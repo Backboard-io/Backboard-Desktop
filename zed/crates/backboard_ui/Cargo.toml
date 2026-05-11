@@ -21,5 +21,6 @@ gpui_tokio.workspace = true
 gpui.workspace = true
 async-channel.workspace = true
 serde_json.workspace = true
+tokio = { workspace = true, features = ["time"] }
 ui.workspace = true
 workspace.workspace = true
