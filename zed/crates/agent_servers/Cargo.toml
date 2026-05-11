@@ -22,6 +22,7 @@ action_log.workspace = true
 async-channel.workspace = true
 agent-client-protocol.workspace = true
 anyhow.workspace = true
+backboard.workspace = true
 chrono.workspace = true
 client.workspace = true
 collections.workspace = true

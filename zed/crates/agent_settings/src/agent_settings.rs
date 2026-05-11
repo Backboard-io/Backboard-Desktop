@@ -36,8 +36,8 @@ pub struct PanelLayout {
 
 impl PanelLayout {
     const AGENT: Self = Self {
-        agent_dock: Some(DockPosition::Left),
-        project_panel_dock: Some(DockSide::Right),
+        agent_dock: Some(DockPosition::Right),
+        project_panel_dock: Some(DockSide::Left),
         outline_panel_dock: Some(DockSide::Right),
         collaboration_panel_dock: Some(DockPosition::Right),
         git_panel_dock: Some(DockPosition::Right),

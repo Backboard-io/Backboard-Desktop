@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod agent_configuration;
 pub mod agent_connection_store;
 mod agent_diff;
@@ -86,6 +88,8 @@ const PARALLEL_AGENT_LAYOUT_BACKFILL_KEY: &str = "parallel_agent_layout_backfill
 actions!(
     agent,
     [
+        /// Opens the native Zed agent panel and starts a fresh thread.
+        OpenBackboardPortal,
         /// Toggles the menu to create new agent threads.
         ToggleNewThreadMenu,
         /// Toggles the options menu for agent settings and preferences.
@@ -326,7 +330,7 @@ impl Agent {
 
     pub fn label(&self) -> SharedString {
         match self {
-            Self::NativeAgent => "Zed Agent".into(),
+            Self::NativeAgent => "Backboard".into(),
             Self::Custom { id, .. } => id.0.clone(),
             #[cfg(any(test, feature = "test-support"))]
             Self::Stub => "Stub Agent".into(),
@@ -335,7 +339,7 @@ impl Agent {
 
     pub fn icon(&self) -> Option<IconName> {
         match self {
-            Self::NativeAgent => None,
+            Self::NativeAgent => Some(IconName::Sparkle),
             Self::Custom { .. } => Some(IconName::Sparkle),
             #[cfg(any(test, feature = "test-support"))]
             Self::Stub => None,

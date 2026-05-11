@@ -279,6 +279,7 @@ dependencies = [
  "agent-client-protocol",
  "anyhow",
  "async-channel 2.5.0",
+ "backboard",
  "chrono",
  "client",
  "collections",
@@ -351,6 +352,7 @@ dependencies = [
  "anyhow",
  "async-channel 2.5.0",
  "audio",
+ "backboard_ui",
  "base64 0.22.1",
  "buffer_diff",
  "chrono",
@@ -1901,6 +1903,34 @@ dependencies = [
  "rustversion",
  "tower-layer",
  "tower-service",
+]
+
+[[package]]
+name = "backboard"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures 0.3.32",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "zed-reqwest",
+]
+
+[[package]]
+name = "backboard_ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel 2.5.0",
+ "backboard",
+ "editor",
+ "futures 0.3.32",
+ "gpui",
+ "gpui_tokio",
+ "serde_json",
+ "ui",
+ "workspace",
 ]
 
 [[package]]
@@ -22391,6 +22421,7 @@ dependencies = [
  "audio",
  "auto_update",
  "auto_update_ui",
+ "backboard_ui",
  "breadcrumbs",
  "call",
  "channel",

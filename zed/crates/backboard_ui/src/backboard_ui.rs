@@ -1,0 +1,2004 @@
+use std::{
+    path::{Component, Path, PathBuf},
+    time::Duration,
+};
+
+use anyhow::{Context as _, Result, anyhow};
+use editor::Editor;
+use futures::StreamExt as _;
+use gpui::{
+    Action, App, AppContext as _, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle,
+    Focusable, ParentElement, Render, Styled, Task, WeakEntity, Window, actions, div, px,
+};
+use serde_json::{Value, json};
+use ui::{
+    Button, ButtonStyle, Color, CommonAnimationExt, Divider, Icon, IconButton, IconName, Label,
+    LabelSize, Tooltip, prelude::*,
+};
+use workspace::{
+    Workspace,
+    dock::{DockPosition, Panel, PanelEvent},
+};
+
+const BACKBOARD_PANEL_KEY: &str = "backboard_panel";
+const DEFAULT_WIDTH: gpui::Pixels = px(380.);
+const INITIAL_VISIBLE_MODELS: usize = 120;
+const MODEL_LOAD_INCREMENT: usize = 120;
+const ACTIVITY_LIMIT: usize = 24;
+const LOADING_TICK_MS: u64 = 900;
+const LOADING_COPY: &[&str] = &[
+    "Initializing everything...",
+    "Loading tiny pixels...",
+    "Waking up the servers...",
+    "Summoning the interface...",
+    "Mining fresh data...",
+    "Crafting the dashboard...",
+    "Generating terrain...",
+    "Finding cool stuff...",
+    "Loading your world...",
+    "Spawning components...",
+    "Booting the vibes...",
+    "Calibrating buttons...",
+    "Preparing inventory...",
+    "Fetching the good stuff...",
+    "Dusting off the database...",
+    "Counting blocks...",
+    "Placing pixels...",
+    "Charging crystals...",
+    "Rendering magic...",
+    "Checking coordinates...",
+    "Opening the portal...",
+    "Syncing reality...",
+    "Polishing the UI...",
+    "Summoning menus...",
+    "Taming loading bar...",
+    "Building something cool...",
+    "Sharpening tools...",
+    "Mixing potions...",
+    "Heating up the engine...",
+    "Feeding the hamsters...",
+    "Untangling cables...",
+    "Aligning stars...",
+    "Connecting the dots...",
+    "Rolling for luck...",
+    "Planting ideas...",
+    "Harvesting results...",
+    "Brewing something useful...",
+    "Scanning nearby chunks...",
+    "Optimizing the chaos...",
+    "Preparing your adventure...",
+    "Lighting torches...",
+    "Avoiding creepers...",
+    "Saving progress...",
+    "Loading secret sauce...",
+    "Creating possibilities...",
+    "Deploying imagination...",
+    "Gathering resources...",
+    "Assembling blocks...",
+    "Forging the experience...",
+    "Finding diamonds...",
+    "Filtering good ideas...",
+    "Spawning greatness...",
+    "Crafting the next screen...",
+    "Checking if this works...",
+    "Making things happen...",
+    "Doing computer stuff...",
+    "Convincing servers nicely...",
+    "Talking to the cloud...",
+    "Consulting the algorithm...",
+    "Searching the void...",
+    "Querying the universe...",
+    "Fetching hidden treasures...",
+    "Preparing scan results...",
+    "Almost there...",
+    "Still cooking...",
+    "Hold up, magic is happening...",
+    "One sec, building it...",
+    "Loading the good bits...",
+    "Getting things ready...",
+    "Making it shiny...",
+    "Organizing chaos...",
+    "Smoothing the corners...",
+    "Adding extra sauce...",
+    "Making this look expensive...",
+    "Turning pixels into vibes...",
+    "Opening the command center...",
+    "Running final checks...",
+    "Almost done crafting...",
+];
+
+actions!(
+    backboard,
+    [
+        /// Toggles focus for the Backboard chat panel.
+        ToggleFocus,
+        /// Starts a fresh Backboard chat draft.
+        NewChat,
+        /// Saves the Backboard API key into the shared CLI config.
+        SaveApiKey,
+        /// Sends the current Backboard chat draft.
+        SendPrompt,
+    ]
+);
+
+pub fn init(cx: &mut App) {
+    cx.observe_new(|workspace: &mut Workspace, _, _| {
+        workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
+            workspace.toggle_panel_focus::<BackboardPanel>(window, cx);
+        });
+        workspace.register_action(|workspace, _: &NewChat, window, cx| {
+            workspace.open_panel::<BackboardPanel>(window, cx);
+            if let Some(panel) = workspace.panel::<BackboardPanel>(cx) {
+                panel.update(cx, |panel, cx| panel.new_chat(cx));
+            }
+        });
+        workspace.register_action(|workspace, _: &SaveApiKey, window, cx| {
+            workspace.open_panel::<BackboardPanel>(window, cx);
+            if let Some(panel) = workspace.panel::<BackboardPanel>(cx) {
+                panel.update(cx, |panel, cx| panel.save_api_key(window, cx));
+            }
+        });
+        workspace.register_action(|workspace, _: &SendPrompt, window, cx| {
+            if let Some(panel) = workspace.panel::<BackboardPanel>(cx) {
+                panel.update(cx, |panel, cx| panel.send_prompt(window, cx));
+            }
+        });
+    })
+    .detach();
+}
+
+pub struct BackboardPanel {
+    focus_handle: FocusHandle,
+    workspace: WeakEntity<Workspace>,
+    messages: Vec<BackboardMessage>,
+    composer: Entity<Editor>,
+    api_key_editor: Entity<Editor>,
+    status: String,
+    model_status: String,
+    api_ready: bool,
+    models_loading: bool,
+    streaming: bool,
+    activity_open: bool,
+    loading_tick: usize,
+    activity_log: Vec<String>,
+    file_changes: Vec<FileChange>,
+    files_changed_open: bool,
+    providers: Vec<String>,
+    models: Vec<backboard::BackboardModel>,
+    visible_model_count: usize,
+    model_picker_open: bool,
+    selected_provider: Option<String>,
+    selected_model: Option<String>,
+    is_zoomed: bool,
+}
+
+struct BackboardMessage {
+    role: MessageRole,
+    body: String,
+}
+
+#[derive(Clone)]
+struct FileChange {
+    path: String,
+    additions: usize,
+    deletions: usize,
+    preview: Vec<String>,
+    expanded: bool,
+}
+
+#[derive(Clone, Copy)]
+enum MessageRole {
+    User,
+    Backboard,
+    Error,
+}
+
+enum BackboardUiEvent {
+    Append { index: usize, text: String },
+    Activity(String),
+    FileChange(FileChange),
+}
+
+impl BackboardPanel {
+    pub fn load(
+        workspace: WeakEntity<Workspace>,
+        cx: AsyncWindowContext,
+    ) -> Task<Result<Entity<Self>>> {
+        cx.spawn(async move |cx| {
+            workspace.update_in(cx, |_workspace, window, cx| {
+                cx.new(|cx| Self::new(workspace.clone(), window, cx))
+            })
+        })
+    }
+
+    pub fn new(
+        workspace: WeakEntity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let config = backboard::BackboardConfig::load_or_default();
+        let api_ready = config.api_key().is_some();
+        let status = Self::status_for_config(&config, api_ready);
+        let selected_provider = config.default_provider.clone();
+        let selected_model = config.default_model.clone();
+
+        let api_key_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text("Paste your Backboard API key...", window, cx);
+            editor.set_show_gutter(false, cx);
+            editor.set_show_wrap_guides(false, cx);
+            editor.set_show_indent_guides(false, cx);
+            editor
+        });
+
+        let composer = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text(
+                "Ask Backboard to build, edit, search, or run tools...",
+                window,
+                cx,
+            );
+            editor.set_show_gutter(false, cx);
+            editor.set_show_wrap_guides(false, cx);
+            editor.set_show_indent_guides(false, cx);
+            editor
+        });
+
+        let mut panel = Self {
+            focus_handle: cx.focus_handle(),
+            workspace,
+            messages: vec![BackboardMessage {
+                role: MessageRole::Backboard,
+                body: if api_ready {
+                    "Backboard IDE is connected. Choose a model, then ask it to inspect files, create code, run tools, or plan work in this workspace.".into()
+                } else {
+                    "Paste your Backboard API key in the setup card above. It saves to the same ~/.backboard/config.json file used by the CLI.".into()
+                },
+            }],
+            composer,
+            api_key_editor,
+            status,
+            model_status: if api_ready {
+                "Loading Backboard model catalog...".into()
+            } else {
+                "Connect Backboard to load models.".into()
+            },
+            api_ready,
+            models_loading: false,
+            streaming: false,
+            activity_open: false,
+            loading_tick: 0,
+            activity_log: Vec::new(),
+            file_changes: Vec::new(),
+            files_changed_open: true,
+            providers: Vec::new(),
+            models: Vec::new(),
+            visible_model_count: INITIAL_VISIBLE_MODELS,
+            model_picker_open: api_ready && selected_model.is_none(),
+            selected_provider,
+            selected_model,
+            is_zoomed: false,
+        };
+
+        if panel.api_ready {
+            panel.load_models(cx);
+        }
+
+        panel
+    }
+
+    fn status_for_config(config: &backboard::BackboardConfig, api_ready: bool) -> String {
+        if api_ready {
+            format!(
+                "Connected to Backboard {} at {}",
+                config.env,
+                config.base_url()
+            )
+        } else {
+            "No API key yet. Paste one here or run `backboard config set-api-key <key>`."
+                .to_string()
+        }
+    }
+
+    fn new_chat(&mut self, cx: &mut Context<Self>) {
+        self.messages.clear();
+        self.messages.push(BackboardMessage {
+            role: MessageRole::Backboard,
+            body: "New Backboard chat started.".into(),
+        });
+        self.activity_log.clear();
+        self.file_changes.clear();
+        self.files_changed_open = true;
+        self.activity_open = false;
+        cx.notify();
+    }
+
+    fn refresh_status(&mut self, cx: &mut Context<Self>) {
+        let config = backboard::BackboardConfig::load_or_default();
+        self.api_ready = config.api_key().is_some();
+        self.status = Self::status_for_config(&config, self.api_ready);
+        self.selected_provider = config.default_provider;
+        self.selected_model = config.default_model;
+        if self.api_ready && self.models.is_empty() && !self.models_loading {
+            self.load_models(cx);
+        }
+    }
+
+    fn load_models(&mut self, cx: &mut Context<Self>) {
+        if self.models_loading {
+            return;
+        }
+        if !self.models.is_empty() {
+            self.model_status = format!(
+                "{} Backboard models loaded across {} providers",
+                self.models.len(),
+                self.providers.len()
+            );
+            cx.notify();
+            return;
+        }
+
+        let config = backboard::BackboardConfig::load_or_default();
+        let Ok(client) = backboard::BackboardClient::from_config(config) else {
+            self.model_status = "Add a Backboard API key to load models.".into();
+            self.models_loading = false;
+            return;
+        };
+
+        self.models_loading = true;
+        self.model_status = "Loading Backboard model catalog...".into();
+        cx.notify();
+
+        let models_task = gpui_tokio::Tokio::spawn_result(cx, async move {
+            let providers = client.list_providers().await?;
+            let models = client.list_models(None, Some("llm"), Some(15000)).await?;
+            anyhow::Ok((providers, models))
+        });
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = models_task.await;
+
+            this.update(cx, |this, cx| {
+                this.models_loading = false;
+                match result {
+                    Ok((providers, mut models)) => {
+                        this.providers.clear();
+                        providers.into_iter().for_each(|provider| {
+                            if !this.providers.contains(&provider) {
+                                this.providers.push(provider);
+                            }
+                        });
+                        models.sort_by(|a, b| {
+                            a.provider
+                                .cmp(&b.provider)
+                                .then_with(|| a.name.cmp(&b.name))
+                        });
+                        for provider in models.iter().map(|model| model.provider.clone()) {
+                            if !this.providers.contains(&provider) {
+                                this.providers.push(provider);
+                            }
+                        }
+                        this.models = models;
+                        this.visible_model_count = INITIAL_VISIBLE_MODELS;
+                        this.model_status = format!(
+                            "{} Backboard models loaded across {} providers",
+                            this.models.len(),
+                            this.providers.len()
+                        );
+                    }
+                    Err(error) => {
+                        this.model_status = format!("Could not load Backboard models: {error:#}");
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn reload_models(&mut self, cx: &mut Context<Self>) {
+        if self.models_loading {
+            return;
+        }
+        self.providers.clear();
+        self.models.clear();
+        self.visible_model_count = INITIAL_VISIBLE_MODELS;
+        self.load_models(cx);
+    }
+
+    fn save_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let api_key = self.api_key_editor.read(cx).text(cx).trim().to_string();
+
+        if api_key.is_empty() {
+            self.status = "Paste your Backboard API key first.".to_string();
+            self.api_key_editor.focus_handle(cx).focus(window, cx);
+            cx.notify();
+            return;
+        }
+
+        match backboard::BackboardConfig::save_api_key_for_current_env(api_key) {
+            Ok(config) => {
+                self.api_ready = true;
+                self.status = format!("Saved API key to ~/.backboard/config.json ({})", config.env);
+                self.api_key_editor
+                    .update(cx, |editor, cx| editor.set_text("", window, cx));
+                self.messages.push(BackboardMessage {
+                    role: MessageRole::Backboard,
+                    body:
+                        "API key saved. The IDE and Backboard CLI now share the same config file."
+                            .into(),
+                });
+                self.model_picker_open = true;
+                self.load_models(cx);
+            }
+            Err(error) => {
+                self.api_ready = false;
+                self.status = format!("Could not save API key: {error:#}");
+            }
+        }
+
+        cx.notify();
+    }
+
+    fn select_model(&mut self, provider: String, model: String, cx: &mut Context<Self>) {
+        match backboard::BackboardConfig::save_model_selection(provider.clone(), model.clone()) {
+            Ok(_) => {
+                self.selected_provider = Some(provider.clone());
+                self.selected_model = Some(model.clone());
+                self.model_status = format!("Using {provider}/{model}");
+                self.model_picker_open = false;
+            }
+            Err(error) => {
+                self.model_status = format!("Could not save model: {error:#}");
+            }
+        }
+        cx.notify();
+    }
+
+    fn toggle_model_picker(&mut self, cx: &mut Context<Self>) {
+        self.model_picker_open = !self.model_picker_open;
+        if self.model_picker_open && self.models.is_empty() && !self.models_loading {
+            self.load_models(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    fn show_more_models(&mut self, cx: &mut Context<Self>) {
+        self.visible_model_count = (self.visible_model_count + MODEL_LOAD_INCREMENT)
+            .min(self.models.len().max(INITIAL_VISIBLE_MODELS));
+        cx.notify();
+    }
+
+    fn send_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let prompt = self.composer.read(cx).text(cx).trim().to_string();
+        if prompt.is_empty() {
+            self.composer.focus_handle(cx).focus(window, cx);
+            return;
+        }
+        if !self.api_ready || self.streaming {
+            return;
+        }
+
+        let workspace_root = self.workspace_root(cx);
+        let selected_provider = self.selected_provider.clone();
+        let selected_model = self.selected_model.clone();
+        let response_index = self.messages.len() + 1;
+
+        self.messages.push(BackboardMessage {
+            role: MessageRole::User,
+            body: prompt.clone(),
+        });
+        self.messages.push(BackboardMessage {
+            role: MessageRole::Backboard,
+            body: String::new(),
+        });
+        self.streaming = true;
+        self.activity_open = true;
+        self.loading_tick = 0;
+        self.activity_log.clear();
+        self.file_changes.clear();
+        self.files_changed_open = true;
+        self.push_activity("Initializing everything...");
+        self.push_activity("Opening the portal...");
+        self.push_activity("Talking to the cloud...");
+        self.status = "Backboard is running...".into();
+        self.composer
+            .update(cx, |editor, cx| editor.set_text("", window, cx));
+        cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(LOADING_TICK_MS))
+                    .await;
+
+                let keep_spinning = this
+                    .update(cx, |this, cx| {
+                        if !this.streaming {
+                            return false;
+                        }
+                        this.loading_tick = this.loading_tick.wrapping_add(1);
+                        if this.loading_tick % 4 == 0 {
+                            this.push_activity(
+                                LOADING_COPY[this.loading_tick % LOADING_COPY.len()],
+                            );
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+
+                if !keep_spinning {
+                    break;
+                }
+            }
+        })
+        .detach();
+
+        let (tx, rx) = async_channel::unbounded();
+        let run_task = gpui_tokio::Tokio::spawn_result(cx, async move {
+            send_backboard_prompt(
+                prompt,
+                selected_provider,
+                selected_model,
+                workspace_root,
+                response_index,
+                tx,
+            )
+            .await
+        });
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            while let Ok(event) = rx.recv().await {
+                this.update(cx, |this, cx| {
+                    match event {
+                        BackboardUiEvent::Append { index, text } => {
+                            this.append_to_message(index, &text);
+                        }
+                        BackboardUiEvent::Activity(activity) => {
+                            this.push_activity(activity);
+                        }
+                        BackboardUiEvent::FileChange(file_change) => {
+                            this.record_file_change(file_change);
+                        }
+                    }
+                    cx.notify();
+                })
+                .ok();
+            }
+
+            let result = run_task.await;
+
+            this.update(cx, |this, cx| {
+                this.streaming = false;
+                match result {
+                    Ok(()) => {
+                        if this
+                            .messages
+                            .get(response_index)
+                            .is_some_and(|message| message.body.trim().is_empty())
+                        {
+                            this.append_to_message(
+                                response_index,
+                                "Backboard completed without text output.",
+                            );
+                        }
+                        this.refresh_status(cx);
+                        this.push_activity("Backboard finished.");
+                    }
+                    Err(error) => {
+                        this.messages.push(BackboardMessage {
+                            role: MessageRole::Error,
+                            body: format!("Backboard run failed: {error:#}"),
+                        });
+                        this.push_activity(format!("Run failed: {error:#}"));
+                        this.status = "Backboard run failed.".into();
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn workspace_root(&self, cx: &App) -> Option<PathBuf> {
+        self.workspace.upgrade().and_then(|workspace| {
+            workspace
+                .read(cx)
+                .root_paths(cx)
+                .into_iter()
+                .next()
+                .map(|path| path.to_path_buf())
+        })
+    }
+
+    fn append_to_message(&mut self, index: usize, text: &str) {
+        if let Some(message) = self.messages.get_mut(index) {
+            message.body.push_str(text);
+        }
+    }
+
+    fn push_activity(&mut self, activity: impl Into<String>) {
+        let activity = activity.into();
+        if self.activity_log.last() == Some(&activity) {
+            return;
+        }
+        self.activity_log.push(activity);
+        if self.activity_log.len() > ACTIVITY_LIMIT {
+            self.activity_log.remove(0);
+        }
+    }
+
+    fn record_file_change(&mut self, mut file_change: FileChange) {
+        if let Some(existing) = self
+            .file_changes
+            .iter_mut()
+            .find(|existing| existing.path == file_change.path)
+        {
+            file_change.expanded = existing.expanded;
+            *existing = file_change;
+        } else {
+            self.file_changes.push(file_change);
+        }
+    }
+
+    fn current_loading_text(&self) -> String {
+        if self.streaming {
+            LOADING_COPY[self.loading_tick % LOADING_COPY.len()].to_string()
+        } else {
+            self.activity_log
+                .last()
+                .cloned()
+                .unwrap_or_else(|| "Ready when you are.".into())
+        }
+    }
+
+    fn toggle_activity(&mut self, cx: &mut Context<Self>) {
+        self.activity_open = !self.activity_open;
+        cx.notify();
+    }
+
+    fn toggle_files_changed(&mut self, cx: &mut Context<Self>) {
+        self.files_changed_open = !self.files_changed_open;
+        cx.notify();
+    }
+
+    fn toggle_file_change(&mut self, path: String, cx: &mut Context<Self>) {
+        if let Some(change) = self
+            .file_changes
+            .iter_mut()
+            .find(|change| change.path == path)
+        {
+            change.expanded = !change.expanded;
+        }
+        cx.notify();
+    }
+
+    fn selected_model_label(&self) -> String {
+        self.selected_provider
+            .as_ref()
+            .zip(self.selected_model.as_ref())
+            .map(|(provider, model)| format!("{provider}/{model}"))
+            .unwrap_or_else(|| "No model selected".into())
+    }
+
+    fn should_show_status(&self) -> bool {
+        !self.api_ready || self.models_loading || self.streaming
+    }
+
+    fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .h(px(54.))
+            .px_4()
+            .justify_between()
+            .border_b_1()
+            .border_color(cx.theme().colors().border)
+            .bg(cx.theme().colors().panel_background)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(Icon::new(IconName::ZedAgentTwo).color(Color::Muted))
+                    .child(Label::new("Conversation").size(LabelSize::Large)),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(Icon::new(IconName::FileCode).color(Color::Muted))
+                    .child(
+                        Label::new(self.selected_model_label())
+                            .size(LabelSize::Small)
+                            .color(Color::Muted)
+                            .truncate(),
+                    )
+                    .child(Divider::vertical())
+                    .child(
+                        IconButton::new("backboard-new-chat", IconName::Plus)
+                            .icon_size(IconSize::Small)
+                            .tooltip(Tooltip::text("New Backboard Chat"))
+                            .on_click(cx.listener(|this, _, _window, cx| this.new_chat(cx))),
+                    )
+                    .child(
+                        IconButton::new("backboard-refresh", IconName::RotateCw)
+                            .icon_size(IconSize::Small)
+                            .tooltip(Tooltip::text("Refresh Backboard Status"))
+                            .on_click(cx.listener(|this, _, _window, cx| {
+                                this.refresh_status(cx);
+                                cx.notify();
+                            })),
+                    ),
+            )
+    }
+
+    fn render_status(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .mx_4()
+            .mt_3()
+            .px_3()
+            .py_2()
+            .gap_2()
+            .rounded_lg()
+            .bg(cx.theme().colors().element_background)
+            .child(div().size(px(7.)).rounded_full().bg(if self.api_ready {
+                cx.theme().status().created
+            } else {
+                cx.theme().status().warning
+            }))
+            .child(Label::new(self.status.clone()).size(LabelSize::Small))
+    }
+
+    fn render_inline_activity(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let loading_text = if self.streaming {
+            format!("Running: {}", self.current_loading_text())
+        } else {
+            self.current_loading_text()
+        };
+        let toggle_icon = if self.activity_open {
+            IconName::ChevronDown
+        } else {
+            IconName::ChevronRight
+        };
+
+        h_flex()
+            .id("backboard-inline-activity-toggle")
+            .cursor_pointer()
+            .gap_1()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .bg(cx.theme().colors().element_background)
+            .on_click(cx.listener(|this, _, _window, cx| this.toggle_activity(cx)))
+            .child(if self.streaming {
+                Icon::new(IconName::LoadCircle)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted)
+                    .with_rotate_animation(2)
+                    .into_any_element()
+            } else {
+                Icon::new(IconName::Check)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted)
+                    .into_any_element()
+            })
+            .child(
+                Label::new(loading_text)
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+            )
+            .child(
+                Icon::new(toggle_icon)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+    }
+
+    fn render_activity_details(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .mt_1()
+            .ml_1()
+            .pl_4()
+            .gap_1()
+            .border_l_1()
+            .border_color(cx.theme().colors().border)
+            .children(self.activity_log.iter().rev().take(6).map(|activity| {
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Icon::new(IconName::Circle)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(activity.clone())
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+            }))
+    }
+
+    fn render_api_key_setup(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .mx_3()
+            .mb_3()
+            .p_3()
+            .gap_3()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .bg(cx.theme().colors().editor_background)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(Icon::new(IconName::LockOutlined).color(Color::Accent))
+                    .child(Label::new("Connect Backboard").size(LabelSize::Large)),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().colors().text_muted)
+                    .child("Paste your API key here. It saves to ~/.backboard/config.json, the same config file your Backboard CLI uses."),
+            )
+            .child(
+                v_flex()
+                    .min_h(px(38.))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .bg(cx.theme().colors().panel_background)
+                    .px_2()
+                    .py_1()
+                    .child(self.api_key_editor.clone()),
+            )
+            .child(
+                h_flex()
+                    .justify_between()
+                    .child(
+                        Label::new("CLI fallback: backboard config set-api-key <key>")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Button::new("backboard-save-api-key", "Save API Key")
+                            .style(ButtonStyle::Filled)
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.save_api_key(window, cx)),
+                            ),
+                    ),
+            )
+    }
+
+    fn render_model_drawer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let selected = self.selected_model_label();
+
+        let visible_count = self.visible_model_count.min(self.models.len());
+        let hidden_count = self.models.len().saturating_sub(visible_count);
+        let mut rows = Vec::new();
+        let mut last_provider = String::new();
+        for (ix, model) in self.models.iter().take(visible_count).enumerate() {
+            if model.provider != last_provider {
+                last_provider = model.provider.clone();
+                rows.push(
+                    h_flex()
+                        .id(("backboard-provider", ix))
+                        .pt_2()
+                        .child(
+                            Label::new(last_provider.clone())
+                                .size(LabelSize::Small)
+                                .color(Color::Accent),
+                        )
+                        .into_any_element(),
+                );
+            }
+
+            let provider = model.provider.clone();
+            let name = model.name.clone();
+            let display = model.display_name.clone().unwrap_or_else(|| name.clone());
+            let is_selected = self.selected_provider.as_ref() == Some(&provider)
+                && self.selected_model.as_ref() == Some(&name);
+            let meta = model
+                .context_limit
+                .map(|limit| format!("{} ctx", format_number(limit)))
+                .unwrap_or_else(|| "catalog model".into());
+
+            rows.push(
+                h_flex()
+                    .id(("backboard-model-row", ix))
+                    .w_full()
+                    .justify_between()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .bg(if is_selected {
+                        cx.theme().colors().element_selected
+                    } else {
+                        cx.theme().colors().editor_background
+                    })
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .child(Label::new(display).size(LabelSize::Small))
+                            .child(Label::new(meta).size(LabelSize::Small).color(Color::Muted)),
+                    )
+                    .child(
+                        Button::new(
+                            ("backboard-use-model", ix),
+                            if is_selected { "Using" } else { "Use" },
+                        )
+                        .style(if is_selected {
+                            ButtonStyle::Subtle
+                        } else {
+                            ButtonStyle::Tinted(ui::TintColor::Accent)
+                        })
+                        .on_click(cx.listener(
+                            move |this, _, _window, cx| {
+                                this.select_model(provider.clone(), name.clone(), cx);
+                            },
+                        )),
+                    )
+                    .into_any_element(),
+            );
+        }
+
+        v_flex()
+            .border_t_1()
+            .border_color(cx.theme().colors().border)
+            .bg(cx.theme().colors().panel_background)
+            .px_4()
+            .py_2()
+            .gap_2()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .gap_2()
+                            .child(Icon::new(IconName::Sliders).color(Color::Muted))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .child(Label::new("Backboard Model").size(LabelSize::Small))
+                                    .child(
+                                        Label::new(selected)
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        Button::new(
+                            "backboard-toggle-model-picker",
+                            if self.model_picker_open {
+                                "Close"
+                            } else {
+                                "Models"
+                            },
+                        )
+                        .style(ButtonStyle::Tinted(ui::TintColor::Accent))
+                        .disabled(!self.api_ready)
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            this.toggle_model_picker(cx);
+                        })),
+                    ),
+            )
+            .when(self.model_picker_open, |this| {
+                this.child(
+                    v_flex()
+                        .id("backboard-model-picker-scroll")
+                        .overflow_y_scroll()
+                        .max_h(px(300.))
+                        .p_3()
+                        .gap_2()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(cx.theme().colors().border)
+                        .bg(cx.theme().colors().element_background)
+                        .child(
+                            h_flex()
+                                .justify_between()
+                                .child(
+                                    Label::new(self.model_status.clone())
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                )
+                                .child(
+                                    Button::new(
+                                        "backboard-load-models",
+                                        if self.models_loading {
+                                            "Loading"
+                                        } else {
+                                            "Reload"
+                                        },
+                                    )
+                                    .disabled(!self.api_ready || self.models_loading)
+                                    .on_click(
+                                        cx.listener(|this, _, _window, cx| this.reload_models(cx)),
+                                    ),
+                                ),
+                        )
+                        .when(!self.models.is_empty(), |this| {
+                            this.child(v_flex().gap_1().children(rows))
+                        }),
+                )
+            })
+            .when(self.model_picker_open && hidden_count > 0, |this| {
+                this.child(
+                    h_flex()
+                        .justify_between()
+                        .pt_2()
+                        .child(
+                            Label::new(format!(
+                                "Showing {visible_count} of {} models",
+                                self.models.len()
+                            ))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                        )
+                        .child(
+                            Button::new("backboard-show-more-models", "Show More")
+                                .style(ButtonStyle::Tinted(ui::TintColor::Accent))
+                                .on_click(cx.listener(|this, _, _window, cx| {
+                                    this.show_more_models(cx);
+                                })),
+                        ),
+                )
+            })
+    }
+
+    fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let active_backboard_index = self
+            .messages
+            .iter()
+            .rposition(|message| matches!(message.role, MessageRole::Backboard));
+        v_flex()
+            .id("backboard-messages")
+            .flex_1()
+            .gap_3()
+            .px_3()
+            .py_3()
+            .overflow_y_scroll()
+            .children(self.messages.iter().enumerate().map(|(ix, message)| {
+                let is_user = matches!(message.role, MessageRole::User);
+                let is_active_backboard = matches!(message.role, MessageRole::Backboard)
+                    && Some(ix) == active_backboard_index
+                    && (self.streaming || !self.activity_log.is_empty());
+                let compact_body = compact_message_body(message.role, &message.body);
+                let (label, color) = match message.role {
+                    MessageRole::User => ("You", Color::Muted),
+                    MessageRole::Backboard => ("backboard", Color::Muted),
+                    MessageRole::Error => ("error", Color::Error),
+                };
+                let icon = match message.role {
+                    MessageRole::User => IconName::Circle,
+                    MessageRole::Backboard => {
+                        if message.body.is_empty() {
+                            IconName::LoadCircle
+                        } else {
+                            IconName::ZedAgentTwo
+                        }
+                    }
+                    MessageRole::Error => IconName::XCircle,
+                };
+                let body = if message.body.is_empty() {
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .h(px(6.))
+                                .w_full()
+                                .rounded_full()
+                                .bg(cx.theme().colors().element_background),
+                        )
+                        .child(
+                            div()
+                                .h(px(6.))
+                                .w_2_3()
+                                .rounded_full()
+                                .bg(cx.theme().colors().element_background),
+                        )
+                        .into_any_element()
+                } else {
+                    div()
+                        .text_sm()
+                        .line_height(gpui::relative(1.32))
+                        .text_color(cx.theme().colors().text)
+                        .child(compact_body.clone())
+                        .into_any_element()
+                };
+
+                if is_user {
+                    v_flex()
+                        .id(("backboard-message-row", ix))
+                        .ml_1()
+                        .pl_4()
+                        .gap_1()
+                        .border_l_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(Icon::new(icon).color(Color::Muted).size(IconSize::Small))
+                                .child(Label::new(label).size(LabelSize::Small).color(color)),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .line_height(gpui::relative(1.32))
+                                .text_color(cx.theme().colors().text)
+                                .child(compact_body),
+                        )
+                        .into_any_element()
+                } else {
+                    v_flex()
+                        .id(("backboard-message-row", ix))
+                        .gap_1()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(if message.body.is_empty() {
+                                    Icon::new(icon)
+                                        .color(color)
+                                        .size(IconSize::Small)
+                                        .with_rotate_animation(2)
+                                        .into_any_element()
+                                } else {
+                                    Icon::new(icon)
+                                        .color(color)
+                                        .size(IconSize::Small)
+                                        .into_any_element()
+                                })
+                                .child(Label::new(label).size(LabelSize::Small).color(color))
+                                .when(is_active_backboard, |this| {
+                                    this.child(self.render_inline_activity(cx))
+                                }),
+                        )
+                        .child(body)
+                        .when(is_active_backboard && self.activity_open, |this| {
+                            this.child(self.render_activity_details(cx))
+                        })
+                        .into_any_element()
+                }
+            }))
+            .when(!self.file_changes.is_empty(), |this| {
+                this.child(self.render_files_changed(cx))
+            })
+    }
+
+    fn render_files_changed(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let additions = self
+            .file_changes
+            .iter()
+            .map(|change| change.additions)
+            .sum::<usize>();
+        let deletions = self
+            .file_changes
+            .iter()
+            .map(|change| change.deletions)
+            .sum::<usize>();
+        let toggle_icon = if self.files_changed_open {
+            IconName::ChevronDown
+        } else {
+            IconName::ChevronRight
+        };
+
+        v_flex()
+            .mt_2()
+            .rounded_xl()
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .bg(cx.theme().colors().element_background)
+            .child(
+                h_flex()
+                    .id("backboard-files-changed-toggle")
+                    .cursor_pointer()
+                    .justify_between()
+                    .px_3()
+                    .py_2()
+                    .on_click(cx.listener(|this, _, _window, cx| this.toggle_files_changed(cx)))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                Label::new(format!("{} files changed", self.file_changes.len()))
+                                    .size(LabelSize::Small),
+                            )
+                            .child(
+                                Label::new(format!("+{additions}"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::VersionControlAdded),
+                            )
+                            .child(
+                                Label::new(format!("-{deletions}"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::VersionControlDeleted),
+                            ),
+                    )
+                    .child(
+                        Icon::new(toggle_icon)
+                            .size(IconSize::Small)
+                            .color(Color::Muted),
+                    ),
+            )
+            .when(self.files_changed_open, |this| {
+                this.children(self.file_changes.iter().enumerate().map(|(ix, change)| {
+                    let path = change.path.clone();
+                    v_flex()
+                        .border_t_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(
+                            h_flex()
+                                .id(("backboard-file-change", ix))
+                                .cursor_pointer()
+                                .justify_between()
+                                .px_3()
+                                .py_2()
+                                .on_click(cx.listener(move |this, _, _window, cx| {
+                                    this.toggle_file_change(path.clone(), cx)
+                                }))
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .child(
+                                            Label::new(change.path.clone()).size(LabelSize::Small),
+                                        )
+                                        .child(
+                                            Label::new(format!("+{}", change.additions))
+                                                .size(LabelSize::Small)
+                                                .color(Color::VersionControlAdded),
+                                        )
+                                        .child(
+                                            Label::new(format!("-{}", change.deletions))
+                                                .size(LabelSize::Small)
+                                                .color(Color::VersionControlDeleted),
+                                        ),
+                                )
+                                .child(
+                                    Icon::new(if change.expanded {
+                                        IconName::ChevronDown
+                                    } else {
+                                        IconName::ChevronRight
+                                    })
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted),
+                                ),
+                        )
+                        .when(change.expanded, |this| {
+                            this.child(v_flex().px_3().pb_2().gap_1().children(
+                                change.preview.iter().take(12).map(|line| {
+                                    let color = if line.starts_with('+') {
+                                        Color::VersionControlAdded
+                                    } else if line.starts_with('-') {
+                                        Color::VersionControlDeleted
+                                    } else {
+                                        Color::Muted
+                                    };
+                                    Label::new(line.clone()).size(LabelSize::Small).color(color)
+                                }),
+                            ))
+                        })
+                }))
+            })
+    }
+
+    fn render_composer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .border_t_1()
+            .border_color(cx.theme().colors().border)
+            .bg(cx.theme().colors().panel_background)
+            .px_4()
+            .py_3()
+            .child(
+                h_flex()
+                    .min_h(px(58.))
+                    .gap_2()
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(cx.theme().colors().border)
+                    .bg(cx.theme().colors().editor_background)
+                    .px_3()
+                    .py_2()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                IconButton::new("backboard-context", IconName::AtSign)
+                                    .icon_size(IconSize::Small),
+                            )
+                            .child(
+                                IconButton::new("backboard-files", IconName::FileCode)
+                                    .icon_size(IconSize::Small),
+                            ),
+                    )
+                    .child(v_flex().flex_1().child(self.composer.clone()))
+                    .child(
+                        IconButton::new("backboard-send", IconName::Send)
+                            .icon_size(IconSize::Small)
+                            .disabled(!self.api_ready || self.streaming)
+                            .tooltip(Tooltip::text(if self.streaming {
+                                "Backboard is running"
+                            } else {
+                                "Send to Backboard"
+                            }))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.send_prompt(window, cx)),
+                            ),
+                    ),
+            )
+    }
+}
+
+impl EventEmitter<PanelEvent> for BackboardPanel {}
+
+impl Focusable for BackboardPanel {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Panel for BackboardPanel {
+    fn persistent_name() -> &'static str {
+        "Backboard"
+    }
+
+    fn panel_key() -> &'static str {
+        BACKBOARD_PANEL_KEY
+    }
+
+    fn position(&self, _window: &Window, _cx: &App) -> DockPosition {
+        DockPosition::Right
+    }
+
+    fn position_is_valid(&self, position: DockPosition) -> bool {
+        matches!(position, DockPosition::Left | DockPosition::Right)
+    }
+
+    fn set_position(
+        &mut self,
+        _position: DockPosition,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+    }
+
+    fn default_size(&self, _window: &Window, _cx: &App) -> gpui::Pixels {
+        DEFAULT_WIDTH
+    }
+
+    fn icon(&self, _window: &Window, _cx: &App) -> Option<IconName> {
+        Some(IconName::Sparkle)
+    }
+
+    fn icon_tooltip(&self, _window: &Window, _cx: &App) -> Option<&'static str> {
+        Some("Backboard")
+    }
+
+    fn toggle_action(&self) -> Box<dyn Action> {
+        Box::new(ToggleFocus)
+    }
+
+    fn is_zoomed(&self, _window: &Window, _cx: &App) -> bool {
+        self.is_zoomed
+    }
+
+    fn set_zoomed(&mut self, zoomed: bool, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.is_zoomed = zoomed;
+    }
+
+    fn activation_priority(&self) -> u32 {
+        8
+    }
+}
+
+impl Render for BackboardPanel {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .size_full()
+            .key_context("BackboardPanel")
+            .track_focus(&self.focus_handle(cx))
+            .bg(cx.theme().colors().editor_background)
+            .child(self.render_header(cx))
+            .when(self.should_show_status(), |this| {
+                this.child(self.render_status(cx))
+            })
+            .when(!self.api_ready, |this| {
+                this.child(self.render_api_key_setup(cx))
+            })
+            .child(self.render_messages(cx))
+            .when(self.api_ready, |this| {
+                this.child(self.render_model_drawer(cx))
+            })
+            .child(self.render_composer(cx))
+    }
+}
+
+async fn send_backboard_prompt(
+    prompt: String,
+    provider: Option<String>,
+    model: Option<String>,
+    workspace_root: Option<PathBuf>,
+    response_index: usize,
+    tx: async_channel::Sender<BackboardUiEvent>,
+) -> Result<()> {
+    let config = backboard::BackboardConfig::load()?;
+    let client = backboard::BackboardClient::from_config(config.clone())?;
+    let (assistant_id, thread_id) = ensure_session(&client, config).await?;
+    backboard::BackboardConfig::save_session(Some(assistant_id), Some(thread_id.clone()))?;
+
+    let request = backboard::SendMessageRequest {
+        content: prompt,
+        provider,
+        model,
+        tools: Some(file_tools()),
+        ..Default::default()
+    };
+
+    let mut current_run_id = None;
+    let mut stream = client.send_message_stream(&thread_id, request).await?;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if let Some(run_id) = run_id_from_chunk(&chunk) {
+            current_run_id = Some(run_id);
+        }
+        handle_stream_text(&tx, response_index, &chunk).await;
+
+        if let Some(tool_calls) = tool_calls_from_chunk(&chunk) {
+            let Some(run_id) = current_run_id.clone().or_else(|| run_id_from_chunk(&chunk)) else {
+                push_activity_event(
+                    &tx,
+                    "Backboard requested tools but did not include a run id.",
+                )
+                .await;
+                continue;
+            };
+            push_activity_event(
+                &tx,
+                format!("Running {} workspace tool(s)...", tool_calls.len()),
+            )
+            .await;
+            let (outputs, file_changes, activities) =
+                execute_tool_calls(tool_calls, workspace_root.as_deref());
+            for activity in activities {
+                push_activity_event(&tx, activity).await;
+            }
+            for file_change in file_changes {
+                let _ = tx.send(BackboardUiEvent::FileChange(file_change)).await;
+            }
+            push_activity_event(
+                &tx,
+                format!("Submitted {} tool result(s) to Backboard.", outputs.len()),
+            )
+            .await;
+            let mut tool_stream = client
+                .submit_tool_outputs_stream(
+                    &thread_id,
+                    &run_id,
+                    backboard::SubmitToolOutputsRequest {
+                        tool_outputs: outputs,
+                        tools: Some(file_tools()),
+                    },
+                )
+                .await?;
+            while let Some(chunk) = tool_stream.next().await {
+                let chunk = chunk?;
+                handle_stream_text(&tx, response_index, &chunk).await;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn ensure_session(
+    client: &backboard::BackboardClient,
+    config: backboard::BackboardConfig,
+) -> Result<(String, String)> {
+    let assistant_id = if let Some(assistant_id) = config.assistant_id.clone() {
+        assistant_id
+    } else {
+        let assistant = client
+            .create_assistant(backboard::CreateAssistantRequest {
+                name: "Backboard IDE".into(),
+                description: "Backboard running inside the Zed agent panel.".into(),
+                tools: Some(file_tools()),
+                ..Default::default()
+            })
+            .await?;
+        extract_id(&assistant).context("Backboard create_assistant did not return an id")?
+    };
+
+    let thread_id = if let Some(thread_id) = config.thread_id.clone() {
+        thread_id
+    } else {
+        let thread = client.create_thread(&assistant_id).await?;
+        extract_id(&thread).context("Backboard create_thread did not return an id")?
+    };
+
+    Ok((assistant_id, thread_id))
+}
+
+fn extract_id(value: &Value) -> Option<String> {
+    value
+        .get("id")
+        .or_else(|| value.pointer("/assistant/id"))
+        .or_else(|| value.pointer("/thread/id"))
+        .or_else(|| value.pointer("/data/id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+async fn handle_stream_text(
+    tx: &async_channel::Sender<BackboardUiEvent>,
+    response_index: usize,
+    chunk: &Value,
+) {
+    let Some(text) = text_from_chunk(chunk) else {
+        if let Some(status) = status_from_chunk(chunk) {
+            push_activity_event(tx, status).await;
+        }
+        return;
+    };
+
+    let _ = tx
+        .send(BackboardUiEvent::Append {
+            index: response_index,
+            text,
+        })
+        .await;
+}
+
+async fn push_activity_event(
+    tx: &async_channel::Sender<BackboardUiEvent>,
+    activity: impl Into<String>,
+) {
+    let _ = tx.send(BackboardUiEvent::Activity(activity.into())).await;
+}
+
+fn text_from_chunk(chunk: &Value) -> Option<String> {
+    let chunk_type = chunk
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match chunk_type {
+        "content_streaming" => chunk
+            .get("content")
+            .and_then(value_to_text)
+            .and_then(clean_stream_text),
+        "reasoning_streaming" => None,
+        "run_ended" => chunk
+            .get("content")
+            .or_else(|| chunk.get("message"))
+            .and_then(value_to_text)
+            .and_then(clean_stream_text),
+        "error" | "run_failed" => chunk
+            .get("error")
+            .or_else(|| chunk.get("message"))
+            .and_then(value_to_text)
+            .map(|text| format!("Error: {text}")),
+        _ => None,
+    }
+}
+
+fn status_from_chunk(chunk: &Value) -> Option<String> {
+    match chunk.get("type").and_then(Value::as_str)? {
+        "reasoning_started" => Some("Thinking through the request...".into()),
+        "reasoning_streaming" => chunk
+            .get("content")
+            .and_then(value_to_text)
+            .map(|text| strip_thinking_blocks(&text))
+            .filter(|text| !text.trim().is_empty())
+            .map(|text| format!("Thinking: {}", truncate_chars(text.trim(), 160)))
+            .or_else(|| Some("Thinking through the request...".into())),
+        "reasoning_ended" => Some("Finished planning the next step.".into()),
+        "tool_submit_required" => Some("Backboard requested tool access.".into()),
+        _ => None,
+    }
+}
+
+fn clean_stream_text(text: String) -> Option<String> {
+    let text = strip_thinking_blocks(&text);
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn compact_message_body(role: MessageRole, body: &str) -> String {
+    let cleaned = strip_thinking_blocks(body);
+    let max_lines = match role {
+        MessageRole::User => 1,
+        MessageRole::Backboard | MessageRole::Error => 2,
+    };
+    let mut lines = cleaned
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let mut preview = lines.by_ref().take(max_lines).collect::<Vec<_>>().join(" ");
+    let had_more_lines = lines.next().is_some();
+    preview = truncate_chars(&preview, 220);
+    if had_more_lines && !preview.ends_with("...") {
+        preview.push_str(" ...");
+    }
+    preview
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
+}
+
+fn strip_thinking_blocks(text: &str) -> String {
+    let mut output = String::new();
+    let mut rest = text;
+
+    loop {
+        let Some(start) = rest.find("<thinking>") else {
+            output.push_str(rest);
+            break;
+        };
+        output.push_str(&rest[..start]);
+        let after_start = &rest[start + "<thinking>".len()..];
+        let Some(end) = after_start.find("</thinking>") else {
+            break;
+        };
+        rest = &after_start[end + "</thinking>".len()..];
+    }
+
+    output
+        .replace("<thinking>", "")
+        .replace("</thinking>", "")
+        .trim()
+        .to_string()
+}
+
+fn value_to_text(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+    if value.is_array() || value.is_object() {
+        return Some(value.to_string());
+    }
+    None
+}
+
+fn run_id_from_chunk(chunk: &Value) -> Option<String> {
+    chunk
+        .get("run_id")
+        .or_else(|| chunk.pointer("/run/id"))
+        .or_else(|| {
+            (chunk.get("type").and_then(Value::as_str) == Some("run_started"))
+                .then(|| chunk.get("id"))
+                .flatten()
+        })
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn tool_calls_from_chunk(chunk: &Value) -> Option<&Vec<Value>> {
+    let has_tool_status = chunk.get("type").and_then(Value::as_str) == Some("tool_submit_required")
+        || (chunk.get("type").and_then(Value::as_str) == Some("run_ended")
+            && chunk.get("status").and_then(Value::as_str) == Some("requires_action"));
+    if !has_tool_status {
+        return None;
+    }
+    chunk.get("tool_calls")?.as_array()
+}
+
+struct ToolExecution {
+    result: Value,
+    file_change: Option<FileChange>,
+    activity: Option<String>,
+}
+
+fn execute_tool_calls(
+    tool_calls: &[Value],
+    workspace_root: Option<&Path>,
+) -> (Vec<Value>, Vec<FileChange>, Vec<String>) {
+    let mut outputs = Vec::new();
+    let mut file_changes = Vec::new();
+    let mut activities = Vec::new();
+
+    for tool_call in tool_calls {
+        let tool_call_id = tool_call
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let execution = execute_tool_call(tool_call, workspace_root);
+        if let Some(file_change) = execution.file_change {
+            file_changes.push(file_change);
+        }
+        if let Some(activity) = execution.activity {
+            activities.push(activity);
+        }
+        outputs.push(json!({
+                "tool_call_id": tool_call_id,
+            "output": serde_json::to_string(&execution.result).unwrap_or_else(|_| "{\"success\":false}".into())
+        }));
+    }
+
+    (outputs, file_changes, activities)
+}
+
+fn execute_tool_call(tool_call: &Value, workspace_root: Option<&Path>) -> ToolExecution {
+    let name = tool_call
+        .pointer("/function/name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let args = parse_tool_args(tool_call.pointer("/function/arguments"));
+
+    match name {
+        "read_file" => {
+            let activity = arg_string(
+                &args,
+                &["target_file", "file_path", "path", "file", "filename"],
+            )
+            .map(|path| format!("Reading {path}"));
+            ToolExecution {
+                result: read_file_tool(&args, workspace_root),
+                file_change: None,
+                activity,
+            }
+        }
+        "write" => write_file_tool(&args, workspace_root),
+        _ => ToolExecution {
+            result: json!({
+                "success": false,
+                "error": format!("Unsupported IDE tool: {name}. Supported tools: read_file, write")
+            }),
+            file_change: None,
+            activity: Some(format!("Skipped unsupported tool: {name}")),
+        },
+    }
+}
+
+fn parse_tool_args(value: Option<&Value>) -> Value {
+    match value {
+        Some(Value::String(raw)) => serde_json::from_str(raw).unwrap_or_else(|_| json!({})),
+        Some(value) => value.clone(),
+        None => json!({}),
+    }
+}
+
+fn read_file_tool(args: &Value, workspace_root: Option<&Path>) -> Value {
+    let Some(root) = workspace_root else {
+        return json!({"success": false, "error": "No local workspace root is available."});
+    };
+    let Some(target) = arg_string(
+        args,
+        &["target_file", "file_path", "path", "file", "filename"],
+    ) else {
+        return json!({"success": false, "error": "read_file needs target_file or file_path."});
+    };
+    let Ok(path) = resolve_workspace_path(root, &target) else {
+        return json!({"success": false, "error": "Path must stay inside the opened workspace."});
+    };
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) => return json!({"success": false, "error": error.to_string()}),
+    };
+
+    let lines: Vec<&str> = content.lines().collect();
+    let offset = arg_i64(args, "offset");
+    let limit = arg_i64(args, "limit");
+    let total = lines.len();
+    let start = match offset {
+        Some(value) if value < 0 => total.saturating_sub(value.unsigned_abs() as usize),
+        Some(value) if value > 0 => value as usize - 1,
+        _ => 0,
+    };
+    let end = limit
+        .map(|limit| start.saturating_add(limit.max(0) as usize))
+        .unwrap_or(total)
+        .min(total);
+    let numbered = lines[start..end]
+        .iter()
+        .enumerate()
+        .map(|(ix, line)| format!("{:6}|{}", start + ix + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    json!({
+        "success": true,
+        "content": numbered,
+        "total_lines": total,
+        "showing": format!("{}-{}", start + 1, end),
+    })
+}
+
+fn write_file_tool(args: &Value, workspace_root: Option<&Path>) -> ToolExecution {
+    let Some(root) = workspace_root else {
+        return ToolExecution {
+            result: json!({"success": false, "error": "No local workspace root is available."}),
+            file_change: None,
+            activity: Some("Could not write file: no workspace root.".into()),
+        };
+    };
+    let Some(target) = arg_string(args, &["file_path", "path", "filename", "target_file"]) else {
+        return ToolExecution {
+            result: json!({"success": false, "error": "write needs file_path."}),
+            file_change: None,
+            activity: Some("Could not write file: missing file_path.".into()),
+        };
+    };
+    let Some(contents) = arg_string(args, &["contents", "content"]) else {
+        return ToolExecution {
+            result: json!({"success": false, "error": "write needs contents."}),
+            file_change: None,
+            activity: Some(format!("Could not write {target}: missing contents.")),
+        };
+    };
+    let Ok(path) = resolve_workspace_path(root, &target) else {
+        return ToolExecution {
+            result: json!({"success": false, "error": "Path must stay inside the opened workspace."}),
+            file_change: None,
+            activity: Some(format!("Blocked write outside workspace: {target}")),
+        };
+    };
+    let before = std::fs::read_to_string(&path).ok();
+    if let Some(parent) = path.parent()
+        && let Err(error) = std::fs::create_dir_all(parent)
+    {
+        return ToolExecution {
+            result: json!({"success": false, "error": error.to_string()}),
+            file_change: None,
+            activity: Some(format!("Could not create parent directories for {target}.")),
+        };
+    }
+    match std::fs::write(&path, contents) {
+        Ok(()) => {
+            let after = std::fs::read_to_string(&path).unwrap_or_default();
+            ToolExecution {
+                result: json!({"success": true, "message": format!("Wrote file: {target}")}),
+                file_change: Some(build_file_change(target.clone(), before.as_deref(), &after)),
+                activity: Some(format!("Wrote {target}")),
+            }
+        }
+        Err(error) => ToolExecution {
+            result: json!({"success": false, "error": error.to_string()}),
+            file_change: None,
+            activity: Some(format!("Could not write {target}: {error}")),
+        },
+    }
+}
+
+fn build_file_change(path: String, before: Option<&str>, after: &str) -> FileChange {
+    let before_lines = before
+        .map(|before| before.lines().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let after_lines = after.lines().collect::<Vec<_>>();
+    let max_len = before_lines.len().max(after_lines.len());
+    let mut additions = 0;
+    let mut deletions = 0;
+    let mut preview = Vec::new();
+
+    for index in 0..max_len {
+        let before_line = before_lines.get(index).copied();
+        let after_line = after_lines.get(index).copied();
+        if before_line == after_line {
+            continue;
+        }
+        if let Some(line) = before_line {
+            deletions += 1;
+            if preview.len() < 24 {
+                preview.push(format!("- {}", truncate_chars(line.trim(), 140)));
+            }
+        }
+        if let Some(line) = after_line {
+            additions += 1;
+            if preview.len() < 24 {
+                preview.push(format!("+ {}", truncate_chars(line.trim(), 140)));
+            }
+        }
+    }
+
+    if preview.is_empty() {
+        preview.push("No textual diff preview available.".into());
+    }
+
+    FileChange {
+        path,
+        additions,
+        deletions,
+        preview,
+        expanded: false,
+    }
+}
+
+fn arg_string(args: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| args.get(*key).and_then(Value::as_str))
+        .map(str::to_string)
+}
+
+fn arg_i64(args: &Value, key: &str) -> Option<i64> {
+    args.get(key)
+        .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+}
+
+fn resolve_workspace_path(root: &Path, target: &str) -> Result<PathBuf> {
+    let target = PathBuf::from(target);
+    let joined = if target.is_absolute() {
+        target
+    } else {
+        root.join(target)
+    };
+
+    if joined
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(anyhow!("parent traversal is not allowed"));
+    }
+
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let parent = joined
+        .parent()
+        .map(|parent| {
+            parent
+                .canonicalize()
+                .unwrap_or_else(|_| parent.to_path_buf())
+        })
+        .unwrap_or_else(|| root.clone());
+    if !parent.starts_with(&root) {
+        return Err(anyhow!("path escapes workspace"));
+    }
+
+    Ok(joined)
+}
+
+fn file_tools() -> Vec<Value> {
+    vec![
+        json!({
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read a file from the opened workspace. Use target_file or file_path. Supports optional offset and limit line parameters.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_file": {"type": "string", "description": "Path relative to the opened workspace"},
+                        "file_path": {"type": "string", "description": "Alias for target_file"},
+                        "offset": {"type": "integer", "description": "Starting line number, 1-indexed"},
+                        "limit": {"type": "integer", "description": "Number of lines to read"}
+                    },
+                    "required": ["target_file"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "write",
+                "description": "Write or create a file inside the opened workspace. Overwrites the whole file.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Path relative to the opened workspace"},
+                        "contents": {"type": "string", "description": "Complete file contents"}
+                    },
+                    "required": ["file_path", "contents"]
+                }
+            }
+        }),
+    ]
+}
+
+fn format_number(value: u64) -> String {
+    if value >= 1_000_000 {
+        format!("{}M", value / 1_000_000)
+    } else if value >= 1_000 {
+        format!("{}K", value / 1_000)
+    } else {
+        value.to_string()
+    }
+}

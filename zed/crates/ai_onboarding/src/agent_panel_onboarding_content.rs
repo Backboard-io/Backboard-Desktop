@@ -1,24 +1,21 @@
 use std::sync::Arc;
 
 use client::{Client, UserStore};
-use cloud_api_types::Plan;
 use gpui::{Entity, IntoElement, ParentElement};
 use language_model::{LanguageModelRegistry, ZED_CLOUD_PROVIDER_ID};
 use ui::prelude::*;
 
-use crate::{AgentPanelOnboardingCard, ApiKeysWithoutProviders, ZedAiOnboarding};
+use crate::AgentPanelOnboardingCard;
 
 pub struct AgentPanelOnboarding {
-    user_store: Entity<UserStore>,
-    client: Arc<Client>,
     has_configured_providers: bool,
     continue_with_zed_ai: Arc<dyn Fn(&mut Window, &mut App)>,
 }
 
 impl AgentPanelOnboarding {
     pub fn new(
-        user_store: Entity<UserStore>,
-        client: Arc<Client>,
+        _user_store: Entity<UserStore>,
+        _client: Arc<Client>,
         continue_with_zed_ai: impl Fn(&mut Window, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -37,8 +34,6 @@ impl AgentPanelOnboarding {
         .detach();
 
         Self {
-            user_store,
-            client,
             has_configured_providers: Self::has_configured_providers(cx),
             continue_with_zed_ai: Arc::new(continue_with_zed_ai),
         }
@@ -53,38 +48,39 @@ impl AgentPanelOnboarding {
 }
 
 impl Render for AgentPanelOnboarding {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let enrolled_in_trial = self
-            .user_store
-            .read(cx)
-            .plan()
-            .is_some_and(|plan| plan == Plan::ZedProTrial);
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let dismiss = self.continue_with_zed_ai.clone();
 
-        let is_pro_user = self
-            .user_store
-            .read(cx)
-            .plan()
-            .is_some_and(|plan| plan == Plan::ZedPro);
-
-        let onboarding = ZedAiOnboarding::new(
-            self.client.clone(),
-            &self.user_store,
-            self.continue_with_zed_ai.clone(),
-            cx,
+        AgentPanelOnboardingCard::new().child(
+            v_flex()
+                .w_full()
+                .relative()
+                .gap_3()
+                .child(v_flex().gap_1().child(Headline::new("Zed Agent")).child(
+                    Label::new("Chat with Zed Agent against this workspace.").color(Color::Muted),
+                ))
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            Label::new("Use models and tools configured in Zed")
+                                .color(Color::Muted),
+                        )
+                        .child(
+                            Label::new("Streams runs, tool calls, and file edits here")
+                                .color(Color::Muted),
+                        )
+                        .child(
+                            Label::new("Reads and writes files through the IDE workspace")
+                                .color(Color::Muted),
+                        ),
+                )
+                .child(
+                    Button::new("start-zed-agent-chat", "Start Zed Agent Chat")
+                        .full_width()
+                        .style(ButtonStyle::Tinted(ui::TintColor::Accent))
+                        .on_click(move |_, window, cx| dismiss(window, cx)),
+                ),
         )
-        .with_dismiss({
-            let callback = self.continue_with_zed_ai.clone();
-            move |window, cx| callback(window, cx)
-        });
-
-        AgentPanelOnboardingCard::new()
-            .child(onboarding)
-            .map(|this| {
-                if enrolled_in_trial || is_pro_user || self.has_configured_providers {
-                    this
-                } else {
-                    this.child(ApiKeysWithoutProviders::new())
-                }
-            })
     }
 }

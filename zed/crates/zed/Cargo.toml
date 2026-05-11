@@ -75,6 +75,7 @@ assets.workspace = true
 audio.workspace = true
 auto_update.workspace = true
 auto_update_ui.workspace = true
+backboard_ui.workspace = true
 breadcrumbs.workspace = true
 call.workspace = true
 chrono.workspace = true

@@ -18,6 +18,8 @@ members = [
     "crates/auto_update_helper",
     "crates/auto_update_ui",
     "crates/aws_http_client",
+    "crates/backboard",
+    "crates/backboard_ui",
     "crates/bedrock",
     "crates/breadcrumbs",
     "crates/buffer_diff",
@@ -280,6 +282,8 @@ audio = { path = "crates/audio" }
 auto_update = { path = "crates/auto_update" }
 auto_update_ui = { path = "crates/auto_update_ui" }
 aws_http_client = { path = "crates/aws_http_client" }
+backboard = { path = "crates/backboard" }
+backboard_ui = { path = "crates/backboard_ui" }
 bedrock = { path = "crates/bedrock" }
 breadcrumbs = { path = "crates/breadcrumbs" }
 buffer_diff = { path = "crates/buffer_diff" }

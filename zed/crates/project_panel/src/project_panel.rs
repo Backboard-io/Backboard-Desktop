@@ -7229,10 +7229,8 @@ impl EventEmitter<PanelEvent> for ProjectPanel {}
 
 impl Panel for ProjectPanel {
     fn position(&self, _: &Window, cx: &App) -> DockPosition {
-        match ProjectPanelSettings::get_global(cx).dock {
-            DockSide::Left => DockPosition::Left,
-            DockSide::Right => DockPosition::Right,
-        }
+        let _ = ProjectPanelSettings::get_global(cx);
+        DockPosition::Left
     }
 
     fn position_is_valid(&self, position: DockPosition) -> bool {
