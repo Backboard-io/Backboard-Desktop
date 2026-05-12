@@ -52,6 +52,7 @@ try:
     from backboard_cli.agent.subagents import SubagentManager
     from backboard_cli.api.client import BackboardAPIClient
     from backboard_cli.api.mcp.manager import MCPManager
+    from backboard_cli.cli.chat.pricing import PricingService
     from backboard_cli.cli.chat.prompt import build_system_prompt
     from backboard_cli.skills.manager import SkillManager
     from backboard_cli.state.config import config
@@ -488,6 +489,7 @@ class AcpServer:
                 "sessionId": session_id,
                 "modes": self._mode_state("agent"),
                 "models": await session.model_state(),
+                "configOptions": session.config_options(),
             }
 
         if method == "session/load":
@@ -531,6 +533,17 @@ class AcpServer:
             if session.assistant_id or session.thread_id:
                 session._persist_session_mapping()
             return {}
+
+        if method == "session/set_config_option":
+            session = self._session(params)
+            config_id = str(params.get("configId") or params.get("config_id") or "")
+            value = params.get("value")
+            if isinstance(value, dict):
+                value = value.get("value")
+            value_id = str(value or "")
+            if config_id == "backboard_intensity":
+                session.intensity = value_id if value_id in {"fast", "balanced", "deep"} else "fast"
+            return {"configOptions": session.config_options()}
 
         if method == "session/prompt":
             session = self._session(params)
@@ -618,6 +631,9 @@ class BackboardIdeSession:
         self.mode = "agent"
         self.provider: str | None = None
         self.model: str | None = None
+        self.intensity = "fast"
+        self.pricing = PricingService()
+        self.session_total_cost = 0.0
         self.api_client: Any = None
         self.tool_system: Any = None
         self.mcp_manager: Any = None
@@ -645,6 +661,7 @@ class BackboardIdeSession:
             return {
                 "modes": self.server._mode_state(self.mode),
                 "models": await self.model_state(),
+                "configOptions": self.config_options(),
             }
 
         restored = self._restore_session_mapping()
@@ -663,6 +680,7 @@ class BackboardIdeSession:
         return {
             "modes": self.server._mode_state(self.mode),
             "models": await self.model_state(),
+            "configOptions": self.config_options(),
         }
 
     async def model_state(self) -> dict[str, Any]:
@@ -680,6 +698,8 @@ class BackboardIdeSession:
         try:
             await self._ensure_runtime()
             models = await self.api_client.list_models(limit=250)
+            with contextlib.suppress(Exception):
+                self.pricing.update_from_catalog(models)
         except Exception:
             return fallback
 
@@ -715,6 +735,35 @@ class BackboardIdeSession:
             "currentModelId": current_id,
             "availableModels": available_models,
         }
+
+    def config_options(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "backboard_intensity",
+                "name": "Intensity",
+                "description": "Controls speed by changing how much extended model thinking Backboard asks for.",
+                "category": "thought_level",
+                "type": "select",
+                "currentValue": self.intensity,
+                "options": [
+                    {
+                        "value": "fast",
+                        "name": "Fast",
+                        "description": "Prioritize quick streaming and skip extended thinking.",
+                    },
+                    {
+                        "value": "balanced",
+                        "name": "Balanced",
+                        "description": "Use a small thinking budget when the selected model supports it.",
+                    },
+                    {
+                        "value": "deep",
+                        "name": "Deep",
+                        "description": "Use the configured Backboard thinking settings for harder work.",
+                    },
+                ],
+            }
+        ]
 
     async def prompt(self, blocks: list[dict[str, Any]]) -> dict[str, Any]:
         self.cancel_event.clear()
@@ -993,9 +1042,24 @@ class BackboardIdeSession:
         return filtered
 
     def _thinking_payload(self) -> dict[str, Any] | None:
+        if self.intensity == "fast":
+            return None
         with contextlib.suppress(Exception):
-            return config.thinking_for_provider(self.provider or config.default_provider, self.model or config.default_model)
+            payload = config.thinking_for_provider(self.provider or config.default_provider, self.model or config.default_model)
+            if self.intensity == "balanced":
+                return self._cap_thinking_payload(payload, 2048)
+            return payload
         return None
+
+    def _cap_thinking_payload(self, payload: Any, budget_tokens: int) -> Any:
+        if not isinstance(payload, dict):
+            return payload
+        capped = dict(payload)
+        for key in ("budget_tokens", "budgetTokens", "max_tokens", "maxTokens"):
+            value = capped.get(key)
+            if isinstance(value, (int, float)):
+                capped[key] = min(int(value), budget_tokens)
+        return capped
 
     async def _consume_stream(self, stream: Any) -> str:
         async for chunk in stream:
@@ -1586,13 +1650,46 @@ class BackboardIdeSession:
         )
         if used <= 0 or size <= 0:
             return
+        cost = self._record_usage_cost(input_tokens, output_tokens, chunk)
+        update = {
+            "sessionUpdate": "usage_update",
+            "used": used,
+            "size": size,
+        }
+        if cost is not None:
+            update["cost"] = {"amount": cost, "currency": "USD"}
         await self._update(
-            {
-                "sessionUpdate": "usage_update",
-                "used": used,
-                "size": size,
-            }
+            update
         )
+
+    def _record_usage_cost(self, input_tokens: int, output_tokens: int, chunk: dict[str, Any]) -> float | None:
+        turn_cost = self._extract_server_cost(chunk)
+        if turn_cost is None:
+            with contextlib.suppress(Exception):
+                turn_cost = self.pricing.cost_for_turn(
+                    self.provider or config.default_provider,
+                    self.model or config.default_model,
+                    input_tokens,
+                    output_tokens,
+                )
+        if turn_cost is None:
+            return None
+        self.session_total_cost = round(max(0.0, self.session_total_cost + float(turn_cost)), 6)
+        return self.session_total_cost
+
+    def _extract_server_cost(self, chunk: dict[str, Any]) -> float | None:
+        for key in ("amount_deducted_usd", "cost_usd", "turn_cost_usd", "cost"):
+            value = chunk.get(key)
+            if isinstance(value, dict):
+                value = value.get("amount") or value.get("usd")
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                return float(value)
+            if isinstance(value, str):
+                with contextlib.suppress(ValueError):
+                    parsed = float(value)
+                    if parsed >= 0:
+                        return parsed
+        return None
 
     async def _update(self, update: dict[str, Any]) -> None:
         with contextlib.suppress(RuntimeError):

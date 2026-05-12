@@ -1,11 +1,12 @@
 use std::rc::Rc;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use acp_thread::{AgentModelIcon, AgentModelInfo, AgentModelSelector};
 use fs::Fs;
-use gpui::{Entity, FocusHandle};
+use gpui::{Entity, FocusHandle, ObjectFit, img};
 use picker::popover_menu::PickerPopoverMenu;
-use ui::{PopoverMenuHandle, Tooltip, prelude::*};
+use ui::{ButtonLike, PopoverMenuHandle, Tooltip, prelude::*};
 
 use crate::ui::ModelSelectorTooltip;
 use crate::{ModelSelector, model_selector::acp_model_selector};
@@ -13,6 +14,8 @@ use crate::{ModelSelector, model_selector::acp_model_selector};
 pub struct ModelSelectorPopover {
     selector: Entity<ModelSelector>,
     menu_handle: PopoverMenuHandle<ModelSelector>,
+    trigger_label: Option<SharedString>,
+    trigger_logo: Option<PathBuf>,
 }
 
 impl ModelSelectorPopover {
@@ -30,7 +33,14 @@ impl ModelSelectorPopover {
                 acp_model_selector(selector, agent_server, fs, focus_handle.clone(), window, cx)
             }),
             menu_handle,
+            trigger_label: None,
+            trigger_logo: None,
         }
+    }
+
+    pub fn set_trigger_brand(&mut self, label: SharedString, logo_path: Option<PathBuf>) {
+        self.trigger_label = Some(label);
+        self.trigger_logo = logo_path;
     }
 
     pub fn toggle(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -75,22 +85,52 @@ impl Render for ModelSelectorPopover {
             }
         });
 
+        let trigger_label = self.trigger_label.clone();
+        let trigger_logo = self.trigger_logo.clone();
+
+        let trigger = ButtonLike::new("active-model")
+            .style(ButtonStyle::Outlined)
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .when_some(trigger_logo, |this, path| {
+                        this.child(
+                            img(path)
+                                .h(px(14.))
+                                .w_auto()
+                                .flex_none()
+                                .object_fit(ObjectFit::ScaleDown),
+                        )
+                    })
+                    .when_some(trigger_label, |this, label| {
+                        this.child(
+                            Label::new(label)
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        )
+                    })
+                    .when_some(model_icon, |this, icon| {
+                        this.child(
+                            match icon {
+                                AgentModelIcon::Path(path) => Icon::from_external_svg(path),
+                                AgentModelIcon::Named(icon_name) => Icon::new(icon_name),
+                            }
+                            .color(color)
+                            .size(IconSize::XSmall),
+                        )
+                    })
+                    .child(
+                        Label::new(model_name)
+                            .size(LabelSize::Small)
+                            .color(color),
+                    )
+                    .child(Icon::new(icon).color(Color::Muted).size(IconSize::XSmall)),
+            );
+
         PickerPopoverMenu::new(
             self.selector.clone(),
-            Button::new("active-model", model_name)
-                .label_size(LabelSize::Small)
-                .color(color)
-                .when_some(model_icon, |this, icon| {
-                    this.start_icon(
-                        match icon {
-                            AgentModelIcon::Path(path) => Icon::from_external_svg(path),
-                            AgentModelIcon::Named(icon_name) => Icon::new(icon_name),
-                        }
-                        .color(color)
-                        .size(IconSize::XSmall),
-                    )
-                })
-                .end_icon(Icon::new(icon).color(Color::Muted).size(IconSize::XSmall)),
+            trigger,
             tooltip,
             gpui::Anchor::BottomRight,
             cx,

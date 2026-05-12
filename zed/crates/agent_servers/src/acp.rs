@@ -3148,13 +3148,10 @@ fn config_state(
     Option<Rc<RefCell<acp::SessionModelState>>>,
     Option<Rc<RefCell<Vec<acp::SessionConfigOption>>>>,
 ) {
-    if let Some(opts) = config_options {
-        return (None, None, Some(Rc::new(RefCell::new(opts))));
-    }
-
     let modes = modes.map(|modes| Rc::new(RefCell::new(modes)));
     let models = models.map(|models| Rc::new(RefCell::new(models)));
-    (modes, models, None)
+    let config_options = config_options.map(|opts| Rc::new(RefCell::new(opts)));
+    (modes, models, config_options)
 }
 
 struct AcpSessionModes {

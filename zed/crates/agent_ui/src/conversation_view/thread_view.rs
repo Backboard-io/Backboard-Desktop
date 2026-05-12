@@ -9,8 +9,6 @@ use std::path::{Path, PathBuf};
 use acp_thread::{ContentBlock, PlanEntry};
 use cloud_api_types::{SubmitAgentThreadFeedbackBody, SubmitAgentThreadFeedbackCommentsBody};
 use editor::actions::OpenExcerpts;
-use feature_flags::AcpBetaFeatureFlag;
-
 use crate::message_editor::SharedSessionCapabilities;
 
 use gpui::List;
@@ -760,12 +758,13 @@ impl ThreadView {
             })
     }
 
-    fn render_backboard_footer_status(&self, cx: &App) -> impl IntoElement {
+    fn render_backboard_footer_status(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let model_label = self
             .current_model_label(cx)
             .unwrap_or_else(|| SharedString::from("Select model"));
 
         h_flex()
+            .id("backboard-footer-model-selector")
             .gap_1()
             .items_center()
             .px_1p5()
@@ -774,6 +773,8 @@ impl ThreadView {
             .border_1()
             .border_color(cx.theme().colors().border_variant)
             .bg(cx.theme().colors().editor_background)
+            .hover(|style| style.bg(cx.theme().colors().element_hover))
+            .cursor_pointer()
             .child(self.render_backboard_logo(px(14.)))
             .child(
                 Label::new(self.agent_display_name.clone())
@@ -785,6 +786,29 @@ impl ThreadView {
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
+            .child(Icon::new(IconName::ChevronDown).size(IconSize::XSmall).color(Color::Muted))
+            .tooltip(Tooltip::text("Change Backboard model"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.toggle_model_selector(window, cx);
+            }))
+    }
+
+    fn toggle_model_selector(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.thread.read(cx).status() != ThreadStatus::Idle {
+            return;
+        }
+        if let Some(config_options_view) = self.config_options_view.clone() {
+            let handled = config_options_view.update(cx, |view, cx| {
+                view.toggle_category_picker(acp::SessionConfigOptionCategory::Model, window, cx)
+            });
+            if handled {
+                return;
+            }
+        }
+
+        if let Some(model_selector) = self.model_selector.clone() {
+            model_selector.update(cx, |model_selector, cx| model_selector.toggle(window, cx));
+        }
     }
 
     fn render_backboard_run_overview(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -3498,15 +3522,14 @@ impl ThreadView {
                                 h_flex()
                                     .flex_wrap()
                                     .gap_1()
-                                    .child(self.render_backboard_footer_status(cx))
+                                    .map(|this| match self.model_selector.clone() {
+                                        Some(model_selector) => this.child(model_selector),
+                                        None => this.child(self.render_backboard_footer_status(cx)),
+                                    })
                                     .children(self.render_token_usage(cx))
                                     .children(self.profile_selector.clone())
-                                    .map(|this| match self.config_options_view.clone() {
-                                        Some(config_view) => this.child(config_view),
-                                        None => this
-                                            .children(self.mode_selector.clone())
-                                            .children(self.model_selector.clone()),
-                                    })
+                                    .children(self.mode_selector.clone())
+                                    .children(self.config_options_view.clone())
                                     .child(self.render_send_button(cx)),
                             ),
                     ),
@@ -3706,18 +3729,18 @@ impl ThreadView {
         let usage = thread.token_usage()?;
         let show_split = self.supports_split_token_display(cx);
 
-        let cost_label = if cx.has_flag::<AcpBetaFeatureFlag>() {
-            thread.cost().map(|cost| {
-                let precision = if cost.amount > 0.0 && cost.amount < 0.01 {
-                    4
-                } else {
-                    2
-                };
+        let cost_label = thread.cost().map(|cost| {
+            let precision = if cost.amount > 0.0 && cost.amount < 0.01 {
+                4
+            } else {
+                2
+            };
+            if cost.currency.as_ref() == "USD" {
+                format!("${:.prec$}", cost.amount, prec = precision)
+            } else {
                 format!("{:.prec$} {}", cost.amount, cost.currency, prec = precision)
-            })
-        } else {
-            None
-        };
+            }
+        });
 
         let progress_color = |ratio: f32| -> Hsla {
             if ratio >= 0.85 {
@@ -3782,6 +3805,7 @@ impl ThreadView {
             let tooltip_percentage = percentage.clone();
             let tooltip_used = used.clone();
             let tooltip_max = max.clone();
+            let tooltip_cost_label = cost_label.clone();
             move |_window: &mut Window, cx: &mut App| {
                 let percentage = tooltip_percentage.clone();
                 let used = tooltip_used.clone();
@@ -3792,7 +3816,7 @@ impl ThreadView {
                 let output_max_label = output_max_label.clone();
                 let project_entry_ids = project_entry_ids.clone();
                 let workspace = workspace.clone();
-                let cost_label = cost_label.clone();
+                let cost_label = tooltip_cost_label.clone();
                 cx.new(move |_cx| TokenUsageTooltip {
                     percentage,
                     used,
@@ -3852,7 +3876,14 @@ impl ThreadView {
                             Label::new(format!("{used} / {max} tokens"))
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted),
-                        ),
+                        )
+                        .when_some(cost_label.clone(), |this, cost| {
+                            this.child(
+                                Label::new(format!("Session cost: {cost}"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                        }),
                 )
                 .hoverable_tooltip(build_tooltip)
                 .into_any_element(),
@@ -9385,26 +9416,7 @@ impl Render for ThreadView {
                 }
             }))
             .on_action(cx.listener(|this, _: &ToggleModelSelector, window, cx| {
-                if this.thread.read(cx).status() != ThreadStatus::Idle {
-                    return;
-                }
-                if let Some(config_options_view) = this.config_options_view.clone() {
-                    let handled = config_options_view.update(cx, |view, cx| {
-                        view.toggle_category_picker(
-                            acp::SessionConfigOptionCategory::Model,
-                            window,
-                            cx,
-                        )
-                    });
-                    if handled {
-                        return;
-                    }
-                }
-
-                if let Some(model_selector) = this.model_selector.clone() {
-                    model_selector
-                        .update(cx, |model_selector, cx| model_selector.toggle(window, cx));
-                }
+                this.toggle_model_selector(window, cx);
             }))
             .on_action(cx.listener(|this, _: &CycleFavoriteModels, window, cx| {
                 if this.thread.read(cx).status() != ThreadStatus::Idle {

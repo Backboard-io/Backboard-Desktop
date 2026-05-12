@@ -1067,28 +1067,40 @@ impl ConversationView {
         let connection = thread.read(cx).connection().clone();
         let session_id = thread.read(cx).session_id().clone();
 
-        // Check for config options first
-        // Config options take precedence over legacy mode/model selectors
-        // (feature flag gating happens at the data layer)
         let config_options_provider = connection.session_config_options(&session_id, cx);
+        let config_option_categories = config_options_provider
+            .as_ref()
+            .map(|config_options| {
+                config_options
+                    .config_options()
+                    .into_iter()
+                    .filter_map(|option| option.category)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let config_options_include_mode = config_option_categories
+            .iter()
+            .any(|category| category == &acp::SessionConfigOptionCategory::Mode);
+        let config_options_include_model = config_option_categories
+            .iter()
+            .any(|category| category == &acp::SessionConfigOptionCategory::Model);
 
         let config_options_view;
-        let mode_selector;
-        let model_selector;
         if let Some(config_options) = config_options_provider {
-            // Use config options - don't create mode_selector or model_selector
             let agent_server = self.agent.clone();
             let fs = self.project.read(cx).fs().clone();
             config_options_view =
                 Some(cx.new(|cx| {
                     ConfigOptionsView::new(config_options, agent_server, fs, window, cx)
                 }));
-            model_selector = None;
-            mode_selector = None;
         } else {
-            // Fall back to legacy mode/model selectors
             config_options_view = None;
-            model_selector = connection.model_selector(&session_id).map(|selector| {
+        }
+
+        let model_selector = if config_options_include_model {
+            None
+        } else {
+            connection.model_selector(&session_id).map(|selector| {
                 let agent_server = self.agent.clone();
                 let fs = self.project.read(cx).fs().clone();
                 cx.new(|cx| {
@@ -1102,15 +1114,17 @@ impl ConversationView {
                         cx,
                     )
                 })
-            });
+            })
+        };
 
-            mode_selector = connection
-                .session_modes(&session_id, cx)
-                .map(|session_modes| {
-                    let fs = self.project.read(cx).fs().clone();
-                    cx.new(|_cx| ModeSelector::new(session_modes, self.agent.clone(), fs))
-                });
-        }
+        let mode_selector = if config_options_include_mode {
+            None
+        } else {
+            connection.session_modes(&session_id, cx).map(|session_modes| {
+                let fs = self.project.read(cx).fs().clone();
+                cx.new(|_cx| ModeSelector::new(session_modes, self.agent.clone(), fs))
+            })
+        };
 
         let subscriptions = vec![
             cx.subscribe_in(&thread, window, Self::handle_thread_event),
@@ -1170,6 +1184,16 @@ impl ConversationView {
                 .agent_display_name(&agent_id.clone())
                 .unwrap_or_else(|| agent_id.0.clone())
         };
+
+        if let Some(model_selector) = model_selector.as_ref() {
+            if agent_display_name.as_ref() == "Backboard" {
+                let logo_path =
+                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../app/logo.png");
+                model_selector.update(cx, |model_selector, _cx| {
+                    model_selector.set_trigger_brand(agent_display_name.clone(), Some(logo_path));
+                });
+            }
+        }
 
         let agent_icon = self.agent.logo();
         let agent_icon_from_external_svg = self
