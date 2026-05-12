@@ -132,6 +132,7 @@ READ_ONLY_COMMANDS = {
     "stat",
     "tail",
     "tree",
+    "curl",
     "wc",
 }
 READ_ONLY_GIT_SUBCOMMANDS = {
@@ -197,6 +198,8 @@ UNSAFE_READ_FLAGS = {
     "-i\"\"",
     "--in-place",
 }
+CURL_SAFE_METHODS = {"GET", "HEAD"}
+
 INSTALL_COMMAND_NAMES = {"npm", "pnpm", "yarn", "bun"}
 CHECK_COMMAND_NAMES = {"cargo", "pytest", "vitest", "playwright", "tsc", "ruff", "eslint"}
 DEV_SERVER_COMMAND_MARKERS = {
@@ -213,6 +216,7 @@ DEV_SERVER_COMMAND_MARKERS = {
     "python -m http.server",
     "python3 -m http.server",
 }
+SUPPORTED_MODES = {"agent", "ask", "manual", "free"}
 
 
 class JsonRpcError(Exception):
@@ -378,6 +382,8 @@ def _is_read_only_shell_command(command: str) -> bool:
     executable = Path(tokens[0]).name
     if executable not in READ_ONLY_COMMANDS:
         return False
+    if executable == "curl":
+        return _is_read_only_curl_command(tokens[1:])
     if any(token in UNSAFE_READ_FLAGS for token in tokens[1:]):
         return False
     if executable == "git":
@@ -435,6 +441,89 @@ def _is_read_only_sed_command(args: list[str]) -> bool:
     # `sed` can write files with the `w` command and execute shell commands on
     # some platforms with `e`; keep the auto-approval path limited.
     return not any("w " in script or script.endswith("w") or "e " in script for script in scripts)
+
+
+def _is_mutating_curl_arg(arg: str) -> bool:
+    return (
+        arg in {
+            "-d",
+            "--data",
+            "--data-binary",
+            "--data-raw",
+            "--data-urlencode",
+            "-F",
+            "--form",
+            "--form-string",
+            "-T",
+            "--upload-file",
+            "-o",
+            "--output",
+            "-O",
+            "--remote-name",
+            "--remote-name-all",
+            "--remote-header-name",
+            "-J",
+            "--upload-file",
+        }
+        or arg.startswith("-d")
+        or arg.startswith("--data")
+        or arg.startswith("-F")
+        or arg.startswith("--form")
+        or arg.startswith("-T")
+        or arg.startswith("--upload-file")
+        or arg.startswith("-o")
+        or arg.startswith("--output=")
+        or arg == "--remote-name"
+        or arg == "--remote-header-name"
+    )
+
+
+def _is_read_only_curl_command(args: list[str]) -> bool:
+    if not args:
+        return False
+
+    request_method = "GET"
+    index = 0
+    while index < len(args):
+        arg = args[index]
+
+        if arg == "-I" or arg == "--head":
+            request_method = "HEAD"
+            index += 1
+            continue
+
+        if arg == "-X" or arg == "--request":
+            if index + 1 >= len(args):
+                return False
+            request_method = args[index + 1].strip().upper()
+            if request_method not in CURL_SAFE_METHODS:
+                return False
+            index += 2
+            continue
+
+        if arg.startswith("--request="):
+            request_method = arg.split("=", 1)[1].strip().upper()
+            if request_method not in CURL_SAFE_METHODS:
+                return False
+            index += 1
+            continue
+
+        if arg.startswith("-X") and arg != "-X":
+            request_method = arg[2:].lstrip("=").strip().upper()
+            if request_method not in CURL_SAFE_METHODS:
+                return False
+            index += 1
+            continue
+
+        if arg == "--":
+            break
+
+        if _is_mutating_curl_arg(arg):
+            return False
+
+        index += 1
+
+    return request_method in CURL_SAFE_METHODS
 
 
 def _command_tokens(command: str) -> list[str]:
@@ -630,6 +719,8 @@ class AcpServer:
         if method == "session/set_mode":
             session = self._session(params)
             mode_id = str(params.get("modeId") or params.get("mode_id") or "agent")
+            if mode_id not in SUPPORTED_MODES:
+                mode_id = "agent"
             session.mode = mode_id
             session._tool_definitions_cache.clear()
             return {}
@@ -704,6 +795,11 @@ class AcpServer:
                     "id": "manual",
                     "name": "Manual",
                     "description": "Focused edit proposals with explicit diff review.",
+                },
+                {
+                    "id": "free",
+                    "name": "Free",
+                    "description": "Unrestricted tool access. Terminal commands run without approval prompts.",
                 },
             ],
         }
@@ -1739,9 +1835,13 @@ class BackboardIdeSession:
         terminal_id = f"backboard-terminal-{uuid.uuid4().hex}"
         meta = {"terminal_info": {"terminal_id": terminal_id, "cwd": str(self.workspace)}}
         read_only_auto_approved = name in {"bash", "run_terminal_cmd"} and _is_read_only_shell_command(command)
+        free_mode_auto_approved = self.mode == "free"
+        command_auto_approved = read_only_auto_approved or free_mode_auto_approved
         timeout_ms = _command_timeout_ms(command, args, read_only_auto_approved)
         command_card = f"{command}\n\nBackboard timeout: {timeout_ms / 1000:.0f}s"
-        if read_only_auto_approved:
+        if free_mode_auto_approved:
+            await self._emit_progress(f"Running without approval (Free mode): {title}.", "running command")
+        elif read_only_auto_approved:
             await self._emit_progress(f"Running read-only command: {title}.", "running command")
         else:
             await self._emit_progress(f"Waiting for approval: {title}.", "waiting for command approval")
@@ -1749,12 +1849,12 @@ class BackboardIdeSession:
             tool_id,
             title,
             "execute",
-            "in_progress" if read_only_auto_approved else "pending",
+            "in_progress" if command_auto_approved else "pending",
             [{"type": "terminal", "terminalId": terminal_id}, _content_item(command_card)],
             args,
             meta=meta,
         )
-        if not read_only_auto_approved:
+        if not command_auto_approved:
             wait_started = self._loop_time()
             allowed = await self._request_tool_permission(tool_id, title, "execute", [_content_item(command)], args)
             self._add_timing("command_wait_ms", wait_started)

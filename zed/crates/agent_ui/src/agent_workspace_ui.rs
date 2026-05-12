@@ -174,6 +174,42 @@ impl BackboardAgentWorkspacePage {
         }
     }
 
+    fn review_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                    panel.update(cx, |panel, cx| {
+                        panel.review_backboard_workspace_agent(thread_id, window, cx);
+                    });
+                }
+            });
+        }
+    }
+
+    fn apply_run(&mut self, thread_id: ThreadId, cx: &mut Context<Self>) {
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                    panel.update(cx, |panel, cx| {
+                        panel.apply_backboard_workspace_agent(thread_id, cx);
+                    });
+                }
+            });
+        }
+    }
+
+    fn open_worktree(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                    panel.update(cx, |panel, cx| {
+                        panel.open_backboard_workspace_agent_worktree(thread_id, window, cx);
+                    });
+                }
+            });
+        }
+    }
+
     fn revise_run(
         &mut self,
         title: SharedString,
@@ -555,7 +591,7 @@ impl BackboardAgentWorkspacePage {
             .id(format!("backboard-agent-card-{thread_key}"))
             .min_w(rems_from_px(320.))
             .max_w(rems_from_px(480.))
-            .h(rems_from_px(270.))
+            .h(rems_from_px(310.))
             .flex_1()
             .rounded_md()
             .border_1()
@@ -588,7 +624,23 @@ impl BackboardAgentWorkspacePage {
                                         Label::new(card_label)
                                             .size(LabelSize::Small)
                                             .color(Color::Muted),
-                                    ),
+                                    )
+                                    .when_some(summary.worktree_label.clone(), |this, label| {
+                                        this.child(
+                                            h_flex()
+                                                .gap_1()
+                                                .child(
+                                                    Icon::new(IconName::GitWorktree)
+                                                        .size(IconSize::XSmall)
+                                                        .color(Color::Muted),
+                                                )
+                                                .child(
+                                                    Label::new(label)
+                                                        .size(LabelSize::Small)
+                                                        .color(Color::Muted),
+                                                ),
+                                        )
+                                    }),
                             ),
                     )
                     .child(
@@ -620,6 +672,39 @@ impl BackboardAgentWorkspacePage {
                         Label::new(summary.command.clone())
                             .size(LabelSize::Small)
                             .color(Color::Muted),
+                    )
+                    .when(
+                        summary.branch_label.is_some() || summary.apply_state_label.is_some(),
+                        |this| {
+                            this.child(
+                                h_flex()
+                                    .gap_2()
+                                    .flex_wrap()
+                                    .when_some(summary.branch_label.clone(), |this, branch| {
+                                        this.child(
+                                            h_flex()
+                                                .gap_1()
+                                                .child(
+                                                    Icon::new(IconName::GitBranch)
+                                                        .size(IconSize::XSmall)
+                                                        .color(Color::Muted),
+                                                )
+                                                .child(
+                                                    Label::new(branch)
+                                                        .size(LabelSize::Small)
+                                                        .color(Color::Muted),
+                                                ),
+                                        )
+                                    })
+                                    .when_some(summary.apply_state_label.clone(), |this, label| {
+                                        this.child(
+                                            Label::new(label)
+                                                .size(LabelSize::Small)
+                                                .color(Color::Muted),
+                                        )
+                                    }),
+                            )
+                        },
                     )
                     .when_some(summary.blocked_reason.clone(), |this, reason| {
                         this.child(
@@ -676,6 +761,56 @@ impl BackboardAgentWorkspacePage {
                             .child(
                                 h_flex()
                                     .gap_1()
+                                    .when(summary.can_review, |this| {
+                                        this.child(
+                                            Button::new(
+                                                format!("review-agent-{thread_key}"),
+                                                "Review",
+                                            )
+                                            .start_icon(Icon::new(IconName::GitBranch))
+                                            .style(ButtonStyle::Outlined)
+                                            .size(ButtonSize::Compact)
+                                            .on_click(
+                                                cx.listener(move |this, _, window, cx| {
+                                                    cx.stop_propagation();
+                                                    this.review_run(thread_id, window, cx);
+                                                }),
+                                            ),
+                                        )
+                                    })
+                                    .when(summary.can_apply, |this| {
+                                        this.child(
+                                            Button::new(
+                                                format!("apply-agent-{thread_key}"),
+                                                "Apply",
+                                            )
+                                            .start_icon(Icon::new(IconName::Check))
+                                            .style(ButtonStyle::Tinted(TintColor::Accent))
+                                            .size(ButtonSize::Compact)
+                                            .on_click(
+                                                cx.listener(move |this, _, _, cx| {
+                                                    cx.stop_propagation();
+                                                    this.apply_run(thread_id, cx);
+                                                }),
+                                            ),
+                                        )
+                                    })
+                                    .when(summary.worktree_label.is_some(), |this| {
+                                        this.child(
+                                            IconButton::new(
+                                                format!("open-worktree-{thread_key}"),
+                                                IconName::FolderOpen,
+                                            )
+                                            .icon_size(IconSize::Small)
+                                            .tooltip(Tooltip::text("Open agent worktree"))
+                                            .on_click(
+                                                cx.listener(move |this, _, window, cx| {
+                                                    cx.stop_propagation();
+                                                    this.open_worktree(thread_id, window, cx);
+                                                }),
+                                            ),
+                                        )
+                                    })
                                     .when(
                                         matches!(
                                             summary.status,
