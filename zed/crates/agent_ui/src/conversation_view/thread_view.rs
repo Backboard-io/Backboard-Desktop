@@ -6,10 +6,10 @@ use agent_client_protocol::schema as acp;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
+use crate::message_editor::SharedSessionCapabilities;
 use acp_thread::{ContentBlock, PlanEntry};
 use cloud_api_types::{SubmitAgentThreadFeedbackBody, SubmitAgentThreadFeedbackCommentsBody};
 use editor::actions::OpenExcerpts;
-use crate::message_editor::SharedSessionCapabilities;
 
 use gpui::List;
 use gpui::TaskExt;
@@ -797,7 +797,11 @@ impl ThreadView {
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
-            .child(Icon::new(IconName::ChevronDown).size(IconSize::XSmall).color(Color::Muted))
+            .child(
+                Icon::new(IconName::ChevronDown)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
             .tooltip(Tooltip::text("Change Backboard model"))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.toggle_model_selector(window, cx);
@@ -3752,6 +3756,13 @@ impl ThreadView {
                 format!("{:.prec$} {}", cost.amount, cost.currency, prec = precision)
             }
         });
+        let speed_metrics = thread.speed_metrics().cloned();
+        let speed_label = speed_metrics.as_ref().and_then(|metrics| {
+            metrics
+                .first_token_ms
+                .or(metrics.total_turn_ms)
+                .map(|ms| format!("Speed: {}", format_duration_ms(ms)))
+        });
 
         let progress_color = |ratio: f32| -> Hsla {
             if ratio >= 0.85 {
@@ -3817,6 +3828,7 @@ impl ThreadView {
             let tooltip_used = used.clone();
             let tooltip_max = max.clone();
             let tooltip_cost_label = cost_label.clone();
+            let tooltip_speed_metrics = speed_metrics.clone();
             move |_window: &mut Window, cx: &mut App| {
                 let percentage = tooltip_percentage.clone();
                 let used = tooltip_used.clone();
@@ -3828,6 +3840,7 @@ impl ThreadView {
                 let project_entry_ids = project_entry_ids.clone();
                 let workspace = workspace.clone();
                 let cost_label = tooltip_cost_label.clone();
+                let speed_metrics = tooltip_speed_metrics.clone();
                 cx.new(move |_cx| TokenUsageTooltip {
                     percentage,
                     used,
@@ -3838,6 +3851,7 @@ impl ThreadView {
                     output_max: output_max_label,
                     show_split,
                     cost_label,
+                    speed_metrics,
                     separator_color: tooltip_separator_color,
                     user_rules_count,
                     first_user_rules_id,
@@ -3891,6 +3905,13 @@ impl ThreadView {
                         .when_some(cost_label.clone(), |this, cost| {
                             this.child(
                                 Label::new(format!("Session cost: {cost}"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                        })
+                        .when_some(speed_label.clone(), |this, speed| {
+                            this.child(
+                                Label::new(speed)
                                     .size(LabelSize::XSmall)
                                     .color(Color::Muted),
                             )
@@ -4483,12 +4504,66 @@ struct TokenUsageTooltip {
     output_max: String,
     show_split: bool,
     cost_label: Option<String>,
+    speed_metrics: Option<acp_thread::SpeedMetrics>,
     separator_color: Color,
     user_rules_count: usize,
     first_user_rules_id: Option<uuid::Uuid>,
     project_rules_count: usize,
     project_entry_ids: Vec<ProjectEntryId>,
     workspace: WeakEntity<Workspace>,
+}
+
+fn format_duration_ms(ms: f64) -> String {
+    if ms >= 1000.0 {
+        format!("{:.1}s", ms / 1000.0)
+    } else {
+        format!("{}ms", ms.round() as u64)
+    }
+}
+
+fn speed_metric_row(label: &'static str, value: f64) -> AnyElement {
+    h_flex()
+        .gap_1()
+        .justify_between()
+        .child(Label::new(label).color(Color::Muted))
+        .child(Label::new(format_duration_ms(value)))
+        .into_any_element()
+}
+
+fn render_speed_metric_rows(metrics: &acp_thread::SpeedMetrics) -> Vec<AnyElement> {
+    let mut rows = Vec::new();
+    if let Some(value) = metrics.first_token_ms {
+        rows.push(speed_metric_row("First token", value));
+    }
+    if let Some(value) = metrics.total_turn_ms {
+        rows.push(speed_metric_row("Total turn", value));
+    }
+    if let Some(value) = metrics.context_pack_ms {
+        rows.push(speed_metric_row("Context pack", value));
+    }
+    if let Some(value) = metrics.semantic_context_ms {
+        rows.push(speed_metric_row("Semantic context", value));
+    }
+    if let Some(value) = metrics.tool_batch_ms {
+        rows.push(speed_metric_row("Tools", value));
+    }
+    if let Some(value) = metrics.file_write_ms {
+        rows.push(speed_metric_row("File writes", value));
+    }
+    if let Some(value) = metrics.command_wait_ms {
+        rows.push(speed_metric_row("Approval wait", value));
+    }
+    if let Some(intensity) = metrics.intensity.as_ref() {
+        rows.push(
+            h_flex()
+                .gap_1()
+                .justify_between()
+                .child(Label::new("Intensity").color(Color::Muted))
+                .child(Label::new(intensity.clone()))
+                .into_any_element(),
+        );
+    }
+    rows
 }
 
 impl Render for TokenUsageTooltip {
@@ -4503,6 +4578,7 @@ impl Render for TokenUsageTooltip {
         let output_max = self.output_max.clone();
         let show_split = self.show_split;
         let cost_label = self.cost_label.clone();
+        let speed_metrics = self.speed_metrics.clone();
         let user_rules_count = self.user_rules_count;
         let first_user_rules_id = self.first_user_rules_id;
         let project_rules_count = self.project_rules_count;
@@ -4564,6 +4640,22 @@ impl Render for TokenUsageTooltip {
                                     .size(LabelSize::Small),
                             )
                             .child(Label::new(cost_label)),
+                    )
+                })
+                .when_some(speed_metrics, |this, speed_metrics| {
+                    this.child(
+                        v_flex()
+                            .mt_1p5()
+                            .pt_1p5()
+                            .gap_0p5()
+                            .border_t_1()
+                            .border_color(cx.theme().colors().border_variant)
+                            .child(
+                                Label::new("Speed")
+                                    .color(Color::Muted)
+                                    .size(LabelSize::Small),
+                            )
+                            .children(render_speed_metric_rows(&speed_metrics)),
                     )
                 })
                 .when(
@@ -4808,10 +4900,8 @@ impl ThreadView {
         window: &Window,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let group_id = acp::ToolCallId::new(format!(
-            "exploration-group-{}-{}",
-            group.start, group.end
-        ));
+        let group_id =
+            acp::ToolCallId::new(format!("exploration-group-{}-{}", group.start, group.end));
         let is_open = self.expanded_tool_calls.contains(&group_id);
         let header_id = SharedString::from(format!("exploration-group-{}", group.start));
         let summary = self.exploration_group_summary(group);
@@ -4884,7 +4974,9 @@ impl ThreadView {
                         .children(detail_rows),
                 )
             })
-            .when(needs_controls, |this| this.child(self.render_thread_controls(&thread, cx)))
+            .when(needs_controls, |this| {
+                this.child(self.render_thread_controls(&thread, cx))
+            })
             .into_any_element()
     }
 
@@ -4948,15 +5040,10 @@ impl ThreadView {
             .gap_2()
             .items_center()
             .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
-            .child(
-                div()
-                    .text_ui_sm(cx)
-                    .child(self.render_markdown(
-                        tool_call.label.clone(),
-                        MarkdownStyle::themed(MarkdownFont::Agent, window, cx)
-                            .with_buffer_font(cx),
-                    )),
-            )
+            .child(div().text_ui_sm(cx).child(self.render_markdown(
+                tool_call.label.clone(),
+                MarkdownStyle::themed(MarkdownFont::Agent, window, cx).with_buffer_font(cx),
+            )))
             .into_any_element()
     }
 

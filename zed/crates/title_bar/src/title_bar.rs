@@ -25,6 +25,7 @@ use auto_update::AutoUpdateStatus;
 use call::ActiveCall;
 use client::{Client, UserStore, zed_urls};
 use cloud_api_types::Plan;
+use agent_ui::OpenBackboardAgentWorkspace;
 
 use gpui::{
     Action, Anchor, Animation, AnimationExt, AnyElement, App, Context, Element, Entity, Focusable,
@@ -321,7 +322,9 @@ impl Render for TitleBar {
                     user.is_none()
                         && is_signed_out_or_auth_error
                         && TitleBarSettings::get_global(cx).show_sign_in,
-                    |this| this.child(self.render_sign_in_button(cx)),
+                    |this| this
+                        .child(self.render_agent_workspace_button(cx))
+                        .child(self.render_sign_in_button(cx)),
                 )
                 .when(is_signing_in, |this| {
                     this.child(
@@ -1155,6 +1158,14 @@ impl TitleBar {
                             .notify_workspace_async_err(workspace, &mut cx);
                     })
                     .detach();
+            })
+    }
+
+    pub fn render_agent_workspace_button(&mut self, _cx: &mut Context<Self>) -> Button {
+        Button::new("agent_workspace", "Agent Workspace")
+            .label_size(LabelSize::Small)
+            .on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(OpenBackboardAgentWorkspace), cx);
             })
     }
 

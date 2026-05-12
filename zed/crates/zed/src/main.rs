@@ -4,7 +4,6 @@
 mod reliability;
 mod zed;
 
-
 use agent::{SharedThread, ThreadStore};
 use agent_client_protocol::schema as acp;
 use agent_ui::AgentPanel;
@@ -1899,6 +1898,15 @@ fn load_user_themes_in_background(fs: Arc<dyn fs::Fs>, cx: &mut App) {
                 let Some(theme_path) = theme_path.log_err() else {
                     continue;
                 };
+                if fs
+                    .metadata(&theme_path)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some_and(|metadata| metadata.is_dir)
+                {
+                    continue;
+                }
                 let Some(bytes) = fs.load_bytes(&theme_path).await.log_err() else {
                     continue;
                 };
@@ -1923,7 +1931,13 @@ fn watch_themes(fs: Arc<dyn fs::Fs>, cx: &mut App) {
 
         while let Some(paths) = events.next().await {
             for event in paths {
-                if fs.metadata(&event.path).await.ok().flatten().is_some() {
+                if fs
+                    .metadata(&event.path)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some_and(|metadata| !metadata.is_dir)
+                {
                     let theme_registry = cx.update(|cx| ThemeRegistry::global(cx));
                     if let Some(bytes) = fs.load_bytes(&event.path).await.log_err()
                         && load_user_theme(&theme_registry, &bytes).log_err().is_some()

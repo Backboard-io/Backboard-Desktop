@@ -18194,6 +18194,7 @@ name = "title_bar"
 version = "0.1.0"
 dependencies = [
  "agent_settings",
+ "agent_ui",
  "anyhow",
  "arrayvec",
  "auto_update",

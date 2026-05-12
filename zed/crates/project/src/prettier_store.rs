@@ -204,7 +204,14 @@ impl PrettierStore {
                             Some((Some(prettier_dir), new_prettier_task))
                         }
                         Err(e) => {
-                            log::error!("Failed to determine prettier path for buffer: {e:#}");
+                            let message = format!("{e:#}");
+                            if message.contains("empty metadata for initial path") {
+                                log::debug!(
+                                    "Skipping prettier path lookup while buffer metadata is unavailable: {message}"
+                                );
+                            } else {
+                                log::error!("Failed to determine prettier path for buffer: {message}");
+                            }
                             None
                         }
                     }
@@ -263,9 +270,16 @@ impl PrettierStore {
                             Some(ignore_dir)
                         }
                         Err(e) => {
-                            log::error!(
-                                "Failed to determine prettier ignore path for buffer: {e:#}"
-                            );
+                            let message = format!("{e:#}");
+                            if message.contains("empty metadata for initial path") {
+                                log::debug!(
+                                    "Skipping prettier ignore lookup while buffer metadata is unavailable: {message}"
+                                );
+                            } else {
+                                log::error!(
+                                    "Failed to determine prettier ignore path for buffer: {message}"
+                                );
+                            }
                             None
                         }
                     }

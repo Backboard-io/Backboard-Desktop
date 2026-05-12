@@ -5,21 +5,18 @@ mod terminal;
 use action_log::{ActionLog, ActionLogTelemetry};
 use agent_client_protocol::schema as acp;
 use anyhow::{Context as _, Result, anyhow};
-use collections::HashSet;
 pub use connection::*;
 pub use diff::*;
 use feature_flags::{AcpBetaFeatureFlag, FeatureFlagAppExt as _};
 use futures::{FutureExt, channel::oneshot, future::BoxFuture};
 use gpui::{AppContext, AsyncApp, Context, Entity, EventEmitter, SharedString, Task, WeakEntity};
 use itertools::Itertools;
-use language::language_settings::FormatOnSave;
 use language::{Anchor, Buffer, BufferSnapshot, LanguageRegistry, Point, ToPoint, text_diff};
 use markdown::Markdown;
 pub use mention::*;
-use project::lsp_store::{FormatTrigger, LspFormatTarget};
 use project::{AgentLocation, Project, git_store::GitStoreCheckpoint};
 use serde::{Deserialize, Serialize};
-use serde_json::to_string_pretty;
+use serde_json::{Value, to_string_pretty};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Formatter, Write};
@@ -1010,6 +1007,23 @@ pub struct SessionCost {
     pub currency: SharedString,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SpeedMetrics {
+    pub runtime_load_ms: Option<f64>,
+    pub model_list_ms: Option<f64>,
+    pub assistant_create_ms: Option<f64>,
+    pub context_pack_ms: Option<f64>,
+    pub semantic_context_ms: Option<f64>,
+    pub first_token_ms: Option<f64>,
+    pub tool_batch_ms: Option<f64>,
+    pub file_write_ms: Option<f64>,
+    pub command_wait_ms: Option<f64>,
+    pub total_turn_ms: Option<f64>,
+    pub model: Option<SharedString>,
+    pub provider: Option<SharedString>,
+    pub intensity: Option<SharedString>,
+}
+
 pub const TOKEN_USAGE_WARNING_THRESHOLD: f32 = 0.8;
 
 impl TokenUsage {
@@ -1034,6 +1048,45 @@ impl TokenUsage {
             TokenUsageRatio::Normal
         }
     }
+}
+
+impl SpeedMetrics {
+    fn from_meta(meta: &serde_json::Map<String, Value>) -> Option<Self> {
+        let value = meta.get("backboard_speed")?;
+        let object = value.as_object()?;
+        let metric = Self {
+            runtime_load_ms: number_field(object, "runtime_load_ms"),
+            model_list_ms: number_field(object, "model_list_ms"),
+            assistant_create_ms: number_field(object, "assistant_create_ms"),
+            context_pack_ms: number_field(object, "context_pack_ms"),
+            semantic_context_ms: number_field(object, "semantic_context_ms"),
+            first_token_ms: number_field(object, "first_token_ms"),
+            tool_batch_ms: number_field(object, "tool_batch_ms"),
+            file_write_ms: number_field(object, "file_write_ms"),
+            command_wait_ms: number_field(object, "command_wait_ms"),
+            total_turn_ms: number_field(object, "total_turn_ms"),
+            model: string_field(object, "model"),
+            provider: string_field(object, "provider"),
+            intensity: string_field(object, "intensity"),
+        };
+        Some(metric)
+    }
+}
+
+fn number_field(object: &serde_json::Map<String, Value>, key: &str) -> Option<f64> {
+    object.get(key).and_then(|value| {
+        value
+            .as_f64()
+            .or_else(|| value.as_str().and_then(|text| text.parse::<f64>().ok()))
+    })
+}
+
+fn string_field(object: &serde_json::Map<String, Value>, key: &str) -> Option<SharedString> {
+    object
+        .get(key)
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .map(SharedString::from)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -1073,6 +1126,7 @@ pub struct AcpThread {
     connection: Rc<dyn AgentConnection>,
     token_usage: Option<TokenUsage>,
     cost: Option<SessionCost>,
+    speed_metrics: Option<SpeedMetrics>,
     prompt_capabilities: acp::PromptCapabilities,
     available_commands: Vec<acp::AvailableCommand>,
     _observe_prompt_capabilities: Task<anyhow::Result<()>>,
@@ -1265,6 +1319,7 @@ impl AcpThread {
             session_id,
             token_usage: None,
             cost: None,
+            speed_metrics: None,
             prompt_capabilities,
             available_commands: Vec::new(),
             _observe_prompt_capabilities: task,
@@ -1394,6 +1449,10 @@ impl AcpThread {
         self.cost.as_ref()
     }
 
+    pub fn speed_metrics(&self) -> Option<&SpeedMetrics> {
+        self.speed_metrics.as_ref()
+    }
+
     pub fn has_pending_edit_tool_calls(&self) -> bool {
         for entry in self.entries.iter().rev() {
             match entry {
@@ -1518,6 +1577,11 @@ impl AcpThread {
                         amount: cost.amount,
                         currency: cost.currency.into(),
                     });
+                }
+                if let Some(meta) = &update.meta
+                    && let Some(speed_metrics) = SpeedMetrics::from_meta(meta)
+                {
+                    self.speed_metrics = Some(speed_metrics);
                 }
                 cx.emit(AcpThreadEvent::TokenUsageUpdated);
             }
@@ -2749,41 +2813,18 @@ impl AcpThread {
                 });
             }
 
-            let format_on_save = cx.update(|cx| {
+            cx.update(|cx| {
                 action_log.update(cx, |action_log, cx| {
                     action_log.buffer_read(buffer.clone(), cx);
                 });
 
-                let format_on_save = buffer.update(cx, |buffer, cx| {
+                buffer.update(cx, |buffer, cx| {
                     buffer.edit(edits, None, cx);
-
-                    let settings =
-                        language::language_settings::LanguageSettings::for_buffer(buffer, cx);
-
-                    settings.format_on_save != FormatOnSave::Off
                 });
                 action_log.update(cx, |action_log, cx| {
                     action_log.buffer_edited(buffer.clone(), cx);
                 });
-                format_on_save
             });
-
-            if format_on_save {
-                let format_task = project.update(cx, |project, cx| {
-                    project.format(
-                        HashSet::from_iter([buffer.clone()]),
-                        LspFormatTarget::Buffers,
-                        false,
-                        FormatTrigger::Save,
-                        cx,
-                    )
-                });
-                format_task.await.log_err();
-
-                action_log.update(cx, |action_log, cx| {
-                    action_log.buffer_edited(buffer.clone(), cx);
-                });
-            }
 
             project
                 .update(cx, |project, cx| project.save_buffer(buffer, cx))

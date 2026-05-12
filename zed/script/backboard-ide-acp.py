@@ -78,6 +78,36 @@ MAX_DISPLAY_CHARS = 16000
 DEFAULT_PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-4o"
 DEFAULT_CONTEXT_WINDOW = 258_000
+MODEL_LIST_CACHE_TTL_SECONDS = 300.0
+TOOL_DEFINITION_CACHE_TTL_SECONDS = 30.0
+CONTEXT_PACK_MAX_CHARS = 9000
+CONTEXT_PREWARM_MAX_FILES = 120
+CONTEXT_PREWARM_TIMEOUT_SECONDS = 3.0
+READ_ONLY_IDE_TOOLS = {
+    "read_file",
+    "list_dir",
+    "glob",
+    "glob_file_search",
+    "grep",
+    "codebase_search",
+    "web_fetch",
+    "web_search",
+    "read_lints",
+}
+CONTEXT_IGNORE_DIRS = {
+    ".backboard",
+    ".git",
+    ".hg",
+    ".svn",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "target",
+    "vendor",
+}
+MODEL_LIST_CACHE: dict[str, Any] = {"expires_at": 0.0, "models": None}
 READ_ONLY_COMMANDS = {
     "cat",
     "du",
@@ -485,6 +515,7 @@ class AcpServer:
             session_id = f"backboard-{uuid.uuid4().hex}"
             session = BackboardIdeSession(self, session_id, cwd)
             self.sessions[session_id] = session
+            session.start_prewarm()
             return {
                 "sessionId": session_id,
                 "modes": self._mode_state("agent"),
@@ -501,6 +532,7 @@ class AcpServer:
                 self.sessions[session_id] = session
             else:
                 session.workspace = cwd
+            session.start_prewarm()
             return await session.load()
 
         if method == "session/list":
@@ -521,6 +553,7 @@ class AcpServer:
             session = self._session(params)
             mode_id = str(params.get("modeId") or params.get("mode_id") or "agent")
             session.mode = mode_id
+            session._tool_definitions_cache.clear()
             return {}
 
         if method == "session/set_model":
@@ -530,6 +563,7 @@ class AcpServer:
                 session.provider, session.model = model_id.split("/", 1)
             elif model_id:
                 session.model = model_id
+            session._tool_definitions_cache.clear()
             if session.assistant_id or session.thread_id:
                 session._persist_session_mapping()
             return {}
@@ -543,6 +577,7 @@ class AcpServer:
             value_id = str(value or "")
             if config_id == "backboard_intensity":
                 session.intensity = value_id if value_id in {"fast", "balanced", "deep"} else "fast"
+                session._tool_definitions_cache.clear()
             return {"configOptions": session.config_options()}
 
         if method == "session/prompt":
@@ -647,8 +682,19 @@ class BackboardIdeSession:
         self._history_replayed = False
         self._phase = "starting"
         self._heartbeat_task: asyncio.Task | None = None
+        self._prewarm_task: asyncio.Task | None = None
         self._last_visible_event = 0.0
         self._last_progress_note = ""
+        self._tool_definitions_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._tool_names_cache: list[str] | None = None
+        self._skill_section_cache: str | None = None
+        self._system_prompt_cache: str | None = None
+        self._context_cache: dict[str, Any] = {}
+        self._context_cache_at = 0.0
+        self._turn_started_at = 0.0
+        self._first_token_seen = False
+        self._speed_timings: dict[str, float] = {}
+        self._speed_totals: dict[str, float] = {}
 
     async def load(self) -> dict[str, Any]:
         self.cancel_event.clear()
@@ -696,8 +742,20 @@ class BackboardIdeSession:
             return fallback
 
         try:
+            started = self._loop_time()
             await self._ensure_runtime()
-            models = await self.api_client.list_models(limit=250)
+            self._record_timing("runtime_load_ms", started)
+            now = self._loop_time()
+            cached_models = MODEL_LIST_CACHE.get("models")
+            expires_at = float(MODEL_LIST_CACHE.get("expires_at") or 0.0)
+            if cached_models is not None and now < expires_at:
+                models = cached_models
+            else:
+                started = self._loop_time()
+                models = await self.api_client.list_models(limit=250)
+                self._record_timing("model_list_ms", started)
+                MODEL_LIST_CACHE["models"] = models
+                MODEL_LIST_CACHE["expires_at"] = now + MODEL_LIST_CACHE_TTL_SECONDS
             with contextlib.suppress(Exception):
                 self.pricing.update_from_catalog(models)
         except Exception:
@@ -765,8 +823,57 @@ class BackboardIdeSession:
             }
         ]
 
+    def start_prewarm(self) -> None:
+        if self._prewarm_task and not self._prewarm_task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._prewarm_task = loop.create_task(self._prewarm_context())
+
+    def _loop_time(self) -> float:
+        with contextlib.suppress(RuntimeError):
+            return asyncio.get_running_loop().time()
+        return 0.0
+
+    def _elapsed_ms(self, started_at: float) -> float:
+        now = self._loop_time()
+        if not started_at or not now:
+            return 0.0
+        return round(max(0.0, now - started_at) * 1000.0, 1)
+
+    def _record_timing(self, key: str, started_at: float) -> None:
+        elapsed = self._elapsed_ms(started_at)
+        if elapsed:
+            self._speed_timings[key] = elapsed
+
+    def _add_timing(self, key: str, started_at: float) -> None:
+        elapsed = self._elapsed_ms(started_at)
+        if elapsed:
+            self._speed_totals[key] = round(self._speed_totals.get(key, 0.0) + elapsed, 1)
+
+    def _reset_turn_metrics(self) -> None:
+        self._turn_started_at = self._loop_time()
+        self._first_token_seen = False
+        self._speed_timings = {}
+        self._speed_totals = {}
+
+    def _speed_meta(self) -> dict[str, Any]:
+        meta: dict[str, Any] = {
+            "model": self.model or config.default_model if CLI_IMPORT_ERROR is None else self.model,
+            "provider": self.provider or config.default_provider if CLI_IMPORT_ERROR is None else self.provider,
+            "intensity": self.intensity,
+        }
+        meta.update({key: value for key, value in self._speed_timings.items() if value})
+        meta.update({key: value for key, value in self._speed_totals.items() if value})
+        if self._turn_started_at:
+            meta["total_turn_ms"] = self._elapsed_ms(self._turn_started_at)
+        return {key: value for key, value in meta.items() if value is not None}
+
     async def prompt(self, blocks: list[dict[str, Any]]) -> dict[str, Any]:
         self.cancel_event.clear()
+        self._reset_turn_metrics()
         message = self._extract_prompt_text(blocks)
         if not message.strip():
             await self._agent_text("Give me a prompt and I will work from the current workspace.")
@@ -784,18 +891,23 @@ class BackboardIdeSession:
                 return {"stopReason": "end_turn"}
 
             await self._emit_progress("Loading the Backboard agent runtime.", "loading runtime")
+            started = self._loop_time()
             if not await self._ensure_runtime():
                 await self._agent_text(
                     "Backboard needs an API key before the IDE agent can run. "
                     "Set it in the shared config with `backboard config set-api-key <key>`."
                 )
                 return {"stopReason": "end_turn"}
+            self._record_timing("runtime_load_ms", started)
             await self._emit_progress("Preparing workspace context and tools.", "preparing workspace context")
+            context_started = self._loop_time()
+            augmented_message = await self._augment_prompt_with_context(message, blocks)
+            self._record_timing("context_pack_ms", context_started)
             await self._ensure_thread_binding()
             await self._emit_progress("Sending the task to the selected model.", "waiting for model")
             stream = self.api_client.send_message_stream(
                 self.thread_id,
-                message,
+                augmented_message,
                 provider=self.provider,
                 model=self.model,
                 tools=self._tool_definitions(),
@@ -815,6 +927,8 @@ class BackboardIdeSession:
             self._thinking = False
             self.current_run_id = None
             self._phase = "idle"
+            if self._turn_started_at:
+                self._speed_timings["total_turn_ms"] = self._elapsed_ms(self._turn_started_at)
             await self._stop_heartbeat()
 
     async def cancel(self) -> None:
@@ -866,6 +980,205 @@ class BackboardIdeSession:
         self._last_progress_note = text
         await self._agent_thought(text)
 
+    async def _prewarm_context(self) -> None:
+        try:
+            self._context_cache = await asyncio.wait_for(
+                self._collect_workspace_context(include_semantic_query=None),
+                timeout=CONTEXT_PREWARM_TIMEOUT_SECONDS,
+            )
+            self._context_cache_at = self._loop_time()
+        except Exception:
+            self._context_cache = {}
+
+    async def _augment_prompt_with_context(self, message: str, blocks: list[dict[str, Any]]) -> str:
+        self.start_prewarm()
+        context = dict(self._context_cache)
+        if self._prewarm_task and not self._prewarm_task.done():
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(asyncio.shield(self._prewarm_task), timeout=0.25)
+                context = dict(self._context_cache)
+        if not context:
+            with contextlib.suppress(Exception):
+                context = await asyncio.wait_for(
+                    self._collect_workspace_context(include_semantic_query=None),
+                    timeout=1.0,
+                )
+
+        if self.intensity in {"balanced", "deep"} and self.tool_system:
+            semantic_started = self._loop_time()
+            semantic = await self._semantic_context(message)
+            self._record_timing("semantic_context_ms", semantic_started)
+            if semantic:
+                context["semantic_hits"] = semantic
+
+        prompt_context = self._format_context_pack(context, blocks)
+        if not prompt_context:
+            return message
+        return f"{message}\n\n<backboard_ide_context>\n{prompt_context}\n</backboard_ide_context>"
+
+    async def _collect_workspace_context(self, include_semantic_query: str | None) -> dict[str, Any]:
+        del include_semantic_query
+        tree_task = asyncio.create_task(asyncio.to_thread(self._lightweight_file_tree))
+        stack_task = asyncio.create_task(asyncio.to_thread(self._workspace_stack_summary))
+        rules_task = asyncio.create_task(asyncio.to_thread(self._rules_summary))
+        git_task = asyncio.create_task(self._git_summary())
+        results = await asyncio.gather(tree_task, stack_task, rules_task, git_task, return_exceptions=True)
+        context: dict[str, Any] = {}
+        for key, value in zip(("files", "stack", "rules", "git"), results):
+            if not isinstance(value, Exception) and value:
+                context[key] = value
+        return context
+
+    def _lightweight_file_tree(self) -> list[str]:
+        files: list[str] = []
+        if not self.workspace.exists():
+            return files
+        for root, dirs, filenames in os.walk(self.workspace):
+            dirs[:] = [name for name in dirs if name not in CONTEXT_IGNORE_DIRS and not name.startswith(".cache")]
+            rel_root = Path(root).relative_to(self.workspace)
+            for filename in sorted(filenames):
+                if filename.startswith(".DS_Store"):
+                    continue
+                rel_path = rel_root / filename if str(rel_root) != "." else Path(filename)
+                files.append(str(rel_path))
+                if len(files) >= CONTEXT_PREWARM_MAX_FILES:
+                    return files
+        return files
+
+    def _workspace_stack_summary(self) -> list[str]:
+        summary: list[str] = []
+        markers = {
+            "package.json": "Node/JavaScript project",
+            "vite.config.ts": "Vite app",
+            "vite.config.js": "Vite app",
+            "next.config.js": "Next.js app",
+            "Cargo.toml": "Rust project",
+            "pyproject.toml": "Python project",
+            "requirements.txt": "Python requirements",
+            "go.mod": "Go module",
+        }
+        for filename, label in markers.items():
+            if (self.workspace / filename).exists():
+                summary.append(label)
+        package_json = self.workspace / "package.json"
+        if package_json.exists():
+            with contextlib.suppress(Exception):
+                payload = json.loads(package_json.read_text(encoding="utf-8"))
+                deps = {}
+                for key in ("dependencies", "devDependencies"):
+                    value = payload.get(key)
+                    if isinstance(value, dict):
+                        deps.update(value)
+                frameworks = [name for name in ("react", "vue", "svelte", "next", "vite", "typescript", "tailwindcss") if name in deps]
+                if frameworks:
+                    summary.append("Frameworks: " + ", ".join(frameworks))
+                scripts = payload.get("scripts")
+                if isinstance(scripts, dict) and scripts:
+                    summary.append("Scripts: " + ", ".join(sorted(scripts.keys())[:8]))
+        return summary
+
+    def _rules_summary(self) -> list[str]:
+        snippets: list[str] = []
+        for relative in ("CLAUDE.md", "AGENTS.md", ".cursorrules", ".backboard/rules.md"):
+            path = self.workspace / relative
+            if path.exists() and path.is_file():
+                with contextlib.suppress(Exception):
+                    text = path.read_text(encoding="utf-8").strip()
+                    if text:
+                        snippets.append(f"{relative}: {_truncate(text, 1200)}")
+        return snippets
+
+    async def _git_summary(self) -> dict[str, str]:
+        summary: dict[str, str] = {}
+        status = await self._run_readonly_command(["git", "status", "--short"], timeout=1.5)
+        if status:
+            summary["status"] = _truncate(status, 2000)
+        diff = await self._run_readonly_command(["git", "diff", "--stat"], timeout=1.5)
+        if diff:
+            summary["diff_stat"] = _truncate(diff, 2000)
+        branch = await self._run_readonly_command(["git", "branch", "--show-current"], timeout=1.0)
+        if branch:
+            summary["branch"] = branch.strip()
+        return summary
+
+    async def _run_readonly_command(self, args: list[str], timeout: float) -> str:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                cwd=str(self.workspace),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            if proc.returncode == 0 and stdout:
+                return stdout.decode(errors="replace").strip()
+        except Exception:
+            return ""
+        return ""
+
+    async def _semantic_context(self, message: str) -> str:
+        if not self.tool_system or not message.strip():
+            return ""
+        with contextlib.suppress(Exception):
+            if hasattr(self.tool_system, "_semantic_search_ready") and not self.tool_system._semantic_search_ready():
+                return ""
+        args = {"query": message.strip(), "limit": 5}
+        loop = asyncio.get_running_loop()
+        try:
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: self.tool_system.execute_tool("codebase_search", args)),
+                timeout=2.5,
+            )
+        except Exception:
+            return ""
+        return _truncate(_result_text(result), 2500)
+
+    def _format_context_pack(self, context: dict[str, Any], blocks: list[dict[str, Any]]) -> str:
+        lines: list[str] = []
+        lines.append("Use this IDE context to reduce repeated exploration. Prefer explicit tools if this summary is stale.")
+        if self.intensity == "fast":
+            lines.append("Intensity: Fast; keep context use focused and avoid extra deep exploration unless required.")
+        elif self.intensity == "deep":
+            lines.append("Intensity: Deep; use the broader context and verify architecture-level assumptions.")
+        if context.get("stack"):
+            lines.append("Workspace stack: " + "; ".join(context["stack"][:8]))
+        git = context.get("git")
+        if isinstance(git, dict):
+            if git.get("branch"):
+                lines.append(f"Git branch: {git['branch']}")
+            if git.get("status"):
+                lines.append("Git status:\n" + git["status"])
+            if git.get("diff_stat"):
+                lines.append("Git diff stat:\n" + git["diff_stat"])
+        files = context.get("files")
+        if isinstance(files, list) and files:
+            limit = 35 if self.intensity == "fast" else 80
+            lines.append("Workspace files:\n" + "\n".join(str(path) for path in files[:limit]))
+        rules = context.get("rules")
+        if isinstance(rules, list) and rules:
+            lines.append("Project rules:\n" + "\n\n".join(rules[:3]))
+        if context.get("semantic_hits"):
+            lines.append("Semantic hits:\n" + str(context["semantic_hits"]))
+        resources = self._embedded_context_summary(blocks)
+        if resources:
+            lines.append("Embedded editor context:\n" + resources)
+        return _truncate("\n\n".join(lines), CONTEXT_PACK_MAX_CHARS)
+
+    def _embedded_context_summary(self, blocks: list[dict[str, Any]]) -> str:
+        resources: list[str] = []
+        for block in blocks:
+            block_type = block.get("type")
+            if block_type == "resource_link":
+                resources.append(str(block.get("uri") or block.get("name") or "resource"))
+            elif block_type == "resource":
+                resource = block.get("resource") or {}
+                if isinstance(resource, dict):
+                    uri = resource.get("uri") or resource.get("name")
+                    text = resource.get("text") or resource.get("contents") or resource.get("content")
+                    if uri or text:
+                        resources.append(_truncate(f"{uri or 'resource'}\n{text or ''}", 1200))
+        return "\n\n".join(resources[:5])
+
     async def _ensure_runtime(self) -> bool:
         async with self._ready_lock:
             if self.api_client and self.tool_system:
@@ -891,10 +1204,6 @@ class BackboardIdeSession:
             subagents.set_rlm_engine(rlm_engine)
             self.tool_system.set_rlm_engine(rlm_engine)
             self.tool_system.set_subagent_manager(subagents)
-
-            skill_section = ""
-            with contextlib.suppress(Exception):
-                skill_section = SkillManager(str(self.workspace)).build_prompt_section()
 
             return True
 
@@ -923,19 +1232,41 @@ class BackboardIdeSession:
         if self.assistant_id and self.thread_id:
             return
 
-        tool_names = [tool["function"]["name"] for tool in self.tool_system.get_tool_definitions()]
-        skill_section = ""
-        with contextlib.suppress(Exception):
-            skill_section = SkillManager(str(self.workspace)).build_prompt_section()
-        system_prompt = build_system_prompt(str(self.workspace), tool_names, skill_section)
+        started = self._loop_time()
+        system_prompt = self._system_prompt()
+        assistant = await self.api_client.create_assistant(
+            name="Backboard IDE Agent",
+            description=system_prompt,
+            tools=self._tool_definitions(),
+        )
+        self._record_timing("assistant_create_ms", started)
+        self.assistant_id = assistant["assistant_id"]
+        thread = await self.api_client.create_thread(self.assistant_id)
+        self.thread_id = thread["thread_id"]
+        self._persist_session_mapping()
+
+    def _system_prompt(self) -> str:
+        if self._system_prompt_cache:
+            return self._system_prompt_cache
+        if self._tool_names_cache is None:
+            self._tool_names_cache = [
+                tool["function"]["name"]
+                for tool in self._tool_definitions()
+                if isinstance(tool.get("function"), dict) and tool["function"].get("name")
+            ]
+        if self._skill_section_cache is None:
+            self._skill_section_cache = ""
+            with contextlib.suppress(Exception):
+                self._skill_section_cache = SkillManager(str(self.workspace)).build_prompt_section()
+        system_prompt = build_system_prompt(str(self.workspace), self._tool_names_cache, self._skill_section_cache)
         system_prompt += (
             "\n\nYou are running inside Backboard IDE through Zed's native ACP panel. "
             "When editing files, use write/edit/delete tools so the IDE can show reviewable diffs. "
             "Do not claim a file changed until the IDE edit approval path has applied it."
-            "\n\nBackboard IDE progress UX: keep users oriented with concise visible updates. "
-            "Use todo_write for multi-step tasks, keep exactly one item in_progress, and mark items "
-            "completed immediately after finishing them. Before long commands, file writes, or checks, "
-            "state the concrete thing being worked on in normal assistant text or via the relevant tool title."
+            "\n\nBackboard IDE speed UX: emit concise progress early, prefer cached/indexed context before "
+            "manual exploration, and batch independent read/search work. Use todo_write for multi-step tasks, "
+            "keep exactly one item in_progress, and mark items completed immediately after finishing them. "
+            "Before long commands, file writes, or checks, state the concrete thing being worked on."
             "\n\nBackboard IDE website defaults: when the user asks to create a website or app in an empty "
             "workspace, build a real Vite React TypeScript project unless they explicitly request static HTML "
             "or a single file. The baseline should include package.json, index.html, src/main.tsx, src/App.tsx, "
@@ -944,16 +1275,8 @@ class BackboardIdeSession:
             "file unless the user asks for a single-file/static artifact. Verify with install/build/dev-server "
             "checks when practical."
         )
-
-        assistant = await self.api_client.create_assistant(
-            name="Backboard IDE Agent",
-            description=system_prompt,
-            tools=self._tool_definitions(),
-        )
-        self.assistant_id = assistant["assistant_id"]
-        thread = await self.api_client.create_thread(self.assistant_id)
-        self.thread_id = thread["thread_id"]
-        self._persist_session_mapping()
+        self._system_prompt_cache = system_prompt
+        return system_prompt
 
     def _persist_session_mapping(self) -> None:
         path = _session_store_path()
@@ -1025,6 +1348,12 @@ class BackboardIdeSession:
         self._history_replayed = True
 
     def _tool_definitions(self) -> list[dict[str, Any]]:
+        cache_key = self.mode
+        now = self._loop_time()
+        cached = self._tool_definitions_cache.get(cache_key)
+        if cached and now - cached[0] < TOOL_DEFINITION_CACHE_TTL_SECONDS:
+            return cached[1]
+
         tools = self.tool_system.get_tool_definitions()
         if self.mode == "ask":
             blocked = ASK_BLOCKED_TOOLS
@@ -1033,12 +1362,14 @@ class BackboardIdeSession:
         else:
             blocked = set()
         if not blocked:
+            self._tool_definitions_cache[cache_key] = (now, tools)
             return tools
         filtered = []
         for tool in tools:
             name = ((tool.get("function") or {}).get("name") or "").strip()
             if name not in blocked:
                 filtered.append(tool)
+        self._tool_definitions_cache[cache_key] = (now, filtered)
         return filtered
 
     def _thinking_payload(self) -> dict[str, Any] | None:
@@ -1080,6 +1411,9 @@ class BackboardIdeSession:
                 self._phase = "preparing the next action"
             elif chunk_type == "content_streaming":
                 self._phase = "streaming the response"
+                if not self._first_token_seen:
+                    self._first_token_seen = True
+                    self._record_timing("first_token_ms", self._turn_started_at)
                 await self._agent_text(str(chunk.get("content") or chunk.get("text") or chunk.get("delta") or ""))
             elif chunk_type == "tool_submit_required":
                 await self._emit_progress("Backboard is preparing tool actions.", "preparing tool actions")
@@ -1107,12 +1441,11 @@ class BackboardIdeSession:
             f"Backboard is running {len(tool_calls)} tool action{'s' if len(tool_calls) != 1 else ''}.",
             "running tools",
         )
-        outputs = []
-        for tool_call in tool_calls:
-            output = await self._execute_tool_call(tool_call)
-            outputs.append({"tool_call_id": _tool_call_id(tool_call), "output": json.dumps(output, ensure_ascii=False)})
-            if self.cancel_event.is_set():
-                return
+        batch_started = self._loop_time()
+        outputs = await self._execute_tool_batch(tool_calls)
+        self._add_timing("tool_batch_ms", batch_started)
+        if self.cancel_event.is_set():
+            return
         stream = self.api_client.submit_tool_outputs(
             self.thread_id,
             run_id,
@@ -1122,6 +1455,75 @@ class BackboardIdeSession:
             is_thinking=lambda: self._thinking,
         )
         await self._consume_stream(stream)
+
+    async def _execute_tool_batch(self, tool_calls: list[dict[str, Any]]) -> list[dict[str, str]]:
+        if not tool_calls:
+            return []
+
+        if all(self._is_parallel_read_only_tool_call(tool_call) for tool_call in tool_calls):
+            await self._emit_progress(
+                f"Running {len(tool_calls)} read/search actions in parallel.",
+                "running parallel read/search tools",
+            )
+            return await self._execute_read_only_batch_parallel(tool_calls)
+
+        outputs = []
+        for tool_call in tool_calls:
+            output = await self._execute_tool_call(tool_call)
+            outputs.append(self._tool_output_payload(tool_call, output))
+            if self.cancel_event.is_set():
+                break
+        return outputs
+
+    def _is_parallel_read_only_tool_call(self, tool_call: dict[str, Any]) -> bool:
+        name, _args = _function_payload(tool_call)
+        return name in READ_ONLY_IDE_TOOLS and not (self.tool_system and self.tool_system.is_mcp_tool(name))
+
+    async def _execute_read_only_batch_parallel(self, tool_calls: list[dict[str, Any]]) -> list[dict[str, str]]:
+        deduped: dict[tuple[str, str], asyncio.Task] = {}
+        output_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+
+        def key_for(tool_call: dict[str, Any]) -> tuple[str, str]:
+            name, args = _function_payload(tool_call)
+            try:
+                encoded = json.dumps(args, sort_keys=True, ensure_ascii=False, default=str)
+            except Exception:
+                encoded = str(args)
+            return name, encoded
+
+        async def run_one(key: tuple[str, str], tool_call: dict[str, Any]) -> None:
+            output_by_key[key] = await self._execute_tool_call(tool_call)
+
+        for tool_call in tool_calls:
+            key = key_for(tool_call)
+            if key not in deduped:
+                deduped[key] = asyncio.create_task(run_one(key, tool_call))
+
+        await asyncio.gather(*deduped.values(), return_exceptions=False)
+        return [self._tool_output_payload(tool_call, output_by_key[key_for(tool_call)]) for tool_call in tool_calls]
+
+    def _tool_output_payload(self, tool_call: dict[str, Any], output: dict[str, Any]) -> dict[str, str]:
+        return {
+            "tool_call_id": _tool_call_id(tool_call),
+            "output": json.dumps(self._compress_tool_output(tool_call, output), ensure_ascii=False),
+        }
+
+    def _compress_tool_output(self, tool_call: dict[str, Any], output: Any) -> Any:
+        name, _args = _function_payload(tool_call)
+        if name not in READ_ONLY_IDE_TOOLS:
+            return output
+        if not isinstance(output, dict):
+            return _truncate(str(output), 8000)
+        compressed = dict(output)
+        for key in ("content", "output", "stdout", "stderr", "message", "results"):
+            value = compressed.get(key)
+            if isinstance(value, str):
+                compressed[key] = _truncate(value, 8000)
+            elif isinstance(value, list) and len(value) > 50:
+                compressed[key] = value[:50] + [{"truncated": len(value) - 50}]
+        if name in {"grep", "glob", "glob_file_search", "codebase_search"}:
+            compressed["_backboard_note"] = "Search output compressed for model context; use read_file for exact full content."
+        return compressed
 
     async def _execute_tool_call(self, tool_call: dict[str, Any]) -> dict[str, Any]:
         tool_id = _tool_call_id(tool_call)
@@ -1228,7 +1630,9 @@ class BackboardIdeSession:
             meta=meta,
         )
         if not read_only_auto_approved:
+            wait_started = self._loop_time()
             allowed = await self._request_tool_permission(tool_id, title, "execute", [_content_item(command)], args)
+            self._add_timing("command_wait_ms", wait_started)
             if not allowed:
                 await self._tool_update(tool_id, "failed", [_content_item("Command rejected in Backboard IDE.")])
                 return {"success": False, "error": "Command rejected in Backboard IDE."}
@@ -1457,6 +1861,7 @@ class BackboardIdeSession:
         return resolved
 
     async def _write_file_via_ide(self, path: Path, content: str) -> None:
+        started = self._loop_time()
         try:
             await self.server.request(
                 "fs/write_text_file",
@@ -1465,6 +1870,8 @@ class BackboardIdeSession:
         except Exception:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
+        finally:
+            self._add_timing("file_write_ms", started)
 
     async def _request_tool_permission(
         self,
@@ -1631,10 +2038,10 @@ class BackboardIdeSession:
         await self._update(update)
 
     async def _usage(self, chunk: dict[str, Any]) -> None:
-        if not chunk.get("input_tokens") and not chunk.get("output_tokens"):
-            return
         input_tokens = int(chunk.get("input_tokens") or 0)
         output_tokens = int(chunk.get("output_tokens") or 0)
+        if not input_tokens and not output_tokens and not self._speed_meta():
+            return
         used = int(
             chunk.get("used_tokens")
             or chunk.get("context_tokens")
@@ -1648,13 +2055,14 @@ class BackboardIdeSession:
             or self.context_window_tokens
             or DEFAULT_CONTEXT_WINDOW
         )
-        if used <= 0 or size <= 0:
+        if used < 0 or size <= 0:
             return
         cost = self._record_usage_cost(input_tokens, output_tokens, chunk)
         update = {
             "sessionUpdate": "usage_update",
             "used": used,
             "size": size,
+            "_meta": {"backboard_speed": self._speed_meta()},
         }
         if cost is not None:
             update["cost"] = {"amount": cost, "currency": "USD"}
