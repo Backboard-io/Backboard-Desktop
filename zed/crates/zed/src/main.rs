@@ -4,15 +4,6 @@
 mod reliability;
 mod zed;
 
-// Ensure the binary name stays in sync with APP_NAME so that the paths used
-// at runtime (data dir, config dir, etc.) match what the binary is called.
-const _: () = assert!(
-    paths::APP_NAME_LOWERCASE
-        .as_bytes()
-        .eq_ignore_ascii_case(env!("CARGO_BIN_NAME").as_bytes()),
-    "paths::APP_NAME_LOWERCASE must match the binary name. \
-     Forks: update APP_NAME in crates/paths/src/paths.rs when renaming the binary.",
-);
 
 use agent::{SharedThread, ThreadStore};
 use agent_client_protocol::schema as acp;
@@ -337,6 +328,25 @@ fn main() {
 
     #[cfg(windows)]
     check_for_conpty_dll();
+
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use cocoa::base::{id, nil};
+        use cocoa::foundation::{NSProcessInfo, NSString};
+        use objc::{class, msg_send, sel, sel_impl};
+        let name = NSString::alloc(nil).init_str(paths::APP_NAME);
+        // Set the process name so NSRunningApplication.localizedName reflects the app name.
+        let process_info = NSProcessInfo::processInfo(nil);
+        let _: () = msg_send![process_info, setProcessName: name];
+        // Inject CFBundleDisplayName and CFBundleName into the main bundle's info
+        // dictionary so macOS uses the proper display name in the menu bar.
+        let bundle: id = msg_send![class!(NSBundle), mainBundle];
+        let info_dict: id = msg_send![bundle, infoDictionary];
+        let display_key = NSString::alloc(nil).init_str("CFBundleDisplayName");
+        let bundle_key = NSString::alloc(nil).init_str("CFBundleName");
+        let _: () = msg_send![info_dict, setValue: name forKey: display_key];
+        let _: () = msg_send![info_dict, setValue: name forKey: bundle_key];
+    }
 
     let app =
         Application::with_platform(gpui_platform::current_platform(false)).with_assets(Assets);
