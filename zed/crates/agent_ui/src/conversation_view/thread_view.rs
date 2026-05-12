@@ -969,9 +969,11 @@ impl ThreadView {
     ) {
         match &event.view_event {
             ViewEvent::NewDiff(tool_call_id) => {
-                let is_backboard_native_agent =
-                    self.agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref();
-                if AgentSettings::get_global(cx).expand_edit_card && !is_backboard_native_agent {
+                let is_zed_native_agent = self.agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref();
+                let is_backboard_agent = self.agent_id.as_ref() == "backboard";
+                if is_backboard_agent
+                    || (AgentSettings::get_global(cx).expand_edit_card && !is_zed_native_agent)
+                {
                     self.expanded_tool_calls.insert(tool_call_id.clone());
                 }
             }

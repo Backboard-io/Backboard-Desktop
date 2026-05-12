@@ -1120,10 +1120,12 @@ impl ConversationView {
         let mode_selector = if config_options_include_mode {
             None
         } else {
-            connection.session_modes(&session_id, cx).map(|session_modes| {
-                let fs = self.project.read(cx).fs().clone();
-                cx.new(|_cx| ModeSelector::new(session_modes, self.agent.clone(), fs))
-            })
+            connection
+                .session_modes(&session_id, cx)
+                .map(|session_modes| {
+                    let fs = self.project.read(cx).fs().clone();
+                    cx.new(|_cx| ModeSelector::new(session_modes, self.agent.clone(), fs))
+                })
         };
 
         let subscriptions = vec![
@@ -1187,8 +1189,8 @@ impl ConversationView {
 
         if let Some(model_selector) = model_selector.as_ref() {
             if agent_display_name.as_ref() == "Backboard" {
-                let logo_path =
-                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../app/logo.png");
+                let logo_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../../../app/logo.png");
                 model_selector.update(cx, |model_selector, _cx| {
                     model_selector.set_trigger_brand(agent_display_name.clone(), Some(logo_path));
                 });
@@ -2272,7 +2274,10 @@ impl ConversationView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (heading_label, description_label) = (
-            format!("Upgrade {} to work with Backboard Studio", self.agent.agent_id()),
+            format!(
+                "Upgrade {} to work with Backboard Studio",
+                self.agent.agent_id()
+            ),
             if version.is_empty() {
                 format!(
                     "Currently using {}, which does not report a valid --version",

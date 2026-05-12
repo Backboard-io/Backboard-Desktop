@@ -248,6 +248,8 @@ pub struct BackboardAgentRunSummary {
     pub command: SharedString,
     pub status: BackboardAgentRunStatus,
     pub blocked_reason: Option<SharedString>,
+    pub kind_label: Option<SharedString>,
+    pub scope_label: Option<SharedString>,
     pub worktree_label: Option<SharedString>,
     pub branch_label: Option<SharedString>,
     pub apply_state_label: Option<SharedString>,
@@ -367,6 +369,16 @@ fn workspace_agent_worktree_label(path: &std::path::Path) -> SharedString {
         .unwrap_or("agent worktree")
         .to_string()
         .into()
+}
+
+pub fn parse_backboard_workspace_agent_tasks(
+    tasks: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    tasks
+        .into_iter()
+        .map(|task| task.trim().to_string())
+        .filter(|task| !task.is_empty())
+        .collect()
 }
 
 fn apply_backboard_agent_worktree_patch(
@@ -547,11 +559,8 @@ pub fn init(cx: &mut App) {
                         workspace.focus_panel::<AgentPanel>(window, cx);
                     }
                 })
-                .register_action(|workspace, _action: &OpenBackboardPortal, window, cx| {
-                    if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
-                        panel.update(cx, |panel, cx| panel.new_thread(&NewThread, window, cx));
-                        workspace.focus_panel::<AgentPanel>(window, cx);
-                    }
+                .register_action(|_workspace, _action: &OpenBackboardPortal, window, cx| {
+                    window.dispatch_action(Box::new(OpenBackboardAgentWorkspace), cx);
                 })
                 .register_action(
                     |workspace, action: &NewNativeAgentThreadFromSummary, window, cx| {
@@ -3263,17 +3272,6 @@ impl AgentPanel {
                     if let Some(workspace) = workspace.upgrade() {
                         workspace.update(cx, |workspace, cx| workspace.show_error(&error, cx));
                     }
-                    this.update_in(cx, |this, window, cx| {
-                        this.create_backboard_workspace_agent_thread(
-                            title.clone(),
-                            prompt.clone(),
-                            None,
-                            window,
-                            cx,
-                        );
-                        cx.notify();
-                        anyhow::Ok(())
-                    })??;
                 }
             }
 
@@ -3282,6 +3280,22 @@ impl AgentPanel {
         .detach_and_log_err(cx);
 
         None
+    }
+
+    pub fn spawn_backboard_workspace_agents(
+        &mut self,
+        tasks: Vec<String>,
+        scope: BackboardAgentWorkspaceScope,
+        kind: BackboardAgentWorkspaceKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        let tasks = parse_backboard_workspace_agent_tasks(tasks);
+        let count = tasks.len();
+        for task in tasks {
+            self.spawn_backboard_workspace_agent(task, scope, kind, window, cx);
+        }
+        count
     }
 
     fn create_backboard_workspace_agent_thread(
@@ -3501,6 +3515,9 @@ impl AgentPanel {
 
         for summary in &mut summaries {
             if let Some(run) = self.backboard_workspace_runs.get(&summary.thread_id) {
+                summary.command = run.task.clone().into();
+                summary.kind_label = Some(run.kind.label().into());
+                summary.scope_label = Some(run.scope.label().into());
                 summary.worktree_label = Some(workspace_agent_worktree_label(&run.worktree_path));
                 summary.branch_label = Some(run.branch_name.clone().into());
                 summary.apply_state_label = Some(run.apply_state.label().into());
@@ -3575,6 +3592,8 @@ impl AgentPanel {
                     BackboardAgentRunStatus::Error
                 },
                 blocked_reason: None,
+                kind_label: None,
+                scope_label: None,
                 worktree_label: None,
                 branch_label: None,
                 apply_state_label: None,
@@ -3752,6 +3771,8 @@ impl AgentPanel {
             status,
             blocked_reason: has_permission_wait
                 .then(|| SharedString::from("Waiting for command approval")),
+            kind_label: None,
+            scope_label: None,
             worktree_label: None,
             branch_label: None,
             apply_state_label: None,
@@ -3770,6 +3791,16 @@ impl AgentPanel {
     pub fn active_thread_view(&self, cx: &App) -> Option<Entity<ThreadView>> {
         let server_view = self.active_conversation_view()?;
         server_view.read(cx).root_thread_view()
+    }
+
+    pub fn backboard_workspace_conversation_view(
+        &self,
+        thread_id: ThreadId,
+        cx: &App,
+    ) -> Option<Entity<ConversationView>> {
+        self.conversation_views()
+            .into_iter()
+            .find(|conversation_view| conversation_view.read(cx).parent_id() == thread_id)
     }
 
     pub fn active_agent_thread(&self, cx: &App) -> Option<Entity<AcpThread>> {
@@ -5903,6 +5934,18 @@ mod tests {
     use std::sync::Arc;
     use std::time::Instant;
 
+    #[test]
+    fn test_parse_backboard_workspace_agent_tasks_trims_empty_lines() {
+        let tasks = parse_backboard_workspace_agent_tasks(vec![
+            " build the header ".to_string(),
+            "".to_string(),
+            "   ".to_string(),
+            "write tests".to_string(),
+        ]);
+
+        assert_eq!(tasks, vec!["build the header", "write tests"]);
+    }
+
     #[derive(Clone, Default)]
     struct SessionTrackingConnection {
         next_session_number: Arc<Mutex<usize>>,
@@ -7198,6 +7241,34 @@ mod tests {
         });
 
         (panel, cx)
+    }
+
+    #[gpui::test]
+    async fn test_workspace_agent_worktree_failure_does_not_create_shared_thread(
+        cx: &mut TestAppContext,
+    ) {
+        let (panel, mut cx) = setup_panel(cx).await;
+
+        let attempted = panel.update_in(&mut cx, |panel, window, cx| {
+            panel.spawn_backboard_workspace_agents(
+                vec!["change the dashboard".to_string(), "   ".to_string()],
+                BackboardAgentWorkspaceScope::WholeProject,
+                BackboardAgentWorkspaceKind::Build,
+                window,
+                cx,
+            )
+        });
+
+        assert_eq!(attempted, 1);
+        cx.run_until_parked();
+
+        panel.read_with(&cx, |panel, _cx| {
+            assert!(
+                panel.retained_threads.is_empty(),
+                "worktree setup failure should not fall back to a shared-workspace thread"
+            );
+            assert!(panel.backboard_workspace_runs.is_empty());
+        });
     }
 
     #[gpui::test]

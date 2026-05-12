@@ -1,5 +1,5 @@
-use std::rc::Rc;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use acp_thread::{AgentModelIcon, AgentModelInfo, AgentModelSelector};
@@ -104,11 +104,7 @@ impl Render for ModelSelectorPopover {
                         )
                     })
                     .when_some(trigger_label, |this, label| {
-                        this.child(
-                            Label::new(label)
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                        )
+                        this.child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
                     })
                     .when_some(model_icon, |this, icon| {
                         this.child(
@@ -120,11 +116,7 @@ impl Render for ModelSelectorPopover {
                             .size(IconSize::XSmall),
                         )
                     })
-                    .child(
-                        Label::new(model_name)
-                            .size(LabelSize::Small)
-                            .color(color),
-                    )
+                    .child(Label::new(model_name).size(LabelSize::Small).color(color))
                     .child(Icon::new(icon).color(Color::Muted).size(IconSize::XSmall)),
             );
 

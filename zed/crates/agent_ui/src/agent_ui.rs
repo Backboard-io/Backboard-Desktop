@@ -5,6 +5,7 @@ pub mod agent_connection_store;
 mod agent_diff;
 mod agent_model_selector;
 mod agent_panel;
+mod agent_portal_window;
 mod agent_registry_ui;
 mod agent_workspace_ui;
 mod buffer_codegen;
@@ -68,8 +69,8 @@ pub use crate::agent_connection_store::{ActiveAcpConnection, AgentConnectionStor
 pub use crate::agent_panel::{
     AgentPanel, AgentPanelEvent, AgentPanelTerminalInfo, MaxIdleRetainedThreads, TerminalId,
 };
+use crate::agent_portal_window::open_backboard_agent_portal;
 use crate::agent_registry_ui::AgentRegistryPage;
-use crate::agent_workspace_ui::BackboardAgentWorkspacePage;
 pub use crate::inline_assistant::InlineAssistant;
 pub use crate::thread_metadata_store::ThreadId;
 pub use agent_diff::{AgentDiffPane, AgentDiffToolbar};
@@ -513,18 +514,7 @@ pub fn init(
                   _: &OpenBackboardAgentWorkspace,
                   window: &mut Window,
                   cx: &mut Context<Workspace>| {
-                let existing = workspace
-                    .active_pane()
-                    .read(cx)
-                    .items()
-                    .find_map(|item| item.downcast::<BackboardAgentWorkspacePage>());
-
-                if let Some(existing) = existing {
-                    workspace.activate_item(&existing, true, true, window, cx);
-                } else {
-                    let page = BackboardAgentWorkspacePage::new(workspace, window, cx);
-                    workspace.add_item_to_active_pane(Box::new(page), None, true, window, cx);
-                }
+                open_backboard_agent_portal(workspace, window, cx);
             },
         );
     })

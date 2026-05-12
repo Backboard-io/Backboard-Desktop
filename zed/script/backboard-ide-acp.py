@@ -249,6 +249,10 @@ def _diff_item(path: Path, old_text: str | None, new_text: str) -> dict[str, Any
     return item
 
 
+def _tool_locations(path: Path) -> list[dict[str, Any]]:
+    return [{"path": str(path)}]
+
+
 def _truncate(text: str, limit: int = MAX_DISPLAY_CHARS) -> str:
     if len(text) <= limit:
         return text
@@ -852,6 +856,7 @@ class BackboardIdeSession:
         self.context_window_tokens: int | None = None
         self.cancel_event = asyncio.Event()
         self._ready_lock = asyncio.Lock()
+        self._prompt_lock = asyncio.Lock()
         self._thinking = False
         self._history_replayed = False
         self._phase = "starting"
@@ -1072,6 +1077,10 @@ class BackboardIdeSession:
         return {key: value for key, value in meta.items() if value is not None}
 
     async def prompt(self, blocks: list[dict[str, Any]]) -> dict[str, Any]:
+        async with self._prompt_lock:
+            return await self._run_prompt(blocks)
+
+    async def _run_prompt(self, blocks: list[dict[str, Any]]) -> dict[str, Any]:
         self.cancel_event.clear()
         self._reset_turn_metrics()
         message = self._extract_prompt_text(blocks)
@@ -1805,7 +1814,16 @@ class BackboardIdeSession:
             f"Applying a reviewable diff for `{self._display_path(path)}`.",
             "applying file change",
         )
-        await self._tool_call(tool_id, title, _tool_kind(name), "in_progress", [diff], args)
+        locations = _tool_locations(path)
+        await self._tool_call(
+            tool_id,
+            title,
+            _tool_kind(name),
+            "in_progress",
+            [diff],
+            args,
+            locations=locations,
+        )
 
         try:
             await self._emit_progress(f"Applying `{self._display_path(path)}`.", "applying file change")
@@ -1814,7 +1832,7 @@ class BackboardIdeSession:
                     path.unlink()
             else:
                 await self._write_file_via_ide(path, new_text)
-            await self._tool_update(tool_id, "completed", [diff])
+            await self._tool_update(tool_id, "completed", [diff], locations=locations)
             return {"success": True, "path": str(path), "applied": True}
         except Exception as exc:
             await self._tool_update(tool_id, "failed", [_content_item(str(exc))])
@@ -2260,6 +2278,7 @@ class BackboardIdeSession:
         content: list[dict[str, Any]],
         raw_input: dict[str, Any],
         meta: dict[str, Any] | None = None,
+        locations: list[dict[str, Any]] | None = None,
     ) -> None:
         update: dict[str, Any] = {
             "sessionUpdate": "tool_call",
@@ -2270,6 +2289,8 @@ class BackboardIdeSession:
             "content": content,
             "rawInput": raw_input,
         }
+        if locations:
+            update["locations"] = locations
         if meta:
             update["_meta"] = meta
         await self._update(update)
@@ -2280,6 +2301,7 @@ class BackboardIdeSession:
         status: str,
         content: list[dict[str, Any]],
         meta: dict[str, Any] | None = None,
+        locations: list[dict[str, Any]] | None = None,
     ) -> None:
         update: dict[str, Any] = {
             "sessionUpdate": "tool_call_update",
@@ -2287,6 +2309,8 @@ class BackboardIdeSession:
             "status": status,
             "content": content,
         }
+        if locations:
+            update["locations"] = locations
         if meta:
             update["_meta"] = meta
         await self._update(update)

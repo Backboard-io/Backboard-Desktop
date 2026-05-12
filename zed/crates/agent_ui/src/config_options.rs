@@ -349,7 +349,10 @@ impl ConfigOptionSelector {
             self.current_value_name()
         };
 
-        Button::new(ElementId::Name(format!("config-option-{}", option.id.0).into()), label)
+        Button::new(
+            ElementId::Name(format!("config-option-{}", option.id.0).into()),
+            label,
+        )
         .label_size(LabelSize::Small)
         .color(Color::Muted)
         .end_icon(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
