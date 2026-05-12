@@ -6,6 +6,7 @@ mod agent_diff;
 mod agent_model_selector;
 mod agent_panel;
 mod agent_registry_ui;
+mod agent_workspace_ui;
 mod buffer_codegen;
 mod completion_provider;
 mod config_options;
@@ -68,6 +69,7 @@ pub use crate::agent_panel::{
     AgentPanel, AgentPanelEvent, AgentPanelTerminalInfo, MaxIdleRetainedThreads, TerminalId,
 };
 use crate::agent_registry_ui::AgentRegistryPage;
+use crate::agent_workspace_ui::BackboardAgentWorkspacePage;
 pub use crate::inline_assistant::InlineAssistant;
 pub use crate::thread_metadata_store::ThreadId;
 pub use agent_diff::{AgentDiffPane, AgentDiffToolbar};
@@ -90,6 +92,8 @@ actions!(
     [
         /// Opens the native Zed agent panel and starts a fresh thread.
         OpenBackboardPortal,
+        /// Opens the Backboard multi-agent workspace.
+        OpenBackboardAgentWorkspace,
         /// Toggles the menu to create new agent threads.
         ToggleNewThreadMenu,
         /// Toggles the options menu for agent settings and preferences.
@@ -498,6 +502,28 @@ pub fn init(
                         window,
                         cx,
                     );
+                }
+            },
+        );
+    })
+    .detach();
+    cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
+        workspace.register_action(
+            move |workspace: &mut Workspace,
+                  _: &OpenBackboardAgentWorkspace,
+                  window: &mut Window,
+                  cx: &mut Context<Workspace>| {
+                let existing = workspace
+                    .active_pane()
+                    .read(cx)
+                    .items()
+                    .find_map(|item| item.downcast::<BackboardAgentWorkspacePage>());
+
+                if let Some(existing) = existing {
+                    workspace.activate_item(&existing, true, true, window, cx);
+                } else {
+                    let page = BackboardAgentWorkspacePage::new(workspace, window, cx);
+                    workspace.add_item_to_active_pane(Box::new(page), None, true, window, cx);
                 }
             },
         );

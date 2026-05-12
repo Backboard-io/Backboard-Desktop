@@ -38,8 +38,8 @@ use crate::thread_metadata_store::{ThreadId, ThreadMetadataStore, ThreadMetadata
 use crate::{
     AddContextServer, AgentDiffPane, ConversationView, CopyThreadToClipboard, Follow,
     InlineAssistant, LoadThreadFromClipboard, NewThread, OpenActiveThreadAsMarkdown, OpenAgentDiff,
-    OpenBackboardPortal, ResetTrialEndUpsell, ResetTrialUpsell, ShowAllSidebarThreadMetadata,
-    ShowThreadMetadata, ToggleNewThreadMenu, ToggleOptionsMenu,
+    OpenBackboardAgentWorkspace, OpenBackboardPortal, ResetTrialEndUpsell, ResetTrialUpsell,
+    ShowAllSidebarThreadMetadata, ShowThreadMetadata, ToggleNewThreadMenu, ToggleOptionsMenu,
     agent_configuration::{AgentConfiguration, AssistantConfigurationEvent},
     conversation_view::{AcpThreadViewEvent, ThreadView},
     ui::{AgentNotification, AgentNotificationEvent, EndTrialUpsell},
@@ -126,6 +126,176 @@ pub struct AgentPanelTerminalInfo {
     pub title: SharedString,
     pub created_at: DateTime<Utc>,
     pub has_notification: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BackboardAgentWorkspaceScope {
+    WholeProject,
+    SelectedFiles,
+    GitChanges,
+    TestsOnly,
+}
+
+impl BackboardAgentWorkspaceScope {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::WholeProject => "Whole Project",
+            Self::SelectedFiles => "Selected Files",
+            Self::GitChanges => "Git Changes",
+            Self::TestsOnly => "Tests Only",
+        }
+    }
+
+    fn prompt_guidance(self) -> &'static str {
+        match self {
+            Self::WholeProject => "Use the whole project as context.",
+            Self::SelectedFiles => {
+                "Focus on currently relevant files and ask for more context only if blocked."
+            }
+            Self::GitChanges => "Focus on the current git changes and preserve unrelated work.",
+            Self::TestsOnly => "Focus on tests, test coverage, and verification changes.",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BackboardAgentWorkspaceKind {
+    Build,
+    Review,
+    Test,
+    Docs,
+}
+
+impl BackboardAgentWorkspaceKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Build => "Build",
+            Self::Review => "Review",
+            Self::Test => "Test",
+            Self::Docs => "Docs",
+        }
+    }
+
+    fn prompt_guidance(self) -> &'static str {
+        match self {
+            Self::Build => "Write or refactor production code.",
+            Self::Review => "Analyze behavior, risks, bugs, regressions, and missing tests.",
+            Self::Test => "Generate, repair, and run focused tests.",
+            Self::Docs => "Write or update documentation and examples.",
+        }
+    }
+
+    fn title_prefix(self) -> &'static str {
+        match self {
+            Self::Build => "build",
+            Self::Review => "review",
+            Self::Test => "test",
+            Self::Docs => "docs",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BackboardAgentRunStatus {
+    Queued,
+    Running,
+    Done,
+    Blocked,
+    Error,
+    Canceled,
+}
+
+impl BackboardAgentRunStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Done => "done",
+            Self::Blocked => "blocked",
+            Self::Error => "error",
+            Self::Canceled => "canceled",
+        }
+    }
+
+    fn is_active(self) -> bool {
+        matches!(self, Self::Queued | Self::Running | Self::Blocked)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BackboardAgentRunEventState {
+    Active,
+    Done,
+    Waiting,
+    Failed,
+    Muted,
+}
+
+#[derive(Clone, Debug)]
+pub struct BackboardAgentRunEvent {
+    pub text: SharedString,
+    pub state: BackboardAgentRunEventState,
+}
+
+#[derive(Clone, Debug)]
+pub struct BackboardAgentRunSummary {
+    pub thread_id: ThreadId,
+    pub title: SharedString,
+    pub command: SharedString,
+    pub status: BackboardAgentRunStatus,
+    pub blocked_reason: Option<SharedString>,
+    pub progress: u8,
+    pub cost: Option<SharedString>,
+    pub files_changed: usize,
+    pub latest_events: Vec<BackboardAgentRunEvent>,
+    pub touched_paths: Vec<String>,
+    pub conflicting_paths: Vec<String>,
+    pub is_active_thread: bool,
+}
+
+fn workspace_agent_title(kind: BackboardAgentWorkspaceKind, task: &str) -> String {
+    let mut title = task
+        .split_whitespace()
+        .take(5)
+        .collect::<Vec<_>>()
+        .join("-");
+    title.make_ascii_lowercase();
+    title.retain(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
+    if title.is_empty() {
+        title = "agent-task".to_string();
+    }
+    format!("{} {}", kind.title_prefix(), title)
+}
+
+fn workspace_agent_prompt(
+    kind: BackboardAgentWorkspaceKind,
+    scope: BackboardAgentWorkspaceScope,
+    task: &str,
+) -> String {
+    format!(
+        "You are running as a Backboard Agent Workspace worker.\n\
+         Agent type: {kind_label} - {kind_guidance}\n\
+         Scope: {scope_label} - {scope_guidance}\n\
+         Task: {task}\n\n\
+         Work independently and stream concise progress as you go. Use the visible plan for multi-step work. \
+         You may read and write files in this workspace. Commands still require user approval. \
+         Preserve unrelated user changes and call out conflicts with other active agents.",
+        kind_label = kind.label(),
+        kind_guidance = kind.prompt_guidance(),
+        scope_label = scope.label(),
+        scope_guidance = scope.prompt_guidance(),
+    )
+}
+
+fn truncate_workspace_event(text: &str) -> SharedString {
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_CHARS: usize = 88;
+    if text.chars().count() <= MAX_CHARS {
+        text.into()
+    } else {
+        let truncated = text.chars().take(MAX_CHARS).collect::<String>();
+        format!("{truncated}...").into()
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2815,6 +2985,366 @@ impl AgentPanel {
             .collect()
     }
 
+    pub fn spawn_backboard_workspace_agent(
+        &mut self,
+        task: String,
+        scope: BackboardAgentWorkspaceScope,
+        kind: BackboardAgentWorkspaceKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<ThreadId> {
+        let task = task.trim();
+        if task.is_empty() {
+            return None;
+        }
+
+        let title = workspace_agent_title(kind, task);
+        let prompt = workspace_agent_prompt(kind, scope, task);
+        let initial_content = AgentInitialContent::ContentBlock {
+            blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(prompt))],
+            auto_submit: true,
+        };
+
+        let thread = self.create_agent_thread_with_server(
+            Agent::NativeAgent,
+            None,
+            None,
+            None,
+            Some(title.into()),
+            Some(initial_content),
+            "agent_workspace",
+            window,
+            cx,
+        );
+        let thread_id = thread.conversation_view.read(cx).parent_id();
+        self.retained_threads
+            .insert(thread_id, thread.conversation_view.clone());
+        self.set_last_created_entry_kind(AgentPanelEntryKind::Thread, cx);
+        self.serialize(cx);
+        cx.notify();
+        Some(thread_id)
+    }
+
+    pub fn activate_backboard_workspace_agent(
+        &mut self,
+        thread_id: ThreadId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.load_agent_thread(
+            Agent::NativeAgent,
+            thread_id,
+            None,
+            None,
+            true,
+            "agent_workspace",
+            window,
+            cx,
+        );
+    }
+
+    pub fn stop_backboard_workspace_agent(&mut self, thread_id: ThreadId, cx: &mut Context<Self>) {
+        self.cancel_thread(&thread_id, cx);
+    }
+
+    pub fn retry_backboard_workspace_agent(&mut self, thread_id: ThreadId, cx: &mut Context<Self>) {
+        for conversation_view in self.conversation_views() {
+            if conversation_view.read(cx).parent_id() != thread_id {
+                continue;
+            }
+            if let Some(thread_view) = conversation_view.read(cx).root_thread_view() {
+                thread_view.update(cx, |thread_view, cx| {
+                    thread_view.retry_generation(cx);
+                });
+            }
+            break;
+        }
+    }
+
+    pub fn dismiss_backboard_workspace_agent(
+        &mut self,
+        thread_id: ThreadId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_thread_id(cx) == Some(thread_id) {
+            let old_view = std::mem::replace(&mut self.base_view, BaseView::Uninitialized);
+            if let BaseView::AgentThread { conversation_view } = old_view
+                && conversation_view.read(cx).parent_id() != thread_id
+            {
+                self.retain_running_thread(BaseView::AgentThread { conversation_view }, cx);
+            }
+            self.activate_draft(false, "agent_workspace", window, cx);
+        }
+        self.retained_threads.remove(&thread_id);
+        self.serialize(cx);
+        cx.notify();
+    }
+
+    pub fn backboard_agent_run_summaries(&self, cx: &App) -> Vec<BackboardAgentRunSummary> {
+        let active_thread_id = self.active_thread_id(cx);
+        let mut summaries = self
+            .conversation_views()
+            .into_iter()
+            .filter_map(|conversation_view| {
+                self.summarize_backboard_agent_run(&conversation_view, active_thread_id, cx)
+            })
+            .collect::<Vec<_>>();
+
+        let mut path_to_runs = HashMap::<String, Vec<usize>>::default();
+        for (ix, summary) in summaries.iter().enumerate() {
+            if summary.status.is_active() {
+                for path in &summary.touched_paths {
+                    path_to_runs.entry(path.clone()).or_default().push(ix);
+                }
+            }
+        }
+
+        for (path, runs) in path_to_runs {
+            if runs.len() < 2 {
+                continue;
+            }
+            for run_ix in runs {
+                let summary = &mut summaries[run_ix];
+                if !summary.conflicting_paths.contains(&path) {
+                    summary.conflicting_paths.push(path.clone());
+                }
+            }
+        }
+
+        for summary in &mut summaries {
+            if !summary.conflicting_paths.is_empty() && summary.status.is_active() {
+                summary.status = BackboardAgentRunStatus::Blocked;
+                summary.blocked_reason =
+                    Some(format!("Conflicts on {}", summary.conflicting_paths.join(", ")).into());
+                summary.latest_events.insert(
+                    0,
+                    BackboardAgentRunEvent {
+                        text: "Waiting on file conflict with another active agent".into(),
+                        state: BackboardAgentRunEventState::Waiting,
+                    },
+                );
+            }
+        }
+
+        summaries.sort_by(|left, right| {
+            left.status
+                .label()
+                .cmp(right.status.label())
+                .then_with(|| left.title.as_ref().cmp(right.title.as_ref()))
+        });
+        summaries
+    }
+
+    fn summarize_backboard_agent_run(
+        &self,
+        conversation_view: &Entity<ConversationView>,
+        active_thread_id: Option<ThreadId>,
+        cx: &App,
+    ) -> Option<BackboardAgentRunSummary> {
+        let conversation = conversation_view.read(cx);
+        if !matches!(conversation.agent_key(), Agent::NativeAgent) {
+            return None;
+        }
+
+        let thread_id = conversation.parent_id();
+        let title = conversation.title(cx);
+        let is_loading = conversation.is_loading();
+        let thread = conversation.root_thread(cx);
+
+        let Some(thread) = thread else {
+            return Some(BackboardAgentRunSummary {
+                thread_id,
+                title: title.clone(),
+                command: format!("$ {}", title.as_ref()).into(),
+                status: if is_loading {
+                    BackboardAgentRunStatus::Queued
+                } else {
+                    BackboardAgentRunStatus::Error
+                },
+                blocked_reason: None,
+                progress: 0,
+                cost: None,
+                files_changed: 0,
+                latest_events: vec![BackboardAgentRunEvent {
+                    text: if is_loading {
+                        "Starting Backboard agent".into()
+                    } else {
+                        "Agent session is not available".into()
+                    },
+                    state: BackboardAgentRunEventState::Muted,
+                }],
+                touched_paths: Vec::new(),
+                conflicting_paths: Vec::new(),
+                is_active_thread: active_thread_id == Some(thread_id),
+            });
+        };
+
+        let thread = thread.read(cx);
+        let entries = thread.entries();
+        let has_permission_wait = entries.iter().any(|entry| {
+            matches!(
+                entry,
+                acp_thread::AgentThreadEntry::ToolCall(tool_call)
+                    if matches!(tool_call.status, acp_thread::ToolCallStatus::WaitingForConfirmation { .. })
+            )
+        });
+        let has_failed = thread.had_error()
+            || entries.iter().rev().any(|entry| {
+                matches!(
+                    entry,
+                    acp_thread::AgentThreadEntry::ToolCall(tool_call)
+                        if matches!(tool_call.status, acp_thread::ToolCallStatus::Failed | acp_thread::ToolCallStatus::Rejected)
+                )
+            });
+        let has_canceled = entries.iter().rev().any(|entry| {
+            matches!(
+                entry,
+                acp_thread::AgentThreadEntry::ToolCall(tool_call)
+                    if matches!(tool_call.status, acp_thread::ToolCallStatus::Canceled)
+            )
+        });
+
+        let status = if has_permission_wait {
+            BackboardAgentRunStatus::Blocked
+        } else if matches!(thread.status(), ThreadStatus::Generating) {
+            BackboardAgentRunStatus::Running
+        } else if has_failed {
+            BackboardAgentRunStatus::Error
+        } else if has_canceled {
+            BackboardAgentRunStatus::Canceled
+        } else if entries.is_empty() {
+            BackboardAgentRunStatus::Queued
+        } else {
+            BackboardAgentRunStatus::Done
+        };
+
+        let plan = thread.plan();
+        let progress = if !plan.is_empty() {
+            let stats = plan.stats();
+            let total = plan.entries.len().max(1) as u32;
+            ((stats.completed * 100) / total).min(100) as u8
+        } else if status == BackboardAgentRunStatus::Done {
+            100
+        } else if status == BackboardAgentRunStatus::Running {
+            38
+        } else {
+            0
+        };
+
+        let cost = thread.cost().map(|cost| {
+            if cost.currency.as_ref() == "USD" {
+                format!("${:.2}", cost.amount).into()
+            } else {
+                format!("{:.2} {}", cost.amount, cost.currency).into()
+            }
+        });
+        let files_changed = thread.action_log().read(cx).changed_buffers(cx).len();
+        let mut touched_paths = Vec::<String>::new();
+        let mut latest_events = Vec::new();
+
+        for entry in plan.entries.iter().rev().take(3).rev() {
+            latest_events.push(BackboardAgentRunEvent {
+                text: truncate_workspace_event(entry.content.read(cx).source()),
+                state: match entry.status {
+                    acp::PlanEntryStatus::Completed => BackboardAgentRunEventState::Done,
+                    acp::PlanEntryStatus::InProgress => BackboardAgentRunEventState::Active,
+                    _ => BackboardAgentRunEventState::Muted,
+                },
+            });
+        }
+
+        for entry in entries.iter().rev() {
+            if latest_events.len() >= 5 {
+                break;
+            }
+            match entry {
+                acp_thread::AgentThreadEntry::ToolCall(tool_call) => {
+                    for location in &tool_call.locations {
+                        let path = location.path.to_string_lossy().into_owned();
+                        if !touched_paths.contains(&path) {
+                            touched_paths.push(path);
+                        }
+                    }
+                    for diff in tool_call.diffs() {
+                        if let Some(path) = diff.read(cx).file_path(cx)
+                            && !touched_paths.contains(&path)
+                        {
+                            touched_paths.push(path);
+                        }
+                    }
+
+                    latest_events.push(BackboardAgentRunEvent {
+                        text: truncate_workspace_event(tool_call.label.read(cx).source()),
+                        state: match tool_call.status {
+                            acp_thread::ToolCallStatus::Completed => {
+                                BackboardAgentRunEventState::Done
+                            }
+                            acp_thread::ToolCallStatus::Pending
+                            | acp_thread::ToolCallStatus::InProgress => {
+                                BackboardAgentRunEventState::Active
+                            }
+                            acp_thread::ToolCallStatus::WaitingForConfirmation { .. } => {
+                                BackboardAgentRunEventState::Waiting
+                            }
+                            acp_thread::ToolCallStatus::Failed
+                            | acp_thread::ToolCallStatus::Rejected
+                            | acp_thread::ToolCallStatus::Canceled => {
+                                BackboardAgentRunEventState::Failed
+                            }
+                        },
+                    });
+                }
+                acp_thread::AgentThreadEntry::AssistantMessage(message) => {
+                    if let Some(text) = message.chunks.iter().rev().find_map(|chunk| match chunk {
+                        acp_thread::AssistantMessageChunk::Message { block }
+                        | acp_thread::AssistantMessageChunk::Thought { block } => {
+                            let text = block.to_markdown(cx).trim();
+                            (!text.is_empty()).then(|| truncate_workspace_event(text))
+                        }
+                    }) {
+                        latest_events.push(BackboardAgentRunEvent {
+                            text,
+                            state: BackboardAgentRunEventState::Muted,
+                        });
+                    }
+                }
+                acp_thread::AgentThreadEntry::CompletedPlan(entries) => {
+                    if let Some(entry) = entries.last() {
+                        latest_events.push(BackboardAgentRunEvent {
+                            text: truncate_workspace_event(entry.content.read(cx).source()),
+                            state: BackboardAgentRunEventState::Done,
+                        });
+                    }
+                }
+                acp_thread::AgentThreadEntry::UserMessage(_) => {}
+            }
+        }
+
+        if latest_events.is_empty() {
+            latest_events.push(BackboardAgentRunEvent {
+                text: "Queued - waiting for Backboard".into(),
+                state: BackboardAgentRunEventState::Muted,
+            });
+        }
+
+        Some(BackboardAgentRunSummary {
+            thread_id,
+            title: title.clone(),
+            command: format!("$ {}", title.as_ref()).into(),
+            status,
+            blocked_reason: has_permission_wait
+                .then(|| SharedString::from("Waiting for command approval")),
+            progress,
+            cost,
+            files_changed,
+            latest_events,
+            touched_paths,
+            conflicting_paths: Vec::new(),
+            is_active_thread: active_thread_id == Some(thread_id),
+        })
+    }
+
     pub fn active_thread_view(&self, cx: &App) -> Option<Entity<ThreadView>> {
         let server_view = self.active_conversation_view()?;
         server_view.read(cx).root_thread_view()
@@ -4042,6 +4572,15 @@ impl AgentPanel {
                                             });
                                         }
                                     }
+                                }),
+                        )
+                        .item(
+                            ContextMenuEntry::new("Agent Workspace")
+                                .icon(IconName::Blocks)
+                                .icon_color(Color::Muted)
+                                .handler(move |window, cx| {
+                                    window
+                                        .dispatch_action(Box::new(OpenBackboardAgentWorkspace), cx);
                                 }),
                         )
                         .when(supports_terminal, |menu| {
