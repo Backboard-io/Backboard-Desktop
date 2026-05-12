@@ -4,6 +4,7 @@ use crate::{
 };
 use agent_client_protocol::schema as acp;
 use std::cell::RefCell;
+use std::path::PathBuf;
 
 use acp_thread::{ContentBlock, PlanEntry};
 use cloud_api_types::{SubmitAgentThreadFeedbackBody, SubmitAgentThreadFeedbackCommentsBody};
@@ -272,6 +273,7 @@ pub struct ThreadView {
     pub agent_icon: IconName,
     pub agent_icon_from_external_svg: Option<SharedString>,
     pub agent_id: AgentId,
+    pub agent_display_name: SharedString,
     pub focus_handle: FocusHandle,
     pub workspace: WeakEntity<Workspace>,
     pub entry_view_state: Entity<EntryViewState>,
@@ -499,6 +501,7 @@ impl ThreadView {
             agent_icon,
             agent_icon_from_external_svg,
             agent_id,
+            agent_display_name,
             workspace,
             entry_view_state,
             title_editor,
@@ -660,6 +663,12 @@ impl ThreadView {
         Some(model.id.to_string())
     }
 
+    pub fn current_model_label(&self, cx: &App) -> Option<SharedString> {
+        let selector = self.model_selector.as_ref()?;
+        let model = selector.read(cx).active_model(cx)?;
+        Some(model.name.clone())
+    }
+
     pub fn current_mode_id(&self, cx: &App) -> Option<Arc<str>> {
         if let Some(thread) = self.as_native_thread(cx) {
             Some(thread.read(cx).profile().0.clone())
@@ -671,6 +680,111 @@ impl ThreadView {
 
     fn is_subagent(&self) -> bool {
         self.parent_session_id.is_some()
+    }
+
+    fn backboard_logo_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../app/logo.png")
+    }
+
+    fn render_backboard_logo(&self, size: Pixels) -> impl IntoElement {
+        img(Self::backboard_logo_path())
+            .h(size)
+            .w_auto()
+            .flex_none()
+            .object_fit(ObjectFit::ScaleDown)
+    }
+
+    fn render_backboard_status(
+        &self,
+        state_label: &'static str,
+        emphasize: bool,
+        cx: &App,
+    ) -> impl IntoElement {
+        let model_label = self.current_model_label(cx);
+
+        h_flex()
+            .gap_1p5()
+            .items_center()
+            .child(self.render_backboard_logo(px(18.)))
+            .child(
+                v_flex()
+                    .gap_0p5()
+                    .overflow_hidden()
+                    .child(
+                        Label::new(self.agent_display_name.clone())
+                            .size(LabelSize::Small)
+                            .color(if emphasize {
+                                Color::Default
+                            } else {
+                                Color::Muted
+                            }),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .overflow_hidden()
+                            .child(
+                                Label::new(state_label)
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                            .when_some(model_label, |this, model| {
+                                this.child(
+                                    Label::new(model)
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                            }),
+                    ),
+            )
+    }
+
+    fn render_assistant_message_header(&self, cx: &App) -> impl IntoElement {
+        let model_label = self.current_model_label(cx);
+
+        h_flex()
+            .gap_1p5()
+            .items_center()
+            .child(self.render_backboard_logo(px(16.)))
+            .child(
+                Label::new(self.agent_display_name.clone())
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+            )
+            .when_some(model_label, |this, model| {
+                this.child(
+                    Label::new(model)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+            })
+    }
+
+    fn render_backboard_footer_status(&self, cx: &App) -> impl IntoElement {
+        let model_label = self
+            .current_model_label(cx)
+            .unwrap_or_else(|| SharedString::from("Select model"));
+
+        h_flex()
+            .gap_1()
+            .items_center()
+            .px_1p5()
+            .py_0p5()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().colors().border_variant)
+            .bg(cx.theme().colors().editor_background)
+            .child(self.render_backboard_logo(px(14.)))
+            .child(
+                Label::new(self.agent_display_name.clone())
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+            )
+            .child(
+                Label::new(model_label)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
+            )
     }
 
     /// Returns the currently active editor, either for a message that is being
@@ -712,7 +826,9 @@ impl ThreadView {
     ) {
         match &event.view_event {
             ViewEvent::NewDiff(tool_call_id) => {
-                if AgentSettings::get_global(cx).expand_edit_card {
+                let is_backboard_native_agent =
+                    self.agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref();
+                if AgentSettings::get_global(cx).expand_edit_card && !is_backboard_native_agent {
                     self.expanded_tool_calls.insert(tool_call_id.clone());
                 }
             }
@@ -3278,6 +3394,7 @@ impl ThreadView {
                                 h_flex()
                                     .flex_wrap()
                                     .gap_1()
+                                    .child(self.render_backboard_footer_status(cx))
                                     .children(self.render_token_usage(cx))
                                     .children(self.profile_selector.clone())
                                     .map(|this| match self.config_options_view.clone() {
@@ -4657,7 +4774,7 @@ impl ThreadView {
             AgentThreadEntry::AssistantMessage(AssistantMessage {
                 chunks,
                 indented: _,
-                is_subagent_output: _,
+                is_subagent_output,
             }) => {
                 let mut is_blank = true;
                 let is_last = entry_ix + 1 == total_entries;
@@ -4712,8 +4829,12 @@ impl ThreadView {
                         .px_5()
                         .py_1p5()
                         .when(is_last, |this| this.pb_4())
+                        .gap_1p5()
                         .w_full()
                         .text_ui(cx)
+                        .when(!*is_subagent_output, |this| {
+                            this.child(self.render_assistant_message_header(cx))
+                        })
                         .child(self.render_message_context_menu(entry_ix, message_body, cx))
                         .when_some(
                             self.entry_view_state
@@ -5376,6 +5497,7 @@ impl ThreadView {
             .py_2()
             .px(rems_from_px(22.))
             .gap_2()
+            .items_center()
             .map(|this| {
                 if confirmation {
                     this.child(
@@ -5402,6 +5524,17 @@ impl ThreadView {
                     )
                 }
             })
+            .child(self.render_backboard_status(
+                if confirmation {
+                    "awaiting confirmation"
+                } else if is_waiting {
+                    "thinking"
+                } else {
+                    "streaming"
+                },
+                !confirmation,
+                cx,
+            ))
             .when_some(elapsed_label, |this, elapsed| {
                 this.child(
                     Label::new(elapsed)
@@ -5592,16 +5725,24 @@ impl ThreadView {
                             .h(window.line_height() - px(2.))
                             .gap_1p5()
                             .overflow_hidden()
+                            .child(self.render_backboard_logo(px(14.)))
                             .child(
-                                Icon::new(IconName::ToolThink)
-                                    .size(IconSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .child(
-                                div()
-                                    .text_size(self.tool_name_font_size())
-                                    .text_color(cx.theme().colors().text_muted)
-                                    .child("Thinking"),
+                                h_flex()
+                                    .gap_1()
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .text_size(self.tool_name_font_size())
+                                            .text_color(cx.theme().colors().text_muted)
+                                            .child("Backboard thinking"),
+                                    )
+                                    .when_some(self.current_model_label(cx), |this, model| {
+                                        this.child(
+                                            Label::new(model)
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted),
+                                        )
+                                    }),
                             ),
                     )
                     .child(
@@ -8527,7 +8668,7 @@ impl ThreadView {
     }
 
     fn current_model_name(&self, cx: &App) -> SharedString {
-        // For native agent (Zed Agent), use the specific model name (e.g., "Claude 3.5 Sonnet")
+        // For native agent (Backboard), use the specific model name (e.g., "Claude 3.5 Sonnet")
         // For ACP agents, use the agent name (e.g., "Claude Agent", "Gemini CLI")
         // This provides better clarity about what refused the request
         if self.as_native_connection(cx).is_some() {

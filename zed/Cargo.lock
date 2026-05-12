@@ -1929,6 +1929,7 @@ dependencies = [
  "gpui",
  "gpui_tokio",
  "serde_json",
+ "tokio",
  "ui",
  "workspace",
 ]

@@ -1163,11 +1163,14 @@ impl ConversationView {
                 })
             });
 
-        let agent_display_name = self
-            .agent_server_store
-            .read(cx)
-            .agent_display_name(&agent_id.clone())
-            .unwrap_or_else(|| agent_id.0.clone());
+        let agent_display_name = if agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref() {
+            SharedString::from("Backboard")
+        } else {
+            self.agent_server_store
+                .read(cx)
+                .agent_display_name(&agent_id.clone())
+                .unwrap_or_else(|| agent_id.0.clone())
+        };
 
         let agent_icon = self.agent.logo();
         let agent_icon_from_external_svg = self
@@ -1647,11 +1650,15 @@ impl ConversationView {
                 if let Some(thread_view) = self.thread_view(&session_id) {
                     let has_commands = !available_commands.is_empty();
 
-                    let agent_display_name = self
-                        .agent_server_store
-                        .read(cx)
-                        .agent_display_name(&self.agent.agent_id())
-                        .unwrap_or_else(|| self.agent.agent_id().0.to_string().into());
+                    let agent_id = self.agent.agent_id();
+                    let agent_display_name = if agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref() {
+                        SharedString::from("Backboard")
+                    } else {
+                        self.agent_server_store
+                            .read(cx)
+                            .agent_display_name(&agent_id)
+                            .unwrap_or_else(|| agent_id.0.to_string().into())
+                    };
 
                     let new_placeholder =
                         placeholder_text(agent_display_name.as_ref(), has_commands);
@@ -2061,11 +2068,15 @@ impl ConversationView {
     ) -> impl IntoElement {
         let auth_methods = connection.auth_methods();
 
-        let agent_display_name = self
-            .agent_server_store
-            .read(cx)
-            .agent_display_name(&self.agent.agent_id())
-            .unwrap_or_else(|| self.agent.agent_id().0);
+        let agent_id = self.agent.agent_id();
+        let agent_display_name = if agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref() {
+            SharedString::from("Backboard")
+        } else {
+            self.agent_server_store
+                .read(cx)
+                .agent_display_name(&agent_id)
+                .unwrap_or_else(|| agent_id.0)
+        };
 
         let show_fallback_description = auth_methods.len() > 1
             && configuration_view.is_none()
@@ -2818,7 +2829,7 @@ impl ConversationView {
     }
 
     fn current_model_name(&self, cx: &App) -> SharedString {
-        // For native agent (Zed Agent), use the specific model name (e.g., "Claude 3.5 Sonnet")
+        // For native agent (Backboard), use the specific model name (e.g., "Claude 3.5 Sonnet")
         // For ACP agents, use the agent name (e.g., "Claude Agent", "Gemini CLI")
         // This provides better clarity about what refused the request
         if self.as_native_connection(cx).is_some() {
@@ -2865,7 +2876,9 @@ fn loading_contents_spinner(size: IconSize) -> AnyElement {
 
 fn placeholder_text(agent_name: &str, has_commands: bool) -> String {
     if agent_name == agent::ZED_AGENT_ID.as_ref() {
-        "Message Zed Agent — @ to include context".to_string()
+        "Message Backboard — @ to include context".to_string()
+    } else if agent_name == "Backboard" {
+        "Message Backboard — @ to include context".to_string()
     } else if has_commands {
         format!(
             "Message {} — @ to include context, / for commands",
