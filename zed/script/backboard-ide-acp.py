@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import json
 import os
+import shlex
 import signal
 import sys
 import traceback
@@ -75,6 +76,88 @@ MANUAL_BLOCKED_TOOLS = SHELL_TOOLS | {"task"}
 MAX_DISPLAY_CHARS = 16000
 DEFAULT_PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-4o"
+DEFAULT_CONTEXT_WINDOW = 258_000
+READ_ONLY_COMMANDS = {
+    "cat",
+    "du",
+    "fd",
+    "file",
+    "find",
+    "git",
+    "grep",
+    "head",
+    "ls",
+    "pwd",
+    "rg",
+    "sed",
+    "stat",
+    "tail",
+    "tree",
+    "wc",
+}
+READ_ONLY_GIT_SUBCOMMANDS = {
+    "blame",
+    "describe",
+    "diff",
+    "grep",
+    "log",
+    "ls-files",
+    "ls-tree",
+    "rev-parse",
+    "show",
+    "status",
+}
+SAFE_GIT_BRANCH_FLAGS = {"--show-current", "--list", "-a", "-r", "-v", "-vv", "--verbose"}
+SAFE_GIT_REMOTE_FLAGS = {"-v", "--verbose"}
+SAFE_GIT_CONFIG_FLAGS = {"--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin"}
+UNSAFE_GIT_SUBCOMMANDS = {
+    "add",
+    "am",
+    "apply",
+    "bisect",
+    "branch",
+    "checkout",
+    "cherry-pick",
+    "clean",
+    "clone",
+    "commit",
+    "config",
+    "fetch",
+    "gc",
+    "init",
+    "merge",
+    "mv",
+    "pull",
+    "push",
+    "rebase",
+    "remote",
+    "reset",
+    "restore",
+    "revert",
+    "rm",
+    "stash",
+    "submodule",
+    "switch",
+    "tag",
+    "worktree",
+}
+UNSAFE_SHELL_TOKENS = {";", "&", "|", ">", "<", "`", "$", "\n", "\r"}
+UNSAFE_READ_FLAGS = {
+    "--delete",
+    "--exec",
+    "--execdir",
+    "--ok",
+    "--okdir",
+    "-delete",
+    "-exec",
+    "-execdir",
+    "-ok",
+    "-okdir",
+    "-i",
+    "-i''",
+    "-i\"\"",
+    "--in-place",
+}
 
 
 class JsonRpcError(Exception):
@@ -222,6 +305,81 @@ def _selected_permission_option(response: dict[str, Any]) -> str | None:
         return None
     option_id = outcome.get("optionId")
     return str(option_id) if option_id else None
+
+
+def _is_read_only_shell_command(command: str) -> bool:
+    command = command.strip()
+    if not command:
+        return False
+    if any(token in command for token in UNSAFE_SHELL_TOKENS):
+        return False
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    if not tokens:
+        return False
+
+    executable = Path(tokens[0]).name
+    if executable not in READ_ONLY_COMMANDS:
+        return False
+    if any(token in UNSAFE_READ_FLAGS for token in tokens[1:]):
+        return False
+    if executable == "git":
+        return _is_read_only_git_command(tokens[1:])
+    if executable == "find":
+        return not any(token in UNSAFE_READ_FLAGS for token in tokens[1:])
+    if executable == "sed":
+        return _is_read_only_sed_command(tokens[1:])
+    return True
+
+
+def _is_read_only_git_command(args: list[str]) -> bool:
+    if not args:
+        return True
+
+    # Skip `git -C path status` and global read-only display flags.
+    cleaned: list[str] = []
+    skip_next = False
+    for index, arg in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "-C":
+            skip_next = True
+            continue
+        if arg in {"--no-pager", "--paginate"}:
+            continue
+        cleaned.append(arg)
+
+    if not cleaned:
+        return True
+
+    subcommand = cleaned[0]
+    rest = cleaned[1:]
+    if subcommand in READ_ONLY_GIT_SUBCOMMANDS:
+        return True
+    if subcommand == "branch":
+        has_list_mode = not rest or any(arg in {"--list", "-a", "-r", "-v", "-vv", "--verbose"} for arg in rest)
+        return has_list_mode and all(arg in SAFE_GIT_BRANCH_FLAGS or not arg.startswith("-") for arg in rest)
+    if subcommand == "remote":
+        return not rest or all(arg in SAFE_GIT_REMOTE_FLAGS or arg == "show" for arg in rest)
+    if subcommand == "config":
+        return bool(rest) and rest[0] in SAFE_GIT_CONFIG_FLAGS
+    if subcommand == "stash":
+        return bool(rest) and rest[0] in {"list", "show"}
+    if subcommand in UNSAFE_GIT_SUBCOMMANDS:
+        return False
+    return False
+
+
+def _is_read_only_sed_command(args: list[str]) -> bool:
+    if any(arg in {"-i", "--in-place"} or arg.startswith("-i") for arg in args):
+        return False
+    scripts = [arg for arg in args if not arg.startswith("-")]
+    # `sed` can write files with the `w` command and execute shell commands on
+    # some platforms with `e`; keep the auto-approval path limited.
+    return not any("w " in script or script.endswith("w") or "e " in script for script in scripts)
 
 
 def _session_store_path() -> Path:
@@ -466,6 +624,7 @@ class BackboardIdeSession:
         self.assistant_id: str | None = None
         self.thread_id: str | None = None
         self.current_run_id: str | None = None
+        self.context_window_tokens: int | None = None
         self.cancel_event = asyncio.Event()
         self._ready_lock = asyncio.Lock()
         self._thinking = False
@@ -537,6 +696,9 @@ class BackboardIdeSession:
             if model_id in seen:
                 continue
             seen.add(model_id)
+            context_limit = item.get("context_limit") or item.get("context_window") or item.get("max_context_tokens")
+            if model_id == fallback["currentModelId"] and isinstance(context_limit, (int, float)):
+                self.context_window_tokens = int(context_limit)
             available_models.append(
                 {
                     "modelId": model_id,
@@ -987,20 +1149,25 @@ class BackboardIdeSession:
         title = self._tool_title(name, args)
         terminal_id = f"backboard-terminal-{uuid.uuid4().hex}"
         meta = {"terminal_info": {"terminal_id": terminal_id, "cwd": str(self.workspace)}}
-        await self._emit_progress(f"Waiting for approval: {title}.", "waiting for command approval")
+        read_only_auto_approved = name in {"bash", "run_terminal_cmd"} and _is_read_only_shell_command(command)
+        if read_only_auto_approved:
+            await self._emit_progress(f"Running read-only command: {title}.", "running command")
+        else:
+            await self._emit_progress(f"Waiting for approval: {title}.", "waiting for command approval")
         await self._tool_call(
             tool_id,
             title,
             "execute",
-            "pending",
+            "in_progress" if read_only_auto_approved else "pending",
             [{"type": "terminal", "terminalId": terminal_id}, _content_item(command)],
             args,
             meta=meta,
         )
-        allowed = await self._request_tool_permission(tool_id, title, "execute", [_content_item(command)], args)
-        if not allowed:
-            await self._tool_update(tool_id, "failed", [_content_item("Command rejected in Backboard IDE.")])
-            return {"success": False, "error": "Command rejected in Backboard IDE."}
+        if not read_only_auto_approved:
+            allowed = await self._request_tool_permission(tool_id, title, "execute", [_content_item(command)], args)
+            if not allowed:
+                await self._tool_update(tool_id, "failed", [_content_item("Command rejected in Backboard IDE.")])
+                return {"success": False, "error": "Command rejected in Backboard IDE."}
 
         if name in {"bash", "run_terminal_cmd"}:
             try:
@@ -1402,19 +1569,28 @@ class BackboardIdeSession:
     async def _usage(self, chunk: dict[str, Any]) -> None:
         if not chunk.get("input_tokens") and not chunk.get("output_tokens"):
             return
+        input_tokens = int(chunk.get("input_tokens") or 0)
+        output_tokens = int(chunk.get("output_tokens") or 0)
+        used = int(
+            chunk.get("used_tokens")
+            or chunk.get("context_tokens")
+            or chunk.get("total_tokens")
+            or input_tokens + output_tokens
+        )
+        size = int(
+            chunk.get("context_limit")
+            or chunk.get("context_window")
+            or chunk.get("max_context_tokens")
+            or self.context_window_tokens
+            or DEFAULT_CONTEXT_WINDOW
+        )
+        if used <= 0 or size <= 0:
+            return
         await self._update(
             {
-                "sessionUpdate": "tool_call",
-                "toolCallId": f"usage-{uuid.uuid4().hex}",
-                "title": "Usage",
-                "kind": "other",
-                "status": "completed",
-                "content": [
-                    _content_item(
-                        f"Input: {chunk.get('input_tokens', 0)} tokens\n"
-                        f"Output: {chunk.get('output_tokens', 0)} tokens"
-                    )
-                ],
+                "sessionUpdate": "usage_update",
+                "used": used,
+                "size": size,
             }
         )
 

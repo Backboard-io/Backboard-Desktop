@@ -4,7 +4,7 @@ use crate::{
 };
 use agent_client_protocol::schema as acp;
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use acp_thread::{ContentBlock, PlanEntry};
 use cloud_api_types::{SubmitAgentThreadFeedbackBody, SubmitAgentThreadFeedbackCommentsBody};
@@ -785,6 +785,110 @@ impl ThreadView {
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
+    }
+
+    fn render_backboard_run_overview(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.agent_display_name.as_ref() != "Backboard" {
+            return None;
+        }
+
+        let is_generating = matches!(self.thread.read(cx).status(), ThreadStatus::Generating);
+        if !is_generating {
+            return None;
+        }
+
+        let elapsed = self
+            .turn_fields
+            .turn_started_at
+            .map(|started_at| ("Working for", started_at.elapsed()));
+        let token_usage = self.thread.read(cx).token_usage().cloned();
+
+        if elapsed.is_none() && token_usage.is_none() {
+            return None;
+        }
+
+        let context_card = token_usage.map(|usage| {
+            let used = crate::humanize_token_count(usage.used_tokens);
+            let max = crate::humanize_token_count(usage.max_tokens);
+            let ratio = if usage.max_tokens > 0 {
+                usage.used_tokens as f32 / usage.max_tokens as f32
+            } else {
+                0.0
+            };
+            let percentage = (ratio * 100.0).round() as u32;
+            let remaining = 100_u32.saturating_sub(percentage);
+            let color = if ratio >= 0.85 {
+                cx.theme().status().warning
+            } else {
+                cx.theme().colors().text_muted
+            };
+
+            h_flex()
+                .gap_2()
+                .items_center()
+                .rounded_md()
+                .border_1()
+                .border_color(cx.theme().colors().border_variant)
+                .bg(cx.theme().colors().editor_background)
+                .px_3()
+                .py_2()
+                .child(
+                    CircularProgress::new(
+                        usage.used_tokens as f32,
+                        usage.max_tokens as f32,
+                        px(18.),
+                        cx,
+                    )
+                    .stroke_width(px(2.))
+                    .progress_color(color),
+                )
+                .child(
+                    v_flex()
+                        .gap_0p5()
+                        .child(
+                            Label::new(format!(
+                                "Context window: {percentage}% used ({remaining}% left)"
+                            ))
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                        )
+                        .child(
+                            Label::new(format!("{used} / {max} tokens used"))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
+                )
+        });
+
+        Some(
+            h_flex()
+                .mx_5()
+                .mt_3()
+                .mb_1()
+                .pb_3()
+                .justify_between()
+                .border_b_1()
+                .border_color(cx.theme().colors().border_variant)
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(self.render_backboard_logo(px(16.)))
+                        .when_some(elapsed, |this, (label, duration)| {
+                            this.child(
+                                Label::new(format!("{label} {}", duration_alt_display(duration)))
+                                    .size(LabelSize::Small)
+                                    .color(if is_generating {
+                                        Color::Default
+                                    } else {
+                                        Color::Muted
+                                    }),
+                            )
+                        }),
+                )
+                .children(context_card)
+                .into_any_element(),
+        )
     }
 
     /// Returns the currently active editor, either for a message that is being
@@ -3675,10 +3779,13 @@ impl ThreadView {
         let output_max_label = crate::humanize_token_count(max_output_tokens);
 
         let build_tooltip = {
+            let tooltip_percentage = percentage.clone();
+            let tooltip_used = used.clone();
+            let tooltip_max = max.clone();
             move |_window: &mut Window, cx: &mut App| {
-                let percentage = percentage.clone();
-                let used = used.clone();
-                let max = max.clone();
+                let percentage = tooltip_percentage.clone();
+                let used = tooltip_used.clone();
+                let max = tooltip_max.clone();
                 let input_tokens_label = input_tokens_label.clone();
                 let output_tokens_label = output_tokens_label.clone();
                 let input_max_label = input_max_label.clone();
@@ -3707,88 +3814,49 @@ impl ThreadView {
             }
         };
 
-        if show_split {
-            let input_max_raw = usage.max_tokens.saturating_sub(max_output_tokens);
-            let output_max_raw = max_output_tokens;
-
-            let input_ratio = if input_max_raw > 0 {
-                usage.input_tokens as f32 / input_max_raw as f32
-            } else {
-                0.0
-            };
-            let output_ratio = if output_max_raw > 0 {
-                usage.output_tokens as f32 / output_max_raw as f32
-            } else {
-                0.0
-            };
-
-            Some(
-                h_flex()
-                    .id("split_token_usage")
-                    .flex_shrink_0()
-                    .gap_1p5()
-                    .mr_1()
-                    .child(
-                        h_flex()
-                            .gap_0p5()
-                            .child(
-                                Icon::new(IconName::ArrowUp)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            )
-                            .child(
-                                CircularProgress::new(
-                                    usage.input_tokens as f32,
-                                    input_max_raw as f32,
-                                    ring_size,
-                                    cx,
-                                )
-                                .stroke_width(stroke_width)
-                                .progress_color(progress_color(input_ratio)),
-                            ),
+        Some(
+            h_flex()
+                .id(if show_split {
+                    "split_token_usage"
+                } else {
+                    "circular_progress_tokens"
+                })
+                .flex_shrink_0()
+                .gap_1()
+                .mr_1()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .border_1()
+                .border_color(cx.theme().colors().border_variant)
+                .bg(cx.theme().colors().editor_background)
+                .child(
+                    CircularProgress::new(
+                        usage.used_tokens as f32,
+                        usage.max_tokens as f32,
+                        ring_size,
+                        cx,
                     )
-                    .child(
-                        h_flex()
-                            .gap_0p5()
-                            .child(
-                                Icon::new(IconName::ArrowDown)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            )
-                            .child(
-                                CircularProgress::new(
-                                    usage.output_tokens as f32,
-                                    output_max_raw as f32,
-                                    ring_size,
-                                    cx,
-                                )
-                                .stroke_width(stroke_width)
-                                .progress_color(progress_color(output_ratio)),
-                            ),
-                    )
-                    .hoverable_tooltip(build_tooltip)
-                    .into_any_element(),
-            )
-        } else {
-            Some(
-                h_flex()
-                    .id("circular_progress_tokens")
-                    .mt_px()
-                    .mr_1()
-                    .child(
-                        CircularProgress::new(
-                            usage.used_tokens as f32,
-                            usage.max_tokens as f32,
-                            ring_size,
-                            cx,
+                    .stroke_width(stroke_width)
+                    .progress_color(progress_color(progress_ratio)),
+                )
+                .child(
+                    v_flex()
+                        .gap_0p5()
+                        .child(
+                            Label::new(format!("Context window: {percentage} full"))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
                         )
-                        .stroke_width(stroke_width)
-                        .progress_color(progress_color(progress_ratio)),
-                    )
-                    .hoverable_tooltip(build_tooltip)
-                    .into_any_element(),
-            )
-        }
+                        .child(
+                            Label::new(format!("{used} / {max} tokens"))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
+                )
+                .hoverable_tooltip(build_tooltip)
+                .into_any_element(),
+        )
     }
 
     fn fast_mode_available(&self, cx: &Context<Self>) -> bool {
@@ -7431,6 +7499,11 @@ impl ThreadView {
         } else {
             Icon::new(IconName::ToolPencil).color(Color::Muted)
         };
+        let edit_summary = if is_edit {
+            self.edit_tool_call_summary(tool_call, cx)
+        } else {
+            None
+        };
 
         let tool_icon = if is_file && has_failed && has_revealed_diff {
             div()
@@ -7518,42 +7591,118 @@ impl ThreadView {
             })
             .overflow_hidden()
             .child(tool_icon)
-            .child(if has_location {
-                h_flex()
-                    .id(("open-tool-call-location", entry_ix))
-                    .w_full()
-                    .map(|this| {
-                        if use_card_layout {
-                            this.text_color(cx.theme().colors().text)
-                        } else {
-                            this.text_color(cx.theme().colors().text_muted)
-                        }
-                    })
-                    .child(
-                        self.render_markdown(
-                            tool_call.label.clone(),
-                            MarkdownStyle {
-                                prevent_mouse_interaction: true,
-                                ..MarkdownStyle::themed(MarkdownFont::Agent, window, cx)
-                                    .with_muted_text(cx)
-                            },
-                        ),
-                    )
-                    .tooltip(Tooltip::text("Go to File"))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_tool_call_location(entry_ix, 0, window, cx);
-                    }))
-                    .into_any_element()
-            } else {
-                h_flex()
-                    .w_full()
-                    .child(self.render_markdown(
-                        tool_call.label.clone(),
-                        MarkdownStyle::themed(MarkdownFont::Agent, window, cx).with_muted_text(cx),
-                    ))
-                    .into_any()
-            })
+            .child(
+                if let Some((path, file_name, added, removed)) = edit_summary {
+                    let mut summary = h_flex()
+                        .id(("open-tool-call-location", entry_ix))
+                        .w_full()
+                        .min_w_0()
+                        .gap_1p5()
+                        .child(Label::new("Editing").color(Color::Muted))
+                        .child(Label::new(file_name).color(Color::Accent).truncate())
+                        .child(
+                            DiffStat::new(("tool-call-edit-stat", entry_ix), added, removed)
+                                .label_size(LabelSize::Custom(self.tool_name_font_size())),
+                        )
+                        .tooltip({
+                            let path = path.clone();
+                            move |_, cx| Tooltip::with_meta("Go to File", None, path.clone(), cx)
+                        });
+                    if has_location {
+                        summary = summary.on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_tool_call_location(entry_ix, 0, window, cx);
+                        }));
+                    }
+                    summary.into_any_element()
+                } else if has_location {
+                    h_flex()
+                        .id(("open-tool-call-location", entry_ix))
+                        .w_full()
+                        .map(|this| {
+                            if use_card_layout {
+                                this.text_color(cx.theme().colors().text)
+                            } else {
+                                this.text_color(cx.theme().colors().text_muted)
+                            }
+                        })
+                        .child(
+                            self.render_markdown(
+                                tool_call.label.clone(),
+                                MarkdownStyle {
+                                    prevent_mouse_interaction: true,
+                                    ..MarkdownStyle::themed(MarkdownFont::Agent, window, cx)
+                                        .with_muted_text(cx)
+                                },
+                            ),
+                        )
+                        .tooltip(Tooltip::text("Go to File"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_tool_call_location(entry_ix, 0, window, cx);
+                        }))
+                        .into_any_element()
+                } else {
+                    h_flex()
+                        .w_full()
+                        .child(
+                            self.render_markdown(
+                                tool_call.label.clone(),
+                                MarkdownStyle::themed(MarkdownFont::Agent, window, cx)
+                                    .with_muted_text(cx),
+                            ),
+                        )
+                        .into_any()
+                },
+            )
             .when(!is_edit, |this| this.child(gradient_overlay))
+    }
+
+    fn edit_tool_call_summary(
+        &self,
+        tool_call: &ToolCall,
+        cx: &App,
+    ) -> Option<(String, String, usize, usize)> {
+        let diff = tool_call.diffs().next()?;
+        let diff = diff.read(cx);
+        let path = diff.file_path(cx).or_else(|| {
+            tool_call
+                .locations
+                .first()
+                .map(|location| location.path.to_string_lossy().into_owned())
+        })?;
+        let file_name = Path::new(&path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(path.as_str())
+            .to_string();
+        let new_text = diff.buffer().read(cx).text();
+        let (added, removed) =
+            Self::line_delta_counts(diff.base_text().as_ref(), new_text.as_str());
+        Some((path, file_name, added, removed))
+    }
+
+    fn line_delta_counts(old_text: &str, new_text: &str) -> (usize, usize) {
+        let old_lines = old_text.lines().collect::<Vec<_>>();
+        let new_lines = new_text.lines().collect::<Vec<_>>();
+        let mut prefix = 0;
+        while prefix < old_lines.len()
+            && prefix < new_lines.len()
+            && old_lines[prefix] == new_lines[prefix]
+        {
+            prefix += 1;
+        }
+
+        let mut suffix = 0;
+        while suffix + prefix < old_lines.len()
+            && suffix + prefix < new_lines.len()
+            && old_lines[old_lines.len() - 1 - suffix] == new_lines[new_lines.len() - 1 - suffix]
+        {
+            suffix += 1;
+        }
+
+        (
+            new_lines.len().saturating_sub(prefix + suffix),
+            old_lines.len().saturating_sub(prefix + suffix),
+        )
     }
 
     fn open_tool_call_location(
@@ -9282,6 +9431,7 @@ impl Render for ThreadView {
             }))
             .size_full()
             .children(self.render_subagent_titlebar(cx))
+            .children(self.render_backboard_run_overview(cx))
             .child(conversation)
             .children(self.render_multi_root_callout(cx))
             .children(self.render_activity_bar(window, cx))
