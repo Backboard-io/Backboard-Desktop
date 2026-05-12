@@ -27,6 +27,17 @@ struct ThreadFeedbackState {
     comments_editor: Option<Entity<Editor>>,
 }
 
+#[derive(Clone, Debug)]
+struct ExplorationGroup {
+    start: usize,
+    end: usize,
+    reads: usize,
+    searches: usize,
+    fetches: usize,
+    thoughts: usize,
+    active: bool,
+}
+
 impl ThreadFeedbackState {
     pub fn submit(
         &mut self,
@@ -4659,6 +4670,20 @@ impl ThreadView {
             cx.processor(move |this, index: usize, window, cx| {
                 let entries = this.thread.read(cx).entries();
                 if let Some(entry) = entries.get(index) {
+                    if let Some(group) = this.exploration_group_at(entries, index, cx) {
+                        if index != group.start {
+                            return Empty.into_any();
+                        }
+                        let rendered = this.render_exploration_group(
+                            &group,
+                            entries.len(),
+                            entries,
+                            window,
+                            cx,
+                        );
+                        return centered_container(rendered).into_any_element();
+                    }
+
                     let rendered = this.render_entry(index, entries.len(), entry, window, cx);
                     centered_container(rendered.into_any_element()).into_any_element()
                 } else if this.generating_indicator_in_list {
@@ -4674,6 +4699,265 @@ impl ThreadView {
         )
         .with_sizing_behavior(gpui::ListSizingBehavior::Auto)
         .flex_grow()
+    }
+
+    fn exploration_group_at(
+        &self,
+        entries: &[AgentThreadEntry],
+        index: usize,
+        cx: &Context<Self>,
+    ) -> Option<ExplorationGroup> {
+        if !self.is_exploration_entry(entries.get(index)?, cx) {
+            return None;
+        }
+
+        let mut start = index;
+        while start > 0 && self.is_exploration_entry(&entries[start - 1], cx) {
+            start -= 1;
+        }
+
+        let mut end = index + 1;
+        while end < entries.len() && self.is_exploration_entry(&entries[end], cx) {
+            end += 1;
+        }
+
+        let mut group = ExplorationGroup {
+            start,
+            end,
+            reads: 0,
+            searches: 0,
+            fetches: 0,
+            thoughts: 0,
+            active: false,
+        };
+
+        for entry in &entries[start..end] {
+            match entry {
+                AgentThreadEntry::ToolCall(tool_call) => {
+                    group.active |= matches!(
+                        tool_call.status,
+                        ToolCallStatus::Pending | ToolCallStatus::InProgress
+                    );
+                    match tool_call.kind {
+                        acp::ToolKind::Read => group.reads += 1,
+                        acp::ToolKind::Search => group.searches += 1,
+                        acp::ToolKind::Fetch => group.fetches += 1,
+                        _ => {}
+                    }
+                }
+                AgentThreadEntry::AssistantMessage(_) => group.thoughts += 1,
+                _ => {}
+            }
+        }
+
+        let tool_count = group.reads + group.searches + group.fetches;
+        if tool_count >= 2 || (tool_count >= 1 && group.thoughts >= 1) {
+            Some(group)
+        } else {
+            None
+        }
+    }
+
+    fn is_exploration_entry(&self, entry: &AgentThreadEntry, cx: &Context<Self>) -> bool {
+        match entry {
+            AgentThreadEntry::ToolCall(tool_call) => matches!(
+                tool_call.kind,
+                acp::ToolKind::Read | acp::ToolKind::Search | acp::ToolKind::Fetch
+            ),
+            AgentThreadEntry::AssistantMessage(message) => {
+                self.is_thought_only_assistant_message(message, cx)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_thought_only_assistant_message(
+        &self,
+        message: &AssistantMessage,
+        cx: &Context<Self>,
+    ) -> bool {
+        let mut saw_thought = false;
+        for chunk in &message.chunks {
+            match chunk {
+                AssistantMessageChunk::Thought { block } => {
+                    if block
+                        .markdown()
+                        .is_some_and(|md| !md.read(cx).source().trim().is_empty())
+                    {
+                        saw_thought = true;
+                    }
+                }
+                AssistantMessageChunk::Message { block } => {
+                    if block
+                        .markdown()
+                        .is_some_and(|md| !md.read(cx).source().trim().is_empty())
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+        saw_thought
+    }
+
+    fn render_exploration_group(
+        &self,
+        group: &ExplorationGroup,
+        total_entries: usize,
+        entries: &[AgentThreadEntry],
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let group_id = acp::ToolCallId::new(format!(
+            "exploration-group-{}-{}",
+            group.start, group.end
+        ));
+        let is_open = self.expanded_tool_calls.contains(&group_id);
+        let header_id = SharedString::from(format!("exploration-group-{}", group.start));
+        let summary = self.exploration_group_summary(group);
+
+        let detail_rows = (group.start..group.end).filter_map(|entry_ix| {
+            let AgentThreadEntry::ToolCall(tool_call) = entries.get(entry_ix)? else {
+                return None;
+            };
+            Some(self.render_exploration_detail_row(entry_ix, tool_call, window, cx))
+        });
+
+        let thread = self.thread.clone();
+        let needs_controls = group.end == total_entries;
+
+        v_flex()
+            .mx_5()
+            .my_1p5()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().colors().border_variant)
+            .bg(cx.theme().colors().editor_background)
+            .overflow_hidden()
+            .child(
+                h_flex()
+                    .id(header_id.clone())
+                    .group(&header_id)
+                    .w_full()
+                    .justify_between()
+                    .px_2()
+                    .py_1p5()
+                    .hover(|style| style.bg(cx.theme().colors().element_hover))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                Icon::new(IconName::ToolSearch)
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .child(
+                                Label::new(summary)
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            ),
+                    )
+                    .child(
+                        Disclosure::new(("exploration-group-disclosure", group.start), is_open)
+                            .opened_icon(IconName::ChevronUp)
+                            .closed_icon(IconName::ChevronDown)
+                            .visible_on_hover(&header_id),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if is_open {
+                            this.expanded_tool_calls.remove(&group_id);
+                        } else {
+                            this.expanded_tool_calls.insert(group_id.clone());
+                        }
+                        cx.notify();
+                    })),
+            )
+            .when(is_open, |this| {
+                this.child(
+                    v_flex()
+                        .gap_1()
+                        .px_3()
+                        .py_2()
+                        .border_t_1()
+                        .border_color(cx.theme().colors().border_variant)
+                        .children(detail_rows),
+                )
+            })
+            .when(needs_controls, |this| this.child(self.render_thread_controls(&thread, cx)))
+            .into_any_element()
+    }
+
+    fn exploration_group_summary(&self, group: &ExplorationGroup) -> String {
+        let mut parts = Vec::new();
+        if group.reads > 0 {
+            parts.push(format!(
+                "explored {} file{}",
+                group.reads,
+                if group.reads == 1 { "" } else { "s" }
+            ));
+        }
+        if group.searches > 0 {
+            parts.push(format!(
+                "ran {} search{}",
+                group.searches,
+                if group.searches == 1 { "" } else { "es" }
+            ));
+        }
+        if group.fetches > 0 {
+            parts.push(format!(
+                "fetched {} result{}",
+                group.fetches,
+                if group.fetches == 1 { "" } else { "s" }
+            ));
+        }
+
+        let summary = if parts.is_empty() {
+            "checked workspace context".to_string()
+        } else {
+            parts.join(", ")
+        };
+
+        if group.active {
+            format!("Exploring: {}", summary)
+        } else {
+            let mut chars = summary.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                None => summary,
+            }
+        }
+    }
+
+    fn render_exploration_detail_row(
+        &self,
+        entry_ix: usize,
+        tool_call: &ToolCall,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let icon = match tool_call.kind {
+            acp::ToolKind::Read => IconName::File,
+            acp::ToolKind::Search => IconName::ToolSearch,
+            acp::ToolKind::Fetch => IconName::MagnifyingGlass,
+            _ => IconName::ToolSearch,
+        };
+
+        h_flex()
+            .id(("exploration-detail-row", entry_ix))
+            .gap_2()
+            .items_center()
+            .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
+            .child(
+                div()
+                    .text_ui_sm(cx)
+                    .child(self.render_markdown(
+                        tool_call.label.clone(),
+                        MarkdownStyle::themed(MarkdownFont::Agent, window, cx)
+                            .with_buffer_font(cx),
+                    )),
+            )
+            .into_any_element()
     }
 
     fn render_entry(
