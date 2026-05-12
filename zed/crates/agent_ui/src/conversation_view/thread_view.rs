@@ -4547,6 +4547,35 @@ fn render_speed_metric_rows(metrics: &acp_thread::SpeedMetrics) -> Vec<AnyElemen
     if let Some(value) = metrics.tool_batch_ms {
         rows.push(speed_metric_row("Tools", value));
     }
+    if let Some(value) = metrics.shell_tools_ms {
+        rows.push(speed_metric_row("Shell", value));
+    }
+    if let Some(value) = metrics.read_tools_ms {
+        rows.push(speed_metric_row("Reads", value));
+    }
+    if let Some(value) = metrics.search_tools_ms {
+        rows.push(speed_metric_row("Searches", value));
+    }
+    if let Some(value) = metrics.edit_tools_ms {
+        rows.push(speed_metric_row("Edits", value));
+    }
+    if let Some(value) = metrics.other_tools_ms {
+        rows.push(speed_metric_row("Other tools", value));
+    }
+    if let (Some(name), Some(value)) = (metrics.slowest_tool.as_ref(), metrics.slowest_tool_ms) {
+        rows.push(
+            h_flex()
+                .gap_1()
+                .justify_between()
+                .child(Label::new("Slowest tool").color(Color::Muted))
+                .child(Label::new(format!(
+                    "{} {}",
+                    name,
+                    format_duration_ms(value)
+                )))
+                .into_any_element(),
+        );
+    }
     if let Some(value) = metrics.file_write_ms {
         rows.push(speed_metric_row("File writes", value));
     }

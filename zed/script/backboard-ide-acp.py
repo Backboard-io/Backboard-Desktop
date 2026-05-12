@@ -83,6 +83,14 @@ TOOL_DEFINITION_CACHE_TTL_SECONDS = 30.0
 CONTEXT_PACK_MAX_CHARS = 9000
 CONTEXT_PREWARM_MAX_FILES = 120
 CONTEXT_PREWARM_TIMEOUT_SECONDS = 3.0
+DEFAULT_COMMAND_TIMEOUT_MS = 45_000
+READ_ONLY_COMMAND_TIMEOUT_MS = 20_000
+CHECK_COMMAND_TIMEOUT_MS = 90_000
+INSTALL_COMMAND_TIMEOUT_MS = 120_000
+DEV_SERVER_STARTUP_TIMEOUT_MS = 10_000
+MAX_COMMAND_TIMEOUT_MS = 180_000
+TERMINAL_UPDATE_INTERVAL_SECONDS = 0.25
+TERMINAL_UPDATE_MAX_CHARS = 12_000
 READ_ONLY_IDE_TOOLS = {
     "read_file",
     "list_dir",
@@ -188,6 +196,22 @@ UNSAFE_READ_FLAGS = {
     "-i''",
     "-i\"\"",
     "--in-place",
+}
+INSTALL_COMMAND_NAMES = {"npm", "pnpm", "yarn", "bun"}
+CHECK_COMMAND_NAMES = {"cargo", "pytest", "vitest", "playwright", "tsc", "ruff", "eslint"}
+DEV_SERVER_COMMAND_MARKERS = {
+    "npm run dev",
+    "pnpm dev",
+    "pnpm run dev",
+    "yarn dev",
+    "yarn run dev",
+    "bun dev",
+    "bun run dev",
+    "vite",
+    "next dev",
+    "astro dev",
+    "python -m http.server",
+    "python3 -m http.server",
 }
 
 
@@ -411,6 +435,60 @@ def _is_read_only_sed_command(args: list[str]) -> bool:
     # `sed` can write files with the `w` command and execute shell commands on
     # some platforms with `e`; keep the auto-approval path limited.
     return not any("w " in script or script.endswith("w") or "e " in script for script in scripts)
+
+
+def _command_tokens(command: str) -> list[str]:
+    with contextlib.suppress(ValueError):
+        return shlex.split(command.strip(), posix=True)
+    return []
+
+
+def _is_dev_server_command(command: str) -> bool:
+    normalized = " ".join(command.strip().split()).lower()
+    return any(
+        normalized == marker or normalized.startswith(f"{marker} ")
+        for marker in DEV_SERVER_COMMAND_MARKERS
+    )
+
+
+def _is_install_command(command: str) -> bool:
+    tokens = _command_tokens(command)
+    if not tokens:
+        return False
+    executable = Path(tokens[0]).name
+    if executable == "npm":
+        return len(tokens) > 1 and tokens[1] in {"install", "i", "ci"}
+    if executable in {"pnpm", "yarn", "bun"}:
+        return len(tokens) > 1 and tokens[1] in {"install", "i", "add"}
+    return False
+
+
+def _is_check_command(command: str) -> bool:
+    tokens = _command_tokens(command)
+    if not tokens:
+        return False
+    executable = Path(tokens[0]).name
+    if executable in CHECK_COMMAND_NAMES:
+        return True
+    if executable in INSTALL_COMMAND_NAMES and any(token in {"test", "build", "lint", "check"} for token in tokens[1:]):
+        return True
+    return False
+
+
+def _command_timeout_ms(command: str, args: dict[str, Any], read_only: bool) -> int:
+    explicit = args.get("timeout")
+    if explicit is not None:
+        with contextlib.suppress(TypeError, ValueError):
+            return max(1_000, min(int(float(explicit)), MAX_COMMAND_TIMEOUT_MS))
+    if _is_dev_server_command(command):
+        return DEV_SERVER_STARTUP_TIMEOUT_MS
+    if read_only:
+        return READ_ONLY_COMMAND_TIMEOUT_MS
+    if _is_install_command(command):
+        return INSTALL_COMMAND_TIMEOUT_MS
+    if _is_check_command(command):
+        return CHECK_COMMAND_TIMEOUT_MS
+    return DEFAULT_COMMAND_TIMEOUT_MS
 
 
 def _session_store_path() -> Path:
@@ -695,6 +773,8 @@ class BackboardIdeSession:
         self._first_token_seen = False
         self._speed_timings: dict[str, float] = {}
         self._speed_totals: dict[str, float] = {}
+        self._slowest_tool_name: str | None = None
+        self._slowest_tool_ms = 0.0
 
     async def load(self) -> dict[str, Any]:
         self.cancel_event.clear()
@@ -853,11 +933,32 @@ class BackboardIdeSession:
         if elapsed:
             self._speed_totals[key] = round(self._speed_totals.get(key, 0.0) + elapsed, 1)
 
+    def _record_tool_duration(self, name: str, started_at: float) -> None:
+        elapsed = self._elapsed_ms(started_at)
+        if not elapsed:
+            return
+        if name in SHELL_TOOLS:
+            bucket = "shell_tools_ms"
+        elif name in {"read_file", "list_dir", "read_lints"}:
+            bucket = "read_tools_ms"
+        elif name in {"glob", "glob_file_search", "grep", "codebase_search"}:
+            bucket = "search_tools_ms"
+        elif name in {"write", "edit", "search_replace", "delete_file", "create_directory", "edit_notebook"}:
+            bucket = "edit_tools_ms"
+        else:
+            bucket = "other_tools_ms"
+        self._speed_totals[bucket] = round(self._speed_totals.get(bucket, 0.0) + elapsed, 1)
+        if elapsed > self._slowest_tool_ms:
+            self._slowest_tool_ms = elapsed
+            self._slowest_tool_name = name
+
     def _reset_turn_metrics(self) -> None:
         self._turn_started_at = self._loop_time()
         self._first_token_seen = False
         self._speed_timings = {}
         self._speed_totals = {}
+        self._slowest_tool_name = None
+        self._slowest_tool_ms = 0.0
 
     def _speed_meta(self) -> dict[str, Any]:
         meta: dict[str, Any] = {
@@ -867,6 +968,9 @@ class BackboardIdeSession:
         }
         meta.update({key: value for key, value in self._speed_timings.items() if value})
         meta.update({key: value for key, value in self._speed_totals.items() if value})
+        if self._slowest_tool_name and self._slowest_tool_ms:
+            meta["slowest_tool"] = self._slowest_tool_name
+            meta["slowest_tool_ms"] = self._slowest_tool_ms
         if self._turn_started_at:
             meta["total_turn_ms"] = self._elapsed_ms(self._turn_started_at)
         return {key: value for key, value in meta.items() if value is not None}
@@ -1460,17 +1564,28 @@ class BackboardIdeSession:
         if not tool_calls:
             return []
 
-        if all(self._is_parallel_read_only_tool_call(tool_call) for tool_call in tool_calls):
-            await self._emit_progress(
-                f"Running {len(tool_calls)} read/search actions in parallel.",
-                "running parallel read/search tools",
-            )
-            return await self._execute_read_only_batch_parallel(tool_calls)
-
-        outputs = []
-        for tool_call in tool_calls:
-            output = await self._execute_tool_call(tool_call)
-            outputs.append(self._tool_output_payload(tool_call, output))
+        outputs: list[dict[str, str]] = []
+        index = 0
+        while index < len(tool_calls):
+            if self._is_parallel_read_only_tool_call(tool_calls[index]):
+                read_group = []
+                while index < len(tool_calls) and self._is_parallel_read_only_tool_call(tool_calls[index]):
+                    read_group.append(tool_calls[index])
+                    index += 1
+                if len(read_group) > 1:
+                    await self._emit_progress(
+                        f"Running {len(read_group)} read/search actions in parallel.",
+                        "running parallel read/search tools",
+                    )
+                    outputs.extend(await self._execute_read_only_batch_parallel(read_group))
+                else:
+                    output = await self._execute_timed_tool_call(read_group[0])
+                    outputs.append(self._tool_output_payload(read_group[0], output))
+            else:
+                tool_call = tool_calls[index]
+                output = await self._execute_timed_tool_call(tool_call)
+                outputs.append(self._tool_output_payload(tool_call, output))
+                index += 1
             if self.cancel_event.is_set():
                 break
         return outputs
@@ -1492,7 +1607,7 @@ class BackboardIdeSession:
             return name, encoded
 
         async def run_one(key: tuple[str, str], tool_call: dict[str, Any]) -> None:
-            output_by_key[key] = await self._execute_tool_call(tool_call)
+            output_by_key[key] = await self._execute_timed_tool_call(tool_call)
 
         for tool_call in tool_calls:
             key = key_for(tool_call)
@@ -1501,6 +1616,14 @@ class BackboardIdeSession:
 
         await asyncio.gather(*deduped.values(), return_exceptions=False)
         return [self._tool_output_payload(tool_call, output_by_key[key_for(tool_call)]) for tool_call in tool_calls]
+
+    async def _execute_timed_tool_call(self, tool_call: dict[str, Any]) -> dict[str, Any]:
+        name, _args = _function_payload(tool_call)
+        started = self._loop_time()
+        try:
+            return await self._execute_tool_call(tool_call)
+        finally:
+            self._record_tool_duration(name, started)
 
     def _tool_output_payload(self, tool_call: dict[str, Any], output: dict[str, Any]) -> dict[str, str]:
         return {
@@ -1616,6 +1739,8 @@ class BackboardIdeSession:
         terminal_id = f"backboard-terminal-{uuid.uuid4().hex}"
         meta = {"terminal_info": {"terminal_id": terminal_id, "cwd": str(self.workspace)}}
         read_only_auto_approved = name in {"bash", "run_terminal_cmd"} and _is_read_only_shell_command(command)
+        timeout_ms = _command_timeout_ms(command, args, read_only_auto_approved)
+        command_card = f"{command}\n\nBackboard timeout: {timeout_ms / 1000:.0f}s"
         if read_only_auto_approved:
             await self._emit_progress(f"Running read-only command: {title}.", "running command")
         else:
@@ -1625,7 +1750,7 @@ class BackboardIdeSession:
             title,
             "execute",
             "in_progress" if read_only_auto_approved else "pending",
-            [{"type": "terminal", "terminalId": terminal_id}, _content_item(command)],
+            [{"type": "terminal", "terminalId": terminal_id}, _content_item(command_card)],
             args,
             meta=meta,
         )
@@ -1639,7 +1764,13 @@ class BackboardIdeSession:
 
         if name in {"bash", "run_terminal_cmd"}:
             try:
-                return await self._run_shell_subprocess(tool_id, terminal_id, command, args)
+                return await self._run_shell_subprocess(
+                    tool_id,
+                    terminal_id,
+                    command,
+                    args,
+                    read_only_auto_approved,
+                )
             except Exception as exc:
                 await self._tool_update(
                     tool_id,
@@ -1685,6 +1816,7 @@ class BackboardIdeSession:
         terminal_id: str,
         command: str,
         args: dict[str, Any],
+        read_only_auto_approved: bool,
     ) -> dict[str, Any]:
         sandbox_err = None
         if self.tool_system and hasattr(self.tool_system, "_sandbox_check"):
@@ -1699,10 +1831,9 @@ class BackboardIdeSession:
         if isinstance(working_directory, str) and working_directory.strip():
             cwd = self._resolve_path(working_directory)
 
-        timeout_ms = args.get("timeout") or 120000
-        if not isinstance(timeout_ms, (int, float)):
-            timeout_ms = float(timeout_ms)
+        timeout_ms = _command_timeout_ms(command, args, read_only_auto_approved)
         timeout_s = max(float(timeout_ms) / 1000, 0.1)
+        is_dev_server = _is_dev_server_command(command)
 
         env = os.environ.copy()
         backboard_bin = Path.home() / ".backboard" / "bin"
@@ -1724,11 +1855,29 @@ class BackboardIdeSession:
             meta={"terminal_output": {"terminal_id": terminal_id, "data": f"$ {command}\n"}},
         )
 
+        loop = asyncio.get_running_loop()
         stdout_parts: list[str] = []
         stderr_parts: list[str] = []
+        pending_terminal: list[str] = []
+        pending_lock = asyncio.Lock()
+        last_terminal_update = loop.time()
         proc = await asyncio.create_subprocess_shell(command, **popen_kwargs)
-        loop = asyncio.get_running_loop()
         started = loop.time()
+
+        async def flush_terminal(force: bool = False) -> None:
+            nonlocal last_terminal_update
+            async with pending_lock:
+                now = loop.time()
+                if not force and now - last_terminal_update < TERMINAL_UPDATE_INTERVAL_SECONDS:
+                    return
+                if not pending_terminal and not force:
+                    return
+                data = "".join(pending_terminal)
+                pending_terminal.clear()
+                last_terminal_update = now
+            content = _truncate("".join(stdout_parts + stderr_parts), TERMINAL_UPDATE_MAX_CHARS)
+            meta = {"terminal_output": {"terminal_id": terminal_id, "data": data}} if data else None
+            await self._tool_update(tool_id, "in_progress", [_content_item(content)], meta=meta)
 
         async def pump(reader: asyncio.StreamReader | None, parts: list[str]) -> None:
             if reader is None:
@@ -1739,12 +1888,9 @@ class BackboardIdeSession:
                     return
                 text = chunk.decode(errors="replace")
                 parts.append(text)
-                await self._tool_update(
-                    tool_id,
-                    "in_progress",
-                    [_content_item(_truncate("".join(stdout_parts + stderr_parts)))],
-                    meta={"terminal_output": {"terminal_id": terminal_id, "data": text}},
-                )
+                async with pending_lock:
+                    pending_terminal.append(text)
+                await flush_terminal()
 
         pumps = [
             asyncio.create_task(pump(proc.stdout, stdout_parts)),
@@ -1771,6 +1917,7 @@ class BackboardIdeSession:
                 await asyncio.sleep(0.05)
         finally:
             await asyncio.gather(*pumps, return_exceptions=True)
+            await flush_terminal(force=True)
 
         exit_code = proc.returncode if proc.returncode is not None else 124
         stdout = "".join(stdout_parts)
@@ -1785,7 +1932,14 @@ class BackboardIdeSession:
             "cwd": str(cwd),
         }
         if timed_out:
-            result["error"] = f"Command timed out after {timeout_s:.0f}s."
+            if is_dev_server:
+                result["success"] = True
+                result["note"] = (
+                    "Backboard stopped this long-running dev-server command after the startup window. "
+                    "Use the captured output to verify whether it started cleanly."
+                )
+            else:
+                result["error"] = f"Command timed out after {timeout_s:.0f}s."
 
         await self._tool_update(
             tool_id,
