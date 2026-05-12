@@ -339,7 +339,7 @@ impl PickerDelegate for RulePickerDelegate {
         match self.filtered_entries.get(ix)? {
             RulePickerEntry::Header(title) => {
                 let tooltip_text = if title.as_ref() == "Built-in Rules" {
-                    "Built-in rules are those included out of the box with Zed."
+                    "Built-in rules are those included out of the box with Backboard Studio."
                 } else {
                     "Default Rules are attached by default with every new thread."
                 };

@@ -15,7 +15,7 @@ use ui::{
 use vim_mode_setting::VimModeSetting;
 
 use crate::{
-    ImportCursorSettings, ImportVsCodeSettings, SettingsImportState,
+    ExperienceLevel, ImportCursorSettings, ImportVsCodeSettings, SettingsImportState,
     theme_preview::{ThemePreviewStyle, ThemePreviewTile},
 };
 
@@ -243,7 +243,7 @@ fn render_telemetry_section(tab_index: &mut isize, cx: &App) -> impl IntoElement
             SwitchField::new(
                 "onboarding-telemetry-metrics",
                 None::<&str>,
-                Some("Help improve Zed by sending anonymous usage data".into()),
+                Some("Help improve Backboard Studio by sending anonymous usage data".into()),
                 if TelemetrySettings::get_global(cx).metrics {
                     ui::ToggleState::Selected
                 } else {
@@ -283,7 +283,7 @@ fn render_telemetry_section(tab_index: &mut isize, cx: &App) -> impl IntoElement
                 "onboarding-telemetry-crash-reports",
                 None::<&str>,
                 Some(
-                    "Help fix Zed by sending crash reports so we can fix critical issues fast"
+                    "Help fix Backboard Studio by sending crash reports so we can fix critical issues fast"
                         .into(),
                 ),
                 if TelemetrySettings::get_global(cx).diagnostics {
@@ -323,16 +323,25 @@ fn render_telemetry_section(tab_index: &mut isize, cx: &App) -> impl IntoElement
 }
 
 
-fn render_vim_mode_switch(tab_index: &mut isize, cx: &mut App) -> impl IntoElement {
+fn render_vim_mode_switch(
+    tab_index: &mut isize,
+    mention_neovim: bool,
+    cx: &mut App,
+) -> impl IntoElement {
     let toggle_state = if VimModeSetting::get_global(cx).0 {
         ui::ToggleState::Selected
     } else {
         ui::ToggleState::Unselected
     };
+    let description: SharedString = if mention_neovim {
+        "Coming from Neovim? Use our first-class implementation of Vim Mode".into()
+    } else {
+        "Use Vim-style keybindings while editing".into()
+    };
     SwitchField::new(
         "onboarding-vim-mode",
         Some("Vim Mode"),
-        Some("Coming from Neovim? Use our first-class implementation of Vim Mode".into()),
+        Some(description),
         toggle_state,
         {
             let fs = <dyn Fs>::global(cx);
@@ -368,12 +377,12 @@ fn render_worktree_auto_trust_switch(tab_index: &mut isize, cx: &mut App) -> imp
         ui::ToggleState::Unselected
     };
 
-    let tooltip_description = "Zed can only allow services like language servers, project settings, and MCP servers to run after you mark a new project as trusted.";
+    let tooltip_description = "Backboard Studio can only allow services like language servers, project settings, and MCP servers to run after you mark a new project as trusted.";
 
     SwitchField::new(
         "onboarding-auto-trust-worktrees",
         Some("Trust All Projects By Default"),
-        Some("Automatically mark all new projects as trusted to unlock all Zed's features".into()),
+        Some("Automatically mark all new projects as trusted to unlock all Backboard's features".into()),
         toggle_state,
         {
             let fs = <dyn Fs>::global(cx);
@@ -486,17 +495,28 @@ fn render_ai_section(_cx: &mut App) -> impl IntoElement {
         )
 }
 
-pub(crate) fn render_basics_page(cx: &mut App) -> impl IntoElement {
+pub(crate) fn render_basics_page(level: ExperienceLevel, cx: &mut App) -> impl IntoElement {
     let mut tab_index = 0;
+
+    let show_import = matches!(level, ExperienceLevel::Developer | ExperienceLevel::Power);
+    let show_vim = matches!(level, ExperienceLevel::Developer | ExperienceLevel::Power);
+    let show_worktree_trust = matches!(level, ExperienceLevel::Power);
+    let mention_neovim = matches!(level, ExperienceLevel::Power);
 
     v_flex()
         .id("basics-page")
         .gap_6()
         .child(render_theme_section(&mut tab_index, cx))
         .child(render_ai_section(cx))
-        .child(render_import_settings_section(&mut tab_index, cx))
-        .child(render_vim_mode_switch(&mut tab_index, cx))
-        .child(render_worktree_auto_trust_switch(&mut tab_index, cx))
+        .when(show_import, |this| {
+            this.child(render_import_settings_section(&mut tab_index, cx))
+        })
+        .when(show_vim, |this| {
+            this.child(render_vim_mode_switch(&mut tab_index, mention_neovim, cx))
+        })
+        .when(show_worktree_trust, |this| {
+            this.child(render_worktree_auto_trust_switch(&mut tab_index, cx))
+        })
         .child(Divider::horizontal().color(ui::DividerColor::BorderVariant))
         .child(render_telemetry_section(&mut tab_index, cx))
 }

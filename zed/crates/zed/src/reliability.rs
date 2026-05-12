@@ -344,7 +344,7 @@ async fn upload_minidump(
         form = form
             .text(
                 format!("{root}[Description]"),
-                "A GPU found on the users system. May or may not be the GPU Zed is running on",
+                "A GPU found on the users system. May or may not be the GPU Backboard Studio is running on",
             )
             .text(format!("{root}[type]"), "gpu")
             .text(format!("{root}[name]"), device_name.unwrap_or(name))
@@ -361,7 +361,7 @@ async fn upload_minidump(
         form = form
             .text(
                 "sentry[contexts][Active_GPU][Description]",
-                "The GPU Zed is running on",
+                "The GPU Backboard Studio is running on",
             )
             .text("sentry[contexts][Active_GPU][type]", "gpu")
             .text("sentry[contexts][Active_GPU][name]", active_gpu.device_name)

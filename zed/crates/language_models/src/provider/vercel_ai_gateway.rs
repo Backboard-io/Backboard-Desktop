@@ -345,7 +345,7 @@ fn clean_error_message(message: &str) -> String {
     let lower = message.to_lowercase();
 
     if lower.contains("vercel_oidc_token") && lower.contains("oidc token") {
-        return "Authentication failed for Vercel AI Gateway. Use a Vercel AI Gateway key (vck_...).\nCreate or manage keys in Vercel AI Gateway console.\nIf this persists, regenerate the key and update it in Vercel AI Gateway provider settings in Zed.".to_string();
+        return "Authentication failed for Vercel AI Gateway. Use a Vercel AI Gateway key (vck_...).\nCreate or manage keys in Vercel AI Gateway console.\nIf this persists, regenerate the key and update it in Vercel AI Gateway provider settings in Backboard Studio.".to_string();
     }
 
     if lower.contains("invalid api key") || lower.contains("invalid_api_key") {
@@ -673,7 +673,7 @@ impl Render for ConfigurationView {
                 .size_full()
                 .on_action(cx.listener(Self::save_api_key))
                 .child(Label::new(
-                    "To use Zed's agent with Vercel AI Gateway, you need to add an API key. Follow these steps:",
+                    "To use Backboard's agent with Vercel AI Gateway, you need to add an API key. Follow these steps:",
                 ))
                 .child(
                     List::new()
@@ -692,7 +692,7 @@ impl Render for ConfigurationView {
                 .child(self.api_key_editor.clone())
                 .child(
                     Label::new(format!(
-                        "You can also set the {API_KEY_ENV_VAR_NAME} environment variable and restart Zed.",
+                        "You can also set the {API_KEY_ENV_VAR_NAME} environment variable and restart Backboard Studio.",
                     ))
                     .size(LabelSize::Small)
                     .color(Color::Muted),

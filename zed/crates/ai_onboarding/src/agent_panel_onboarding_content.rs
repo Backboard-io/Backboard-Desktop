@@ -56,14 +56,14 @@ impl Render for AgentPanelOnboarding {
                 .w_full()
                 .relative()
                 .gap_3()
-                .child(v_flex().gap_1().child(Headline::new("Zed Agent")).child(
-                    Label::new("Chat with Zed Agent against this workspace.").color(Color::Muted),
+                .child(v_flex().gap_1().child(Headline::new("Backboard Agent")).child(
+                    Label::new("Chat with Backboard Agent against this workspace.").color(Color::Muted),
                 ))
                 .child(
                     v_flex()
                         .gap_1()
                         .child(
-                            Label::new("Use models and tools configured in Zed")
+                            Label::new("Use models and tools configured in Backboard Studio")
                                 .color(Color::Muted),
                         )
                         .child(
@@ -76,7 +76,7 @@ impl Render for AgentPanelOnboarding {
                         ),
                 )
                 .child(
-                    Button::new("start-zed-agent-chat", "Start Zed Agent Chat")
+                    Button::new("start-zed-agent-chat", "Start Backboard Chat")
                         .full_width()
                         .style(ButtonStyle::Tinted(ui::TintColor::Accent))
                         .on_click(move |_, window, cx| dismiss(window, cx)),

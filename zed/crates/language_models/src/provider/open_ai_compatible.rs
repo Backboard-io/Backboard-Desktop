@@ -498,7 +498,7 @@ impl Render for ConfigurationView {
         let api_key_section = if self.should_render_editor(cx) {
             v_flex()
                 .on_action(cx.listener(Self::save_api_key))
-                .child(Label::new("To use Zed's agent with an OpenAI-compatible provider, you need to add an API key."))
+                .child(Label::new("To use Backboard's agent with an OpenAI-compatible provider, you need to add an API key."))
                 .child(
                     div()
                         .pt(DynamicSpacing::Base04.rems(cx))
@@ -506,7 +506,7 @@ impl Render for ConfigurationView {
                 )
                 .child(
                     Label::new(
-                        format!("You can also set the {env_var_name} environment variable and restart Zed."),
+                        format!("You can also set the {env_var_name} environment variable and restart Backboard Studio."),
                     )
                     .size(LabelSize::Small).color(Color::Muted),
                 )

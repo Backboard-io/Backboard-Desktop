@@ -13,8 +13,8 @@ use serde::Deserialize;
 use settings::{SettingsStore, VsCodeSettingsSource};
 use std::sync::Arc;
 use ui::{
-    Divider, KeyBinding, ParentElement as _, StatefulInteractiveElement, Vector, VectorName,
-    WithScrollbar as _, prelude::*, rems_from_px,
+    Divider, IconName, IconSize, KeyBinding, ParentElement as _, StatefulInteractiveElement,
+    Vector, VectorName, WithScrollbar as _, prelude::*, rems_from_px,
 };
 
 pub use workspace::welcome::ShowWelcome;
@@ -53,6 +53,42 @@ pub struct ImportCursorSettings {
 
 pub const FIRST_OPEN: &str = "first_open";
 pub const DOCS_URL: &str = "https://zed.dev/docs/";
+pub const EXPERIENCE_LEVEL_KVP_KEY: &str = "backboard_experience_level";
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ExperienceLevel {
+    /// No coding background — chat-first, no file tree.
+    Beginner,
+    /// Knows how to code — traditional editor with AI assistance.
+    Developer,
+    /// Power user — full agent mode, all features unlocked.
+    Power,
+}
+
+impl ExperienceLevel {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "beginner" => Some(Self::Beginner),
+            "developer" => Some(Self::Developer),
+            "power" => Some(Self::Power),
+            _ => None,
+        }
+    }
+
+    pub fn to_str(self) -> &'static str {
+        match self {
+            Self::Beginner => "beginner",
+            Self::Developer => "developer",
+            Self::Power => "power",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum OnboardingStep {
+    ExperiencePicker,
+    Setup(ExperienceLevel),
+}
 
 actions!(
     onboarding,
@@ -64,7 +100,9 @@ actions!(
         /// Open the user account in zed.dev while in the onboarding flow.
         OpenAccount,
         /// Resets the welcome screen hints to their initial state.
-        ResetHints
+        ResetHints,
+        /// Re-open the experience level picker to switch modes.
+        SwitchMode
     ]
 );
 
@@ -91,6 +129,33 @@ pub fn init(cx: &mut App) {
                         let settings_page = Onboarding::new(workspace, cx);
                         workspace.add_item_to_active_pane(
                             Box::new(settings_page),
+                            None,
+                            true,
+                            window,
+                            cx,
+                        )
+                    }
+                })
+                .detach();
+        });
+    });
+
+    cx.on_action(|_: &SwitchMode, cx| {
+        with_active_or_new_workspace(cx, |workspace, window, cx| {
+            workspace
+                .with_local_workspace(window, cx, |workspace, window, cx| {
+                    let existing = workspace
+                        .active_pane()
+                        .read(cx)
+                        .items()
+                        .find_map(|item| item.downcast::<Onboarding>());
+
+                    if let Some(existing) = existing {
+                        workspace.activate_item(&existing, true, true, window, cx);
+                    } else {
+                        let page = Onboarding::new(workspace, cx);
+                        workspace.add_item_to_active_pane(
+                            Box::new(page),
                             None,
                             true,
                             window,
@@ -209,6 +274,7 @@ struct Onboarding {
     focus_handle: FocusHandle,
     user_store: Entity<UserStore>,
     scroll_handle: ScrollHandle,
+    step: OnboardingStep,
     _settings_subscription: Subscription,
 }
 
@@ -232,15 +298,49 @@ impl Onboarding {
                 focus_handle: cx.focus_handle(),
                 scroll_handle: ScrollHandle::new(),
                 user_store: workspace.user_store().clone(),
+                step: OnboardingStep::ExperiencePicker,
                 _settings_subscription: cx
                     .observe_global::<SettingsStore>(move |_, cx| cx.notify()),
             }
         })
     }
 
-    fn on_finish(_: &Finish, _: &mut Window, cx: &mut App) {
+    fn on_finish(&mut self, _: &Finish, window: &mut Window, cx: &mut Context<Self>) {
+        let level = match self.step {
+            OnboardingStep::Setup(level) => level,
+            OnboardingStep::ExperiencePicker => return,
+        };
+
+        let kvp = KeyValueStore::global(cx);
+        let level_str = level.to_str().to_string();
+        db::write_and_log(cx, move || async move {
+            kvp.write_kvp(EXPERIENCE_LEVEL_KVP_KEY.to_string(), level_str).await
+        });
+
         telemetry::event!("Finish Setup");
-        go_to_welcome_page(cx);
+
+        match level {
+            ExperienceLevel::Beginner => {
+                // Chat-first: close onboarding, no welcome page, open Backboard chat
+                close_onboarding_tab(cx);
+                window.dispatch_action(
+                    zed_actions::assistant::ToggleFocus.boxed_clone(),
+                    cx,
+                );
+            }
+            ExperienceLevel::Developer => {
+                // Traditional editor: go to welcome page (open project, recents, etc.)
+                go_to_welcome_page(cx);
+            }
+            ExperienceLevel::Power => {
+                // Agent workspace: open the multi-agent dashboard
+                close_onboarding_tab(cx);
+                window.dispatch_action(
+                    agent_ui::OpenBackboardAgentWorkspace.boxed_clone(),
+                    cx,
+                );
+            }
+        }
     }
 
     fn handle_sign_in(&mut self, _: &SignIn, window: &mut Window, cx: &mut Context<Self>) {
@@ -262,12 +362,108 @@ impl Onboarding {
     }
 
     fn render_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        crate::basics_page::render_basics_page(cx).into_any_element()
+        match self.step {
+            OnboardingStep::ExperiencePicker => self.render_experience_picker(cx),
+            OnboardingStep::Setup(level) => {
+                crate::basics_page::render_basics_page(level, cx).into_any_element()
+            }
+        }
+    }
+
+    fn render_experience_picker(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .w_full()
+            .py_12()
+            .items_center()
+            .gap_10()
+            .child(
+                v_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Headline::new("How comfortable are you with coding?")
+                            .size(HeadlineSize::Large),
+                    )
+                    .child(
+                        Label::new("We'll tailor Backboard to match how you work")
+                            .color(Color::Muted)
+                            .size(LabelSize::Small),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_4()
+                    .child(self.render_level_card(
+                        ExperienceLevel::Beginner,
+                        IconName::Chat,
+                        "Just getting started",
+                        "Describe what you want to build — Backboard does the rest. No code required.",
+                        cx,
+                    ))
+                    .child(self.render_level_card(
+                        ExperienceLevel::Developer,
+                        IconName::Code,
+                        "I know how to code",
+                        "A full code editor with AI assistance when you need it.",
+                        cx,
+                    ))
+                    .child(self.render_level_card(
+                        ExperienceLevel::Power,
+                        IconName::BoltFilled,
+                        "Full agent mode",
+                        "Maximum autonomy. Agents take the wheel while you direct from above.",
+                        cx,
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_level_card(
+        &mut self,
+        level: ExperienceLevel,
+        icon: IconName,
+        title: &'static str,
+        description: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        div()
+            .id(SharedString::from(title))
+            .w(rems_from_px(220.))
+            .p_6()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .border_1()
+            .border_color(colors.border)
+            .rounded_lg()
+            .hover(|s| s.border_color(colors.border_focused).bg(colors.element_hover))
+            .on_click(cx.listener(move |this, _, _window, cx| {
+                this.step = OnboardingStep::Setup(level);
+                cx.notify();
+            }))
+            .child(
+                Icon::new(icon)
+                    .size(IconSize::Custom(rems_from_px(28.)))
+                    .color(Color::Accent),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(Headline::new(title).size(HeadlineSize::Small))
+                    .child(
+                        Label::new(description)
+                            .color(Color::Muted)
+                            .size(LabelSize::Small),
+                    ),
+            )
     }
 }
 
 impl Render for Onboarding {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_setup = matches!(self.step, OnboardingStep::Setup(_));
+
         div()
             .image_cache(gpui::retain_all("onboarding-page"))
             .key_context({
@@ -279,7 +475,7 @@ impl Render for Onboarding {
             .track_focus(&self.focus_handle)
             .size_full()
             .bg(cx.theme().colors().editor_background)
-            .on_action(Self::on_finish)
+            .on_action(cx.listener(Self::on_finish))
             .on_action(cx.listener(Self::handle_sign_in))
             .on_action(Self::handle_open_account)
             .on_action(cx.listener(|_, _: &menu::SelectNext, window, cx| {
@@ -327,19 +523,38 @@ impl Render for Onboarding {
                                                     ),
                                             ),
                                     )
-                                    .child({
-                                        Button::new("finish_setup", "Finish Setup")
-                                            .style(ButtonStyle::Filled)
-                                            .size(ButtonSize::Medium)
-                                            .width(rems_from_px(200.))
-                                            .key_binding(KeyBinding::for_action_in(
-                                                &Finish,
-                                                &self.focus_handle,
-                                                cx,
-                                            ))
-                                            .on_click(|_, window, cx| {
-                                                window.dispatch_action(Finish.boxed_clone(), cx);
-                                            })
+                                    .when(is_setup, |this| {
+                                        this.child(
+                                            h_flex()
+                                                .gap_3()
+                                                .child(
+                                                    Button::new("back", "← Back")
+                                                        .style(ButtonStyle::Subtle)
+                                                        .size(ButtonSize::Medium)
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.step =
+                                                                OnboardingStep::ExperiencePicker;
+                                                            cx.notify();
+                                                        })),
+                                                )
+                                                .child(
+                                                    Button::new("finish_setup", "Finish Setup")
+                                                        .style(ButtonStyle::Filled)
+                                                        .size(ButtonSize::Medium)
+                                                        .width(rems_from_px(160.))
+                                                        .key_binding(KeyBinding::for_action_in(
+                                                            &Finish,
+                                                            &self.focus_handle,
+                                                            cx,
+                                                        ))
+                                                        .on_click(|_, window, cx| {
+                                                            window.dispatch_action(
+                                                                Finish.boxed_clone(),
+                                                                cx,
+                                                            );
+                                                        }),
+                                                ),
+                                        )
                                     }),
                             )
                             .child(Divider::horizontal().color(ui::DividerColor::BorderVariant))
@@ -383,11 +598,13 @@ impl Item for Onboarding {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Option<Entity<Self>>> {
+        let step = self.step;
         Task::ready(Some(cx.new(|cx| Onboarding {
             workspace: self.workspace.clone(),
             user_store: self.user_store.clone(),
             scroll_handle: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
+            step,
             _settings_subscription: cx.observe_global::<SettingsStore>(move |_, cx| cx.notify()),
         })))
     }
@@ -395,6 +612,28 @@ impl Item for Onboarding {
     fn to_item_events(event: &Self::Event, f: &mut dyn FnMut(workspace::item::ItemEvent)) {
         f(*event)
     }
+}
+
+fn close_onboarding_tab(cx: &mut App) {
+    with_active_or_new_workspace(cx, |workspace, window, cx| {
+        let Some(onboarding_id) = workspace
+            .active_pane()
+            .read(cx)
+            .items()
+            .find_map(|item| {
+                item.downcast::<Onboarding>()?;
+                Some(item.item_id())
+            })
+        else {
+            return;
+        };
+
+        workspace
+            .active_pane()
+            .update(cx, |pane, cx| {
+                pane.remove_item(onboarding_id, false, false, window, cx);
+            });
+    });
 }
 
 fn go_to_welcome_page(cx: &mut App) {

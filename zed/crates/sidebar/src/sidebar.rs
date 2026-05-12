@@ -5339,7 +5339,7 @@ impl Sidebar {
         render_import_onboarding_banner(
             "acp",
             "Looking for threads from external agents?",
-            "Import threads from agents like Claude Agent, Codex, and more, whether started in Zed or another client.",
+            "Import threads from agents like Claude Agent, Codex, and more, whether started in Backboard Studio or another client.",
             if verbose_labels {
                 "Import Threads from External Agents"
             } else {

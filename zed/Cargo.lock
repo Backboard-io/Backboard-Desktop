@@ -11766,6 +11766,7 @@ dependencies = [
 name = "onboarding"
 version = "0.1.0"
 dependencies = [
+ "agent_ui",
  "anyhow",
  "client",
  "cloud_api_types",

@@ -1502,7 +1502,7 @@ async fn ensure_session(
         let assistant = client
             .create_assistant(backboard::CreateAssistantRequest {
                 name: "Backboard IDE".into(),
-                description: "Backboard running inside the Zed agent panel.".into(),
+                description: "Backboard running inside the Backboard Studio agent panel.".into(),
                 tools: Some(file_tools()),
                 ..Default::default()
             })
