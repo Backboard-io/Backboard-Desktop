@@ -10,7 +10,7 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use async_compression::futures::bufread::GzipDecoder;
 use async_tar::Archive;
 use client::{Client, proto, telemetry::Telemetry};
-use cloud_api_types::{ExtensionMetadata, ExtensionProvides, GetExtensionsResponse};
+use cloud_api_types::{ExtensionMetadata, ExtensionProvides};
 use collections::{BTreeMap, BTreeSet, HashSet, btree_map};
 pub use extension::ExtensionManifest;
 use extension::extension_builder::{CompileExtensionOptions, ExtensionBuilder};
@@ -34,7 +34,7 @@ use gpui::{
     App, AppContext as _, AsyncApp, Context, Entity, EventEmitter, Global, Task, TaskExt,
     UpdateGlobal as _, WeakEntity, actions,
 };
-use http_client::{AsyncBody, HttpClient, HttpClientWithUrl};
+use http_client::{HttpClient, HttpClientWithUrl};
 use language::{
     LanguageConfig, LanguageMatcher, LanguageName, LanguageQueries, LoadedLanguage,
     QUERY_FILENAME_PREFIXES, Rope,
@@ -657,40 +657,11 @@ impl ExtensionStore {
 
     fn fetch_extensions_from_api(
         &self,
-        path: &str,
-        query: &[(&str, &str)],
+        _path: &str,
+        _query: &[(&str, &str)],
         cx: &mut Context<ExtensionStore>,
     ) -> Task<Result<Vec<ExtensionMetadata>>> {
-        let url = self.http_client.build_zed_api_url(path, query);
-        let http_client = self.http_client.clone();
-        cx.spawn(async move |_, _| {
-            let mut response = http_client
-                .get(url?.as_ref(), AsyncBody::empty(), true)
-                .await?;
-
-            let mut body = Vec::new();
-            response
-                .body_mut()
-                .read_to_end(&mut body)
-                .await
-                .context("error reading extensions")?;
-
-            if response.status().is_client_error() {
-                let text = String::from_utf8_lossy(body.as_slice());
-                bail!(
-                    "status error {}, response: {text:?}",
-                    response.status().as_u16()
-                );
-            }
-
-            let mut response: GetExtensionsResponse = serde_json::from_slice(&body)?;
-
-            response
-                .data
-                .retain(|extension| !SUPPRESSED_EXTENSIONS.contains(&extension.id.as_ref()));
-
-            Ok(response.data)
-        })
+        cx.spawn(async move |_, _| Ok(Vec::new()))
     }
 
     pub fn install_extension(

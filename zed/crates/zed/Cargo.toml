@@ -77,14 +77,11 @@ auto_update.workspace = true
 auto_update_ui.workspace = true
 backboard_ui.workspace = true
 breadcrumbs.workspace = true
-call.workspace = true
 chrono.workspace = true
-channel.workspace = true
 clap.workspace = true
 cli.workspace = true
 client.workspace = true
 codestral.workspace = true
-collab_ui.workspace = true
 collections.workspace = true
 command_palette.workspace = true
 component.workspace = true
@@ -158,7 +155,6 @@ miniprofiler_ui.workspace = true
 mimalloc = { version = "0.1", optional = true }
 nc.workspace = true
 node_runtime.workspace = true
-notifications.workspace = true
 onboarding.workspace = true
 outline.workspace = true
 outline_panel.workspace = true
@@ -258,7 +254,6 @@ image.workspace = true
 pkg-config = "0.3.22"
 
 [dev-dependencies]
-call = { workspace = true, features = ["test-support"] }
 editor = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["input-latency-histogram", "test-support"] }
 image_viewer = { workspace = true, features = ["test-support"] }
