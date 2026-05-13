@@ -62,6 +62,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use util::{RangeExt as _, ResultExt as _};
 
+pub mod backboard;
 pub mod cursor_excerpt;
 pub mod example_spec;
 pub mod fim;
@@ -86,6 +87,7 @@ mod edit_prediction_tests;
 use crate::cursor_excerpt::expand_context_syntactically_then_linewise;
 use crate::example_spec::ExampleSpec;
 use crate::license_detection::LicenseDetectionWatcher;
+use crate::backboard::BackboardCompletions;
 use crate::mercury::Mercury;
 pub use crate::metrics::{KeptRateResult, compute_kept_rate};
 use crate::onboarding_modal::ZedPredictModal;
@@ -154,6 +156,7 @@ pub struct EditPredictionStore {
     preferred_experiment: Option<String>,
     available_experiments: Vec<String>,
     pub mercury: Mercury,
+    pub backboard: BackboardCompletions,
     legacy_data_collection_enabled: bool,
     reject_predictions_tx: mpsc::UnboundedSender<EditPredictionRejectionPayload>,
     settled_predictions_tx: mpsc::UnboundedSender<Instant>,
@@ -174,6 +177,7 @@ pub enum EditPredictionModel {
     Zeta,
     Fim { format: EditPredictionPromptFormat },
     Mercury,
+    Backboard,
 }
 
 #[derive(Clone)]
@@ -816,6 +820,7 @@ impl EditPredictionStore {
             preferred_experiment: None,
             available_experiments: Vec::new(),
             mercury: Mercury::new(cx),
+            backboard: BackboardCompletions::new(cx),
             legacy_data_collection_enabled,
 
             reject_predictions_tx: reject_tx,
@@ -929,6 +934,11 @@ impl EditPredictionStore {
     pub fn icons(&self, cx: &App) -> edit_prediction_types::EditPredictionIconSet {
         use ui::IconName;
         match self.edit_prediction_model {
+            EditPredictionModel::Backboard => {
+                edit_prediction_types::EditPredictionIconSet::new(IconName::ZedPredict)
+                    .with_disabled(IconName::ZedPredictDisabled)
+                    .with_error(IconName::ZedPredictError)
+            }
             EditPredictionModel::Mercury => {
                 edit_prediction_types::EditPredictionIconSet::new(IconName::Inception)
             }
@@ -955,6 +965,10 @@ impl EditPredictionStore {
 
     pub fn has_mercury_api_token(&self, cx: &App) -> bool {
         self.mercury.api_token.read(cx).has_key()
+    }
+
+    pub fn backboard_has_api_key(&self, cx: &App) -> bool {
+        self.backboard.has_personal_key(cx)
     }
 
     pub fn mercury_has_payment_required_error(&self) -> bool {
@@ -1522,6 +1536,7 @@ impl EditPredictionStore {
                     zeta::edit_prediction_accepted(self, current_prediction, cx)
                 }
             }
+            EditPredictionModel::Backboard => {}
             EditPredictionModel::Fim { .. } => {}
         }
     }
@@ -1883,6 +1898,7 @@ impl EditPredictionStore {
                     cx,
                 );
             }
+            EditPredictionModel::Backboard => {}
             EditPredictionModel::Fim { .. } => {}
         }
     }
@@ -2118,6 +2134,8 @@ fn is_ep_store_provider(provider: EditPredictionProvider) -> bool {
     }
 }
 
+// EditPredictionProvider::Zed maps to EditPredictionModel::Backboard at runtime.
+
 impl EditPredictionStore {
     fn queue_prediction_refresh(
         &mut self,
@@ -2146,7 +2164,7 @@ impl EditPredictionStore {
 
         let (needs_acceptance_tracking, max_pending_predictions) =
             match all_language_settings(None, cx).edit_predictions.provider {
-                EditPredictionProvider::Zed | EditPredictionProvider::Mercury => (true, 2),
+                EditPredictionProvider::Zed | EditPredictionProvider::Mercury => (false, 2),
                 EditPredictionProvider::Ollama => (false, 1),
                 EditPredictionProvider::OpenAiCompatibleApi => (false, 2),
                 EditPredictionProvider::None
@@ -2411,6 +2429,10 @@ impl EditPredictionStore {
             EditPredictionModel::Fim { format } => fim::request_prediction(inputs, format, cx),
             EditPredictionModel::Mercury => {
                 self.mercury
+                    .request_prediction(inputs, self.credentials_provider.clone(), cx)
+            }
+            EditPredictionModel::Backboard => {
+                self.backboard
                     .request_prediction(inputs, self.credentials_provider.clone(), cx)
             }
         };

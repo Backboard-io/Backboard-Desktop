@@ -474,6 +474,8 @@ pub struct EditPredictionSettings {
     pub copilot: CopilotSettings,
     /// Settings specific to Codestral.
     pub codestral: CodestralSettings,
+    /// Settings specific to Backboard AI.
+    pub backboard: BackboardSettings,
     /// Settings specific to Ollama.
     pub ollama: Option<OpenAiCompatibleEditPredictionSettings>,
     pub open_ai_compatible_api: Option<OpenAiCompatibleEditPredictionSettings>,
@@ -525,6 +527,21 @@ pub struct CodestralSettings {
     pub max_tokens: Option<u32>,
     /// Custom API URL to use for Codestral.
     pub api_url: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct BackboardSettings {
+    pub provider: String,
+    pub model: String,
+}
+
+impl Default for BackboardSettings {
+    fn default() -> Self {
+        Self {
+            provider: "openrouter".into(),
+            model: "deepseek/deepseek-chat".into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -848,6 +865,12 @@ impl settings::Settings for AllLanguageSettings {
             api_url: codestral.api_url,
         };
 
+        let backboard = edit_predictions.backboard.unwrap_or_default();
+        let backboard_settings = BackboardSettings {
+            provider: backboard.provider.unwrap_or_else(|| "openrouter".into()),
+            model: backboard.model.unwrap_or_else(|| "deepseek/deepseek-chat".into()),
+        };
+
         let ollama = edit_predictions.ollama.unwrap();
         let ollama_settings = ollama
             .model
@@ -909,6 +932,7 @@ impl settings::Settings for AllLanguageSettings {
                 mode: edit_predictions_mode,
                 copilot: copilot_settings,
                 codestral: codestral_settings,
+                backboard: backboard_settings,
                 ollama: ollama_settings,
                 open_ai_compatible_api: openai_compatible_settings,
                 examples_dir: edit_predictions.examples_dir,

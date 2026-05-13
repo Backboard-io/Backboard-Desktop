@@ -116,7 +116,9 @@ fn edit_prediction_provider_config_for_settings(cx: &App) -> Option<EditPredicti
     match provider {
         EditPredictionProvider::None => None,
         EditPredictionProvider::Copilot => Some(EditPredictionProviderConfig::Copilot),
-        EditPredictionProvider::Zed => None,
+        EditPredictionProvider::Zed => {
+            Some(EditPredictionProviderConfig::Zed(EditPredictionModel::Backboard))
+        }
         EditPredictionProvider::Codestral => Some(EditPredictionProviderConfig::Codestral),
         EditPredictionProvider::Ollama | EditPredictionProvider::OpenAiCompatibleApi => {
             let custom_settings = if provider == EditPredictionProvider::Ollama {
@@ -185,6 +187,7 @@ impl EditPredictionProviderConfig {
                 EditPredictionModel::Zeta => "Zeta",
                 EditPredictionModel::Fim { .. } => "FIM",
                 EditPredictionModel::Mercury => "Mercury",
+                EditPredictionModel::Backboard => "Backboard",
             },
         }
     }
@@ -205,6 +208,13 @@ fn assign_edit_prediction_providers(
 ) {
     if provider_config == Some(EditPredictionProviderConfig::Codestral) {
         load_codestral_api_key(cx).detach();
+    }
+    if provider_config
+        == Some(EditPredictionProviderConfig::Zed(
+            EditPredictionModel::Backboard,
+        ))
+    {
+        edit_prediction::backboard::load_backboard_api_token(cx).detach();
     }
     for (editor, window) in editors.borrow().iter() {
         _ = window.update(cx, |_window, window, cx| {

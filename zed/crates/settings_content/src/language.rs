@@ -133,6 +133,8 @@ pub struct EditPredictionSettingsContent {
     pub copilot: Option<CopilotSettingsContent>,
     /// Settings specific to Codestral.
     pub codestral: Option<CodestralSettingsContent>,
+    /// Settings specific to Backboard AI.
+    pub backboard: Option<BackboardSettingsContent>,
     /// Settings specific to Ollama.
     pub ollama: Option<OllamaEditPredictionSettingsContent>,
     /// Settings specific to using custom OpenAI-compatible servers for edit prediction.
@@ -236,6 +238,19 @@ pub struct CodestralSettingsContent {
     ///
     /// Default: "https://codestral.mistral.ai"
     pub api_url: Option<String>,
+}
+
+#[with_fallible_options]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, MergeFrom, PartialEq)]
+pub struct BackboardSettingsContent {
+    /// LLM provider to use for inline completions.
+    ///
+    /// Default: "openrouter"
+    pub provider: Option<String>,
+    /// Model name for inline completions.
+    ///
+    /// Default: "deepseek/deepseek-chat"
+    pub model: Option<String>,
 }
 
 /// Ollama model name for edit predictions.
