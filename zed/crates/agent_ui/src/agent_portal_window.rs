@@ -19,7 +19,7 @@ use crate::{
     ConversationView,
     agent_panel::{
         AgentPanel, BackboardAgentRunEventState, BackboardAgentRunStatus, BackboardAgentRunSummary,
-        BackboardAgentWorkspaceKind, BackboardAgentWorkspaceScope,
+        BackboardAgentWorkspaceKind, BackboardAgentWorkspaceMode, BackboardAgentWorkspaceScope,
     },
     thread_metadata_store::ThreadId,
 };
@@ -92,6 +92,7 @@ pub struct BackboardAgentPortalWindow {
     task_editor: Entity<Editor>,
     selected_scope: BackboardAgentWorkspaceScope,
     selected_kind: BackboardAgentWorkspaceKind,
+    selected_mode: BackboardAgentWorkspaceMode,
     selected_thread_id: Option<ThreadId>,
     show_launcher: bool,
     dismissed_threads: HashSet<ThreadId>,
@@ -133,6 +134,7 @@ impl BackboardAgentPortalWindow {
                 task_editor,
                 selected_scope: BackboardAgentWorkspaceScope::WholeProject,
                 selected_kind: BackboardAgentWorkspaceKind::Build,
+                selected_mode: BackboardAgentWorkspaceMode::Agent,
                 selected_thread_id: None,
                 show_launcher: false,
                 dismissed_threads: HashSet::default(),
@@ -224,6 +226,7 @@ impl BackboardAgentPortalWindow {
                     tasks.clone(),
                     self.selected_scope,
                     self.selected_kind,
+                    self.selected_mode,
                     window,
                     cx,
                 );
@@ -401,6 +404,15 @@ impl BackboardAgentPortalWindow {
                 )
             })
             .count();
+        let done = summaries
+            .iter()
+            .filter(|summary| summary.status == BackboardAgentRunStatus::Done)
+            .count();
+        let ready = summaries.iter().filter(|summary| summary.can_apply).count();
+        let blocked = summaries
+            .iter()
+            .filter(|summary| summary.status == BackboardAgentRunStatus::Blocked)
+            .count();
         let label = if active == 1 {
             "1 agent running".to_string()
         } else {
@@ -427,7 +439,26 @@ impl BackboardAgentPortalWindow {
                             .size(IconSize::Small)
                             .color(Color::Muted),
                     )
-                    .child(Label::new(label).color(Color::Accent)),
+                    .child(Label::new(label).color(Color::Accent))
+                    .child(self.render_count_pill(format!("{done} done"), Color::Success, cx))
+                    .child(self.render_count_pill(
+                        format!("{ready} ready"),
+                        if ready > 0 {
+                            Color::Success
+                        } else {
+                            Color::Muted
+                        },
+                        cx,
+                    ))
+                    .child(self.render_count_pill(
+                        format!("{blocked} blocked"),
+                        if blocked > 0 {
+                            Color::Warning
+                        } else {
+                            Color::Muted
+                        },
+                        cx,
+                    )),
             )
             .child(
                 Button::new("add-agent", "Add agent")
@@ -461,7 +492,7 @@ impl BackboardAgentPortalWindow {
 
         v_flex()
             .gap_2()
-            .rounded_md()
+            .rounded_sm()
             .border_1()
             .border_color(cx.theme().colors().border_variant)
             .bg(cx.theme().colors().elevated_surface_background)
@@ -504,6 +535,16 @@ impl BackboardAgentPortalWindow {
                 h_flex()
                     .gap_2()
                     .flex_wrap()
+                    .items_center()
+                    .child(
+                        Label::new("Mode")
+                            .size(LabelSize::Small)
+                            .color(Color::Accent),
+                    )
+                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Agent, cx))
+                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Ask, cx))
+                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Manual, cx))
+                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Free, cx))
                     .child(
                         Label::new("Scope")
                             .size(LabelSize::Small)
@@ -525,6 +566,25 @@ impl BackboardAgentPortalWindow {
                     .child(self.render_kind_button(BackboardAgentWorkspaceKind::Test, cx))
                     .child(self.render_kind_button(BackboardAgentWorkspaceKind::Docs, cx)),
             )
+    }
+
+    fn render_mode_button(
+        &self,
+        mode: BackboardAgentWorkspaceMode,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let selected = self.selected_mode == mode;
+        Button::new(format!("portal-agent-mode-{}", mode.label()), mode.label())
+            .style(if selected {
+                ButtonStyle::Tinted(TintColor::Accent)
+            } else {
+                ButtonStyle::Outlined
+            })
+            .size(ButtonSize::Compact)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.selected_mode = mode;
+                cx.notify();
+            }))
     }
 
     fn render_scope_button(
@@ -589,26 +649,136 @@ impl BackboardAgentPortalWindow {
                 .into_any_element();
         }
 
-        let cards = summaries
+        let mut summary_groups = Vec::<(Option<String>, Vec<BackboardAgentRunSummary>)>::new();
+        for summary in summaries {
+            let key = summary
+                .batch_id
+                .as_ref()
+                .filter(|_| summary.batch_size > 1)
+                .map(|batch_id| batch_id.as_ref().to_string());
+            if let Some((_, group_summaries)) = summary_groups
+                .iter_mut()
+                .find(|(existing_key, _)| *existing_key == key)
+            {
+                group_summaries.push(summary);
+            } else {
+                summary_groups.push((key, vec![summary]));
+            }
+        }
+        let groups = summary_groups
             .into_iter()
-            .map(|summary| self.render_agent_card(summary, cx).into_any_element())
+            .map(|(batch_id, summaries)| match batch_id {
+                Some(batch_id) if summaries.len() > 1 => self
+                    .render_batch_group(batch_id, summaries, cx)
+                    .into_any_element(),
+                _ => h_flex()
+                    .items_start()
+                    .flex_wrap()
+                    .gap_2()
+                    .children(
+                        summaries
+                            .into_iter()
+                            .map(|summary| self.render_agent_card(summary, cx).into_any_element()),
+                    )
+                    .into_any_element(),
+            })
             .collect::<Vec<_>>();
 
         v_flex()
             .size_full()
             .id("portal-agent-card-scroll")
             .overflow_y_scroll()
+            .p_3()
+            .gap_3()
+            .children(groups)
+            .into_any_element()
+    }
+
+    fn render_batch_group(
+        &self,
+        batch_id: String,
+        summaries: Vec<BackboardAgentRunSummary>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let running = summaries
+            .iter()
+            .filter(|summary| summary.status == BackboardAgentRunStatus::Running)
+            .count();
+        let blocked = summaries
+            .iter()
+            .filter(|summary| summary.status == BackboardAgentRunStatus::Blocked)
+            .count();
+        let done = summaries
+            .iter()
+            .filter(|summary| summary.status == BackboardAgentRunStatus::Done)
+            .count();
+        let ready = summaries.iter().filter(|summary| summary.can_apply).count();
+        let batch_size = summaries
+            .iter()
+            .map(|summary| summary.batch_size)
+            .max()
+            .unwrap_or(summaries.len());
+        let short_id = batch_id.chars().take(8).collect::<String>();
+        let cards = summaries
+            .into_iter()
+            .map(|summary| self.render_agent_card(summary, cx).into_any_element())
+            .collect::<Vec<_>>();
+
+        v_flex()
+            .gap_2()
             .child(
                 h_flex()
-                    .size_full()
+                    .justify_between()
                     .items_center()
-                    .justify_center()
-                    .p_6()
-                    .gap_4()
-                    .flex_wrap()
-                    .children(cards),
+                    .px_1()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                Label::new(format!("Batch {short_id}"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Accent),
+                            )
+                            .child(
+                                Label::new(format!("{batch_size} threads"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(self.render_count_pill(
+                                format!("{running} running"),
+                                Color::Accent,
+                                cx,
+                            ))
+                            .child(self.render_count_pill(
+                                format!("{blocked} blocked"),
+                                if blocked > 0 {
+                                    Color::Warning
+                                } else {
+                                    Color::Muted
+                                },
+                                cx,
+                            ))
+                            .child(self.render_count_pill(
+                                format!("{done} done"),
+                                Color::Success,
+                                cx,
+                            ))
+                            .child(self.render_count_pill(
+                                format!("{ready} ready"),
+                                if ready > 0 {
+                                    Color::Success
+                                } else {
+                                    Color::Muted
+                                },
+                                cx,
+                            )),
+                    ),
             )
-            .into_any_element()
+            .child(h_flex().items_start().flex_wrap().gap_2().children(cards))
     }
 
     fn render_agent_card(
@@ -629,9 +799,9 @@ impl BackboardAgentPortalWindow {
 
         v_flex()
             .id(format!("portal-agent-card-{thread_key}"))
-            .w(rems_from_px(560.))
+            .w(rems_from_px(350.))
             .max_w_full()
-            .rounded_lg()
+            .rounded_sm()
             .border_1()
             .border_color(if selected {
                 cx.theme().colors().text_accent
@@ -639,7 +809,6 @@ impl BackboardAgentPortalWindow {
                 cx.theme().colors().border_variant
             })
             .bg(cx.theme().colors().elevated_surface_background)
-            .shadow_md()
             .overflow_hidden()
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -649,8 +818,8 @@ impl BackboardAgentPortalWindow {
             }))
             .child(
                 h_flex()
-                    .h(rems_from_px(48.))
-                    .px_4()
+                    .h(rems_from_px(34.))
+                    .px_2()
                     .justify_between()
                     .border_b_1()
                     .border_color(cx.theme().colors().border_variant)
@@ -666,6 +835,7 @@ impl BackboardAgentPortalWindow {
                             )
                             .child(
                                 Label::new(summary.title.clone())
+                                    .size(LabelSize::Small)
                                     .color(Color::Accent)
                                     .truncate(),
                             )
@@ -674,27 +844,45 @@ impl BackboardAgentPortalWindow {
                     .child(
                         h_flex()
                             .gap_1()
-                            .child(Label::new(meta).size(LabelSize::Small).color(Color::Muted))
-                            .child(
-                                Icon::new(IconName::ChevronDown)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            ),
+                            .child(Label::new(meta).size(LabelSize::Small).color(Color::Muted)),
                     ),
             )
             .child(
                 div()
-                    .px_4()
-                    .py_3()
+                    .px_2()
+                    .py_2()
                     .border_b_1()
                     .border_color(cx.theme().colors().border_variant)
                     .child(
-                        div()
-                            .line_clamp(2)
-                            .child(Label::new(summary.command.clone()).color(Color::Accent)),
+                        div().line_clamp(2).child(
+                            Label::new(summary.command.clone())
+                                .size(LabelSize::Small)
+                                .color(Color::Accent),
+                        ),
                     ),
             )
             .child(self.render_files_section(&summary, cx))
+            .when_some(summary.blocked_reason.clone(), |this, reason| {
+                this.child(
+                    h_flex()
+                        .gap_1()
+                        .px_2()
+                        .py_1()
+                        .border_b_1()
+                        .border_color(cx.theme().colors().border_variant)
+                        .child(
+                            Icon::new(IconName::Warning)
+                                .size(IconSize::XSmall)
+                                .color(Color::Warning),
+                        )
+                        .child(
+                            Label::new(reason)
+                                .size(LabelSize::Small)
+                                .color(Color::Warning)
+                                .truncate(),
+                        ),
+                )
+            })
             .child(self.render_events_section(&summary, cx))
             .child(self.render_card_actions(summary, cx))
     }
@@ -706,9 +894,9 @@ impl BackboardAgentPortalWindow {
     ) -> impl IntoElement {
         let paths = summary.touched_paths.iter().take(3).collect::<Vec<_>>();
         v_flex()
-            .gap_2()
-            .px_4()
-            .py_3()
+            .gap_1()
+            .px_2()
+            .py_2()
             .border_b_1()
             .border_color(cx.theme().colors().border_variant)
             .child(
@@ -721,6 +909,7 @@ impl BackboardAgentPortalWindow {
                     )
                     .child(
                         Label::new(format!("Files touched - {}", summary.files_changed))
+                            .size(LabelSize::Small)
                             .color(Color::Accent),
                     ),
             )
@@ -753,17 +942,13 @@ impl BackboardAgentPortalWindow {
     fn render_events_section(
         &self,
         summary: &BackboardAgentRunSummary,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> impl IntoElement {
         v_flex()
-            .m_4()
+            .mx_2()
+            .my_2()
             .gap_1()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().editor_background)
-            .p_3()
-            .children(summary.latest_events.iter().take(6).map(|event| {
+            .children(summary.latest_events.iter().take(3).map(|event| {
                 let (icon, color) = match event.state {
                     BackboardAgentRunEventState::Active => (IconName::LoadCircle, Color::Accent),
                     BackboardAgentRunEventState::Done => (IconName::Check, Color::Success),
@@ -792,8 +977,8 @@ impl BackboardAgentPortalWindow {
         let thread_id = summary.thread_id;
         let thread_key = thread_id.to_key_string();
         h_flex()
-            .h(rems_from_px(48.))
-            .px_4()
+            .h(rems_from_px(34.))
+            .px_2()
             .justify_between()
             .border_t_1()
             .border_color(cx.theme().colors().border_variant)
@@ -912,6 +1097,21 @@ impl BackboardAgentPortalWindow {
                     .size(LabelSize::Small)
                     .color(Self::status_color_label(status)),
             )
+    }
+
+    fn render_count_pill(
+        &self,
+        label: String,
+        color: Color,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .px_1p5()
+            .py_0p5()
+            .rounded_sm()
+            .border_1()
+            .border_color(cx.theme().colors().border_variant)
+            .child(Label::new(label).size(LabelSize::Small).color(color))
     }
 
     fn status_color(status: BackboardAgentRunStatus, cx: &mut Context<Self>) -> gpui::Hsla {

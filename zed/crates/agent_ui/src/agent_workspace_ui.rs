@@ -1,7 +1,7 @@
 use collections::HashSet;
 use editor::{Editor, EditorElement, EditorEvent, EditorStyle};
 use gpui::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, ParentElement, Render,
+    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, ParentElement, Render,
     SharedString, StatefulInteractiveElement, Styled, Subscription, TextStyle, WeakEntity, Window,
     prelude::*,
 };
@@ -19,15 +19,36 @@ use workspace::{
 
 use crate::agent_panel::{
     AgentPanel, BackboardAgentRunEventState, BackboardAgentRunStatus, BackboardAgentRunSummary,
-    BackboardAgentWorkspaceKind, BackboardAgentWorkspaceScope,
+    BackboardAgentWorkspaceKind, BackboardAgentWorkspaceMode, BackboardAgentWorkspaceScope,
 };
 use crate::thread_metadata_store::ThreadId;
+
+pub fn open_backboard_agent_workspace_page(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let existing = workspace.panes().iter().find_map(|pane| {
+        pane.read(cx)
+            .items()
+            .find_map(|item| item.downcast::<BackboardAgentWorkspacePage>())
+    });
+
+    if let Some(existing) = existing {
+        workspace.activate_item(&existing, true, true, window, cx);
+        return;
+    }
+
+    let page = BackboardAgentWorkspacePage::new(workspace, window, cx);
+    workspace.add_item_to_active_pane(Box::new(page), None, true, window, cx);
+}
 
 pub struct BackboardAgentWorkspacePage {
     workspace: WeakEntity<Workspace>,
     task_editor: Entity<Editor>,
     selected_scope: BackboardAgentWorkspaceScope,
     selected_kind: BackboardAgentWorkspaceKind,
+    selected_mode: BackboardAgentWorkspaceMode,
     dismissed_threads: HashSet<ThreadId>,
     _subscriptions: Vec<Subscription>,
 }
@@ -66,6 +87,7 @@ impl BackboardAgentWorkspacePage {
                 task_editor,
                 selected_scope: BackboardAgentWorkspaceScope::WholeProject,
                 selected_kind: BackboardAgentWorkspaceKind::Build,
+                selected_mode: BackboardAgentWorkspaceMode::Agent,
                 dismissed_threads: HashSet::default(),
                 _subscriptions: subscriptions,
             }
@@ -127,6 +149,7 @@ impl BackboardAgentWorkspacePage {
                             tasks.clone(),
                             self.selected_scope,
                             self.selected_kind,
+                            self.selected_mode,
                             window,
                             cx,
                         );
@@ -289,6 +312,7 @@ impl BackboardAgentWorkspacePage {
             .iter()
             .filter(|summary| summary.status == BackboardAgentRunStatus::Blocked)
             .count();
+        let ready = summaries.iter().filter(|summary| summary.can_apply).count();
 
         h_flex()
             .h(rems_from_px(44.))
@@ -331,6 +355,15 @@ impl BackboardAgentWorkspacePage {
                             .child(self.render_counter_pill(
                                 format!("{done} done"),
                                 Color::Success,
+                                cx,
+                            ))
+                            .child(self.render_counter_pill(
+                                format!("{ready} ready"),
+                                if ready > 0 {
+                                    Color::Success
+                                } else {
+                                    Color::Muted
+                                },
                                 cx,
                             ))
                             .child(self.render_counter_pill(
@@ -420,6 +453,16 @@ impl BackboardAgentWorkspacePage {
                     .flex_wrap()
                     .items_center()
                     .child(
+                        Label::new("Mode")
+                            .size(LabelSize::Small)
+                            .color(Color::Accent),
+                    )
+                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Agent, cx))
+                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Ask, cx))
+                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Manual, cx))
+                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Free, cx))
+                    .child(Divider::vertical())
+                    .child(
                         Label::new("Scope")
                             .size(LabelSize::Small)
                             .color(Color::Accent),
@@ -487,10 +530,40 @@ impl BackboardAgentWorkspacePage {
             .filter(|summary| summary.status == BackboardAgentRunStatus::Blocked)
             .cloned()
             .collect::<Vec<_>>();
-        let mut agent_cards = Vec::with_capacity(summaries.len());
+        let mut summary_groups = Vec::<(Option<String>, Vec<BackboardAgentRunSummary>)>::new();
         for summary in summaries {
-            agent_cards.push(self.render_agent_card(summary, cx).into_any_element());
+            let key = summary
+                .batch_id
+                .as_ref()
+                .filter(|_| summary.batch_size > 1)
+                .map(|batch_id| batch_id.as_ref().to_string());
+            if let Some((_, group_summaries)) = summary_groups
+                .iter_mut()
+                .find(|(existing_key, _)| *existing_key == key)
+            {
+                group_summaries.push(summary);
+            } else {
+                summary_groups.push((key, vec![summary]));
+            }
         }
+        let group_elements = summary_groups
+            .into_iter()
+            .map(|(batch_id, summaries)| match batch_id {
+                Some(batch_id) if summaries.len() > 1 => {
+                    self.render_batch_group(batch_id, summaries, cx)
+                }
+                _ => h_flex()
+                    .items_start()
+                    .flex_wrap()
+                    .gap_2()
+                    .children(
+                        summaries
+                            .into_iter()
+                            .map(|summary| self.render_agent_card(summary, cx).into_any_element()),
+                    )
+                    .into_any_element(),
+            })
+            .collect::<Vec<_>>();
 
         v_flex()
             .size_full()
@@ -501,14 +574,94 @@ impl BackboardAgentWorkspacePage {
             .when(!blocked_summaries.is_empty(), |this| {
                 this.child(self.render_blocked_overview(blocked_summaries, cx))
             })
+            .child(v_flex().gap_3().p_3().children(group_elements))
+            .into_any_element()
+    }
+
+    fn render_batch_group(
+        &self,
+        batch_id: String,
+        summaries: Vec<BackboardAgentRunSummary>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let running = summaries
+            .iter()
+            .filter(|summary| summary.status == BackboardAgentRunStatus::Running)
+            .count();
+        let blocked = summaries
+            .iter()
+            .filter(|summary| summary.status == BackboardAgentRunStatus::Blocked)
+            .count();
+        let done = summaries
+            .iter()
+            .filter(|summary| summary.status == BackboardAgentRunStatus::Done)
+            .count();
+        let ready = summaries.iter().filter(|summary| summary.can_apply).count();
+        let batch_size = summaries
+            .iter()
+            .map(|summary| summary.batch_size)
+            .max()
+            .unwrap_or(summaries.len());
+        let cards = summaries
+            .into_iter()
+            .map(|summary| self.render_agent_card(summary, cx).into_any_element())
+            .collect::<Vec<_>>();
+        let short_id = batch_id.chars().take(8).collect::<String>();
+
+        v_flex()
+            .gap_2()
             .child(
                 h_flex()
-                    .items_start()
-                    .flex_wrap()
-                    .gap_2()
-                    .p_3()
-                    .children(agent_cards),
+                    .justify_between()
+                    .items_center()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                Label::new(format!("Batch {short_id}"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Accent),
+                            )
+                            .child(
+                                Label::new(format!("{batch_size} threads"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(self.render_counter_pill(
+                                format!("{running} running"),
+                                Color::Accent,
+                                cx,
+                            ))
+                            .child(self.render_counter_pill(
+                                format!("{blocked} blocked"),
+                                if blocked > 0 {
+                                    Color::Warning
+                                } else {
+                                    Color::Muted
+                                },
+                                cx,
+                            ))
+                            .child(self.render_counter_pill(
+                                format!("{done} done"),
+                                Color::Success,
+                                cx,
+                            ))
+                            .child(self.render_counter_pill(
+                                format!("{ready} ready"),
+                                if ready > 0 {
+                                    Color::Success
+                                } else {
+                                    Color::Muted
+                                },
+                                cx,
+                            )),
+                    ),
             )
+            .child(h_flex().items_start().flex_wrap().gap_2().children(cards))
             .into_any_element()
     }
 
@@ -1102,6 +1255,25 @@ impl BackboardAgentWorkspacePage {
                     .color(color)
                     .truncate(),
             )
+    }
+
+    fn render_mode_button(
+        &self,
+        mode: BackboardAgentWorkspaceMode,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let selected = self.selected_mode == mode;
+        Button::new(format!("agent-mode-button-{}", mode.label()), mode.label())
+            .style(if selected {
+                ButtonStyle::Tinted(TintColor::Accent)
+            } else {
+                ButtonStyle::Outlined
+            })
+            .size(ButtonSize::Compact)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.selected_mode = mode;
+                cx.notify();
+            }))
     }
 
     fn render_scope_button(

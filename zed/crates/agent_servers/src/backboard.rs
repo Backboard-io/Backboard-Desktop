@@ -29,11 +29,22 @@ pub const BACKBOARD_IDE_PYTHON_ENV_VAR: &str = "BACKBOARD_IDE_PYTHON";
 
 pub struct BackboardAgentServer {
     agent_id: AgentId,
+    default_mode: acp::SessionModeId,
 }
 
 impl BackboardAgentServer {
     pub fn new(agent_id: AgentId) -> Self {
-        Self { agent_id }
+        Self {
+            agent_id,
+            default_mode: acp::SessionModeId::new("agent"),
+        }
+    }
+
+    pub fn with_default_mode(agent_id: AgentId, default_mode: acp::SessionModeId) -> Self {
+        Self {
+            agent_id,
+            default_mode,
+        }
     }
 }
 
@@ -47,7 +58,7 @@ impl AgentServer for BackboardAgentServer {
     }
 
     fn default_mode(&self, _cx: &App) -> Option<acp::SessionModeId> {
-        Some(acp::SessionModeId::new("agent"))
+        Some(self.default_mode.clone())
     }
 
     fn connect(
