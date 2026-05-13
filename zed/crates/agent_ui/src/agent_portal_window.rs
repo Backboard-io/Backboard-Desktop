@@ -104,6 +104,7 @@ impl BackboardAgentPortalWindow {
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
+        let workspace_id = workspace.entity_id();
         cx.new(|cx| {
             let task_editor = cx.new(|cx| {
                 let mut editor = Editor::auto_height(2, 5, window, cx);
@@ -118,6 +119,14 @@ impl BackboardAgentPortalWindow {
 
             cx.subscribe(&task_editor, Self::handle_task_editor_event)
                 .detach();
+            cx.on_release(move |_, cx| {
+                if cx.try_global::<BackboardAgentPortalWindows>().is_some() {
+                    cx.global_mut::<BackboardAgentPortalWindows>()
+                        .windows
+                        .remove(&workspace_id);
+                }
+            })
+            .detach();
 
             Self {
                 workspace,

@@ -278,6 +278,8 @@ struct BackboardAgentWorkspaceRunMetadata {
     changed_paths: Vec<String>,
     #[serde(default)]
     apply_state: BackboardAgentApplyState,
+    #[serde(default)]
+    current_workspace: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -331,11 +333,18 @@ fn workspace_agent_prompt(
     kind: BackboardAgentWorkspaceKind,
     scope: BackboardAgentWorkspaceScope,
     task: &str,
+    current_workspace: bool,
 ) -> String {
+    let workspace_guidance = if current_workspace {
+        "This run is using the user's current workspace, not an isolated git worktree. Changes are live in the project immediately, so avoid starting parallel edits and be especially careful to preserve unrelated user changes."
+    } else {
+        "You are running in an isolated git worktree for this task."
+    };
     format!(
         "You are running as a Backboard Agent Workspace worker.\n\
          Agent type: {kind_label} - {kind_guidance}\n\
          Scope: {scope_label} - {scope_guidance}\n\
+         Workspace: {workspace_guidance}\n\
          Task: {task}\n\n\
          Work independently and stream concise progress as you go. Use the visible plan for multi-step work. \
          You may read and write files in this workspace. Commands still require user approval. \
@@ -369,6 +378,15 @@ fn workspace_agent_worktree_label(path: &std::path::Path) -> SharedString {
         .unwrap_or("agent worktree")
         .to_string()
         .into()
+}
+
+fn current_workspace_agent_path(project: &Project, cx: &App) -> PathBuf {
+    let work_dirs = project.default_path_list(cx);
+    work_dirs
+        .ordered_paths()
+        .next()
+        .cloned()
+        .unwrap_or_else(|| paths::home_dir().clone())
 }
 
 pub fn parse_backboard_workspace_agent_tasks(
@@ -3167,25 +3185,58 @@ impl AgentPanel {
         }
 
         let title = workspace_agent_title(kind, &task);
-        let prompt = workspace_agent_prompt(kind, scope, &task);
         let branch_slug = workspace_agent_branch_slug(&task);
         let branch_name = format!("backboard/agent/{branch_slug}");
         let project = self.project.clone();
         let workspace = self.workspace.clone();
+        let repo = {
+            let project = project.read(cx);
+            project
+                .active_repository(cx)
+                .or_else(|| project.repositories(cx).values().next().cloned())
+        };
+
+        let Some(repo) = repo else {
+            let work_dirs = self.project.read(cx).default_path_list(cx);
+            let workspace_path = current_workspace_agent_path(self.project.read(cx), cx);
+            let prompt = workspace_agent_prompt(kind, scope, &task, true);
+            let thread_id = self.create_backboard_workspace_agent_thread(
+                title.clone(),
+                prompt,
+                Some(work_dirs),
+                window,
+                cx,
+            );
+            self.backboard_workspace_runs.insert(
+                thread_id,
+                BackboardAgentWorkspaceRunMetadata {
+                    title,
+                    task,
+                    kind,
+                    scope,
+                    base_workspace_path: workspace_path.clone(),
+                    worktree_path: workspace_path,
+                    branch_name: String::new(),
+                    base_commit: String::new(),
+                    changed_paths: Vec::new(),
+                    apply_state: BackboardAgentApplyState::Pending,
+                    current_workspace: true,
+                },
+            );
+            self.set_last_created_entry_kind(AgentPanelEntryKind::Thread, cx);
+            self.serialize(cx);
+            cx.notify();
+            return Some(thread_id);
+        };
 
         cx.spawn_in(window, async move |this, cx| {
             let setup = async {
-                let (repo, worktree_directory_setting) = cx.update(|_, cx| {
-                    let project = project.read(cx);
-                    let repo = project
-                        .active_repository(cx)
-                        .or_else(|| project.repositories(cx).values().next().cloned());
-                    let repo = repo.context(
-                        "Backboard parallel agents need a local git repository. Open a git-backed project to use isolated worktrees.",
-                    )?;
-                    let worktree_directory_setting =
-                        ProjectSettings::get_global(cx).git.worktree_directory.clone();
-                    anyhow::Ok((repo, worktree_directory_setting))
+                let worktree_directory_setting = cx.update(|_, cx| {
+                    let worktree_directory_setting = ProjectSettings::get_global(cx)
+                        .git
+                        .worktree_directory
+                        .clone();
+                    anyhow::Ok(worktree_directory_setting)
                 })??;
 
                 let base_commit = repo
@@ -3195,9 +3246,8 @@ impl AgentPanel {
                     .context("failed to read HEAD")?
                     .context("repository has no HEAD commit")?;
 
-                let (base_workspace_path, worktree_path, create_rx) = repo.update(
-                    &mut cx.clone(),
-                    |repo, _cx| {
+                let (base_workspace_path, worktree_path, create_rx) =
+                    repo.update(&mut cx.clone(), |repo, _cx| {
                         let worktree_path = repo.path_for_new_linked_worktree(
                             &branch_name,
                             &worktree_directory_setting,
@@ -3214,8 +3264,7 @@ impl AgentPanel {
                             worktree_path,
                             create_rx,
                         ))
-                    },
-                )?;
+                    })?;
 
                 create_rx
                     .await
@@ -3239,9 +3288,10 @@ impl AgentPanel {
                 Ok((base_workspace_path, worktree_path, base_commit)) => {
                     this.update_in(cx, |this, window, cx| {
                         let work_dirs = PathList::new(&[worktree_path.clone()]);
+                        let prompt = workspace_agent_prompt(kind, scope, &task, false);
                         let thread_id = this.create_backboard_workspace_agent_thread(
                             title.clone(),
-                            prompt.clone(),
+                            prompt,
                             Some(work_dirs),
                             window,
                             cx,
@@ -3259,6 +3309,7 @@ impl AgentPanel {
                                 base_commit,
                                 changed_paths: Vec::new(),
                                 apply_state: BackboardAgentApplyState::Pending,
+                                current_workspace: false,
                             },
                         );
                         this.set_last_created_entry_kind(AgentPanelEntryKind::Thread, cx);
@@ -3290,7 +3341,20 @@ impl AgentPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> usize {
-        let tasks = parse_backboard_workspace_agent_tasks(tasks);
+        let mut tasks = parse_backboard_workspace_agent_tasks(tasks);
+        let has_repository = {
+            let project = self.project.read(cx);
+            project.active_repository(cx).is_some() || !project.repositories(cx).is_empty()
+        };
+        if !has_repository && tasks.len() > 1 {
+            tasks.truncate(1);
+            Self::show_deferred_toast(
+                &self.workspace,
+                "Parallel isolated agents need git. Running the first task in the current workspace.",
+                cx,
+            );
+        }
+
         let count = tasks.len();
         for task in tasks {
             self.spawn_backboard_workspace_agent(task, scope, kind, window, cx);
@@ -3337,10 +3401,11 @@ impl AgentPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let work_dirs = self
-            .backboard_workspace_runs
-            .get(&thread_id)
-            .map(|run| PathList::new(&[run.worktree_path.clone()]));
+        let work_dirs = match self.backboard_workspace_runs.get(&thread_id) {
+            Some(run) if run.current_workspace => Some(self.project.read(cx).default_path_list(cx)),
+            Some(run) => Some(PathList::new(&[run.worktree_path.clone()])),
+            None => None,
+        };
         self.load_agent_thread(
             Agent::NativeAgent,
             thread_id,
@@ -3404,6 +3469,10 @@ impl AgentPanel {
             self.activate_backboard_workspace_agent(thread_id, window, cx);
             return;
         };
+        if run.current_workspace {
+            self.activate_backboard_workspace_agent(thread_id, window, cx);
+            return;
+        }
         if let Some(workspace) = self.workspace.upgrade() {
             workspace.update(cx, |workspace, cx| {
                 let _ = workspace.open_paths(
@@ -3434,6 +3503,9 @@ impl AgentPanel {
         let Some(run) = self.backboard_workspace_runs.get_mut(&thread_id) else {
             return;
         };
+        if run.current_workspace {
+            return;
+        }
         run.apply_state = BackboardAgentApplyState::Applying;
         let base_workspace_path = run.base_workspace_path.clone();
         let worktree_path = run.worktree_path.clone();
@@ -3495,7 +3567,10 @@ impl AgentPanel {
         if self
             .backboard_workspace_runs
             .get(&thread_id)
-            .is_some_and(|run| matches!(run.apply_state, BackboardAgentApplyState::Applied))
+            .is_some_and(|run| {
+                run.current_workspace
+                    || matches!(run.apply_state, BackboardAgentApplyState::Applied)
+            })
         {
             self.backboard_workspace_runs.remove(&thread_id);
         }
@@ -3518,10 +3593,18 @@ impl AgentPanel {
                 summary.command = run.task.clone().into();
                 summary.kind_label = Some(run.kind.label().into());
                 summary.scope_label = Some(run.scope.label().into());
+                summary.can_review = true;
+                if run.current_workspace {
+                    summary.worktree_label = None;
+                    summary.branch_label = None;
+                    summary.apply_state_label = Some("Current workspace".into());
+                    summary.can_apply = false;
+                    continue;
+                }
+
                 summary.worktree_label = Some(workspace_agent_worktree_label(&run.worktree_path));
                 summary.branch_label = Some(run.branch_name.clone().into());
                 summary.apply_state_label = Some(run.apply_state.label().into());
-                summary.can_review = true;
                 summary.can_apply =
                     summary.status == BackboardAgentRunStatus::Done && run.apply_state.can_apply();
                 if let Some(reason) = run.apply_state.blocked_reason() {
@@ -3842,7 +3925,9 @@ impl AgentPanel {
             let work_dirs = self
                 .backboard_workspace_runs
                 .get(&thread_id)
-                .map(|run| PathList::new(&[run.worktree_path.clone()]))
+                .and_then(|run| {
+                    (!run.current_workspace).then(|| PathList::new(&[run.worktree_path.clone()]))
+                })
                 .unwrap_or_else(|| new_work_dirs.clone());
             conversation_view.update(cx, |conversation_view, cx| {
                 conversation_view.set_work_dirs(work_dirs, cx);
@@ -3854,7 +3939,9 @@ impl AgentPanel {
             let work_dirs = self
                 .backboard_workspace_runs
                 .get(&thread_id)
-                .map(|run| PathList::new(&[run.worktree_path.clone()]))
+                .and_then(|run| {
+                    (!run.current_workspace).then(|| PathList::new(&[run.worktree_path.clone()]))
+                })
                 .unwrap_or_else(|| new_work_dirs.clone());
             conversation_view.update(cx, |conversation_view, cx| {
                 conversation_view.set_work_dirs(work_dirs, cx);
@@ -5279,7 +5366,7 @@ impl AgentPanel {
             .justify_between()
             .gap_2();
 
-        let toolbar_content = if matches!(mode, ToolbarMode::EmptyThread) {
+        let toolbar_content = if matches!(mode, ToolbarMode::EmptyThread | ToolbarMode::Terminal) {
             let (chevron_icon, icon_color, label_color) =
                 if self.new_thread_menu_handle.is_deployed() {
                     (IconName::ChevronUp, Color::Accent, Color::Accent)
@@ -5333,7 +5420,10 @@ impl AgentPanel {
                         .size_full()
                         .gap(DynamicSpacing::Base04.rems(cx))
                         .pl(DynamicSpacing::Base04.rems(cx))
-                        .child(agent_selector_menu),
+                        .child(agent_selector_menu)
+                        .when(matches!(mode, ToolbarMode::Terminal), |this| {
+                            this.child(self.render_title_view(window, cx))
+                        }),
                 )
                 .child(
                     h_flex()
@@ -7244,14 +7334,17 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_workspace_agent_worktree_failure_does_not_create_shared_thread(
+    async fn test_workspace_agent_without_git_creates_current_workspace_thread(
         cx: &mut TestAppContext,
     ) {
         let (panel, mut cx) = setup_panel(cx).await;
 
         let attempted = panel.update_in(&mut cx, |panel, window, cx| {
             panel.spawn_backboard_workspace_agents(
-                vec!["change the dashboard".to_string(), "   ".to_string()],
+                vec![
+                    "change the dashboard".to_string(),
+                    "write the tests".to_string(),
+                ],
                 BackboardAgentWorkspaceScope::WholeProject,
                 BackboardAgentWorkspaceKind::Build,
                 window,
@@ -7262,12 +7355,35 @@ mod tests {
         assert_eq!(attempted, 1);
         cx.run_until_parked();
 
-        panel.read_with(&cx, |panel, _cx| {
-            assert!(
-                panel.retained_threads.is_empty(),
-                "worktree setup failure should not fall back to a shared-workspace thread"
+        panel.read_with(&cx, |panel, cx| {
+            assert_eq!(panel.retained_threads.len(), 1);
+            assert_eq!(panel.backboard_workspace_runs.len(), 1);
+
+            let (thread_id, run) = panel
+                .backboard_workspace_runs
+                .iter()
+                .next()
+                .expect("run metadata should be recorded");
+            assert!(run.current_workspace);
+            assert_eq!(run.task, "change the dashboard");
+
+            let summary = panel
+                .backboard_agent_run_summaries(cx)
+                .into_iter()
+                .find(|summary| summary.thread_id == *thread_id)
+                .expect("current-workspace agent run should be summarized");
+
+            assert!(summary.can_review);
+            assert!(!summary.can_apply);
+            assert_eq!(
+                summary
+                    .apply_state_label
+                    .as_ref()
+                    .map(|label| label.as_ref()),
+                Some("Current workspace")
             );
-            assert!(panel.backboard_workspace_runs.is_empty());
+            assert!(summary.worktree_label.is_none());
+            assert!(summary.branch_label.is_none());
         });
     }
 

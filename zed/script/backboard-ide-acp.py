@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import shlex
 import signal
 import sys
@@ -83,6 +84,7 @@ TOOL_DEFINITION_CACHE_TTL_SECONDS = 30.0
 CONTEXT_PACK_MAX_CHARS = 9000
 CONTEXT_PREWARM_MAX_FILES = 120
 CONTEXT_PREWARM_TIMEOUT_SECONDS = 3.0
+WEB_QUALITY_THINKING_BUDGET_TOKENS = 2048
 DEFAULT_COMMAND_TIMEOUT_MS = 45_000
 READ_ONLY_COMMAND_TIMEOUT_MS = 20_000
 CHECK_COMMAND_TIMEOUT_MS = 90_000
@@ -216,7 +218,59 @@ DEV_SERVER_COMMAND_MARKERS = {
     "python -m http.server",
     "python3 -m http.server",
 }
+SIMPLE_CD_PREFIX_RE = re.compile(
+    r"^\s*cd\s+(?:'[^']*'|\"[^\"]*\"|\\.|[^;&|`$<>])+?\s+&&\s*",
+    re.IGNORECASE,
+)
 SUPPORTED_MODES = {"agent", "ask", "manual", "free"}
+WEBSITE_REQUEST_RE = re.compile(
+    r"\b("
+    r"website|web\s*site|webpage|web\s*page|landing\s*page|homepage|marketing\s*page|"
+    r"frontend|front\s*end|ui/ux|ux/ui|dashboard|admin\s*panel|webapp|web\s*app|"
+    r"single\s*page\s*app|spa|react\s*app|vite\s*app|next(?:\.js)?\s*app|"
+    r"tailwind|shadcn|hero\s*section|responsive\s*(?:site|page|layout)"
+    r")\b",
+    re.IGNORECASE,
+)
+FRONTEND_STACK_FILES = (
+    "index.html",
+    "src/App.tsx",
+    "src/App.jsx",
+    "src/main.tsx",
+    "src/main.jsx",
+    "src/routes",
+    "app/page.tsx",
+    "app/layout.tsx",
+    "pages/index.tsx",
+    "pages/_app.tsx",
+    "vite.config.ts",
+    "vite.config.js",
+    "next.config.js",
+    "next.config.mjs",
+    "tailwind.config.ts",
+    "tailwind.config.js",
+)
+FRONTEND_DEPENDENCIES = {
+    "@vitejs/plugin-react",
+    "astro",
+    "lucide-react",
+    "next",
+    "react",
+    "react-dom",
+    "remix",
+    "svelte",
+    "tailwindcss",
+    "vite",
+    "vue",
+}
+FRONTEND_QUALITY_CONTEXT = """Frontend quality profile: this is a website/app/UI task, so optimize for visible product quality instead of the normal Fast-path brevity.
+
+- Build a real usable first screen, not a placeholder, scaffold, or generic card stack.
+- Follow the existing app stack and design language when present; use Next.js TypeScript only for empty workspaces unless the user asked for static or single-file HTML.
+- Make the result responsive with deliberate layout, spacing, typography, color contrast, and hover/focus/active states.
+- Use relevant assets, icons, imagery, or domain-specific visual structure when available; avoid generic gradients, decorative blobs, and filler copy.
+- Keep text sized for its container on mobile and desktop, with no overlaps or clipped labels.
+- Verify like the CLI: run practical install/build/dev-server checks when the project setup allows it, and use browser/screenshot inspection only when browser tooling is available or the user asks."""
 
 
 class JsonRpcError(Exception):
@@ -536,8 +590,16 @@ def _command_tokens(command: str) -> list[str]:
     return []
 
 
+def _dev_server_detection_command(command: str) -> str:
+    normalized = " ".join(command.strip().split())
+    if normalized.endswith("&"):
+        normalized = normalized[:-1].rstrip()
+    normalized = SIMPLE_CD_PREFIX_RE.sub("", normalized)
+    return normalized.lower()
+
+
 def _is_dev_server_command(command: str) -> bool:
-    normalized = " ".join(command.strip().split()).lower()
+    normalized = _dev_server_detection_command(command)
     return any(
         normalized == marker or normalized.startswith(f"{marker} ")
         for marker in DEV_SERVER_COMMAND_MARKERS
@@ -563,18 +625,20 @@ def _is_check_command(command: str) -> bool:
     executable = Path(tokens[0]).name
     if executable in CHECK_COMMAND_NAMES:
         return True
-    if executable in INSTALL_COMMAND_NAMES and any(token in {"test", "build", "lint", "check"} for token in tokens[1:]):
+    if executable in INSTALL_COMMAND_NAMES and any(
+        token in {"test", "build", "lint", "check"} for token in tokens[1:]
+    ):
         return True
     return False
 
 
 def _command_timeout_ms(command: str, args: dict[str, Any], read_only: bool) -> int:
+    if _is_dev_server_command(command):
+        return DEV_SERVER_STARTUP_TIMEOUT_MS
     explicit = args.get("timeout")
     if explicit is not None:
         with contextlib.suppress(TypeError, ValueError):
             return max(1_000, min(int(float(explicit)), MAX_COMMAND_TIMEOUT_MS))
-    if _is_dev_server_command(command):
-        return DEV_SERVER_STARTUP_TIMEOUT_MS
     if read_only:
         return READ_ONLY_COMMAND_TIMEOUT_MS
     if _is_install_command(command):
@@ -876,6 +940,7 @@ class BackboardIdeSession:
         self._speed_totals: dict[str, float] = {}
         self._slowest_tool_name: str | None = None
         self._slowest_tool_ms = 0.0
+        self._web_quality_turn = False
 
     async def load(self) -> dict[str, Any]:
         self.cancel_event.clear()
@@ -1087,6 +1152,7 @@ class BackboardIdeSession:
         if not message.strip():
             await self._agent_text("Give me a prompt and I will work from the current workspace.")
             return {"stopReason": "end_turn"}
+        self._web_quality_turn = self._is_web_quality_request(message, blocks)
 
         await self._start_heartbeat("reading the request")
         await self._emit_progress("Backboard is reading your request.", "reading the request")
@@ -1134,6 +1200,7 @@ class BackboardIdeSession:
             return {"stopReason": "end_turn"}
         finally:
             self._thinking = False
+            self._web_quality_turn = False
             self.current_run_id = None
             self._phase = "idle"
             if self._turn_started_at:
@@ -1189,6 +1256,89 @@ class BackboardIdeSession:
         self._last_progress_note = text
         await self._agent_thought(text)
 
+    def _is_web_quality_request(self, message: str, blocks: list[dict[str, Any]]) -> bool:
+        embedded_context = self._embedded_context_summary(blocks)
+        combined = f"{message}\n{embedded_context}"
+        if WEBSITE_REQUEST_RE.search(combined):
+            return True
+
+        if not self._workspace_has_frontend_stack():
+            return False
+
+        lower = combined.lower()
+        action_terms = (
+            "add",
+            "build",
+            "change",
+            "create",
+            "edit",
+            "fix",
+            "implement",
+            "improve",
+            "make",
+            "polish",
+            "redesign",
+            "restyle",
+            "style",
+            "update",
+        )
+        frontend_terms = (
+            "button",
+            "card",
+            "component",
+            "css",
+            "design",
+            "form",
+            "hero",
+            "layout",
+            "look",
+            "modal",
+            "nav",
+            "navbar",
+            "page",
+            "responsive",
+            "screen",
+            "sidebar",
+            "style",
+            "ui",
+            "ux",
+            "visual",
+        )
+        return self._contains_word_like(lower, action_terms) and self._contains_word_like(
+            lower,
+            frontend_terms,
+        )
+
+    @staticmethod
+    def _contains_word_like(text: str, terms: tuple[str, ...]) -> bool:
+        return any(re.search(rf"\b{re.escape(term)}\b", text) for term in terms)
+
+    def _workspace_has_frontend_stack(self) -> bool:
+        for relative in FRONTEND_STACK_FILES:
+            if (self.workspace / relative).exists():
+                return True
+
+        package_json = self.workspace / "package.json"
+        if not package_json.exists():
+            return False
+
+        with contextlib.suppress(Exception):
+            payload = json.loads(package_json.read_text(encoding="utf-8"))
+            dependencies: dict[str, Any] = {}
+            for key in ("dependencies", "devDependencies"):
+                value = payload.get(key)
+                if isinstance(value, dict):
+                    dependencies.update(value)
+            if any(name in dependencies for name in FRONTEND_DEPENDENCIES):
+                return True
+            scripts = payload.get("scripts")
+            if isinstance(scripts, dict):
+                script_text = " ".join(str(value).lower() for value in scripts.values())
+                script_markers = ("vite", "next", "astro", "remix", "svelte", "react-scripts")
+                return any(marker in script_text for marker in script_markers)
+
+        return False
+
     async def _prewarm_context(self) -> None:
         try:
             self._context_cache = await asyncio.wait_for(
@@ -1213,14 +1363,14 @@ class BackboardIdeSession:
                     timeout=1.0,
                 )
 
-        if self.intensity in {"balanced", "deep"} and self.tool_system:
+        if (self.intensity in {"balanced", "deep"} or self._web_quality_turn) and self.tool_system:
             semantic_started = self._loop_time()
             semantic = await self._semantic_context(message)
             self._record_timing("semantic_context_ms", semantic_started)
             if semantic:
                 context["semantic_hits"] = semantic
 
-        prompt_context = self._format_context_pack(context, blocks)
+        prompt_context = self._format_context_pack(context, blocks, web_quality=self._web_quality_turn)
         if not prompt_context:
             return message
         return f"{message}\n\n<backboard_ide_context>\n{prompt_context}\n</backboard_ide_context>"
@@ -1342,13 +1492,26 @@ class BackboardIdeSession:
             return ""
         return _truncate(_result_text(result), 2500)
 
-    def _format_context_pack(self, context: dict[str, Any], blocks: list[dict[str, Any]]) -> str:
+    def _format_context_pack(
+        self,
+        context: dict[str, Any],
+        blocks: list[dict[str, Any]],
+        *,
+        web_quality: bool = False,
+    ) -> str:
         lines: list[str] = []
         lines.append("Use this IDE context to reduce repeated exploration. Prefer explicit tools if this summary is stale.")
-        if self.intensity == "fast":
+        if web_quality and self.intensity == "fast":
+            lines.append(
+                "Intensity: Fast UI with website quality profile active; use focused extra reasoning "
+                "for visual quality without slowing unrelated turns."
+            )
+        elif self.intensity == "fast":
             lines.append("Intensity: Fast; keep context use focused and avoid extra deep exploration unless required.")
         elif self.intensity == "deep":
             lines.append("Intensity: Deep; use the broader context and verify architecture-level assumptions.")
+        if web_quality:
+            lines.append(FRONTEND_QUALITY_CONTEXT)
         if context.get("stack"):
             lines.append("Workspace stack: " + "; ".join(context["stack"][:8]))
         git = context.get("git")
@@ -1361,7 +1524,7 @@ class BackboardIdeSession:
                 lines.append("Git diff stat:\n" + git["diff_stat"])
         files = context.get("files")
         if isinstance(files, list) and files:
-            limit = 35 if self.intensity == "fast" else 80
+            limit = 80 if web_quality or self.intensity != "fast" else 35
             lines.append("Workspace files:\n" + "\n".join(str(path) for path in files[:limit]))
         rules = context.get("rules")
         if isinstance(rules, list) and rules:
@@ -1477,12 +1640,20 @@ class BackboardIdeSession:
             "keep exactly one item in_progress, and mark items completed immediately after finishing them. "
             "Before long commands, file writes, or checks, state the concrete thing being worked on."
             "\n\nBackboard IDE website defaults: when the user asks to create a website or app in an empty "
-            "workspace, build a real Vite React TypeScript project unless they explicitly request static HTML "
-            "or a single file. The baseline should include package.json, index.html, src/main.tsx, src/App.tsx, "
-            "and src/styles.css, plus any domain-specific components/assets needed by the prompt. If an existing "
+            "workspace, build a real Next.js TypeScript project unless they explicitly request static HTML "
+            "or a single file. The baseline should include package.json, app/page.tsx, app/layout.tsx, "
+            "app/globals.css, and next.config.js or next.config.mjs when needed, plus any domain-specific "
+            "components/assets needed by the prompt. If an existing "
             "app stack is present, follow that stack instead. Do not collapse website/app requests into one HTML "
-            "file unless the user asks for a single-file/static artifact. Verify with install/build/dev-server "
-            "checks when practical."
+            "file unless the user asks for a single-file/static artifact. Build an actual usable first screen, "
+            "not a placeholder or generic card stack. Make the page responsive and polished with deliberate "
+            "layout, spacing, typography, color contrast, interaction states, and relevant assets or icons when "
+            "available. Avoid decorative filler such as generic gradients, blobs, and vague copy when the prompt "
+            "calls for a concrete product or experience. Verify like the CLI: run practical install, build, and "
+            "dev-server checks when the project setup allows it, but only require browser/screenshot inspection "
+            "when browser tooling is available or the user asks for visual verification. Run dev servers in the "
+            "foreground without appending `&`; Backboard IDE already stops long-running dev-server checks after "
+            "a short startup window."
         )
         self._system_prompt_cache = system_prompt
         return system_prompt
@@ -1583,11 +1754,22 @@ class BackboardIdeSession:
 
     def _thinking_payload(self) -> dict[str, Any] | None:
         if self.intensity == "fast":
+            if not self._web_quality_turn:
+                return None
+            with contextlib.suppress(Exception):
+                payload = config.thinking_for_provider(
+                    self.provider or config.default_provider,
+                    self.model or config.default_model,
+                )
+                return self._cap_thinking_payload(payload, WEB_QUALITY_THINKING_BUDGET_TOKENS)
             return None
         with contextlib.suppress(Exception):
-            payload = config.thinking_for_provider(self.provider or config.default_provider, self.model or config.default_model)
+            payload = config.thinking_for_provider(
+                self.provider or config.default_provider,
+                self.model or config.default_model,
+            )
             if self.intensity == "balanced":
-                return self._cap_thinking_payload(payload, 2048)
+                return self._cap_thinking_payload(payload, WEB_QUALITY_THINKING_BUDGET_TOKENS)
             return payload
         return None
 
@@ -2015,12 +2197,19 @@ class BackboardIdeSession:
             asyncio.create_task(pump(proc.stderr, stderr_parts)),
         ]
 
+        async def finish_pumps() -> None:
+            try:
+                await asyncio.wait_for(asyncio.gather(*pumps, return_exceptions=True), timeout=1.0)
+            except asyncio.TimeoutError:
+                for task in pumps:
+                    task.cancel()
+                await asyncio.gather(*pumps, return_exceptions=True)
+
         timed_out = False
         try:
-            while proc.returncode is None:
+            while True:
                 if self.cancel_event.is_set():
-                    await self._terminate_process(proc)
-                    await asyncio.gather(*pumps, return_exceptions=True)
+                    await self._terminate_process(proc, force=True)
                     await self._tool_update(
                         tool_id,
                         "failed",
@@ -2030,11 +2219,14 @@ class BackboardIdeSession:
                     return {"success": False, "error": "Command cancelled.", "exit_code": 130}
                 if loop.time() - started > timeout_s:
                     timed_out = True
-                    await self._terminate_process(proc)
+                    await self._terminate_process(proc, force=True)
                     break
+                if proc.returncode is not None:
+                    if not is_dev_server or all(task.done() for task in pumps):
+                        break
                 await asyncio.sleep(0.05)
         finally:
-            await asyncio.gather(*pumps, return_exceptions=True)
+            await finish_pumps()
             await flush_terminal(force=True)
 
         exit_code = proc.returncode if proc.returncode is not None else 124
@@ -2067,23 +2259,32 @@ class BackboardIdeSession:
         )
         return result
 
-    async def _terminate_process(self, proc: asyncio.subprocess.Process) -> None:
-        if proc.returncode is not None:
+    async def _terminate_process(
+        self,
+        proc: asyncio.subprocess.Process,
+        *,
+        force: bool = False,
+    ) -> None:
+        if proc.returncode is not None and not force:
             return
         try:
             if os.name != "nt":
                 os.killpg(proc.pid, signal.SIGTERM)
             else:
-                proc.terminate()
-            await asyncio.wait_for(proc.wait(), timeout=2)
+                if proc.returncode is None:
+                    proc.terminate()
+            if proc.returncode is None:
+                await asyncio.wait_for(proc.wait(), timeout=2)
         except Exception:
             with contextlib.suppress(Exception):
                 if os.name != "nt":
                     os.killpg(proc.pid, signal.SIGKILL)
                 else:
-                    proc.kill()
+                    if proc.returncode is None:
+                        proc.kill()
             with contextlib.suppress(Exception):
-                await proc.wait()
+                if proc.returncode is None:
+                    await proc.wait()
 
     def _compute_file_change(self, name: str, args: dict[str, Any]) -> tuple[Path, str | None, str]:
         raw_path = _path_arg(args)
