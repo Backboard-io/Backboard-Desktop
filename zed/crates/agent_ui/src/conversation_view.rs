@@ -549,7 +549,7 @@ impl ConversationView {
         })
     }
 
-    pub(crate) fn root_thread(&self, cx: &App) -> Option<Entity<AcpThread>> {
+    pub fn root_thread(&self, cx: &App) -> Option<Entity<AcpThread>> {
         self.root_thread_view()
             .map(|view| view.read(cx).thread.clone())
     }

@@ -8,6 +8,7 @@ use std::sync::{Arc, OnceLock};
 use strum::{EnumMessage, IntoDiscriminant as _, VariantArray};
 use theme::SystemAppearance;
 use ui::IntoElement;
+use workspace::InterfaceMode;
 
 use crate::{
     ActionLink, DynamicItem, PROJECT, SettingField, SettingItem, SettingsFieldMetadata,
@@ -133,6 +134,30 @@ fn developer_page() -> SettingsPage {
 fn general_page(cx: &App) -> SettingsPage {
     fn general_settings_section(_cx: &App) -> Vec<SettingsPageItem> {
         vec![
+            SettingsPageItem::SectionHeader("Mode"),
+            SettingsPageItem::ActionLink(ActionLink {
+                title: "Interface Mode".into(),
+                description: Some("Toggle between Simple (chat-first) and Expert (editor + agents) mode.".into()),
+                button_text: "Toggle Mode".into(),
+                on_click: Arc::new(|settings_window, window, cx| {
+                    let Some(original_window) = settings_window.original_window else {
+                        return;
+                    };
+                    original_window
+                        .update(cx, |mw, original_window, cx| {
+                            let new_mode = if mw.interface_mode == InterfaceMode::Simple {
+                                InterfaceMode::Expert
+                            } else {
+                                InterfaceMode::Simple
+                            };
+                            mw.set_interface_mode(new_mode, original_window, cx);
+                            original_window.activate_window();
+                        })
+                        .ok();
+                    window.remove_window();
+                }),
+                files: USER,
+            }),
             SettingsPageItem::SectionHeader("General Settings"),
             SettingsPageItem::SettingItem(SettingItem {
                 title: "When Closing With No Tabs",

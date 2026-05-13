@@ -20,13 +20,13 @@ use ui::{
 pub use workspace::welcome::ShowWelcome;
 use workspace::welcome::WelcomePage;
 use workspace::{
-    AppState, Workspace, WorkspaceId,
+    AppState, InterfaceMode, MultiWorkspace, Workspace, WorkspaceId,
     dock::DockPosition,
     item::{Item, ItemEvent},
     notifications::NotifyResultExt as _,
     open_new, register_serializable_item, with_active_or_new_workspace,
 };
-use zed_actions::OpenOnboarding;
+use zed_actions::{OpenOnboarding, SwitchInterfaceMode};
 
 mod base_keymap_picker;
 mod basics_page;
@@ -129,6 +129,33 @@ pub fn init(cx: &mut App) {
                         let settings_page = Onboarding::new(workspace, cx);
                         workspace.add_item_to_active_pane(
                             Box::new(settings_page),
+                            None,
+                            true,
+                            window,
+                            cx,
+                        )
+                    }
+                })
+                .detach();
+        });
+    });
+
+    cx.on_action(|_: &SwitchInterfaceMode, cx| {
+        with_active_or_new_workspace(cx, |workspace, window, cx| {
+            workspace
+                .with_local_workspace(window, cx, |workspace, window, cx| {
+                    let existing = workspace
+                        .active_pane()
+                        .read(cx)
+                        .items()
+                        .find_map(|item| item.downcast::<Onboarding>());
+
+                    if let Some(existing) = existing {
+                        workspace.activate_item(&existing, true, true, window, cx);
+                    } else {
+                        let page = Onboarding::new(workspace, cx);
+                        workspace.add_item_to_active_pane(
+                            Box::new(page),
                             None,
                             true,
                             window,
@@ -319,26 +346,24 @@ impl Onboarding {
 
         telemetry::event!("Finish Setup");
 
+        let interface_mode = match level {
+            ExperienceLevel::Beginner => InterfaceMode::Simple,
+            ExperienceLevel::Developer | ExperienceLevel::Power => InterfaceMode::Expert,
+        };
+
+        // Switch the running MultiWorkspace immediately so the user sees the change now.
+        if let Some(mw) = window.root::<MultiWorkspace>().flatten() {
+            mw.update(cx, |mw, cx| {
+                mw.set_interface_mode(interface_mode, window, cx);
+            });
+        }
+
         match level {
             ExperienceLevel::Beginner => {
-                // Chat-first: close onboarding, no welcome page, open Backboard chat
                 close_onboarding_tab(cx);
-                window.dispatch_action(
-                    zed_actions::assistant::ToggleFocus.boxed_clone(),
-                    cx,
-                );
             }
-            ExperienceLevel::Developer => {
-                // Traditional editor: go to welcome page (open project, recents, etc.)
+            ExperienceLevel::Developer | ExperienceLevel::Power => {
                 go_to_welcome_page(cx);
-            }
-            ExperienceLevel::Power => {
-                // Agent workspace: open the multi-agent dashboard
-                close_onboarding_tab(cx);
-                window.dispatch_action(
-                    agent_ui::OpenBackboardAgentWorkspace.boxed_clone(),
-                    cx,
-                );
             }
         }
     }
@@ -381,11 +406,11 @@ impl Onboarding {
                     .items_center()
                     .gap_2()
                     .child(
-                        Headline::new("How comfortable are you with coding?")
+                        Headline::new("How do you want to work?")
                             .size(HeadlineSize::Large),
                     )
                     .child(
-                        Label::new("We'll tailor Backboard to match how you work")
+                        Label::new("You can change this any time in Settings")
                             .color(Color::Muted)
                             .size(LabelSize::Small),
                     ),
@@ -396,22 +421,15 @@ impl Onboarding {
                     .child(self.render_level_card(
                         ExperienceLevel::Beginner,
                         IconName::Chat,
-                        "Just getting started",
-                        "Describe what you want to build — Backboard does the rest. No code required.",
+                        "Simple",
+                        "Describe what you want to build in plain language. No code required.",
                         cx,
                     ))
                     .child(self.render_level_card(
                         ExperienceLevel::Developer,
                         IconName::Code,
-                        "I know how to code",
-                        "A full code editor with AI assistance when you need it.",
-                        cx,
-                    ))
-                    .child(self.render_level_card(
-                        ExperienceLevel::Power,
-                        IconName::BoltFilled,
-                        "Full agent mode",
-                        "Maximum autonomy. Agents take the wheel while you direct from above.",
+                        "Expert",
+                        "Full editor with AI agents. Code, run, and ship with full control.",
                         cx,
                     )),
             )

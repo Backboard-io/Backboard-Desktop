@@ -51,7 +51,8 @@ use ui::{
 use update_version::UpdateVersion;
 use util::ResultExt;
 use workspace::{
-    MultiWorkspace, ToggleWorktreeSecurity, Workspace, notifications::NotifyResultExt,
+    InterfaceMode, MultiWorkspace, ToggleMultiAgentView, ToggleWorktreeSecurity, Workspace,
+    notifications::NotifyResultExt,
 };
 
 use zed_actions::OpenRemote;
@@ -317,6 +318,9 @@ impl Render for TitleBar {
                 .children(self.render_call_controls(window, cx))
                 .children(self.render_connection_status(status, cx))
                 .child(self.update_version.clone())
+                .when_some(self.render_expert_toggle_pill(cx), |this, pill| {
+                    this.child(pill)
+                })
                 .when(
                     user.is_none()
                         && is_signed_out_or_auth_error
@@ -442,6 +446,10 @@ impl TitleBar {
             subscriptions.push(cx.subscribe(&trusted_worktrees, |_, _, _, cx| {
                 cx.notify();
             }));
+        }
+
+        if let Some(mw) = multi_workspace.as_ref().and_then(|w| w.upgrade()) {
+            subscriptions.push(cx.observe(&mw, |_, _, cx| cx.notify()));
         }
 
         let update_version = cx.new(|cx| UpdateVersion::new(cx));
@@ -1124,6 +1132,70 @@ impl TitleBar {
             .on_click(|_, window, cx| {
                 window.dispatch_action(Box::new(OpenBackboardAgentWorkspace), cx);
             })
+    }
+
+    fn render_expert_toggle_pill(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let mw = self.multi_workspace.as_ref()?.upgrade()?;
+        let mw_read = mw.read(cx);
+        if mw_read.interface_mode != InterfaceMode::Expert {
+            return None;
+        }
+        let multi_agent_expanded = mw_read.multi_agent_expanded;
+        Some(
+            h_flex()
+                .id("expert-toggle-pill")
+                .gap_px()
+                .p_0p5()
+                .rounded_md()
+                .bg(cx.theme().colors().element_background)
+                .border_1()
+                .border_color(cx.theme().colors().border)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(
+                    div()
+                        .id("pill-editor")
+                        .px_2()
+                        .py_0p5()
+                        .rounded_sm()
+                        .when(!multi_agent_expanded, |el| {
+                            el.bg(cx.theme().colors().element_selected)
+                        })
+                        .when(multi_agent_expanded, |el| {
+                            el.cursor_pointer()
+                                .hover(|el| el.bg(cx.theme().colors().element_hover))
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(ToggleMultiAgentView), cx);
+                                })
+                        })
+                        .child(
+                            Label::new("Editor")
+                                .size(LabelSize::Small)
+                                .when(!multi_agent_expanded, |l| l.color(Color::Accent)),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("pill-agents")
+                        .px_2()
+                        .py_0p5()
+                        .rounded_sm()
+                        .when(multi_agent_expanded, |el| {
+                            el.bg(cx.theme().colors().element_selected)
+                        })
+                        .when(!multi_agent_expanded, |el| {
+                            el.cursor_pointer()
+                                .hover(|el| el.bg(cx.theme().colors().element_hover))
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(ToggleMultiAgentView), cx);
+                                })
+                        })
+                        .child(
+                            Label::new("Agents")
+                                .size(LabelSize::Small)
+                                .when(multi_agent_expanded, |l| l.color(Color::Accent)),
+                        ),
+                ),
+        )
     }
 
     pub fn render_user_menu_button(&mut self, cx: &mut Context<Self>) -> impl Element {

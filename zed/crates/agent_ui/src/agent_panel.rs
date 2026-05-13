@@ -93,6 +93,7 @@ use workspace::{
     dock::{DockPosition, Panel, PanelEvent},
     item::ItemEvent,
 };
+use zed_actions::agents_sidebar::ToggleThreadSwitcher;
 
 const AGENT_PANEL_KEY: &str = "agent_panel";
 const MIN_PANEL_WIDTH: Pixels = px(300.);
@@ -3356,6 +3357,39 @@ impl AgentPanel {
         count
     }
 
+    /// Creates a new Backboard agent thread for the beginner UI and returns the
+    /// underlying `AcpThread`. Does NOT activate or show the agent panel sidebar.
+    /// Creates a new Backboard agent thread for the beginner UI and returns the
+    /// `ConversationView` entity. The ACP server connects asynchronously — callers
+    /// should subscribe to the returned view and call `root_thread(cx)` once connected.
+    pub fn spawn_beginner_thread(
+        &mut self,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<ConversationView> {
+        let initial_content = if text.is_empty() {
+            None
+        } else {
+            Some(AgentInitialContent::ContentBlock {
+                blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
+                auto_submit: true,
+            })
+        };
+        let agent_thread = self.create_agent_thread_with_server(
+            Agent::NativeAgent,
+            None,
+            None,
+            None,
+            None,
+            initial_content,
+            "beginner_ui",
+            window,
+            cx,
+        );
+        agent_thread.conversation_view
+    }
+
     fn create_backboard_workspace_agent_thread(
         &mut self,
         title: String,
@@ -4748,6 +4782,110 @@ impl AgentPanel {
         true
     }
 
+    fn render_expert_header(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Collect open thread tabs: active first, then retained sorted by update time.
+        let active_id = self.active_thread_id(cx);
+        let mut thread_tabs: Vec<(ThreadId, SharedString)> = Vec::new();
+        if let Some(cv) = self.active_conversation_view() {
+            let id = cv.read(cx).thread_id;
+            let title = cv.read(cx).title(cx);
+            thread_tabs.push((id, title));
+        }
+        let mut retained: Vec<_> = self
+            .retained_threads
+            .values()
+            .map(|cv| {
+                let id = cv.read(cx).thread_id;
+                let title = cv.read(cx).title(cx);
+                let updated = cv.read(cx).updated_at(cx);
+                (id, title, updated)
+            })
+            .collect();
+        retained.sort_by(|a, b| b.2.cmp(&a.2));
+        thread_tabs.extend(retained.into_iter().map(|(id, title, _)| (id, title)));
+
+        let show_tabs = thread_tabs.len() > 1;
+
+        v_flex()
+            .w_full()
+            .flex_shrink_0()
+            // Action buttons row
+            .child(
+                h_flex()
+                    .w_full()
+                    .px_2()
+                    .py_1()
+                    .justify_end()
+                    .bg(cx.theme().colors().tab_bar_background)
+                    .border_b_1()
+                    .border_color(cx.theme().colors().border)
+                    .child(
+                        h_flex()
+                            .gap_0p5()
+                            .child(
+                                IconButton::new("new-agent-thread", IconName::Plus)
+                                    .icon_size(IconSize::Small)
+                                    .tooltip(Tooltip::text("New Agent"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.activate_new_thread(true, "expert_header", window, cx);
+                                    })),
+                            )
+                            .child(
+                                IconButton::new("agent-history", IconName::HistoryRerun)
+                                    .icon_size(IconSize::Small)
+                                    .tooltip(Tooltip::text("Thread History"))
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(ToggleThreadSwitcher { select_last: false }),
+                                            cx,
+                                        );
+                                    }),
+                            ),
+                    ),
+            )
+            // Thread tab bar (visible when 2+ threads are open)
+            .when(show_tabs, |el| {
+                el.child(
+                    h_flex()
+                        .id("agent-thread-tabs")
+                        .w_full()
+                        .overflow_x_hidden()
+                        .bg(cx.theme().colors().tab_bar_background)
+                        .border_b_1()
+                        .border_color(cx.theme().colors().border)
+                        .children(thread_tabs.into_iter().enumerate().map(|(i, (id, title))| {
+                            let is_active = Some(id) == active_id;
+                            div()
+                                .id(ElementId::Integer(i as u64))
+                                .px_3()
+                                .py_1()
+                                .cursor_pointer()
+                                .flex_shrink_0()
+                                .max_w_40()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .when(is_active, |el| {
+                                    el.border_b_2()
+                                        .border_color(cx.theme().colors().border_focused)
+                                        .text_color(cx.theme().colors().text)
+                                })
+                                .when(!is_active, |el| {
+                                    el.text_color(cx.theme().colors().text_muted)
+                                        .hover(|el| el.bg(cx.theme().colors().element_hover))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.activate_retained_thread(id, true, window, cx);
+                                        }))
+                                })
+                                .child(
+                                    Label::new(title)
+                                        .size(LabelSize::XSmall)
+                                        .single_line(),
+                                )
+                        })),
+                )
+            })
+    }
+
     fn render_title_view(&self, _window: &mut Window, cx: &Context<Self>) -> AnyElement {
         let content = match self.visible_surface() {
             VisibleSurface::AgentThread(conversation_view) => {
@@ -5730,6 +5868,7 @@ impl Render for AgentPanel {
                     })
                 }
             }))
+            .child(self.render_expert_header(window, cx))
             .child(self.render_toolbar(window, cx))
             .children(self.render_new_user_onboarding(window, cx))
             .map(|parent| match self.visible_surface() {

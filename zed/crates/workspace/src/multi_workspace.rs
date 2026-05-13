@@ -18,6 +18,7 @@ use ui::prelude::*;
 use util::ResultExt;
 use util::path_list::PathList;
 use zed_actions::agents_sidebar::ToggleThreadSwitcher;
+use zed_actions::SwitchInterfaceMode;
 
 use agent_settings::AgentSettings;
 use settings::SidebarDockPosition;
@@ -53,6 +54,8 @@ actions!(
         NewThread,
         /// Moves the active project to a new window.
         MoveProjectToNewWindow,
+        /// Toggles the multi-agent expanded view in Expert mode.
+        ToggleMultiAgentView,
     ]
 );
 
@@ -283,6 +286,13 @@ pub struct ProjectGroupState {
     pub last_active_workspace: Option<WeakEntity<Workspace>>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum InterfaceMode {
+    Simple,
+    #[default]
+    Expert,
+}
+
 pub struct MultiWorkspace {
     window_id: WindowId,
     retained_workspaces: Vec<Entity<Workspace>>,
@@ -295,6 +305,10 @@ pub struct MultiWorkspace {
     _serialize_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
     previous_focus_handle: Option<FocusHandle>,
+    pub interface_mode: InterfaceMode,
+    pub multi_agent_expanded: bool,
+    pub beginner_view: Option<AnyView>,
+    pub agent_workspace_view: Option<AnyView>,
 }
 
 impl EventEmitter<MultiWorkspaceEvent> for MultiWorkspace {}
@@ -356,7 +370,21 @@ impl MultiWorkspace {
                 settings_subscription,
             ],
             previous_focus_handle: None,
+            interface_mode: InterfaceMode::Expert,
+            multi_agent_expanded: false,
+            beginner_view: None,
+            agent_workspace_view: None,
         }
+    }
+
+    pub fn set_interface_mode(
+        &mut self,
+        mode: InterfaceMode,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.interface_mode = mode;
+        cx.notify();
     }
 
     pub fn register_sidebar<T: Sidebar>(&mut self, sidebar: Entity<T>, cx: &mut Context<Self>) {
@@ -470,8 +498,20 @@ impl MultiWorkspace {
 
     /// Restores the sidebar to open state from persisted session data without
     /// firing a telemetry event, since this is not a user-initiated action.
+    /// Skipped when no project folder is loaded — the sidebar should only
+    /// auto-open when there's actually a project to work in.
     pub(crate) fn restore_open_sidebar(&mut self, cx: &mut Context<Self>) {
-        self.apply_open_sidebar(cx);
+        let has_project = self
+            .workspace()
+            .read(cx)
+            .project()
+            .read(cx)
+            .visible_worktrees(cx)
+            .next()
+            .is_some();
+        if has_project {
+            self.apply_open_sidebar(cx);
+        }
     }
 
     fn apply_open_sidebar(&mut self, cx: &mut Context<Self>) {
@@ -2010,8 +2050,36 @@ impl MultiWorkspace {
     }
 }
 
+
 impl Render for MultiWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let ui_font = theme_settings::setup_ui_font(window, cx);
+        let text_color = cx.theme().colors().text;
+
+        if self.interface_mode == InterfaceMode::Simple {
+            if let Some(view) = self.beginner_view.as_ref() {
+                let titlebar = self.workspace().read(cx).titlebar_item();
+                return client_side_decorations(
+                    div()
+                        .key_context("SimpleMode")
+                        .flex()
+                        .flex_col()
+                        .size_full()
+                        .font(ui_font)
+                        .text_color(text_color)
+                        .on_action(cx.listener(Self::close_window))
+                        .on_action(cx.listener(|this, _: &SwitchInterfaceMode, window, cx| {
+                            this.set_interface_mode(InterfaceMode::Expert, window, cx);
+                        }))
+                        .children(titlebar)
+                        .child(div().flex_1().min_h_0().child(view.clone())),
+                    window,
+                    cx,
+                    Tiling::default(),
+                );
+            }
+        }
+
         let multi_workspace_enabled = self.multi_workspace_enabled(cx);
         let sidebar_side = self.sidebar_side(cx);
         let sidebar_on_right = sidebar_side == SidebarSide::Right;
@@ -2082,8 +2150,27 @@ impl Render for MultiWorkspace {
             (sidebar, None)
         };
 
-        let ui_font = theme_settings::setup_ui_font(window, cx);
-        let text_color = cx.theme().colors().text;
+        if self.multi_agent_expanded {
+            if let Some(view) = self.agent_workspace_view.as_ref() {
+                return client_side_decorations(
+                    div()
+                        .key_context("MultiAgentView")
+                        .relative()
+                        .size_full()
+                        .font(ui_font)
+                        .text_color(text_color)
+                        .on_action(cx.listener(Self::close_window))
+                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
+                            this.multi_agent_expanded = false;
+                            cx.notify();
+                        }))
+                        .child(view.clone()),
+                    window,
+                    cx,
+                    Tiling::default(),
+                );
+            }
+        }
 
         let workspace = self.workspace().clone();
         let workspace_key_context = workspace.update(cx, |workspace, cx| workspace.key_context(cx));
@@ -2096,6 +2183,10 @@ impl Render for MultiWorkspace {
                 .font(ui_font)
                 .text_color(text_color)
                 .on_action(cx.listener(Self::close_window))
+                .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
+                    this.multi_agent_expanded = !this.multi_agent_expanded;
+                    cx.notify();
+                }))
                 .when(self.multi_workspace_enabled(cx), |this| {
                     this.on_action(cx.listener(
                         |this: &mut Self, _: &ToggleWorkspaceSidebar, window, cx| {

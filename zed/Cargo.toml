@@ -20,6 +20,7 @@ members = [
     "crates/aws_http_client",
     "crates/backboard",
     "crates/backboard_ui",
+    "crates/beginner_ui",
     "crates/bedrock",
     "crates/breadcrumbs",
     "crates/buffer_diff",
@@ -284,6 +285,7 @@ auto_update_ui = { path = "crates/auto_update_ui" }
 aws_http_client = { path = "crates/aws_http_client" }
 backboard = { path = "crates/backboard" }
 backboard_ui = { path = "crates/backboard_ui" }
+beginner_ui = { path = "crates/beginner_ui" }
 bedrock = { path = "crates/bedrock" }
 breadcrumbs = { path = "crates/breadcrumbs" }
 buffer_diff = { path = "crates/buffer_diff" }

@@ -34,8 +34,6 @@ impl Focusable for BeginnerChatFeed {
 
 impl Render for BeginnerChatFeed {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Collect owned items — all &str are immediately converted to String,
-        // so the thread borrow ends before we build the element tree.
         let items = collect_items(&self.thread, cx);
 
         v_flex()
@@ -43,8 +41,9 @@ impl Render for BeginnerChatFeed {
             .flex_1()
             .w_full()
             .overflow_y_scroll()
-            .p_4()
-            .gap_3()
+            .px_4()
+            .py_3()
+            .gap_2()
             .children(items.into_iter().map(|item| render_item(item, cx)))
     }
 }
@@ -62,7 +61,6 @@ fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
 fn friendly_item(index: usize, entry: &AgentThreadEntry, cx: &App) -> Option<FriendlyItem> {
     match entry {
         AgentThreadEntry::UserMessage(msg) => {
-            // Skip workspace-injected system messages (indented = sub-agent task)
             if msg.indented {
                 return None;
             }
@@ -74,7 +72,6 @@ fn friendly_item(index: usize, entry: &AgentThreadEntry, cx: &App) -> Option<Fri
         }
 
         AgentThreadEntry::AssistantMessage(msg) => {
-            // Show only Message chunks — skip Thought (internal reasoning)
             let parts: Vec<String> = msg
                 .chunks
                 .iter()
@@ -104,7 +101,6 @@ fn friendly_item(index: usize, entry: &AgentThreadEntry, cx: &App) -> Option<Fri
             Some(FriendlyItem::ToolAction { index, label, done, failed })
         }
 
-        // Internal planning data — not surfaced to beginners
         AgentThreadEntry::CompletedPlan(_) => None,
     }
 }
@@ -112,7 +108,6 @@ fn friendly_item(index: usize, entry: &AgentThreadEntry, cx: &App) -> Option<Fri
 fn translate_tool_label(kind: &acp::ToolKind, raw: &str) -> String {
     match kind {
         acp::ToolKind::Edit => {
-            // raw is like "Editing `index.html` +24 -0" — extract the filename
             if let Some(start) = raw.find('`') {
                 if let Some(end) = raw[start + 1..].find('`') {
                     let filename = &raw[start + 1..start + 1 + end];
@@ -124,7 +119,6 @@ fn translate_tool_label(kind: &acp::ToolKind, raw: &str) -> String {
         acp::ToolKind::Execute => "Ran a command".to_string(),
         acp::ToolKind::Fetch => "Explored your project".to_string(),
         _ => {
-            // Truncate to first line and strip markdown backticks for readability
             let first_line = raw.lines().next().unwrap_or(raw).trim();
             first_line.replace('`', "").to_string()
         }
@@ -137,10 +131,10 @@ fn render_item(item: FriendlyItem, cx: &App) -> impl IntoElement {
             .id(index)
             .w_full()
             .justify_end()
-            .py_1()
+            .py_0p5()
             .child(
                 div()
-                    .max_w(px(480.))
+                    .max_w_3_4()
                     .rounded_xl()
                     .bg(cx.theme().colors().element_selected)
                     .px_3()
@@ -156,11 +150,22 @@ fn render_item(item: FriendlyItem, cx: &App) -> impl IntoElement {
         FriendlyItem::AssistantBubble { index, text } => h_flex()
             .id(index + 10_000)
             .w_full()
-            .justify_start()
-            .py_1()
+            .items_start()
+            .gap_2()
+            .py_0p5()
             .child(
                 div()
-                    .max_w(px(480.))
+                    .mt_1()
+                    .flex_shrink_0()
+                    .child(
+                        Icon::new(IconName::Sparkle)
+                            .size(IconSize::XSmall)
+                            .color(Color::Accent),
+                    ),
+            )
+            .child(
+                div()
+                    .max_w_3_4()
                     .rounded_xl()
                     .bg(cx.theme().colors().surface_background)
                     .border_1()
@@ -178,24 +183,30 @@ fn render_item(item: FriendlyItem, cx: &App) -> impl IntoElement {
         FriendlyItem::ToolAction { index, label, done, failed } => h_flex()
             .id(index + 20_000)
             .w_full()
-            .gap_2()
+            .gap_1p5()
             .items_center()
             .px_1()
             .py_0p5()
             .child(
-                Icon::new(IconName::Pencil)
-                    .size(IconSize::XSmall)
-                    .color(if failed {
-                        Color::Error
-                    } else if done {
-                        Color::Created
-                    } else {
-                        Color::Modified
-                    }),
+                Icon::new(if failed {
+                    IconName::XCircle
+                } else if done {
+                    IconName::Check
+                } else {
+                    IconName::Pencil
+                })
+                .size(IconSize::XSmall)
+                .color(if failed {
+                    Color::Error
+                } else if done {
+                    Color::Created
+                } else {
+                    Color::Modified
+                }),
             )
             .child(
                 Label::new(SharedString::from(label))
-                    .size(LabelSize::Small)
+                    .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
             .into_any_element(),

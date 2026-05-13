@@ -76,6 +76,7 @@ audio.workspace = true
 auto_update.workspace = true
 auto_update_ui.workspace = true
 backboard_ui.workspace = true
+beginner_ui.workspace = true
 breadcrumbs.workspace = true
 chrono.workspace = true
 clap.workspace = true

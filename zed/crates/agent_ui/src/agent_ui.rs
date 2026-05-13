@@ -66,6 +66,7 @@ use workspace::Workspace;
 
 use crate::agent_configuration::{ConfigureContextServerModal, ManageProfilesModal};
 pub use crate::agent_connection_store::{ActiveAcpConnection, AgentConnectionStore};
+pub use crate::agent_workspace_ui::BackboardAgentWorkspacePage;
 pub use crate::agent_panel::{
     AgentPanel, AgentPanelEvent, AgentPanelTerminalInfo, MaxIdleRetainedThreads, TerminalId,
 };

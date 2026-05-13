@@ -1999,6 +1999,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "beginner_ui"
+version = "0.1.0"
+dependencies = [
+ "acp_thread",
+ "action_log",
+ "agent-client-protocol",
+ "agent_ui",
+ "anyhow",
+ "db",
+ "editor",
+ "fs",
+ "futures 0.3.32",
+ "gpui",
+ "language",
+ "onboarding",
+ "project",
+ "recent_projects",
+ "settings",
+ "theme",
+ "theme_settings",
+ "ui",
+ "util",
+ "workspace",
+]
+
+[[package]]
 name = "bigdecimal"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -22421,6 +22447,7 @@ dependencies = [
  "auto_update",
  "auto_update_ui",
  "backboard_ui",
+ "beginner_ui",
  "breadcrumbs",
  "chrono",
  "clap",

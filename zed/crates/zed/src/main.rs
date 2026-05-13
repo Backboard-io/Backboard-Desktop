@@ -14,7 +14,6 @@ use client::{Client, ProxySettings, RefreshLlmTokenListener, UserStore, parse_ze
 use collections::HashMap;
 use crashes::InitCrashHandler;
 use db::kvp::{GlobalKeyValueStore, KeyValueStore};
-use editor::Editor;
 use extension::ExtensionHostProxy;
 use fs::{Fs, RealFs};
 use futures::{StreamExt, channel::oneshot};
@@ -28,7 +27,7 @@ use gpui_platform;
 
 use gpui_tokio::Tokio;
 use language::LanguageRegistry;
-use onboarding::{FIRST_OPEN, show_onboarding_view};
+use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, FIRST_OPEN, ExperienceLevel, show_onboarding_view};
 use project_panel::ProjectPanel;
 use prompt_store::PromptBuilder;
 use remote::RemoteConnectionOptions;
@@ -1471,16 +1470,7 @@ pub(crate) async fn restore_or_create_workspace(
                     Default::default(),
                     app_state.clone(),
                     cx,
-                    |workspace, window, cx| {
-                        let restore_on_startup =
-                            WorkspaceSettings::get_global(cx).restore_on_startup;
-                        match restore_on_startup {
-                            workspace::RestoreOnStartupBehavior::Launchpad => {}
-                            _ => {
-                                Editor::new_file(workspace, &Default::default(), window, cx);
-                            }
-                        }
-                    },
+                    open_new_workspace_callback,
                 )
             })
             .await?;
@@ -1493,21 +1483,45 @@ pub(crate) async fn restore_or_create_workspace(
                 Default::default(),
                 app_state,
                 cx,
-                |workspace, window, cx| {
-                    let restore_on_startup = WorkspaceSettings::get_global(cx).restore_on_startup;
-                    match restore_on_startup {
-                        workspace::RestoreOnStartupBehavior::Launchpad => {}
-                        _ => {
-                            Editor::new_file(workspace, &Default::default(), window, cx);
-                        }
-                    }
-                },
+                open_new_workspace_callback,
             )
         })
         .await?;
     }
 
     Ok(())
+}
+
+fn open_new_workspace_callback(
+    workspace: &mut workspace::Workspace,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<workspace::Workspace>,
+) {
+    use db::kvp::KeyValueStore;
+    let restore_on_startup = WorkspaceSettings::get_global(cx).restore_on_startup;
+    if matches!(restore_on_startup, workspace::RestoreOnStartupBehavior::Launchpad) {
+        return;
+    }
+
+    let level = KeyValueStore::global(cx)
+        .read_kvp(EXPERIENCE_LEVEL_KVP_KEY)
+        .ok()
+        .flatten()
+        .as_deref()
+        .and_then(ExperienceLevel::from_str);
+
+    match level {
+        Some(ExperienceLevel::Beginner) => {
+            // Simple mode — the BeginnerWorkspace UI is shown; no pane item needed.
+        }
+        _ => {
+            // Expert mode (or no level set) — show the welcome / recents page.
+            let welcome = cx.new(|cx| {
+                workspace::welcome::WelcomePage::new(workspace.weak_handle(), false, window, cx)
+            });
+            workspace.add_item_to_active_pane(Box::new(welcome), None, true, window, cx);
+        }
+    }
 }
 
 async fn restorable_workspaces(
