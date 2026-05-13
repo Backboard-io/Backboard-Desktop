@@ -25,7 +25,7 @@ use settings::{LanguageModelProviderSetting, LanguageModelSelection};
 use zed_actions::{
     DecreaseBufferFontSize, IncreaseBufferFontSize, ResetBufferFontSize,
     agent::{
-        AddSelectionToThread, ConflictContent, OpenSettings, ReauthenticateAgent, ResetAgentZoom,
+        AddSelectionToThread, ConflictContent, ReauthenticateAgent, ResetAgentZoom,
         ResetOnboarding, ResolveConflictedFilesWithAgent, ResolveConflictsWithAgent,
         ReviewBranchDiff,
     },
@@ -594,12 +594,6 @@ pub fn init(cx: &mut App) {
                     if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
                         workspace.focus_panel::<AgentPanel>(window, cx);
                         panel.update(cx, |panel, cx| panel.expand_message_editor(window, cx));
-                    }
-                })
-                .register_action(|workspace, _: &OpenSettings, window, cx| {
-                    if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
-                        workspace.focus_panel::<AgentPanel>(window, cx);
-                        panel.update(cx, |panel, cx| panel.open_configuration(window, cx));
                     }
                 })
                 .register_action(|workspace, action: &NewExternalAgentThread, window, cx| {
@@ -4997,7 +4991,6 @@ impl AgentPanel {
                         }
 
                         menu = menu
-                            .action("Settings", Box::new(OpenSettings))
                             .separator()
                             .action("Toggle Threads Sidebar", Box::new(ToggleWorkspaceSidebar));
 
@@ -5721,9 +5714,6 @@ impl Render for AgentPanel {
             .key_context(self.key_context())
             .on_action(cx.listener(|this, action: &NewThread, window, cx| {
                 this.new_thread(action, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
-                this.open_configuration(window, cx);
             }))
             .on_action(cx.listener(Self::open_active_thread_as_markdown))
             .on_action(cx.listener(Self::deploy_rules_library))
