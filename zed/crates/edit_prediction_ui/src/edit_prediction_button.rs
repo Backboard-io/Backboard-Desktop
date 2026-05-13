@@ -1211,14 +1211,18 @@ impl EditPredictionButton {
                             },
                             |_window, cx| cx.open_url(&zed_urls::account_url(cx)),
                         )
-                        .entry("Upgrade to Backboard Pro or contact us.", None, |_window, cx| {
-                            telemetry::event!(
-                                "Edit Prediction Menu Action",
-                                action = "upsell_clicked",
-                                reason = "account_age",
-                            );
-                            cx.open_url(&zed_urls::account_url(cx))
-                        })
+                        .entry(
+                            "Upgrade to Backboard Pro or contact us.",
+                            None,
+                            |_window, cx| {
+                                telemetry::event!(
+                                    "Edit Prediction Menu Action",
+                                    action = "upsell_clicked",
+                                    reason = "account_age",
+                                );
+                                cx.open_url(&zed_urls::account_url(cx))
+                            },
+                        )
                         .separator();
                 } else if self.user_store.read(cx).has_overdue_invoices() {
                     menu = menu

@@ -56,9 +56,15 @@ impl Render for AgentPanelOnboarding {
                 .w_full()
                 .relative()
                 .gap_3()
-                .child(v_flex().gap_1().child(Headline::new("Backboard Agent")).child(
-                    Label::new("Chat with Backboard Agent against this workspace.").color(Color::Muted),
-                ))
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(Headline::new("Backboard Agent"))
+                        .child(
+                            Label::new("Chat with Backboard Agent against this workspace.")
+                                .color(Color::Muted),
+                        ),
+                )
                 .child(
                     v_flex()
                         .gap_1()

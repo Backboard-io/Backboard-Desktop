@@ -82,10 +82,9 @@ impl FileChangesPanel {
             .filter_map(|buffer| {
                 let buffer_ref = buffer.read(cx);
                 let rel_path_arc = buffer_ref.file()?.path().clone();
-                let path: PathBuf = <util::rel_path::RelPath as AsRef<std::path::Path>>::as_ref(
-                    &rel_path_arc,
-                )
-                .to_path_buf();
+                let path: PathBuf =
+                    <util::rel_path::RelPath as AsRef<std::path::Path>>::as_ref(&rel_path_arc)
+                        .to_path_buf();
                 let status = if buffer_ref.file().is_some() {
                     ChangeStatus::Modified
                 } else {
@@ -180,7 +179,9 @@ impl Render for FileChangesPanel {
                             .unwrap_or_default();
 
                         h_flex()
-                            .id(SharedString::from(entry.path.to_string_lossy().into_owned()))
+                            .id(SharedString::from(
+                                entry.path.to_string_lossy().into_owned(),
+                            ))
                             .px_2()
                             .py_1()
                             .gap_2()

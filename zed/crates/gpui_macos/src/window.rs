@@ -1391,10 +1391,19 @@ impl PlatformWindow for MacWindow {
     fn set_title(&mut self, title: &str) {
         unsafe {
             let app = NSApplication::sharedApplication(nil);
-            let window = self.0.lock().native_window;
+            let window_state = self.0.lock();
+            let window = window_state.native_window;
+            let transparent_titlebar = window_state.transparent_titlebar;
+            drop(window_state);
             let title = ns_string(title);
             let _: () = msg_send![app, changeWindowsItem:window title:title filename:false];
             let _: () = msg_send![window, setTitle: title];
+            if transparent_titlebar {
+                let _: () = msg_send![
+                    window,
+                    setTitleVisibility: NSWindowTitleVisibility::NSWindowTitleHidden
+                ];
+            }
             self.0.lock().move_traffic_light();
         }
     }

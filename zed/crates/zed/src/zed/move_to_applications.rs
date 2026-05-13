@@ -198,9 +198,11 @@ impl Render for InstallingZedModal {
                             .gap_1()
                             .child(Label::new("Moving Backboard Studio to Applications"))
                             .child(
-                                Label::new("Backboard Studio will reopen when installation is complete.")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
+                                Label::new(
+                                    "Backboard Studio will reopen when installation is complete.",
+                                )
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
                             ),
                     ),
             )

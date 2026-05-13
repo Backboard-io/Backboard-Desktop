@@ -6,10 +6,10 @@ use gpui::{Pixels, Window, px};
 // Magic number: There is one extra pixel of padding on the left side due to
 // the 1px border around the window on macOS apps.
 #[cfg(macos_sdk_26)]
-pub const TRAFFIC_LIGHT_PADDING: f32 = 78.;
+pub const TRAFFIC_LIGHT_PADDING: f32 = 112.;
 
 #[cfg(not(macos_sdk_26))]
-pub const TRAFFIC_LIGHT_PADDING: f32 = 71.;
+pub const TRAFFIC_LIGHT_PADDING: f32 = 104.;
 
 /// Returns the platform-appropriate title bar height.
 ///

@@ -600,7 +600,9 @@ impl Render for ConfigurationView {
                             .size(IconSize::XSmall)
                             .color(Color::Muted),
                     )
-                    .child(Label::new("Backboard also supports OpenAI-compatible models.")),
+                    .child(Label::new(
+                        "Backboard also supports OpenAI-compatible models.",
+                    )),
             )
             .child(
                 Button::new("docs", "Learn More")

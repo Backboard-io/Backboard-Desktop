@@ -12,8 +12,8 @@ use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
 use project::Project;
 use recent_projects::RecentProjectEntry;
 use ui::{
-    Button, ButtonStyle, Color, Headline, HeadlineSize, Icon, IconButton, IconName,
-    IconSize, Label, LabelSize, Tooltip, prelude::*,
+    Button, ButtonStyle, Color, Headline, HeadlineSize, Icon, IconButton, IconName, IconSize,
+    Label, LabelSize, Tooltip, prelude::*,
 };
 use util::ResultExt;
 use workspace::{MultiWorkspace, Workspace, WorkspaceDb};
@@ -76,15 +76,16 @@ impl BeginnerWorkspace {
         let state = folder_to_state(initial_folder.as_ref());
 
         // Keep state in sync when folders are opened or closed from any mode.
-        let project_sub = cx.subscribe(
-            &project,
-            |this, _proj, event: &project::Event, cx| match event {
-                project::Event::WorktreeAdded(_) | project::Event::WorktreeRemoved(_) => {
-                    this.sync_from_project(cx);
-                }
-                _ => {}
-            },
-        );
+        let project_sub =
+            cx.subscribe(
+                &project,
+                |this, _proj, event: &project::Event, cx| match event {
+                    project::Event::WorktreeAdded(_) | project::Event::WorktreeRemoved(_) => {
+                        this.sync_from_project(cx);
+                    }
+                    _ => {}
+                },
+            );
 
         Self {
             workspace,
@@ -280,14 +281,12 @@ impl BeginnerWorkspace {
         let cv_sub = cx.observe(&conversation_view, |this, cv, cx| {
             if this.thread.is_none() {
                 if let Some(thread) = cv.read(cx).root_thread(cx) {
-                    let thread_sub = cx.subscribe(&thread, |this, _, event, cx| {
-                        match event {
-                            AcpThreadEvent::Stopped(_) | AcpThreadEvent::Error => {
-                                this.is_agent_running = false;
-                                cx.notify();
-                            }
-                            _ => {}
+                    let thread_sub = cx.subscribe(&thread, |this, _, event, cx| match event {
+                        AcpThreadEvent::Stopped(_) | AcpThreadEvent::Error => {
+                            this.is_agent_running = false;
+                            cx.notify();
                         }
+                        _ => {}
                     });
                     this._subscriptions.push(thread_sub);
                     let feed = cx.new(|cx| BeginnerChatFeed::new(thread.clone(), cx));
@@ -463,18 +462,14 @@ impl BeginnerWorkspace {
             .gap_8()
             .bg(cx.theme().colors().panel_background)
             .child(
-                div()
-                    .absolute()
-                    .top_3()
-                    .right_3()
-                    .child(
-                        IconButton::new("simple-mode-settings", IconName::Settings)
-                            .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Switch to Expert mode"))
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                cx.emit(BeginnerWorkspaceEvent::SwitchToEditor);
-                            })),
-                    ),
+                div().absolute().top_3().right_3().child(
+                    IconButton::new("simple-mode-settings", IconName::Settings)
+                        .icon_size(IconSize::Small)
+                        .tooltip(Tooltip::text("Switch to Expert mode"))
+                        .on_click(cx.listener(|_, _, _, cx| {
+                            cx.emit(BeginnerWorkspaceEvent::SwitchToEditor);
+                        })),
+                ),
             )
             // Logo + headline
             .child(
@@ -490,10 +485,7 @@ impl BeginnerWorkspace {
                                     .size(IconSize::Custom(rems(1.75)))
                                     .color(Color::Accent),
                             )
-                            .child(
-                                Headline::new("Backboard")
-                                    .size(HeadlineSize::XLarge),
-                            ),
+                            .child(Headline::new("Backboard").size(HeadlineSize::XLarge)),
                     )
                     .child(
                         Label::new("What do you want to build today?")
@@ -555,46 +547,42 @@ impl BeginnerWorkspace {
                                 )
                                 .child(div().flex_1().h_px().bg(cx.theme().colors().border)),
                         )
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .flex_wrap()
-                                .max_w(px(580.))
-                                .children(recent_projects.into_iter().map(|entry| {
-                                    let name = entry.name.clone();
-                                    let entry_for_click = RecentProjectEntry {
-                                        name: entry.name.clone(),
-                                        full_path: entry.full_path.clone(),
-                                        paths: entry.paths.clone(),
-                                        workspace_id: entry.workspace_id,
-                                        timestamp: entry.timestamp,
-                                    };
-                                    h_flex()
-                                        .id(SharedString::from(format!("recent-{}", name)))
-                                        .px_3()
-                                        .py_1p5()
-                                        .gap_1p5()
-                                        .rounded_lg()
-                                        .border_1()
-                                        .border_color(cx.theme().colors().border)
-                                        .bg(cx.theme().colors().surface_background)
-                                        .cursor_pointer()
-                                        .hover(|el| el.bg(cx.theme().colors().element_hover))
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.open_recent_project(
-                                                entry_for_click.clone(),
-                                                window,
-                                                cx,
-                                            );
-                                        }))
-                                        .child(
-                                            Icon::new(IconName::Folder)
-                                                .size(IconSize::XSmall)
-                                                .color(Color::Muted),
-                                        )
-                                        .child(Label::new(name).size(LabelSize::Small))
-                                })),
-                        ),
+                        .child(h_flex().gap_2().flex_wrap().max_w(px(580.)).children(
+                            recent_projects.into_iter().map(|entry| {
+                                let name = entry.name.clone();
+                                let entry_for_click = RecentProjectEntry {
+                                    name: entry.name.clone(),
+                                    full_path: entry.full_path.clone(),
+                                    paths: entry.paths.clone(),
+                                    workspace_id: entry.workspace_id,
+                                    timestamp: entry.timestamp,
+                                };
+                                h_flex()
+                                    .id(SharedString::from(format!("recent-{}", name)))
+                                    .px_3()
+                                    .py_1p5()
+                                    .gap_1p5()
+                                    .rounded_lg()
+                                    .border_1()
+                                    .border_color(cx.theme().colors().border)
+                                    .bg(cx.theme().colors().surface_background)
+                                    .cursor_pointer()
+                                    .hover(|el| el.bg(cx.theme().colors().element_hover))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.open_recent_project(
+                                            entry_for_click.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::Folder)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(Label::new(name).size(LabelSize::Small))
+                            }),
+                        )),
                 )
             })
     }
@@ -732,17 +720,18 @@ impl BeginnerWorkspace {
                     .child(self.chat_editor.clone()),
             )
             .child(
-                h_flex()
-                    .justify_end()
-                    .child(
-                        Button::new("send-follow-up", if is_running { "Running…" } else { "Send" })
-                            .style(ButtonStyle::Filled)
-                            .end_icon(Icon::new(IconName::ArrowRight))
-                            .disabled(is_running || draft_is_empty)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.submit_follow_up(window, cx);
-                            })),
-                    ),
+                h_flex().justify_end().child(
+                    Button::new(
+                        "send-follow-up",
+                        if is_running { "Running…" } else { "Send" },
+                    )
+                    .style(ButtonStyle::Filled)
+                    .end_icon(Icon::new(IconName::ArrowRight))
+                    .disabled(is_running || draft_is_empty)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.submit_follow_up(window, cx);
+                    })),
+                ),
             )
     }
 }

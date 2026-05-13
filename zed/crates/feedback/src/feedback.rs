@@ -73,8 +73,7 @@ pub fn init(cx: &mut App) {
                     .log_err();
                 })
                 .detach();
-            })
-;
+            });
     })
     .detach();
 }

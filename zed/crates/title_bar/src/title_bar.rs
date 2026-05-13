@@ -21,10 +21,10 @@ use crate::application_menu::{
     ActivateDirection, ActivateMenuLeft, ActivateMenuRight, OpenApplicationMenu,
 };
 
+use agent_ui::OpenBackboardAgentWorkspace;
 use auto_update::AutoUpdateStatus;
 use client::{Client, UserStore, zed_urls};
 use cloud_api_types::Plan;
-use agent_ui::OpenBackboardAgentWorkspace;
 
 use gpui::{
     Action, Anchor, Animation, AnimationExt, AnyElement, App, Context, Element, Entity, Focusable,
@@ -46,12 +46,13 @@ use theme::ActiveTheme;
 use title_bar_settings::TitleBarSettings;
 use ui::{
     Avatar, ButtonLike, ContextMenu, ContextMenuEntry, IconWithIndicator, Indicator, PopoverMenu,
-    PopoverMenuHandle, TintColor, Tooltip, prelude::*, utils::platform_title_bar_height,
+    PopoverMenuHandle, Tab, TabPosition, TintColor, Tooltip, prelude::*,
+    utils::platform_title_bar_height,
 };
 use update_version::UpdateVersion;
 use util::ResultExt;
 use workspace::{
-    InterfaceMode, MultiWorkspace, ToggleMultiAgentView, ToggleWorktreeSecurity, Workspace,
+    InterfaceMode, MultiWorkspace, ToggleWorktreeSecurity, Workspace,
     notifications::NotifyResultExt,
 };
 
@@ -166,14 +167,19 @@ pub struct TitleBar {
 impl Render for TitleBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.multi_workspace.is_none() {
-            if let Some(mw) = self
-                .workspace
-                .upgrade()
-                .and_then(|ws| ws.read(cx).multi_workspace().cloned())
+            if let Some(multi_workspace) = window
+                .root::<MultiWorkspace>()
+                .flatten()
+                .map(|multi_workspace| multi_workspace.downgrade())
+                .or_else(|| {
+                    self.workspace
+                        .upgrade()
+                        .and_then(|ws| ws.read(cx).multi_workspace().cloned())
+                })
             {
-                self.multi_workspace = Some(mw.clone());
+                self.multi_workspace = Some(multi_workspace.clone());
                 self.platform_titlebar.update(cx, |titlebar, _cx| {
-                    titlebar.set_multi_workspace(mw);
+                    titlebar.set_multi_workspace(multi_workspace);
                 });
             }
         }
@@ -254,6 +260,9 @@ impl Render for TitleBar {
                                 title_bar.child(menu)
                             },
                         )
+                        .when_some(self.render_expert_toggle_pill(cx), |title_bar, tabs| {
+                            title_bar.child(tabs)
+                        })
                         .children(self.render_restricted_mode(cx))
                         .when(render_project_items, |title_bar| {
                             title_bar
@@ -318,16 +327,14 @@ impl Render for TitleBar {
                 .children(self.render_call_controls(window, cx))
                 .children(self.render_connection_status(status, cx))
                 .child(self.update_version.clone())
-                .when_some(self.render_expert_toggle_pill(cx), |this, pill| {
-                    this.child(pill)
-                })
                 .when(
                     user.is_none()
                         && is_signed_out_or_auth_error
                         && TitleBarSettings::get_global(cx).show_sign_in,
-                    |this| this
-                        .child(self.render_agent_workspace_button(cx))
-                        .child(self.render_sign_in_button(cx)),
+                    |this| {
+                        this.child(self.render_agent_workspace_button(cx))
+                            .child(self.render_sign_in_button(cx))
+                    },
                 )
                 .when(is_signing_in, |this| {
                     this.child(
@@ -1079,7 +1086,9 @@ impl TitleBar {
             client::Status::UpgradeRequired => {
                 let auto_updater = auto_update::AutoUpdater::get(cx);
                 let label = match auto_updater.map(|auto_update| auto_update.read(cx).status()) {
-                    Some(AutoUpdateStatus::Updated { .. }) => "Please restart Backboard Studio to Collaborate",
+                    Some(AutoUpdateStatus::Updated { .. }) => {
+                        "Please restart Backboard Studio to Collaborate"
+                    }
                     Some(AutoUpdateStatus::Installing { .. })
                     | Some(AutoUpdateStatus::Downloading { .. })
                     | Some(AutoUpdateStatus::Checking) => "Updating...",
@@ -1137,63 +1146,54 @@ impl TitleBar {
     fn render_expert_toggle_pill(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let mw = self.multi_workspace.as_ref()?.upgrade()?;
         let mw_read = mw.read(cx);
-        if mw_read.interface_mode != InterfaceMode::Expert {
-            return None;
-        }
-        let multi_agent_expanded = mw_read.multi_agent_expanded;
+        let simple_active = mw_read.interface_mode == InterfaceMode::Simple;
+        let agents_active = simple_active || mw_read.multi_agent_expanded;
+        let multi_workspace = mw.downgrade();
         Some(
             h_flex()
                 .id("expert-toggle-pill")
-                .gap_px()
-                .p_0p5()
-                .rounded_md()
-                .bg(cx.theme().colors().element_background)
-                .border_1()
-                .border_color(cx.theme().colors().border)
+                .h_full()
+                .items_end()
+                .pl_1()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
-                    div()
-                        .id("pill-editor")
-                        .px_2()
-                        .py_0p5()
-                        .rounded_sm()
-                        .when(!multi_agent_expanded, |el| {
-                            el.bg(cx.theme().colors().element_selected)
+                    Tab::new("tab-code-editor")
+                        .position(TabPosition::First)
+                        .toggle_state(!agents_active)
+                        .when(agents_active, |el| {
+                            let multi_workspace = multi_workspace.clone();
+                            el.on_click(move |_, window, cx| {
+                                multi_workspace
+                                    .update(cx, |multi_workspace, cx| {
+                                        multi_workspace.set_interface_mode(
+                                            InterfaceMode::Expert,
+                                            window,
+                                            cx,
+                                        );
+                                        multi_workspace.multi_agent_expanded = false;
+                                        cx.notify();
+                                    })
+                                    .log_err();
+                            })
                         })
-                        .when(multi_agent_expanded, |el| {
-                            el.cursor_pointer()
-                                .hover(|el| el.bg(cx.theme().colors().element_hover))
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(ToggleMultiAgentView), cx);
-                                })
-                        })
-                        .child(
-                            Label::new("Editor")
-                                .size(LabelSize::Small)
-                                .when(!multi_agent_expanded, |l| l.color(Color::Accent)),
-                        ),
+                        .child(Label::new("Editor").size(LabelSize::Small)),
                 )
                 .child(
-                    div()
-                        .id("pill-agents")
-                        .px_2()
-                        .py_0p5()
-                        .rounded_sm()
-                        .when(multi_agent_expanded, |el| {
-                            el.bg(cx.theme().colors().element_selected)
+                    Tab::new("tab-multi-agent")
+                        .position(TabPosition::Last)
+                        .toggle_state(agents_active)
+                        .when(!agents_active, |el| {
+                            let multi_workspace = multi_workspace.clone();
+                            el.on_click(move |_, _window, cx| {
+                                multi_workspace
+                                    .update(cx, |multi_workspace, cx| {
+                                        multi_workspace.multi_agent_expanded = true;
+                                        cx.notify();
+                                    })
+                                    .log_err();
+                            })
                         })
-                        .when(!multi_agent_expanded, |el| {
-                            el.cursor_pointer()
-                                .hover(|el| el.bg(cx.theme().colors().element_hover))
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(ToggleMultiAgentView), cx);
-                                })
-                        })
-                        .child(
-                            Label::new("Agents")
-                                .size(LabelSize::Small)
-                                .when(multi_agent_expanded, |l| l.color(Color::Accent)),
-                        ),
+                        .child(Label::new("Agents").size(LabelSize::Small)),
                 ),
         )
     }
@@ -1305,7 +1305,10 @@ impl TitleBar {
                                     .w_full()
                                     .gap_1()
                                     .justify_between()
-                                    .child(Label::new("Restart to update Backboard Studio").color(Color::Accent))
+                                    .child(
+                                        Label::new("Restart to update Backboard Studio")
+                                            .color(Color::Accent),
+                                    )
                                     .child(
                                         Icon::new(IconName::Download)
                                             .size(IconSize::Small)

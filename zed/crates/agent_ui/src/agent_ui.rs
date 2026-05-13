@@ -62,7 +62,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{LanguageModelSelection, Settings as _, SettingsStore};
 use std::any::TypeId;
-use workspace::Workspace;
+use workspace::{MultiWorkspace, Workspace};
 
 use crate::agent_configuration::{ConfigureContextServerModal, ManageProfilesModal};
 pub use crate::agent_connection_store::{ActiveAcpConnection, AgentConnectionStore};
@@ -71,7 +71,6 @@ pub use crate::agent_panel::{
 };
 use crate::agent_registry_ui::AgentRegistryPage;
 pub use crate::agent_workspace_ui::BackboardAgentWorkspacePage;
-use crate::agent_workspace_ui::open_backboard_agent_workspace_page;
 pub use crate::inline_assistant::InlineAssistant;
 pub use crate::thread_metadata_store::ThreadId;
 pub use agent_diff::{AgentDiffPane, AgentDiffToolbar};
@@ -515,7 +514,20 @@ pub fn init(
                   _: &OpenBackboardAgentWorkspace,
                   window: &mut Window,
                   cx: &mut Context<Workspace>| {
-                open_backboard_agent_workspace_page(workspace, window, cx);
+                if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
+                    multi_workspace.update(cx, |multi_workspace, cx| {
+                        multi_workspace.multi_agent_expanded = true;
+                        cx.notify();
+                    });
+                } else if let Some(multi_workspace) = workspace
+                    .multi_workspace()
+                    .and_then(|handle| handle.upgrade())
+                {
+                    multi_workspace.update(cx, |multi_workspace, cx| {
+                        multi_workspace.multi_agent_expanded = true;
+                        cx.notify();
+                    });
+                }
             },
         );
     })
