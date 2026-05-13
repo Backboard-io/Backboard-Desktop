@@ -1,47 +1,24 @@
 use collections::HashSet;
 use editor::{Editor, EditorElement, EditorEvent, EditorStyle};
 use gpui::{
-    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, TextStyle, WeakEntity, Window,
-    prelude::*,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, TextStyle, WeakEntity, Window, prelude::*,
 };
 use language::language_settings::SoftWrap;
 use settings::Settings;
 use theme_settings::ThemeSettings;
 use ui::{
-    Button, ButtonSize, ButtonStyle, Divider, Icon, IconButton, IconSize, Label, LabelSize,
-    TintColor, Tooltip, prelude::*,
+    Button, ButtonSize, ButtonStyle, Icon, IconButton, IconSize, Label, LabelSize, TintColor,
+    Tooltip, prelude::*,
 };
-use workspace::{
-    Workspace,
-    item::{Item, ItemEvent},
-};
+use workspace::Workspace;
 
+use crate::ConversationView;
 use crate::agent_panel::{
     AgentPanel, BackboardAgentRunEventState, BackboardAgentRunStatus, BackboardAgentRunSummary,
     BackboardAgentWorkspaceKind, BackboardAgentWorkspaceMode, BackboardAgentWorkspaceScope,
 };
 use crate::thread_metadata_store::ThreadId;
-
-pub fn open_backboard_agent_workspace_page(
-    workspace: &mut Workspace,
-    window: &mut Window,
-    cx: &mut Context<Workspace>,
-) {
-    let existing = workspace.panes().iter().find_map(|pane| {
-        pane.read(cx)
-            .items()
-            .find_map(|item| item.downcast::<BackboardAgentWorkspacePage>())
-    });
-
-    if let Some(existing) = existing {
-        workspace.activate_item(&existing, true, true, window, cx);
-        return;
-    }
-
-    let page = BackboardAgentWorkspacePage::new(workspace, window, cx);
-    workspace.add_item_to_active_pane(Box::new(page), None, true, window, cx);
-}
 
 pub struct BackboardAgentWorkspacePage {
     workspace: WeakEntity<Workspace>,
@@ -49,6 +26,7 @@ pub struct BackboardAgentWorkspacePage {
     selected_scope: BackboardAgentWorkspaceScope,
     selected_kind: BackboardAgentWorkspaceKind,
     selected_mode: BackboardAgentWorkspaceMode,
+    selected_thread_id: Option<ThreadId>,
     dismissed_threads: HashSet<ThreadId>,
     _subscriptions: Vec<Subscription>,
 }
@@ -88,6 +66,7 @@ impl BackboardAgentWorkspacePage {
                 selected_scope: BackboardAgentWorkspaceScope::WholeProject,
                 selected_kind: BackboardAgentWorkspaceKind::Build,
                 selected_mode: BackboardAgentWorkspaceMode::Agent,
+                selected_thread_id: None,
                 dismissed_threads: HashSet::default(),
                 _subscriptions: subscriptions,
             }
@@ -165,17 +144,29 @@ impl BackboardAgentWorkspacePage {
         }
     }
 
-    fn open_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(workspace) = self.workspace.upgrade() {
-            workspace.update(cx, |workspace, cx| {
-                if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
-                    panel.update(cx, |panel, cx| {
-                        panel.activate_backboard_workspace_agent(thread_id, window, cx);
-                    });
-                    workspace.focus_panel::<AgentPanel>(window, cx);
-                }
-            });
-        }
+    fn open_run(&mut self, thread_id: ThreadId, _window: &mut Window, cx: &mut Context<Self>) {
+        self.selected_thread_id = Some(thread_id);
+        cx.notify();
+    }
+
+    fn close_detail(&mut self, cx: &mut Context<Self>) {
+        self.selected_thread_id = None;
+        cx.notify();
+    }
+
+    fn conversation_for_thread(
+        &self,
+        thread_id: ThreadId,
+        cx: &App,
+    ) -> Option<Entity<ConversationView>> {
+        self.workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).panel::<AgentPanel>(cx))
+            .and_then(|panel| {
+                panel
+                    .read(cx)
+                    .backboard_workspace_conversation_view(thread_id, cx)
+            })
     }
 
     fn stop_run(&mut self, thread_id: ThreadId, cx: &mut Context<Self>) {
@@ -259,6 +250,9 @@ impl BackboardAgentWorkspacePage {
 
     fn dismiss_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
         self.dismissed_threads.insert(thread_id);
+        if self.selected_thread_id == Some(thread_id) {
+            self.selected_thread_id = None;
+        }
         if let Some(workspace) = self.workspace.upgrade() {
             workspace.update(cx, |workspace, cx| {
                 if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
@@ -315,8 +309,8 @@ impl BackboardAgentWorkspacePage {
         let ready = summaries.iter().filter(|summary| summary.can_apply).count();
 
         h_flex()
-            .h(rems_from_px(44.))
-            .px_3()
+            .h(rems_from_px(48.))
+            .px_4()
             .justify_between()
             .border_b_1()
             .border_color(cx.theme().colors().border_variant)
@@ -378,7 +372,7 @@ impl BackboardAgentWorkspacePage {
                     ),
             )
             .child(
-                Button::new("new-agent", "Tasks")
+                Button::new("new-agent", "Focus Tasks")
                     .start_icon(Icon::new(IconName::Plus))
                     .style(ButtonStyle::Outlined)
                     .size(ButtonSize::Compact)
@@ -413,28 +407,28 @@ impl BackboardAgentWorkspacePage {
         };
 
         v_flex()
-            .m_3()
-            .mb_0()
-            .gap_2()
-            .rounded_sm()
-            .border_1()
+            .flex_shrink_0()
+            .gap_3()
+            .p_3()
+            .border_b_1()
             .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().elevated_surface_background)
-            .p_2()
             .child(
                 h_flex()
-                    .gap_2()
-                    .items_start()
+                    .justify_between()
+                    .items_center()
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(cx.theme().colors().border_variant)
-                            .bg(cx.theme().colors().element_background)
-                            .p_2()
-                            .child(self.render_text_input(cx)),
+                        v_flex()
+                            .gap_0p5()
+                            .child(
+                                Label::new("New agents")
+                                    .size(LabelSize::Default)
+                                    .color(Color::Accent),
+                            )
+                            .child(
+                                Label::new("One task per line")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            ),
                     )
                     .child(
                         Button::new("run-agents", run_label)
@@ -448,41 +442,120 @@ impl BackboardAgentWorkspacePage {
                     ),
             )
             .child(
-                h_flex()
+                div()
+                    .w_full()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .bg(cx.theme().colors().element_background)
+                    .p_2()
+                    .child(self.render_text_input(cx)),
+            )
+            .child(
+                v_flex()
                     .gap_2()
-                    .flex_wrap()
-                    .items_center()
                     .child(
-                        Label::new("Mode")
-                            .size(LabelSize::Small)
-                            .color(Color::Accent),
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                Label::new("Mode")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Accent),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .flex_wrap()
+                                    .child(
+                                        self.render_mode_button(
+                                            BackboardAgentWorkspaceMode::Agent,
+                                            cx,
+                                        ),
+                                    )
+                                    .child(
+                                        self.render_mode_button(
+                                            BackboardAgentWorkspaceMode::Ask,
+                                            cx,
+                                        ),
+                                    )
+                                    .child(self.render_mode_button(
+                                        BackboardAgentWorkspaceMode::Manual,
+                                        cx,
+                                    ))
+                                    .child(
+                                        self.render_mode_button(
+                                            BackboardAgentWorkspaceMode::Free,
+                                            cx,
+                                        ),
+                                    ),
+                            ),
                     )
-                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Agent, cx))
-                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Ask, cx))
-                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Manual, cx))
-                    .child(self.render_mode_button(BackboardAgentWorkspaceMode::Free, cx))
-                    .child(Divider::vertical())
                     .child(
-                        Label::new("Scope")
-                            .size(LabelSize::Small)
-                            .color(Color::Accent),
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                Label::new("Scope")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Accent),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .flex_wrap()
+                                    .child(self.render_scope_button(
+                                        BackboardAgentWorkspaceScope::WholeProject,
+                                        cx,
+                                    ))
+                                    .child(self.render_scope_button(
+                                        BackboardAgentWorkspaceScope::SelectedFiles,
+                                        cx,
+                                    ))
+                                    .child(self.render_scope_button(
+                                        BackboardAgentWorkspaceScope::GitChanges,
+                                        cx,
+                                    ))
+                                    .child(self.render_scope_button(
+                                        BackboardAgentWorkspaceScope::TestsOnly,
+                                        cx,
+                                    )),
+                            ),
                     )
-                    .child(self.render_scope_button(BackboardAgentWorkspaceScope::WholeProject, cx))
                     .child(
-                        self.render_scope_button(BackboardAgentWorkspaceScope::SelectedFiles, cx),
-                    )
-                    .child(self.render_scope_button(BackboardAgentWorkspaceScope::GitChanges, cx))
-                    .child(self.render_scope_button(BackboardAgentWorkspaceScope::TestsOnly, cx))
-                    .child(Divider::vertical())
-                    .child(
-                        Label::new("Type")
-                            .size(LabelSize::Small)
-                            .color(Color::Accent),
-                    )
-                    .child(self.render_kind_button(BackboardAgentWorkspaceKind::Build, cx))
-                    .child(self.render_kind_button(BackboardAgentWorkspaceKind::Review, cx))
-                    .child(self.render_kind_button(BackboardAgentWorkspaceKind::Test, cx))
-                    .child(self.render_kind_button(BackboardAgentWorkspaceKind::Docs, cx)),
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                Label::new("Type")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Accent),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .flex_wrap()
+                                    .child(
+                                        self.render_kind_button(
+                                            BackboardAgentWorkspaceKind::Build,
+                                            cx,
+                                        ),
+                                    )
+                                    .child(self.render_kind_button(
+                                        BackboardAgentWorkspaceKind::Review,
+                                        cx,
+                                    ))
+                                    .child(
+                                        self.render_kind_button(
+                                            BackboardAgentWorkspaceKind::Test,
+                                            cx,
+                                        ),
+                                    )
+                                    .child(
+                                        self.render_kind_button(
+                                            BackboardAgentWorkspaceKind::Docs,
+                                            cx,
+                                        ),
+                                    ),
+                            ),
+                    ),
             )
     }
 
@@ -497,8 +570,7 @@ impl BackboardAgentWorkspacePage {
                 .id("backboard-agent-workspace-empty")
                 .overflow_y_scroll()
                 .gap_3()
-                .pb(rems_from_px(80.))
-                .child(self.render_launch_strip(cx))
+                .p_4()
                 .child(
                     v_flex()
                         .flex_1()
@@ -517,9 +589,11 @@ impl BackboardAgentWorkspacePage {
                                 .color(Color::Accent),
                         )
                         .child(
-                            Label::new("Add one task per line above to start parallel workers.")
-                                .size(LabelSize::Small)
-                                .color(Color::Accent),
+                            Label::new(
+                                "Add tasks from the panel on the right to start parallel workers.",
+                            )
+                            .size(LabelSize::Small)
+                            .color(Color::Accent),
                         ),
                 )
                 .into_any_element();
@@ -569,12 +643,11 @@ impl BackboardAgentWorkspacePage {
             .size_full()
             .id("backboard-agent-workspace-scroll")
             .overflow_y_scroll()
-            .pb(rems_from_px(80.))
-            .child(self.render_launch_strip(cx))
+            .pb_4()
             .when(!blocked_summaries.is_empty(), |this| {
                 this.child(self.render_blocked_overview(blocked_summaries, cx))
             })
-            .child(v_flex().gap_3().p_3().children(group_elements))
+            .child(v_flex().gap_3().p_4().children(group_elements))
             .into_any_element()
     }
 
@@ -1362,11 +1435,130 @@ impl BackboardAgentWorkspacePage {
                     .color(Color::Accent),
             )
     }
+
+    fn render_detail_drawer(
+        &self,
+        summary: BackboardAgentRunSummary,
+        conversation: Entity<ConversationView>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let thread_key = summary.thread_id.to_key_string();
+
+        v_flex()
+            .id(format!("backboard-agent-detail-{thread_key}"))
+            .w_full()
+            .flex_1()
+            .min_h_0()
+            .border_t_1()
+            .border_color(cx.theme().colors().border_variant)
+            .bg(cx.theme().colors().editor_background)
+            .child(
+                h_flex()
+                    .h(rems_from_px(44.))
+                    .px_3()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .child(
+                        h_flex()
+                            .min_w_0()
+                            .gap_2()
+                            .child(self.render_status_dot(summary.status, cx))
+                            .child(
+                                v_flex()
+                                    .min_w_0()
+                                    .gap_0()
+                                    .child(
+                                        Label::new(summary.title.clone())
+                                            .size(LabelSize::Small)
+                                            .color(Color::Accent)
+                                            .truncate(),
+                                    )
+                                    .child(
+                                        Label::new(summary.status.label())
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        IconButton::new(
+                            format!("close-agent-detail-{thread_key}"),
+                            IconName::Close,
+                        )
+                        .icon_size(IconSize::Small)
+                        .tooltip(Tooltip::text("Close detail"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.close_detail(cx);
+                        })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(conversation),
+            )
+    }
+
+    fn render_right_panel(
+        &self,
+        selected_detail: Option<(BackboardAgentRunSummary, Entity<ConversationView>)>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        v_flex()
+            .w(rems_from_px(400.))
+            .min_w(rems_from_px(340.))
+            .h_full()
+            .flex_shrink_0()
+            .border_l_1()
+            .border_color(cx.theme().colors().border_variant)
+            .bg(cx.theme().colors().elevated_surface_background)
+            .child(self.render_launch_strip(cx))
+            .when_some(selected_detail, |this, (summary, conversation)| {
+                this.child(self.render_detail_drawer(summary, conversation, cx))
+            })
+            .when(self.selected_thread_id.is_none(), |this| {
+                this.child(
+                    v_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .items_center()
+                        .justify_center()
+                        .gap_2()
+                        .px_5()
+                        .border_t_1()
+                        .border_color(cx.theme().colors().border_variant)
+                        .child(
+                            Icon::new(IconName::ThreadsSidebarRightOpen)
+                                .size(IconSize::XLarge)
+                                .color(Color::Muted),
+                        )
+                        .child(
+                            Label::new("Select an agent to inspect its chat.")
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        ),
+                )
+            })
+    }
 }
 
 impl Render for BackboardAgentWorkspacePage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let summaries = self.summaries(cx);
+        let selected_detail = self.selected_thread_id.and_then(|thread_id| {
+            let summary = summaries
+                .iter()
+                .find(|summary| summary.thread_id == thread_id)
+                .cloned()?;
+            let conversation = self.conversation_for_thread(thread_id, cx)?;
+            Some((summary, conversation))
+        });
+        if self.selected_thread_id.is_some() && selected_detail.is_none() {
+            self.selected_thread_id = None;
+        }
 
         v_flex()
             .size_full()
@@ -1374,39 +1566,24 @@ impl Render for BackboardAgentWorkspacePage {
             .key_context("BackboardAgentWorkspace")
             .child(self.render_header(&summaries, cx))
             .child(
-                div().flex_1().min_h_0().overflow_hidden().child(
-                    self.render_dashboard(summaries.clone(), cx)
-                        .into_any_element(),
-                ),
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(
+                        div().flex_1().min_w_0().h_full().overflow_hidden().child(
+                            self.render_dashboard(summaries.clone(), cx)
+                                .into_any_element(),
+                        ),
+                    )
+                    .child(self.render_right_panel(selected_detail, cx)),
             )
             .child(self.render_bottom_bar(&summaries, cx))
     }
 }
 
-impl EventEmitter<ItemEvent> for BackboardAgentWorkspacePage {}
-
 impl Focusable for BackboardAgentWorkspacePage {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         self.task_editor.read(cx).focus_handle(cx)
-    }
-}
-
-impl Item for BackboardAgentWorkspacePage {
-    type Event = ItemEvent;
-
-    fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
-        "Agent Workspace".into()
-    }
-
-    fn telemetry_event_text(&self) -> Option<&'static str> {
-        Some("Backboard Agent Workspace Opened")
-    }
-
-    fn show_toolbar(&self) -> bool {
-        false
-    }
-
-    fn to_item_events(event: &Self::Event, f: &mut dyn FnMut(ItemEvent)) {
-        f(*event)
     }
 }

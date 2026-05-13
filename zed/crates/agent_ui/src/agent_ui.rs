@@ -516,16 +516,14 @@ pub fn init(
                   cx: &mut Context<Workspace>| {
                 if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
                     multi_workspace.update(cx, |multi_workspace, cx| {
-                        multi_workspace.multi_agent_expanded = true;
-                        cx.notify();
+                        multi_workspace.set_multi_agent_expanded(true, cx);
                     });
                 } else if let Some(multi_workspace) = workspace
                     .multi_workspace()
                     .and_then(|handle| handle.upgrade())
                 {
                     multi_workspace.update(cx, |multi_workspace, cx| {
-                        multi_workspace.multi_agent_expanded = true;
-                        cx.notify();
+                        multi_workspace.set_multi_agent_expanded(true, cx);
                     });
                 }
             },
