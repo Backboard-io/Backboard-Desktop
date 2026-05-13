@@ -72,7 +72,11 @@ impl UpdateButton {
     }
 
     pub fn checking() -> Self {
-        Self::new(IconName::ArrowCircle, "Checking for Backboard Studio updates…").icon_animate(true)
+        Self::new(
+            IconName::ArrowCircle,
+            "Checking for Backboard Studio updates…",
+        )
+        .icon_animate(true)
     }
 
     pub fn downloading(version: impl Into<SharedString>) -> Self {

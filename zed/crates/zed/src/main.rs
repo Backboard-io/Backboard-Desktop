@@ -27,7 +27,7 @@ use gpui_platform;
 
 use gpui_tokio::Tokio;
 use language::LanguageRegistry;
-use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, FIRST_OPEN, ExperienceLevel, show_onboarding_view};
+use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel, FIRST_OPEN, show_onboarding_view};
 use project_panel::ProjectPanel;
 use prompt_store::PromptBuilder;
 use remote::RemoteConnectionOptions;
@@ -1499,7 +1499,10 @@ fn open_new_workspace_callback(
 ) {
     use db::kvp::KeyValueStore;
     let restore_on_startup = WorkspaceSettings::get_global(cx).restore_on_startup;
-    if matches!(restore_on_startup, workspace::RestoreOnStartupBehavior::Launchpad) {
+    if matches!(
+        restore_on_startup,
+        workspace::RestoreOnStartupBehavior::Launchpad
+    ) {
         return;
     }
 

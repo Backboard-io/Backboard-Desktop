@@ -17,8 +17,8 @@ use std::path::PathBuf;
 use ui::prelude::*;
 use util::ResultExt;
 use util::path_list::PathList;
-use zed_actions::agents_sidebar::ToggleThreadSwitcher;
 use zed_actions::SwitchInterfaceMode;
+use zed_actions::agents_sidebar::ToggleThreadSwitcher;
 
 use agent_settings::AgentSettings;
 use settings::SidebarDockPosition;
@@ -2050,7 +2050,6 @@ impl MultiWorkspace {
     }
 }
 
-
 impl Render for MultiWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let ui_font = theme_settings::setup_ui_font(window, cx);
@@ -2152,10 +2151,12 @@ impl Render for MultiWorkspace {
 
         if self.multi_agent_expanded {
             if let Some(view) = self.agent_workspace_view.as_ref() {
+                let titlebar = self.workspace().read(cx).titlebar_item();
                 return client_side_decorations(
                     div()
                         .key_context("MultiAgentView")
-                        .relative()
+                        .flex()
+                        .flex_col()
                         .size_full()
                         .font(ui_font)
                         .text_color(text_color)
@@ -2164,7 +2165,8 @@ impl Render for MultiWorkspace {
                             this.multi_agent_expanded = false;
                             cx.notify();
                         }))
-                        .child(view.clone()),
+                        .children(titlebar)
+                        .child(div().flex_1().min_h_0().child(view.clone())),
                     window,
                     cx,
                     Tiling::default(),

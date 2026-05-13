@@ -242,7 +242,7 @@ impl Render for PlatformTitleBar {
 
                 if window.is_fullscreen() {
                     this.pl_2()
-                } else if self.platform_style == PlatformStyle::Mac && show_left_controls {
+                } else if self.platform_style == PlatformStyle::Mac {
                     this.pl(px(TRAFFIC_LIGHT_PADDING))
                 } else if let Some(controls) = show_left_controls
                     .then(|| {

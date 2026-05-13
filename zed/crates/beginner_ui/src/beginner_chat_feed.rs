@@ -1,12 +1,25 @@
-use agent_client_protocol::schema as acp;
 use acp_thread::{AcpThread, AgentThreadEntry, AssistantMessageChunk, ToolCallStatus};
-use gpui::{App, Context, Entity, FocusHandle, Focusable, Render, SharedString, Subscription, Window};
+use agent_client_protocol::schema as acp;
+use gpui::{
+    App, Context, Entity, FocusHandle, Focusable, Render, SharedString, Subscription, Window,
+};
 use ui::{Color, Icon, IconName, IconSize, Label, LabelSize, prelude::*};
 
 enum FriendlyItem {
-    UserBubble { index: usize, text: String },
-    AssistantBubble { index: usize, text: String },
-    ToolAction { index: usize, label: String, done: bool, failed: bool },
+    UserBubble {
+        index: usize,
+        text: String,
+    },
+    AssistantBubble {
+        index: usize,
+        text: String,
+    },
+    ToolAction {
+        index: usize,
+        label: String,
+        done: bool,
+        failed: bool,
+    },
 }
 
 pub struct BeginnerChatFeed {
@@ -98,7 +111,12 @@ fn friendly_item(index: usize, entry: &AgentThreadEntry, cx: &App) -> Option<Fri
                 call.status,
                 ToolCallStatus::Failed | ToolCallStatus::Rejected | ToolCallStatus::Canceled
             );
-            Some(FriendlyItem::ToolAction { index, label, done, failed })
+            Some(FriendlyItem::ToolAction {
+                index,
+                label,
+                done,
+                failed,
+            })
         }
 
         AgentThreadEntry::CompletedPlan(_) => None,
@@ -154,14 +172,11 @@ fn render_item(item: FriendlyItem, cx: &App) -> impl IntoElement {
             .gap_2()
             .py_0p5()
             .child(
-                div()
-                    .mt_1()
-                    .flex_shrink_0()
-                    .child(
-                        Icon::new(IconName::Sparkle)
-                            .size(IconSize::XSmall)
-                            .color(Color::Accent),
-                    ),
+                div().mt_1().flex_shrink_0().child(
+                    Icon::new(IconName::Sparkle)
+                        .size(IconSize::XSmall)
+                        .color(Color::Accent),
+                ),
             )
             .child(
                 div()
@@ -180,7 +195,12 @@ fn render_item(item: FriendlyItem, cx: &App) -> impl IntoElement {
             )
             .into_any_element(),
 
-        FriendlyItem::ToolAction { index, label, done, failed } => h_flex()
+        FriendlyItem::ToolAction {
+            index,
+            label,
+            done,
+            failed,
+        } => h_flex()
             .id(index + 20_000)
             .w_full()
             .gap_1p5()

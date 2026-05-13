@@ -4782,7 +4782,11 @@ impl AgentPanel {
         true
     }
 
-    fn render_expert_header(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_expert_header(
+        &self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         // Collect open thread tabs: active first, then retained sorted by update time.
         let active_id = self.active_thread_id(cx);
         let mut thread_tabs: Vec<(ThreadId, SharedString)> = Vec::new();
@@ -4876,11 +4880,7 @@ impl AgentPanel {
                                             this.activate_retained_thread(id, true, window, cx);
                                         }))
                                 })
-                                .child(
-                                    Label::new(title)
-                                        .size(LabelSize::XSmall)
-                                        .single_line(),
-                                )
+                                .child(Label::new(title).size(LabelSize::XSmall).single_line())
                         })),
                 )
             })

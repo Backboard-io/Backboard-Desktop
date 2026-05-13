@@ -66,12 +66,12 @@ use workspace::Workspace;
 
 use crate::agent_configuration::{ConfigureContextServerModal, ManageProfilesModal};
 pub use crate::agent_connection_store::{ActiveAcpConnection, AgentConnectionStore};
-pub use crate::agent_workspace_ui::BackboardAgentWorkspacePage;
 pub use crate::agent_panel::{
     AgentPanel, AgentPanelEvent, AgentPanelTerminalInfo, MaxIdleRetainedThreads, TerminalId,
 };
 use crate::agent_portal_window::open_backboard_agent_portal;
 use crate::agent_registry_ui::AgentRegistryPage;
+pub use crate::agent_workspace_ui::BackboardAgentWorkspacePage;
 pub use crate::inline_assistant::InlineAssistant;
 pub use crate::thread_metadata_store::ThreadId;
 pub use agent_diff::{AgentDiffPane, AgentDiffToolbar};

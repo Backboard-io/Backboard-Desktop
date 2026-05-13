@@ -490,27 +490,21 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             let beginner = cx.new(|cx| {
                 beginner_ui::BeginnerWorkspace::new(workspace_weak, multi_weak, window, cx)
             });
-            cx.subscribe_in(
-                &beginner,
-                window,
-                |mw, _, event, window, cx| {
-                    use beginner_ui::BeginnerWorkspaceEvent;
-                    match event {
-                        BeginnerWorkspaceEvent::SwitchToEditor => {
-                            mw.set_interface_mode(InterfaceMode::Expert, window, cx);
-                        }
+            cx.subscribe_in(&beginner, window, |mw, _, event, window, cx| {
+                use beginner_ui::BeginnerWorkspaceEvent;
+                match event {
+                    BeginnerWorkspaceEvent::SwitchToEditor => {
+                        mw.set_interface_mode(InterfaceMode::Expert, window, cx);
                     }
-                },
-            )
+                }
+            })
             .detach();
             _multi_workspace.beginner_view = Some(beginner.into());
 
             // Always create the agent workspace view so it's ready when the user switches to Agents.
-            let agent_workspace = _multi_workspace
-                .workspace()
-                .update(cx, |workspace, cx| {
-                    agent_ui::BackboardAgentWorkspacePage::new(workspace, window, cx)
-                });
+            let agent_workspace = _multi_workspace.workspace().update(cx, |workspace, cx| {
+                agent_ui::BackboardAgentWorkspacePage::new(workspace, window, cx)
+            });
             _multi_workspace.agent_workspace_view = Some(agent_workspace.into());
 
             // Set initial mode from KVP — defaults to Developer.

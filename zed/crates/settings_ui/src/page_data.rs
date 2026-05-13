@@ -1,4 +1,4 @@
-use gpui::{Action as _, App};
+use gpui::{Action as _, App, WindowHandle};
 use itertools::Itertools as _;
 use settings::{
     AudioInputDeviceName, AudioOutputDeviceName, LanguageSettingsContent, SemanticTokens,
@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock};
 use strum::{EnumMessage, IntoDiscriminant as _, VariantArray};
 use theme::SystemAppearance;
 use ui::IntoElement;
-use workspace::InterfaceMode;
+use workspace::{InterfaceMode, MultiWorkspace};
 
 use crate::{
     ActionLink, DynamicItem, PROJECT, SettingField, SettingItem, SettingsFieldMetadata,
@@ -132,18 +132,32 @@ fn developer_page() -> SettingsPage {
 }
 
 fn general_page(cx: &App) -> SettingsPage {
+    fn target_multi_workspace_window(
+        settings_window: &crate::SettingsWindow,
+        cx: &mut App,
+    ) -> Option<WindowHandle<MultiWorkspace>> {
+        settings_window.original_window.or_else(|| {
+            cx.windows()
+                .into_iter()
+                .find_map(|window| window.downcast::<MultiWorkspace>())
+        })
+    }
+
     fn general_settings_section(_cx: &App) -> Vec<SettingsPageItem> {
         vec![
             SettingsPageItem::SectionHeader("Mode"),
             SettingsPageItem::ActionLink(ActionLink {
                 title: "Interface Mode".into(),
-                description: Some("Toggle between Simple (chat-first) and Expert (editor + agents) mode.".into()),
+                description: Some(
+                    "Toggle between Simple (chat-first) and Expert (editor + agents) mode.".into(),
+                ),
                 button_text: "Toggle Mode".into(),
                 on_click: Arc::new(|settings_window, window, cx| {
-                    let Some(original_window) = settings_window.original_window else {
+                    let Some(target_window) = target_multi_workspace_window(settings_window, cx)
+                    else {
                         return;
                     };
-                    original_window
+                    target_window
                         .update(cx, |mw, original_window, cx| {
                             let new_mode = if mw.interface_mode == InterfaceMode::Simple {
                                 InterfaceMode::Expert

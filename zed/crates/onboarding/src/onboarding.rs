@@ -154,13 +154,7 @@ pub fn init(cx: &mut App) {
                         workspace.activate_item(&existing, true, true, window, cx);
                     } else {
                         let page = Onboarding::new(workspace, cx);
-                        workspace.add_item_to_active_pane(
-                            Box::new(page),
-                            None,
-                            true,
-                            window,
-                            cx,
-                        )
+                        workspace.add_item_to_active_pane(Box::new(page), None, true, window, cx)
                     }
                 })
                 .detach();
@@ -181,13 +175,7 @@ pub fn init(cx: &mut App) {
                         workspace.activate_item(&existing, true, true, window, cx);
                     } else {
                         let page = Onboarding::new(workspace, cx);
-                        workspace.add_item_to_active_pane(
-                            Box::new(page),
-                            None,
-                            true,
-                            window,
-                            cx,
-                        )
+                        workspace.add_item_to_active_pane(Box::new(page), None, true, window, cx)
                     }
                 })
                 .detach();
@@ -341,7 +329,8 @@ impl Onboarding {
         let kvp = KeyValueStore::global(cx);
         let level_str = level.to_str().to_string();
         db::write_and_log(cx, move || async move {
-            kvp.write_kvp(EXPERIENCE_LEVEL_KVP_KEY.to_string(), level_str).await
+            kvp.write_kvp(EXPERIENCE_LEVEL_KVP_KEY.to_string(), level_str)
+                .await
         });
 
         telemetry::event!("Finish Setup");
@@ -405,10 +394,7 @@ impl Onboarding {
                 v_flex()
                     .items_center()
                     .gap_2()
-                    .child(
-                        Headline::new("How do you want to work?")
-                            .size(HeadlineSize::Large),
-                    )
+                    .child(Headline::new("How do you want to work?").size(HeadlineSize::Large))
                     .child(
                         Label::new("You can change this any time in Settings")
                             .color(Color::Muted)
@@ -455,7 +441,10 @@ impl Onboarding {
             .border_1()
             .border_color(colors.border)
             .rounded_lg()
-            .hover(|s| s.border_color(colors.border_focused).bg(colors.element_hover))
+            .hover(|s| {
+                s.border_color(colors.border_focused)
+                    .bg(colors.element_hover)
+            })
             .on_click(cx.listener(move |this, _, _window, cx| {
                 this.step = OnboardingStep::Setup(level);
                 cx.notify();
@@ -530,8 +519,10 @@ impl Render for Onboarding {
                                             .child(
                                                 v_flex()
                                                     .child(
-                                                        Headline::new("Welcome to Backboard Studio")
-                                                            .size(HeadlineSize::Small),
+                                                        Headline::new(
+                                                            "Welcome to Backboard Studio",
+                                                        )
+                                                        .size(HeadlineSize::Small),
                                                     )
                                                     .child(
                                                         Label::new("The editor for what's next")
@@ -634,23 +625,16 @@ impl Item for Onboarding {
 
 fn close_onboarding_tab(cx: &mut App) {
     with_active_or_new_workspace(cx, |workspace, window, cx| {
-        let Some(onboarding_id) = workspace
-            .active_pane()
-            .read(cx)
-            .items()
-            .find_map(|item| {
-                item.downcast::<Onboarding>()?;
-                Some(item.item_id())
-            })
-        else {
+        let Some(onboarding_id) = workspace.active_pane().read(cx).items().find_map(|item| {
+            item.downcast::<Onboarding>()?;
+            Some(item.item_id())
+        }) else {
             return;
         };
 
-        workspace
-            .active_pane()
-            .update(cx, |pane, cx| {
-                pane.remove_item(onboarding_id, false, false, window, cx);
-            });
+        workspace.active_pane().update(cx, |pane, cx| {
+            pane.remove_item(onboarding_id, false, false, window, cx);
+        });
     });
 }
 

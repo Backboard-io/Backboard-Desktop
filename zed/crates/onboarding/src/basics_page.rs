@@ -8,9 +8,8 @@ use settings::{Settings, update_settings_file};
 use theme::{Appearance, SystemAppearance, ThemeRegistry};
 use theme_settings::{ThemeAppearanceMode, ThemeName, ThemeSelection, ThemeSettings};
 use ui::{
-    Divider, StatefulInteractiveElement, SwitchField, TintColor,
-    ToggleButtonGroup, ToggleButtonGroupSize, ToggleButtonSimple, Tooltip,
-    prelude::*,
+    Divider, StatefulInteractiveElement, SwitchField, TintColor, ToggleButtonGroup,
+    ToggleButtonGroupSize, ToggleButtonSimple, Tooltip, prelude::*,
 };
 use vim_mode_setting::VimModeSetting;
 
@@ -322,7 +321,6 @@ fn render_telemetry_section(tab_index: &mut isize, cx: &App) -> impl IntoElement
         )
 }
 
-
 fn render_vim_mode_switch(
     tab_index: &mut isize,
     mention_neovim: bool,
@@ -382,7 +380,10 @@ fn render_worktree_auto_trust_switch(tab_index: &mut isize, cx: &mut App) -> imp
     SwitchField::new(
         "onboarding-auto-trust-worktrees",
         Some("Trust All Projects By Default"),
-        Some("Automatically mark all new projects as trusted to unlock all Backboard's features".into()),
+        Some(
+            "Automatically mark all new projects as trusted to unlock all Backboard's features"
+                .into(),
+        ),
         toggle_state,
         {
             let fs = <dyn Fs>::global(cx);
