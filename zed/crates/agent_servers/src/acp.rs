@@ -670,6 +670,18 @@ fn connect_client_future(
 }
 
 impl AcpConnection {
+    fn non_empty_work_dirs_or_project_default(
+        work_dirs: PathList,
+        project: &Entity<Project>,
+        cx: &App,
+    ) -> PathList {
+        if work_dirs.is_empty() {
+            project.read(cx).default_path_list(cx)
+        } else {
+            work_dirs
+        }
+    }
+
     pub fn subscribe_debug_messages(
         &self,
     ) -> (
@@ -1039,6 +1051,8 @@ impl AcpConnection {
             }
         }
 
+        let work_dirs = Self::non_empty_work_dirs_or_project_default(work_dirs, &project, cx);
+
         // TODO: remove this once ACP supports multiple working directories
         let Some(cwd) = work_dirs.ordered_paths().next().cloned() else {
             return Task::ready(Err(anyhow!("Working directory cannot be empty")));
@@ -1335,6 +1349,8 @@ impl AgentConnection for AcpConnection {
         work_dirs: PathList,
         cx: &mut App,
     ) -> Task<Result<Entity<AcpThread>>> {
+        let work_dirs = Self::non_empty_work_dirs_or_project_default(work_dirs, &project, cx);
+
         // TODO: remove this once ACP supports multiple working directories
         let Some(cwd) = work_dirs.ordered_paths().next().cloned() else {
             return Task::ready(Err(anyhow!("Working directory cannot be empty")));

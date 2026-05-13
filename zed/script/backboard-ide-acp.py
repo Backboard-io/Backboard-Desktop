@@ -938,6 +938,7 @@ class BackboardIdeSession:
         self._first_token_seen = False
         self._speed_timings: dict[str, float] = {}
         self._speed_totals: dict[str, float] = {}
+        self._speed_counts: dict[str, int] = {}
         self._slowest_tool_name: str | None = None
         self._slowest_tool_ms = 0.0
         self._web_quality_turn = False
@@ -1114,6 +1115,9 @@ class BackboardIdeSession:
         else:
             bucket = "other_tools_ms"
         self._speed_totals[bucket] = round(self._speed_totals.get(bucket, 0.0) + elapsed, 1)
+        self._speed_counts["tool_calls_count"] = self._speed_counts.get("tool_calls_count", 0) + 1
+        count_bucket = bucket.replace("_ms", "_count")
+        self._speed_counts[count_bucket] = self._speed_counts.get(count_bucket, 0) + 1
         if elapsed > self._slowest_tool_ms:
             self._slowest_tool_ms = elapsed
             self._slowest_tool_name = name
@@ -1123,6 +1127,7 @@ class BackboardIdeSession:
         self._first_token_seen = False
         self._speed_timings = {}
         self._speed_totals = {}
+        self._speed_counts = {}
         self._slowest_tool_name = None
         self._slowest_tool_ms = 0.0
 
@@ -1134,6 +1139,7 @@ class BackboardIdeSession:
         }
         meta.update({key: value for key, value in self._speed_timings.items() if value})
         meta.update({key: value for key, value in self._speed_totals.items() if value})
+        meta.update({key: value for key, value in self._speed_counts.items() if value})
         if self._slowest_tool_name and self._slowest_tool_ms:
             meta["slowest_tool"] = self._slowest_tool_name
             meta["slowest_tool_ms"] = self._slowest_tool_ms
@@ -1254,7 +1260,7 @@ class BackboardIdeSession:
         if not text or text == self._last_progress_note:
             return
         self._last_progress_note = text
-        await self._agent_thought(text)
+        await self._agent_thought(text, progress=True)
 
     def _is_web_quality_request(self, message: str, blocks: list[dict[str, Any]]) -> bool:
         embedded_context = self._embedded_context_summary(blocks)
@@ -2465,10 +2471,13 @@ class BackboardIdeSession:
             return
         await self._update({"sessionUpdate": "agent_message_chunk", "content": _text_block(text)})
 
-    async def _agent_thought(self, text: str) -> None:
+    async def _agent_thought(self, text: str, *, progress: bool = False) -> None:
         if not text:
             return
-        await self._update({"sessionUpdate": "agent_thought_chunk", "content": _text_block(text)})
+        update = {"sessionUpdate": "agent_thought_chunk", "content": _text_block(text)}
+        if progress:
+            update["_meta"] = {"backboardProgress": True}
+        await self._update(update)
 
     async def _tool_call(
         self,

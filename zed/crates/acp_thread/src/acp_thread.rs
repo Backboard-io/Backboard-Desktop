@@ -1029,6 +1029,12 @@ pub struct SpeedMetrics {
     pub model: Option<SharedString>,
     pub provider: Option<SharedString>,
     pub intensity: Option<SharedString>,
+    pub tool_calls_count: Option<u64>,
+    pub shell_tools_count: Option<u64>,
+    pub read_tools_count: Option<u64>,
+    pub search_tools_count: Option<u64>,
+    pub edit_tools_count: Option<u64>,
+    pub other_tools_count: Option<u64>,
 }
 
 pub const TOKEN_USAGE_WARNING_THRESHOLD: f32 = 0.8;
@@ -1082,9 +1088,29 @@ impl SpeedMetrics {
             model: string_field(object, "model"),
             provider: string_field(object, "provider"),
             intensity: string_field(object, "intensity"),
+            tool_calls_count: integer_field(object, "tool_calls_count"),
+            shell_tools_count: integer_field(object, "shell_tools_count"),
+            read_tools_count: integer_field(object, "read_tools_count"),
+            search_tools_count: integer_field(object, "search_tools_count"),
+            edit_tools_count: integer_field(object, "edit_tools_count"),
+            other_tools_count: integer_field(object, "other_tools_count"),
         };
         Some(metric)
     }
+}
+
+fn integer_field(object: &serde_json::Map<String, Value>, key: &str) -> Option<u64> {
+    object.get(key).and_then(|value| {
+        value.as_u64().or_else(|| {
+            value.as_f64().and_then(|number| {
+                if number >= 0.0 {
+                    Some(number.round() as u64)
+                } else {
+                    None
+                }
+            })
+        })
+    })
 }
 
 fn number_field(object: &serde_json::Map<String, Value>, key: &str) -> Option<f64> {
@@ -1543,8 +1569,12 @@ impl AcpThread {
             acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk { content, .. }) => {
                 self.push_assistant_content_block(content, false, cx);
             }
-            acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk { content, .. }) => {
-                self.push_assistant_content_block(content, true, cx);
+            acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk { content, meta, .. }) => {
+                if Self::is_backboard_progress_update(&content, meta.as_ref()) {
+                    self.push_backboard_progress_content_block(content, cx);
+                } else {
+                    self.push_assistant_content_block(content, true, cx);
+                }
             }
             acp::SessionUpdate::ToolCall(tool_call) => {
                 self.upsert_tool_call(tool_call, cx)?;
@@ -1664,6 +1694,31 @@ impl AcpThread {
         self.push_assistant_content_block_with_indent(chunk, is_thought, false, cx)
     }
 
+    fn push_backboard_progress_content_block(
+        &mut self,
+        chunk: acp::ContentBlock,
+        cx: &mut Context<Self>,
+    ) {
+        let path_style = self.project.read(cx).path_style(cx);
+        let replacement_text = ContentBlock::block_string_contents(&chunk, path_style);
+        let entries_len = self.entries.len();
+
+        if let Some(last_entry) = self.entries.last_mut()
+            && let AgentThreadEntry::AssistantMessage(AssistantMessage { chunks, .. }) = last_entry
+            && let Some(AssistantMessageChunk::Thought {
+                block: ContentBlock::Markdown { markdown },
+            }) = chunks.last_mut()
+            && Self::is_backboard_progress_markdown(markdown, cx)
+        {
+            Self::flush_streaming_text(&mut self.streaming_text_buffer, cx);
+            markdown.update(cx, |markdown, cx| markdown.replace(replacement_text, cx));
+            cx.emit(AcpThreadEvent::EntryUpdated(entries_len - 1));
+            return;
+        }
+
+        self.push_assistant_content_block(chunk, true, cx);
+    }
+
     pub fn push_assistant_content_block_with_indent(
         &mut self,
         chunk: acp::ContentBlock,
@@ -1676,7 +1731,7 @@ impl AcpThread {
         // For text chunks going to an existing Markdown block, buffer for smooth
         // streaming instead of appending all at once which may feel more choppy.
         if let acp::ContentBlock::Text(text_content) = &chunk {
-            if let Some(markdown) = self.streaming_markdown_target(is_thought, indented) {
+            if let Some(markdown) = self.streaming_markdown_target(is_thought, indented, cx) {
                 let entries_len = self.entries.len();
                 cx.emit(AcpThreadEvent::EntryUpdated(entries_len - 1));
                 self.buffer_streaming_text(&markdown, text_content.text.clone(), cx);
@@ -1698,8 +1753,12 @@ impl AcpThread {
             Self::flush_streaming_text(&mut self.streaming_text_buffer, cx);
             cx.emit(AcpThreadEvent::EntryUpdated(idx));
             match (chunks.last_mut(), is_thought) {
-                (Some(AssistantMessageChunk::Message { block }), false)
-                | (Some(AssistantMessageChunk::Thought { block }), true) => {
+                (Some(AssistantMessageChunk::Message { block }), false) => {
+                    block.append(chunk, &language_registry, path_style, cx)
+                }
+                (Some(AssistantMessageChunk::Thought { block }), true)
+                    if !Self::is_backboard_progress_block(block, cx) =>
+                {
                     block.append(chunk, &language_registry, path_style, cx)
                 }
                 _ => {
@@ -1734,6 +1793,7 @@ impl AcpThread {
         &self,
         is_thought: bool,
         indented: bool,
+        cx: &App,
     ) -> Option<Entity<Markdown>> {
         let last_entry = self.entries.last()?;
         if let AgentThreadEntry::AssistantMessage(AssistantMessage {
@@ -1756,12 +1816,48 @@ impl AcpThread {
                         block: ContentBlock::Markdown { markdown },
                     },
                     true,
-                ) => Some(markdown.clone()),
+                ) if !Self::is_backboard_progress_markdown(markdown, cx) => Some(markdown.clone()),
                 _ => None,
             }
         } else {
             None
         }
+    }
+
+    fn is_backboard_progress_block(block: &ContentBlock, cx: &App) -> bool {
+        match block {
+            ContentBlock::Markdown { markdown } => {
+                Self::is_backboard_progress_markdown(markdown, cx)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_backboard_progress_markdown(markdown: &Entity<Markdown>, cx: &App) -> bool {
+        let source = markdown.read(cx).source().trim_start();
+        Self::is_backboard_progress_text(source)
+    }
+
+    fn is_backboard_progress_update(
+        content: &acp::ContentBlock,
+        meta: Option<&serde_json::Map<String, Value>>,
+    ) -> bool {
+        meta.and_then(|meta| meta.get("backboardProgress"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+            || match content {
+                acp::ContentBlock::Text(text) => Self::is_backboard_progress_text(&text.text),
+                _ => false,
+            }
+    }
+
+    fn is_backboard_progress_text(text: &str) -> bool {
+        let text = text.trim_start();
+        text.starts_with("Backboard ")
+            || text.starts_with("Loading the Backboard agent runtime.")
+            || text.starts_with("Preparing workspace context and tools.")
+            || text.starts_with("Sending the task to the selected model.")
+            || text.starts_with("Updating the visible task plan.")
     }
 
     /// Add text to the streaming buffer. If the target changed (e.g. switching

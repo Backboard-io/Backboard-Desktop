@@ -844,7 +844,9 @@ impl ConversationView {
                 ),
             };
         }
-        let session_work_dirs = work_dirs.unwrap_or_else(|| project.read(cx).default_path_list(cx));
+        let session_work_dirs = work_dirs
+            .filter(|work_dirs| !work_dirs.is_empty())
+            .unwrap_or_else(|| project.read(cx).default_path_list(cx));
 
         let connection_entry = connection_store.update(cx, |store, cx| {
             store.request_connection(connection_key, agent.clone(), cx)
@@ -3535,6 +3537,63 @@ pub(crate) mod tests {
             captured_cwd.lock().as_ref().unwrap(),
             &PathList::new(&[Path::new("/project/subdir")]),
             "Should use session cwd when it's inside the project"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_empty_work_dirs_fall_back_to_project_default(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            "/project",
+            json!({
+                "src": {
+                    "main.rs": "fn main() {}"
+                }
+            }),
+        )
+        .await;
+        let project = Project::test(fs, [Path::new("/project")], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+
+        let connection = CwdCapturingConnection::new();
+        let captured_cwd = connection.captured_work_dirs.clone();
+
+        let thread_store = cx.update(|_window, cx| cx.new(|cx| ThreadStore::new(cx)));
+        let connection_store =
+            cx.update(|_window, cx| cx.new(|cx| AgentConnectionStore::new(project.clone(), cx)));
+
+        let _conversation_view = cx.update(|window, cx| {
+            cx.new(|cx| {
+                ConversationView::new(
+                    Rc::new(StubAgentServer::new(connection)),
+                    connection_store,
+                    Agent::Custom { id: "Test".into() },
+                    None,
+                    None,
+                    Some(PathList::default()),
+                    None,
+                    None,
+                    workspace.downgrade(),
+                    project,
+                    Some(thread_store),
+                    None,
+                    "agent_panel",
+                    window,
+                    cx,
+                )
+            })
+        });
+
+        cx.run_until_parked();
+
+        assert_eq!(
+            captured_cwd.lock().as_ref().unwrap(),
+            &PathList::new(&[Path::new("/project")]),
+            "Should use the project default cwd when saved work dirs are empty"
         );
     }
 

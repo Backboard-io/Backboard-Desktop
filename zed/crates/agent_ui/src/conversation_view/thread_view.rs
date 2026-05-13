@@ -3743,8 +3743,13 @@ impl ThreadView {
 
     fn render_token_usage(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let thread = self.thread.read(cx);
-        let usage = thread.token_usage()?;
-        let show_split = self.supports_split_token_display(cx);
+        let usage = thread.token_usage().cloned();
+        if usage.is_none() && self.agent_display_name.as_ref() != "Backboard" {
+            return None;
+        }
+        let usage = usage.unwrap_or_default();
+        let has_usage = usage.max_tokens > 0 || usage.used_tokens > 0;
+        let show_split = has_usage && self.supports_split_token_display(cx);
 
         let cost_label = thread.cost().map(|cost| {
             let precision = if cost.amount > 0.0 && cost.amount < 0.01 {
@@ -3759,12 +3764,6 @@ impl ThreadView {
             }
         });
         let speed_metrics = thread.speed_metrics().cloned();
-        let speed_label = speed_metrics.as_ref().and_then(|metrics| {
-            metrics
-                .first_token_ms
-                .or(metrics.total_turn_ms)
-                .map(|ms| format!("Speed: {}", format_duration_ms(ms)))
-        });
 
         let progress_color = |ratio: f32| -> Hsla {
             if ratio >= 0.85 {
@@ -3789,6 +3788,11 @@ impl ThreadView {
         let stroke_width = px(2.);
 
         let percentage = format!("{}%", (progress_ratio * 100.0).round() as u32);
+        let visible_tokens_label = if has_usage {
+            format!("{used} / {max} tokens")
+        } else {
+            "tokens".to_string()
+        };
 
         let tooltip_separator_color = Color::Custom(cx.theme().colors().text_disabled.opacity(0.6));
 
@@ -3875,16 +3879,10 @@ impl ThreadView {
                 .flex_shrink_0()
                 .gap_1()
                 .mr_1()
-                .px_2()
-                .py_1()
-                .rounded_md()
-                .border_1()
-                .border_color(cx.theme().colors().border_variant)
-                .bg(cx.theme().colors().editor_background)
                 .child(
                     CircularProgress::new(
                         usage.used_tokens as f32,
-                        usage.max_tokens as f32,
+                        usage.max_tokens.max(1) as f32,
                         ring_size,
                         cx,
                     )
@@ -3892,32 +3890,9 @@ impl ThreadView {
                     .progress_color(progress_color(progress_ratio)),
                 )
                 .child(
-                    v_flex()
-                        .gap_0p5()
-                        .child(
-                            Label::new(format!("Context window: {percentage} full"))
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .child(
-                            Label::new(format!("{used} / {max} tokens"))
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .when_some(cost_label.clone(), |this, cost| {
-                            this.child(
-                                Label::new(format!("Session cost: {cost}"))
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
-                            )
-                        })
-                        .when_some(speed_label.clone(), |this, speed| {
-                            this.child(
-                                Label::new(speed)
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
-                            )
-                        }),
+                    Label::new(visible_tokens_label)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
                 )
                 .hoverable_tooltip(build_tooltip)
                 .into_any_element(),
@@ -4540,6 +4515,15 @@ fn render_speed_metric_rows(metrics: &acp_thread::SpeedMetrics) -> Vec<AnyElemen
     if let Some(value) = metrics.total_turn_ms {
         rows.push(speed_metric_row("Total turn", value));
     }
+    if let Some(value) = metrics.runtime_load_ms {
+        rows.push(speed_metric_row("Runtime", value));
+    }
+    if let Some(value) = metrics.model_list_ms {
+        rows.push(speed_metric_row("Models", value));
+    }
+    if let Some(value) = metrics.assistant_create_ms {
+        rows.push(speed_metric_row("Assistant", value));
+    }
     if let Some(value) = metrics.context_pack_ms {
         rows.push(speed_metric_row("Context pack", value));
     }
@@ -4593,6 +4577,58 @@ fn render_speed_metric_rows(metrics: &acp_thread::SpeedMetrics) -> Vec<AnyElemen
                 .child(Label::new(intensity.clone()))
                 .into_any_element(),
         );
+    }
+    rows
+}
+
+fn speed_stat_row(label: &'static str, value: u64) -> AnyElement {
+    h_flex()
+        .gap_1()
+        .justify_between()
+        .child(Label::new(label).color(Color::Muted))
+        .child(Label::new(value.to_string()))
+        .into_any_element()
+}
+
+fn render_speed_stat_rows(metrics: &acp_thread::SpeedMetrics) -> Vec<AnyElement> {
+    let mut rows = Vec::new();
+    if let Some(model) = metrics.model.as_ref() {
+        rows.push(
+            h_flex()
+                .gap_1()
+                .justify_between()
+                .child(Label::new("Model").color(Color::Muted))
+                .child(Label::new(model.clone()))
+                .into_any_element(),
+        );
+    }
+    if let Some(provider) = metrics.provider.as_ref() {
+        rows.push(
+            h_flex()
+                .gap_1()
+                .justify_between()
+                .child(Label::new("Provider").color(Color::Muted))
+                .child(Label::new(provider.clone()))
+                .into_any_element(),
+        );
+    }
+    if let Some(value) = metrics.tool_calls_count {
+        rows.push(speed_stat_row("Tool calls", value));
+    }
+    if let Some(value) = metrics.shell_tools_count {
+        rows.push(speed_stat_row("Shell calls", value));
+    }
+    if let Some(value) = metrics.read_tools_count {
+        rows.push(speed_stat_row("Read calls", value));
+    }
+    if let Some(value) = metrics.search_tools_count {
+        rows.push(speed_stat_row("Search calls", value));
+    }
+    if let Some(value) = metrics.edit_tools_count {
+        rows.push(speed_stat_row("Edit calls", value));
+    }
+    if let Some(value) = metrics.other_tools_count {
+        rows.push(speed_stat_row("Other calls", value));
     }
     rows
 }
@@ -4674,6 +4710,7 @@ impl Render for TokenUsageTooltip {
                     )
                 })
                 .when_some(speed_metrics, |this, speed_metrics| {
+                    let stat_rows = render_speed_stat_rows(&speed_metrics);
                     this.child(
                         v_flex()
                             .mt_1p5()
@@ -4688,6 +4725,22 @@ impl Render for TokenUsageTooltip {
                             )
                             .children(render_speed_metric_rows(&speed_metrics)),
                     )
+                    .when(!stat_rows.is_empty(), |this| {
+                        this.child(
+                            v_flex()
+                                .mt_1p5()
+                                .pt_1p5()
+                                .gap_0p5()
+                                .border_t_1()
+                                .border_color(cx.theme().colors().border_variant)
+                                .child(
+                                    Label::new("Stats")
+                                        .color(Color::Muted)
+                                        .size(LabelSize::Small),
+                                )
+                                .children(stat_rows),
+                        )
+                    })
                 })
                 .when(
                     user_rules_count > 0 || project_rules_count > 0,
@@ -6212,7 +6265,8 @@ impl ThreadView {
         let panel_bg = cx.theme().colors().panel_background;
 
         v_flex()
-            .gap_1()
+            .gap_0p5()
+            .opacity(0.72)
             .child(
                 h_flex()
                     .id(header_id)
@@ -6223,17 +6277,17 @@ impl ThreadView {
                     .justify_between()
                     .child(
                         h_flex()
-                            .h(window.line_height() - px(2.))
-                            .gap_1p5()
+                            .h(window.line_height() - px(4.))
+                            .gap_1()
                             .overflow_hidden()
-                            .child(self.render_backboard_logo(px(14.)))
+                            .child(self.render_backboard_logo(px(12.)))
                             .child(
                                 h_flex()
-                                    .gap_1()
+                                    .gap_0p5()
                                     .overflow_hidden()
                                     .child(
                                         div()
-                                            .text_size(self.tool_name_font_size())
+                                            .text_xs()
                                             .text_color(cx.theme().colors().text_muted)
                                             .child("Backboard thinking"),
                                     )
@@ -6268,10 +6322,11 @@ impl ThreadView {
                         .child(
                             div()
                                 .id(("thinking-content", chunk_ix))
-                                .ml_1p5()
-                                .pl_3p5()
+                                .ml_1()
+                                .pl_2()
                                 .border_l_1()
-                                .border_color(self.tool_card_border_color(cx))
+                                .border_color(self.tool_card_border_color(cx).opacity(0.6))
+                                .text_xs()
                                 .when(is_constrained, |this| this.max_h_64())
                                 .when_some(scroll_handle, |this, scroll_handle| {
                                     this.track_scroll(&scroll_handle)
