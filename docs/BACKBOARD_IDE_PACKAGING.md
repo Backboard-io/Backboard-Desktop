@@ -2,6 +2,113 @@
 
 This note explains why the development checkout is huge, why the downloadable app should be much smaller, and what needs to happen before Backboard Studio can be shipped as a normal web download.
 
+## Development Build / Run Command
+
+For day-to-day development on macOS, build and run the IDE from the Zed workspace. Replace `path/to/Espri-API` with wherever the repo is cloned on that machine.
+
+```sh
+cd path/to/Espri-API/ide/zed
+cargo run -p zed
+```
+
+For a faster-to-test release-mode app without making a DMG:
+
+```sh
+cd path/to/Espri-API/ide/zed
+cargo run -p zed --release
+```
+
+For Backboard inline autocomplete debugging:
+
+```sh
+cd path/to/Espri-API/ide/zed
+BACKBOARD_API_KEY=your_key RUST_LOG=edit_prediction=debug cargo run -p zed
+```
+
+Useful targeted compile checks:
+
+```sh
+cd path/to/Espri-API/ide/zed
+cargo check --locked -p agent_ui
+cargo check --locked -p agent_ui -p agent_servers -p acp_thread
+python3 -m py_compile script/backboard-ide-acp.py
+```
+
+### macOS Build Prerequisites
+
+Install the full Xcode app, not only the command line tools. Zed/Backboard Studio needs Apple developer tools for shader compilation, linking, signing, and bundling.
+
+1. Install Xcode from the Mac App Store or Apple Developer downloads.
+2. Open Xcode once and let it install macOS platform components.
+3. Point command line tools at the full Xcode install:
+
+```sh
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -license accept
+xcodebuild -runFirstLaunch
+```
+
+Install Rust and the active toolchain:
+
+```sh
+rustup update
+rustup default stable
+```
+
+Install Node dependencies/tools needed by some bundle/documentation/release scripts:
+
+```sh
+node --version
+npm --version
+```
+
+If `node` or `npm` is missing, install Node 20 or newer.
+
+### Metal / Shader Compiler Fix
+
+If builds or tests fail with a Metal shader compiler error, or an error like:
+
+```txt
+xcrun: error: unable to find utility "metal", not a developer tool or in PATH
+```
+
+First make sure Xcode is selected:
+
+```sh
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+xcodebuild -runFirstLaunch
+```
+
+On macOS 26 or newer, install the Metal toolchain component:
+
+```sh
+xcodebuild -downloadComponent MetalToolchain
+```
+
+If that fails, run first-launch setup again and retry:
+
+```sh
+xcodebuild -runFirstLaunch
+xcodebuild -downloadComponent MetalToolchain
+```
+
+Then clean and rebuild:
+
+```sh
+cd path/to/Espri-API/ide/zed
+cargo clean
+cargo run -p zed
+```
+
+### Common Dev Build Notes
+
+- `cargo run -p zed` builds a debug app and can create a very large `target/debug` directory.
+- `cargo run -p zed --release` is slower the first time but closer to the downloadable app behavior.
+- `cargo check --locked -p agent_ui` is a good quick sanity check for most Backboard UI work.
+- `cargo test -p agent_ui --no-fail-fast workspace_agent` may require the Metal toolchain before tests even start.
+- The Python ACP bridge should still compile separately with `python3 -m py_compile script/backboard-ide-acp.py`.
+- If the build gets weird after Xcode/Rust upgrades, try `cargo clean` and rebuild.
+
 ## Short Answer
 
 The repo/build folder can be tens or hundreds of GB because Rust development builds create a large `target/` directory with incremental artifacts, debug symbols, dependency builds, and object files.
@@ -245,4 +352,3 @@ The key test is simple:
 ```txt
 If the source repo is deleted or moved, the packaged app should still launch and Backboard chat should still work.
 ```
-
