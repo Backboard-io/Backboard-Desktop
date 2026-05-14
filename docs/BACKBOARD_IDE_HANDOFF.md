@@ -612,11 +612,13 @@ What the user sees:
 
 - Beginner landing/active-project flow.
 - Folder selection before starting an agent when needed.
-- Chat-first prompt/follow-up box.
+- Chat-first prompt/follow-up box. **Enter submits** (registered via `editor.register_action` for `editor::actions::Newline` — subscription stored in `session_subscriptions` to stay alive).
 - Friendly feed that turns raw ACP messages/tool calls into simpler labels.
 - File changes panel listing created/modified files with a route back into the editor.
+- Raw file browser with **folder navigation**: clicking a folder drills into it; a back row appears at the top to go up. `raw_browse_path: Option<PathBuf>` tracks the current directory (separate from `selected_folder`).
 - Embedded web preview panel that shows the running dev server inline (macOS WKWebView, Windows WebView2).
 - Layout flips when the preview is live: preview takes most of the space; chat shrinks to a narrow 340 px column on the left. When the agent is building again, chat takes priority.
+- Session tab bar shows proper browser-style tabs: active tab has a raised bordered background, inactive tabs are muted with hover highlight. Rendered by `render_tab_bar(active_title, background_titles, cx)`.
 
 Runtime behavior:
 
@@ -628,7 +630,10 @@ Runtime behavior:
 - The file changes panel watches the active thread action log, not a separate file-scanning runtime.
 - When the agent finishes, `open_web_app_if_present` searches the project root and one level of subdirectories for a `package.json` with a `"dev"` script or an `index.html`. It starts `npm run dev` for Next.js/Vite projects or sets `preview_url` to a `file://` URL for static HTML.
 - Before starting a new dev server, the code kills any existing process on port 3000 with `lsof -ti :3000 | xargs kill -9` (macOS/Linux), waits 400 ms, then starts fresh. The preview URL is always `http://localhost:3000`.
-- Multiple project sessions are supported with "+". Each session is stashed/restored with its full state including `web_preview`.
+- `start_dev_server` runs via `$SHELL -l -c "cd <folder> && <pm> run dev -- --port=3000"` so nvm/Homebrew/mise paths are on PATH (the plain `Command::new("npm")` path would fail in a GUI app). Package manager is auto-detected from lockfiles: `pnpm-lock.yaml` → pnpm, `bun.lockb`/`bun.lock` → bun, `yarn.lock` → yarn, fallback → npm.
+- The polling task is stored in `dev_server_task: Option<Task<()>>` on both `BeginnerWorkspace` and `ProjectSession`. Replacing this field drops and cancels the old task, preventing stale tasks from firing on the wrong session when tabs are switched.
+- **Follow-up behavior:** `submit_follow_up` only clears `web_preview` (hides the preview, reverts to chat-dominant layout) but keeps `preview_url`. The running dev server hot-reloads the code changes. When `AcpThreadEvent::Stopped` fires again, the code checks `if preview_url.is_none()` before calling `open_web_app_if_present` — if a server is already running, it just calls `cx.notify()` and `render()` recreates the `WebPreview` from the stored URL. The server is never killed/restarted on a follow-up.
+- Multiple project sessions are supported with "+". Each session is stashed/restored with its full state. **Critical:** `self.web_preview = None` must be called after building the stash struct to actually drop the live WKWebView — setting `web_preview: None` in the `ProjectSession` literal only prevents the stash from holding a copy, it does not drop the active one.
 
 ### Embedded Web Preview (`web_preview.rs`)
 
@@ -649,7 +654,7 @@ Key facts for future changes:
 - The macOS `WKWebView` configuration must not call `setValue:forKey: allowFileAccessFromFileURLs` on `WKPreferences`. That private KVC key was removed in macOS 26 and causes an EXC_BAD_ACCESS crash.
 - `set_frame` on macOS does the Y-flip: `ns_y = viewport_height - gpui_y - element_height`. This is passed through the `canvas` prepaint closure in `render_right_panel`.
 - Layout: `preview_dominant = web_preview.is_some() && !is_running`. When true, the right panel gets `flex_1` and the chat panel is fixed at `340 px`. When false, chat gets `flex_1` and the preview panel is `320 px`.
-- Sending a follow-up message clears both `web_preview` and `preview_url` so the layout reverts to chat-dominant and shows "Building your app…" while the new agent run completes.
+- Sending a follow-up message clears `web_preview` (reverts to chat-dominant layout) but keeps `preview_url` so the running dev server is reused — it is only restarted when `preview_url` is None (first build or explicitly reset).
 
 The `wry` crate is a Windows-only workspace dependency (`[target.'cfg(target_os = "windows")'.dependencies]` in `beginner_ui/Cargo.toml`). On macOS the `cocoa`/`objc` crates are used directly. Adding the `os-webview` wry feature on Linux would pull in GTK/webkit2gtk — do not enable it.
 
@@ -1027,6 +1032,12 @@ The bridge appends an IDE-specific system prompt in `_ensure_thread_binding()`. 
 - Avoid decorative filler such as generic gradients, blobs, and vague copy when the prompt calls for a concrete product or experience.
 - Only require browser/screenshot inspection when browser tooling is available or the user explicitly asks for visual verification.
 - Run dev-server checks in the foreground without appending `&`; the bridge stops dev-server commands after a short startup window.
+
+**Simple Mode absolute rules** (appended at the end of the system prompt, labeled "BACKBOARD STUDIO SIMPLE MODE — ABSOLUTE RULES"):
+1. Never output phrases like `run npm run dev`, `run the dev server`, `to preview`, `open http://localhost`, or any terminal command or localhost URL.
+2. The IDE automatically installs dependencies, starts the dev server, and shows the preview. The user does nothing.
+3. End every completed response with a friendly 2–4 sentence plain-language description of what was built (no file paths, commands, or URLs).
+4. The user is non-technical and will never open a terminal.
 
 This is why future website generation should not collapse into only `index.html` or a bare static scaffold.
 

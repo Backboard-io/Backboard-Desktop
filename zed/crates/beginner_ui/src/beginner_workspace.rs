@@ -10,6 +10,7 @@ use gpui::{
     PathPromptOptions, Render, SharedString, Subscription, Task, WeakEntity, Window,
     WindowControlArea, canvas,
 };
+use editor::actions::Newline;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
 use project::Project;
 use recent_projects::RecentProjectEntry;
@@ -61,9 +62,11 @@ struct ProjectSession {
     file_changes_panel: Option<Entity<FileChangesPanel>>,
     left_tab: LeftTab,
     show_raw_files: bool,
+    raw_browse_path: Option<PathBuf>,
     right_panel: RightPanel,
     preview_url: Option<String>,
     web_preview: Option<crate::web_preview::WebPreview>,
+    dev_server_task: Option<Task<()>>,
     subscriptions: Vec<Subscription>,
 }
 
@@ -90,9 +93,12 @@ pub struct BeginnerWorkspace {
     file_changes_panel: Option<Entity<FileChangesPanel>>,
     left_tab: LeftTab,
     show_raw_files: bool,
+    raw_browse_path: Option<PathBuf>,
     right_panel: RightPanel,
     // URL of the running dev server once it's ready.
     preview_url: Option<String>,
+    // Polling task for start_dev_server; stored per-session so it cancels on stash/switch.
+    dev_server_task: Option<Task<()>>,
     // Embedded web preview. Created lazily in render() once we have both a
     // preview_url and the Window handle. None on Linux (unsupported).
     web_preview: Option<crate::web_preview::WebPreview>,
@@ -104,12 +110,22 @@ pub struct BeginnerWorkspace {
 }
 
 impl BeginnerWorkspace {
-    fn make_chat_editor(window: &mut Window, cx: &mut Context<Self>, placeholder: &str) -> Entity<Editor> {
-        cx.new(|cx| {
+    fn make_chat_editor(window: &mut Window, cx: &mut Context<Self>, placeholder: &str) -> (Entity<Editor>, Subscription) {
+        let workspace = cx.entity().downgrade();
+        let editor = cx.new(|cx| {
             let mut editor = Editor::auto_height(3, 8, window, cx);
             editor.set_placeholder_text(placeholder, window, cx);
             editor
-        })
+        });
+        let subscription = editor.update(cx, |editor, _cx| {
+            let workspace = workspace.clone();
+            editor.register_action(move |_: &Newline, window, cx| {
+                workspace.update(cx, |this, cx| {
+                    this.submit_follow_up(window, cx);
+                }).ok();
+            })
+        });
+        (editor, subscription)
     }
 
     fn current_tab_title(&self) -> SharedString {
@@ -120,7 +136,7 @@ impl BeginnerWorkspace {
     }
 
     fn stash_current_session_and_reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let replacement_editor = Self::make_chat_editor(window, cx, "Describe your project or idea...");
+        let (replacement_editor, enter_sub) = Self::make_chat_editor(window, cx, "Describe your project or idea...");
         let session = ProjectSession {
             state: std::mem::replace(&mut self.state, BeginnerState::Landing),
             chat_editor: std::mem::replace(&mut self.chat_editor, replacement_editor),
@@ -134,13 +150,19 @@ impl BeginnerWorkspace {
             file_changes_panel: self.file_changes_panel.take(),
             left_tab: std::mem::replace(&mut self.left_tab, LeftTab::Files),
             show_raw_files: std::mem::replace(&mut self.show_raw_files, false),
+            raw_browse_path: self.raw_browse_path.take(),
             right_panel: std::mem::replace(&mut self.right_panel, RightPanel::Preview),
             preview_url: self.preview_url.take(),
-            // Drop the live webview — only the active session may hold one.
-            // The preview_url is preserved so it can be recreated on switch-back.
+            // Drop the live webview by not carrying it into the stash.
+            // preview_url is preserved so it can be recreated on switch-back.
             web_preview: None,
+            dev_server_task: self.dev_server_task.take(),
             subscriptions: std::mem::take(&mut self.session_subscriptions),
         };
+        // Drop the active webview so the WKWebView is removed from the window immediately.
+        self.web_preview = None;
+        // The new editor's Enter-to-submit subscription belongs to the fresh session.
+        self.session_subscriptions.push(enter_sub);
         self.background_sessions.push(session);
         cx.notify();
     }
@@ -168,8 +190,10 @@ impl BeginnerWorkspace {
         std::mem::swap(&mut self.file_changes_panel, &mut session.file_changes_panel);
         std::mem::swap(&mut self.left_tab, &mut session.left_tab);
         std::mem::swap(&mut self.show_raw_files, &mut session.show_raw_files);
+        std::mem::swap(&mut self.raw_browse_path, &mut session.raw_browse_path);
         std::mem::swap(&mut self.right_panel, &mut session.right_panel);
         std::mem::swap(&mut self.preview_url, &mut session.preview_url);
+        std::mem::swap(&mut self.dev_server_task, &mut session.dev_server_task);
         // Drop the active webview — background sessions never hold a live one.
         // render() will recreate it from preview_url for the new active session.
         self.web_preview = None;
@@ -183,7 +207,7 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let chat_editor = Self::make_chat_editor(window, cx, "Describe your project or idea...");
+        let (chat_editor, chat_enter_sub) = Self::make_chat_editor(window, cx, "Describe your project or idea...");
 
         let load_recent = Self::load_recent_projects(workspace.clone(), window, cx);
 
@@ -226,14 +250,16 @@ impl BeginnerWorkspace {
             file_changes_panel: None,
             left_tab: LeftTab::Files,
             show_raw_files: false,
+            raw_browse_path: None,
             right_panel: RightPanel::Preview,
             preview_url: None,
+            dev_server_task: None,
             web_preview: None,
             background_sessions: Vec::new(),
             recent_projects: Vec::new(),
             _tasks: vec![load_recent],
             _project_subscription: project_sub,
-            session_subscriptions: Vec::new(),
+            session_subscriptions: vec![chat_enter_sub],
         }
     }
 
@@ -342,6 +368,10 @@ impl BeginnerWorkspace {
         self.state = BeginnerState::ActiveProject {
             project_name: SharedString::from(project_name),
         };
+        // Clear any leftover preview from a previous run on this session.
+        self.web_preview = None;
+        self.preview_url = None;
+        self.dev_server_task = None;
         cx.notify();
 
         let workspace = self.workspace.clone();
@@ -438,7 +468,13 @@ impl BeginnerWorkspace {
                             AcpThreadEvent::Stopped(_) => {
                                 this.is_agent_running = false;
                                 this.agent_finished = true;
-                                this.open_web_app_if_present(cx);
+                                if this.preview_url.is_none() {
+                                    // First build — start the dev server.
+                                    this.open_web_app_if_present(cx);
+                                }
+                                // If preview_url is already set the dev server is still
+                                // running (hot-reloaded). render() will recreate the
+                                // WebPreview from the stored URL on the next frame.
                                 cx.notify();
                             }
 
@@ -529,9 +565,9 @@ impl BeginnerWorkspace {
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_text("", window, cx);
         });
-        // Drop the webview so the layout reverts to chat-dominant while building.
+        // Hide the webview so layout reverts to chat-dominant while the agent runs.
+        // Keep preview_url so the running dev server is reused (not restarted) after.
         self.web_preview = None;
-        self.preview_url = None;
         self.is_agent_running = true;
         cx.notify();
 
@@ -673,6 +709,8 @@ impl BeginnerWorkspace {
 
     fn start_dev_server(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
         let task = cx.spawn(async move |this, cx| {
+            // Note: 'this' is WeakEntity<BeginnerWorkspace> — cancels automatically if
+            // dev_server_task is replaced or the session is stashed.
             const PORT: u16 = 3000;
 
             // Kill anything already listening on the port so the new server
@@ -690,14 +728,31 @@ impl BeginnerWorkspace {
                     .await;
             }
 
-            let port_arg = format!("--port={PORT}");
-            let spawned = std::process::Command::new("npm")
-                .arg("run")
-                .arg("dev")
-                .arg("--")
-                .arg(port_arg)
+            // Detect the package manager from lockfiles present in the project folder.
+            let pkg_manager = if folder.join("pnpm-lock.yaml").exists() {
+                "pnpm"
+            } else if folder.join("bun.lockb").exists() || folder.join("bun.lock").exists() {
+                "bun"
+            } else if folder.join("yarn.lock").exists() {
+                "yarn"
+            } else {
+                "npm"
+            };
+
+            // Use the login shell so nvm/Homebrew/mise paths are on PATH.
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+            let dev_cmd = format!(
+                "cd {folder} && {pkg_manager} run dev -- --port={PORT}",
+                folder = folder.display(),
+                pkg_manager = pkg_manager,
+                PORT = PORT,
+            );
+
+            let spawned = std::process::Command::new(&shell)
+                .arg("-l")
+                .arg("-c")
+                .arg(&dev_cmd)
                 .env("PORT", PORT.to_string())
-                .current_dir(&folder)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
@@ -707,15 +762,13 @@ impl BeginnerWorkspace {
                 return;
             }
 
-            let port = PORT;
-
-            // Poll selected localhost port until it responds (up to 20 s).
-            for _ in 0..40 {
+            // Poll until the port responds (up to 30 s).
+            for _ in 0..60 {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(500))
                     .await;
-                if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                    let url = format!("http://localhost:{port}");
+                if std::net::TcpStream::connect(("127.0.0.1", PORT)).is_ok() {
+                    let url = format!("http://localhost:{PORT}");
                     this.update(cx, |this, cx| {
                         // Drop the old webview so render() creates a fresh one
                         // pointing at the new server — even if the port number
@@ -729,7 +782,8 @@ impl BeginnerWorkspace {
                 }
             }
         });
-        self._tasks.push(task);
+        // Replace any previous polling task — dropping the old one cancels it.
+        self.dev_server_task = Some(task);
     }
 
     #[allow(dead_code)]
@@ -746,6 +800,7 @@ impl BeginnerWorkspace {
         self.show_raw_files = false;
         self.right_panel = RightPanel::Preview;
         self.preview_url = None;
+        self.dev_server_task = None;
         self.web_preview = None;
         self.session_subscriptions.clear();
         self.chat_editor.update(cx, |editor, cx| {
@@ -936,6 +991,66 @@ impl Render for BeginnerWorkspace {
 }
 
 impl BeginnerWorkspace {
+    /// Renders a horizontal tab strip. `active_title` is the current (non-clickable) tab;
+    /// `background_titles` are the stashed sessions (clickable).
+    fn render_tab_bar(
+        &self,
+        active_title: SharedString,
+        background_titles: Vec<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let border = cx.theme().colors().border;
+        let active_bg = cx.theme().colors().editor_background;
+        let inactive_hover = cx.theme().colors().element_hover;
+
+        h_flex()
+            .h(px(30.))
+            .w_full()
+            .flex_shrink_0()
+            .items_end()
+            .px_2()
+            .gap_1()
+            .border_b_1()
+            .border_color(border)
+            // Active tab — raised appearance with no bottom border
+            .child(
+                h_flex()
+                    .id("tab-active")
+                    .h(px(26.))
+                    .px_3()
+                    .items_center()
+                    .rounded_t_md()
+                    .border_1()
+                    .border_b_0()
+                    .border_color(border)
+                    .bg(active_bg)
+                    .child(
+                        Label::new(active_title)
+                            .size(LabelSize::Small)
+                            .color(Color::Default),
+                    ),
+            )
+            // Stashed session tabs — clickable, inactive style
+            .children(background_titles.into_iter().enumerate().map(move |(ix, title)| {
+                h_flex()
+                    .id(SharedString::from(format!("tab-bg-{ix}")))
+                    .h(px(24.))
+                    .px_3()
+                    .items_center()
+                    .rounded_t_md()
+                    .cursor_pointer()
+                    .hover(move |el| el.bg(inactive_hover))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.switch_to_session(ix, cx);
+                    }))
+                    .child(
+                        Label::new(title)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+            }))
+    }
+
     fn render_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
         let folder_label = self
@@ -997,21 +1112,11 @@ impl BeginnerWorkspace {
                     ),
             )
             .when(!background_titles.is_empty(), |el| {
-                el.child(
-                    h_flex()
-                        .px_2()
-                        .py_1()
-                        .gap_1()
-                        .border_b_1()
-                        .border_color(cx.theme().colors().border)
-                        .children(background_titles.into_iter().enumerate().map(|(ix, title)| {
-                            Button::new(SharedString::from(format!("landing-bg-tab-{ix}")), title)
-                                .style(ButtonStyle::Subtle)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.switch_to_session(ix, cx);
-                                }))
-                        })),
-                )
+                el.child(self.render_tab_bar(
+                    SharedString::from("New Project"),
+                    background_titles,
+                    cx,
+                ))
             })
             // Centered content
             .child(
@@ -1228,25 +1333,7 @@ impl BeginnerWorkspace {
                     ),
             )
             .when(!background_titles.is_empty(), |el| {
-                el.child(
-                    h_flex()
-                        .px_2()
-                        .py_1()
-                        .gap_1()
-                        .border_b_1()
-                        .border_color(cx.theme().colors().border)
-                        .child(
-                            Button::new("active-tab", active_title)
-                                .style(ButtonStyle::Filled),
-                        )
-                        .children(background_titles.into_iter().enumerate().map(|(ix, title)| {
-                            Button::new(SharedString::from(format!("bg-tab-{ix}")), title)
-                                .style(ButtonStyle::Subtle)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.switch_to_session(ix, cx);
-                                }))
-                        })),
-                )
+                el.child(self.render_tab_bar(active_title, background_titles, cx))
             })
             // 3-column body
             .child(
@@ -1419,9 +1506,47 @@ impl BeginnerWorkspace {
                                 ),
                         )
                     })
-                    .when_some(self.selected_folder.as_ref(), |el, folder| {
+                    .when_some(self.selected_folder.as_ref(), |el, root_folder| {
                         if self.show_raw_files {
-                            el.children(project_file_sections(folder).into_iter().map(
+                            let browse_root = self.raw_browse_path.as_ref().unwrap_or(root_folder);
+                            let in_subdir = self.raw_browse_path.is_some();
+                            let browse_root = browse_root.clone();
+                            let root_folder = root_folder.clone();
+                            el
+                                .when(in_subdir, |el| {
+                                    let parent = browse_root.parent()
+                                        .map(|p| p.to_path_buf())
+                                        .filter(|p| p.starts_with(&root_folder));
+                                    el.child(
+                                        h_flex()
+                                            .id("raw-back")
+                                            .px_2()
+                                            .py_1()
+                                            .gap_1p5()
+                                            .rounded_md()
+                                            .cursor_pointer()
+                                            .hover(|row| row.bg(cx.theme().colors().element_hover))
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.raw_browse_path = parent.clone();
+                                                cx.notify();
+                                            }))
+                                            .child(
+                                                Icon::new(IconName::ArrowLeft)
+                                                    .size(IconSize::XSmall)
+                                                    .color(Color::Muted),
+                                            )
+                                            .child(
+                                                Label::new(
+                                                    browse_root.file_name()
+                                                        .map(|n| n.to_string_lossy().into_owned())
+                                                        .unwrap_or_default()
+                                                )
+                                                .size(LabelSize::Small)
+                                                .color(Color::Muted),
+                                            ),
+                                    )
+                                })
+                                .children(project_file_sections(&browse_root).into_iter().map(
                                 |(name, path, is_dir)| {
                                     h_flex()
                                         .id(SharedString::from(format!(
@@ -1432,14 +1557,17 @@ impl BeginnerWorkspace {
                                         .py_1()
                                         .gap_1p5()
                                         .rounded_md()
-                                        .when(!is_dir, |row| row.cursor_pointer())
+                                        .cursor_pointer()
                                         .hover(|row| row.bg(cx.theme().colors().element_hover))
-                                        .when(!is_dir, |row| {
-                                            row.on_click(cx.listener(move |this, _, _, cx| {
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            if is_dir {
+                                                this.raw_browse_path = Some(path.clone());
+                                                cx.notify();
+                                            } else {
                                                 this.open_file_read_only(path.as_path());
                                                 cx.notify();
-                                            }))
-                                        })
+                                            }
+                                        }))
                                         .child(
                                             Icon::new(if is_dir {
                                                 IconName::Folder
