@@ -606,6 +606,7 @@ Primary files:
 - `ide/zed/crates/beginner_ui/src/beginner_workspace.rs`
 - `ide/zed/crates/beginner_ui/src/beginner_chat_feed.rs`
 - `ide/zed/crates/beginner_ui/src/file_changes_panel.rs`
+- `ide/zed/crates/beginner_ui/src/web_preview.rs`
 
 What the user sees:
 
@@ -614,13 +615,43 @@ What the user sees:
 - Chat-first prompt/follow-up box.
 - Friendly feed that turns raw ACP messages/tool calls into simpler labels.
 - File changes panel listing created/modified files with a route back into the editor.
+- Embedded web preview panel that shows the running dev server inline (macOS WKWebView, Windows WebView2).
+- Layout flips when the preview is live: preview takes most of the space; chat shrinks to a narrow 340 px column on the left. When the agent is building again, chat takes priority.
 
 Runtime behavior:
 
-- `BeginnerWorkspace` asks `AgentPanel::spawn_beginner_thread(text, ...)` to create a native Backboard ACP thread.
+- `BeginnerWorkspace` asks `AgentPanel::spawn_beginner_thread(text, work_dirs, ...)` to create a native Backboard ACP thread.
+- `spawn_beginner_thread` passes `work_dirs` so the agent writes into the correct folder and creates the `ConversationView` with `suppress_notifications = true` so tool-confirmation popups are never shown in Simple Mode.
+- The ACP session uses `free` mode so the Python bridge auto-approves every tool call without asking the user.
 - The initial prompt is `AgentInitialContent::ContentBlock { auto_submit: true }`.
 - The beginner feed observes the same `AcpThread` entries as native chat but hides thought-only chunks and simplifies tool labels.
 - The file changes panel watches the active thread action log, not a separate file-scanning runtime.
+- When the agent finishes, `open_web_app_if_present` searches the project root and one level of subdirectories for a `package.json` with a `"dev"` script or an `index.html`. It starts `npm run dev` for Next.js/Vite projects or sets `preview_url` to a `file://` URL for static HTML.
+- Before starting a new dev server, the code kills any existing process on port 3000 with `lsof -ti :3000 | xargs kill -9` (macOS/Linux), waits 400 ms, then starts fresh. The preview URL is always `http://localhost:3000`.
+- Multiple project sessions are supported with "+". Each session is stashed/restored with its full state including `web_preview`.
+
+### Embedded Web Preview (`web_preview.rs`)
+
+The web preview embeds a native webview as a transparent overlay inside the GPUI window, positioned by a `canvas` element in `render_right_panel`.
+
+Platform support:
+
+| Platform | Implementation | Notes |
+|----------|----------------|-------|
+| macOS | `WKWebView` via `cocoa`/`objc` crates | Climbs from GPUI's Metal NSView to its `superview` (the window's `contentView`) so the webview is a sibling of the Metal layer, not a child of it |
+| Windows | WebView2 child window via `wry = "0.55"` | Uses `build_as_child(window)` with GPUI's `Win32WindowHandle`; coordinates already top-left |
+| Linux | Not embedded — `preview_url` shows "Open in Browser" button | GPUI uses Wayland; wry child views require X11 |
+
+Key facts for future changes:
+
+- `WebPreview::new(window, url)` is called lazily in `BeginnerWorkspace::render()`. It should only be called once per project session.
+- When `start_dev_server` fires or when `open_web_app_if_present` sets `preview_url`, `web_preview` is set to `None` first so `render()` creates a fresh webview pointed at the new URL — even if the port number is reused.
+- The macOS `WKWebView` configuration must not call `setValue:forKey: allowFileAccessFromFileURLs` on `WKPreferences`. That private KVC key was removed in macOS 26 and causes an EXC_BAD_ACCESS crash.
+- `set_frame` on macOS does the Y-flip: `ns_y = viewport_height - gpui_y - element_height`. This is passed through the `canvas` prepaint closure in `render_right_panel`.
+- Layout: `preview_dominant = web_preview.is_some() && !is_running`. When true, the right panel gets `flex_1` and the chat panel is fixed at `340 px`. When false, chat gets `flex_1` and the preview panel is `320 px`.
+- Sending a follow-up message clears both `web_preview` and `preview_url` so the layout reverts to chat-dominant and shows "Building your app…" while the new agent run completes.
+
+The `wry` crate is a Windows-only workspace dependency (`[target.'cfg(target_os = "windows")'.dependencies]` in `beginner_ui/Cargo.toml`). On macOS the `cocoa`/`objc` crates are used directly. Adding the `os-webview` wry feature on Linux would pull in GTK/webkit2gtk — do not enable it.
 
 ### Workspace And Title Bar Switching
 

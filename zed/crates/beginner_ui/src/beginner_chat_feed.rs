@@ -1,4 +1,4 @@
-use acp_thread::{AcpThread, AgentThreadEntry, AssistantMessageChunk, ToolCallStatus};
+use acp_thread::{AcpThread, AcpThreadEvent, AgentThreadEntry, AssistantMessageChunk, ToolCallStatus};
 use agent_client_protocol::schema as acp;
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, Render, SharedString, Subscription, Window,
@@ -30,7 +30,9 @@ pub struct BeginnerChatFeed {
 
 impl BeginnerChatFeed {
     pub fn new(thread: Entity<AcpThread>, cx: &mut Context<Self>) -> Self {
-        let subscription = cx.observe(&thread, |_, _, cx| cx.notify());
+        let subscription = cx.subscribe(&thread, |_, _, _event: &AcpThreadEvent, cx| {
+            cx.notify();
+        });
         Self {
             thread,
             focus_handle: cx.focus_handle(),
@@ -48,6 +50,7 @@ impl Focusable for BeginnerChatFeed {
 impl Render for BeginnerChatFeed {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let items = collect_items(&self.thread, cx);
+        let is_empty = items.is_empty();
 
         v_flex()
             .id("beginner-feed")
@@ -57,6 +60,25 @@ impl Render for BeginnerChatFeed {
             .px_4()
             .py_3()
             .gap_2()
+            .when(is_empty, |el| {
+                el.child(
+                    v_flex()
+                        .flex_1()
+                        .items_center()
+                        .justify_center()
+                        .gap_1()
+                        .child(
+                            Icon::new(IconName::Sparkle)
+                                .size(IconSize::Small)
+                                .color(Color::Accent),
+                        )
+                        .child(
+                            Label::new("Thinking…")
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        ),
+                )
+            })
             .children(items.into_iter().map(|item| render_item(item, cx)))
     }
 }

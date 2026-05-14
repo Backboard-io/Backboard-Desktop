@@ -507,6 +507,7 @@ pub struct ConversationView {
     notification_subscriptions: HashMap<WindowHandle<AgentNotification>, Vec<Subscription>>,
     auth_task: Option<Task<()>>,
     draft_prompt_persist_task: Option<Task<()>>,
+    suppress_notifications: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -754,9 +755,14 @@ impl ConversationView {
             notification_subscriptions: HashMap::default(),
             auth_task: None,
             draft_prompt_persist_task: None,
+            suppress_notifications: false,
             _subscriptions: subscriptions,
             focus_handle: cx.focus_handle(),
         }
+    }
+
+    pub fn set_suppress_notifications(&mut self, suppress: bool) {
+        self.suppress_notifications = suppress;
     }
 
     fn set_server_state(&mut self, state: ServerState, cx: &mut Context<Self>) {
@@ -2529,6 +2535,9 @@ impl ConversationView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.suppress_notifications {
+            return;
+        }
         #[cfg(feature = "audio")]
         self.play_notification_sound(window, cx);
         self.show_notification(caption, icon, window, cx);

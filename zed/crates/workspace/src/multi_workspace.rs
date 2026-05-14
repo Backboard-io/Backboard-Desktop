@@ -2130,7 +2130,6 @@ impl Render for MultiWorkspace {
 
         if self.interface_mode == InterfaceMode::Simple {
             if let Some(view) = self.beginner_view.as_ref() {
-                let titlebar = self.workspace().read(cx).titlebar_item();
                 return client_side_decorations(
                     div()
                         .key_context("SimpleMode")
@@ -2143,8 +2142,7 @@ impl Render for MultiWorkspace {
                         .on_action(cx.listener(|this, _: &SwitchInterfaceMode, window, cx| {
                             this.set_interface_mode(InterfaceMode::Expert, window, cx);
                         }))
-                        .children(titlebar)
-                        .child(div().flex_1().min_h_0().child(view.clone())),
+                        .child(view.clone()),
                     window,
                     cx,
                     Tiling::default(),

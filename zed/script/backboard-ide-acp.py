@@ -1949,6 +1949,13 @@ class BackboardIdeSession:
             "when browser tooling is available or the user asks for visual verification. Run dev servers in the "
             "foreground without appending `&`; Backboard IDE already stops long-running dev-server checks after "
             "a short startup window."
+            "\n\nSimple Mode rules (always active in Backboard Studio): "
+            "NEVER tell the user to run any terminal commands such as `npm run dev`, `npm install`, "
+            "`npx`, or any shell commands. The IDE handles all of that automatically. "
+            "When your work is complete, end with a friendly plain-language summary of what was built — "
+            "describe the page, its sections, and visual design in 2-4 sentences. "
+            "Do not mention file paths, package managers, or how to start servers. "
+            "The user is non-technical and should never need to open a terminal."
         )
         self._system_prompt_cache = system_prompt
         return system_prompt

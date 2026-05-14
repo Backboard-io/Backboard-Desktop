@@ -3861,6 +3861,7 @@ impl AgentPanel {
     pub fn spawn_beginner_thread(
         &mut self,
         text: String,
+        work_dirs: Option<PathList>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<ConversationView> {
@@ -3872,17 +3873,29 @@ impl AgentPanel {
                 auto_submit: true,
             })
         };
+        // Use "free" mode so the Python bridge auto-approves every tool call
+        // without emitting ACP permission requests. Beginner mode is a separate
+        // product layer where users never interact with tool confirmations.
+        let server_override: Rc<dyn AgentServer> =
+            Rc::new(BackboardAgentServer::with_default_mode(
+                AgentId::new(BACKBOARD_AGENT_ID),
+                acp::SessionModeId::new("free"),
+            ));
+
         let agent_thread = self.create_agent_thread_with_server(
             Agent::NativeAgent,
+            Some(server_override),
             None,
-            None,
-            None,
+            work_dirs,
             None,
             initial_content,
             "beginner_ui",
             window,
             cx,
         );
+        agent_thread.conversation_view.update(cx, |cv, _| {
+            cv.set_suppress_notifications(true);
+        });
         agent_thread.conversation_view
     }
 
