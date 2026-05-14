@@ -766,7 +766,7 @@ enum BackboardAgentApplyOutcome {
 
 fn truncate_workspace_event(text: &str) -> SharedString {
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    const MAX_CHARS: usize = 88;
+    const MAX_CHARS: usize = 180;
     if text.chars().count() <= MAX_CHARS {
         text.into()
     } else {

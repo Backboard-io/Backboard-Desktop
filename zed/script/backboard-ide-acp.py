@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.util
 import json
 import os
 import re
@@ -46,6 +47,55 @@ CLI_ROOT = _find_cli_root()
 if str(CLI_ROOT) not in sys.path:
     sys.path.insert(0, str(CLI_ROOT))
 
+
+def _load_cli_chat_symbol(module_name: str, filename: str, symbol: str) -> Any:
+    """Load a standalone chat helper without running chat package init.
+
+    The IDE bridge runs over stdio and should not initialize the CLI's
+    interactive prompt package. Importing `backboard_cli.cli.chat.*` normally
+    executes `chat/__init__.py`, which pulls in prompt_toolkit UI state that is
+    irrelevant here and can fail under the IDE launcher.
+    """
+    path = CLI_ROOT / "backboard_cli" / "cli" / "chat" / filename
+    spec = importlib.util.spec_from_file_location(f"_backboard_ide_{module_name}", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load {symbol} from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, symbol)
+
+
+class _FallbackPricingService:
+    def update_from_catalog(self, _models: Any) -> None:
+        return None
+
+    def cost_for_turn(
+        self,
+        _provider: str,
+        _model: str,
+        _input_tokens: int,
+        _output_tokens: int,
+    ) -> float | None:
+        return None
+
+
+try:
+    PricingService = _load_cli_chat_symbol("pricing", "pricing.py", "PricingService")
+except BaseException:
+    PricingService = _FallbackPricingService
+
+try:
+    build_system_prompt = _load_cli_chat_symbol("prompt", "prompt.py", "build_system_prompt")
+except BaseException:
+    def build_system_prompt(workspace: str, tool_names: list[str], _skills: str | None = None) -> str:
+        tools = ", ".join(tool_names[:80])
+        return (
+            "You are Backboard running inside the Backboard IDE. "
+            f"Work in this workspace: {workspace}. "
+            f"Available tools include: {tools}."
+        )
+
+
 CLI_IMPORT_ERROR: BaseException | None = None
 CLI_IMPORT_TRACEBACK = ""
 try:
@@ -53,8 +103,6 @@ try:
     from backboard_cli.agent.subagents import SubagentManager
     from backboard_cli.api.client import BackboardAPIClient
     from backboard_cli.api.mcp.manager import MCPManager
-    from backboard_cli.cli.chat.pricing import PricingService
-    from backboard_cli.cli.chat.prompt import build_system_prompt
     from backboard_cli.skills.manager import SkillManager
     from backboard_cli.state.config import config
     from backboard_cli.tools.manager import AdvancedToolManager
