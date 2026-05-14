@@ -173,17 +173,17 @@ export APP_CLI="zed"
 export APP_ICON="zed"
 export APP_ARGS="%U"
 if [[ "$channel" == "preview" ]]; then
-  export APP_NAME="Zed Preview"
-  APP_ID="dev.zed.Zed-Preview"
+  export APP_NAME="Backboard Studio Preview"
+  APP_ID="io.backboard.studio.preview"
 elif [[ "$channel" == "nightly" ]]; then
-  export APP_NAME="Zed Nightly"
-  APP_ID="dev.zed.Zed-Nightly"
+  export APP_NAME="Backboard Studio Nightly"
+  APP_ID="io.backboard.studio.nightly"
 elif [[ "$channel" == "dev" ]]; then
-  export APP_NAME="Zed Devel"
-  APP_ID="dev.zed.Zed-Dev"
+  export APP_NAME="Backboard Studio Dev"
+  APP_ID="io.backboard.studio.dev"
 else
-  export APP_NAME="Zed"
-  APP_ID="dev.zed.Zed"
+  export APP_NAME="Backboard Studio"
+  APP_ID="io.backboard.studio"
 fi
 
 mkdir -p "${zed_dir}/share/applications"

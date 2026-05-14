@@ -54,6 +54,6 @@ parts:
 apps:
   zed:
     command: usr/bin/zed
-    common-id: dev.zed.Zed
+    common-id: io.backboard.studio
     environment:
       ZED_BUNDLE_TYPE: snap

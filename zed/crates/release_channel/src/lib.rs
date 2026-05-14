@@ -28,10 +28,10 @@ pub static RELEASE_CHANNEL: LazyLock<ReleaseChannel> =
 #[cfg(target_os = "windows")]
 pub fn app_identifier() -> &'static str {
     match *RELEASE_CHANNEL {
-        ReleaseChannel::Dev => "Zed-Editor-Dev",
-        ReleaseChannel::Nightly => "Zed-Editor-Nightly",
-        ReleaseChannel::Preview => "Zed-Editor-Preview",
-        ReleaseChannel::Stable => "Zed-Editor-Stable",
+        ReleaseChannel::Dev => "Backboard-Studio-Dev",
+        ReleaseChannel::Nightly => "Backboard-Studio-Nightly",
+        ReleaseChannel::Preview => "Backboard-Studio-Preview",
+        ReleaseChannel::Stable => "Backboard-Studio",
     }
 }
 
@@ -181,10 +181,10 @@ impl ReleaseChannel {
     /// Returns the display name for this [`ReleaseChannel`].
     pub fn display_name(&self) -> &'static str {
         match self {
-            ReleaseChannel::Dev => "Zed Dev",
-            ReleaseChannel::Nightly => "Zed Nightly",
-            ReleaseChannel::Preview => "Zed Preview",
-            ReleaseChannel::Stable => "Zed",
+            ReleaseChannel::Dev => "Backboard Studio Dev",
+            ReleaseChannel::Nightly => "Backboard Studio Nightly",
+            ReleaseChannel::Preview => "Backboard Studio Preview",
+            ReleaseChannel::Stable => "Backboard Studio",
         }
     }
 
@@ -200,13 +200,13 @@ impl ReleaseChannel {
 
     /// Returns the application ID that's used by Wayland as application ID
     /// and WM_CLASS on X11.
-    /// This also has to match the bundle identifier for Zed on macOS.
+    /// This also has to match the bundle identifier for Backboard Studio on macOS.
     pub fn app_id(&self) -> &'static str {
         match self {
-            ReleaseChannel::Dev => "dev.zed.Zed-Dev",
-            ReleaseChannel::Nightly => "dev.zed.Zed-Nightly",
-            ReleaseChannel::Preview => "dev.zed.Zed-Preview",
-            ReleaseChannel::Stable => "dev.zed.Zed",
+            ReleaseChannel::Dev => "io.backboard.studio.dev",
+            ReleaseChannel::Nightly => "io.backboard.studio.nightly",
+            ReleaseChannel::Preview => "io.backboard.studio.preview",
+            ReleaseChannel::Stable => "io.backboard.studio",
         }
     }
 

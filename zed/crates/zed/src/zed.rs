@@ -459,6 +459,11 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
 
                 let active_workspace = this.workspace().clone();
                 let source_workspace = source_workspace.clone();
+                let agent_workspace = active_workspace.update(cx, |workspace, cx| {
+                    agent_ui::BackboardAgentWorkspacePage::new(workspace, window, cx)
+                });
+                this.agent_workspace_view = Some(agent_workspace.into());
+
                 active_workspace.update(cx, |workspace, cx| {
                     if let Some(ref source) = source_workspace {
                         if let Some(panel) = workspace.panel::<agent_ui::AgentPanel>(cx) {
@@ -5751,6 +5756,75 @@ mod tests {
                 )
             });
         }
+    }
+
+    #[gpui::test]
+    async fn test_agent_workspace_view_is_recreated_for_active_workspace(cx: &mut TestAppContext) {
+        let app_state = init_test(cx);
+
+        app_state
+            .fs
+            .as_fake()
+            .insert_tree(
+                path!("/"),
+                json!({
+                    "dir1": {},
+                    "dir2": {}
+                }),
+            )
+            .await;
+
+        let project1 = Project::test(app_state.fs.clone(), [path!("/dir1").as_ref()], cx).await;
+        let window = cx.add_window({
+            let project = project1.clone();
+            |window, cx| MultiWorkspace::test_new(project, window, cx)
+        });
+        cx.run_until_parked();
+
+        let initial_agent_workspace = window
+            .read_with(cx, |multi_workspace, _cx| {
+                multi_workspace
+                    .agent_workspace_view
+                    .as_ref()
+                    .expect("agent workspace view should be initialized")
+                    .clone()
+                    .downcast::<agent_ui::BackboardAgentWorkspacePage>()
+                    .expect("agent workspace view should be a BackboardAgentWorkspacePage")
+            })
+            .unwrap();
+
+        let project2 = Project::test(app_state.fs.clone(), [path!("/dir2").as_ref()], cx).await;
+        let workspace2 = window
+            .update(cx, |multi_workspace, window, cx| {
+                multi_workspace.test_add_workspace(project2.clone(), window, cx)
+            })
+            .unwrap();
+
+        window
+            .update(cx, |multi_workspace, window, cx| {
+                multi_workspace.activate(workspace2.clone(), None, window, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        let updated_agent_workspace = window
+            .read_with(cx, |multi_workspace, _cx| {
+                assert_eq!(multi_workspace.workspace(), &workspace2);
+                multi_workspace
+                    .agent_workspace_view
+                    .as_ref()
+                    .expect("agent workspace view should still be initialized")
+                    .clone()
+                    .downcast::<agent_ui::BackboardAgentWorkspacePage>()
+                    .expect("agent workspace view should still be a BackboardAgentWorkspacePage")
+            })
+            .unwrap();
+
+        assert_ne!(
+            initial_agent_workspace.entity_id(),
+            updated_agent_workspace.entity_id(),
+            "agent workspace page should be rebound when the active workspace changes"
+        );
     }
 
     #[gpui::test]

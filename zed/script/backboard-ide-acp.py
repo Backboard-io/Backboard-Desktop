@@ -18,6 +18,7 @@ import re
 import shlex
 import signal
 import sys
+import time
 import traceback
 import uuid
 from pathlib import Path
@@ -359,6 +360,80 @@ def _truncate(text: str, limit: int = MAX_DISPLAY_CHARS) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n\n[truncated {len(text) - limit} chars]"
+
+
+def _diagnostic_log_path() -> Path:
+    return Path.home() / ".backboard" / "logs" / "ide-agent.log"
+
+
+def _exception_details(exc: BaseException) -> dict[str, Any]:
+    details: dict[str, Any] = {
+        "exception_type": type(exc).__name__,
+        "exception_module": type(exc).__module__,
+        "message": str(exc),
+    }
+    response = getattr(exc, "response", None)
+    if response is not None:
+        details["http_status"] = getattr(response, "status_code", None)
+        request = getattr(response, "request", None)
+        if request is not None:
+            details["http_method"] = getattr(request, "method", None)
+            details["http_url"] = str(getattr(request, "url", ""))
+        detail = getattr(exc, "error_detail", None)
+        if detail:
+            details["api_error_detail"] = str(detail)
+        else:
+            with contextlib.suppress(Exception):
+                details["api_response_body"] = _truncate(response.text, 4000)
+    return {key: value for key, value in details.items() if value not in (None, "")}
+
+
+def _write_diagnostic_log(
+    label: str,
+    exc: BaseException,
+    *,
+    context: dict[str, Any] | None = None,
+    traceback_text: str | None = None,
+) -> Path:
+    path = _diagnostic_log_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "label": label,
+            "exception": _exception_details(exc),
+            "context": context or {},
+            "traceback": traceback_text or "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        }
+        with path.open("a", encoding="utf-8") as log:
+            log.write("\n" + "=" * 80 + "\n")
+            log.write(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+            log.write("\n")
+    except Exception:
+        print(traceback.format_exc(), file=sys.stderr)
+    return path
+
+
+_PREV_UNRAISABLEHOOK = sys.unraisablehook
+
+
+def _ide_unraisablehook(unraisable: Any) -> None:
+    exc = getattr(unraisable, "exc_value", None)
+    if isinstance(exc, BaseException):
+        _write_diagnostic_log(
+            "python_unraisable",
+            exc,
+            context={
+                "err_msg": getattr(unraisable, "err_msg", None),
+                "object": repr(getattr(unraisable, "object", None)),
+            },
+        )
+    if _PREV_UNRAISABLEHOOK is not None:
+        with contextlib.suppress(Exception):
+            _PREV_UNRAISABLEHOOK(unraisable)
+
+
+sys.unraisablehook = _ide_unraisablehook
 
 
 def _shared_config_defaults() -> tuple[str, str]:
@@ -711,6 +786,47 @@ def _load_session_store() -> dict[str, Any]:
     return {}
 
 
+@contextlib.contextmanager
+def _session_store_lock():
+    path = _session_store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(".json.lock")
+    fd: int | None = None
+    deadline = time.monotonic() + 5.0
+    while fd is None:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.write(fd, str(os.getpid()).encode("utf-8"))
+        except FileExistsError:
+            with contextlib.suppress(OSError):
+                if time.time() - lock_path.stat().st_mtime > 30:
+                    lock_path.unlink()
+                    continue
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for Backboard IDE session store lock: {lock_path}"
+                )
+            time.sleep(0.025)
+    try:
+        yield
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+            with contextlib.suppress(OSError):
+                lock_path.unlink()
+
+
+def _write_session_store_entry(session_id: str, record: dict[str, Any]) -> None:
+    path = _session_store_path()
+    with _session_store_lock():
+        data = _load_session_store()
+        data[session_id] = record
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+
+
 class AcpServer:
     def __init__(self) -> None:
         self.sessions: dict[str, BackboardIdeSession] = {}
@@ -764,7 +880,18 @@ class AcpServer:
         except JsonRpcError as exc:
             await self._send_error(request_id, exc.code, exc.message)
         except Exception as exc:  # pragma: no cover - defensive bridge surface.
-            print(traceback.format_exc(), file=sys.stderr)
+            tb = traceback.format_exc()
+            print(tb, file=sys.stderr)
+            _write_diagnostic_log(
+                "acp_request",
+                exc,
+                context={
+                    "request_id": request_id,
+                    "method": message.get("method"),
+                    "params_keys": sorted((message.get("params") or {}).keys()),
+                },
+                traceback_text=tb,
+            )
             await self._send_error(request_id, -32000, str(exc))
         else:
             await self._send({"jsonrpc": JSONRPC, "id": request_id, "result": result})
@@ -1195,6 +1322,62 @@ class BackboardIdeSession:
             meta["total_turn_ms"] = self._elapsed_ms(self._turn_started_at)
         return {key: value for key, value in meta.items() if value is not None}
 
+    def _diagnostic_context(self, **extra: Any) -> dict[str, Any]:
+        context: dict[str, Any] = {
+            "session_id": self.session_id,
+            "workspace": str(self.workspace),
+            "mode": self.mode,
+            "provider": self.provider,
+            "model": self.model,
+            "intensity": self.intensity,
+            "assistant_id": self.assistant_id,
+            "thread_id": self.thread_id,
+            "current_run_id": self.current_run_id,
+            "phase": self._phase,
+            "thinking": self._thinking,
+            "web_quality_turn": self._web_quality_turn,
+            "speed": self._speed_meta(),
+        }
+        context.update(extra)
+        return {key: value for key, value in context.items() if value not in (None, "")}
+
+    def _log_exception(self, label: str, exc: BaseException, **extra: Any) -> Path:
+        tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        print(tb, file=sys.stderr)
+        return _write_diagnostic_log(
+            label,
+            exc,
+            context=self._diagnostic_context(**extra),
+            traceback_text=tb,
+        )
+
+    def _visible_exception_report(self, label: str, exc: BaseException, log_path: Path) -> str:
+        details = _exception_details(exc)
+        lines = [
+            f"Backboard IDE agent error during {label}: {exc}",
+            "",
+            f"Full diagnostic log: {log_path}",
+            "",
+            "Exception:",
+        ]
+        for key, value in details.items():
+            lines.append(f"- {key}: {value}")
+        lines.extend([
+            "",
+            "Session:",
+            f"- session_id: {self.session_id}",
+            f"- workspace: {self.workspace}",
+            f"- phase: {self._phase}",
+            f"- provider/model: {self.provider}/{self.model}",
+            f"- assistant_id: {self.assistant_id}",
+            f"- thread_id: {self.thread_id}",
+            f"- run_id: {self.current_run_id}",
+            "",
+            "Traceback:",
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        ])
+        return _truncate("\n".join(lines), 12000)
+
     async def prompt(self, blocks: list[dict[str, Any]]) -> dict[str, Any]:
         async with self._prompt_lock:
             return await self._run_prompt(blocks)
@@ -1249,8 +1432,13 @@ class BackboardIdeSession:
         except asyncio.CancelledError:
             return {"stopReason": "cancelled"}
         except Exception as exc:
-            print(traceback.format_exc(), file=sys.stderr)
-            await self._agent_text(f"Backboard IDE agent error: {exc}")
+            log_path = self._log_exception(
+                "prompt",
+                exc,
+                prompt_preview=_truncate(message, 1000),
+                block_count=len(blocks),
+            )
+            await self._agent_text(self._visible_exception_report("prompt", exc, log_path))
             return {"stopReason": "end_turn"}
         finally:
             self._thinking = False
@@ -1713,20 +1901,14 @@ class BackboardIdeSession:
         return system_prompt
 
     def _persist_session_mapping(self) -> None:
-        path = _session_store_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data = _load_session_store()
-        data[self.session_id] = {
+        _write_session_store_entry(self.session_id, {
             "workspace": str(self.workspace),
             "assistant_id": self.assistant_id,
             "thread_id": self.thread_id,
             "provider": self.provider,
             "model": self.model,
             "title": self.workspace.name,
-        }
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        })
 
     def _restore_session_mapping(self) -> bool:
         record = _load_session_store().get(self.session_id)
@@ -1873,7 +2055,20 @@ class BackboardIdeSession:
                     return "end_turn"
             elif chunk_type in {"run_failed", "error"}:
                 self._thinking = False
-                await self._agent_text(str(chunk.get("error") or chunk.get("message") or "Backboard run failed."))
+                message = str(chunk.get("error") or chunk.get("message") or "Backboard run failed.")
+                synthetic = RuntimeError(message)
+                log_path = _write_diagnostic_log(
+                    "stream_error_chunk",
+                    synthetic,
+                    context=self._diagnostic_context(chunk=chunk),
+                )
+                await self._agent_text(
+                    _truncate(
+                        f"{message}\n\nFull diagnostic log: {log_path}\n\nStream error chunk:\n"
+                        f"{json.dumps(chunk, indent=2, ensure_ascii=False, default=str)}",
+                        12000,
+                    )
+                )
                 return "end_turn"
         return "end_turn"
 
@@ -1964,9 +2159,18 @@ class BackboardIdeSession:
         try:
             return await self._execute_tool_call(tool_call)
         except Exception as exc:
-            print(traceback.format_exc(), file=sys.stderr)
             tool_id = _tool_call_id(tool_call)
-            message = f"Backboard IDE tool `{name}` failed: {exc}"
+            log_path = self._log_exception(
+                "tool_call",
+                exc,
+                tool_id=tool_id,
+                tool_name=name,
+                tool_call=tool_call,
+            )
+            message = (
+                f"Backboard IDE tool `{name}` failed: {exc}\n\n"
+                f"Full diagnostic log: {log_path}"
+            )
             with contextlib.suppress(Exception):
                 await self._tool_update(tool_id, "failed", [_content_item(message)])
             return {"success": False, "error": message}
@@ -2037,8 +2241,16 @@ class BackboardIdeSession:
             await self._tool_update(tool_id, "completed", [_content_item(_result_text(result))])
             return result
         except Exception as exc:
-            result = {"success": False, "error": str(exc)}
-            await self._tool_update(tool_id, "failed", [_content_item(str(exc))])
+            log_path = self._log_exception(
+                "tool_execution",
+                exc,
+                tool_id=tool_id,
+                tool_name=name,
+                tool_args=args,
+            )
+            message = f"{exc}\n\nFull diagnostic log: {log_path}"
+            result = {"success": False, "error": message}
+            await self._tool_update(tool_id, "failed", [_content_item(message)])
             return result
 
     async def _call_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -2439,11 +2651,18 @@ class BackboardIdeSession:
                 },
             )
         except Exception as exc:
-            print(traceback.format_exc(), file=sys.stderr)
+            log_path = self._log_exception(
+                "permission_request",
+                exc,
+                tool_id=tool_id,
+                title=title,
+                kind=kind,
+                raw_input=raw_input,
+            )
             await self._tool_update(
                 tool_id,
                 "failed",
-                [_content_item(f"Tool permission request failed in Backboard IDE: {exc}")],
+                [_content_item(f"Tool permission request failed in Backboard IDE: {exc}\n\nFull diagnostic log: {log_path}")],
             )
             return False
         return (_selected_permission_option(response) or "").startswith("allow")
@@ -2734,3 +2953,8 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+    except Exception as exc:
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr)
+        _write_diagnostic_log("bridge_main", exc, traceback_text=tb)
+        raise

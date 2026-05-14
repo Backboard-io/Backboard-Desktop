@@ -140,6 +140,7 @@ impl OpenRequest {
         }
 
         for url in request.urls {
+            let url = normalize_backboard_url(url);
             if let Some(server_name) = url.strip_prefix("zed-cli://") {
                 this.kind = Some(OpenRequestKind::CliConnection(connect_to_cli(server_name)?));
             } else if let Some(action_index) = url.strip_prefix("zed-dock-action://") {
@@ -291,6 +292,16 @@ impl OpenRequest {
         self.remote_connection = Some(connection_options);
         self.parse_file_path(url.path());
         Ok(())
+    }
+}
+
+fn normalize_backboard_url(url: String) -> String {
+    if let Some(rest) = url.strip_prefix("backboard-cli://") {
+        format!("zed-cli://{rest}")
+    } else if let Some(rest) = url.strip_prefix("backboard://") {
+        format!("zed://{rest}")
+    } else {
+        url
     }
 }
 
