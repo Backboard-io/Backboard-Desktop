@@ -1915,13 +1915,24 @@ class BackboardIdeSession:
         started = self._loop_time()
         try:
             return await self._execute_tool_call(tool_call)
+        except Exception as exc:
+            print(traceback.format_exc(), file=sys.stderr)
+            tool_id = _tool_call_id(tool_call)
+            message = f"Backboard IDE tool `{name}` failed: {exc}"
+            with contextlib.suppress(Exception):
+                await self._tool_update(tool_id, "failed", [_content_item(message)])
+            return {"success": False, "error": message}
         finally:
             self._record_tool_duration(name, started)
 
     def _tool_output_payload(self, tool_call: dict[str, Any], output: dict[str, Any]) -> dict[str, str]:
         return {
             "tool_call_id": _tool_call_id(tool_call),
-            "output": json.dumps(self._compress_tool_output(tool_call, output), ensure_ascii=False),
+            "output": json.dumps(
+                self._compress_tool_output(tool_call, output),
+                ensure_ascii=False,
+                default=str,
+            ),
         }
 
     def _compress_tool_output(self, tool_call: dict[str, Any], output: Any) -> Any:
@@ -2360,24 +2371,33 @@ class BackboardIdeSession:
         content: list[dict[str, Any]],
         raw_input: dict[str, Any],
     ) -> bool:
-        response = await self.server.request(
-            "session/request_permission",
-            {
-                "sessionId": self.session_id,
-                "toolCall": {
-                    "toolCallId": tool_id,
-                    "title": title,
-                    "kind": kind,
-                    "status": "pending",
-                    "content": content,
-                    "rawInput": raw_input,
+        try:
+            response = await self.server.request(
+                "session/request_permission",
+                {
+                    "sessionId": self.session_id,
+                    "toolCall": {
+                        "toolCallId": tool_id,
+                        "title": title,
+                        "kind": kind,
+                        "status": "pending",
+                        "content": content,
+                        "rawInput": raw_input,
+                    },
+                    "options": [
+                        {"optionId": "allow_once", "name": "Allow", "kind": "allow_once"},
+                        {"optionId": "reject_once", "name": "Reject", "kind": "reject_once"},
+                    ],
                 },
-                "options": [
-                    {"optionId": "allow_once", "name": "Allow", "kind": "allow_once"},
-                    {"optionId": "reject_once", "name": "Reject", "kind": "reject_once"},
-                ],
-            },
-        )
+            )
+        except Exception as exc:
+            print(traceback.format_exc(), file=sys.stderr)
+            await self._tool_update(
+                tool_id,
+                "failed",
+                [_content_item(f"Tool permission request failed in Backboard IDE: {exc}")],
+            )
+            return False
         return (_selected_permission_option(response) or "").startswith("allow")
 
     async def _emit_plan_from_todos(self, source: dict[str, Any]) -> None:

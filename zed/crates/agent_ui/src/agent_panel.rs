@@ -312,6 +312,14 @@ pub struct BackboardAgentRunSummary {
     pub is_active_thread: bool,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct BackboardAgentWorkspaceLaunchResult {
+    pub accepted_count: usize,
+    pub batch_id: String,
+    pub created_thread_ids: Vec<ThreadId>,
+    pub pending_worktree_setup: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct BackboardAgentWorkspaceRunMetadata {
     title: String,
@@ -472,6 +480,10 @@ pub fn parse_backboard_workspace_agent_tasks(
         .filter(|task| !task.is_empty())
         .collect()
 }
+
+const MAX_BACKBOARD_WORKSPACE_AGENT_TASKS: usize = 20;
+const BACKBOARD_WORKSPACE_BLANK_CHAT_TITLE: &str = "New chat";
+const BACKBOARD_WORKSPACE_BLANK_CHAT_TASK: &str = "Waiting for first prompt";
 
 fn apply_backboard_agent_worktree_patch(
     base_workspace_path: PathBuf,
@@ -3463,22 +3475,11 @@ impl AgentPanel {
             return None;
         }
 
-        let repo = {
-            let project = self.project.read(cx);
-            project
-                .active_repository(cx)
-                .or_else(|| project.repositories(cx).values().next().cloned())
-        };
         let batch_id = workspace_agent_batch_id();
-
-        if repo.is_some() {
-            self.spawn_git_backboard_workspace_agents(
-                vec![task],
-                scope,
-                kind,
-                mode,
-                batch_id,
-                window,
+        if self.backboard_workspace_runs.len() >= MAX_BACKBOARD_WORKSPACE_AGENT_TASKS {
+            Self::show_deferred_toast(
+                &self.workspace,
+                "Backboard workspace is limited to 20 chats.",
                 cx,
             );
             None
@@ -3502,14 +3503,14 @@ impl AgentPanel {
         cx: &mut Context<Self>,
     ) -> ThreadId {
         let title = workspace_agent_title(kind, &task);
-        let work_dirs = self.project.read(cx).default_path_list(cx);
         let workspace_path = current_workspace_agent_path(self.project.read(cx), cx);
         let prompt = workspace_agent_prompt(kind, scope, mode, &task, true);
+        let event_batch_id = batch_id.clone();
         let thread_id = self.create_backboard_workspace_agent_thread(
             title.clone(),
             prompt,
             mode,
-            Some(work_dirs),
+            None,
             window,
             cx,
         );
@@ -3533,6 +3534,10 @@ impl AgentPanel {
                 batch_size,
             },
         );
+        cx.emit(AgentPanelEvent::BackboardWorkspaceRunCreated {
+            thread_id,
+            batch_id: event_batch_id,
+        });
         self.set_last_created_entry_kind(AgentPanelEntryKind::Thread, cx);
         self.serialize(cx);
         cx.notify();
@@ -3572,6 +3577,7 @@ impl AgentPanel {
 
         let project = self.project.clone();
         let workspace = self.workspace.clone();
+        let failure_batch_id = batch_id.clone();
         let repo = {
             let project = project.read(cx);
             project
@@ -3670,6 +3676,7 @@ impl AgentPanel {
                             let work_dirs = PathList::new(&[worktree_path.clone()]);
                             let prompt =
                                 workspace_agent_prompt(kind, scope, mode, &launch.task, false);
+                            let event_batch_id = launch.batch_id.clone();
                             let thread_id = this.create_backboard_workspace_agent_thread(
                                 launch.title.clone(),
                                 prompt,
@@ -3698,6 +3705,10 @@ impl AgentPanel {
                                     batch_size: launch.batch_size,
                                 },
                             );
+                            cx.emit(AgentPanelEvent::BackboardWorkspaceRunCreated {
+                                thread_id,
+                                batch_id: event_batch_id,
+                            });
                         }
                         this.set_last_created_entry_kind(AgentPanelEntryKind::Thread, cx);
                         this.serialize(cx);
@@ -3707,6 +3718,11 @@ impl AgentPanel {
                 }
                 Err(error) => {
                     log::warn!("failed to create Backboard agent worktrees: {error:#}");
+                    this.update(cx, |_this, cx| {
+                        cx.emit(AgentPanelEvent::BackboardWorkspaceLaunchFailed {
+                            batch_id: failure_batch_id.clone(),
+                        });
+                    })?;
                     if let Some(workspace) = workspace.upgrade() {
                         workspace.update(cx, |workspace, cx| workspace.show_error(&error, cx));
                     }
@@ -3726,33 +3742,37 @@ impl AgentPanel {
         mode: BackboardAgentWorkspaceMode,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> usize {
+    ) -> BackboardAgentWorkspaceLaunchResult {
         let mut tasks = parse_backboard_workspace_agent_tasks(tasks);
-        let has_repository = {
-            let project = self.project.read(cx);
-            project.active_repository(cx).is_some() || !project.repositories(cx).is_empty()
-        };
-        if !has_repository && tasks.len() > 1 {
-            tasks.truncate(1);
+        let available_slots =
+            MAX_BACKBOARD_WORKSPACE_AGENT_TASKS.saturating_sub(self.backboard_workspace_runs.len());
+        if available_slots == 0 {
             Self::show_deferred_toast(
                 &self.workspace,
-                "Parallel isolated agents need git. Running the first task in the current workspace.",
+                "Backboard workspace is limited to 20 chats.",
+                cx,
+            );
+            return BackboardAgentWorkspaceLaunchResult::default();
+        }
+        if tasks.len() > available_slots {
+            tasks.truncate(available_slots);
+            Self::show_deferred_toast(
+                &self.workspace,
+                "Running as many Backboard chats as the 20-chat limit allows.",
                 cx,
             );
         }
 
         let count = tasks.len();
         if count == 0 {
-            return 0;
+            return BackboardAgentWorkspaceLaunchResult::default();
         }
 
         let batch_id = workspace_agent_batch_id();
-        if has_repository {
-            self.spawn_git_backboard_workspace_agents(
-                tasks, scope, kind, mode, batch_id, window, cx,
-            );
-        } else {
-            for (batch_index, task) in tasks.into_iter().enumerate() {
+        let created_thread_ids = tasks
+            .into_iter()
+            .enumerate()
+            .map(|(batch_index, task)| {
                 self.spawn_current_workspace_backboard_workspace_agent(
                     task,
                     scope,
@@ -3763,10 +3783,72 @@ impl AgentPanel {
                     count,
                     window,
                     cx,
-                );
-            }
+                )
+            })
+            .collect();
+        BackboardAgentWorkspaceLaunchResult {
+            accepted_count: count,
+            batch_id,
+            created_thread_ids,
+            pending_worktree_setup: false,
         }
-        count
+    }
+
+    pub fn create_backboard_workspace_chat(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<ThreadId> {
+        if self.backboard_workspace_runs.len() >= MAX_BACKBOARD_WORKSPACE_AGENT_TASKS {
+            Self::show_deferred_toast(
+                &self.workspace,
+                "Backboard workspace is limited to 20 chats.",
+                cx,
+            );
+            return None;
+        }
+
+        let title = BACKBOARD_WORKSPACE_BLANK_CHAT_TITLE.to_string();
+        let task = BACKBOARD_WORKSPACE_BLANK_CHAT_TASK.to_string();
+        let batch_id = workspace_agent_batch_id();
+        let workspace_path = current_workspace_agent_path(self.project.read(cx), cx);
+        let thread_id = self.create_backboard_workspace_agent_conversation(
+            title.clone(),
+            BackboardAgentWorkspaceMode::Agent,
+            None,
+            None,
+            window,
+            cx,
+        );
+
+        self.backboard_workspace_runs.insert(
+            thread_id,
+            BackboardAgentWorkspaceRunMetadata {
+                title,
+                task,
+                kind: BackboardAgentWorkspaceKind::Build,
+                scope: BackboardAgentWorkspaceScope::WholeProject,
+                mode: BackboardAgentWorkspaceMode::Agent,
+                base_workspace_path: workspace_path.clone(),
+                worktree_path: workspace_path,
+                branch_name: String::new(),
+                base_commit: String::new(),
+                changed_paths: Vec::new(),
+                apply_state: BackboardAgentApplyState::Pending,
+                current_workspace: true,
+                batch_id: batch_id.clone(),
+                batch_index: 0,
+                batch_size: 1,
+            },
+        );
+        cx.emit(AgentPanelEvent::BackboardWorkspaceRunCreated {
+            thread_id,
+            batch_id,
+        });
+        self.set_last_created_entry_kind(AgentPanelEntryKind::Thread, cx);
+        self.serialize(cx);
+        cx.notify();
+        Some(thread_id)
     }
 
     /// Creates a new Backboard agent thread for the beginner UI and returns the
@@ -3815,7 +3897,25 @@ impl AgentPanel {
             blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(prompt))],
             auto_submit: true,
         };
+        self.create_backboard_workspace_agent_conversation(
+            title,
+            mode,
+            work_dirs,
+            Some(initial_content),
+            window,
+            cx,
+        )
+    }
 
+    fn create_backboard_workspace_agent_conversation(
+        &mut self,
+        title: String,
+        mode: BackboardAgentWorkspaceMode,
+        work_dirs: Option<PathList>,
+        initial_content: Option<AgentInitialContent>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> ThreadId {
         let server_override: Rc<dyn AgentServer> =
             Rc::new(BackboardAgentServer::with_default_mode(
                 AgentId::new(BACKBOARD_AGENT_ID),
@@ -3828,7 +3928,7 @@ impl AgentPanel {
             None,
             work_dirs,
             Some(title.into()),
-            Some(initial_content),
+            initial_content,
             "agent_workspace",
             window,
             cx,
@@ -3849,7 +3949,7 @@ impl AgentPanel {
         cx: &mut Context<Self>,
     ) {
         let work_dirs = match self.backboard_workspace_runs.get(&thread_id) {
-            Some(run) if run.current_workspace => Some(self.project.read(cx).default_path_list(cx)),
+            Some(run) if run.current_workspace => None,
             Some(run) => Some(PathList::new(&[run.worktree_path.clone()])),
             None => None,
         };
@@ -4500,9 +4600,17 @@ impl AgentPanel {
         false
     }
 
-    fn update_thread_work_dirs(&self, cx: &mut Context<Self>) {
+    fn update_thread_work_dirs(&mut self, cx: &mut Context<Self>) {
         let new_work_dirs = self.project.read(cx).default_path_list(cx);
         let new_worktree_paths = self.project.read(cx).worktree_paths(cx);
+        let current_workspace_path = current_workspace_agent_path(self.project.read(cx), cx);
+
+        for run in self.backboard_workspace_runs.values_mut() {
+            if run.current_workspace {
+                run.base_workspace_path = current_workspace_path.clone();
+                run.worktree_path = current_workspace_path.clone();
+            }
+        }
 
         if let Some(conversation_view) = self.active_conversation_view() {
             let thread_id = conversation_view.read(cx).parent_id();
@@ -5093,11 +5201,21 @@ fn agent_panel_dock_position(cx: &App) -> DockPosition {
     DockPosition::Right
 }
 
+#[derive(Clone, Debug)]
 pub enum AgentPanelEvent {
     ActiveViewChanged,
     ActiveViewFocused,
     EntryChanged,
-    ThreadInteracted { thread_id: ThreadId },
+    ThreadInteracted {
+        thread_id: ThreadId,
+    },
+    BackboardWorkspaceRunCreated {
+        thread_id: ThreadId,
+        batch_id: String,
+    },
+    BackboardWorkspaceLaunchFailed {
+        batch_id: String,
+    },
 }
 
 impl EventEmitter<PanelEvent> for AgentPanel {}
@@ -6699,6 +6817,7 @@ mod tests {
     use anyhow::{Result, anyhow};
     use feature_flags::FeatureFlagAppExt;
     use fs::FakeFs;
+    use futures::StreamExt;
     use gpui::{App, TestAppContext, VisualTestContext};
     use parking_lot::Mutex;
     use project::Project;
@@ -8076,12 +8195,12 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_workspace_agent_without_git_creates_current_workspace_thread(
+    async fn test_workspace_agent_without_git_creates_current_workspace_threads(
         cx: &mut TestAppContext,
     ) {
         let (panel, mut cx) = setup_panel(cx).await;
 
-        let attempted = panel.update_in(&mut cx, |panel, window, cx| {
+        let result = panel.update_in(&mut cx, |panel, window, cx| {
             panel.spawn_backboard_workspace_agents(
                 vec![
                     "change the dashboard".to_string(),
@@ -8095,33 +8214,209 @@ mod tests {
             )
         });
 
-        assert_eq!(attempted, 1);
+        assert_eq!(result.accepted_count, 2);
+        assert_eq!(result.created_thread_ids.len(), 2);
+        assert!(!result.pending_worktree_setup);
+        assert!(!result.batch_id.is_empty());
         cx.run_until_parked();
 
         panel.read_with(&cx, |panel, cx| {
-            assert_eq!(panel.retained_threads.len(), 1);
-            assert_eq!(panel.backboard_workspace_runs.len(), 1);
+            assert_eq!(panel.retained_threads.len(), 2);
+            assert_eq!(panel.backboard_workspace_runs.len(), 2);
 
-            let (thread_id, run) = panel
+            for run in panel.backboard_workspace_runs.values() {
+                assert!(run.current_workspace);
+                assert!(!run.batch_id.is_empty());
+                assert_eq!(run.batch_size, 2);
+                assert_eq!(run.mode, BackboardAgentWorkspaceMode::Agent);
+                assert!(run.branch_name.is_empty());
+                assert!(run.base_commit.is_empty());
+            }
+
+            let summaries = panel.backboard_agent_run_summaries(cx);
+            assert_eq!(summaries.len(), 2);
+
+            for summary in summaries {
+                assert!(summary.can_review);
+                assert!(!summary.can_apply);
+                assert_eq!(
+                    summary
+                        .apply_state_label
+                        .as_ref()
+                        .map(|label| label.as_ref()),
+                    Some("Current workspace")
+                );
+                assert!(summary.worktree_label.is_none());
+                assert!(summary.branch_label.is_none());
+                assert_eq!(summary.batch_size, 2);
+                assert!(summary.batch_id.is_some());
+            }
+        });
+    }
+
+    #[gpui::test]
+    async fn test_workspace_agent_launch_result_emits_created_event_and_keeps_chat(
+        cx: &mut TestAppContext,
+    ) {
+        let (panel, mut cx) = setup_panel(cx).await;
+        let mut events = cx.events::<AgentPanelEvent, _>(&panel);
+
+        let result = panel.update_in(&mut cx, |panel, window, cx| {
+            panel.spawn_backboard_workspace_agents(
+                vec!["add a chat follow-up affordance".to_string()],
+                BackboardAgentWorkspaceScope::WholeProject,
+                BackboardAgentWorkspaceKind::Build,
+                BackboardAgentWorkspaceMode::Agent,
+                window,
+                cx,
+            )
+        });
+
+        assert_eq!(result.accepted_count, 1);
+        assert_eq!(result.created_thread_ids.len(), 1);
+        assert!(!result.pending_worktree_setup);
+
+        let thread_id = result.created_thread_ids[0];
+        let event = events
+            .next()
+            .await
+            .expect("workspace run creation should emit an event");
+        match event {
+            AgentPanelEvent::BackboardWorkspaceRunCreated {
+                thread_id: event_thread_id,
+                batch_id,
+            } => {
+                assert_eq!(event_thread_id, thread_id);
+                assert_eq!(batch_id, result.batch_id);
+            }
+            other => panic!("expected workspace run created event, got {other:?}"),
+        }
+
+        panel.read_with(&cx, |panel, cx| {
+            let conversation = panel
+                .backboard_workspace_conversation_view(thread_id, cx)
+                .expect("created workspace agent should keep a real conversation view");
+            assert_eq!(conversation.read(cx).parent_id(), thread_id);
+            assert!(
+                panel.retained_threads.contains_key(&thread_id),
+                "workspace chat should remain retained for follow-up sends"
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_workspace_agent_blank_chat_is_retained_without_auto_prompt(
+        cx: &mut TestAppContext,
+    ) {
+        let (panel, mut cx) = setup_git_panel(cx).await;
+        let mut events = cx.events::<AgentPanelEvent, _>(&panel);
+
+        let thread_id = panel
+            .update_in(&mut cx, |panel, window, cx| {
+                panel.create_backboard_workspace_chat(window, cx)
+            })
+            .expect("blank workspace chat should be created");
+        cx.run_until_parked();
+
+        let event = events
+            .next()
+            .await
+            .expect("blank workspace chat should emit a creation event");
+        match event {
+            AgentPanelEvent::BackboardWorkspaceRunCreated {
+                thread_id: event_thread_id,
+                batch_id,
+            } => {
+                assert_eq!(event_thread_id, thread_id);
+                assert!(!batch_id.is_empty());
+            }
+            other => panic!("expected workspace run created event, got {other:?}"),
+        }
+
+        panel.read_with(&cx, |panel, cx| {
+            assert!(panel.retained_threads.contains_key(&thread_id));
+            let run = panel
                 .backboard_workspace_runs
-                .iter()
-                .next()
-                .expect("run metadata should be recorded");
+                .get(&thread_id)
+                .expect("blank chat should have workspace metadata");
             assert!(run.current_workspace);
-            assert_eq!(run.task, "change the dashboard");
-            assert!(!run.batch_id.is_empty());
-            assert_eq!(run.batch_index, 0);
-            assert_eq!(run.batch_size, 1);
-            assert_eq!(run.mode, BackboardAgentWorkspaceMode::Agent);
+            assert_eq!(run.title, BACKBOARD_WORKSPACE_BLANK_CHAT_TITLE);
+            assert_eq!(run.task, BACKBOARD_WORKSPACE_BLANK_CHAT_TASK);
+            assert!(run.branch_name.is_empty());
+            assert!(run.base_commit.is_empty());
+
+            let conversation = panel
+                .backboard_workspace_conversation_view(thread_id, cx)
+                .expect("blank chat should expose a retained conversation");
+            assert_eq!(conversation.read(cx).parent_id(), thread_id);
+        });
+    }
+
+    #[gpui::test]
+    async fn test_workspace_agent_blank_chat_tracks_folder_opened_after_creation(
+        cx: &mut TestAppContext,
+    ) {
+        init_test(cx);
+        cx.update(|cx| {
+            agent::ThreadStore::init_global(cx);
+            language_model::LanguageModelRegistry::test(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        cx.update(|cx| <dyn fs::Fs>::set_global(fs.clone(), cx));
+        let project = Project::test(fs.clone(), [], cx).await;
+        let multi_workspace =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = multi_workspace
+            .read_with(cx, |mw, _cx| mw.workspace().clone())
+            .unwrap();
+        let mut cx = VisualTestContext::from_window(multi_workspace.into(), cx);
+
+        let panel = workspace.update_in(&mut cx, |workspace, window, cx| {
+            cx.new(|cx| AgentPanel::new(workspace, None, window, cx))
+        });
+
+        let thread_id = panel
+            .update_in(&mut cx, |panel, window, cx| {
+                panel.create_backboard_workspace_chat(window, cx)
+            })
+            .expect("blank workspace chat should be created before a folder exists");
+
+        panel.read_with(&cx, |panel, _cx| {
+            let run = panel
+                .backboard_workspace_runs
+                .get(&thread_id)
+                .expect("blank chat should have workspace metadata");
+            assert!(run.current_workspace);
+            assert_eq!(run.worktree_path, *paths::home_dir());
+        });
+
+        fs.insert_tree("/opened_project", json!({ "src": { "main.rs": "" } }))
+            .await;
+        let (new_tree, _) = project
+            .update(&mut cx, |project, cx| {
+                project.find_or_create_worktree("/opened_project", true, cx)
+            })
+            .await
+            .unwrap();
+        cx.read(|cx| new_tree.read(cx).as_local().unwrap().scan_complete())
+            .await;
+        cx.run_until_parked();
+
+        panel.read_with(&cx, |panel, cx| {
+            let run = panel
+                .backboard_workspace_runs
+                .get(&thread_id)
+                .expect("blank chat should keep workspace metadata after folder open");
+            assert!(run.current_workspace);
+            assert_eq!(run.base_workspace_path, PathBuf::from("/opened_project"));
+            assert_eq!(run.worktree_path, PathBuf::from("/opened_project"));
 
             let summary = panel
                 .backboard_agent_run_summaries(cx)
                 .into_iter()
-                .find(|summary| summary.thread_id == *thread_id)
-                .expect("current-workspace agent run should be summarized");
-
-            assert!(summary.can_review);
-            assert!(!summary.can_apply);
+                .find(|summary| summary.thread_id == thread_id)
+                .expect("blank chat should still be summarized after folder open");
             assert_eq!(
                 summary
                     .apply_state_label
@@ -8130,20 +8425,16 @@ mod tests {
                 Some("Current workspace")
             );
             assert!(summary.worktree_label.is_none());
-            assert!(summary.branch_label.is_none());
-            assert_eq!(summary.batch_size, 1);
-            assert_eq!(summary.batch_index, 0);
-            assert!(summary.batch_id.is_some());
         });
     }
 
     #[gpui::test]
-    async fn test_workspace_agent_git_multi_task_creates_batched_worktree_threads(
+    async fn test_workspace_agent_git_multi_task_creates_shared_workspace_threads(
         cx: &mut TestAppContext,
     ) {
         let (panel, mut cx) = setup_git_panel(cx).await;
 
-        let attempted = panel.update_in(&mut cx, |panel, window, cx| {
+        let result = panel.update_in(&mut cx, |panel, window, cx| {
             panel.spawn_backboard_workspace_agents(
                 vec![
                     "change the dashboard".to_string(),
@@ -8157,10 +8448,11 @@ mod tests {
             )
         });
 
-        assert_eq!(attempted, 2);
-        for _ in 0..4 {
-            cx.run_until_parked();
-        }
+        assert_eq!(result.accepted_count, 2);
+        assert_eq!(result.created_thread_ids.len(), 2);
+        assert!(!result.pending_worktree_setup);
+        assert!(!result.batch_id.is_empty());
+        cx.run_until_parked();
 
         panel.read_with(&cx, |panel, cx| {
             assert_eq!(panel.retained_threads.len(), 2);
@@ -8189,14 +8481,17 @@ mod tests {
 
             assert_eq!(batch_ids.len(), 1);
             assert!(!batch_ids.iter().next().unwrap().is_empty());
-            assert_eq!(worktree_paths.len(), 2);
-            assert_eq!(branch_names.len(), 2);
+            assert_eq!(worktree_paths.len(), 1);
+            assert_eq!(
+                branch_names,
+                [String::new()].into_iter().collect::<HashSet<_>>()
+            );
             assert_eq!(batch_indices, [0, 1].into_iter().collect::<HashSet<_>>());
             for run in panel.backboard_workspace_runs.values() {
-                assert!(!run.current_workspace);
+                assert!(run.current_workspace);
                 assert_eq!(run.mode, BackboardAgentWorkspaceMode::Free);
                 assert_eq!(run.batch_size, 2);
-                assert!(!run.base_commit.is_empty());
+                assert!(run.base_commit.is_empty());
             }
 
             let summaries = panel.backboard_agent_run_summaries(cx);
@@ -8204,10 +8499,53 @@ mod tests {
             for summary in summaries {
                 assert_eq!(summary.batch_size, 2);
                 assert!(summary.batch_id.is_some());
-                assert!(summary.worktree_label.is_some());
-                assert!(summary.branch_label.is_some());
+                assert!(summary.worktree_label.is_none());
+                assert!(summary.branch_label.is_none());
             }
         });
+    }
+
+    #[gpui::test]
+    async fn test_workspace_agent_git_launch_caps_batch_at_twenty(cx: &mut TestAppContext) {
+        let (panel, mut cx) = setup_git_panel(cx).await;
+        let tasks = (0..25)
+            .map(|index| format!("update page {index}"))
+            .collect::<Vec<_>>();
+
+        let result = panel.update_in(&mut cx, |panel, window, cx| {
+            panel.spawn_backboard_workspace_agents(
+                tasks,
+                BackboardAgentWorkspaceScope::WholeProject,
+                BackboardAgentWorkspaceKind::Build,
+                BackboardAgentWorkspaceMode::Free,
+                window,
+                cx,
+            )
+        });
+
+        assert_eq!(result.accepted_count, 20);
+        assert_eq!(result.created_thread_ids.len(), 20);
+        assert!(!result.pending_worktree_setup);
+
+        cx.run_until_parked();
+
+        panel.read_with(&cx, |panel, cx| {
+            assert_eq!(panel.retained_threads.len(), 20);
+            assert_eq!(panel.backboard_workspace_runs.len(), 20);
+            assert_eq!(panel.backboard_agent_run_summaries(cx).len(), 20);
+            for run in panel.backboard_workspace_runs.values() {
+                assert!(run.current_workspace);
+                assert_eq!(run.batch_size, 20);
+            }
+        });
+
+        let blocked = panel.update_in(&mut cx, |panel, window, cx| {
+            panel.create_backboard_workspace_chat(window, cx)
+        });
+        assert!(
+            blocked.is_none(),
+            "the twenty-first workspace chat should be rejected"
+        );
     }
 
     #[gpui::test]

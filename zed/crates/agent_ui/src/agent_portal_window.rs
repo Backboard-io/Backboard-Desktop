@@ -222,7 +222,7 @@ impl BackboardAgentPortalWindow {
         let mut spawned = 0;
         if let Some(panel) = self.panel(cx) {
             panel.update(cx, |panel, cx| {
-                spawned = panel.spawn_backboard_workspace_agents(
+                let result = panel.spawn_backboard_workspace_agents(
                     tasks.clone(),
                     self.selected_scope,
                     self.selected_kind,
@@ -230,6 +230,7 @@ impl BackboardAgentPortalWindow {
                     window,
                     cx,
                 );
+                spawned = result.created_thread_ids.len();
             });
         }
 
@@ -473,10 +474,11 @@ impl BackboardAgentPortalWindow {
 
     fn render_launcher(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let task_count = self.task_lines(cx).len();
-        let run_label = if task_count == 1 {
+        let runnable_task_count = task_count.min(20);
+        let run_label = if runnable_task_count == 1 {
             "Run 1 agent".to_string()
         } else {
-            format!("Run {task_count} agents")
+            format!("Run {runnable_task_count} agents")
         };
         let settings = ThemeSettings::get_global(cx);
         let text_style = TextStyle {

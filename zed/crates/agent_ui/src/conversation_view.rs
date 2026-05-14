@@ -844,10 +844,6 @@ impl ConversationView {
                 ),
             };
         }
-        let session_work_dirs = work_dirs
-            .filter(|work_dirs| !work_dirs.is_empty())
-            .unwrap_or_else(|| project.read(cx).default_path_list(cx));
-
         let connection_entry = connection_store.update(cx, |store, cx| {
             store.request_connection(connection_key, agent.clone(), cx)
         });
@@ -883,6 +879,15 @@ impl ConversationView {
                     .log_err();
                     return;
                 }
+            };
+            let session_work_dirs = match cx.update(|_, cx| {
+                work_dirs
+                    .clone()
+                    .filter(|work_dirs| !work_dirs.is_empty())
+                    .unwrap_or_else(|| project.read(cx).default_path_list(cx))
+            }) {
+                Ok(work_dirs) => work_dirs,
+                Err(_) => return,
             };
 
             telemetry::event!(
@@ -2794,7 +2799,9 @@ impl ConversationView {
                             dismiss_if_visible(this, window, cx);
                         }
                         AgentPanelEvent::EntryChanged
-                        | AgentPanelEvent::ThreadInteracted { .. } => {}
+                        | AgentPanelEvent::ThreadInteracted { .. }
+                        | AgentPanelEvent::BackboardWorkspaceRunCreated { .. }
+                        | AgentPanelEvent::BackboardWorkspaceLaunchFailed { .. } => {}
                     },
                 ));
             }

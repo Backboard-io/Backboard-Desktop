@@ -889,6 +889,8 @@ impl Sidebar {
                     this.record_thread_interacted(thread_id, cx);
                     this.update_entries(cx);
                 }
+                AgentPanelEvent::BackboardWorkspaceRunCreated { .. }
+                | AgentPanelEvent::BackboardWorkspaceLaunchFailed { .. } => {}
             },
         )
         .detach();
