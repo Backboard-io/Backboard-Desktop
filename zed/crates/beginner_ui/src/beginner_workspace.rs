@@ -65,6 +65,8 @@ struct ProjectSession {
     raw_browse_path: Option<PathBuf>,
     right_panel: RightPanel,
     preview_url: Option<String>,
+    // Port claimed by this session's dev server (3000–3002). None until first start.
+    dev_server_port: Option<u16>,
     web_preview: Option<crate::web_preview::WebPreview>,
     dev_server_task: Option<Task<()>>,
     subscriptions: Vec<Subscription>,
@@ -97,6 +99,9 @@ pub struct BeginnerWorkspace {
     right_panel: RightPanel,
     // URL of the running dev server once it's ready.
     preview_url: Option<String>,
+    // Port claimed by this session (3000–3002). Persists across stash/switch so the
+    // server is never killed when switching tabs — only reclaimed when a session is reset.
+    dev_server_port: Option<u16>,
     // Polling task for start_dev_server; stored per-session so it cancels on stash/switch.
     dev_server_task: Option<Task<()>>,
     // Embedded web preview. Created lazily in render() once we have both a
@@ -153,8 +158,10 @@ impl BeginnerWorkspace {
             raw_browse_path: self.raw_browse_path.take(),
             right_panel: std::mem::replace(&mut self.right_panel, RightPanel::Preview),
             preview_url: self.preview_url.take(),
+            dev_server_port: self.dev_server_port.take(),
             // Drop the live webview by not carrying it into the stash.
-            // preview_url is preserved so it can be recreated on switch-back.
+            // preview_url and dev_server_port are preserved so the server stays alive
+            // on its port and can be shown again on switch-back.
             web_preview: None,
             dev_server_task: self.dev_server_task.take(),
             subscriptions: std::mem::take(&mut self.session_subscriptions),
@@ -193,6 +200,7 @@ impl BeginnerWorkspace {
         std::mem::swap(&mut self.raw_browse_path, &mut session.raw_browse_path);
         std::mem::swap(&mut self.right_panel, &mut session.right_panel);
         std::mem::swap(&mut self.preview_url, &mut session.preview_url);
+        std::mem::swap(&mut self.dev_server_port, &mut session.dev_server_port);
         std::mem::swap(&mut self.dev_server_task, &mut session.dev_server_task);
         // Drop the active webview — background sessions never hold a live one.
         // render() will recreate it from preview_url for the new active session.
@@ -253,6 +261,7 @@ impl BeginnerWorkspace {
             raw_browse_path: None,
             right_panel: RightPanel::Preview,
             preview_url: None,
+            dev_server_port: None,
             dev_server_task: None,
             web_preview: None,
             background_sessions: Vec::new(),
@@ -369,8 +378,10 @@ impl BeginnerWorkspace {
             project_name: SharedString::from(project_name),
         };
         // Clear any leftover preview from a previous run on this session.
+        // dev_server_port is also cleared so the next build claims a fresh port.
         self.web_preview = None;
         self.preview_url = None;
+        self.dev_server_port = None;
         self.dev_server_task = None;
         cx.notify();
 
@@ -707,22 +718,35 @@ impl BeginnerWorkspace {
         }
     }
 
-    fn start_dev_server(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
-        let task = cx.spawn(async move |this, cx| {
-            // Note: 'this' is WeakEntity<BeginnerWorkspace> — cancels automatically if
-            // dev_server_task is replaced or the session is stashed.
-            const PORT: u16 = 3000;
+    /// Picks the lowest port in 3000–3002 not already claimed by another session.
+    fn claim_dev_server_port(&self) -> u16 {
+        let used: std::collections::HashSet<u16> = self
+            .background_sessions
+            .iter()
+            .filter_map(|s| s.dev_server_port)
+            .collect();
+        for port in 3000u16..3003 {
+            if !used.contains(&port) {
+                return port;
+            }
+        }
+        3000 // all three taken — reuse 3000 (shouldn't happen with max 3 tabs)
+    }
 
-            // Kill anything already listening on the port so the new server
-            // always gets a clean start. Works on macOS and Linux; no-op on Windows.
+    fn start_dev_server(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
+        // Reuse the already-claimed port for this session; claim a fresh one if first start.
+        let port = self.dev_server_port.unwrap_or_else(|| self.claim_dev_server_port());
+        self.dev_server_port = Some(port);
+
+        let task = cx.spawn(async move |this, cx| {
+            // Kill only the specific port being claimed so other sessions' servers survive.
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             {
                 std::process::Command::new("sh")
                     .arg("-c")
-                    .arg(format!("lsof -ti :{PORT} | xargs kill -9 2>/dev/null; true"))
+                    .arg(format!("lsof -ti :{port} | xargs kill -9 2>/dev/null; true"))
                     .status()
                     .ok();
-                // Give the OS a moment to reclaim the port.
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(400))
                     .await;
@@ -739,20 +763,19 @@ impl BeginnerWorkspace {
                 "npm"
             };
 
-            // Use the login shell so nvm/Homebrew/mise paths are on PATH.
+            // Use the interactive login shell so ~/.zshrc / ~/.bashrc are sourced —
+            // this makes nvm, Homebrew, mise, etc. available even from a GUI app launch.
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
             let dev_cmd = format!(
-                "cd {folder} && {pkg_manager} run dev -- --port={PORT}",
-                folder = folder.display(),
-                pkg_manager = pkg_manager,
-                PORT = PORT,
+                "cd {} && {} run dev -- --port={}",
+                folder.display(),
+                pkg_manager,
+                port,
             );
 
             let spawned = std::process::Command::new(&shell)
-                .arg("-l")
-                .arg("-c")
-                .arg(&dev_cmd)
-                .env("PORT", PORT.to_string())
+                .args(["-i", "-l", "-c", &dev_cmd])
+                .env("PORT", port.to_string())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
@@ -767,12 +790,9 @@ impl BeginnerWorkspace {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(500))
                     .await;
-                if std::net::TcpStream::connect(("127.0.0.1", PORT)).is_ok() {
-                    let url = format!("http://localhost:{PORT}");
+                if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                    let url = format!("http://localhost:{port}");
                     this.update(cx, |this, cx| {
-                        // Drop the old webview so render() creates a fresh one
-                        // pointing at the new server — even if the port number
-                        // is the same as a previous project.
                         this.web_preview = None;
                         this.preview_url = Some(url);
                         cx.notify();
@@ -800,6 +820,7 @@ impl BeginnerWorkspace {
         self.show_raw_files = false;
         self.right_panel = RightPanel::Preview;
         self.preview_url = None;
+        self.dev_server_port = None;
         self.dev_server_task = None;
         self.web_preview = None;
         self.session_subscriptions.clear();
