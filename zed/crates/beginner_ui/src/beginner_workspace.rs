@@ -136,7 +136,9 @@ impl BeginnerWorkspace {
             show_raw_files: std::mem::replace(&mut self.show_raw_files, false),
             right_panel: std::mem::replace(&mut self.right_panel, RightPanel::Preview),
             preview_url: self.preview_url.take(),
-            web_preview: self.web_preview.take(),
+            // Drop the live webview — only the active session may hold one.
+            // The preview_url is preserved so it can be recreated on switch-back.
+            web_preview: None,
             subscriptions: std::mem::take(&mut self.session_subscriptions),
         };
         self.background_sessions.push(session);
@@ -168,7 +170,9 @@ impl BeginnerWorkspace {
         std::mem::swap(&mut self.show_raw_files, &mut session.show_raw_files);
         std::mem::swap(&mut self.right_panel, &mut session.right_panel);
         std::mem::swap(&mut self.preview_url, &mut session.preview_url);
-        std::mem::swap(&mut self.web_preview, &mut session.web_preview);
+        // Drop the active webview — background sessions never hold a live one.
+        // render() will recreate it from preview_url for the new active session.
+        self.web_preview = None;
         std::mem::swap(&mut self.session_subscriptions, &mut session.subscriptions);
         cx.notify();
     }
@@ -742,6 +746,7 @@ impl BeginnerWorkspace {
         self.show_raw_files = false;
         self.right_panel = RightPanel::Preview;
         self.preview_url = None;
+        self.web_preview = None;
         self.session_subscriptions.clear();
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_placeholder_text("Describe your project or idea...", window, cx);
