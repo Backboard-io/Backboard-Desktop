@@ -34,6 +34,7 @@ pub struct BackboardAgentWorkspacePage {
     run_list_scroll_handle: ScrollHandle,
     dashboard_scroll_handle: ScrollHandle,
     dismissed_threads: HashSet<ThreadId>,
+    show_token_context: bool,
     observing_agent_panel: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -80,6 +81,7 @@ impl BackboardAgentWorkspacePage {
                 run_list_scroll_handle: ScrollHandle::new(),
                 dashboard_scroll_handle: ScrollHandle::new(),
                 dismissed_threads: HashSet::default(),
+                show_token_context: false,
                 observing_agent_panel,
                 _subscriptions: subscriptions,
             }
@@ -515,7 +517,23 @@ impl BackboardAgentWorkspacePage {
                                     Color::Muted
                                 },
                                 cx,
-                            )),
+                            ))
+                            .child(
+                                Button::new(
+                                    "toggle-token-context-cards",
+                                    if self.show_token_context {
+                                        "Hide context"
+                                    } else {
+                                        "Show context"
+                                    },
+                                )
+                                .size(ButtonSize::Compact)
+                                .style(ButtonStyle::Subtle)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.show_token_context = !this.show_token_context;
+                                    cx.notify();
+                                })),
+                            ),
                     ),
             )
             .child(
@@ -1373,7 +1391,11 @@ impl BackboardAgentWorkspacePage {
                     .px_3()
                     .flex_1()
                     .min_h_0()
-                    .child(self.render_terminal_preview(&summary, cx))
+                    .child(if self.show_token_context {
+                        self.render_token_context_preview(&summary, cx).into_any_element()
+                    } else {
+                        self.render_terminal_preview(&summary, cx).into_any_element()
+                    })
                     .when(
                         summary.branch_label.is_some() || summary.apply_state_label.is_some(),
                         |this| {
@@ -1673,6 +1695,91 @@ impl BackboardAgentWorkspacePage {
                     )
                     .children(event_rows),
             )
+    }
+
+    fn render_token_context_preview(
+        &self,
+        summary: &BackboardAgentRunSummary,
+        _cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let token_lines = summary
+            .token_usage
+            .as_ref()
+            .map(|usage| {
+                vec![
+                    format!("tokens used: {}", usage.used_tokens),
+                    format!("input/output: {} / {}", usage.input_tokens, usage.output_tokens),
+                    format!("context limit: {}", usage.max_tokens),
+                ]
+            })
+            .unwrap_or_else(|| vec!["token usage not available yet".to_string()]);
+
+        let speed_lines = summary
+            .speed_metrics
+            .as_ref()
+            .map(|metrics| {
+                vec![
+                    format!(
+                        "first token: {}",
+                        metrics
+                            .first_token_ms
+                            .map(Self::format_ms)
+                            .unwrap_or_else(|| "--".to_string())
+                    ),
+                    format!(
+                        "context pack: {}",
+                        metrics
+                            .context_pack_ms
+                            .map(Self::format_ms)
+                            .unwrap_or_else(|| "--".to_string())
+                    ),
+                    format!(
+                        "total turn: {}",
+                        metrics
+                            .total_turn_ms
+                            .map(Self::format_ms)
+                            .unwrap_or_else(|| "--".to_string())
+                    ),
+                ]
+            })
+            .unwrap_or_else(|| vec!["timing metrics not available yet".to_string()]);
+
+        let mut lines = Vec::new();
+        lines.extend(token_lines);
+        lines.extend(speed_lines);
+        lines.push(format!(
+            "cost: {}",
+            summary.cost.as_deref().unwrap_or("not available")
+        ));
+
+        v_flex().flex_1().min_h(rems_from_px(124.)).child(
+            v_flex()
+                .gap_1()
+                .children(lines.into_iter().map(|line| {
+                    h_flex()
+                        .items_start()
+                        .min_w_0()
+                        .gap_1p5()
+                        .child(Icon::new(IconName::ArrowRight).size(IconSize::XSmall))
+                        .child(
+                            Label::new(line)
+                                .size(LabelSize::Small)
+                                .buffer_font(_cx)
+                                .line_height_style(LineHeightStyle::UiLabel)
+                                .color(Color::Muted)
+                                .flex_1(),
+                        )
+                        .into_any_element()
+                })),
+        )
+    }
+
+    fn format_ms(value: f64) -> String {
+        if value >= 1000.0 {
+            format!("{:.2}s", value / 1000.0)
+        } else {
+            format!("{:.0}ms", value)
+        }
     }
 
     fn render_terminal_event_row(

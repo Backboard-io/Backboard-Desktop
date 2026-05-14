@@ -1118,6 +1118,46 @@ class BackboardIdeSession:
         self._slowest_tool_ms = 0.0
         self._web_quality_turn = False
 
+    async def _api_json_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        """Run short API calls outside anyio's async transport machinery.
+
+        The IDE bridge lives inside Zed's ACP request/cancel lifecycle. On
+        Python 3.14, httpx/httpcore's async close path can hit anyio task-state
+        bookkeeping with ``asyncio.current_task() is None`` and raise
+        ``TypeError: cannot create weak reference to 'NoneType' object``. The
+        terminal CLI can tolerate or hide some async teardown noise, but here it
+        aborts the prompt before we even create a thread. These calls are small
+        JSON requests, so doing them synchronously in a worker thread avoids the
+        brittle async cancel-scope path while keeping the streaming model path
+        unchanged.
+        """
+        if self.api_client is None:
+            raise RuntimeError("Backboard API client is not initialized.")
+
+        def request() -> Any:
+            import httpx
+
+            url = f"{self.api_client.base_url}{path}"
+            with httpx.Client(timeout=60.0) as client:
+                response = client.request(
+                    method,
+                    url,
+                    headers=self.api_client._request_headers(),
+                    json=json_body,
+                    params=params,
+                )
+                response.raise_for_status()
+                return response.json()
+
+        return await asyncio.to_thread(request)
+
     async def load(self) -> dict[str, Any]:
         self.cancel_event.clear()
 
@@ -1174,7 +1214,12 @@ class BackboardIdeSession:
                 models = cached_models
             else:
                 started = self._loop_time()
-                models = await self.api_client.list_models(limit=250)
+                model_data = await self._api_json_request(
+                    "GET",
+                    "/models",
+                    params={"model_type": "llm", "limit": 250},
+                )
+                models = model_data.get("models", []) if isinstance(model_data, dict) else []
                 self._record_timing("model_list_ms", started)
                 MODEL_LIST_CACHE["models"] = models
                 MODEL_LIST_CACHE["expires_at"] = now + MODEL_LIST_CACHE_TTL_SECONDS
@@ -1848,14 +1893,22 @@ class BackboardIdeSession:
 
         started = self._loop_time()
         system_prompt = self._system_prompt()
-        assistant = await self.api_client.create_assistant(
-            name="Backboard IDE Agent",
-            description=system_prompt,
-            tools=self._tool_definitions(),
+        assistant = await self._api_json_request(
+            "POST",
+            "/assistants",
+            json_body={
+                "name": "Backboard IDE Agent",
+                "description": system_prompt,
+                "tools": self._tool_definitions(),
+            },
         )
         self._record_timing("assistant_create_ms", started)
         self.assistant_id = assistant["assistant_id"]
-        thread = await self.api_client.create_thread(self.assistant_id)
+        thread = await self._api_json_request(
+            "POST",
+            f"/assistants/{self.assistant_id}/threads",
+            json_body={},
+        )
         self.thread_id = thread["thread_id"]
         self._persist_session_mapping()
 
@@ -1931,7 +1984,7 @@ class BackboardIdeSession:
         if self._history_replayed or not self.thread_id or not self.api_client:
             return
         try:
-            thread_data = await self.api_client.get_thread(self.thread_id)
+            thread_data = await self._api_json_request("GET", f"/threads/{self.thread_id}")
         except Exception:
             return
         messages = thread_data.get("messages", []) or []

@@ -302,6 +302,8 @@ pub struct BackboardAgentRunSummary {
     pub can_review: bool,
     pub progress: u8,
     pub cost: Option<SharedString>,
+    pub token_usage: Option<acp_thread::TokenUsage>,
+    pub speed_metrics: Option<acp_thread::SpeedMetrics>,
     pub files_changed: usize,
     pub latest_events: Vec<BackboardAgentRunEvent>,
     pub touched_paths: Vec<String>,
@@ -4362,6 +4364,8 @@ impl AgentPanel {
                 can_review: false,
                 progress: 0,
                 cost: None,
+                token_usage: None,
+                speed_metrics: None,
                 files_changed: 0,
                 latest_events: vec![BackboardAgentRunEvent {
                     text: if is_loading {
@@ -4439,6 +4443,8 @@ impl AgentPanel {
                 format!("{:.2} {}", cost.amount, cost.currency).into()
             }
         });
+        let token_usage = thread.token_usage().cloned();
+        let speed_metrics = thread.speed_metrics().cloned();
         let files_changed = thread.action_log().read(cx).changed_buffers(cx).len();
         let mut touched_paths = Vec::<String>::new();
         let mut latest_events = Vec::new();
@@ -4544,6 +4550,8 @@ impl AgentPanel {
             can_review: false,
             progress,
             cost,
+            token_usage,
+            speed_metrics,
             files_changed,
             latest_events,
             touched_paths,
