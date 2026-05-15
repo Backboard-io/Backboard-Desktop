@@ -2060,14 +2060,13 @@ impl MultiWorkspace {
 
     fn render_workspace_mode_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
-            .h(px(58.))
+            .h(px(44.))
             .w_full()
             .flex_shrink_0()
-            .items_end()
-            .gap_1()
-            .pt(px(12.))
-            .pl(px(118.))
-            .pr_4()
+            .items_center()
+            .gap_0p5()
+            .pl(px(74.))
+            .pr_3()
             .border_b_1()
             .border_color(cx.theme().colors().border_variant)
             .bg(cx.theme().colors().tab_bar_background)
@@ -2080,7 +2079,7 @@ impl MultiWorkspace {
             ))
             .child(self.render_workspace_mode_tab(
                 "multi-workspace-agent-tab",
-                "Multi-Agent",
+                "Jarvis",
                 self.multi_agent_expanded,
                 true,
                 cx,
@@ -2098,14 +2097,20 @@ impl MultiWorkspace {
     ) -> AnyElement {
         div()
             .id(id)
-            .h(px(34.))
+            .h(px(30.))
             .px_3()
             .flex()
             .items_center()
             .justify_center()
-            .border_b_2()
+            .rounded_sm()
+            .border_1()
             .border_color(if selected {
-                cx.theme().colors().text_accent
+                cx.theme().colors().border
+            } else {
+                gpui::transparent_black()
+            })
+            .bg(if selected {
+                cx.theme().colors().element_selected
             } else {
                 gpui::transparent_black()
             })

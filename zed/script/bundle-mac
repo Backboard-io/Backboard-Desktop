@@ -238,7 +238,7 @@ function sign_app_binaries() {
         # sequence of codesign commands modeled after this example: https://developer.apple.com/forums/thread/701514
         /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/cli" -v
         /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/git" -v
-        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}/Contents/MacOS/zed" -v
+        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}/Contents/MacOS/backboard-studio" -v
         /usr/bin/codesign --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}" -v
     else
         echo "One or more of the following variables are missing: MACOS_CERTIFICATE, MACOS_CERTIFICATE_PASSWORD, APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, APPLE_NOTARIZATION_ISSUER_ID"
@@ -300,8 +300,8 @@ function sign_app_binaries() {
         rm ${dmg_source_directory}/Applications
 
         echo "Adding license agreement to DMG"
-        npm install --global dmg-license minimist
-        dmg-license script/terms/terms.json "${dmg_file_path}"
+        npm install --prefix target/dmg-license-tools dmg-license minimist
+        target/dmg-license-tools/node_modules/.bin/dmg-license script/terms/terms.json "${dmg_file_path}"
 
         if [[ $can_code_sign = true ]]; then
             echo "Notarizing DMG with Apple"
@@ -332,8 +332,7 @@ function upload_debug_symbols() {
         echo "local install; skipping sentry upload."
     elif [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
         echo "Uploading zed debug symbols to sentry..."
-        exe_path="target/${target_triple}/release/Zed"
-        if ! dsymutil --flat "target/${target_triple}/${target_dir}/zed" 2> target/dsymutil.log; then
+        if ! dsymutil --flat "target/${target_triple}/${target_dir}/backboard-studio" 2> target/dsymutil.log; then
             echo "dsymutil failed"
             cat target/dsymutil.log
             exit 1
@@ -349,7 +348,7 @@ function upload_debug_symbols() {
         for attempt in 1 2 3; do
             echo "Sentry upload attempt $attempt..."
             if sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev \
-                "target/${target_triple}/${target_dir}/zed.dwarf" \
+                "target/${target_triple}/${target_dir}/backboard-studio.dwarf" \
                 "target/${target_triple}/${target_dir}/remote_server.dwarf"; then
                 break
             else
@@ -367,7 +366,7 @@ function upload_debug_symbols() {
 
 upload_debug_symbols
 
-cp target/${target_triple}/${target_dir}/zed "${app_path}/Contents/MacOS/zed"
+cp target/${target_triple}/${target_dir}/backboard-studio "${app_path}/Contents/MacOS/backboard-studio"
 cp target/${target_triple}/${target_dir}/cli "${app_path}/Contents/MacOS/cli"
 bundle_backboard_runtime "${app_path}"
 sign_app_binaries

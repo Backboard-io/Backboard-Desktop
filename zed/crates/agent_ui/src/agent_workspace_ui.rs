@@ -290,6 +290,17 @@ impl BackboardAgentWorkspacePage {
 
     fn open_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_thread_id = Some(thread_id);
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                    panel.update(cx, |panel, cx| {
+                        if panel.active_thread_id(cx) != Some(thread_id) {
+                            panel.activate_retained_thread(thread_id, true, window, cx);
+                        }
+                    });
+                }
+            });
+        }
         self.focus_selected_conversation(window, cx);
         cx.notify();
     }
@@ -454,69 +465,75 @@ impl BackboardAgentWorkspacePage {
         let ready = summaries.iter().filter(|summary| summary.can_apply).count();
 
         h_flex()
-            .h(rems_from_px(50.))
-            .px_4()
+            .h(rems_from_px(38.))
+            .px_3()
+            .gap_3()
             .justify_between()
             .border_b_1()
             .border_color(cx.theme().colors().border_variant)
             .bg(cx.theme().colors().editor_background)
             .child(
                 h_flex()
-                    .gap_2()
+                    .gap_3()
                     .items_center()
                     .child(
-                        Vector::square(VectorName::ZedLogo, rems_from_px(18.)).color(Color::Accent),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_0()
+                        h_flex()
+                            .gap_1p5()
+                            .child(
+                                Vector::square(VectorName::ZedLogo, rems_from_px(14.))
+                                    .color(Color::Accent),
+                            )
                             .child(
                                 Label::new("Agent Workspace")
-                                    .size(LabelSize::Default)
+                                    .size(LabelSize::Small)
                                     .weight(FontWeight::BOLD)
                                     .color(Color::Default),
                             )
                             .child(
-                                Label::new("Parallel Backboard chats")
+                                Label::new("Parallel chats")
                                     .size(LabelSize::Small)
                                     .color(Color::Muted),
                             ),
                     )
                     .child(
                         h_flex()
-                            .gap_1()
-                            .child(self.render_counter_pill(
-                                format!("{} / 20 chats", summaries.len()),
+                            .gap_3()
+                            .child(self.render_header_stat(
+                                summaries.len().to_string(),
+                                "of 20",
                                 Color::Muted,
-                                cx,
                             ))
-                            .child(self.render_counter_pill(
-                                format!("{running} running"),
+                            .child(self.render_header_stat(
+                                running.to_string(),
+                                "running",
                                 Color::Accent,
-                                cx,
                             ))
-                            .child(self.render_counter_pill(
-                                format!("{done} done"),
-                                Color::Success,
-                                cx,
+                            .child(self.render_header_stat(
+                                done.to_string(),
+                                "done",
+                                if done > 0 {
+                                    Color::Success
+                                } else {
+                                    Color::Muted
+                                },
                             ))
-                            .child(self.render_counter_pill(
-                                format!("{ready} ready"),
+                            .child(self.render_header_stat(
+                                ready.to_string(),
+                                "ready",
                                 if ready > 0 {
                                     Color::Success
                                 } else {
                                     Color::Muted
                                 },
-                                cx,
                             ))
-                            .child(self.render_counter_pill(
-                                format!("{blocked} blocked"),
+                            .child(self.render_header_stat(
+                                blocked.to_string(),
+                                "blocked",
                                 if blocked > 0 {
                                     Color::Warning
                                 } else {
                                     Color::Muted
                                 },
-                                cx,
                             ))
                             .child(
                                 Button::new(
@@ -541,13 +558,30 @@ impl BackboardAgentWorkspacePage {
             .child(
                 Button::new("new-agent-chat", "New Chat")
                     .start_icon(Icon::new(IconName::Plus))
-                    .style(ButtonStyle::Tinted(TintColor::Accent))
+                    .style(ButtonStyle::Subtle)
                     .size(ButtonSize::Compact)
                     .disabled(summaries.len() >= 20)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.create_chat(window, cx);
                     })),
             )
+    }
+
+    fn render_header_stat(
+        &self,
+        value: String,
+        label: &'static str,
+        color: Color,
+    ) -> impl IntoElement {
+        h_flex()
+            .gap_1()
+            .child(
+                Label::new(value)
+                    .size(LabelSize::Small)
+                    .weight(FontWeight::MEDIUM)
+                    .color(color),
+            )
+            .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
     }
 
     fn render_counter_pill(
@@ -612,8 +646,8 @@ impl BackboardAgentWorkspacePage {
 
         v_flex()
             .flex_shrink_0()
-            .gap_2()
-            .p_3()
+            .gap_1p5()
+            .p_2()
             .border_b_1()
             .border_color(cx.theme().colors().border_variant)
             .child(
@@ -622,10 +656,10 @@ impl BackboardAgentWorkspacePage {
                     .items_center()
                     .child(
                         v_flex()
-                            .gap_0p5()
                             .child(
                                 Label::new("New agents")
-                                    .size(LabelSize::Default)
+                                    .size(LabelSize::Small)
+                                    .weight(FontWeight::MEDIUM)
                                     .color(Color::Default),
                             )
                             .child(
@@ -657,12 +691,12 @@ impl BackboardAgentWorkspacePage {
                     .border_color(cx.theme().colors().border_variant)
                     .bg(cx.theme().colors().element_background)
                     .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
-                    .p_2()
+                    .p_1p5()
                     .child(self.render_text_input(cx)),
             )
             .child(
                 v_flex()
-                    .gap_2()
+                    .gap_1p5()
                     .child(
                         v_flex()
                             .gap_1()
@@ -2399,7 +2433,7 @@ impl BackboardAgentWorkspacePage {
 
     fn render_right_panel(
         &self,
-        selected_detail: Option<(BackboardAgentRunSummary, Entity<ConversationView>)>,
+        agent_panel: Option<Entity<AgentPanel>>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -2410,14 +2444,15 @@ impl BackboardAgentWorkspacePage {
             .flex_shrink_0()
             .border_l_1()
             .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().surface_background)
-            .p_3()
-            .when_some(selected_detail, |this, (summary, conversation)| {
-                this.child(self.render_detail_drawer(summary, conversation, cx))
-            })
-            .when(self.selected_thread_id.is_none(), |this| {
-                let chat_count = self.summaries(cx).len();
-                this.child(
+            .bg(cx.theme().colors().editor_background)
+            .child(match agent_panel {
+                Some(panel) => div()
+                    .size_full()
+                    .overflow_hidden()
+                    .child(panel)
+                    .into_any_element(),
+                None => {
+                    let chat_count = self.summaries(cx).len();
                     v_flex()
                         .flex_1()
                         .min_h_0()
@@ -2442,7 +2477,7 @@ impl BackboardAgentWorkspacePage {
                                 ),
                         )
                         .child(
-                            Label::new("Select a chat on the left.")
+                            Label::new("Open a chat to start Jarvis.")
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
                         )
@@ -2462,8 +2497,9 @@ impl BackboardAgentWorkspacePage {
                                     .size(LabelSize::Small)
                                     .color(Color::Muted),
                             )
-                        }),
-                )
+                        })
+                        .into_any_element()
+                }
             })
     }
 }
@@ -2471,7 +2507,7 @@ impl BackboardAgentWorkspacePage {
 impl Render for BackboardAgentWorkspacePage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let summaries = self.summaries(cx);
-        let selected_detail = self.selected_thread_id.and_then(|thread_id| {
+        let selected_detail_exists = self.selected_thread_id.and_then(|thread_id| {
             let summary = summaries
                 .iter()
                 .find(|summary| summary.thread_id == thread_id)
@@ -2479,17 +2515,10 @@ impl Render for BackboardAgentWorkspacePage {
             let conversation = self.conversation_for_thread(thread_id, cx)?;
             Some((summary, conversation))
         });
-        if self.selected_thread_id.is_some() && selected_detail.is_none() {
+        if self.selected_thread_id.is_some() && selected_detail_exists.is_none() {
             self.selected_thread_id = None;
         }
-        let selected_detail = self.selected_thread_id.and_then(|thread_id| {
-            let summary = summaries
-                .iter()
-                .find(|summary| summary.thread_id == thread_id)
-                .cloned()?;
-            let conversation = self.conversation_for_thread(thread_id, cx)?;
-            Some((summary, conversation))
-        });
+        let agent_panel = self.ensure_agent_panel(window, cx);
 
         v_flex()
             .size_full()
@@ -2510,7 +2539,7 @@ impl Render for BackboardAgentWorkspacePage {
                                 .into_any_element(),
                         ),
                     )
-                    .child(self.render_right_panel(selected_detail, window, cx)),
+                    .child(self.render_right_panel(agent_panel, window, cx)),
             )
     }
 }

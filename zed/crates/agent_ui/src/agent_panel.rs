@@ -5595,81 +5595,85 @@ impl AgentPanel {
         thread_tabs.extend(retained.into_iter().map(|(id, title, _)| (id, title)));
 
         let show_tabs = thread_tabs.len() > 1;
+        let thread_tab_elements = if show_tabs {
+            thread_tabs
+                .into_iter()
+                .enumerate()
+                .map(|(i, (id, title))| {
+                    let is_active = Some(id) == active_id;
+                    div()
+                        .id(ElementId::Integer(i as u64))
+                        .h_full()
+                        .px_3()
+                        .cursor_pointer()
+                        .flex()
+                        .items_center()
+                        .flex_shrink_0()
+                        .max_w_40()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .when(is_active, |el| {
+                            el.border_b_2()
+                                .border_color(cx.theme().colors().border_focused)
+                                .text_color(cx.theme().colors().text)
+                        })
+                        .when(!is_active, |el| {
+                            el.text_color(cx.theme().colors().text_muted)
+                                .hover(|el| el.bg(cx.theme().colors().element_hover))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.activate_retained_thread(id, true, window, cx);
+                                }))
+                        })
+                        .child(Label::new(title).size(LabelSize::XSmall).single_line())
+                        .into_any_element()
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
 
-        v_flex()
+        h_flex()
+            .id("agent-thread-tabs")
             .w_full()
+            .h(Tab::container_height(cx))
             .flex_shrink_0()
-            // Action buttons row
+            .overflow_x_hidden()
+            .bg(cx.theme().colors().tab_bar_background)
+            .border_b_1()
+            .border_color(cx.theme().colors().border)
             .child(
                 h_flex()
-                    .w_full()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .children(thread_tab_elements),
+            )
+            .child(
+                h_flex()
+                    .h_full()
+                    .flex_none()
+                    .gap_0p5()
                     .px_2()
-                    .py_1()
-                    .justify_end()
-                    .bg(cx.theme().colors().tab_bar_background)
-                    .border_b_1()
-                    .border_color(cx.theme().colors().border)
                     .child(
-                        h_flex()
-                            .gap_0p5()
-                            .child(
-                                IconButton::new("new-agent-thread", IconName::Plus)
-                                    .icon_size(IconSize::Small)
-                                    .tooltip(Tooltip::text("New Agent"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.activate_new_thread(true, "expert_header", window, cx);
-                                    })),
-                            )
-                            .child(
-                                IconButton::new("agent-history", IconName::HistoryRerun)
-                                    .icon_size(IconSize::Small)
-                                    .tooltip(Tooltip::text("Thread History"))
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(
-                                            Box::new(ToggleThreadSwitcher { select_last: false }),
-                                            cx,
-                                        );
-                                    }),
-                            ),
+                        IconButton::new("new-agent-thread", IconName::Plus)
+                            .icon_size(IconSize::Small)
+                            .tooltip(Tooltip::text("New Agent"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.activate_new_thread(true, "expert_header", window, cx);
+                            })),
+                    )
+                    .child(
+                        IconButton::new("agent-history", IconName::HistoryRerun)
+                            .icon_size(IconSize::Small)
+                            .tooltip(Tooltip::text("Thread History"))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(
+                                    Box::new(ToggleThreadSwitcher { select_last: false }),
+                                    cx,
+                                );
+                            }),
                     ),
             )
-            // Thread tab bar (visible when 2+ threads are open)
-            .when(show_tabs, |el| {
-                el.child(
-                    h_flex()
-                        .id("agent-thread-tabs")
-                        .w_full()
-                        .overflow_x_hidden()
-                        .bg(cx.theme().colors().tab_bar_background)
-                        .border_b_1()
-                        .border_color(cx.theme().colors().border)
-                        .children(thread_tabs.into_iter().enumerate().map(|(i, (id, title))| {
-                            let is_active = Some(id) == active_id;
-                            div()
-                                .id(ElementId::Integer(i as u64))
-                                .px_3()
-                                .py_1()
-                                .cursor_pointer()
-                                .flex_shrink_0()
-                                .max_w_40()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .when(is_active, |el| {
-                                    el.border_b_2()
-                                        .border_color(cx.theme().colors().border_focused)
-                                        .text_color(cx.theme().colors().text)
-                                })
-                                .when(!is_active, |el| {
-                                    el.text_color(cx.theme().colors().text_muted)
-                                        .hover(|el| el.bg(cx.theme().colors().element_hover))
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.activate_retained_thread(id, true, window, cx);
-                                        }))
-                                })
-                                .child(Label::new(title).size(LabelSize::XSmall).single_line())
-                        })),
-                )
-            })
     }
 
     fn render_title_view(&self, _window: &mut Window, cx: &Context<Self>) -> AnyElement {
