@@ -27,7 +27,7 @@ Use this map before changing anything. The Backboard IDE is not one single integ
 | ACP thread model | `ide/zed/crates/acp_thread/src/acp_thread.rs`, `ide/zed/crates/acp_thread/src/connection.rs`, `ide/zed/crates/acp_thread/src/terminal.rs` | Stores conversation entries, tool calls, diffs, terminal handles/output, token/cost/speed metrics, and permission state |
 | Native chat UI | `ide/zed/crates/agent_ui/src/conversation_view.rs`, `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs` | Backboard chat surface, composer, model/mode/config controls, progress, grouped exploration, collapsed edits, terminal/diff/tool rendering |
 | Agent Workspace | `ide/zed/crates/agent_ui/src/agent_workspace_ui.rs`, `ide/zed/crates/agent_ui/src/agent_panel.rs` | Multi-agent dashboard, retained conversations, task launcher, git worktrees, review/apply/stop/retry/dismiss flow |
-| Simple/beginner UI | `ide/zed/crates/beginner_ui/src/*.rs` | Beginner chat-first workspace, folder selection, friendly feed, file changes panel, switch-to-editor handoff |
+| Simple/beginner UI | `ide/zed/crates/beginner_ui/src/*.rs` | Beginner chat-first workspace, folder selection, friendly feed, file changes panel, switch-to-editor handoff; chat history home page (BeginnerChatRecord, KVP persistence), curated model filtering (CuratedModelSelector), tab bar home icon |
 | Workspace shell | `ide/zed/crates/workspace/src/multi_workspace.rs`, `ide/zed/crates/title_bar/src/title_bar.rs` | Editor/Agents switching, Simple/Expert mode, full-page Multi-Agent rendering |
 | Backboard Rust API client | `ide/zed/crates/backboard/src/backboard.rs` | Rust mirror of the Backboard HTTP client used by older UI code and as a reference for endpoint shapes |
 | Inline autocomplete | `ide/zed/crates/edit_prediction/src/backboard.rs` and edit-prediction registry/settings files | BYOK ghost-text completions via Backboard API; separate from ACP chat/Agent Workspace |
@@ -218,6 +218,37 @@ Important framing:
   - Purpose: integrated Simple/Expert mode and mode-switching refinements with Agent Workspace batching work.
   - Main files changed: `backboard_studio_features.txt`, `backboard_studio_mode_features.txt`, `ide/zed/crates/beginner_ui/src/**`, `ide/zed/crates/title_bar/src/title_bar.rs`, `ide/zed/crates/workspace/src/multi_workspace.rs`, `ide/zed/crates/agent_ui/src/**`, `ide/zed/crates/zed/src/**`.
   - Current role: merge node; inspect `81929251`, `a0a0c69a`, and `59efd845` for implementation intent.
+
+### Simple Mode: Curated Models And Chat History Home Page (Uncommitted As Of 2026-05-15)
+
+The changes below are local on `bb-ide-zed` and have not yet been committed. They represent the current working state.
+
+**CuratedModelSelector and model filtering**
+
+- Files changed: `ide/zed/crates/beginner_ui/src/beginner_workspace.rs`, `ide/zed/crates/agent_ui/src/conversation_view.rs`.
+- Purpose: Simple mode shows only ~11 curated models (selected Anthropic, OpenAI, Google, and DeepSeek entries) instead of exposing the full 100+ model list.
+- Implementation: `CuratedModelSelector` is a newtype struct wrapping `Rc<dyn AgentModelSelector>`. It filters `list_models` results against a `CURATED_MODELS` table keyed by provider/model id, rewrites display names, and delegates `select_model`/`watch`/`should_render_footer` to the inner selector. `ConversationView` gained a `make_root_model_selector_wrapped` method that accepts a `FnOnce(Rc<dyn AgentModelSelector>) -> Rc<dyn AgentModelSelector>` closure, builds a fresh `Entity<ModelSelectorPopover>` using the wrapped selector, and returns it. `BeginnerWorkspace::start_agent_thread` calls this via `cx.observe_in` to rebuild the model selector whenever the active conversation view changes.
+- Key pattern: `cx.observe_in` (not `cx.observe`) is required here because `make_root_model_selector_wrapped` needs `&mut Window` to construct a new `ModelSelectorPopover`.
+
+**Chat history home page**
+
+- Files changed: `ide/zed/crates/beginner_ui/src/beginner_workspace.rs`, `ide/zed/crates/beginner_ui/Cargo.toml`.
+- Added Cargo dependencies: `serde.workspace`, `serde_json.workspace`, `uuid.workspace`.
+- Purpose: The "New Project" landing page is now a proper home page showing all past chats (name, folder, timestamp), allowing users to continue or delete them — similar to the ChatGPT or Claude home page.
+- Implementation:
+  - `BeginnerChatRecord` is a new serializable struct with fields `id` (UUID v4), `name` (prompt-derived), `folder_path`, and `timestamp_ms`.
+  - Records are stored as a JSON array under the KVP key `beginner_chats_v1` via `KeyValueStore::global`.
+  - `load_chat_history` replaces `load_recent_projects`; `save_chat_history`, `add_chat_record`, and `delete_chat_record` manage the list (capped at 50 entries, newest first).
+  - `add_chat_record` is called from `submit()` on every new conversation start.
+  - `open_chat_record` replaces `open_recent_project`; it restores `selected_folder`, `tab_name`, and `BeginnerState::ActiveProject` then re-creates the workspace worktree.
+  - The sidebar in `render_landing` shows a chat list: folder icon + v_flex(chat name, folder label) + delete × button. Delete calls `cx.stop_propagation()` (not `event.stop_propagation()` — `ClickEvent` does not have that method).
+  - `generate_chat_name` (renamed from `generate_tab_name`) uses sentence case, keeps up to 6 meaningful words, and strips fewer stop words than before. Example: "make a raptors fan website" → "Raptors fan website".
+
+**Tab bar home icon and go_home**
+
+- Files changed: `ide/zed/crates/beginner_ui/src/beginner_workspace.rs`.
+- Purpose: users can return to the home page from any active chat without losing the tab.
+- Implementation: `render_tab_bar` prepends a home-icon button (using `IconName::Thread`) before the active chat tab. The button is highlighted with `element_selected` background when the workspace is already on the landing page; otherwise it shows a hover highlight. Clicking it calls `go_home`, which calls `stash_current_session_and_reset` if the state is not already `BeginnerState::Landing`.
 
 ## High-Level Architecture
 

@@ -43,6 +43,11 @@ impl ModelSelectorPopover {
         self.trigger_logo = logo_path;
     }
 
+    pub fn clear_trigger_brand(&mut self) {
+        self.trigger_label = None;
+        self.trigger_logo = None;
+    }
+
     pub fn toggle(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.menu_handle.toggle(window, cx);
     }

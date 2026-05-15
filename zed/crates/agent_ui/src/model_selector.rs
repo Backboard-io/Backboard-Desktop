@@ -454,6 +454,9 @@ fn info_list_to_picker_entries(
             }
             for model in list {
                 let is_favorite = favorites.contains(&model.id);
+                if has_favorites && is_favorite {
+                    continue;
+                }
                 entries.push(ModelPickerEntry::Model(model, is_favorite));
             }
         }

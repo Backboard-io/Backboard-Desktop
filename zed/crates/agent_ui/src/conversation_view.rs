@@ -4,7 +4,7 @@ use acp_thread::{
     PermissionOptions, PermissionPattern, RetryStatus, SelectedPermissionOutcome, ThreadStatus,
     ToolCall, ToolCallContent, ToolCallStatus, UserMessageId,
 };
-use acp_thread::{AgentConnection, Plan};
+use acp_thread::{AgentConnection, AgentModelSelector, Plan};
 use action_log::{ActionLog, ActionLogTelemetry, DiffStats};
 use agent::{
     NativeAgentServer, NativeAgentSessionList, NoModelConfiguredError, SharedThread, ThreadStore,
@@ -564,6 +564,40 @@ impl ConversationView {
     pub fn thread_view(&self, session_id: &acp::SessionId) -> Option<Entity<ThreadView>> {
         let connected = self.as_connected()?;
         connected.threads.get(session_id).cloned()
+    }
+
+    /// Returns the model selector for the root thread, if connected and available.
+    pub fn root_model_selector(&self, cx: &App) -> Option<Entity<ModelSelectorPopover>> {
+        self.root_thread_view()
+            .and_then(|tv| tv.read(cx).model_selector.clone())
+    }
+
+    /// Creates a new model selector popover for the root thread with the inner selector
+    /// passed through `wrap`. Used by simple mode to substitute a curated model list.
+    pub fn make_root_model_selector_wrapped(
+        &self,
+        wrap: impl FnOnce(Rc<dyn AgentModelSelector>) -> Rc<dyn AgentModelSelector>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Entity<ModelSelectorPopover>> {
+        let session_id = self.root_session_id.as_ref()?;
+        let connected = self.as_connected()?;
+        let raw_selector = connected.connection.model_selector(session_id)?;
+        let wrapped = wrap(raw_selector);
+        let agent_server = self.agent.clone();
+        let fs = self.project.read(cx).fs().clone();
+        let focus_handle = self.focus_handle.clone();
+        Some(cx.new(|cx| {
+            ModelSelectorPopover::new(
+                wrapped,
+                agent_server,
+                fs,
+                PopoverMenuHandle::default(),
+                focus_handle,
+                window,
+                cx,
+            )
+        }))
     }
 
     pub fn as_connected(&self) -> Option<&ConnectedServerState> {

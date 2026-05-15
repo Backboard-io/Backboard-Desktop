@@ -1,8 +1,12 @@
 use std::path::PathBuf;
+use std::rc::Rc;
 
-use acp_thread::{AcpThread, AcpThreadEvent, SelectedPermissionOutcome, ToolCallStatus};
+use acp_thread::{
+    AcpThread, AcpThreadEvent, AgentModelList, AgentModelSelector, SelectedPermissionOutcome,
+    ToolCallStatus,
+};
 use agent_client_protocol::schema as acp;
-use agent_ui::{AgentPanel, ConversationView};
+use agent_ui::{AgentPanel, ConversationView, ModelSelectorPopover};
 use db::kvp::KeyValueStore;
 use editor::Editor;
 use gpui::{
@@ -13,16 +17,151 @@ use gpui::{
 use editor::actions::Newline;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
 use project::Project;
-use recent_projects::RecentProjectEntry;
 use ui::{
     Button, ButtonStyle, Color, Headline, HeadlineSize, Icon, IconButton, IconName, IconSize,
-    Label, LabelSize, Tooltip, prelude::*, utils::platform_title_bar_height,
+    Label, LabelSize, Tooltip, Vector, VectorName, prelude::*, utils::platform_title_bar_height,
 };
 use util::ResultExt;
-use workspace::{MultiWorkspace, PathList, Workspace, WorkspaceDb};
+use workspace::{MultiWorkspace, PathList, Workspace};
+
+use acp_thread::AgentThreadEntry;
 
 use crate::beginner_chat_feed::BeginnerChatFeed;
 use crate::file_changes_panel::{FileChangesPanel, FileChangesPanelEvent};
+
+/// Provider/model ID prefixes for the curated simple-mode model list.
+/// Matched against ACP model IDs of the form "provider/model-name".
+/// Each entry is (provider_prefix, model_id_prefix, display_name).
+static CURATED_MODELS: &[(&str, &str, &str)] = &[
+    // ── Anthropic ──────────────────────────────────────────────────────
+    ("anthropic", "claude-opus-4",      "Claude Opus 4 · Powerful"),
+    ("anthropic", "claude-sonnet-4",    "Claude Sonnet 4 · Balanced"),
+    ("anthropic", "claude-haiku-4",     "Claude Haiku 4 · Fast"),
+    // ── OpenAI ─────────────────────────────────────────────────────────
+    ("openai",    "gpt-5.5",            "GPT-5.5 · Powerful"),
+    ("openai",    "gpt-5",              "GPT-5 · Balanced"),
+    ("openai",    "gpt-4o",             "GPT-4o · Balanced"),
+    ("openai",    "o3",                 "o3 · Reasoning"),
+    ("openai",    "o4-mini",            "o4-mini · Fast reasoning"),
+    // ── Google ─────────────────────────────────────────────────────────
+    ("google",    "gemini-2.5-pro",     "Gemini 2.5 Pro · Powerful"),
+    ("google",    "gemini-2.5-flash",   "Gemini 2.5 Flash · Fast"),
+    // ── DeepSeek ───────────────────────────────────────────────────────
+    ("deepseek",  "deepseek-r1",        "DeepSeek R1 · Reasoning"),
+    ("deepseek",  "deepseek-v3",        "DeepSeek V3 · Balanced"),
+];
+
+fn curated_display_name(model_id: &str) -> Option<&'static str> {
+    let (provider, model_part) = model_id.split_once('/')?;
+    CURATED_MODELS.iter().find_map(|&(p, m, name)| {
+        if provider.starts_with(p) && model_part.starts_with(m) {
+            Some(name)
+        } else {
+            None
+        }
+    })
+}
+
+/// Wraps an inner `AgentModelSelector` and returns only the curated model list.
+/// Model selection and all mutations pass through to the inner selector unchanged.
+struct CuratedModelSelector {
+    inner: Rc<dyn AgentModelSelector>,
+}
+
+impl AgentModelSelector for CuratedModelSelector {
+    fn list_models(&self, cx: &mut App) -> gpui::Task<anyhow::Result<AgentModelList>> {
+        let inner = self.inner.clone();
+        cx.spawn(async move |cx| {
+            let list = cx.update(|cx| inner.list_models(cx)).await?;
+            let all_models: Vec<acp_thread::AgentModelInfo> = match list {
+                AgentModelList::Flat(models) => models,
+                AgentModelList::Grouped(groups) => groups.into_values().flatten().collect(),
+            };
+            // Filter to curated entries in the defined order.
+            let mut curated: Vec<acp_thread::AgentModelInfo> = Vec::new();
+            for &(provider_prefix, model_prefix, display_name) in CURATED_MODELS {
+                if let Some(mut info) = all_models.iter().find(|m| {
+                    let id: &str = &m.id.0;
+                    if let Some((provider, model_part)) = id.split_once('/') {
+                        provider.starts_with(provider_prefix) && model_part.starts_with(model_prefix)
+                    } else {
+                        false
+                    }
+                }).cloned() {
+                    info.name = SharedString::from(display_name);
+                    curated.push(info);
+                }
+            }
+            // Fallback: if no curated models are available (provider not configured),
+            // show the first 10 from whatever the server provides.
+            if curated.is_empty() {
+                curated = all_models.into_iter().take(10).collect();
+            }
+            Ok(AgentModelList::Flat(curated))
+        })
+    }
+
+    fn select_model(&self, model_id: acp::ModelId, cx: &mut App) -> gpui::Task<anyhow::Result<()>> {
+        self.inner.select_model(model_id, cx)
+    }
+
+    fn selected_model(&self, cx: &mut App) -> gpui::Task<anyhow::Result<acp_thread::AgentModelInfo>> {
+        // Also apply the curated display name to the selected model so the button label matches.
+        let inner = self.inner.clone();
+        cx.spawn(async move |cx| {
+            let mut info = cx.update(|cx| inner.selected_model(cx)).await?;
+            if let Some(name) = curated_display_name(&info.id.0) {
+                info.name = SharedString::from(name);
+            }
+            Ok(info)
+        })
+    }
+
+    fn watch(&self, cx: &mut App) -> Option<watch::Receiver<()>> {
+        self.inner.watch(cx)
+    }
+
+    fn should_render_footer(&self) -> bool {
+        false
+    }
+}
+
+const BEGINNER_CHATS_KVP_KEY: &str = "beginner_chats_v1";
+
+/// A saved simple-mode conversation entry shown on the home page.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct BeginnerChatRecord {
+    id: String,
+    name: String,
+    folder_path: String,
+    timestamp_ms: i64,
+}
+
+impl BeginnerChatRecord {
+    fn new(name: String, folder: &PathBuf) -> Self {
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            folder_path: folder.to_string_lossy().into_owned(),
+            timestamp_ms,
+        }
+    }
+
+    fn folder(&self) -> PathBuf {
+        PathBuf::from(&self.folder_path)
+    }
+
+    fn folder_name(&self) -> SharedString {
+        PathBuf::from(&self.folder_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned().into())
+            .unwrap_or_else(|| SharedString::from(self.folder_path.as_str()))
+    }
+}
 
 pub enum BeginnerWorkspaceEvent {
     SwitchToEditor,
@@ -51,11 +190,13 @@ enum RightPanel {
 
 struct ProjectSession {
     state: BeginnerState,
+    tab_name: SharedString,
     chat_editor: Entity<Editor>,
     selected_folder: Option<PathBuf>,
     thread: Option<Entity<AcpThread>>,
     pending_conversation_view: Option<Entity<ConversationView>>,
     active_conversation_view: Option<Entity<ConversationView>>,
+    model_selector: Option<Entity<ModelSelectorPopover>>,
     is_agent_running: bool,
     agent_finished: bool,
     chat_feed: Option<Entity<BeginnerChatFeed>>,
@@ -67,6 +208,7 @@ struct ProjectSession {
     preview_url: Option<String>,
     // Port claimed by this session's dev server (3000–3002). None until first start.
     dev_server_port: Option<u16>,
+    #[allow(dead_code)]
     web_preview: Option<crate::web_preview::WebPreview>,
     dev_server_task: Option<Task<()>>,
     subscriptions: Vec<Subscription>,
@@ -79,6 +221,8 @@ pub struct BeginnerWorkspace {
     project: Entity<Project>,
     focus_handle: FocusHandle,
     state: BeginnerState,
+    // Human-readable tab name generated from the initial prompt.
+    tab_name: SharedString,
     chat_editor: Entity<Editor>,
     selected_folder: Option<PathBuf>,
     thread: Option<Entity<AcpThread>>,
@@ -88,6 +232,8 @@ pub struct BeginnerWorkspace {
     pending_conversation_view: Option<Entity<ConversationView>>,
     // Kept alive after connection so that ThreadView (and its send tasks) are not dropped.
     active_conversation_view: Option<Entity<ConversationView>>,
+    // Model selector extracted from the ThreadView once connected.
+    model_selector: Option<Entity<ModelSelectorPopover>>,
     is_agent_running: bool,
     // Set when agent finishes so approve/revert actions are shown.
     agent_finished: bool,
@@ -107,8 +253,10 @@ pub struct BeginnerWorkspace {
     // Embedded web preview. Created lazily in render() once we have both a
     // preview_url and the Window handle. None on Linux (unsupported).
     web_preview: Option<crate::web_preview::WebPreview>,
+    // Shows a notice when the user tries to open a 4th tab.
+    show_tab_limit_notice: bool,
     background_sessions: Vec<ProjectSession>,
-    recent_projects: Vec<RecentProjectEntry>,
+    chat_history: Vec<BeginnerChatRecord>,
     _tasks: Vec<Task<()>>,
     _project_subscription: Subscription,
     session_subscriptions: Vec<Subscription>,
@@ -135,7 +283,7 @@ impl BeginnerWorkspace {
 
     fn current_tab_title(&self) -> SharedString {
         match &self.state {
-            BeginnerState::ActiveProject { project_name } => project_name.clone(),
+            BeginnerState::ActiveProject { .. } => self.tab_name.clone(),
             BeginnerState::Landing => SharedString::from("New Project"),
         }
     }
@@ -144,11 +292,13 @@ impl BeginnerWorkspace {
         let (replacement_editor, enter_sub) = Self::make_chat_editor(window, cx, "Describe your project or idea...");
         let session = ProjectSession {
             state: std::mem::replace(&mut self.state, BeginnerState::Landing),
+            tab_name: std::mem::replace(&mut self.tab_name, SharedString::from("New Project")),
             chat_editor: std::mem::replace(&mut self.chat_editor, replacement_editor),
             selected_folder: self.selected_folder.take(),
             thread: self.thread.take(),
             pending_conversation_view: self.pending_conversation_view.take(),
             active_conversation_view: self.active_conversation_view.take(),
+            model_selector: self.model_selector.take(),
             is_agent_running: std::mem::replace(&mut self.is_agent_running, false),
             agent_finished: std::mem::replace(&mut self.agent_finished, false),
             chat_feed: self.chat_feed.take(),
@@ -180,6 +330,7 @@ impl BeginnerWorkspace {
         }
         let session = &mut self.background_sessions[ix];
         std::mem::swap(&mut self.state, &mut session.state);
+        std::mem::swap(&mut self.tab_name, &mut session.tab_name);
         std::mem::swap(&mut self.chat_editor, &mut session.chat_editor);
         std::mem::swap(&mut self.selected_folder, &mut session.selected_folder);
         std::mem::swap(&mut self.thread, &mut session.thread);
@@ -191,6 +342,7 @@ impl BeginnerWorkspace {
             &mut self.active_conversation_view,
             &mut session.active_conversation_view,
         );
+        std::mem::swap(&mut self.model_selector, &mut session.model_selector);
         std::mem::swap(&mut self.is_agent_running, &mut session.is_agent_running);
         std::mem::swap(&mut self.agent_finished, &mut session.agent_finished);
         std::mem::swap(&mut self.chat_feed, &mut session.chat_feed);
@@ -217,17 +369,17 @@ impl BeginnerWorkspace {
     ) -> Self {
         let (chat_editor, chat_enter_sub) = Self::make_chat_editor(window, cx, "Describe your project or idea...");
 
-        let load_recent = Self::load_recent_projects(workspace.clone(), window, cx);
+        let load_recent = Self::load_chat_history(workspace.clone(), cx);
 
         let project = workspace
             .upgrade()
             .map(|ws| ws.read(cx).project().clone())
             .expect("workspace must be alive when BeginnerWorkspace is created");
 
-        // Sync initial state from whatever project worktrees already exist
-        // (e.g. user opened a folder from the Editor before switching to Chat).
-        let initial_folder = first_visible_worktree_path(&project, cx);
-        let state = folder_to_state(initial_folder.as_ref());
+        // Always start simple mode on Home. Existing editor worktrees should not
+        // force simple mode into an active project state on launch/resume.
+        let initial_folder = None;
+        let state = BeginnerState::Landing;
 
         // Keep state in sync when folders are opened or closed from any mode.
         let project_sub =
@@ -247,11 +399,13 @@ impl BeginnerWorkspace {
             project,
             focus_handle: cx.focus_handle(),
             state,
+            tab_name: SharedString::from("New Project"),
             chat_editor,
             selected_folder: initial_folder,
             thread: None,
             pending_conversation_view: None,
             active_conversation_view: None,
+            model_selector: None,
             is_agent_running: false,
             agent_finished: false,
             chat_feed: None,
@@ -264,8 +418,9 @@ impl BeginnerWorkspace {
             dev_server_port: None,
             dev_server_task: None,
             web_preview: None,
+            show_tab_limit_notice: false,
             background_sessions: Vec::new(),
-            recent_projects: Vec::new(),
+            chat_history: Vec::new(),
             _tasks: vec![load_recent],
             _project_subscription: project_sub,
             session_subscriptions: vec![chat_enter_sub],
@@ -275,18 +430,21 @@ impl BeginnerWorkspace {
     /// Called whenever the project's worktree list changes so the Chat UI
     /// stays in sync with folders opened or closed from any mode.
     fn sync_from_project(&mut self, cx: &mut Context<Self>) {
+        // When multiple sessions are active the user manages folders explicitly via
+        // stash/switch. The project accumulates worktrees from all sessions, so
+        // first_visible_worktree_path would return a stale folder from any session.
+        // Only auto-sync in single-session mode.
+        if !self.background_sessions.is_empty() {
+            return;
+        }
+
         let new_folder = first_visible_worktree_path(&self.project, cx);
 
         // Only reset to Landing when the project truly has no folders —
         // don't discard an in-progress conversation when a second worktree
         // is added (e.g. agent workspace creating a git linked worktree).
         match (&self.state, &new_folder) {
-            (BeginnerState::Landing, Some(_)) => {
-                // A folder was opened from another mode — switch to active.
-                self.selected_folder = new_folder;
-                self.state = folder_to_state(self.selected_folder.as_ref());
-                cx.notify();
-            }
+            (BeginnerState::Landing, Some(_)) => {}
             (BeginnerState::ActiveProject { .. }, None) => {
                 // All folders removed — return to landing.
                 self.selected_folder = None;
@@ -304,32 +462,49 @@ impl BeginnerWorkspace {
         }
     }
 
-    fn load_recent_projects(
+    fn load_chat_history(
         workspace: WeakEntity<Workspace>,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<()> {
-        cx.spawn_in(window, async move |this, cx| {
-            let Some((fs, db)) = cx
-                .update(|_, cx| {
-                    let workspace = workspace.upgrade()?;
-                    let app_state = workspace.read(cx).app_state().clone();
-                    let db = WorkspaceDb::global(cx);
-                    Some((app_state.fs.clone(), db))
-                })
-                .ok()
-                .flatten()
-            else {
+        cx.spawn(async move |this, cx| {
+            let kvp = cx.update(|cx| {
+                let _ = workspace; // keep alive
+                KeyValueStore::global(cx)
+            });
+            let Some(json) = kvp.read_kvp(BEGINNER_CHATS_KVP_KEY).log_err().flatten() else {
                 return;
             };
-
-            let entries = recent_projects::get_recent_projects(None, Some(5), fs, &db).await;
-            this.update_in(cx, |this, _window, cx| {
-                this.recent_projects = entries;
+            let Some(records) = serde_json::from_str::<Vec<BeginnerChatRecord>>(&json).log_err() else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                this.chat_history = records;
                 cx.notify();
-            })
-            .ok();
+            }).ok();
         })
+    }
+
+    fn save_chat_history(&self, cx: &mut App) {
+        let kvp = KeyValueStore::global(cx);
+        let records = self.chat_history.clone();
+        cx.background_spawn(async move {
+            if let Ok(json) = serde_json::to_string(&records) {
+                kvp.write_kvp(BEGINNER_CHATS_KVP_KEY.to_string(), json).await.log_err();
+            }
+        }).detach();
+    }
+
+    fn add_chat_record(&mut self, name: String, folder: &PathBuf, cx: &mut App) {
+        let record = BeginnerChatRecord::new(name, folder);
+        // Insert at front so most-recent appears first; cap at 50 entries.
+        self.chat_history.insert(0, record);
+        self.chat_history.truncate(50);
+        self.save_chat_history(cx);
+    }
+
+    fn delete_chat_record(&mut self, id: String, cx: &mut App) {
+        self.chat_history.retain(|r| r.id != id);
+        self.save_chat_history(cx);
     }
 
     fn pick_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -346,9 +521,16 @@ impl BeginnerWorkspace {
             let Some(folder) = paths.into_iter().next() else {
                 return;
             };
-            this.update_in(cx, |this, _window, cx| {
+            this.update_in(cx, |this, window, cx| {
                 this.selected_folder = Some(folder);
-                cx.notify();
+                // If the user already typed a prompt, submit immediately so they
+                // don't need to click "Create Project" a second time.
+                let has_text = !this.chat_editor.read(cx).text(cx).trim().is_empty();
+                if has_text {
+                    this.submit(window, cx);
+                } else {
+                    cx.notify();
+                }
             })
             .ok();
         })
@@ -374,11 +556,26 @@ impl BeginnerWorkspace {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Project".to_string());
 
+        let chat_name = generate_chat_name(&text);
+        self.tab_name = SharedString::from(chat_name.clone());
         self.state = BeginnerState::ActiveProject {
             project_name: SharedString::from(project_name),
         };
-        // Clear any leftover preview from a previous run on this session.
-        // dev_server_port is also cleared so the next build claims a fresh port.
+        // Save the chat to history before starting, so it appears on the home page
+        // even if the user immediately closes without waiting for the agent.
+        self.add_chat_record(chat_name, &folder, cx);
+
+        // Clear all previous session state so the new project starts completely fresh.
+        // If thread is still Some from a previous run, start_agent_thread would skip
+        // creating the new thread (it guards on `this.thread.is_none()`).
+        self.thread = None;
+        self.chat_feed = None;
+        self.file_changes_panel = None;
+        self.pending_conversation_view = None;
+        self.active_conversation_view = None;
+        self.model_selector = None;
+        self.is_agent_running = false;
+        self.agent_finished = false;
         self.web_preview = None;
         self.preview_url = None;
         self.dev_server_port = None;
@@ -405,39 +602,9 @@ impl BeginnerWorkspace {
         })
         .ok();
 
-        // Only create the worktree if the project doesn't already have it
-        // (e.g. the folder was already opened from the Editor).
-        let needs_worktree = cx
-            .update(|_, cx| {
-                let ws = workspace.upgrade()?;
-                let project = ws.read(cx).project().read(cx);
-                let already_open = project
-                    .visible_worktrees(cx)
-                    .any(|wt| wt.read(cx).abs_path().as_ref() == folder.as_path());
-                Some(!already_open)
-            })
-            .ok()
-            .flatten()
-            .unwrap_or(true);
-
-        if needs_worktree {
-            let add_worktree_task = cx
-                .update(|_, cx| {
-                    let ws = workspace.upgrade()?;
-                    let task = ws.update(cx, |workspace, cx| {
-                        workspace
-                            .project()
-                            .update(cx, |project, cx| project.create_worktree(&folder, true, cx))
-                    });
-                    Some(task)
-                })
-                .ok()
-                .flatten();
-
-            if let Some(task) = add_worktree_task {
-                task.await.log_err();
-            }
-        }
+        // Keep simple mode workspace-light: pass folder as thread workdir but do not
+        // auto-open it as an editor worktree.
+        let _ = (workspace, folder);
 
     }
 
@@ -466,7 +633,7 @@ impl BeginnerWorkspace {
         // before root_thread() ever returns Some.
         self.pending_conversation_view = Some(conversation_view.clone());
 
-        let cv_sub = cx.observe(&conversation_view, |this, cv, cx| {
+        let cv_sub = cx.observe_in(&conversation_view, window, |this, cv, window, cx| {
             let (is_loading, root_thread) = {
                 let cv_ref = cv.read(cx);
                 (cv_ref.is_loading(), cv_ref.root_thread(cx))
@@ -537,6 +704,20 @@ impl BeginnerWorkspace {
                     // ThreadView it owns) stays alive while the agent is running.
                     // Dropping it here would cancel the in-flight send task.
                     this.active_conversation_view = this.pending_conversation_view.take();
+                    // Create a curated model selector (max 11 well-known models) so the
+                    // beginner UI doesn't expose the full 100-model list.
+                    this.model_selector = this
+                        .active_conversation_view
+                        .as_ref()
+                        .and_then(|cv_entity| {
+                            cv_entity.update(cx, |cv_ref, cx| {
+                                cv_ref.make_root_model_selector_wrapped(
+                                    |inner| Rc::new(CuratedModelSelector { inner }) as Rc<dyn AgentModelSelector>,
+                                    window,
+                                    cx,
+                                )
+                            })
+                        });
                     cx.notify();
                 } else if !is_loading {
                     this.is_agent_running = false;
@@ -621,6 +802,34 @@ impl BeginnerWorkspace {
         self.is_agent_running = false;
         self.agent_finished = true;
         cx.notify();
+    }
+
+    fn close_active_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_tab_limit_notice = false;
+        if self.background_sessions.is_empty() {
+            // Last tab — reset to landing rather than closing the window.
+            self.new_project(window, cx);
+        } else {
+            // Bring the first background session forward, then discard the old active.
+            self.switch_to_session(0, cx);
+            self.background_sessions.remove(0);
+            cx.notify();
+        }
+    }
+
+    fn close_background_session(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if ix < self.background_sessions.len() {
+            self.background_sessions.remove(ix);
+            self.show_tab_limit_notice = false;
+            cx.notify();
+        }
+    }
+
+    fn go_home(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.state, BeginnerState::Landing) {
+            return;
+        }
+        self.stash_current_session_and_reset(window, cx);
     }
 
     fn approve_changes(&mut self, cx: &mut Context<Self>) {
@@ -831,62 +1040,77 @@ impl BeginnerWorkspace {
         cx.notify();
     }
 
-    fn open_recent_project(
+    fn open_chat_record(
         &mut self,
-        entry: RecentProjectEntry,
+        record: BeginnerChatRecord,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(path) = entry.paths.into_iter().next() else {
-            return;
-        };
+        let path = record.folder();
+        let chat_name = SharedString::from(record.name.clone());
         self.selected_folder = Some(path.clone());
+        self.tab_name = chat_name.clone();
         self.state = BeginnerState::ActiveProject {
-            project_name: SharedString::from(entry.name.to_string()),
+            project_name: record.folder_name(),
         };
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_placeholder_text("Ask a follow-up...", window, cx);
         });
         cx.notify();
 
-        // Only add the worktree; the agent starts when the user sends a message.
-        let workspace = self.workspace.clone();
-        let task = cx.spawn_in(window, async move |_this, cx| {
-            let needs_worktree = cx
-                .update(|_, cx| {
-                    let ws = workspace.upgrade()?;
-                    let project = ws.read(cx).project().read(cx);
-                    let already_open = project
-                        .visible_worktrees(cx)
-                        .any(|wt| wt.read(cx).abs_path().as_ref() == path.as_path());
-                    Some(!already_open)
-                })
-                .ok()
-                .flatten()
-                .unwrap_or(true);
-
-            if needs_worktree {
-                let add_task = cx
-                    .update(|_, cx| {
-                        let ws = workspace.upgrade()?;
-                        let task = ws.update(cx, |workspace, cx| {
-                            workspace
-                                .project()
-                                .update(cx, |project, cx| project.create_worktree(&path, true, cx))
-                        });
-                        Some(task)
-                    })
-                    .ok()
-                    .flatten();
-                if let Some(task) = add_task {
-                    task.await.log_err();
-                }
-            }
-        });
-        self._tasks.push(task);
+        // Do not auto-add worktrees on resume; simple mode should stay uncluttered.
+        let _ = window;
     }
 }
 
+
+/// Generate a human-readable title from the user's initial prompt (like ChatGPT/Claude naming).
+/// Uses sentence case and keeps up to 6 meaningful words.
+fn generate_chat_name(prompt: &str) -> String {
+    const STOP_WORDS: &[&str] = &[
+        "a", "an", "the", "make", "build", "create", "add", "set", "up", "me", "my",
+        "i", "want", "please", "can", "you", "that", "this", "it", "some", "just",
+        "something", "new", "simple", "basic", "cool", "nice", "good", "great",
+        "modern", "clean", "help", "do", "write", "give",
+    ];
+
+    let words: Vec<String> = prompt
+        .split_whitespace()
+        .filter_map(|word| {
+            let clean: String = word
+                .chars()
+                .filter(|c| c.is_alphabetic())
+                .collect::<String>()
+                .to_lowercase();
+            if clean.is_empty() || STOP_WORDS.contains(&clean.as_str()) {
+                None
+            } else {
+                Some(clean)
+            }
+        })
+        .take(6)
+        .collect();
+
+    if words.is_empty() {
+        return "New Project".to_string();
+    }
+
+    // Sentence case: capitalize first word only.
+    let mut result = String::new();
+    for (i, word) in words.iter().enumerate() {
+        if i == 0 {
+            let mut chars = word.chars();
+            if let Some(first) = chars.next() {
+                result.push_str(&first.to_uppercase().to_string());
+                result.push_str(chars.as_str());
+            }
+        } else {
+            result.push(' ');
+            result.push_str(word);
+        }
+    }
+    result
+}
 
 fn first_visible_worktree_path(project: &Entity<Project>, cx: &App) -> Option<PathBuf> {
     project
@@ -895,19 +1119,6 @@ fn first_visible_worktree_path(project: &Entity<Project>, cx: &App) -> Option<Pa
         .filter(|wt| !wt.read(cx).is_single_file())
         .next()
         .map(|wt| wt.read(cx).abs_path().to_path_buf())
-}
-
-fn folder_to_state(folder: Option<&PathBuf>) -> BeginnerState {
-    match folder {
-        Some(p) => BeginnerState::ActiveProject {
-            project_name: SharedString::from(
-                p.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| p.to_string_lossy().into_owned()),
-            ),
-        },
-        None => BeginnerState::Landing,
-    }
 }
 
 #[allow(dead_code)]
@@ -920,27 +1131,6 @@ fn persist_experience_level(level: ExperienceLevel, cx: &mut App) {
     });
 }
 
-fn tab_button(
-    label: &'static str,
-    active: bool,
-    cx: &Context<BeginnerWorkspace>,
-) -> gpui::Stateful<Div> {
-    div()
-        .id(label)
-        .flex_1()
-        .py_2()
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
-        .when(active, |el| el.bg(cx.theme().colors().element_selected))
-        .hover(|el| el.bg(cx.theme().colors().element_hover))
-        .child(
-            Label::new(label)
-                .size(LabelSize::Small)
-                .color(if active { Color::Default } else { Color::Muted }),
-        )
-}
 
 fn project_file_sections(folder: &PathBuf) -> Vec<(String, PathBuf, bool)> {
     let Ok(entries) = std::fs::read_dir(folder) else {
@@ -1012,8 +1202,8 @@ impl Render for BeginnerWorkspace {
 }
 
 impl BeginnerWorkspace {
-    /// Renders a horizontal tab strip. `active_title` is the current (non-clickable) tab;
-    /// `background_titles` are the stashed sessions (clickable).
+    /// Renders a horizontal tab strip with closeable tabs.
+    /// Active tab has a raised border style; background tabs are clickable and closeable.
     fn render_tab_bar(
         &self,
         active_title: SharedString,
@@ -1023,22 +1213,60 @@ impl BeginnerWorkspace {
         let border = cx.theme().colors().border;
         let active_bg = cx.theme().colors().editor_background;
         let inactive_hover = cx.theme().colors().element_hover;
+        let total_tabs = 1 + background_titles.len();
+        let can_add = total_tabs < 3;
+        // Only show a close button on the active tab when it can be meaningfully closed:
+        // either there are other tabs to switch to, or this is an active project (closing
+        // returns to landing). Don't show X on the sole "New Project" landing tab.
+        let show_active_close = !background_titles.is_empty()
+            || matches!(self.state, BeginnerState::ActiveProject { .. });
+
+        let is_on_landing = matches!(self.state, BeginnerState::Landing);
 
         h_flex()
-            .h(px(30.))
+            .h(px(32.))
             .w_full()
             .flex_shrink_0()
             .items_end()
             .px_2()
-            .gap_1()
+            .gap_0p5()
             .border_b_1()
             .border_color(border)
-            // Active tab — raised appearance with no bottom border
+            // Home icon button — always leftmost; highlighted when on the home page
+            .child(
+                div()
+                    .id("tab-home")
+                    .h(px(28.))
+                    .w(px(28.))
+                    .mb_px()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .when(is_on_landing, |el| {
+                        el.bg(cx.theme().colors().element_selected)
+                    })
+                    .when(!is_on_landing, |el| {
+                        el.hover(|el| el.bg(cx.theme().colors().element_hover))
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.go_home(window, cx);
+                    }))
+                    .child(
+                        Icon::new(IconName::Thread)
+                            .size(IconSize::XSmall)
+                            .color(if is_on_landing { Color::Default } else { Color::Muted }),
+                    ),
+            )
+            // Active tab
             .child(
                 h_flex()
                     .id("tab-active")
-                    .h(px(26.))
-                    .px_3()
+                    .h(px(28.))
+                    .pl_3()
+                    .pr_1p5()
+                    .gap_1p5()
                     .items_center()
                     .rounded_t_md()
                     .border_1()
@@ -1049,14 +1277,37 @@ impl BeginnerWorkspace {
                         Label::new(active_title)
                             .size(LabelSize::Small)
                             .color(Color::Default),
-                    ),
+                    )
+                    .when(show_active_close, |el| {
+                        el.child(
+                            div()
+                                .id("tab-active-close")
+                                .size(px(14.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_sm()
+                                .cursor_pointer()
+                                .hover(|el| el.bg(cx.theme().colors().element_hover))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_active_session(window, cx);
+                                }))
+                                .child(
+                                    Icon::new(IconName::Close)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Muted),
+                                ),
+                        )
+                    }),
             )
-            // Stashed session tabs — clickable, inactive style
-            .children(background_titles.into_iter().enumerate().map(move |(ix, title)| {
+            // Background session tabs
+            .children(background_titles.into_iter().enumerate().map(|(ix, title)| {
                 h_flex()
                     .id(SharedString::from(format!("tab-bg-{ix}")))
-                    .h(px(24.))
-                    .px_3()
+                    .h(px(26.))
+                    .pl_3()
+                    .pr_1p5()
+                    .gap_1p5()
                     .items_center()
                     .rounded_t_md()
                     .cursor_pointer()
@@ -1069,47 +1320,105 @@ impl BeginnerWorkspace {
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("tab-bg-close-{ix}")))
+                            .size(px(14.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .hover(move |el| el.bg(inactive_hover))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.close_background_session(ix, cx);
+                            }))
+                            .child(
+                                Icon::new(IconName::Close)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Muted),
+                            ),
+                    )
             }))
+            .child(div().flex_1())
+            // "+" always visible; at limit it shows a notice instead of opening
+            .child(
+                IconButton::new("tab-bar-new", IconName::Plus)
+                    .icon_size(IconSize::XSmall)
+                    .icon_color(if can_add { Color::Muted } else { Color::Disabled })
+                    .tooltip(Tooltip::text(if can_add {
+                        "New project tab"
+                    } else {
+                        "3 project limit reached"
+                    }))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if can_add {
+                            this.show_tab_limit_notice = false;
+                            this.stash_current_session_and_reset(window, cx);
+                        } else {
+                            this.show_tab_limit_notice = true;
+                            cx.notify();
+                        }
+                    })),
+            )
+    }
+
+    fn render_tab_limit_notice(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .w_full()
+            .px_3()
+            .py_2()
+            .gap_2()
+            .items_center()
+            .bg(cx.theme().colors().surface_background)
+            .border_b_1()
+            .border_color(cx.theme().colors().border)
+            .child(
+                Icon::new(IconName::Warning)
+                    .size(IconSize::XSmall)
+                    .color(Color::Warning),
+            )
+            .child(
+                Label::new("You have 3 projects open — the maximum. Close or replace one to start a new project.")
+                    .size(LabelSize::Small)
+                    .color(Color::Default),
+            )
+            .child(div().flex_1())
+            .child(
+                IconButton::new("dismiss-limit-notice", IconName::Close)
+                    .icon_size(IconSize::XSmall)
+                    .icon_color(Color::Muted)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_tab_limit_notice = false;
+                        cx.notify();
+                    })),
+            )
     }
 
     fn render_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
-        let folder_label = self
-            .selected_folder
-            .as_ref()
-            .map(|p| {
-                SharedString::from(
-                    p.file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| p.to_string_lossy().into_owned()),
-                )
-            })
-            .unwrap_or_else(|| SharedString::from("Choose Folder"));
-
-        let recent_projects = self.recent_projects.clone();
+        let chat_history = self.chat_history.clone();
+        let no_history = chat_history.is_empty();
         let chat_editor = self.chat_editor.clone();
         let header_height = platform_title_bar_height(window);
         let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
-        let suggested_prompts = [
-            "Build a clean landing page with pricing and FAQ.",
-            "Create a contact form with validation and success state.",
-            "Add dark mode toggle and save preference.",
-        ];
         let background_titles: Vec<SharedString> = self
             .background_sessions
             .iter()
             .map(|s| match &s.state {
-                BeginnerState::ActiveProject { project_name } => project_name.clone(),
                 BeginnerState::Landing => SharedString::from("New Project"),
+                BeginnerState::ActiveProject { .. } => s.tab_name.clone(),
             })
             .collect();
+
+        let border = cx.theme().colors().border;
 
         v_flex()
             .key_context("BeginnerLanding")
             .track_focus(&self.focus_handle)
             .size_full()
-            .bg(cx.theme().colors().panel_background)
-            // Drag strip that holds the traffic lights and the settings button.
+            .bg(cx.theme().colors().editor_background)
+            // Title bar drag strip
             .child(
                 h_flex()
                     .h(header_height)
@@ -1119,146 +1428,86 @@ impl BeginnerWorkspace {
                     .when(traffic_lights, |this| {
                         this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
                     })
-                    .justify_end()
-                    .items_center()
-                    .pr_2()
-                    .child(
-                        IconButton::new("new-project-tab", IconName::Plus)
-                            .icon_size(IconSize::Small)
-                            .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("New project tab"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.stash_current_session_and_reset(window, cx);
-                            })),
-                    ),
+                    .border_b_1()
+                    .border_color(border)
+                    .bg(cx.theme().colors().title_bar_background),
             )
-            .when(!background_titles.is_empty(), |el| {
-                el.child(self.render_tab_bar(
-                    SharedString::from("New Project"),
-                    background_titles,
-                    cx,
-                ))
+            .child(self.render_tab_bar(
+                SharedString::from("New Project"),
+                background_titles,
+                cx,
+            ))
+            .when(self.show_tab_limit_notice, |el| {
+                el.child(self.render_tab_limit_notice(cx))
             })
-            // Centered content
+            // Body: left sidebar + main content
             .child(
-                v_flex()
+                h_flex()
                     .flex_1()
-                    .items_center()
-                    .justify_center()
-                    .gap_8()
-                    // Logo + headline
+                    .overflow_hidden()
+                    // ── Left sidebar ──────────────────────────────────────────
                     .child(
                         v_flex()
-                            .items_center()
-                            .gap_3()
+                            .w(px(220.))
+                            .h_full()
+                            .flex_shrink_0()
+                            .border_r_1()
+                            .border_color(border)
+                            .bg(cx.theme().colors().surface_background)
+                            // Chat history list
                             .child(
-                                h_flex()
-                                    .items_center()
-                                    .gap_2()
+                                v_flex()
+                                    .id("chat-history-list")
+                                    .flex_1()
+                                    .overflow_y_scroll()
+                                    .p_2()
+                                    .gap_0p5()
                                     .child(
-                                        Icon::new(IconName::Sparkle)
-                                            .size(IconSize::Custom(rems(1.75)))
-                                            .color(Color::Accent),
-                                    )
-                                    .child(Headline::new("Backboard").size(HeadlineSize::XLarge)),
-                            )
-                            .child(
-                                Label::new("What do you want to build today?")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                            ),
-                    )
-                    // Input card
-                    .child(
-                        v_flex()
-                            .w(px(580.))
-                            .gap_2()
-                            .rounded_xl()
-                            .border_1()
-                            .border_color(cx.theme().colors().border)
-                            .bg(cx.theme().colors().editor_background)
-                            .p_3()
-                            .child(chat_editor)
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .pt_1()
-                                    .child(
-                                        Button::new("choose-folder", folder_label)
-                                            .style(ButtonStyle::Subtle)
-                                            .start_icon(Icon::new(IconName::FolderOpen))
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.pick_folder(window, cx);
-                                            })),
-                                    )
-                                    .child(div().flex_1())
-                                    .child(
-                                        Button::new("build", "Build with AI")
-                                            .style(ButtonStyle::Filled)
-                                            .end_icon(Icon::new(IconName::ArrowRight))
-                                            .disabled(draft_is_empty)
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.submit(window, cx);
-                                            })),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .w(px(580.))
-                            .gap_2()
-                            .flex_wrap()
-                            .children(suggested_prompts.into_iter().map(|prompt| {
-                                Button::new(SharedString::from(prompt), SharedString::from(prompt))
-                                    .style(ButtonStyle::Subtle)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.apply_suggested_prompt(prompt, window, cx);
-                                    }))
-                            })),
-                    )
-                    // Recent projects
-                    .when(!recent_projects.is_empty(), |el| {
-                        el.child(
-                            v_flex()
-                                .items_center()
-                                .gap_3()
-                                .child(
-                                    h_flex()
-                                        .w(px(580.))
-                                        .items_center()
-                                        .gap_2()
-                                        .child(div().flex_1().h_px().bg(cx.theme().colors().border))
-                                        .child(
-                                            Label::new("Recent")
-                                                .size(LabelSize::XSmall)
-                                                .color(Color::Muted),
-                                        )
-                                        .child(div().flex_1().h_px().bg(cx.theme().colors().border)),
-                                )
-                                .child(h_flex().gap_2().flex_wrap().max_w(px(580.)).children(
-                                    recent_projects.into_iter().map(|entry| {
-                                        let name = entry.name.clone();
-                                        let entry_for_click = RecentProjectEntry {
-                                            name: entry.name.clone(),
-                                            full_path: entry.full_path.clone(),
-                                            paths: entry.paths.clone(),
-                                            workspace_id: entry.workspace_id,
-                                            timestamp: entry.timestamp,
-                                        };
                                         h_flex()
-                                            .id(SharedString::from(format!("recent-{}", name)))
-                                            .px_3()
-                                            .py_1p5()
+                                            .px_1()
+                                            .py_0p5()
+                                            .child(
+                                                Label::new("Recent")
+                                                    .size(LabelSize::XSmall)
+                                                    .color(Color::Muted),
+                                            ),
+                                    )
+                                    .when(no_history, |el| {
+                                        el.child(
+                                            v_flex()
+                                                .px_2()
+                                                .py_2()
+                                                .gap_0p5()
+                                                .child(
+                                                    Label::new("No chats yet")
+                                                        .size(LabelSize::Small)
+                                                        .color(Color::Disabled),
+                                                )
+                                                .child(
+                                                    Label::new("Start a new project to get started.")
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::Disabled),
+                                                ),
+                                        )
+                                    })
+                                    .children(chat_history.into_iter().map(|record| {
+                                        let name = SharedString::from(record.name.clone());
+                                        let folder_label = record.folder_name();
+                                        let record_for_click = record.clone();
+                                        let record_id_for_delete = record.id.clone();
+                                        let hover_bg = cx.theme().colors().element_hover;
+                                        h_flex()
+                                            .id(SharedString::from(format!("chat-{}", record.id)))
+                                            .group("chat-entry")
+                                            .px_2()
+                                            .py_1()
                                             .gap_1p5()
-                                            .rounded_lg()
-                                            .border_1()
-                                            .border_color(cx.theme().colors().border)
-                                            .bg(cx.theme().colors().surface_background)
+                                            .rounded_md()
                                             .cursor_pointer()
-                                            .hover(|el| el.bg(cx.theme().colors().element_hover))
+                                            .hover(move |el| el.bg(hover_bg))
                                             .on_click(cx.listener(move |this, _, window, cx| {
-                                                this.open_recent_project(
-                                                    entry_for_click.clone(),
+                                                this.open_chat_record(
+                                                    record_for_click.clone(),
                                                     window,
                                                     cx,
                                                 );
@@ -1268,11 +1517,240 @@ impl BeginnerWorkspace {
                                                     .size(IconSize::XSmall)
                                                     .color(Color::Muted),
                                             )
-                                            .child(Label::new(name).size(LabelSize::Small))
-                                    }),
-                                )),
-                        )
-                    }),
+                                            .child(
+                                                v_flex()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .gap_0p5()
+                                                    .child(
+                                                        Label::new(name)
+                                                            .size(LabelSize::Small)
+                                                            .truncate(),
+                                                    )
+                                                    .child(
+                                                        Label::new(folder_label)
+                                                            .size(LabelSize::XSmall)
+                                                            .color(Color::Muted)
+                                                            .truncate(),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .id(SharedString::from(format!("chat-del-{}", record_id_for_delete.clone())))
+                                                    .size(px(14.))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .rounded_sm()
+                                                    .flex_none()
+                                                    .cursor_pointer()
+                                                    .hover(move |el| el.bg(hover_bg))
+                                                    .on_click(cx.listener(move |this, _event, _, cx| {
+                                                        cx.stop_propagation();
+                                                        this.delete_chat_record(record_id_for_delete.clone(), cx);
+                                                        cx.notify();
+                                                    }))
+                                                    .child(
+                                                        Icon::new(IconName::Close)
+                                                            .size(IconSize::XSmall)
+                                                            .color(Color::Muted),
+                                                    ),
+                                            )
+                                    })),
+                            )
+                    )
+                    // ── Main content ──────────────────────────────────────────
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .h_full()
+                            .items_center()
+                            .justify_center()
+                            .gap_6()
+                            .px_8()
+                            .py_6()
+                            // Headline
+                            .child(
+                                v_flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(
+                                        Headline::new(if no_history {
+                                            "Welcome to Backboard"
+                                        } else {
+                                            "Start a new project"
+                                        })
+                                        .size(HeadlineSize::Large),
+                                    )
+                                    .child(
+                                        Label::new(if no_history {
+                                            "Create a project and describe what you want to build."
+                                        } else {
+                                            "Describe your idea and Backboard will start building."
+                                        })
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                    ),
+                            )
+                            // Onboarding steps
+                            .child(
+                                v_flex()
+                                    .w(px(520.))
+                                    .gap_4()
+                                    .children(
+                                        [
+                                            (
+                                                "Create a project",
+                                                "Set up a new project in seconds.",
+                                            ),
+                                            (
+                                                "Describe your idea",
+                                                "Tell Backboard what you want to build.",
+                                            ),
+                                            (
+                                                "See it come to life",
+                                                "Preview your app as you build.",
+                                            ),
+                                        ]
+                                        .into_iter()
+                                        .map(|(title, subtitle)| {
+                                            h_flex()
+                                                .gap_3()
+                                                .items_start()
+                                                .child(
+                                                    // Empty checkbox square
+                                                    div()
+                                                        .mt(px(2.))
+                                                        .size(px(16.))
+                                                        .flex_shrink_0()
+                                                        .rounded_sm()
+                                                        .border_1()
+                                                        .border_color(border),
+                                                )
+                                                .child(
+                                                    v_flex()
+                                                        .gap_0p5()
+                                                        .child(
+                                                            Label::new(title)
+                                                                .size(LabelSize::Small)
+                                                                .color(Color::Default),
+                                                        )
+                                                        .child(
+                                                            Label::new(subtitle)
+                                                                .size(LabelSize::XSmall)
+                                                                .color(Color::Muted),
+                                                        ),
+                                                )
+                                        }),
+                                    ),
+                            )
+                            // Divider
+                            .child(div().w(px(520.)).h_px().bg(border))
+                            // Input card
+                            .child(
+                                v_flex()
+                                    .w(px(520.))
+                                    .gap_2()
+                                    .rounded_xl()
+                                    .border_1()
+                                    .border_color(border)
+                                    .bg(cx.theme().colors().editor_background)
+                                    .p_3()
+                                    .child(chat_editor)
+                                    .child(
+                                        h_flex()
+                                            .pt_1()
+                                            .gap_2()
+                                            .items_center()
+                                            .child(
+                                                Button::new("attach-folder", "Attach")
+                                                    .style(ButtonStyle::Subtle)
+                                                    .start_icon(Icon::new(IconName::FolderOpen))
+                                                    .on_click(cx.listener(|this, _, window, cx| {
+                                                        this.pick_folder(window, cx);
+                                                    })),
+                                            )
+                                            .child(div().flex_1())
+                                            .child(
+                                                Button::new("create-project", "Create Project")
+                                                    .style(ButtonStyle::Filled)
+                                                    .end_icon(Icon::new(IconName::ArrowRight))
+                                                    .disabled(draft_is_empty)
+                                                    .on_click(cx.listener(|this, _, window, cx| {
+                                                        this.submit(window, cx);
+                                                    })),
+                                            ),
+                                    ),
+                            )
+                            // Template chips
+                            .child(
+                                h_flex()
+                                    .w(px(520.))
+                                    .gap_2()
+                                    .flex_wrap()
+                                    .children(
+                                        [
+                                            (
+                                                "Landing page",
+                                                "Build a modern landing page with hero, features, and pricing sections.",
+                                            ),
+                                            (
+                                                "Dashboard",
+                                                "Build a dashboard with charts, stats, and a data table.",
+                                            ),
+                                            (
+                                                "Web app",
+                                                "Build a web app with user authentication and a main workspace.",
+                                            ),
+                                        ]
+                                        .into_iter()
+                                        .map(|(label, prompt)| {
+                                            h_flex()
+                                                .id(SharedString::from(format!(
+                                                    "template-{}",
+                                                    label
+                                                )))
+                                                .px_3()
+                                                .py_1p5()
+                                                .gap_1p5()
+                                                .rounded_lg()
+                                                .border_1()
+                                                .border_color(border)
+                                                .bg(cx.theme().colors().surface_background)
+                                                .cursor_pointer()
+                                                .hover(|el| {
+                                                    el.bg(cx.theme().colors().element_hover)
+                                                })
+                                                .on_click(cx.listener(move |this, _, window, cx| {
+                                                    this.apply_suggested_prompt(prompt, window, cx);
+                                                }))
+                                                .child(
+                                                    Label::new(label).size(LabelSize::Small),
+                                                )
+                                        }),
+                                    ),
+                            )
+                            // Hint
+                            .child(
+                                h_flex()
+                                    .gap_1p5()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .size(px(12.))
+                                            .rounded_sm()
+                                            .border_1()
+                                            .border_color(border),
+                                    )
+                                    .child(
+                                        Label::new(
+                                            "Not sure what to build? Try one of the examples above.",
+                                        )
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                    ),
+                            ),
+                    ),
             )
     }
 
@@ -1300,8 +1778,8 @@ impl BeginnerWorkspace {
             .background_sessions
             .iter()
             .map(|s| match &s.state {
-                BeginnerState::ActiveProject { project_name } => project_name.clone(),
                 BeginnerState::Landing => SharedString::from("New Project"),
+                BeginnerState::ActiveProject { .. } => s.tab_name.clone(),
             })
             .collect();
 
@@ -1324,9 +1802,7 @@ impl BeginnerWorkspace {
                     .gap_2()
                     .items_center()
                     .child(
-                        Icon::new(IconName::Sparkle)
-                            .size(IconSize::Small)
-                            .color(Color::Accent),
+                        Vector::new(VectorName::BackboardLogo, rems_from_px(10.), rems_from_px(14.)),
                     )
                     .child(
                         Label::new(project_name)
@@ -1342,19 +1818,11 @@ impl BeginnerWorkspace {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_project_in_finder(cx);
                             })),
-                    )
-                    .child(
-                        IconButton::new("new-project", IconName::Plus)
-                            .icon_size(IconSize::Small)
-                            .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("New project"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.stash_current_session_and_reset(window, cx);
-                            })),
                     ),
             )
-            .when(!background_titles.is_empty(), |el| {
-                el.child(self.render_tab_bar(active_title, background_titles, cx))
+            .child(self.render_tab_bar(active_title, background_titles, cx))
+            .when(self.show_tab_limit_notice, |el| {
+                el.child(self.render_tab_limit_notice(cx))
             })
             // 3-column body
             .child(
@@ -1393,9 +1861,7 @@ impl BeginnerWorkspace {
                                         .gap_2()
                                         .pb(rems_from_px(48.))
                                         .child(
-                                            Icon::new(IconName::Sparkle)
-                                                .size(IconSize::XLarge)
-                                                .color(Color::Accent),
+                                            Vector::new(VectorName::BackboardLogo, rems_from_px(18.), rems_from_px(24.)),
                                         )
                                         .child(
                                             Label::new(headline)
@@ -1446,223 +1912,324 @@ impl BeginnerWorkspace {
     ) -> impl IntoElement {
         let has_project = self.selected_folder.is_some();
 
+        // Collect user messages from the thread for the conversation history section.
+        let conversation_history: Vec<String> = self
+            .thread
+            .as_ref()
+            .map(|thread| {
+                thread
+                    .read(cx)
+                    .entries()
+                    .iter()
+                    .filter_map(|entry| {
+                        if let AgentThreadEntry::UserMessage(msg) = entry {
+                            if msg.indented {
+                                return None;
+                            }
+                            let text = msg.content.to_markdown(cx).to_string();
+                            let text = text.trim().to_string();
+                            if text.is_empty() { None } else { Some(text) }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         v_flex()
             .w(px(220.))
             .h_full()
             .flex_shrink_0()
             .bg(cx.theme().colors().surface_background)
-            // Tab strip
-            .child(
-                h_flex()
-                    .border_b_1()
-                    .border_color(cx.theme().colors().border)
-                    .child(
-                        tab_button("Files", active_tab == LeftTab::Files, cx)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.left_tab = LeftTab::Files;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        tab_button("Changes", active_tab == LeftTab::Changes, cx)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.left_tab = LeftTab::Changes;
-                                cx.notify();
-                            })),
-                    ),
-            )
+            // Search bar
             .child(
                 h_flex()
                     .px_2()
                     .py_1p5()
                     .border_b_1()
                     .border_color(cx.theme().colors().border)
-                    .justify_between()
+                    .gap_1p5()
                     .items_center()
                     .child(
-                        Label::new(if self.show_raw_files {
-                            "Raw Files"
-                        } else {
-                            "Simple Categories"
-                        })
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                        Icon::new(IconName::MagnifyingGlass)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
                     )
                     .child(
-                        Button::new(
-                            "toggle-raw-files",
-                            if self.show_raw_files {
-                                "Simple View"
-                            } else {
-                                "Raw View"
-                            },
-                        )
-                        .style(ButtonStyle::Subtle)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.show_raw_files = !this.show_raw_files;
-                            cx.notify();
-                        })),
+                        Label::new("Search")
+                            .size(LabelSize::Small)
+                            .color(Color::Disabled),
                     ),
             )
-            // Tab body
-            .child(if active_tab == LeftTab::Files {
+            // Scrollable body
+            .child(
                 v_flex()
-                    .id("files-tab-body")
+                    .id("left-panel-body")
                     .flex_1()
                     .overflow_y_scroll()
-                    .p_2()
-                    .gap_0p5()
-                    .when(!has_project, |el| {
+                    // Conversation history section
+                    .when(!conversation_history.is_empty(), |el| {
                         el.child(
-                            div()
-                                .flex_1()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .p_4()
+                            v_flex()
+                                .p_2()
+                                .gap_0p5()
                                 .child(
-                                    Label::new("No project open")
-                                        .size(LabelSize::Small)
-                                        .color(Color::Disabled),
-                                ),
-                        )
-                    })
-                    .when_some(self.selected_folder.as_ref(), |el, root_folder| {
-                        if self.show_raw_files {
-                            let browse_root = self.raw_browse_path.as_ref().unwrap_or(root_folder);
-                            let in_subdir = self.raw_browse_path.is_some();
-                            let browse_root = browse_root.clone();
-                            let root_folder = root_folder.clone();
-                            el
-                                .when(in_subdir, |el| {
-                                    let parent = browse_root.parent()
-                                        .map(|p| p.to_path_buf())
-                                        .filter(|p| p.starts_with(&root_folder));
-                                    el.child(
+                                    h_flex()
+                                        .px_1()
+                                        .py_0p5()
+                                        .child(
+                                            Label::new("Conversation")
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted),
+                                        ),
+                                )
+                                .children(
+                                    conversation_history.into_iter().enumerate().map(|(ix, text)| {
+                                        let truncated = if text.len() > 40 {
+                                            format!("{}…", &text[..40])
+                                        } else {
+                                            text
+                                        };
                                         h_flex()
-                                            .id("raw-back")
+                                            .id(SharedString::from(format!("history-{ix}")))
                                             .px_2()
                                             .py_1()
                                             .gap_1p5()
                                             .rounded_md()
                                             .cursor_pointer()
-                                            .hover(|row| row.bg(cx.theme().colors().element_hover))
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.raw_browse_path = parent.clone();
-                                                cx.notify();
-                                            }))
+                                            .hover(|el| el.bg(cx.theme().colors().element_hover))
                                             .child(
-                                                Icon::new(IconName::ArrowLeft)
+                                                Icon::new(IconName::MagnifyingGlass)
+                                                    .size(IconSize::XSmall)
+                                                    .color(Color::Disabled),
+                                            )
+                                            .child(
+                                                Label::new(SharedString::from(truncated))
+                                                    .size(LabelSize::XSmall)
+                                                    .color(Color::Muted)
+                                                    .truncate(),
+                                            )
+                                    }),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .mx_2()
+                                .h_px()
+                                .bg(cx.theme().colors().border),
+                        )
+                    })
+                    // Project section
+                    .child(
+                        v_flex()
+                            .p_2()
+                            .gap_0p5()
+                            .child(
+                                h_flex()
+                                    .px_1()
+                                    .py_0p5()
+                                    .justify_between()
+                                    .items_center()
+                                    .child(
+                                        Label::new("Project")
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(
+                                        Button::new(
+                                            "toggle-raw-files",
+                                            if self.show_raw_files { "Simple" } else { "Raw" },
+                                        )
+                                        .style(ButtonStyle::Subtle)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.show_raw_files = !this.show_raw_files;
+                                            cx.notify();
+                                        })),
+                                    ),
+                            )
+                            .when(!has_project, |el| {
+                                el.child(
+                                    div()
+                                        .px_2()
+                                        .py_4()
+                                        .child(
+                                            Label::new("No project open")
+                                                .size(LabelSize::Small)
+                                                .color(Color::Disabled),
+                                        ),
+                                )
+                            })
+                            .when_some(self.selected_folder.as_ref(), |el, root_folder| {
+                                if self.show_raw_files {
+                                    let browse_root =
+                                        self.raw_browse_path.as_ref().unwrap_or(root_folder);
+                                    let in_subdir = self.raw_browse_path.is_some();
+                                    let browse_root = browse_root.clone();
+                                    let root_folder = root_folder.clone();
+                                    el.when(in_subdir, |el| {
+                                        let parent = browse_root
+                                            .parent()
+                                            .map(|p| p.to_path_buf())
+                                            .filter(|p| p.starts_with(&root_folder));
+                                        el.child(
+                                            h_flex()
+                                                .id("raw-back")
+                                                .px_2()
+                                                .py_1()
+                                                .gap_1p5()
+                                                .rounded_md()
+                                                .cursor_pointer()
+                                                .hover(|row| {
+                                                    row.bg(cx.theme().colors().element_hover)
+                                                })
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.raw_browse_path = parent.clone();
+                                                    cx.notify();
+                                                }))
+                                                .child(
+                                                    Icon::new(IconName::ArrowLeft)
+                                                        .size(IconSize::XSmall)
+                                                        .color(Color::Muted),
+                                                )
+                                                .child(
+                                                    Label::new(
+                                                        browse_root
+                                                            .file_name()
+                                                            .map(|n| n.to_string_lossy().into_owned())
+                                                            .unwrap_or_default(),
+                                                    )
+                                                    .size(LabelSize::Small)
+                                                    .color(Color::Muted),
+                                                ),
+                                        )
+                                    })
+                                    .children(
+                                        project_file_sections(&browse_root).into_iter().map(
+                                            |(name, path, is_dir)| {
+                                                h_flex()
+                                                    .id(SharedString::from(format!(
+                                                        "raw-file-{}",
+                                                        path.to_string_lossy()
+                                                    )))
+                                                    .px_2()
+                                                    .py_1()
+                                                    .gap_1p5()
+                                                    .rounded_md()
+                                                    .cursor_pointer()
+                                                    .hover(|row| {
+                                                        row.bg(cx.theme().colors().element_hover)
+                                                    })
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        if is_dir {
+                                                            this.raw_browse_path =
+                                                                Some(path.clone());
+                                                            cx.notify();
+                                                        } else {
+                                                            this.open_file_read_only(path.as_path());
+                                                            cx.notify();
+                                                        }
+                                                    }))
+                                                    .child(
+                                                        Icon::new(if is_dir {
+                                                            IconName::Folder
+                                                        } else {
+                                                            IconName::File
+                                                        })
+                                                        .size(IconSize::XSmall)
+                                                        .color(Color::Muted),
+                                                    )
+                                                    .child(
+                                                        Label::new(SharedString::from(name))
+                                                            .size(LabelSize::Small)
+                                                            .color(if is_dir {
+                                                                Color::Default
+                                                            } else {
+                                                                Color::Muted
+                                                            }),
+                                                    )
+                                            },
+                                        ),
+                                    )
+                                } else {
+                                    let categories = [
+                                        "Pages",
+                                        "Components",
+                                        "Styles",
+                                        "Assets",
+                                        "Forms",
+                                        "Settings",
+                                    ];
+                                    el.children(categories.into_iter().map(|category| {
+                                        h_flex()
+                                            .px_2()
+                                            .py_1()
+                                            .gap_1p5()
+                                            .rounded_md()
+                                            .child(
+                                                Icon::new(IconName::Folder)
                                                     .size(IconSize::XSmall)
                                                     .color(Color::Muted),
                                             )
+                                            .child(Label::new(category).size(LabelSize::Small))
+                                    }))
+                                }
+                            }),
+                    )
+                    // Changes section
+                    .child(
+                        v_flex()
+                            .p_2()
+                            .gap_0p5()
+                            .child(
+                                h_flex()
+                                    .px_1()
+                                    .py_0p5()
+                                    .justify_between()
+                                    .items_center()
+                                    .child(
+                                        Label::new("Changes")
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("toggle-changes-tab")
+                                            .cursor_pointer()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.left_tab = match this.left_tab {
+                                                    LeftTab::Changes => LeftTab::Files,
+                                                    LeftTab::Files => LeftTab::Changes,
+                                                };
+                                                cx.notify();
+                                            }))
                                             .child(
-                                                Label::new(
-                                                    browse_root.file_name()
-                                                        .map(|n| n.to_string_lossy().into_owned())
-                                                        .unwrap_or_default()
-                                                )
-                                                .size(LabelSize::Small)
-                                                .color(Color::Muted),
+                                                Label::new(if active_tab == LeftTab::Changes {
+                                                    "Hide"
+                                                } else {
+                                                    "Show"
+                                                })
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Accent),
                                             ),
+                                    ),
+                            )
+                            .when(active_tab == LeftTab::Changes, |el| {
+                                el.when_some(self.file_changes_panel.as_ref(), |el, panel| {
+                                    el.child(panel.clone())
+                                })
+                                .when(self.file_changes_panel.is_none(), |el| {
+                                    el.child(
+                                        div().px_2().py_2().child(
+                                            Label::new("No changes yet")
+                                                .size(LabelSize::Small)
+                                                .color(Color::Disabled),
+                                        ),
                                     )
                                 })
-                                .children(project_file_sections(&browse_root).into_iter().map(
-                                |(name, path, is_dir)| {
-                                    h_flex()
-                                        .id(SharedString::from(format!(
-                                            "raw-file-{}",
-                                            path.to_string_lossy()
-                                        )))
-                                        .px_2()
-                                        .py_1()
-                                        .gap_1p5()
-                                        .rounded_md()
-                                        .cursor_pointer()
-                                        .hover(|row| row.bg(cx.theme().colors().element_hover))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            if is_dir {
-                                                this.raw_browse_path = Some(path.clone());
-                                                cx.notify();
-                                            } else {
-                                                this.open_file_read_only(path.as_path());
-                                                cx.notify();
-                                            }
-                                        }))
-                                        .child(
-                                            Icon::new(if is_dir {
-                                                IconName::Folder
-                                            } else {
-                                                IconName::File
-                                            })
-                                            .size(IconSize::XSmall)
-                                            .color(Color::Muted),
-                                        )
-                                        .child(
-                                            Label::new(SharedString::from(name))
-                                                .size(LabelSize::Small)
-                                                .color(if is_dir {
-                                                    Color::Default
-                                                } else {
-                                                    Color::Muted
-                                                }),
-                                        )
-                                },
-                            ))
-                        } else {
-                            let categories = [
-                                "Pages",
-                                "Components",
-                                "Styles",
-                                "Assets",
-                                "Forms",
-                                "Settings",
-                            ];
-                            el.children(categories.into_iter().map(|category| {
-                                h_flex()
-                                    .px_2()
-                                    .py_1()
-                                    .gap_1p5()
-                                    .rounded_md()
-                                    .child(
-                                        Icon::new(IconName::Folder)
-                                            .size(IconSize::XSmall)
-                                            .color(Color::Muted),
-                                    )
-                                    .child(Label::new(category).size(LabelSize::Small))
-                            }))
-                        }
-                    })
-                    .into_any_element()
-            } else {
-                v_flex()
-                    .flex_1()
-                    .overflow_hidden()
-                    .when_some(self.file_changes_panel.as_ref(), |el, panel| {
-                        el.child(
-                            div()
-                                .flex_1()
-                                .overflow_hidden()
-                                .child(panel.clone()),
-                        )
-                    })
-                    .when(self.file_changes_panel.is_none(), |el| {
-                        el.child(
-                            div()
-                                .flex_1()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .p_4()
-                                .child(
-                                    Label::new("No changes yet")
-                                        .size(LabelSize::Small)
-                                        .color(Color::Disabled),
-                                ),
-                        )
-                    })
-                    .into_any_element()
-            })
+                            }),
+                    ),
+            )
     }
 
     fn render_right_panel(
@@ -1672,50 +2239,10 @@ impl BeginnerWorkspace {
         preview_dominant: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let RightPanel::CodeView { title, content } = &self.right_panel {
-            return v_flex()
-                .w(px(420.))
-                .h_full()
-                .flex_shrink_0()
-                .bg(cx.theme().colors().surface_background)
-                .child(
-                    h_flex()
-                        .px_3()
-                        .py_2()
-                        .border_b_1()
-                        .border_color(cx.theme().colors().border)
-                        .gap_1p5()
-                        .items_center()
-                        .child(
-                            Icon::new(IconName::File)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .child(Label::new(title.clone()).size(LabelSize::Small))
-                        .child(div().flex_1())
-                        .child(
-                            Button::new("back-to-preview", "Back to Preview")
-                                .style(ButtonStyle::Subtle)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.right_panel = RightPanel::Preview;
-                                    cx.notify();
-                                })),
-                        ),
-                )
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .overflow_hidden()
-                        .p_3()
-                        .child(
-                            Label::new(content.clone())
-                                .size(LabelSize::XSmall)
-                                .color(Color::Default),
-                        ),
-                )
-                .into_any_element();
-        }
-
+        let is_code_view = matches!(self.right_panel, RightPanel::CodeView { .. });
+        let border = cx.theme().colors().border;
+        let tab_active_bg = cx.theme().colors().editor_background;
+        let tab_hover = cx.theme().colors().element_hover;
         let has_webview = self.web_preview.is_some();
         let workspace = cx.entity().downgrade();
 
@@ -1724,41 +2251,167 @@ impl BeginnerWorkspace {
             .when(!preview_dominant, |el| el.w(px(320.)).flex_shrink_0())
             .h_full()
             .bg(cx.theme().colors().surface_background)
-            // Header
+            // Tab bar: Preview | Code
             .child(
                 h_flex()
-                    .px_3()
-                    .py_2()
+                    .h(px(36.))
                     .border_b_1()
-                    .border_color(cx.theme().colors().border)
-                    .gap_1p5()
-                    .items_center()
+                    .border_color(border)
+                    .bg(cx.theme().colors().panel_background)
+                    // Preview tab
                     .child(
-                        Icon::new(IconName::ToolWeb)
-                            .size(IconSize::XSmall)
-                            .color(Color::Muted),
+                        h_flex()
+                            .id("right-tab-preview")
+                            .h_full()
+                            .px_3()
+                            .gap_1p5()
+                            .items_center()
+                            .cursor_pointer()
+                            .border_b_2()
+                            .when(!is_code_view, |el| {
+                                el.border_color(cx.theme().colors().text_accent)
+                                    .bg(tab_active_bg)
+                            })
+                            .when(is_code_view, |el| {
+                                el.border_color(gpui::transparent_white())
+                                    .hover(move |el| el.bg(tab_hover))
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.right_panel = RightPanel::Preview;
+                                cx.notify();
+                            }))
+                            .child(
+                                Icon::new(IconName::ToolWeb)
+                                    .size(IconSize::XSmall)
+                                    .color(if !is_code_view { Color::Default } else { Color::Muted }),
+                            )
+                            .child(
+                                Label::new("Preview")
+                                    .size(LabelSize::Small)
+                                    .color(if !is_code_view { Color::Default } else { Color::Muted }),
+                            ),
                     )
-                    .child(
-                        Label::new("Preview")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .child(div().flex_1())
-                    .when_some(preview_url.as_ref(), |el, url| {
-                        let url = url.clone();
+                    // Code tab — only shown when a file is open
+                    .when(is_code_view, |el| {
                         el.child(
-                            IconButton::new("open-preview", IconName::ArrowUpRight)
-                                .icon_size(IconSize::XSmall)
-                                .icon_color(Color::Muted)
-                                .tooltip(Tooltip::text("Open in browser"))
-                                .on_click(cx.listener(move |_, _, _, cx| {
-                                    cx.open_url(&url);
-                                })),
+                            h_flex()
+                                .id("right-tab-code")
+                                .h_full()
+                                .px_3()
+                                .gap_1p5()
+                                .items_center()
+                                .cursor_pointer()
+                                .border_b_2()
+                                .border_color(cx.theme().colors().text_accent)
+                                .bg(tab_active_bg)
+                                .child(
+                                    Icon::new(IconName::File)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Default),
+                                )
+                                .child(
+                                    Label::new("Code").size(LabelSize::Small).color(Color::Default),
+                                ),
                         )
+                    })
+                    .child(div().flex_1())
+                    // Open-in-browser icon button when URL is available in preview mode
+                    .when(!is_code_view, |el| {
+                        el.when_some(preview_url.as_ref(), |el, url| {
+                            let url = url.clone();
+                            el.child(
+                                IconButton::new("open-preview", IconName::ArrowUpRight)
+                                    .icon_size(IconSize::XSmall)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(Tooltip::text("Open in browser"))
+                                    .on_click(cx.listener(move |_, _, _, cx| {
+                                        cx.open_url(&url);
+                                    })),
+                            )
+                            .pr_1()
+                        })
                     }),
             )
-            // Body
-            .child(if has_webview {
+            // URL bar — shown in Preview mode when a URL is available
+            .when(!is_code_view, |el| {
+                el.child(
+                    h_flex()
+                        .px_2()
+                        .py_1p5()
+                        .border_b_1()
+                        .border_color(border)
+                        .gap_1p5()
+                        .items_center()
+                        .child(
+                            Icon::new(IconName::ToolWeb)
+                                .size(IconSize::XSmall)
+                                .color(Color::Disabled),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .rounded_md()
+                                .bg(tab_active_bg)
+                                .border_1()
+                                .border_color(border)
+                                .px_2()
+                                .py_0p5()
+                                .child(
+                                    Label::new(SharedString::from(
+                                        preview_url
+                                            .as_deref()
+                                            .unwrap_or("No preview running")
+                                            .to_string(),
+                                    ))
+                                    .size(LabelSize::XSmall)
+                                    .color(if preview_url.is_some() {
+                                        Color::Default
+                                    } else {
+                                        Color::Disabled
+                                    })
+                                    .truncate(),
+                                ),
+                        ),
+                )
+            })
+            // Panel body
+            .child(if is_code_view {
+                if let RightPanel::CodeView { title, content } = &self.right_panel {
+                    v_flex()
+                        .flex_1()
+                        .overflow_hidden()
+                        .child(
+                            h_flex()
+                                .px_3()
+                                .py_1p5()
+                                .border_b_1()
+                                .border_color(border)
+                                .gap_1()
+                                .items_center()
+                                .child(
+                                    Icon::new(IconName::File)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                                .child(Label::new(title.clone()).size(LabelSize::XSmall).color(Color::Muted)),
+                        )
+                        .child(
+                            v_flex()
+                                .id("code-view-scroll")
+                                .flex_1()
+                                .overflow_y_scroll()
+                                .p_3()
+                                .child(
+                                    Label::new(content.clone())
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Default),
+                                ),
+                        )
+                        .into_any_element()
+                } else {
+                    div().flex_1().into_any_element()
+                }
+            } else if has_webview {
                 // Transparent fill element — its bounds in prepaint tell the native WKWebView
                 // exactly where to render itself.
                 canvas(
@@ -1793,11 +2446,6 @@ impl BeginnerWorkspace {
                             .color(Color::Default),
                     )
                     .child(
-                        Label::new(SharedString::from(url.clone()))
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .child(
                         Button::new("open-in-browser", "Open in Browser")
                             .style(ButtonStyle::Filled)
                             .end_icon(Icon::new(IconName::ArrowUpRight))
@@ -1814,9 +2462,7 @@ impl BeginnerWorkspace {
                     .gap_2()
                     .p_4()
                     .child(
-                        Icon::new(IconName::Sparkle)
-                            .size(IconSize::XLarge)
-                            .color(Color::Accent),
+                        Vector::new(VectorName::BackboardLogo, rems_from_px(18.), rems_from_px(24.)),
                     )
                     .child(
                         Label::new("Building your app…")
@@ -1928,6 +2574,14 @@ impl BeginnerWorkspace {
                                     this.revert_changes(cx);
                                 })),
                         ),
+                )
+            })
+            .when_some(self.model_selector.clone(), |el, selector| {
+                el.child(
+                    h_flex()
+                        .justify_start()
+                        .pt_0p5()
+                        .child(selector),
                 )
             })
     }

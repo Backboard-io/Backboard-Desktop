@@ -3,22 +3,23 @@ use agent_client_protocol::schema as acp;
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, Render, SharedString, Subscription, Window,
 };
-use ui::{Color, Icon, IconName, IconSize, Label, LabelSize, prelude::*};
+use ui::{Color, Icon, IconName, IconSize, Label, LabelSize, Vector, VectorName, prelude::*};
+
+struct TaskItem {
+    label: String,
+    done: bool,
+    failed: bool,
+}
 
 enum FriendlyItem {
     UserBubble {
         index: usize,
         text: String,
     },
-    AssistantBubble {
+    BackboardCard {
         index: usize,
-        text: String,
-    },
-    ToolAction {
-        index: usize,
-        label: String,
-        done: bool,
-        failed: bool,
+        text: Option<String>,
+        tasks: Vec<TaskItem>,
     },
 }
 
@@ -59,7 +60,7 @@ impl Render for BeginnerChatFeed {
             .overflow_y_scroll()
             .px_4()
             .py_3()
-            .gap_2()
+            .gap_3()
             .when(is_empty, |el| {
                 el.child(
                     v_flex()
@@ -68,9 +69,7 @@ impl Render for BeginnerChatFeed {
                         .justify_center()
                         .gap_1()
                         .child(
-                            Icon::new(IconName::Sparkle)
-                                .size(IconSize::Small)
-                                .color(Color::Accent),
+                            Vector::new(VectorName::BackboardLogo, rems_from_px(10.), rems_from_px(14.)),
                         )
                         .child(
                             Label::new("Thinking…")
@@ -84,65 +83,94 @@ impl Render for BeginnerChatFeed {
 }
 
 fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
-    thread
-        .read(cx)
-        .entries()
-        .iter()
-        .enumerate()
-        .filter_map(|(index, entry)| friendly_item(index, entry, cx))
-        .collect()
-}
+    let entries = thread.read(cx).entries();
+    let mut items: Vec<FriendlyItem> = Vec::new();
+    // (start_index, text, tasks)
+    let mut pending_card: Option<(usize, Option<String>, Vec<TaskItem>)> = None;
 
-fn friendly_item(index: usize, entry: &AgentThreadEntry, cx: &App) -> Option<FriendlyItem> {
-    match entry {
-        AgentThreadEntry::UserMessage(msg) => {
-            if msg.indented {
-                return None;
-            }
-            let text = msg.content.to_markdown(cx).to_string();
-            if text.trim().is_empty() {
-                return None;
-            }
-            Some(FriendlyItem::UserBubble { index, text })
-        }
-
-        AgentThreadEntry::AssistantMessage(msg) => {
-            let parts: Vec<String> = msg
-                .chunks
-                .iter()
-                .filter_map(|chunk| match chunk {
-                    AssistantMessageChunk::Message { block } => {
-                        let s = block.to_markdown(cx).to_string();
-                        if s.trim().is_empty() { None } else { Some(s) }
+    for (index, entry) in entries.iter().enumerate() {
+        match entry {
+            AgentThreadEntry::UserMessage(msg) => {
+                if let Some((card_index, text, tasks)) = pending_card.take() {
+                    if text.is_some() || !tasks.is_empty() {
+                        items.push(FriendlyItem::BackboardCard {
+                            index: card_index,
+                            text,
+                            tasks,
+                        });
                     }
-                    AssistantMessageChunk::Thought { .. } => None,
-                })
-                .collect();
-            let text = parts.join("\n\n");
-            if text.trim().is_empty() {
-                return None;
+                }
+                if msg.indented {
+                    continue;
+                }
+                let text = msg.content.to_markdown(cx).to_string();
+                let text = text.trim().to_string();
+                if !text.is_empty() {
+                    items.push(FriendlyItem::UserBubble { index, text });
+                }
             }
-            Some(FriendlyItem::AssistantBubble { index, text })
-        }
 
-        AgentThreadEntry::ToolCall(call) => {
-            let raw_label = call.label.read(cx).source().to_string();
-            let label = translate_tool_label(&call.kind, &raw_label);
-            let done = matches!(call.status, ToolCallStatus::Completed);
-            let failed = matches!(
-                call.status,
-                ToolCallStatus::Failed | ToolCallStatus::Rejected | ToolCallStatus::Canceled
-            );
-            Some(FriendlyItem::ToolAction {
-                index,
-                label,
-                done,
-                failed,
-            })
-        }
+            AgentThreadEntry::AssistantMessage(msg) => {
+                let parts: Vec<String> = msg
+                    .chunks
+                    .iter()
+                    .filter_map(|chunk| match chunk {
+                        AssistantMessageChunk::Message { block } => {
+                            let s = block.to_markdown(cx).to_string();
+                            if s.trim().is_empty() { None } else { Some(s) }
+                        }
+                        AssistantMessageChunk::Thought { .. } => None,
+                    })
+                    .collect();
+                let text = parts.join("\n\n");
+                if !text.trim().is_empty() {
+                    match &mut pending_card {
+                        Some(card) => {
+                            let combined = match &card.1 {
+                                Some(existing) => format!("{}\n\n{}", existing, text),
+                                None => text,
+                            };
+                            card.1 = Some(combined);
+                        }
+                        None => {
+                            pending_card = Some((index, Some(text), Vec::new()));
+                        }
+                    }
+                }
+            }
 
-        AgentThreadEntry::CompletedPlan(_) => None,
+            AgentThreadEntry::ToolCall(call) => {
+                let raw_label = call.label.read(cx).source().to_string();
+                let label = translate_tool_label(&call.kind, &raw_label);
+                let done = matches!(call.status, ToolCallStatus::Completed);
+                let failed = matches!(
+                    call.status,
+                    ToolCallStatus::Failed | ToolCallStatus::Rejected | ToolCallStatus::Canceled
+                );
+                let task = TaskItem { label, done, failed };
+                match &mut pending_card {
+                    Some(card) => card.2.push(task),
+                    None => {
+                        pending_card = Some((index, None, vec![task]));
+                    }
+                }
+            }
+
+            AgentThreadEntry::CompletedPlan(_) => {}
+        }
     }
+
+    if let Some((card_index, text, tasks)) = pending_card {
+        if text.is_some() || !tasks.is_empty() {
+            items.push(FriendlyItem::BackboardCard {
+                index: card_index,
+                text,
+                tasks,
+            });
+        }
+    }
+
+    items
 }
 
 fn translate_tool_label(kind: &acp::ToolKind, raw: &str) -> String {
@@ -167,15 +195,22 @@ fn translate_tool_label(kind: &acp::ToolKind, raw: &str) -> String {
 
 fn render_item(item: FriendlyItem, cx: &App) -> impl IntoElement {
     match item {
-        FriendlyItem::UserBubble { index, text } => h_flex()
+        FriendlyItem::UserBubble { index, text } => v_flex()
             .id(index)
             .w_full()
-            .justify_end()
+            .items_end()
+            .gap_0p5()
             .py_0p5()
+            .child(
+                Label::new("You")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
+            )
             .child(
                 div()
                     .max_w_3_4()
                     .rounded_xl()
+                    .rounded_tr_none()
                     .bg(cx.theme().colors().element_selected)
                     .px_3()
                     .py_2()
@@ -187,70 +222,84 @@ fn render_item(item: FriendlyItem, cx: &App) -> impl IntoElement {
             )
             .into_any_element(),
 
-        FriendlyItem::AssistantBubble { index, text } => h_flex()
+        FriendlyItem::BackboardCard { index, text, tasks } => v_flex()
             .id(index + 10_000)
             .w_full()
             .items_start()
-            .gap_2()
+            .gap_1p5()
             .py_0p5()
             .child(
-                div().mt_1().flex_shrink_0().child(
-                    Icon::new(IconName::Sparkle)
-                        .size(IconSize::XSmall)
-                        .color(Color::Accent),
-                ),
-            )
-            .child(
-                div()
-                    .max_w_3_4()
-                    .rounded_xl()
-                    .bg(cx.theme().colors().surface_background)
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .px_3()
-                    .py_2()
+                h_flex()
+                    .gap_1()
+                    .items_center()
                     .child(
-                        Label::new(SharedString::from(text))
-                            .size(LabelSize::Small)
-                            .color(Color::Default),
+                        Vector::new(VectorName::BackboardLogo, rems_from_px(8.), rems_from_px(11.)),
+                    )
+                    .child(
+                        Label::new("Backboard")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
                     ),
             )
-            .into_any_element(),
-
-        FriendlyItem::ToolAction {
-            index,
-            label,
-            done,
-            failed,
-        } => h_flex()
-            .id(index + 20_000)
-            .w_full()
-            .gap_1p5()
-            .items_center()
-            .px_1()
-            .py_0p5()
-            .child(
-                Icon::new(if failed {
-                    IconName::XCircle
-                } else if done {
-                    IconName::Check
-                } else {
-                    IconName::Pencil
-                })
-                .size(IconSize::XSmall)
-                .color(if failed {
-                    Color::Error
-                } else if done {
-                    Color::Created
-                } else {
-                    Color::Modified
-                }),
-            )
-            .child(
-                Label::new(SharedString::from(label))
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
-            )
+            .when(!tasks.is_empty(), |el| {
+                el.child(
+                    v_flex()
+                        .max_w_3_4()
+                        .rounded_xl()
+                        .rounded_tl_none()
+                        .bg(cx.theme().colors().surface_background)
+                        .border_1()
+                        .border_color(cx.theme().colors().border)
+                        .px_3()
+                        .py_2()
+                        .gap_1p5()
+                        .children(tasks.into_iter().map(|task| {
+                            h_flex()
+                                .gap_1p5()
+                                .items_center()
+                                .child(
+                                    Icon::new(if task.failed {
+                                        IconName::XCircle
+                                    } else if task.done {
+                                        IconName::Check
+                                    } else {
+                                        IconName::Circle
+                                    })
+                                    .size(IconSize::XSmall)
+                                    .color(if task.failed {
+                                        Color::Error
+                                    } else if task.done {
+                                        Color::Created
+                                    } else {
+                                        Color::Modified
+                                    }),
+                                )
+                                .child(
+                                    Label::new(SharedString::from(task.label))
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                        })),
+                )
+            })
+            .when_some(text, |el, text_content| {
+                el.child(
+                    div()
+                        .max_w_3_4()
+                        .rounded_xl()
+                        .rounded_tl_none()
+                        .bg(cx.theme().colors().surface_background)
+                        .border_1()
+                        .border_color(cx.theme().colors().border)
+                        .px_3()
+                        .py_2()
+                        .child(
+                            Label::new(SharedString::from(text_content))
+                                .size(LabelSize::Small)
+                                .color(Color::Default),
+                        ),
+                )
+            })
             .into_any_element(),
     }
 }
