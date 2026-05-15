@@ -3963,6 +3963,43 @@ impl AgentPanel {
         agent_thread.conversation_view
     }
 
+    /// Resumes an existing beginner thread by internal thread id without
+    /// activating it in the editor's agent panel.
+    pub fn spawn_beginner_thread_from_thread_id(
+        &mut self,
+        thread_id: ThreadId,
+        work_dirs: Option<PathList>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<ConversationView>> {
+        let metadata = ThreadMetadataStore::try_global(cx)
+            .and_then(|store| store.read(cx).entry(thread_id).cloned())?;
+        let agent = Agent::from(metadata.agent_id.clone());
+        // Keep beginner mode behavior consistent: free mode auto-approves
+        // tool calls in the simple-mode UX.
+        let server_override: Rc<dyn AgentServer> =
+            Rc::new(BackboardAgentServer::with_default_mode(
+                AgentId::new(BACKBOARD_AGENT_ID),
+                acp::SessionModeId::new("free"),
+            ));
+
+        let thread = self.create_agent_thread_with_server(
+            agent,
+            Some(server_override),
+            Some(thread_id),
+            work_dirs,
+            metadata.title.clone(),
+            None,
+            "beginner_ui",
+            window,
+            cx,
+        );
+        thread.conversation_view.update(cx, |cv, _| {
+            cv.set_suppress_notifications(true);
+        });
+        Some(thread.conversation_view)
+    }
+
     fn create_backboard_workspace_agent_thread(
         &mut self,
         title: String,

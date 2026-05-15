@@ -59,6 +59,7 @@ impl Column for ThreadId {
 
 const THREAD_REMOTE_CONNECTION_MIGRATION_KEY: &str = "thread-metadata-remote-connection-backfill";
 const THREAD_ID_MIGRATION_KEY: &str = "thread-metadata-thread-id-backfill";
+const THREAD_BACKBOARD_ARCHIVE_RESCUE_KEY: &str = "thread-metadata-backboard-archive-rescue";
 
 /// List all sidebar thread metadata from an arbitrary SQLite connection.
 ///
@@ -90,6 +91,31 @@ pub fn init(cx: &mut App) {
     let migration_task = migrate_thread_metadata(cx);
     migrate_thread_remote_connections(cx, migration_task);
     migrate_thread_ids(cx);
+    migrate_backboard_archived_threads(cx);
+}
+
+fn migrate_backboard_archived_threads(cx: &mut App) {
+    let store = ThreadMetadataStore::global(cx);
+    let db = store.read(cx).db.clone();
+    let kvp = KeyValueStore::global(cx);
+    cx.spawn(async move |cx| -> anyhow::Result<()> {
+        if kvp
+            .read_kvp(THREAD_BACKBOARD_ARCHIVE_RESCUE_KEY)?
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        db.unarchive_backboard_sessions().await?;
+        kvp.write_kvp(
+            THREAD_BACKBOARD_ARCHIVE_RESCUE_KEY.to_string(),
+            "1".to_string(),
+        )
+        .await?;
+        let _ = store.update(cx, |store, cx| store.reload(cx));
+        Ok(())
+    })
+    .detach_and_log_err(cx);
 }
 
 /// Migrate existing thread metadata from native agent thread store to the new metadata storage.
@@ -1232,9 +1258,18 @@ impl ThreadMetadataStore {
         // window) are archived by default so they don't get lost,
         // because they won't show up in the sidebar. Users can reload
         // them from the archive.
+        let is_backboard_session = session_id
+            .as_ref()
+            .is_some_and(|sid| sid.0.starts_with("backboard-"));
         let archived = existing_thread
-            .map(|t| t.archived)
-            .unwrap_or(worktree_paths.is_empty());
+            .map(|t| {
+                if is_backboard_session && t.archived {
+                    false
+                } else {
+                    t.archived
+                }
+            })
+            .unwrap_or(worktree_paths.is_empty() && !is_backboard_session);
 
         let was_draft = existing_thread.map_or(true, |t| t.is_draft());
         if was_draft && !is_draft {
@@ -1474,6 +1509,23 @@ impl ThreadMetadataDb {
             let mut stmt =
                 Statement::prepare(conn, "DELETE FROM sidebar_threads WHERE thread_id = ?")?;
             stmt.bind(&thread_id, 1)?;
+            stmt.exec()
+        })
+        .await
+    }
+
+    /// One-time rescue: restore Backboard ACP chats that were incorrectly
+    /// archived when worktree paths were empty during metadata writes.
+    pub async fn unarchive_backboard_sessions(&self) -> anyhow::Result<()> {
+        self.write(move |conn| {
+            let mut stmt = Statement::prepare(
+                conn,
+                "UPDATE sidebar_threads
+                 SET archived = 0
+                 WHERE archived = 1
+                   AND session_id IS NOT NULL
+                   AND session_id LIKE 'backboard-%'",
+            )?;
             stmt.exec()
         })
         .await

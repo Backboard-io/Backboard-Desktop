@@ -6,6 +6,7 @@ use acp_thread::{
     ToolCallStatus,
 };
 use agent_client_protocol::schema as acp;
+use agent_ui::thread_metadata_store::ThreadMetadataStore;
 use agent_ui::{AgentPanel, ConversationView, ModelSelectorPopover};
 use db::kvp::KeyValueStore;
 use editor::Editor;
@@ -40,21 +41,24 @@ static CURATED_MODELS: &[(&str, &str, &str)] = &[
     // ── OpenAI ─────────────────────────────────────────────────────────
     ("openai",    "gpt-5.5",            "GPT-5.5 · Powerful"),
     ("openai",    "gpt-5",              "GPT-5 · Balanced"),
-    ("openai",    "gpt-4o",             "GPT-4o · Balanced"),
+    ("openai",    "gpt-",               "GPT · OpenAI"),
     ("openai",    "o3",                 "o3 · Reasoning"),
     ("openai",    "o4-mini",            "o4-mini · Fast reasoning"),
     // ── Google ─────────────────────────────────────────────────────────
     ("google",    "gemini-2.5-pro",     "Gemini 2.5 Pro · Powerful"),
     ("google",    "gemini-2.5-flash",   "Gemini 2.5 Flash · Fast"),
+    ("google",    "gemini-",            "Gemini · Google"),
     // ── DeepSeek ───────────────────────────────────────────────────────
     ("deepseek",  "deepseek-r1",        "DeepSeek R1 · Reasoning"),
     ("deepseek",  "deepseek-v3",        "DeepSeek V3 · Balanced"),
+    ("deepseek",  "deepseek-v4",        "DeepSeek V4 · Powerful"),
+    ("deepseek",  "deepseek-",          "DeepSeek"),
 ];
 
 fn curated_display_name(model_id: &str) -> Option<&'static str> {
-    let (provider, model_part) = model_id.split_once('/')?;
-    CURATED_MODELS.iter().find_map(|&(p, m, name)| {
-        if provider.starts_with(p) && model_part.starts_with(m) {
+    let model_part = model_id.split_once('/').map(|(_, m)| m).unwrap_or(model_id);
+    CURATED_MODELS.iter().find_map(|&(_, m, name)| {
+        if model_part.starts_with(m) {
             Some(name)
         } else {
             None
@@ -79,17 +83,25 @@ impl AgentModelSelector for CuratedModelSelector {
             };
             // Filter to curated entries in the defined order.
             let mut curated: Vec<acp_thread::AgentModelInfo> = Vec::new();
-            for &(provider_prefix, model_prefix, display_name) in CURATED_MODELS {
+            for &(provider_id, model_prefix, display_name) in CURATED_MODELS {
                 if let Some(mut info) = all_models.iter().find(|m| {
                     let id: &str = &m.id.0;
-                    if let Some((provider, model_part)) = id.split_once('/') {
-                        provider.starts_with(provider_prefix) && model_part.starts_with(model_prefix)
-                    } else {
-                        false
-                    }
+                    let model_part = id.split_once('/').map(|(_, part)| part).unwrap_or(id);
+                    model_part.starts_with(model_prefix)
                 }).cloned() {
                     info.name = SharedString::from(display_name);
                     curated.push(info);
+                } else {
+                    // Keep options visible in simple mode even if the server omits
+                    // them from `available_models` for this session.
+                    curated.push(acp_thread::AgentModelInfo {
+                        id: acp::ModelId::new(format!("{provider_id}/{model_prefix}")),
+                        name: SharedString::from(display_name),
+                        description: None,
+                        icon: None,
+                        is_latest: false,
+                        cost: None,
+                    });
                 }
             }
             // Fallback: if no curated models are available (provider not configured),
@@ -134,6 +146,8 @@ struct BeginnerChatRecord {
     id: String,
     name: String,
     folder_path: String,
+    #[serde(default)]
+    session_id: Option<String>,
     timestamp_ms: i64,
 }
 
@@ -147,6 +161,7 @@ impl BeginnerChatRecord {
             id: uuid::Uuid::new_v4().to_string(),
             name,
             folder_path: folder.to_string_lossy().into_owned(),
+            session_id: None,
             timestamp_ms,
         }
     }
@@ -502,6 +517,22 @@ impl BeginnerWorkspace {
         self.save_chat_history(cx);
     }
 
+    fn update_latest_chat_record_session_id(
+        &mut self,
+        folder: &PathBuf,
+        session_id: String,
+        cx: &mut App,
+    ) {
+        if let Some(record) = self
+            .chat_history
+            .iter_mut()
+            .find(|r| r.folder() == *folder && r.session_id.is_none())
+        {
+            record.session_id = Some(session_id);
+            self.save_chat_history(cx);
+        }
+    }
+
     fn delete_chat_record(&mut self, id: String, cx: &mut App) {
         self.chat_history.retain(|r| r.id != id);
         self.save_chat_history(cx);
@@ -529,6 +560,10 @@ impl BeginnerWorkspace {
                 if has_text {
                     this.submit(window, cx);
                 } else {
+                    if this.thread.is_none() {
+                        this.start_agent_thread(String::new(), window, cx);
+                        this.is_agent_running = false;
+                    }
                     cx.notify();
                 }
             })
@@ -565,9 +600,14 @@ impl BeginnerWorkspace {
         // even if the user immediately closes without waiting for the agent.
         self.add_chat_record(chat_name, &folder, cx);
 
+        // If a draft thread is already present (for pre-send model selection),
+        // keep it and send as follow-up so the chosen model is respected.
+        if self.thread.is_some() {
+            self.submit_follow_up(window, cx);
+            return;
+        }
+
         // Clear all previous session state so the new project starts completely fresh.
-        // If thread is still Some from a previous run, start_agent_thread would skip
-        // creating the new thread (it guards on `this.thread.is_none()`).
         self.thread = None;
         self.chat_feed = None;
         self.file_changes_panel = None;
@@ -628,106 +668,7 @@ impl BeginnerWorkspace {
             panel.spawn_beginner_thread(text, work_dirs, window, cx)
         });
 
-        // Store the entity to keep it alive until the ACP server connects.
-        // Without this strong reference the ConversationView would be dropped
-        // before root_thread() ever returns Some.
-        self.pending_conversation_view = Some(conversation_view.clone());
-
-        let cv_sub = cx.observe_in(&conversation_view, window, |this, cv, window, cx| {
-            let (is_loading, root_thread) = {
-                let cv_ref = cv.read(cx);
-                (cv_ref.is_loading(), cv_ref.root_thread(cx))
-            };
-
-            if this.thread.is_none() {
-                if let Some(thread) = root_thread {
-                    let thread_sub = cx.subscribe(&thread, |this, thread_entity, event, cx| {
-                        match event {
-                            AcpThreadEvent::Stopped(_) => {
-                                this.is_agent_running = false;
-                                this.agent_finished = true;
-                                if this.preview_url.is_none() {
-                                    // First build — start the dev server.
-                                    this.open_web_app_if_present(cx);
-                                }
-                                // If preview_url is already set the dev server is still
-                                // running (hot-reloaded). render() will recreate the
-                                // WebPreview from the stored URL on the next frame.
-                                cx.notify();
-                            }
-
-                            AcpThreadEvent::Error => {
-                                this.is_agent_running = false;
-                                this.agent_finished = false;
-                                cx.notify();
-                            }
-                            AcpThreadEvent::ToolAuthorizationRequested(tool_call_id) => {
-                                // Auto-accept all tool calls in beginner mode so the agent
-                                // is never blocked waiting for a confirmation the user cannot
-                                // see from the chat UI.
-                                let outcome = thread_entity.read(cx)
-                                    .tool_call(tool_call_id)
-                                    .and_then(|(_, call)| {
-                                        if let ToolCallStatus::WaitingForConfirmation { options, .. } = &call.status {
-                                            let option = options.first_option_of_kind(
-                                                acp::PermissionOptionKind::AllowOnce,
-                                            )?;
-                                            Some(SelectedPermissionOutcome::new(
-                                                option.option_id.clone(),
-                                                option.kind,
-                                            ))
-                                        } else {
-                                            None
-                                        }
-                                    });
-                                if let Some(outcome) = outcome {
-                                    let id = tool_call_id.clone();
-                                    thread_entity.update(cx, |t, cx| {
-                                        t.authorize_tool_call(id, outcome, cx);
-                                    });
-                                }
-                            }
-                            _ => {}
-                        }
-                    });
-                    this.session_subscriptions.push(thread_sub);
-                    let feed = cx.new(|cx| BeginnerChatFeed::new(thread.clone(), cx));
-                    this.chat_feed = Some(feed);
-                    let file_panel = cx.new(|cx| FileChangesPanel::new(thread.clone(), cx));
-                    let file_sub = cx.subscribe(&file_panel, |bw, _, event, cx| {
-                        bw.handle_file_panel_event(event, cx);
-                    });
-                    this.session_subscriptions.push(file_sub);
-                    this.file_changes_panel = Some(file_panel);
-                    this.thread = Some(thread);
-                    // Move CV from pending → active so the ConversationView (and the
-                    // ThreadView it owns) stays alive while the agent is running.
-                    // Dropping it here would cancel the in-flight send task.
-                    this.active_conversation_view = this.pending_conversation_view.take();
-                    // Create a curated model selector (max 11 well-known models) so the
-                    // beginner UI doesn't expose the full 100-model list.
-                    this.model_selector = this
-                        .active_conversation_view
-                        .as_ref()
-                        .and_then(|cv_entity| {
-                            cv_entity.update(cx, |cv_ref, cx| {
-                                cv_ref.make_root_model_selector_wrapped(
-                                    |inner| Rc::new(CuratedModelSelector { inner }) as Rc<dyn AgentModelSelector>,
-                                    window,
-                                    cx,
-                                )
-                            })
-                        });
-                    cx.notify();
-                } else if !is_loading {
-                    this.is_agent_running = false;
-                    this.pending_conversation_view = None;
-                    this.active_conversation_view = None;
-                    cx.notify();
-                }
-            }
-        });
-        self.session_subscriptions.push(cv_sub);
+        self.bind_conversation_view(conversation_view, window, cx);
 
         self.is_agent_running = true;
         self.agent_finished = false;
@@ -1056,10 +997,167 @@ impl BeginnerWorkspace {
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_placeholder_text("Ask a follow-up...", window, cx);
         });
+        self.restore_thread_for_folder(record.clone(), path.clone(), window, cx);
         cx.notify();
 
         // Do not auto-add worktrees on resume; simple mode should stay uncluttered.
         let _ = window;
+    }
+
+    fn restore_thread_for_folder(
+        &mut self,
+        record: BeginnerChatRecord,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let Some(agent_panel) = workspace.read(cx).panel::<AgentPanel>(cx) else {
+            return;
+        };
+        let Some(store) = ThreadMetadataStore::try_global(cx) else {
+            return;
+        };
+
+        let path_list = PathList::new(&[path]);
+        let store_ref = store.read(cx);
+        let metadata = record
+            .session_id
+            .as_ref()
+            .and_then(|sid| {
+                let session = acp::SessionId::new(sid.clone());
+                store_ref.entry_by_session(&session)
+            })
+            .or_else(|| store_ref
+            .entries_for_path(&path_list, None)
+            .chain(store_ref.entries_for_main_worktree_path(&path_list, None))
+            .max_by_key(|entry| entry.updated_at)
+            )
+            .or_else(|| {
+                // Fallback for legacy history rows where folder path matching is unreliable.
+                store_ref
+                    .entries()
+                    .filter(|entry| entry.display_title() == self.tab_name)
+                    .max_by_key(|entry| entry.updated_at)
+            });
+
+        let Some(metadata) = metadata else {
+            return;
+        };
+
+        let thread_id = metadata.thread_id;
+        let work_dirs = Some(path_list);
+        let conversation_view = agent_panel.update(cx, |panel, cx| {
+            panel.spawn_beginner_thread_from_thread_id(thread_id, work_dirs, window, cx)
+        });
+        self.thread = None;
+        self.chat_feed = None;
+        self.file_changes_panel = None;
+        self.pending_conversation_view = None;
+        self.active_conversation_view = None;
+        self.model_selector = None;
+        self.is_agent_running = false;
+        self.agent_finished = false;
+        if let Some(conversation_view) = conversation_view {
+            self.bind_conversation_view(conversation_view, window, cx);
+        }
+    }
+
+    fn bind_conversation_view(
+        &mut self,
+        conversation_view: Entity<ConversationView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_conversation_view = Some(conversation_view.clone());
+        let cv_sub = cx.observe_in(&conversation_view, window, |this, cv, window, cx| {
+            let (is_loading, root_thread) = {
+                let cv_ref = cv.read(cx);
+                (cv_ref.is_loading(), cv_ref.root_thread(cx))
+            };
+
+            if this.thread.is_none() {
+                if let Some(thread) = root_thread {
+                    let thread_sub = cx.subscribe(&thread, |this, thread_entity, event, cx| {
+                        match event {
+                            AcpThreadEvent::Stopped(_) => {
+                                this.is_agent_running = false;
+                                this.agent_finished = true;
+                                if this.preview_url.is_none() {
+                                    this.open_web_app_if_present(cx);
+                                }
+                                cx.notify();
+                            }
+                            AcpThreadEvent::Error => {
+                                this.is_agent_running = false;
+                                this.agent_finished = false;
+                                cx.notify();
+                            }
+                            AcpThreadEvent::ToolAuthorizationRequested(tool_call_id) => {
+                                let outcome = thread_entity.read(cx)
+                                    .tool_call(tool_call_id)
+                                    .and_then(|(_, call)| {
+                                        if let ToolCallStatus::WaitingForConfirmation { options, .. } = &call.status {
+                                            let option = options.first_option_of_kind(
+                                                acp::PermissionOptionKind::AllowOnce,
+                                            )?;
+                                            Some(SelectedPermissionOutcome::new(
+                                                option.option_id.clone(),
+                                                option.kind,
+                                            ))
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                if let Some(outcome) = outcome {
+                                    let id = tool_call_id.clone();
+                                    thread_entity.update(cx, |t, cx| {
+                                        t.authorize_tool_call(id, outcome, cx);
+                                    });
+                                }
+                            }
+                            _ => {}
+                        }
+                    });
+                    this.session_subscriptions.push(thread_sub);
+                    let feed = cx.new(|cx| BeginnerChatFeed::new(thread.clone(), cx));
+                    this.chat_feed = Some(feed);
+                    let file_panel = cx.new(|cx| FileChangesPanel::new(thread.clone(), cx));
+                    let file_sub = cx.subscribe(&file_panel, |bw, _, event, cx| {
+                        bw.handle_file_panel_event(event, cx);
+                    });
+                    this.session_subscriptions.push(file_sub);
+                    this.file_changes_panel = Some(file_panel);
+                    this.thread = Some(thread.clone());
+                    if let Some(folder) = this.selected_folder.clone() {
+                        let sid = thread.read(cx).session_id().0.to_string();
+                        this.update_latest_chat_record_session_id(&folder, sid, cx);
+                    }
+                    this.active_conversation_view = this.pending_conversation_view.take();
+                    this.model_selector = this
+                        .active_conversation_view
+                        .as_ref()
+                        .and_then(|cv_entity| {
+                            cv_entity.update(cx, |cv_ref, cx| {
+                                cv_ref.make_root_model_selector_wrapped(
+                                    |inner| Rc::new(CuratedModelSelector { inner }) as Rc<dyn AgentModelSelector>,
+                                    window,
+                                    cx,
+                                )
+                            })
+                        });
+                    cx.notify();
+                } else if !is_loading {
+                    this.is_agent_running = false;
+                    this.pending_conversation_view = None;
+                    this.active_conversation_view = None;
+                    cx.notify();
+                }
+            }
+        });
+        self.session_subscriptions.push(cv_sub);
     }
 }
 

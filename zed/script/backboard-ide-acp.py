@@ -172,6 +172,7 @@ TOOL_DEFINITION_CACHE_TTL_SECONDS = 30.0
 CONTEXT_PACK_MAX_CHARS = 9000
 CONTEXT_PREWARM_MAX_FILES = 120
 CONTEXT_PREWARM_TIMEOUT_SECONDS = 3.0
+HISTORY_REPLAY_MAX_MESSAGES = 80
 WEB_QUALITY_THINKING_BUDGET_TOKENS = 2048
 DEFAULT_COMMAND_TIMEOUT_MS = 45_000
 READ_ONLY_COMMAND_TIMEOUT_MS = 20_000
@@ -823,6 +824,10 @@ def _session_store_path() -> Path:
     return Path.home() / ".backboard" / "ide_sessions.json"
 
 
+def _workspace_store_key(workspace: Path | str) -> str:
+    return f"workspace::{Path(workspace).expanduser().resolve()}"
+
+
 def _load_session_store() -> dict[str, Any]:
     path = _session_store_path()
     if not path.exists():
@@ -832,6 +837,77 @@ def _load_session_store() -> dict[str, Any]:
         if isinstance(loaded, dict):
             return loaded
     return {}
+
+
+def _latest_legacy_record_for_workspace(store: dict[str, Any], workspace: Path) -> dict[str, Any] | None:
+    workspace_str = str(workspace.expanduser().resolve())
+    best: dict[str, Any] | None = None
+    best_updated = ""
+    for key, value in store.items():
+        if not isinstance(key, str) or not key.startswith("backboard-"):
+            continue
+        if not isinstance(value, dict):
+            continue
+        ws = value.get("workspace")
+        if not isinstance(ws, str):
+            continue
+        with contextlib.suppress(Exception):
+            if str(Path(ws).expanduser().resolve()) != workspace_str:
+                continue
+        updated = str(value.get("updated_at") or "")
+        if best is None or updated > best_updated:
+            best = value
+            best_updated = updated
+    return best
+
+
+def _stored_session_id_for_workspace(store: dict[str, Any], workspace: Path) -> str | None:
+    workspace_key = _workspace_store_key(workspace)
+    record = store.get(workspace_key)
+    if isinstance(record, dict):
+        session_id = record.get("session_id")
+        if isinstance(session_id, str) and session_id:
+            return session_id
+    legacy = _latest_legacy_record_for_workspace(store, workspace)
+    if isinstance(legacy, dict):
+        session_id = legacy.get("session_id")
+        if isinstance(session_id, str) and session_id:
+            return session_id
+        # Old records may not have session_id; find matching key.
+        target_workspace = str(workspace.expanduser().resolve())
+        for key, value in store.items():
+            if not isinstance(key, str) or not key.startswith("backboard-"):
+                continue
+            if not isinstance(value, dict):
+                continue
+            ws = value.get("workspace")
+            if not isinstance(ws, str):
+                continue
+            with contextlib.suppress(Exception):
+                if str(Path(ws).expanduser().resolve()) == target_workspace:
+                    return key
+    return None
+
+
+def _workspace_records(store: dict[str, Any], workspace: Path) -> list[dict[str, Any]]:
+    target_workspace = str(workspace.expanduser().resolve())
+    records: list[dict[str, Any]] = []
+    seen_threads: set[str] = set()
+    for value in store.values():
+        if not isinstance(value, dict):
+            continue
+        ws = value.get("workspace")
+        if not isinstance(ws, str):
+            continue
+        with contextlib.suppress(Exception):
+            if str(Path(ws).expanduser().resolve()) != target_workspace:
+                continue
+        thread_id = value.get("thread_id")
+        if isinstance(thread_id, str) and thread_id and thread_id not in seen_threads:
+            seen_threads.add(thread_id)
+            records.append(value)
+    records.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+    return records
 
 
 @contextlib.contextmanager
@@ -993,17 +1069,29 @@ class AcpServer:
                 session = BackboardIdeSession(self, session_id, cwd)
                 self.sessions[session_id] = session
             else:
-                session.workspace = cwd
+                if session.workspace != cwd:
+                    session.workspace = cwd
+                    session.assistant_id = None
+                    session.thread_id = None
+                    session._history_replayed = False
+                    session._context_cache = {}
+                    session._context_cache_at = 0.0
+                    session._prewarm_task = None
+                    session._skill_section_cache = None
+                    session._system_prompt_cache = None
+                    session._tool_definitions_cache.clear()
             session.start_prewarm()
             return await session.load()
 
         if method == "session/list":
             sessions = []
             for session_id, data in _load_session_store().items():
+                if not isinstance(data, dict):
+                    continue
                 workspace = data.get("workspace") or str(Path.home())
                 sessions.append(
                     {
-                        "sessionId": session_id,
+                        "sessionId": data.get("session_id") or session_id,
                         "cwd": workspace,
                         "title": data.get("title") or Path(workspace).name,
                         "updatedAt": data.get("updated_at"),
@@ -1227,12 +1315,50 @@ class BackboardIdeSession:
         # Restoring only rebinds the IDE shell to an existing Backboard thread;
         # the actual message transcript is replayed separately when needed.
         restored = self._restore_session_mapping()
+        with contextlib.suppress(Exception):
+            _write_diagnostic_log(
+                "session_load_state",
+                RuntimeError("session load state"),
+                context={
+                    "session_id": self.session_id,
+                    "workspace": str(self.workspace),
+                    "restored": restored,
+                    "assistant_id": self.assistant_id,
+                    "thread_id": self.thread_id,
+                },
+            )
         if not restored:
             # Treat missing persisted state as a fresh session instead of a launch failure.
             if await self._ensure_runtime():
                 await self._ensure_thread_binding()
+                with contextlib.suppress(Exception):
+                    _write_diagnostic_log(
+                        "session_load_fresh_thread",
+                        RuntimeError("fresh thread created"),
+                        context={
+                            "session_id": self.session_id,
+                            "workspace": str(self.workspace),
+                            "assistant_id": self.assistant_id,
+                            "thread_id": self.thread_id,
+                        },
+                    )
         elif await self._ensure_runtime():
-            await self._replay_history()
+            replayed = await self._replay_history()
+            if not replayed:
+                await self._ensure_thread_binding()
+            # Upgrade/refresh persisted metadata for legacy records after a successful restore.
+            self._persist_session_mapping()
+            with contextlib.suppress(Exception):
+                _write_diagnostic_log(
+                    "session_load_replay_done",
+                    RuntimeError("replay completed"),
+                    context={
+                        "session_id": self.session_id,
+                        "workspace": str(self.workspace),
+                        "thread_id": self.thread_id,
+                        "replayed": replayed,
+                    },
+                )
         else:
             await self._agent_text(
                 "Backboard needs an API key before the IDE agent can restore this session. "
@@ -1719,6 +1845,17 @@ class BackboardIdeSession:
             return message
         return f"{message}\n\n<backboard_ide_context>\n{prompt_context}\n</backboard_ide_context>"
 
+    def _strip_backboard_ide_context(self, text: str) -> str:
+        if not text:
+            return text
+        cleaned = re.sub(
+            r"\n*\s*<backboard_ide_context>\n.*?\n</backboard_ide_context>\s*",
+            "",
+            text,
+            flags=re.DOTALL,
+        )
+        return cleaned.strip() or text.strip()
+
     async def _collect_workspace_context(self, include_semantic_query: str | None) -> dict[str, Any]:
         del include_semantic_query
         # Gather lightweight repo hints in parallel so the model gets a compact
@@ -2041,22 +2178,38 @@ class BackboardIdeSession:
         return system_prompt
 
     def _persist_session_mapping(self) -> None:
-        _write_session_store_entry(self.session_id, {
+        record = {
             "workspace": str(self.workspace),
             "assistant_id": self.assistant_id,
             "thread_id": self.thread_id,
             "provider": self.provider,
             "model": self.model,
             "title": self.workspace.name,
-        })
+            "session_id": self.session_id,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        _write_session_store_entry(self.session_id, record)
+        _write_session_store_entry(_workspace_store_key(self.workspace), record)
 
     def _restore_session_mapping(self) -> bool:
-        record = _load_session_store().get(self.session_id)
+        store = _load_session_store()
+        record = store.get(self.session_id)
         if not isinstance(record, dict):
-            return False
+            record = store.get(_workspace_store_key(self.workspace))
+            if not isinstance(record, dict):
+                record = _latest_legacy_record_for_workspace(store, self.workspace)
+                if not isinstance(record, dict):
+                    return False
         workspace = record.get("workspace")
         if isinstance(workspace, str) and workspace:
-            self.workspace = Path(workspace).expanduser().resolve()
+            persisted_workspace = Path(workspace).expanduser().resolve()
+            if persisted_workspace != self.workspace:
+                fallback = store.get(_workspace_store_key(self.workspace))
+                if not isinstance(fallback, dict):
+                    fallback = _latest_legacy_record_for_workspace(store, self.workspace)
+                    if not isinstance(fallback, dict):
+                        return False
+                record = fallback
         provider = record.get("provider")
         model = record.get("model")
         assistant_id = record.get("assistant_id")
@@ -2067,14 +2220,26 @@ class BackboardIdeSession:
         self.thread_id = thread_id if isinstance(thread_id, str) and thread_id else None
         return bool(self.thread_id)
 
-    async def _replay_history(self) -> None:
+    async def _replay_history(self) -> bool:
         if self._history_replayed or not self.thread_id or not self.api_client:
-            return
+            return bool(self._history_replayed)
         try:
             thread_data = await self._api_json_request("GET", f"/threads/{self.thread_id}")
-        except Exception:
-            return
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                _write_diagnostic_log(
+                    "session_replay_fetch_failed",
+                    exc,
+                    context={
+                        "session_id": self.session_id,
+                        "workspace": str(self.workspace),
+                        "thread_id": self.thread_id,
+                    },
+                )
+            return False
         messages = thread_data.get("messages", []) or []
+        if len(messages) > HISTORY_REPLAY_MAX_MESSAGES:
+            messages = messages[-HISTORY_REPLAY_MAX_MESSAGES:]
         for message in messages:
             if not isinstance(message, dict):
                 continue
@@ -2082,10 +2247,12 @@ class BackboardIdeSession:
             content = message.get("content")
             text = content if isinstance(content, str) else ""
             if role == "user" and text:
-                await self._update({"sessionUpdate": "user_message_chunk", "content": _text_block(text)})
+                visible_text = self._strip_backboard_ide_context(text)
+                await self._update({"sessionUpdate": "user_message_chunk", "content": _text_block(visible_text)})
             elif role == "assistant":
                 if text:
-                    await self._update({"sessionUpdate": "agent_message_chunk", "content": _text_block(text)})
+                    visible_text = self._strip_backboard_ide_context(text)
+                    await self._update({"sessionUpdate": "agent_message_chunk", "content": _text_block(visible_text)})
                 meta = message.get("metadata_") or message.get("metadata") or {}
                 tool_calls = meta.get("tool_calls") if isinstance(meta, dict) else None
                 if isinstance(tool_calls, list):
@@ -2102,6 +2269,7 @@ class BackboardIdeSession:
                             tool_call if isinstance(tool_call, dict) else {},
                         )
         self._history_replayed = True
+        return True
 
     def _tool_definitions(self) -> list[dict[str, Any]]:
         cache_key = self.mode
@@ -2163,59 +2331,71 @@ class BackboardIdeSession:
         return capped
 
     async def _consume_stream(self, stream: Any) -> str:
-        async for chunk in stream:
-            if self.cancel_event.is_set():
-                return "cancelled"
+        try:
+            async for chunk in stream:
+                if self.cancel_event.is_set():
+                    return "cancelled"
 
-            # The API emits a mixed event stream: model lifecycle, reasoning,
-            # assistant text deltas, and tool handoffs. We translate each chunk
-            # into ACP session updates as they arrive.
-            chunk_type = chunk.get("type")
-            if chunk_type == "run_started":
-                self.current_run_id = chunk.get("run_id") or chunk.get("id") or self.current_run_id
-                await self._emit_progress("Backboard connected to the model.", "waiting for model")
-            elif chunk_type == "reasoning_started":
-                self._thinking = True
-                await self._emit_progress("Backboard is planning the next step.", "thinking through the implementation")
-            elif chunk_type in {"reasoning_streaming", "reasoning_delta"}:
-                self._phase = "thinking through the implementation"
-            elif chunk_type == "reasoning_ended":
-                self._thinking = False
-                self._phase = "preparing the next action"
-            elif chunk_type == "content_streaming":
-                self._phase = "streaming the response"
-                if not self._first_token_seen:
-                    self._first_token_seen = True
-                    self._record_timing("first_token_ms", self._turn_started_at)
-                await self._agent_text(str(chunk.get("content") or chunk.get("text") or chunk.get("delta") or ""))
-            elif chunk_type == "tool_submit_required":
-                await self._emit_progress("Backboard is preparing tool actions.", "preparing tool actions")
-                await self._handle_tool_submit(chunk)
-            elif chunk_type == "run_ended":
-                self._thinking = False
-                if chunk.get("status") == "requires_action" and chunk.get("tool_calls"):
+                # The API emits a mixed event stream: model lifecycle, reasoning,
+                # assistant text deltas, and tool handoffs. We translate each chunk
+                # into ACP session updates as they arrive.
+                chunk_type = chunk.get("type")
+                if chunk_type == "run_started":
+                    self.current_run_id = chunk.get("run_id") or chunk.get("id") or self.current_run_id
+                    await self._emit_progress("Backboard connected to the model.", "waiting for model")
+                elif chunk_type == "reasoning_started":
+                    self._thinking = True
+                    await self._emit_progress("Backboard is planning the next step.", "thinking through the implementation")
+                elif chunk_type in {"reasoning_streaming", "reasoning_delta"}:
+                    self._phase = "thinking through the implementation"
+                elif chunk_type == "reasoning_ended":
+                    self._thinking = False
+                    self._phase = "preparing the next action"
+                elif chunk_type == "content_streaming":
+                    self._phase = "streaming the response"
+                    if not self._first_token_seen:
+                        self._first_token_seen = True
+                        self._record_timing("first_token_ms", self._turn_started_at)
+                    await self._agent_text(str(chunk.get("content") or chunk.get("text") or chunk.get("delta") or ""))
+                elif chunk_type == "tool_submit_required":
                     await self._emit_progress("Backboard is preparing tool actions.", "preparing tool actions")
                     await self._handle_tool_submit(chunk)
-                else:
-                    await self._usage(chunk)
-                    return "end_turn"
-            elif chunk_type in {"run_failed", "error"}:
-                self._thinking = False
-                message = str(chunk.get("error") or chunk.get("message") or "Backboard run failed.")
-                synthetic = RuntimeError(message)
-                log_path = _write_diagnostic_log(
-                    "stream_error_chunk",
-                    synthetic,
-                    context=self._diagnostic_context(chunk=chunk),
-                )
-                await self._agent_text(
-                    _truncate(
-                        f"{message}\n\nFull diagnostic log: {log_path}\n\nStream error chunk:\n"
-                        f"{json.dumps(chunk, indent=2, ensure_ascii=False, default=str)}",
-                        12000,
+                elif chunk_type == "run_ended":
+                    self._thinking = False
+                    if chunk.get("status") == "requires_action" and chunk.get("tool_calls"):
+                        await self._emit_progress("Backboard is preparing tool actions.", "preparing tool actions")
+                        await self._handle_tool_submit(chunk)
+                    else:
+                        await self._usage(chunk)
+                        return "end_turn"
+                elif chunk_type in {"run_failed", "error"}:
+                    self._thinking = False
+                    message = str(chunk.get("error") or chunk.get("message") or "Backboard run failed.")
+                    synthetic = RuntimeError(message)
+                    log_path = _write_diagnostic_log(
+                        "stream_error_chunk",
+                        synthetic,
+                        context=self._diagnostic_context(chunk=chunk),
                     )
+                    await self._agent_text(
+                        _truncate(
+                            f"{message}\n\nFull diagnostic log: {log_path}\n\nStream error chunk:\n"
+                            f"{json.dumps(chunk, indent=2, ensure_ascii=False, default=str)}",
+                            12000,
+                        )
+                    )
+                    return "end_turn"
+        except Exception as exc:
+            self._thinking = False
+            log_path = self._log_exception("stream_consume", exc)
+            await self._agent_text(
+                _truncate(
+                    "Connection to the model stream was interrupted. "
+                    f"Please retry.\n\nFull diagnostic log: {log_path}",
+                    12000,
                 )
-                return "end_turn"
+            )
+            return "end_turn"
         return "end_turn"
 
     async def _handle_tool_submit(self, chunk: dict[str, Any]) -> None:

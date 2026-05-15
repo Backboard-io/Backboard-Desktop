@@ -2016,3 +2016,60 @@ The current Backboard IDE work has touched or added these important files. This 
   - Local test case notes added with the progress/metrics/cwd fallback work.
 
 Preserve unrelated dirty files, especially existing `ide/zed/Cargo.lock` changes, unless the user explicitly asks to reset or clean them. Do not edit `cli/` for IDE runtime/UI work unless the user explicitly approves it.
+
+## 2026-05-15 Follow-Up (Session Persistence + Chat Entry)
+
+This follow-up documents fixes applied after users reported:
+
+- IDE context blobs showing in visible restored chat history.
+- Multiple projects/chats restoring incorrectly or opening as fresh chats.
+- Some chats disappearing after restart despite successful in-session runs.
+- Chat button routing users to the Agent Workspace page instead of opening the chat list/sidebar.
+
+### Python ACP Bridge (`ide/zed/script/backboard-ide-acp.py`)
+
+- Added visible-history sanitization for prompt augmentation payloads:
+  - strips `<backboard_ide_context>...</backboard_ide_context>` before replaying history into UI chunks.
+- Hardened stream handling:
+  - catches stream exceptions and emits a visible interruption message instead of hanging on indefinite "Thinking…".
+- Limited replay payload volume:
+  - added `HISTORY_REPLAY_MAX_MESSAGES` cap for history replay on load.
+- Fixed workspace/session binding behavior:
+  - when `session/load` switches to a different `cwd`, resets assistant/thread/replay caches to avoid cross-workspace bleed.
+  - restore path supports workspace-keyed records and legacy records.
+  - `session/new` reverted to creating a new session id (do not collapse multiple chats into one workspace singleton).
+  - `session/list` reverted to listing all sessions (no workspace dedupe), preserving multi-chat identity.
+- Added load diagnostics:
+  - `session_load_state`
+  - `session_load_fresh_thread`
+  - `session_load_replay_done`
+  - `session_replay_fetch_failed`
+
+### Thread Metadata / Archive Behavior (`ide/zed/crates/agent_ui/src/thread_metadata_store.rs`)
+
+Root cause discovered in the real Backboard Studio DB (`~/Library/Application Support/Backboard Studio/db/0-dev/db.sqlite`):
+
+- many valid Backboard chats were present in `sidebar_threads` but marked `archived=1`, which made them appear missing after restart.
+
+Fixes:
+
+- Prevent default auto-archive for Backboard ACP sessions when `worktree_paths` is empty:
+  - for `session_id` starting with `backboard-`, default archived state is forced non-archived.
+- If an existing Backboard session row is archived, metadata refresh now unarchives it.
+- Added one-time startup rescue migration:
+  - key: `thread-metadata-backboard-archive-rescue`
+  - action: unarchive archived rows where `session_id LIKE 'backboard-%'`.
+- Added DB helper:
+  - `ThreadMetadataDb::unarchive_backboard_sessions()`.
+
+### Chat Button UX Change (`ide/zed/crates/agent_ui/src/agent_ui.rs`)
+
+- `OpenBackboardAgentWorkspace` action now opens/focuses the sidebar thread switcher instead of forcing full-page multi-agent workspace.
+  - calls `multi_workspace.open_sidebar(cx)`.
+  - dispatches `ToggleThreadSwitcher { select_last: false }`.
+
+### Observability Note
+
+- Backboard ACP diagnostics write to `~/.backboard/logs/ide-agent.log`.
+- UI thread list persistence/visibility is backed by `sidebar_threads` in:
+  - `~/Library/Application Support/Backboard Studio/db/0-dev/db.sqlite` (active data in this environment).
