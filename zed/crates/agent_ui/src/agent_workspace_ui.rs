@@ -1,16 +1,16 @@
 use collections::HashSet;
 use editor::{Editor, EditorElement, EditorEvent, EditorStyle};
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, Focusable, FontWeight, ParentElement, Render,
-    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription, TextStyle,
-    WeakEntity, Window, prelude::*,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement,
+    ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, TextStyle, WeakEntity, Window, prelude::*,
 };
 use language::language_settings::SoftWrap;
 use settings::Settings;
 use theme_settings::ThemeSettings;
 use ui::{
-    Button, ButtonSize, ButtonStyle, Icon, IconButton, IconSize, Label, LabelSize, TintColor,
-    Tooltip, Vector, VectorName, WithScrollbar, prelude::*,
+    Button, ButtonSize, ButtonStyle, ElevationIndex, Icon, IconButton, IconSize, Label, LabelSize,
+    TintColor, Tooltip, Vector, VectorName, WithScrollbar, prelude::*,
 };
 use workspace::Workspace;
 
@@ -53,7 +53,7 @@ impl BackboardAgentWorkspacePage {
                 let mut editor = Editor::auto_height(2, 5, window, cx);
                 editor.set_soft_wrap_mode(SoftWrap::EditorWidth, cx);
                 editor.set_placeholder_text(
-                    "One task per line. Each line starts an isolated agent...",
+                    "One task per line. Each line starts an isolated agent",
                     window,
                     cx,
                 );
@@ -603,7 +603,7 @@ impl BackboardAgentWorkspacePage {
         let runnable_task_count = task_count.min(20);
         let launch_pending = self.pending_launch_batch_id.is_some();
         let run_label = if launch_pending {
-            "Setting up...".to_string()
+            "Setting up".to_string()
         } else if runnable_task_count == 1 {
             "Run 1 agent".to_string()
         } else {
@@ -652,10 +652,11 @@ impl BackboardAgentWorkspacePage {
             .child(
                 div()
                     .w_full()
-                    .rounded_sm()
+                    .rounded_lg()
                     .border_1()
                     .border_color(cx.theme().colors().border_variant)
                     .bg(cx.theme().colors().element_background)
+                    .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
                     .p_2()
                     .child(self.render_text_input(cx)),
             )
@@ -876,10 +877,11 @@ impl BackboardAgentWorkspacePage {
             .id(format!("backboard-agent-row-{thread_key}"))
             .w_full()
             .min_h(rems_from_px(76.))
-            .rounded_sm()
+            .rounded_md()
             .border_1()
             .border_color(border_color)
             .bg(row_bg)
+            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
             .cursor_pointer()
             .hover(|style| style.bg(cx.theme().colors().element_hover))
             .p_2()
@@ -906,8 +908,7 @@ impl BackboardAgentWorkspacePage {
                                         Color::Accent
                                     } else {
                                         Color::Default
-                                    })
-                                    .truncate(),
+                                    }),
                             ),
                     )
                     .child(
@@ -919,8 +920,7 @@ impl BackboardAgentWorkspacePage {
             .child(
                 Label::new(summary.command.clone())
                     .size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .truncate(),
+                    .color(Color::Muted),
             )
             .child(
                 h_flex()
@@ -966,6 +966,7 @@ impl BackboardAgentWorkspacePage {
                                 .border_1()
                                 .border_color(cx.theme().colors().border_variant)
                                 .bg(cx.theme().colors().element_background)
+                                .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -1299,12 +1300,13 @@ impl BackboardAgentWorkspacePage {
             .id(format!("backboard-agent-card-{thread_key}"))
             .min_w(rems_from_px(320.))
             .max_w(rems_from_px(420.))
-            .h(rems_from_px(248.))
+            .min_h(rems_from_px(248.))
             .flex_1()
-            .rounded_md()
+            .rounded_lg()
             .border_1()
             .border_color(border_color)
             .bg(background)
+            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
             .overflow_hidden()
             .cursor_pointer()
             .hover(|style| style.border_color(cx.theme().colors().border))
@@ -1313,8 +1315,9 @@ impl BackboardAgentWorkspacePage {
             }))
             .child(
                 h_flex()
-                    .h(rems_from_px(50.))
+                    .min_h(rems_from_px(50.))
                     .px_3()
+                    .py_2()
                     .justify_between()
                     .border_b_1()
                     .border_color(cx.theme().colors().border_variant)
@@ -1343,15 +1346,13 @@ impl BackboardAgentWorkspacePage {
                                                 BackboardAgentRunStatus::Queued
                                                 | BackboardAgentRunStatus::Running => Color::Accent,
                                             })
-                                            .weight(FontWeight::MEDIUM)
-                                            .truncate(),
+                                            .weight(FontWeight::MEDIUM),
                                     )
                                     .child(
                                         Label::new(card_label)
                                             .size(LabelSize::Small)
                                             .color(Color::Muted)
-                                            .alpha(0.8)
-                                            .truncate(),
+                                            .alpha(0.8),
                                     )
                                     .when_some(
                                         summary.working_directory_label.clone(),
@@ -1361,6 +1362,7 @@ impl BackboardAgentWorkspacePage {
                                                 .unwrap_or_else(|| label.clone());
                                             this.child(
                                                 h_flex()
+                                                    .id(format!("agent-directory-{thread_key}"))
                                                     .gap_1()
                                                     .min_w_0()
                                                     .tooltip(Tooltip::text(tooltip.to_string()))
@@ -1372,8 +1374,7 @@ impl BackboardAgentWorkspacePage {
                                                     .child(
                                                         Label::new(label)
                                                             .size(LabelSize::Small)
-                                                            .color(Color::Accent)
-                                                            .truncate(),
+                                                            .color(Color::Accent),
                                                     ),
                                             )
                                         },
@@ -1433,8 +1434,7 @@ impl BackboardAgentWorkspacePage {
                                                 .child(
                                                     Label::new(branch)
                                                         .size(LabelSize::Small)
-                                                        .color(Color::Accent)
-                                                        .truncate(),
+                                                        .color(Color::Accent),
                                                 ),
                                         )
                                     })
@@ -1442,8 +1442,7 @@ impl BackboardAgentWorkspacePage {
                                         this.child(
                                             Label::new(label)
                                                 .size(LabelSize::Small)
-                                                .color(Color::Accent)
-                                                .truncate(),
+                                                .color(Color::Accent),
                                         )
                                     }),
                             )
@@ -1718,60 +1717,9 @@ impl BackboardAgentWorkspacePage {
     fn render_token_context_preview(
         &self,
         summary: &BackboardAgentRunSummary,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let token_lines = summary
-            .token_usage
-            .as_ref()
-            .map(|usage| {
-                vec![
-                    format!("tokens used: {}", usage.used_tokens),
-                    format!(
-                        "input/output: {} / {}",
-                        usage.input_tokens, usage.output_tokens
-                    ),
-                    format!("context limit: {}", usage.max_tokens),
-                ]
-            })
-            .unwrap_or_else(|| vec!["token usage not available yet".to_string()]);
-
-        let speed_lines = summary
-            .speed_metrics
-            .as_ref()
-            .map(|metrics| {
-                vec![
-                    format!(
-                        "first token: {}",
-                        metrics
-                            .first_token_ms
-                            .map(Self::format_ms)
-                            .unwrap_or_else(|| "--".to_string())
-                    ),
-                    format!(
-                        "context pack: {}",
-                        metrics
-                            .context_pack_ms
-                            .map(Self::format_ms)
-                            .unwrap_or_else(|| "--".to_string())
-                    ),
-                    format!(
-                        "total turn: {}",
-                        metrics
-                            .total_turn_ms
-                            .map(Self::format_ms)
-                            .unwrap_or_else(|| "--".to_string())
-                    ),
-                ]
-            })
-            .unwrap_or_else(|| vec!["timing metrics not available yet".to_string()]);
-
-        let mut lines = Vec::new();
-        lines.extend(token_lines);
-        lines.extend(speed_lines);
-        lines.push(format!(
-            "cost: {}",
-            summary.cost.as_deref().unwrap_or("not available")
-        ));
+        let lines = Self::token_context_lines(summary);
 
         v_flex()
             .flex_1()
@@ -1785,7 +1733,7 @@ impl BackboardAgentWorkspacePage {
                     .child(
                         Label::new(line)
                             .size(LabelSize::Small)
-                            .buffer_font(_cx)
+                            .buffer_font(cx)
                             .line_height_style(LineHeightStyle::UiLabel)
                             .color(Color::Muted)
                             .flex_1(),
@@ -1794,11 +1742,92 @@ impl BackboardAgentWorkspacePage {
             })))
     }
 
+    fn token_context_lines(summary: &BackboardAgentRunSummary) -> Vec<String> {
+        let mut lines = Vec::new();
+
+        if let Some(usage) = summary.token_usage.as_ref()
+            && (usage.max_tokens > 0
+                || usage.used_tokens > 0
+                || usage.input_tokens > 0
+                || usage.output_tokens > 0)
+        {
+            let used = crate::humanize_token_count(usage.used_tokens);
+            let max = crate::humanize_token_count(usage.max_tokens);
+            let input = crate::humanize_token_count(usage.input_tokens);
+            let output = crate::humanize_token_count(usage.output_tokens);
+            lines.push(format!("{used} / {max} tokens"));
+            lines.push(format!("input / output: {input} / {output}"));
+        }
+
+        if let Some(cost) = summary.cost.as_ref() {
+            lines.push(format!("cost: {cost}"));
+        }
+
+        if let Some(metrics) = summary.speed_metrics.as_ref() {
+            Self::push_speed_line(&mut lines, "first token", metrics.first_token_ms);
+            Self::push_speed_line(&mut lines, "total turn", metrics.total_turn_ms);
+            Self::push_speed_line(&mut lines, "runtime", metrics.runtime_load_ms);
+            Self::push_speed_line(&mut lines, "models", metrics.model_list_ms);
+            Self::push_speed_line(&mut lines, "assistant", metrics.assistant_create_ms);
+            Self::push_speed_line(&mut lines, "context pack", metrics.context_pack_ms);
+            Self::push_speed_line(&mut lines, "semantic context", metrics.semantic_context_ms);
+            Self::push_speed_line(&mut lines, "tools", metrics.tool_batch_ms);
+            Self::push_speed_line(&mut lines, "shell", metrics.shell_tools_ms);
+            Self::push_speed_line(&mut lines, "reads", metrics.read_tools_ms);
+            Self::push_speed_line(&mut lines, "searches", metrics.search_tools_ms);
+            Self::push_speed_line(&mut lines, "edits", metrics.edit_tools_ms);
+            Self::push_speed_line(&mut lines, "other tools", metrics.other_tools_ms);
+            Self::push_speed_line(&mut lines, "file writes", metrics.file_write_ms);
+            Self::push_speed_line(&mut lines, "approval wait", metrics.command_wait_ms);
+
+            if let (Some(name), Some(value)) =
+                (metrics.slowest_tool.as_ref(), metrics.slowest_tool_ms)
+            {
+                lines.push(format!("slowest tool: {} {}", name, Self::format_ms(value)));
+            }
+            if let Some(model) = metrics.model.as_ref() {
+                lines.push(format!("model: {model}"));
+            }
+            if let Some(provider) = metrics.provider.as_ref() {
+                lines.push(format!("provider: {provider}"));
+            }
+            if let Some(intensity) = metrics.intensity.as_ref() {
+                lines.push(format!("intensity: {intensity}"));
+            }
+            if let Some(value) = metrics.tool_calls_count {
+                lines.push(format!("tool calls: {value}"));
+            }
+            if let Some(value) = metrics.shell_tools_count {
+                lines.push(format!("shell calls: {value}"));
+            }
+            if let Some(value) = metrics.read_tools_count {
+                lines.push(format!("read calls: {value}"));
+            }
+            if let Some(value) = metrics.search_tools_count {
+                lines.push(format!("search calls: {value}"));
+            }
+            if let Some(value) = metrics.edit_tools_count {
+                lines.push(format!("edit calls: {value}"));
+            }
+            if let Some(value) = metrics.other_tools_count {
+                lines.push(format!("other calls: {value}"));
+            }
+        }
+
+        lines
+    }
+
+    fn push_speed_line(lines: &mut Vec<String>, label: &'static str, value: Option<f64>) {
+        if let Some(value) = value {
+            lines.push(format!("{label}: {}", Self::format_ms(value)));
+        }
+    }
+
     fn format_ms(value: f64) -> String {
         if value >= 1000.0 {
-            format!("{:.2}s", value / 1000.0)
+            format!("{:.1}s", value / 1000.0)
         } else {
-            format!("{:.0}ms", value)
+            format!("{}ms", value.round() as u64)
         }
     }
 
@@ -1917,16 +1946,11 @@ impl BackboardAgentWorkspacePage {
         };
 
         h_flex()
-            .h(rems_from_px(21.))
+            .min_h(rems_from_px(21.))
             .min_w_0()
             .gap_1p5()
             .child(Icon::new(icon).size(IconSize::XSmall).color(color))
-            .child(
-                Label::new(text)
-                    .size(LabelSize::Small)
-                    .color(color)
-                    .truncate(),
-            )
+            .child(Label::new(text).size(LabelSize::Small).color(color))
     }
 
     fn render_mode_button(
@@ -2114,8 +2138,9 @@ impl BackboardAgentWorkspacePage {
         let working_directory_tooltip = summary.working_directory_path.clone();
 
         h_flex()
-            .h(rems_from_px(62.))
+            .min_h(rems_from_px(62.))
             .px_3()
+            .py_2()
             .justify_between()
             .border_b_1()
             .border_color(cx.theme().colors().border_variant)
@@ -2132,14 +2157,12 @@ impl BackboardAgentWorkspacePage {
                             .child(
                                 Label::new(summary.title.clone())
                                     .size(LabelSize::Small)
-                                    .color(Color::Default)
-                                    .truncate(),
+                                    .color(Color::Default),
                             )
                             .child(
                                 Label::new(summary.command.clone())
                                     .size(LabelSize::Small)
-                                    .color(Color::Muted)
-                                    .truncate(),
+                                    .color(Color::Muted),
                             )
                             .when_some(summary.working_directory_label.clone(), |this, label| {
                                 let tooltip = working_directory_tooltip
@@ -2147,6 +2170,7 @@ impl BackboardAgentWorkspacePage {
                                     .unwrap_or_else(|| label.clone());
                                 this.child(
                                     h_flex()
+                                        .id(format!("selected-agent-directory-{thread_key}"))
                                         .gap_1()
                                         .min_w_0()
                                         .tooltip(Tooltip::text(tooltip.to_string()))
@@ -2158,8 +2182,7 @@ impl BackboardAgentWorkspacePage {
                                         .child(
                                             Label::new(label)
                                                 .size(LabelSize::Small)
-                                                .color(Color::Accent)
-                                                .truncate(),
+                                                .color(Color::Accent),
                                         ),
                                 )
                             }),
@@ -2300,13 +2323,17 @@ impl BackboardAgentWorkspacePage {
             .w_full()
             .flex_1()
             .min_h_0()
-            .border_t_1()
+            .rounded_lg()
+            .border_1()
             .border_color(cx.theme().colors().border_variant)
             .bg(cx.theme().colors().editor_background)
+            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
+            .overflow_hidden()
             .child(
                 h_flex()
-                    .h(rems_from_px(62.))
+                    .min_h(rems_from_px(62.))
                     .px_3()
+                    .py_2()
                     .justify_between()
                     .border_b_1()
                     .border_color(cx.theme().colors().border_variant)
@@ -2340,8 +2367,7 @@ impl BackboardAgentWorkspacePage {
                                         Label::new(summary.title.clone())
                                             .size(LabelSize::Small)
                                             .weight(FontWeight::MEDIUM)
-                                            .color(Color::Default)
-                                            .truncate(),
+                                            .color(Color::Default),
                                     )
                                     .child(
                                         Label::new(summary.status.label())
@@ -2384,7 +2410,8 @@ impl BackboardAgentWorkspacePage {
             .flex_shrink_0()
             .border_l_1()
             .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().editor_background)
+            .bg(cx.theme().colors().surface_background)
+            .p_3()
             .when_some(selected_detail, |this, (summary, conversation)| {
                 this.child(self.render_detail_drawer(summary, conversation, cx))
             })
@@ -2405,6 +2432,7 @@ impl BackboardAgentWorkspacePage {
                                 .border_1()
                                 .border_color(cx.theme().colors().border_variant)
                                 .bg(cx.theme().colors().element_background)
+                                .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -2503,6 +2531,84 @@ mod tests {
     use serde_json::json;
     use std::path::Path;
     use workspace::MultiWorkspace;
+
+    fn test_summary() -> BackboardAgentRunSummary {
+        BackboardAgentRunSummary {
+            thread_id: ThreadId::new(),
+            title: "A long task title that should wrap cleanly".into(),
+            command: "Run a real workspace task".into(),
+            status: BackboardAgentRunStatus::Done,
+            blocked_reason: None,
+            kind_label: None,
+            scope_label: None,
+            worktree_label: None,
+            working_directory_label: None,
+            working_directory_path: None,
+            working_directory_is_worktree: false,
+            branch_label: None,
+            apply_state_label: None,
+            can_apply: false,
+            can_review: false,
+            progress: 100,
+            cost: None,
+            token_usage: None,
+            speed_metrics: None,
+            files_changed: 0,
+            latest_events: Vec::new(),
+            touched_paths: Vec::new(),
+            conflicting_paths: Vec::new(),
+            batch_id: None,
+            batch_index: 0,
+            batch_size: 1,
+            is_active_thread: false,
+        }
+    }
+
+    #[test]
+    fn test_workspace_context_lines_omit_missing_metric_placeholders() {
+        let summary = test_summary();
+        let lines = BackboardAgentWorkspacePage::token_context_lines(&summary);
+
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn test_workspace_context_lines_render_real_metrics() {
+        let mut summary = test_summary();
+        summary.cost = Some("$0.0042".into());
+        summary.token_usage = Some(acp_thread::TokenUsage {
+            used_tokens: 1234,
+            max_tokens: 8000,
+            input_tokens: 1000,
+            output_tokens: 234,
+            max_output_tokens: Some(2000),
+        });
+        summary.speed_metrics = Some(acp_thread::SpeedMetrics {
+            first_token_ms: Some(321.0),
+            total_turn_ms: Some(2450.0),
+            context_pack_ms: Some(40.0),
+            model: Some("backboard-test-model".into()),
+            provider: Some("backboard".into()),
+            tool_calls_count: Some(3),
+            ..Default::default()
+        });
+
+        let lines = BackboardAgentWorkspacePage::token_context_lines(&summary);
+        let text = lines.join("\n");
+
+        assert!(text.contains("1.2k / 8k tokens"));
+        assert!(text.contains("input / output: 1k / 234"));
+        assert!(text.contains("cost: $0.0042"));
+        assert!(text.contains("first token: 321ms"));
+        assert!(text.contains("total turn: 2.5s"));
+        assert!(text.contains("context pack: 40ms"));
+        assert!(text.contains("model: backboard-test-model"));
+        assert!(text.contains("provider: backboard"));
+        assert!(text.contains("tool calls: 3"));
+        assert!(!text.contains("..."));
+        assert!(!text.contains("--"));
+        assert!(!text.contains("not available"));
+    }
 
     async fn setup_workspace_page(
         cx: &mut TestAppContext,

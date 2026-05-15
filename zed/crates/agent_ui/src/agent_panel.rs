@@ -798,13 +798,20 @@ enum BackboardAgentApplyOutcome {
 }
 
 fn truncate_workspace_event(text: &str) -> SharedString {
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    const MAX_CHARS: usize = 180;
-    if text.chars().count() <= MAX_CHARS {
-        text.into()
-    } else {
-        let truncated = text.chars().take(MAX_CHARS).collect::<String>();
-        format!("{truncated}...").into()
+    text.split_whitespace().collect::<Vec<_>>().join(" ").into()
+}
+
+#[cfg(test)]
+mod workspace_event_tests {
+    use super::*;
+
+    #[test]
+    fn workspace_event_text_preserves_content_without_placeholder_dots() {
+        let text = "alpha\nbeta\tgamma ".repeat(80);
+        let rendered = truncate_workspace_event(&text);
+
+        assert!(rendered.as_ref().contains("alpha beta gamma"));
+        assert!(!rendered.as_ref().contains("..."));
     }
 }
 
@@ -4526,10 +4533,15 @@ impl AgentPanel {
         };
 
         let cost = thread.cost().map(|cost| {
-            if cost.currency.as_ref() == "USD" {
-                format!("${:.2}", cost.amount).into()
+            let precision = if cost.amount > 0.0 && cost.amount < 0.01 {
+                4
             } else {
-                format!("{:.2} {}", cost.amount, cost.currency).into()
+                2
+            };
+            if cost.currency.as_ref() == "USD" {
+                format!("${:.prec$}", cost.amount, prec = precision).into()
+            } else {
+                format!("{:.prec$} {}", cost.amount, cost.currency, prec = precision).into()
             }
         });
         let token_usage = thread.token_usage().cloned();
