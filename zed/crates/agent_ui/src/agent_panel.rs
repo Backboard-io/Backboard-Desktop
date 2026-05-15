@@ -1,7 +1,7 @@
 use std::{
     fmt,
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     rc::Rc,
     sync::{
@@ -296,6 +296,9 @@ pub struct BackboardAgentRunSummary {
     pub kind_label: Option<SharedString>,
     pub scope_label: Option<SharedString>,
     pub worktree_label: Option<SharedString>,
+    pub working_directory_label: Option<SharedString>,
+    pub working_directory_path: Option<SharedString>,
+    pub working_directory_is_worktree: bool,
     pub branch_label: Option<SharedString>,
     pub apply_state_label: Option<SharedString>,
     pub can_apply: bool,
@@ -454,14 +457,42 @@ fn workspace_agent_batch_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-fn workspace_agent_worktree_label(path: &std::path::Path) -> SharedString {
-    path.parent()
-        .and_then(|parent| parent.file_name())
+fn workspace_agent_directory_label(
+    path: &Path,
+    base_workspace_path: Option<&Path>,
+    is_worktree: bool,
+) -> SharedString {
+    let file_name = path
+        .file_name()
         .and_then(|name| name.to_str())
-        .or_else(|| path.file_name().and_then(|name| name.to_str()))
-        .unwrap_or("agent worktree")
-        .to_string()
-        .into()
+        .filter(|name| !name.is_empty());
+
+    if is_worktree {
+        if let (Some(file_name), Some(parent), Some(base_workspace_path)) =
+            (file_name, path.parent(), base_workspace_path)
+        {
+            let base_file_name = base_workspace_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.is_empty());
+            let parent_name = parent
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.is_empty());
+
+            if base_file_name == Some(file_name) {
+                if let Some(parent_name) = parent_name {
+                    return format!("{parent_name}/{file_name}").into();
+                }
+            }
+        }
+    }
+
+    file_name.unwrap_or("Workspace").to_string().into()
+}
+
+fn workspace_agent_directory_path(path: &Path) -> SharedString {
+    path.display().to_string().into()
 }
 
 fn current_workspace_agent_path(project: &Project, cx: &App) -> PathBuf {
@@ -3771,6 +3802,32 @@ impl AgentPanel {
         }
 
         let batch_id = workspace_agent_batch_id();
+        let has_local_repository = {
+            let project = self.project.read(cx);
+            project
+                .active_repository(cx)
+                .or_else(|| project.repositories(cx).values().next().cloned())
+                .is_some()
+        };
+
+        if has_local_repository {
+            self.spawn_git_backboard_workspace_agents(
+                tasks,
+                scope,
+                kind,
+                mode,
+                batch_id.clone(),
+                window,
+                cx,
+            );
+            return BackboardAgentWorkspaceLaunchResult {
+                accepted_count: count,
+                batch_id,
+                created_thread_ids: Vec::new(),
+                pending_worktree_setup: true,
+            };
+        }
+
         let created_thread_ids = tasks
             .into_iter()
             .enumerate()
@@ -4273,13 +4330,29 @@ impl AgentPanel {
                 }
                 if run.current_workspace {
                     summary.worktree_label = None;
+                    summary.working_directory_label = Some(workspace_agent_directory_label(
+                        &run.worktree_path,
+                        Some(&run.base_workspace_path),
+                        false,
+                    ));
+                    summary.working_directory_path =
+                        Some(workspace_agent_directory_path(&run.worktree_path));
+                    summary.working_directory_is_worktree = false;
                     summary.branch_label = None;
                     summary.apply_state_label = Some("Current workspace".into());
                     summary.can_apply = false;
                     continue;
                 }
 
-                summary.worktree_label = Some(workspace_agent_worktree_label(&run.worktree_path));
+                summary.worktree_label = Some(workspace_agent_directory_label(
+                    &run.worktree_path,
+                    Some(&run.base_workspace_path),
+                    true,
+                ));
+                summary.working_directory_label = summary.worktree_label.clone();
+                summary.working_directory_path =
+                    Some(workspace_agent_directory_path(&run.worktree_path));
+                summary.working_directory_is_worktree = true;
                 summary.branch_label = Some(run.branch_name.clone().into());
                 summary.apply_state_label = Some(run.apply_state.label().into());
                 summary.can_apply =
@@ -4371,6 +4444,9 @@ impl AgentPanel {
                 kind_label: None,
                 scope_label: None,
                 worktree_label: None,
+                working_directory_label: None,
+                working_directory_path: None,
+                working_directory_is_worktree: false,
                 branch_label: None,
                 apply_state_label: None,
                 can_apply: false,
@@ -4557,6 +4633,9 @@ impl AgentPanel {
             kind_label: None,
             scope_label: None,
             worktree_label: None,
+            working_directory_label: None,
+            working_directory_path: None,
+            working_directory_is_worktree: false,
             branch_label: None,
             apply_state_label: None,
             can_apply: false,
@@ -8215,6 +8294,23 @@ mod tests {
         assert!(!metadata.current_workspace);
     }
 
+    #[test]
+    fn test_workspace_agent_directory_label_uses_working_directory_name() {
+        assert_eq!(
+            workspace_agent_directory_label(
+                Path::new("/repo/.worktrees/backboard-agent-a"),
+                None,
+                true,
+            )
+            .as_ref(),
+            "backboard-agent-a"
+        );
+        assert_eq!(
+            workspace_agent_directory_label(Path::new("/"), None, false).as_ref(),
+            "Workspace"
+        );
+    }
+
     #[gpui::test]
     async fn test_workspace_agent_without_git_creates_current_workspace_threads(
         cx: &mut TestAppContext,
@@ -8258,6 +8354,7 @@ mod tests {
             assert_eq!(summaries.len(), 2);
 
             for summary in summaries {
+                let home_dir = paths::home_dir().display().to_string();
                 assert!(summary.can_review);
                 assert!(!summary.can_apply);
                 assert_eq!(
@@ -8268,6 +8365,15 @@ mod tests {
                     Some("Current workspace")
                 );
                 assert!(summary.worktree_label.is_none());
+                assert_eq!(
+                    summary
+                        .working_directory_path
+                        .as_ref()
+                        .map(|label| label.as_ref()),
+                    Some(home_dir.as_str())
+                );
+                assert!(summary.working_directory_label.is_some());
+                assert!(!summary.working_directory_is_worktree);
                 assert!(summary.branch_label.is_none());
                 assert_eq!(summary.batch_size, 2);
                 assert!(summary.batch_id.is_some());
@@ -8446,6 +8552,21 @@ mod tests {
                 Some("Current workspace")
             );
             assert!(summary.worktree_label.is_none());
+            assert_eq!(
+                summary
+                    .working_directory_label
+                    .as_ref()
+                    .map(|label| label.as_ref()),
+                Some("opened_project")
+            );
+            assert_eq!(
+                summary
+                    .working_directory_path
+                    .as_ref()
+                    .map(|label| label.as_ref()),
+                Some("/opened_project")
+            );
+            assert!(!summary.working_directory_is_worktree);
         });
     }
 
@@ -8470,8 +8591,8 @@ mod tests {
         });
 
         assert_eq!(result.accepted_count, 2);
-        assert_eq!(result.created_thread_ids.len(), 2);
-        assert!(!result.pending_worktree_setup);
+        assert_eq!(result.created_thread_ids.len(), 0);
+        assert!(result.pending_worktree_setup);
         assert!(!result.batch_id.is_empty());
         cx.run_until_parked();
 
@@ -8502,26 +8623,32 @@ mod tests {
 
             assert_eq!(batch_ids.len(), 1);
             assert!(!batch_ids.iter().next().unwrap().is_empty());
-            assert_eq!(worktree_paths.len(), 1);
-            assert_eq!(
-                branch_names,
-                [String::new()].into_iter().collect::<HashSet<_>>()
-            );
+            assert_eq!(worktree_paths.len(), 2);
+            assert_eq!(branch_names.len(), 2);
+            assert!(branch_names.iter().all(|branch| !branch.is_empty()));
             assert_eq!(batch_indices, [0, 1].into_iter().collect::<HashSet<_>>());
             for run in panel.backboard_workspace_runs.values() {
-                assert!(run.current_workspace);
+                assert!(!run.current_workspace);
                 assert_eq!(run.mode, BackboardAgentWorkspaceMode::Free);
                 assert_eq!(run.batch_size, 2);
-                assert!(run.base_commit.is_empty());
+                assert!(!run.base_commit.is_empty());
             }
 
             let summaries = panel.backboard_agent_run_summaries(cx);
             assert_eq!(summaries.len(), 2);
+            let directory_paths = summaries
+                .iter()
+                .map(|summary| summary.working_directory_path.clone())
+                .collect::<HashSet<_>>();
+            assert_eq!(directory_paths.len(), 2);
             for summary in summaries {
                 assert_eq!(summary.batch_size, 2);
                 assert!(summary.batch_id.is_some());
-                assert!(summary.worktree_label.is_none());
-                assert!(summary.branch_label.is_none());
+                assert!(summary.worktree_label.is_some());
+                assert!(summary.working_directory_label.is_some());
+                assert!(summary.working_directory_path.is_some());
+                assert!(summary.working_directory_is_worktree);
+                assert!(summary.branch_label.is_some());
             }
         });
     }
@@ -8545,8 +8672,8 @@ mod tests {
         });
 
         assert_eq!(result.accepted_count, 20);
-        assert_eq!(result.created_thread_ids.len(), 20);
-        assert!(!result.pending_worktree_setup);
+        assert_eq!(result.created_thread_ids.len(), 0);
+        assert!(result.pending_worktree_setup);
 
         cx.run_until_parked();
 
@@ -8555,7 +8682,7 @@ mod tests {
             assert_eq!(panel.backboard_workspace_runs.len(), 20);
             assert_eq!(panel.backboard_agent_run_summaries(cx).len(), 20);
             for run in panel.backboard_workspace_runs.values() {
-                assert!(run.current_workspace);
+                assert!(!run.current_workspace);
                 assert_eq!(run.batch_size, 20);
             }
         });

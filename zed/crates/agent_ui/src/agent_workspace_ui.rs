@@ -529,10 +529,12 @@ impl BackboardAgentWorkspacePage {
                                 )
                                 .size(ButtonSize::Compact)
                                 .style(ButtonStyle::Subtle)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.show_token_context = !this.show_token_context;
-                                    cx.notify();
-                                })),
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.show_token_context = !this.show_token_context;
+                                        cx.notify();
+                                    },
+                                )),
                             ),
                     ),
             )
@@ -1286,12 +1288,18 @@ impl BackboardAgentWorkspacePage {
             BackboardAgentRunStatus::Queued => "Queued",
             BackboardAgentRunStatus::Running => "Streaming",
         };
+        let working_directory_icon = if summary.working_directory_is_worktree {
+            IconName::GitWorktree
+        } else {
+            IconName::Folder
+        };
+        let working_directory_tooltip = summary.working_directory_path.clone();
 
         v_flex()
             .id(format!("backboard-agent-card-{thread_key}"))
             .min_w(rems_from_px(320.))
             .max_w(rems_from_px(420.))
-            .h(rems_from_px(232.))
+            .h(rems_from_px(248.))
             .flex_1()
             .rounded_md()
             .border_1()
@@ -1305,7 +1313,7 @@ impl BackboardAgentWorkspacePage {
             }))
             .child(
                 h_flex()
-                    .h(rems_from_px(34.))
+                    .h(rems_from_px(50.))
                     .px_3()
                     .justify_between()
                     .border_b_1()
@@ -1345,23 +1353,31 @@ impl BackboardAgentWorkspacePage {
                                             .alpha(0.8)
                                             .truncate(),
                                     )
-                                    .when_some(summary.worktree_label.clone(), |this, label| {
-                                        this.child(
-                                            h_flex()
-                                                .gap_1()
-                                                .child(
-                                                    Icon::new(IconName::GitWorktree)
-                                                        .size(IconSize::XSmall)
-                                                        .color(Color::Muted),
-                                                )
-                                                .child(
-                                                    Label::new(label)
-                                                        .size(LabelSize::Small)
-                                                        .color(Color::Accent)
-                                                        .truncate(),
-                                                ),
-                                        )
-                                    }),
+                                    .when_some(
+                                        summary.working_directory_label.clone(),
+                                        |this, label| {
+                                            let tooltip = working_directory_tooltip
+                                                .clone()
+                                                .unwrap_or_else(|| label.clone());
+                                            this.child(
+                                                h_flex()
+                                                    .gap_1()
+                                                    .min_w_0()
+                                                    .tooltip(Tooltip::text(tooltip.to_string()))
+                                                    .child(
+                                                        Icon::new(working_directory_icon)
+                                                            .size(IconSize::XSmall)
+                                                            .color(Color::Muted),
+                                                    )
+                                                    .child(
+                                                        Label::new(label)
+                                                            .size(LabelSize::Small)
+                                                            .color(Color::Accent)
+                                                            .truncate(),
+                                                    ),
+                                            )
+                                        },
+                                    ),
                             ),
                     )
                     .child(
@@ -1392,9 +1408,11 @@ impl BackboardAgentWorkspacePage {
                     .flex_1()
                     .min_h_0()
                     .child(if self.show_token_context {
-                        self.render_token_context_preview(&summary, cx).into_any_element()
+                        self.render_token_context_preview(&summary, cx)
+                            .into_any_element()
                     } else {
-                        self.render_terminal_preview(&summary, cx).into_any_element()
+                        self.render_terminal_preview(&summary, cx)
+                            .into_any_element()
                     })
                     .when(
                         summary.branch_label.is_some() || summary.apply_state_label.is_some(),
@@ -1503,7 +1521,7 @@ impl BackboardAgentWorkspacePage {
                                         })),
                                 )
                             })
-                            .when(summary.worktree_label.is_some(), |this| {
+                            .when(summary.working_directory_is_worktree, |this| {
                                 this.child(
                                     IconButton::new(
                                         format!("open-worktree-{thread_key}"),
@@ -1708,7 +1726,10 @@ impl BackboardAgentWorkspacePage {
             .map(|usage| {
                 vec![
                     format!("tokens used: {}", usage.used_tokens),
-                    format!("input/output: {} / {}", usage.input_tokens, usage.output_tokens),
+                    format!(
+                        "input/output: {} / {}",
+                        usage.input_tokens, usage.output_tokens
+                    ),
                     format!("context limit: {}", usage.max_tokens),
                 ]
             })
@@ -1752,26 +1773,25 @@ impl BackboardAgentWorkspacePage {
             summary.cost.as_deref().unwrap_or("not available")
         ));
 
-        v_flex().flex_1().min_h(rems_from_px(124.)).child(
-            v_flex()
-                .gap_1()
-                .children(lines.into_iter().map(|line| {
-                    h_flex()
-                        .items_start()
-                        .min_w_0()
-                        .gap_1p5()
-                        .child(Icon::new(IconName::ArrowRight).size(IconSize::XSmall))
-                        .child(
-                            Label::new(line)
-                                .size(LabelSize::Small)
-                                .buffer_font(_cx)
-                                .line_height_style(LineHeightStyle::UiLabel)
-                                .color(Color::Muted)
-                                .flex_1(),
-                        )
-                        .into_any_element()
-                })),
-        )
+        v_flex()
+            .flex_1()
+            .min_h(rems_from_px(124.))
+            .child(v_flex().gap_1().children(lines.into_iter().map(|line| {
+                h_flex()
+                    .items_start()
+                    .min_w_0()
+                    .gap_1p5()
+                    .child(Icon::new(IconName::ArrowRight).size(IconSize::XSmall))
+                    .child(
+                        Label::new(line)
+                            .size(LabelSize::Small)
+                            .buffer_font(_cx)
+                            .line_height_style(LineHeightStyle::UiLabel)
+                            .color(Color::Muted)
+                            .flex_1(),
+                    )
+                    .into_any_element()
+            })))
     }
 
     fn format_ms(value: f64) -> String {
@@ -2086,9 +2106,15 @@ impl BackboardAgentWorkspacePage {
     ) -> impl IntoElement {
         let thread_id = summary.thread_id;
         let thread_key = thread_id.to_key_string();
+        let working_directory_icon = if summary.working_directory_is_worktree {
+            IconName::GitWorktree
+        } else {
+            IconName::Folder
+        };
+        let working_directory_tooltip = summary.working_directory_path.clone();
 
         h_flex()
-            .h(rems_from_px(48.))
+            .h(rems_from_px(62.))
             .px_3()
             .justify_between()
             .border_b_1()
@@ -2114,7 +2140,29 @@ impl BackboardAgentWorkspacePage {
                                     .size(LabelSize::Small)
                                     .color(Color::Muted)
                                     .truncate(),
-                            ),
+                            )
+                            .when_some(summary.working_directory_label.clone(), |this, label| {
+                                let tooltip = working_directory_tooltip
+                                    .clone()
+                                    .unwrap_or_else(|| label.clone());
+                                this.child(
+                                    h_flex()
+                                        .gap_1()
+                                        .min_w_0()
+                                        .tooltip(Tooltip::text(tooltip.to_string()))
+                                        .child(
+                                            Icon::new(working_directory_icon)
+                                                .size(IconSize::XSmall)
+                                                .color(Color::Muted),
+                                        )
+                                        .child(
+                                            Label::new(label)
+                                                .size(LabelSize::Small)
+                                                .color(Color::Accent)
+                                                .truncate(),
+                                        ),
+                                )
+                            }),
                     ),
             )
             .child(
@@ -2156,7 +2204,7 @@ impl BackboardAgentWorkspacePage {
                                 })),
                         )
                     })
-                    .when(summary.worktree_label.is_some(), |this| {
+                    .when(summary.working_directory_is_worktree, |this| {
                         this.child(
                             IconButton::new(
                                 format!("open-selected-worktree-{thread_key}"),
@@ -2607,6 +2655,21 @@ mod tests {
                 Some("Current workspace")
             );
             assert!(summary.worktree_label.is_none());
+            assert_eq!(
+                summary
+                    .working_directory_label
+                    .as_ref()
+                    .map(|label| label.as_ref()),
+                Some("project")
+            );
+            assert_eq!(
+                summary
+                    .working_directory_path
+                    .as_ref()
+                    .map(|label| label.as_ref()),
+                Some("/project")
+            );
+            assert!(!summary.working_directory_is_worktree);
 
             let conversation = panel
                 .backboard_workspace_conversation_view(selected_thread_id, cx)
@@ -2617,7 +2680,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_workspace_agent_page_git_launch_creates_shared_threads_immediately(
+    async fn test_workspace_agent_page_git_launch_creates_worktree_threads(
         cx: &mut TestAppContext,
     ) {
         let (_workspace, panel, page, mut cx) = setup_workspace_page(cx, true).await;
@@ -2631,12 +2694,12 @@ mod tests {
         });
 
         page.read_with(&cx, |page, cx| {
-            assert_eq!(page.task_editor.read(cx).text(cx), "");
+            assert_eq!(page.task_editor.read(cx).text(cx), prompt);
             assert!(
-                page.pending_launch_batch_id.is_none(),
-                "git workspaces should no longer use async worktree setup"
+                page.pending_launch_batch_id.is_some(),
+                "git workspaces should use async worktree setup"
             );
-            assert!(page.selected_thread_id.is_some());
+            assert!(page.selected_thread_id.is_none());
         });
 
         cx.run_until_parked();
@@ -2657,10 +2720,13 @@ mod tests {
                         .apply_state_label
                         .as_ref()
                         .map(|label| label.as_ref()),
-                    Some("Current workspace")
+                    Some("Ready to apply")
                 );
-                assert!(summary.worktree_label.is_none());
-                assert!(summary.branch_label.is_none());
+                assert!(summary.worktree_label.is_some());
+                assert!(summary.working_directory_label.is_some());
+                assert!(summary.working_directory_path.is_some());
+                assert!(summary.working_directory_is_worktree);
+                assert!(summary.branch_label.is_some());
             }
             let conversation = panel
                 .backboard_workspace_conversation_view(selected_thread_id, cx)

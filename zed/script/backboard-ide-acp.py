@@ -29,24 +29,57 @@ PROTOCOL_STDOUT = sys.stdout
 sys.stdout = sys.stderr
 
 
+def _is_cli_root(path: Path) -> bool:
+    return (path / "backboard_cli").is_dir()
+
+
 def _find_cli_root() -> Path:
     env_root = os.environ.get("BACKBOARD_CLI_ROOT")
+    checked: list[Path] = []
+
     if env_root:
-        return Path(env_root).expanduser().resolve()
+        candidate = Path(env_root).expanduser().resolve()
+        checked.append(candidate)
+        if _is_cli_root(candidate):
+            print(f"Backboard IDE ACP using CLI runtime from BACKBOARD_CLI_ROOT={candidate}", file=sys.stderr)
+            return candidate
+        raise RuntimeError(
+            "BACKBOARD_CLI_ROOT does not contain backboard_cli: "
+            f"{candidate}"
+        )
 
     here = Path(__file__).resolve()
+    bundled_candidate = here.parent / "cli"
+    checked.append(bundled_candidate)
+    if _is_cli_root(bundled_candidate):
+        resolved = bundled_candidate.resolve()
+        print(f"Backboard IDE ACP using bundled CLI runtime at {resolved}", file=sys.stderr)
+        return resolved
+
     for parent in here.parents:
         candidate = parent / "cli"
-        if (candidate / "backboard_cli").is_dir():
-            return candidate
+        checked.append(candidate)
+        if _is_cli_root(candidate):
+            resolved = candidate.resolve()
+            print(f"Backboard IDE ACP using source-tree CLI runtime at {resolved}", file=sys.stderr)
+            return resolved
 
-    # Default checkout layout: ide/zed/script/backboard-ide-acp.py -> repo/cli.
-    return here.parents[3] / "cli"
+    checked_paths = "\n".join(f"- {path}" for path in checked)
+    raise RuntimeError(
+        "Could not find Backboard CLI runtime. Checked:\n"
+        f"{checked_paths}\n"
+        "Install a bundled Backboard Studio build or set BACKBOARD_CLI_ROOT for development."
+    )
 
 
 CLI_ROOT = _find_cli_root()
 if str(CLI_ROOT) not in sys.path:
     sys.path.insert(0, str(CLI_ROOT))
+
+BUNDLED_PYTHON_ROOT = Path(__file__).resolve().parent / "python"
+if BUNDLED_PYTHON_ROOT.is_dir() and str(BUNDLED_PYTHON_ROOT) not in sys.path:
+    sys.path.insert(1, str(BUNDLED_PYTHON_ROOT))
+    print(f"Backboard IDE ACP using bundled Python dependencies at {BUNDLED_PYTHON_ROOT}", file=sys.stderr)
 
 
 def _load_cli_chat_symbol(module_name: str, filename: str, symbol: str) -> Any:

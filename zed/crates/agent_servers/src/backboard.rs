@@ -111,7 +111,7 @@ fn backboard_acp_command(mut extra_env: HashMap<String, String>) -> Result<Agent
     }
 
     let cli_root = backboard_cli_root();
-    if cli_root.exists() {
+    if env::var_os(BACKBOARD_CLI_ROOT_ENV_VAR).is_some() || cli_root.exists() {
         extra_env.insert(
             BACKBOARD_CLI_ROOT_ENV_VAR.to_owned(),
             cli_root.to_string_lossy().to_string(),
@@ -132,18 +132,47 @@ fn bridge_script_path() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    zed_root().join("script").join("backboard-ide-acp.py")
+    if let Some(resource_dir) = packaged_backboard_resource_dir() {
+        let script = resource_dir.join("backboard-ide-acp.py");
+        if script.exists() {
+            return script;
+        }
+    }
+
+    source_zed_root()
+        .join("script")
+        .join("backboard-ide-acp.py")
 }
 
 fn backboard_cli_root() -> PathBuf {
-    env::var_os(BACKBOARD_CLI_ROOT_ENV_VAR)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| zed_root().join("../..").join("cli"))
+    if let Some(path) = env::var_os(BACKBOARD_CLI_ROOT_ENV_VAR) {
+        return PathBuf::from(path);
+    }
+
+    if let Some(resource_dir) = packaged_backboard_resource_dir() {
+        let cli_root = resource_dir.join("cli");
+        if cli_root.join("backboard_cli").is_dir() {
+            return cli_root;
+        }
+    }
+
+    source_zed_root().join("../..").join("cli")
 }
 
 fn backboard_python() -> PathBuf {
     if let Some(path) = env::var_os(BACKBOARD_IDE_PYTHON_ENV_VAR) {
         return PathBuf::from(path);
+    }
+
+    if let Some(resource_dir) = packaged_backboard_resource_dir() {
+        for candidate in [
+            resource_dir.join("python").join("bin").join("python3"),
+            resource_dir.join("python").join("bin").join("python"),
+        ] {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
     }
 
     if let Some(cli_path) = env::var_os(BACKBOARD_CLI_PATH_ENV_VAR) {
@@ -179,7 +208,17 @@ fn backboard_python() -> PathBuf {
     PathBuf::from("python3")
 }
 
-fn zed_root() -> PathBuf {
+fn packaged_backboard_resource_dir() -> Option<PathBuf> {
+    let exe = env::current_exe().ok()?;
+    let resource_dir = macos_backboard_resource_dir_from_exe(&exe)?;
+    resource_dir.exists().then_some(resource_dir)
+}
+
+fn macos_backboard_resource_dir_from_exe(exe: &Path) -> Option<PathBuf> {
+    Some(exe.parent()?.parent()?.join("Resources").join("backboard"))
+}
+
+fn source_zed_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
@@ -191,5 +230,16 @@ mod tests {
     fn resolves_default_backboard_paths_from_zed_checkout() {
         assert!(bridge_script_path().ends_with("script/backboard-ide-acp.py"));
         assert!(backboard_cli_root().ends_with("cli"));
+    }
+
+    #[test]
+    fn resolves_packaged_backboard_resource_dir_from_macos_executable() {
+        let exe = Path::new("/Applications/Backboard Studio.app/Contents/MacOS/zed");
+        let resource_dir = macos_backboard_resource_dir_from_exe(exe).unwrap();
+
+        assert_eq!(
+            resource_dir,
+            Path::new("/Applications/Backboard Studio.app/Contents/Resources/backboard")
+        );
     }
 }

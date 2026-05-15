@@ -150,8 +150,8 @@ Upload the release artifact, not the repository.
 For macOS, the intended artifact is a DMG:
 
 ```txt
-ide/zed/target/aarch64-apple-darwin/release/Zed-aarch64.dmg
-ide/zed/target/x86_64-apple-darwin/release/Zed-x86_64.dmg
+ide/zed/target/aarch64-apple-darwin/release/Backboard-Studio-aarch64.dmg
+ide/zed/target/x86_64-apple-darwin/release/Backboard-Studio-x86_64.dmg
 ```
 
 For Linux, the intended artifact is a compressed archive:
@@ -183,7 +183,7 @@ Intel:
 ./script/bundle-mac x86_64-apple-darwin
 ```
 
-The script builds release binaries, creates the `.app` bundle, then creates a compressed `.dmg`.
+The script builds release binaries, creates the `.app` bundle, stages the Backboard ACP bridge and CLI runtime into app resources, then creates a compressed `.dmg`.
 
 The upstream release workflow uses the same bundle script:
 
@@ -254,7 +254,11 @@ Backboard Studio.app/
         cli/
           backboard_cli/
           pyproject.toml
+          requirements.txt
+          setup.py
           ...
+        python/
+          ... Python packages installed from `cli/pyproject.toml`
 ```
 
 Then update the Rust bridge resolution so packaged builds look in app resources first:
@@ -263,7 +267,9 @@ Then update the Rust bridge resolution so packaged builds look in app resources 
 2. Check packaged resource paths under `Contents/Resources/backboard/`.
 3. Fall back to the development repo layout.
 
-This preserves local development while making the downloaded app self-contained.
+This preserves local development while making the downloaded app self-contained. End users who download the signed/notarized DMG do not need Xcode or Rust; only the release builder needs full Xcode, Python 3.11+, and the packaging toolchain.
+
+The macOS bundle script installs the Backboard CLI Python dependencies into `Contents/Resources/backboard/python` by default. Set `BACKBOARD_BUNDLE_PYTHON_DEPS=0` only for local debugging builds where those dependencies are already available on the launch interpreter.
 
 ## Alternative Packaging Strategy
 
@@ -332,6 +338,8 @@ For macOS production releases, also handle:
 - stapling
 - branded app name/icon/bundle id
 - update feed / release metadata
+
+End users do not need Xcode to install or run a completed release artifact. Xcode is only required on the machine that compiles, signs, notarizes, and packages the DMG.
 
 ## Practical Next Tasks
 

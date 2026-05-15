@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-source script/lib/blob-store.sh
+if [[ -f script/lib/blob-store.sh ]]; then
+    source script/lib/blob-store.sh
+fi
 
 build_flag="--release"
 target_dir="release"
@@ -188,6 +190,39 @@ function download_git() {
     rm -rf "$tmp_dir"
 }
 
+function bundle_backboard_runtime() {
+    local app_bundle_path=$1
+    local backboard_resources="${app_bundle_path}/Contents/Resources/backboard"
+    local backboard_cli_resources="${backboard_resources}/cli"
+    local backboard_python_resources="${backboard_resources}/python"
+    local python_bin="${BACKBOARD_IDE_PYTHON:-python3}"
+
+    echo "Bundling Backboard IDE bridge and CLI runtime"
+    rm -rf "${backboard_resources}"
+    mkdir -p "${backboard_cli_resources}"
+
+    cp script/backboard-ide-acp.py "${backboard_resources}/backboard-ide-acp.py"
+
+    rsync -a --delete \
+        --exclude '__pycache__' \
+        --exclude '*.pyc' \
+        --exclude '.DS_Store' \
+        ../../cli/backboard_cli "${backboard_cli_resources}/"
+
+    for file in pyproject.toml requirements.txt setup.py; do
+        if [[ -f "../../cli/${file}" ]]; then
+            cp "../../cli/${file}" "${backboard_cli_resources}/${file}"
+        fi
+    done
+
+    if [[ "${BACKBOARD_BUNDLE_PYTHON_DEPS:-1}" != "0" ]]; then
+        echo "Bundling Backboard Python dependencies with ${python_bin}"
+        "${python_bin}" -m pip install --upgrade --target "${backboard_python_resources}" ../../cli
+    else
+        echo "Skipping Backboard Python dependency bundle because BACKBOARD_BUNDLE_PYTHON_DEPS=0"
+    fi
+}
+
 function sign_app_binaries() {
     rm -rf "${app_path}/Contents/Frameworks"
     mkdir -p "${app_path}/Contents/Frameworks"
@@ -245,7 +280,7 @@ function sign_app_binaries() {
     else
         dmg_target_directory="target/${target_triple}/${target_dir}"
         dmg_source_directory="${dmg_target_directory}/dmg"
-        dmg_file_path="${dmg_target_directory}/Zed-${arch_suffix}.dmg"
+        dmg_file_path="${dmg_target_directory}/Backboard-Studio-${arch_suffix}.dmg"
         xcode_bin_dir_path="$(xcode-select -p)/usr/bin"
 
         rm -rf ${dmg_source_directory}
@@ -257,7 +292,7 @@ function sign_app_binaries() {
         ln -s /Applications ${dmg_source_directory}
 
         echo "Creating final DMG at ${dmg_file_path} using ${dmg_source_directory}"
-        hdiutil create -volname Zed -srcfolder "${dmg_source_directory}" -ov -format UDZO "${dmg_file_path}"
+        hdiutil create -volname "Backboard Studio" -srcfolder "${dmg_source_directory}" -ov -format UDZO "${dmg_file_path}"
 
         # If someone runs this bundle script locally, a symlink will be placed in `dmg_source_directory`.
         # This symlink causes CPU issues with Zed if the Zed codebase is the project being worked on, so we simply remove it for now.
@@ -334,6 +369,7 @@ upload_debug_symbols
 
 cp target/${target_triple}/${target_dir}/zed "${app_path}/Contents/MacOS/zed"
 cp target/${target_triple}/${target_dir}/cli "${app_path}/Contents/MacOS/cli"
+bundle_backboard_runtime "${app_path}"
 sign_app_binaries
 
 sign_binary "target/$target_triple/release/remote_server"
