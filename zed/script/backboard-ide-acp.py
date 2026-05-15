@@ -6,6 +6,7 @@ Backboard CLI as a read-only agent engine, then speaks ACP JSON-RPC over stdio
 so the native Zed agent panel can render chat, tools, terminal output, and
 reviewable diffs.
 """
+# TEMP ACP file right now, we need to eventually create our own version of the "CLI" endpoints without relying on it. 
 
 from __future__ import annotations
 
@@ -26,6 +27,9 @@ from typing import Any, Awaitable, Callable
 
 
 PROTOCOL_STDOUT = sys.stdout
+# ACP JSON-RPC must be the only thing written to the original stdout stream.
+# Everything else is redirected to stderr so debug logging cannot corrupt the
+# line-delimited protocol the IDE is reading.
 sys.stdout = sys.stderr
 
 
@@ -48,6 +52,8 @@ def _find_cli_root() -> Path:
             f"{candidate}"
         )
 
+    # Prefer a colocated packaged CLI first, then fall back to walking up the
+    # source tree so local development still works without extra configuration.
     here = Path(__file__).resolve()
     bundled_candidate = here.parent / "cli"
     checked.append(bundled_candidate)
@@ -56,7 +62,7 @@ def _find_cli_root() -> Path:
         print(f"Backboard IDE ACP using bundled CLI runtime at {resolved}", file=sys.stderr)
         return resolved
 
-    for parent in here.parents:
+    for parent in here.parents: 
         candidate = parent / "cli"
         checked.append(candidate)
         if _is_cli_root(candidate):
@@ -200,6 +206,9 @@ CONTEXT_IGNORE_DIRS = {
     "vendor",
 }
 MODEL_LIST_CACHE: dict[str, Any] = {"expires_at": 0.0, "models": None}
+# The shell auto-approval path is intentionally conservative. We only whitelist
+# commands we can cheaply classify as read-only, because a mistaken allow here
+# would bypass the IDE's explicit approval UI.
 READ_ONLY_COMMANDS = {
     "cat",
     "du",
@@ -314,7 +323,7 @@ WEBSITE_REQUEST_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
-FRONTEND_STACK_FILES = (
+FRONTEND_STACK_FILES = ( 
     "index.html",
     "src/App.tsx",
     "src/App.jsx",
@@ -493,6 +502,9 @@ def _result_text(value: Any) -> str:
 
 
 def _function_payload(tool_call: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    # Tool-call payloads arrive in slightly different shapes depending on which
+    # backend emitted them. Normalize them once so the rest of the bridge can
+    # treat every tool call the same way.
     function = tool_call.get("function") or {}
     name = tool_call.get("name") or function.get("name") or tool_call.get("tool_name") or "tool"
     raw_args = tool_call.get("arguments")
@@ -593,6 +605,9 @@ def _is_read_only_shell_command(command: str) -> bool:
     if not tokens:
         return False
 
+    # Only allow a narrow single-command subset. Anything involving shell
+    # control operators, in-place flags, or non-whitelisted executables falls
+    # back to an explicit permission prompt.
     executable = Path(tokens[0]).name
     if executable not in READ_ONLY_COMMANDS:
         return False
@@ -828,6 +843,8 @@ def _session_store_lock():
     deadline = time.monotonic() + 5.0
     while fd is None:
         try:
+            # Use a simple lockfile rather than fcntl so the same mechanism
+            # works across the IDE launcher environments we care about.
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             os.write(fd, str(os.getpid()).encode("utf-8"))
         except FileExistsError:
@@ -930,6 +947,8 @@ class AcpServer:
             await self._send({"jsonrpc": JSONRPC, "id": request_id, "result": result})
 
     async def _handle_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        # ACP is a small JSON-RPC surface; keep the routing explicit so IDE
+        # behavior stays obvious when new session methods are added.
         if method == "initialize":
             return {
                 "protocolVersion": params.get("protocolVersion", 1),
@@ -1205,6 +1224,8 @@ class BackboardIdeSession:
                 "configOptions": self.config_options(),
             }
 
+        # Restoring only rebinds the IDE shell to an existing Backboard thread;
+        # the actual message transcript is replayed separately when needed.
         restored = self._restore_session_mapping()
         if not restored:
             # Treat missing persisted state as a fresh session instead of a launch failure.
@@ -1671,6 +1692,9 @@ class BackboardIdeSession:
 
     async def _augment_prompt_with_context(self, message: str, blocks: list[dict[str, Any]]) -> str:
         self.start_prewarm()
+        # Prefer the speculative prewarm result when it lands in time, but do a
+        # tiny synchronous fallback fetch so the first prompt still has enough
+        # repo context to avoid repetitive "list files" turns.
         context = dict(self._context_cache)
         if self._prewarm_task and not self._prewarm_task.done():
             with contextlib.suppress(Exception):
@@ -1697,6 +1721,8 @@ class BackboardIdeSession:
 
     async def _collect_workspace_context(self, include_semantic_query: str | None) -> dict[str, Any]:
         del include_semantic_query
+        # Gather lightweight repo hints in parallel so the model gets a compact
+        # situational snapshot without paying for a full manual repo crawl.
         tree_task = asyncio.create_task(asyncio.to_thread(self._lightweight_file_tree))
         stack_task = asyncio.create_task(asyncio.to_thread(self._workspace_stack_summary))
         rules_task = asyncio.create_task(asyncio.to_thread(self._rules_summary))
@@ -1881,6 +1907,8 @@ class BackboardIdeSession:
             if not config.api_key:
                 return False
 
+            # The IDE bridge reuses the CLI runtime pieces directly instead of
+            # reimplementing tool/MCP/subagent orchestration a second time.
             self.provider = self.provider or config.default_provider
             self.model = self.model or config.default_model
             self.api_client = BackboardAPIClient()
@@ -1925,6 +1953,8 @@ class BackboardIdeSession:
             return
 
         started = self._loop_time()
+        # We create one assistant/thread pair per IDE session and keep that
+        # mapping on disk so chat history can survive editor restarts.
         system_prompt = self._system_prompt()
         assistant = await self._api_json_request(
             "POST",
@@ -1959,6 +1989,10 @@ class BackboardIdeSession:
             with contextlib.suppress(Exception):
                 self._skill_section_cache = SkillManager(str(self.workspace)).build_prompt_section()
         system_prompt = build_system_prompt(str(self.workspace), self._tool_names_cache, self._skill_section_cache)
+
+
+        # change this bullshit prompt eventually 
+        
         system_prompt += (
             "\n\nYou are running inside Backboard IDE through Zed's native ACP panel. "
             "When editing files, use write/edit/delete tools so the IDE can show reviewable diffs. "
@@ -2076,6 +2110,9 @@ class BackboardIdeSession:
         if cached and now - cached[0] < TOOL_DEFINITION_CACHE_TTL_SECONDS:
             return cached[1]
 
+        # Tool filtering is mode-dependent, but the underlying definitions are
+        # expensive enough that a short-lived per-mode cache keeps the bridge
+        # noticeably snappier.
         tools = self.tool_system.get_tool_definitions()
         if self.mode == "ask":
             blocked = ASK_BLOCKED_TOOLS
@@ -2130,6 +2167,9 @@ class BackboardIdeSession:
             if self.cancel_event.is_set():
                 return "cancelled"
 
+            # The API emits a mixed event stream: model lifecycle, reasoning,
+            # assistant text deltas, and tool handoffs. We translate each chunk
+            # into ACP session updates as they arrive.
             chunk_type = chunk.get("type")
             if chunk_type == "run_started":
                 self.current_run_id = chunk.get("run_id") or chunk.get("id") or self.current_run_id
@@ -2210,6 +2250,8 @@ class BackboardIdeSession:
         index = 0
         while index < len(tool_calls):
             if self._is_parallel_read_only_tool_call(tool_calls[index]):
+                # Consecutive read/search tools can run together because they do
+                # not mutate files, shell state, or MCP side effects.
                 read_group = []
                 while index < len(tool_calls) and self._is_parallel_read_only_tool_call(tool_calls[index]):
                     read_group.append(tool_calls[index])
@@ -2373,6 +2415,8 @@ class BackboardIdeSession:
             await self._tool_call(tool_id, self._tool_title(name, args), _tool_kind(name), "failed", [_content_item(str(exc))], args)
             return {"success": False, "error": str(exc)}
 
+        # Send the proposed before/after payload through ACP first so the IDE
+        # can render it as a reviewable diff instead of opaque tool output.
         diff = _diff_item(path, old_text, new_text)
         title = self._tool_title(name, args)
         await self._emit_progress(
@@ -2518,6 +2562,8 @@ class BackboardIdeSession:
         timeout_s = max(float(timeout_ms) / 1000, 0.1)
         is_dev_server = _is_dev_server_command(command)
 
+        # Mirror the user's shell closely, but prepend Backboard's private bin
+        # so packaged helper commands remain available inside the IDE.
         env = os.environ.copy()
         backboard_bin = Path.home() / ".backboard" / "bin"
         env["PATH"] = f"{backboard_bin}{os.pathsep}{env.get('PATH', '')}"
@@ -2558,6 +2604,9 @@ class BackboardIdeSession:
                 data = "".join(pending_terminal)
                 pending_terminal.clear()
                 last_terminal_update = now
+            # Stream incremental terminal chunks to the UI, but keep the tool
+            # card content itself bounded so very noisy commands do not blow up
+            # the session payload size.
             content = _truncate("".join(stdout_parts + stderr_parts), TERMINAL_UPDATE_MAX_CHARS)
             meta = {"terminal_output": {"terminal_id": terminal_id, "data": data}} if data else None
             await self._tool_update(tool_id, "in_progress", [_content_item(content)], meta=meta)
@@ -2605,6 +2654,10 @@ class BackboardIdeSession:
                     await self._terminate_process(proc, force=True)
                     break
                 if proc.returncode is not None:
+                    # Dev servers are treated specially: once the process looks
+                    # alive long enough to emit startup logs, the timeout path
+                    # becomes a "startup window complete" success rather than a
+                    # normal command failure.
                     if not is_dev_server or all(task.done() for task in pumps):
                         break
                 await asyncio.sleep(0.05)
