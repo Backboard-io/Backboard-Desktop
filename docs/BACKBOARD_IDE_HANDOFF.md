@@ -39,6 +39,157 @@ Rule of thumb:
 - If the issue is "the IDE did not render the thing", inspect `acp_thread` storage first, then `conversation_view/thread_view.rs`.
 - If the issue is "Agent Workspace applied/reviewed wrong", inspect `agent_panel.rs` worktree/run metadata before the page view.
 
+## Native Rust Runtime Migration Status (2026-05-16)
+
+This section reflects the current working tree after the native runtime migration. It supersedes older sections in this document that describe the Python ACP bridge as the active Backboard IDE chat path. Those older sections are still useful as branch history and as reference for the behavior that was ported.
+
+### Runtime Routing
+
+- `ide/zed/crates/agent_servers/src/backboard.rs` now returns `BackboardNativeConnection` directly from `BackboardAgentServer::connect`.
+- The active Backboard IDE chat path is now: Zed Rust agent UI/runtime -> `agent_servers/src/backboard_native/*` -> `backboard` Rust endpoint client -> Backboard HTTP API -> Rust-native tool execution.
+- The active path no longer launches `ide/zed/script/backboard-ide-acp.py`.
+- The active path no longer imports or shells through `cli/backboard_cli/`.
+- `ide/zed/script/backboard-ide-acp.py` still exists in the repository as a reference/historical bridge, but it is not the default runtime.
+- Generic ACP infrastructure remains in place for other/custom ACP agents. `AcpThread` also remains the internal chat/thread UI model for Backboard because it owns tool cards, diffs, terminals, approvals, token usage, history, and rendering.
+- `ide/zed/script/bundle-mac` no longer copies the Backboard Python bridge or CLI resources into the app bundle. It writes native runtime metadata under `Contents/Resources/backboard/runtime.txt`.
+
+### New Native Runtime Modules
+
+New runtime code lives under `ide/zed/crates/agent_servers/src/backboard_native/`:
+
+- `mod.rs`: `BackboardNativeConnection`, session lifecycle, modes, config options, model selector, cancellation, assistant/thread binding, and session list integration.
+- `stream.rs`: prompt handling, Backboard SSE translation, history replay, tool-output continuation, usage/context-window parsing, provider-shaped thinking payloads, and Tokio wrapping for HTTP/SSE futures.
+- `tools.rs`: Rust-native execution for advertised IDE tools, tool batching, file edits, terminal cards, permission prompts, shell timeout enforcement, and compressed read/search outputs.
+- `tool_schemas.rs`: tool schemas filtered by mode (`agent`, `ask`, `manual`, `free`).
+- `workspace.rs`: system prompt and lightweight workspace prompt augmentation.
+- `session_store.rs`: persisted IDE session/thread mappings in `~/.backboard/ide_sessions.json`.
+
+The runtime keeps the existing user-facing modes:
+
+- `agent`: autonomous read/edit/shell/tool flow.
+- `ask`: read/search/explain only; mutating and shell tools are hidden/blocked.
+- `manual`: focused edit proposals; shell tools are hidden/blocked.
+- `free`: shell tools can run without approval prompts.
+
+### Rust Endpoint Client Work
+
+The `backboard` crate remains the Rust HTTP client source for IDE runtime calls. Endpoint modules live under `ide/zed/crates/backboard/src/endpoints/`, with `[lib] path = "src/backboard.rs"` preserved.
+
+Important runtime-used endpoint methods:
+
+- `list_models(None, Some("llm"), Some(250))`
+- `create_assistant(CreateAssistantRequest { ... })`
+- `create_thread(&assistant_id)`
+- `get_thread(&thread_id)`
+- `send_message_stream(&thread_id, SendMessageRequest { ... })`
+- `submit_tool_outputs_stream(&thread_id, &run_id, SubmitToolOutputsRequest { ... })`
+- `cancel_run(&thread_id, &run_id)`
+
+The Rust SSE endpoint layer now preserves the old Python client's important retry invariant:
+
+- Retry transient request/setup failures before any SSE chunk has been yielded.
+- Do not retry after a real SSE chunk has been yielded, because replaying the POST can duplicate user messages or corrupt run/tool state.
+- Retry chunks are still emitted as `{"type": "retry", ...}` so the native stream translator can show progress.
+
+HTTP/SSE futures must run on Tokio. The native runtime wraps Backboard network calls with `gpui_tokio::Tokio::spawn_result`; GPUI remains responsible for UI updates and `AcpThread` mutations.
+
+### Stream And Usage Mapping
+
+The native stream translator handles these Backboard chunk types:
+
+- `run_started`
+- `reasoning_started`
+- `reasoning_streaming`
+- `reasoning_delta`
+- `reasoning_ended`
+- `content_streaming`
+- `tool_submit_required`
+- `run_ended`
+- `run_failed`
+- `error`
+- `retry`
+
+Important fixes already made:
+
+- Fast intensity now omits `thinking` entirely instead of sending `{"enabled": false}`. The server rejects the `enabled` key.
+- Balanced/deep thinking now uses provider-shaped payloads, such as `effort`, `budget_tokens`, or `max_tokens`.
+- `run_ended.context_usage` is now parsed as the authoritative context-window source. This fixes the broken `102k / 0 tokens` display.
+- Usage metadata now carries input tokens, output tokens, remaining tokens, summary tokens, context percent, context model, and optional max output tokens.
+- `AcpThread` now copies those usage metadata fields into `TokenUsage`.
+- `agent_ui/src/conversation_view/thread_view.rs` now shows more context-window tooltip stats, including Remaining, Summary, and Context model.
+
+### Rust-Native Tool Layer
+
+Advertised and implemented native tools:
+
+- Read/search: `read_file`, `list_dir`, `glob`, `grep`, `codebase_search`, `read_lints`.
+- Mutating files: `write`, `edit`, `search_replace`, `delete_file`, `create_directory`.
+- Shell: `bash`, `run_terminal_cmd`.
+- Flow: `todo_write`.
+
+Tool behavior:
+
+- Read/search tools can batch in parallel.
+- Read/search outputs are compressed before being sent back to the model.
+- Existing-file writes use `AcpThread::write_text_file` so Zed owns buffers, diffs, action log, and saves.
+- New files and deletes currently use direct filesystem operations plus ACP diff/tool updates.
+- Shell output is routed into display-only terminal cards through `TerminalProviderEvent`.
+- Shell commands are classified conservatively for read-only auto-approval. Package-manager scripts, shell operators, `git pull/reset/push`, `sed -i`, mutating curl, and similar commands still require approval unless Free mode is active.
+- Shell timeouts are enforced by spawning, polling, killing on timeout, and reporting timeout text in stderr/output.
+
+### Logging Added For Verification
+
+The native path now logs explicit markers so runtime routing can be verified from app logs:
+
+- `Backboard IDE runtime: using native Rust AgentConnection, not Python ACP/CLI bridge`
+- `Backboard native runtime initialized; Python ACP/CLI bridge is not in the active path`
+- `Backboard native prompt start: ... path=rust-native`
+- `Backboard native endpoint call: POST /threads/{thread_id}/messages?stream=true ...`
+- `Backboard native endpoint call: POST /threads/{thread_id}/runs/{run_id}/submit-tool-outputs?stream=true ...`
+- `Backboard native endpoint call: GET /threads/{thread_id} ... path=rust-native`
+- `Backboard native endpoint call: POST /assistants then POST /assistants/{assistant_id}/threads ...`
+- `Backboard native endpoint call: GET /models?model_type=llm&limit=250 ...`
+- `Backboard native endpoint call: POST /threads/{thread_id}/runs/{run_id}/cancel ...`
+
+If the old bridge is active, these native markers will be absent and process/log output will reference Python ACP/CLI startup instead.
+
+### ACP Thread And UI Infrastructure Fixes
+
+- `acp_thread/src/acp_thread.rs` now treats `std::io::ErrorKind::NotFound` during checkpoint creation as "no checkpoint available" instead of logging `failed to get old checkpoint`.
+- Real checkpoint failures still log.
+- `TokenUsage` now has optional fields for remaining/context/summary/model details.
+- `thread_view.rs` renders additional context-window tooltip rows.
+- Tests and native-agent token usage constructors were updated for the expanded `TokenUsage` struct.
+
+### Verification Already Run
+
+Recent checks run during the migration/debug pass:
+
+- `cargo check -p backboard`
+- `cargo check -p backboard_ui`
+- `cargo check -p acp_thread`
+- `cargo check -p agent_servers`
+- `cargo check -p agent`
+- `cargo check -p agent_ui`
+- `cargo test -p agent_servers backboard_native --lib`
+- `cargo test -p backboard --lib`
+
+Current native unit coverage includes:
+
+- Tool schema filtering for Ask mode.
+- Conservative read-only shell classification.
+- Fast intensity omitting thinking payload.
+- Provider-shaped thinking payloads without `enabled`.
+- Parsing authoritative `context_usage` from Backboard `run_ended` chunks.
+
+### Known Follow-Up Areas
+
+- Live IDE/API manual verification is still useful: send a prompt, inspect logs for `path=rust-native`, run a read tool, run an approved shell command, create/edit a file, cancel a turn, and restore a thread.
+- The Rust-native `read_lints` tool is currently a lightweight placeholder message, not full diagnostics integration.
+- `codebase_search` is a lexical fallback, not the full CLI semantic index/RLM path.
+- MCP, browser, web fetch/search, RLM/subagents, notebook tools, and the CLI's richer skill system are not fully ported into the Rust-native tool layer.
+- Older sections below still describe the Python bridge as the active path. Treat them as historical/reference until the whole handoff doc is rewritten around the native runtime.
+
 ## Branch History
 
 Branch range audited:
