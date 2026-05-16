@@ -1756,6 +1756,10 @@ impl Thread {
             used_tokens: usage.total_tokens(),
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
+            remaining_tokens: None,
+            summary_tokens: None,
+            context_percent: None,
+            context_model: None,
         })
     }
 

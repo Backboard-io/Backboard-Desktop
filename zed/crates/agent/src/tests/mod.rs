@@ -3056,6 +3056,10 @@ async fn test_truncate_first_message(cx: &mut TestAppContext) {
                 max_output_tokens: None,
                 input_tokens: 32_000,
                 output_tokens: 16_000,
+                remaining_tokens: None,
+                summary_tokens: None,
+                context_percent: None,
+                context_model: None,
             })
         );
     });
@@ -3118,6 +3122,10 @@ async fn test_truncate_first_message(cx: &mut TestAppContext) {
                 max_output_tokens: None,
                 input_tokens: 40_000,
                 output_tokens: 20_000,
+                remaining_tokens: None,
+                summary_tokens: None,
+                context_percent: None,
+                context_model: None,
             })
         );
     });
@@ -3169,6 +3177,10 @@ async fn test_truncate_second_message(cx: &mut TestAppContext) {
                     max_output_tokens: None,
                     input_tokens: 32_000,
                     output_tokens: 16_000,
+                    remaining_tokens: None,
+                    summary_tokens: None,
+                    context_percent: None,
+                    context_model: None,
                 })
             );
         });
@@ -3226,6 +3238,10 @@ async fn test_truncate_second_message(cx: &mut TestAppContext) {
                 max_output_tokens: None,
                 input_tokens: 40_000,
                 output_tokens: 20_000,
+                remaining_tokens: None,
+                summary_tokens: None,
+                context_percent: None,
+                context_model: None,
             })
         );
     });

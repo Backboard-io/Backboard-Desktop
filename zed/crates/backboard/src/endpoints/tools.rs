@@ -5,7 +5,7 @@ use futures::Stream;
 use serde_json::Value;
 
 use super::{BackboardClient, SubmitToolOutputsRequest, routes};
-use crate::endpoints::stream::sse_json_stream;
+use crate::endpoints::stream::retrying_sse_json_stream;
 
 impl BackboardClient {
     pub async fn submit_tool_outputs(
@@ -29,14 +29,15 @@ impl BackboardClient {
         run_id: &str,
         request: SubmitToolOutputsRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<Value>> + Send>>> {
-        let response = self
-            .client
-            .post(self.url(&routes::run_submit_tool_outputs_stream(thread_id, run_id)))
-            .headers(self.json_headers()?)
-            .body(serde_json::to_vec(&request)?)
-            .send()
-            .await?;
-        let response = self.ensure_success(response).await?;
-        Ok(Box::pin(sse_json_stream(response)))
+        let client = self.client.clone();
+        let url = self.url(&routes::run_submit_tool_outputs_stream(thread_id, run_id));
+        let headers = self.json_headers()?;
+        let body = serde_json::to_vec(&request)?;
+        Ok(retrying_sse_json_stream(move || {
+            client
+                .post(url.clone())
+                .headers(headers.clone())
+                .body(body.clone())
+        }))
     }
 }

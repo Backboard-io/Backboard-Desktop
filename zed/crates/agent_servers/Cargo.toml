@@ -6,7 +6,7 @@ publish.workspace = true
 license = "GPL-3.0-or-later"
 
 [features]
-test-support = ["acp_thread/test-support", "gpui/test-support", "project/test-support", "dep:env_logger", "client/test-support", "dep:gpui_tokio", "reqwest_client/test-support"]
+test-support = ["acp_thread/test-support", "gpui/test-support", "project/test-support", "dep:env_logger", "client/test-support", "reqwest_client/test-support"]
 e2e = []
 
 [lints]
@@ -31,8 +31,9 @@ fs.workspace = true
 futures.workspace = true
 gpui.workspace = true
 feature_flags.workspace = true
-gpui_tokio = { workspace = true, optional = true }
+gpui_tokio.workspace = true
 google_ai.workspace = true
+globset.workspace = true
 http_client.workspace = true
 indoc.workspace = true
 language_model.workspace = true
@@ -41,6 +42,7 @@ project.workspace = true
 release_channel.workspace = true
 remote.workspace = true
 reqwest_client = { workspace = true, optional = true }
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 settings.workspace = true
@@ -51,6 +53,7 @@ ui.workspace = true
 terminal.workspace = true
 uuid.workspace = true
 util.workspace = true
+walkdir.workspace = true
 watch.workspace = true
 zed_credentials_provider.workspace = true
 

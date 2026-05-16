@@ -84,8 +84,8 @@ pub use thread_import::{
     channels_with_threads, import_threads_from_other_channels,
 };
 use zed_actions;
-pub use zed_actions::{CreateWorktree, NewWorktreeBranchTarget, SwitchWorktree};
 use zed_actions::agents_sidebar::ToggleThreadSwitcher;
+pub use zed_actions::{CreateWorktree, NewWorktreeBranchTarget, SwitchWorktree};
 
 pub const DEFAULT_THREAD_TITLE: &str = "Backboard Thread";
 const PARALLEL_AGENT_LAYOUT_BACKFILL_KEY: &str = "parallel_agent_layout_backfilled";
@@ -519,10 +519,8 @@ pub fn init(
                     multi_workspace.update(cx, |multi_workspace, cx| {
                         multi_workspace.open_sidebar(cx);
                     });
-                    window.dispatch_action(
-                        Box::new(ToggleThreadSwitcher { select_last: false }),
-                        cx,
-                    );
+                    window
+                        .dispatch_action(Box::new(ToggleThreadSwitcher { select_last: false }), cx);
                 } else if let Some(multi_workspace) = workspace
                     .multi_workspace()
                     .and_then(|handle| handle.upgrade())
@@ -530,10 +528,8 @@ pub fn init(
                     multi_workspace.update(cx, |multi_workspace, cx| {
                         multi_workspace.open_sidebar(cx);
                     });
-                    window.dispatch_action(
-                        Box::new(ToggleThreadSwitcher { select_last: false }),
-                        cx,
-                    );
+                    window
+                        .dispatch_action(Box::new(ToggleThreadSwitcher { select_last: false }), cx);
                 }
             },
         );

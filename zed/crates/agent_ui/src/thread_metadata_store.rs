@@ -99,10 +99,7 @@ fn migrate_backboard_archived_threads(cx: &mut App) {
     let db = store.read(cx).db.clone();
     let kvp = KeyValueStore::global(cx);
     cx.spawn(async move |cx| -> anyhow::Result<()> {
-        if kvp
-            .read_kvp(THREAD_BACKBOARD_ARCHIVE_RESCUE_KEY)?
-            .is_some()
-        {
+        if kvp.read_kvp(THREAD_BACKBOARD_ARCHIVE_RESCUE_KEY)?.is_some() {
             return Ok(());
         }
 

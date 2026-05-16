@@ -63,6 +63,14 @@ pub fn meta_with_tool_name(tool_name: &str) -> acp::Meta {
     acp::Meta::from_iter([(TOOL_NAME_META_KEY.into(), tool_name.into())])
 }
 
+fn is_not_found_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    })
+}
+
 /// Key used in ACP ToolCall meta to store the session id and message indexes
 pub const SUBAGENT_SESSION_INFO_META_KEY: &str = "subagent_session_info";
 
@@ -999,6 +1007,10 @@ pub struct TokenUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub max_output_tokens: Option<u64>,
+    pub remaining_tokens: Option<u64>,
+    pub summary_tokens: Option<u64>,
+    pub context_percent: Option<u64>,
+    pub context_model: Option<SharedString>,
 }
 
 #[derive(Debug, Clone)]
@@ -1616,6 +1628,29 @@ impl AcpThread {
                 let usage = self.token_usage.get_or_insert_with(Default::default);
                 usage.max_tokens = update.size;
                 usage.used_tokens = update.used;
+                if let Some(meta) = &update.meta {
+                    if let Some(input_tokens) = integer_field(meta, "input_tokens") {
+                        usage.input_tokens = input_tokens;
+                    }
+                    if let Some(output_tokens) = integer_field(meta, "output_tokens") {
+                        usage.output_tokens = output_tokens;
+                    }
+                    if let Some(max_output_tokens) = integer_field(meta, "max_output_tokens") {
+                        usage.max_output_tokens = Some(max_output_tokens);
+                    }
+                    if let Some(remaining_tokens) = integer_field(meta, "remaining_tokens") {
+                        usage.remaining_tokens = Some(remaining_tokens);
+                    }
+                    if let Some(summary_tokens) = integer_field(meta, "summary_tokens") {
+                        usage.summary_tokens = Some(summary_tokens);
+                    }
+                    if let Some(context_percent) = integer_field(meta, "context_percent") {
+                        usage.context_percent = Some(context_percent.min(100));
+                    }
+                    if let Some(context_model) = string_field(meta, "context_model") {
+                        usage.context_model = Some(context_model);
+                    }
+                }
                 if let Some(cost) = update.cost {
                     self.cost = Some(SessionCost {
                         amount: cost.amount,
@@ -2428,11 +2463,18 @@ impl AcpThread {
             })
             .ok();
 
-            let old_checkpoint = git_store
+            let old_checkpoint = match git_store
                 .update(cx, |git, cx| git.checkpoint(cx))
                 .await
                 .context("failed to get old checkpoint")
-                .log_err();
+            {
+                Ok(checkpoint) => Some(checkpoint),
+                Err(error) if is_not_found_error(&error) => None,
+                Err(error) => {
+                    log::error!("{error:?}");
+                    None
+                }
+            };
             this.update(cx, |this, cx| {
                 if let Some((_ix, message)) = this.last_user_message() {
                     message.checkpoint = old_checkpoint.map(|git_checkpoint| Checkpoint {
@@ -2736,12 +2778,14 @@ impl AcpThread {
 
         let new_checkpoint = git_store.update(cx, |git, cx| git.checkpoint(cx));
         cx.spawn(async move |this, cx| {
-            let Some(new_checkpoint) = new_checkpoint
-                .await
-                .context("failed to get new checkpoint")
-                .log_err()
-            else {
-                return Ok(());
+            let new_checkpoint = match new_checkpoint.await.context("failed to get new checkpoint")
+            {
+                Ok(checkpoint) => checkpoint,
+                Err(error) if is_not_found_error(&error) => return Ok(()),
+                Err(error) => {
+                    log::error!("{error:?}");
+                    return Ok(());
+                }
             };
 
             let equal = git_store

@@ -5,7 +5,7 @@ use futures::Stream;
 use serde_json::{Value, json};
 
 use super::{BackboardClient, SendMessageRequest, routes};
-use crate::endpoints::stream::{message_form, sse_json_stream};
+use crate::endpoints::stream::{message_form, retrying_sse_json_stream};
 
 impl BackboardClient {
     pub async fn create_thread(&self, assistant_id: &str) -> Result<Value> {
@@ -57,15 +57,16 @@ impl BackboardClient {
         thread_id: &str,
         request: SendMessageRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<Value>> + Send>>> {
-        let response = self
-            .client
-            .post(self.url(&routes::thread_messages(thread_id)))
-            .header("X-API-Key", self.api_key_header()?)
-            .form(&message_form(request, true)?)
-            .send()
-            .await?;
-        let response = self.ensure_success(response).await?;
-        Ok(Box::pin(sse_json_stream(response)))
+        let client = self.client.clone();
+        let url = self.url(&routes::thread_messages(thread_id));
+        let api_key = self.api_key_header()?;
+        let form = message_form(request, true)?;
+        Ok(retrying_sse_json_stream(move || {
+            client
+                .post(url.clone())
+                .header("X-API-Key", api_key.clone())
+                .form(&form)
+        }))
     }
 
     pub async fn cancel_run(&self, thread_id: &str, run_id: &str) -> Result<bool> {

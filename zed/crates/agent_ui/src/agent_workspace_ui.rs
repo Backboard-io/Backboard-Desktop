@@ -2611,6 +2611,10 @@ mod tests {
             input_tokens: 1000,
             output_tokens: 234,
             max_output_tokens: Some(2000),
+            remaining_tokens: Some(6766),
+            summary_tokens: Some(0),
+            context_percent: Some(15),
+            context_model: Some("backboard/backboard-test-model".into()),
         });
         summary.speed_metrics = Some(acp_thread::SpeedMetrics {
             first_token_ms: Some(321.0),

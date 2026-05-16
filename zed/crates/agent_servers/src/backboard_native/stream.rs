@@ -1,0 +1,704 @@
+use std::pin::Pin;
+use std::rc::Rc;
+
+use ::backboard::{SendMessageRequest, SubmitToolOutputsRequest};
+use acp_thread::{AcpThread, UserMessageId};
+use agent_client_protocol::schema as acp;
+use anyhow::{Context as _, Result, anyhow};
+use futures::{Stream, StreamExt as _};
+use gpui::{AsyncApp, WeakEntity};
+use serde_json::{Value, json};
+
+use super::{
+    BackboardNativeState, HISTORY_REPLAY_MAX_MESSAGES, SessionRuntime, missing_api_key_message,
+};
+use crate::backboard_native::{tool_schemas, tools, workspace};
+
+pub async fn run_prompt(
+    state: Rc<BackboardNativeState>,
+    _user_message_id: UserMessageId,
+    params: acp::PromptRequest,
+    cx: &mut AsyncApp,
+) -> Result<acp::PromptResponse> {
+    let runtime = state.runtime_for_session(&params.session_id)?;
+    log::info!(
+        "Backboard native prompt start: session_id={} provider={} model={} mode={} intensity={} path=rust-native",
+        params.session_id,
+        runtime.provider,
+        runtime.model,
+        runtime.mode,
+        runtime.intensity
+    );
+    runtime
+        .cancel_flag
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+
+    let message = prompt_text(&params.prompt);
+    if message.trim().is_empty() {
+        emit_agent_text(
+            &state,
+            &runtime,
+            "Give me a prompt and I will work from the current workspace.",
+            cx,
+        )?;
+        return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
+    }
+
+    emit_progress(
+        &state,
+        &runtime,
+        "Preparing workspace context and tools.",
+        cx,
+    )?;
+
+    let (config, client) = match state.client() {
+        Ok(parts) => parts,
+        Err(_) => {
+            emit_agent_text(&state, &runtime, &missing_api_key_message(), cx)?;
+            return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
+        }
+    };
+
+    let thread_id = state
+        .clone()
+        .ensure_thread_binding(&params.session_id, cx)
+        .await?;
+    let provider = Some(runtime.provider.clone());
+    let model = Some(runtime.model.clone());
+    let tools = Some(tool_schemas::tool_definitions(&runtime.mode.to_string()));
+    let thinking = thinking_payload(&runtime.intensity, &runtime.provider, &runtime.model);
+    let augmented =
+        workspace::augment_prompt(&message, &runtime.workspace, &runtime.mode.to_string());
+
+    emit_progress(
+        &state,
+        &runtime,
+        "Sending the task to the selected model.",
+        cx,
+    )?;
+
+    let request = SendMessageRequest {
+        content: augmented,
+        provider,
+        model,
+        memory: "Auto".to_string(),
+        thinking,
+        tools,
+        web_search: "off".to_string(),
+        max_tokens: None,
+    };
+    let thread_id_for_request = thread_id.clone();
+    log::info!(
+        "Backboard native endpoint call: POST /threads/{{thread_id}}/messages?stream=true session_id={} thread_id={} provider={} model={}",
+        params.session_id,
+        thread_id_for_request,
+        runtime.provider,
+        runtime.model
+    );
+    let stream = gpui_tokio::Tokio::spawn_result(cx, async move {
+        client
+            .send_message_stream(&thread_id_for_request, request)
+            .await
+    })
+    .await?;
+
+    let stop = consume_stream(state, runtime, thread_id, stream, cx).await?;
+    if config.default_model.is_none() || config.default_provider.is_none() {
+        // The API call succeeded using the configured/fallback model. Do not
+        // force-write defaults here; selecting a model in the UI owns config persistence.
+    }
+    Ok(acp::PromptResponse::new(stop))
+}
+
+pub async fn replay_history(
+    state: Rc<BackboardNativeState>,
+    session_id: &acp::SessionId,
+    thread: WeakEntity<AcpThread>,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let Some(thread_id) = state.session_thread_id(session_id) else {
+        return Ok(());
+    };
+    log::info!(
+        "Backboard native endpoint call: GET /threads/{{thread_id}} session_id={} thread_id={} path=rust-native",
+        session_id,
+        thread_id
+    );
+    let (_config, client) = match state.client() {
+        Ok(parts) => parts,
+        Err(_) => return Ok(()),
+    };
+    let data =
+        gpui_tokio::Tokio::spawn_result(cx, async move { client.get_thread(&thread_id).await })
+            .await?;
+    let messages = data
+        .get("messages")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let start = messages.len().saturating_sub(HISTORY_REPLAY_MAX_MESSAGES);
+
+    for message in messages.into_iter().skip(start) {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let text = message
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if text.is_empty() {
+            continue;
+        }
+        let update = match role {
+            "user" => acp::SessionUpdate::UserMessageChunk(acp::ContentChunk::new(
+                acp::ContentBlock::from(strip_ide_context(text)),
+            )),
+            "assistant" => acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+                acp::ContentBlock::from(strip_ide_context(text)),
+            )),
+            _ => continue,
+        };
+        thread
+            .update(cx, |thread, cx| thread.handle_session_update(update, cx))
+            .map_err(|err| anyhow!(err))?
+            .map_err(|err| anyhow!("{err:?}"))?;
+    }
+
+    Ok(())
+}
+
+async fn consume_stream(
+    state: Rc<BackboardNativeState>,
+    runtime: SessionRuntime,
+    thread_id: String,
+    mut stream: Pin<Box<dyn Stream<Item = Result<Value>> + Send>>,
+    cx: &mut AsyncApp,
+) -> Result<acp::StopReason> {
+    loop {
+        let mut next_stream = None;
+
+        while let Some((chunk, returned_stream)) = next_stream_chunk(stream, cx).await? {
+            stream = returned_stream;
+            if runtime
+                .cancel_flag
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return Ok(acp::StopReason::Cancelled);
+            }
+
+            let chunk = chunk?;
+            match chunk
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+            {
+                "run_started" => {
+                    let run_id = chunk
+                        .get("run_id")
+                        .or_else(|| chunk.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    state.set_current_run_id(&runtime.session_id, run_id);
+                    emit_progress(&state, &runtime, "Backboard connected to the model.", cx)?;
+                }
+                "reasoning_started" => {
+                    emit_progress(&state, &runtime, "Backboard is planning the next step.", cx)?;
+                }
+                "reasoning_streaming" | "reasoning_delta" => {
+                    if let Some(text) = chunk_text(&chunk) {
+                        state.emit_update(
+                            &runtime,
+                            acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(
+                                acp::ContentBlock::from(text),
+                            )),
+                            cx,
+                        )?;
+                    }
+                }
+                "reasoning_ended" => {}
+                "content_streaming" => {
+                    if let Some(text) = chunk_text(&chunk) {
+                        emit_agent_text(&state, &runtime, &text, cx)?;
+                    }
+                }
+                "tool_submit_required" => {
+                    let run_id = chunk
+                        .get("run_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .or_else(|| {
+                            state
+                                .sessions
+                                .borrow()
+                                .get(&runtime.session_id)
+                                .and_then(|session| session.current_run_id.clone())
+                        })
+                        .context("tool_submit_required did not include a run id")?;
+                    let tool_calls = chunk
+                        .get("tool_calls")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    next_stream = Some(
+                        submit_tools(state.clone(), &runtime, &thread_id, &run_id, tool_calls, cx)
+                            .await?,
+                    );
+                    break;
+                }
+                "run_ended" => {
+                    if chunk.get("status").and_then(Value::as_str) == Some("requires_action")
+                        && chunk.get("tool_calls").is_some()
+                    {
+                        let run_id = chunk
+                            .get("run_id")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .or_else(|| {
+                                state
+                                    .sessions
+                                    .borrow()
+                                    .get(&runtime.session_id)
+                                    .and_then(|session| session.current_run_id.clone())
+                            })
+                            .context("requires_action run_ended did not include a run id")?;
+                        let tool_calls = chunk
+                            .get("tool_calls")
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default();
+                        next_stream = Some(
+                            submit_tools(
+                                state.clone(),
+                                &runtime,
+                                &thread_id,
+                                &run_id,
+                                tool_calls,
+                                cx,
+                            )
+                            .await?,
+                        );
+                        break;
+                    }
+                    emit_usage(&state, &runtime, &chunk, cx).ok();
+                    state.set_current_run_id(&runtime.session_id, None);
+                    return Ok(acp::StopReason::EndTurn);
+                }
+                "run_failed" | "error" => {
+                    let message = chunk
+                        .get("error")
+                        .or_else(|| chunk.get("message"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("Backboard run failed.");
+                    emit_agent_text(&state, &runtime, message, cx)?;
+                    state.set_current_run_id(&runtime.session_id, None);
+                    return Ok(acp::StopReason::EndTurn);
+                }
+                "retry" => {
+                    emit_progress(
+                        &state,
+                        &runtime,
+                        "Backboard is retrying a transient request.",
+                        cx,
+                    )?;
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(continuation) = next_stream {
+            stream = continuation;
+        } else {
+            state.set_current_run_id(&runtime.session_id, None);
+            return Ok(acp::StopReason::EndTurn);
+        }
+    }
+}
+
+async fn submit_tools(
+    state: Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    thread_id: &str,
+    run_id: &str,
+    tool_calls: Vec<Value>,
+    cx: &mut AsyncApp,
+) -> Result<Pin<Box<dyn Stream<Item = Result<Value>> + Send>>> {
+    emit_progress(
+        &state,
+        runtime,
+        &format!(
+            "Backboard is running {} tool action{}.",
+            tool_calls.len(),
+            if tool_calls.len() == 1 { "" } else { "s" }
+        ),
+        cx,
+    )?;
+    let outputs = tools::execute_tool_batch(state.clone(), runtime, tool_calls, cx).await?;
+    let (_config, client) = state.client()?;
+    let thread_id = thread_id.to_string();
+    let run_id = run_id.to_string();
+    let request = SubmitToolOutputsRequest {
+        tool_outputs: outputs,
+        tools: Some(tool_schemas::tool_definitions(&runtime.mode.to_string())),
+    };
+    log::info!(
+        "Backboard native endpoint call: POST /threads/{{thread_id}}/runs/{{run_id}}/submit-tool-outputs?stream=true session_id={} thread_id={} run_id={} path=rust-native",
+        runtime.session_id,
+        thread_id,
+        run_id
+    );
+    gpui_tokio::Tokio::spawn_result(cx, async move {
+        client
+            .submit_tool_outputs_stream(&thread_id, &run_id, request)
+            .await
+    })
+    .await
+}
+
+async fn next_stream_chunk(
+    mut stream: Pin<Box<dyn Stream<Item = Result<Value>> + Send>>,
+    cx: &mut AsyncApp,
+) -> Result<
+    Option<(
+        Result<Value>,
+        Pin<Box<dyn Stream<Item = Result<Value>> + Send>>,
+    )>,
+> {
+    gpui_tokio::Tokio::spawn_result(cx, async move {
+        let next = stream.next().await;
+        anyhow::Ok(next.map(|chunk| (chunk, stream)))
+    })
+    .await
+}
+
+fn emit_agent_text(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    text: &str,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    if text.is_empty() {
+        return Ok(());
+    }
+    state.emit_update(
+        runtime,
+        acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(acp::ContentBlock::from(
+            text.to_string(),
+        ))),
+        cx,
+    )
+}
+
+fn emit_progress(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    text: &str,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let mut meta = acp::Meta::new();
+    meta.insert("backboardProgress".to_string(), true.into());
+    state.emit_update(
+        runtime,
+        acp::SessionUpdate::AgentThoughtChunk(
+            acp::ContentChunk::new(acp::ContentBlock::from(text.to_string())).meta(meta),
+        ),
+        cx,
+    )
+}
+
+fn emit_usage(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    chunk: &Value,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let input_tokens = usage_number(chunk, &["input_tokens", "prompt_tokens"])
+        .or_else(|| nested_usage_number(chunk, &["input_tokens", "prompt_tokens"]))
+        .unwrap_or(0);
+    let output_tokens = usage_number(chunk, &["output_tokens", "completion_tokens"])
+        .or_else(|| nested_usage_number(chunk, &["output_tokens", "completion_tokens"]))
+        .unwrap_or(0);
+    let context_usage = parse_context_usage(chunk);
+    let used = context_usage
+        .as_ref()
+        .map(|usage| usage.used_tokens)
+        .or_else(|| usage_number(chunk, &["used_tokens", "total_tokens"]))
+        .or_else(|| nested_usage_number(chunk, &["used_tokens", "total_tokens"]))
+        .unwrap_or(input_tokens + output_tokens);
+    let size = context_usage
+        .as_ref()
+        .map(|usage| usage.context_limit)
+        .or_else(|| {
+            usage_number(
+                chunk,
+                &["context_limit", "context_window", "max_context_tokens"],
+            )
+        })
+        .unwrap_or(0);
+    if used == 0 && size == 0 {
+        return Ok(());
+    }
+    let remaining_tokens = size.saturating_sub(used);
+    let context_percent = if size > 0 {
+        ((used as f64 / size as f64) * 100.0).round() as u64
+    } else {
+        0
+    };
+    let context_model = context_usage
+        .as_ref()
+        .and_then(|usage| usage.model.clone())
+        .unwrap_or_else(|| format!("{}/{}", runtime.provider, runtime.model));
+    let summary_tokens = context_usage
+        .as_ref()
+        .map(|usage| usage.summary_tokens)
+        .unwrap_or(0);
+    let max_output_tokens = usage_number(
+        chunk,
+        &[
+            "max_output_tokens",
+            "output_token_limit",
+            "max_completion_tokens",
+        ],
+    )
+    .or_else(|| {
+        chunk
+            .get("usage")
+            .and_then(|usage| usage_number(usage, &["max_output_tokens", "output_token_limit"]))
+    });
+    let mut meta = acp::Meta::from_iter([
+        ("model".to_string(), runtime.model.clone().into()),
+        ("provider".to_string(), runtime.provider.clone().into()),
+        ("intensity".to_string(), runtime.intensity.clone().into()),
+        ("input_tokens".to_string(), input_tokens.into()),
+        ("output_tokens".to_string(), output_tokens.into()),
+        ("remaining_tokens".to_string(), remaining_tokens.into()),
+        ("summary_tokens".to_string(), summary_tokens.into()),
+        (
+            "context_percent".to_string(),
+            context_percent.min(100).into(),
+        ),
+        ("context_model".to_string(), context_model.into()),
+    ]);
+    if let Some(max_output_tokens) = max_output_tokens {
+        meta.insert("max_output_tokens".to_string(), max_output_tokens.into());
+    }
+    meta.insert(
+        "backboard_context".to_string(),
+        json!({
+            "used_tokens": used,
+            "context_limit": size,
+            "remaining_tokens": remaining_tokens,
+            "summary_tokens": summary_tokens,
+            "percent": context_percent.min(100),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }),
+    );
+    state.emit_update(
+        runtime,
+        acp::SessionUpdate::UsageUpdate(acp::UsageUpdate::new(used, size).meta(meta)),
+        cx,
+    )
+}
+
+#[derive(Clone, Debug)]
+struct ContextUsage {
+    used_tokens: u64,
+    context_limit: u64,
+    summary_tokens: u64,
+    model: Option<String>,
+}
+
+fn parse_context_usage(chunk: &Value) -> Option<ContextUsage> {
+    let block = chunk.get("context_usage")?.as_object()?;
+    let used_tokens = value_to_u64(block.get("used_tokens")?)?;
+    let context_limit = value_to_u64(block.get("context_limit")?)?;
+    if context_limit == 0 {
+        return None;
+    }
+    let summary_tokens = block
+        .get("summary_tokens")
+        .and_then(value_to_u64)
+        .unwrap_or(0);
+    let model = block
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model| !model.is_empty())
+        .map(str::to_string);
+    Some(ContextUsage {
+        used_tokens,
+        context_limit,
+        summary_tokens,
+        model,
+    })
+}
+
+fn usage_number(chunk: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| chunk.get(*key).and_then(value_to_u64))
+}
+
+fn nested_usage_number(chunk: &Value, keys: &[&str]) -> Option<u64> {
+    chunk
+        .get("usage")
+        .and_then(|usage| usage_number(usage, keys))
+}
+
+fn value_to_u64(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| {
+            value.as_f64().and_then(|number| {
+                if number >= 0.0 {
+                    Some(number.round() as u64)
+                } else {
+                    None
+                }
+            })
+        })
+        .or_else(|| value.as_str().and_then(|text| text.parse::<u64>().ok()))
+}
+
+fn prompt_text(blocks: &[acp::ContentBlock]) -> String {
+    blocks
+        .iter()
+        .map(|block| match block {
+            acp::ContentBlock::Text(text) => text.text.clone(),
+            acp::ContentBlock::ResourceLink(link) => format!("Referenced resource: {}", link.uri),
+            acp::ContentBlock::Resource(resource) => {
+                serde_json::to_string(resource).unwrap_or_default()
+            }
+            acp::ContentBlock::Image(_) => {
+                "[Image omitted in native Backboard runtime]".to_string()
+            }
+            acp::ContentBlock::Audio(_) => {
+                "[Audio omitted in native Backboard runtime]".to_string()
+            }
+            _ => String::new(),
+        })
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn chunk_text(chunk: &Value) -> Option<String> {
+    chunk
+        .get("content")
+        .or_else(|| chunk.get("text"))
+        .or_else(|| chunk.get("delta"))
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
+fn thinking_payload(intensity: &str, provider: &str, model: &str) -> Option<Value> {
+    let effort = match intensity {
+        "fast" => return None,
+        "balanced" => "low",
+        "deep" => "max",
+        _ => return None,
+    };
+    Some(thinking_for_provider(provider, model, effort))
+        .filter(|payload| payload.as_object().is_some_and(|object| !object.is_empty()))
+}
+
+fn thinking_for_provider(provider: &str, model: &str, effort: &str) -> Value {
+    let provider = provider.to_lowercase();
+    let model = model.to_lowercase().replace('_', "-");
+    match provider.as_str() {
+        "openai" | "xai" => json!({ "effort": effort }),
+        "google" => json!({
+            "effort": effort,
+            "budget_tokens": effort_budget_tokens(effort).min(32768),
+        }),
+        "anthropic" => json!({ "budget_tokens": anthropic_budget_tokens(effort) }),
+        "aws-bedrock" if model.contains("opus-4-7") => json!({ "effort": effort }),
+        "aws-bedrock" => json!({ "budget_tokens": anthropic_budget_tokens(effort) }),
+        "openrouter" | "cerebras" => json!({ "max_tokens": effort_max_tokens(effort) }),
+        _ => json!({}),
+    }
+}
+
+fn effort_budget_tokens(effort: &str) -> u64 {
+    match effort {
+        "low" => 2048,
+        "medium" => 4096,
+        "high" => 10000,
+        "max" => 24576,
+        _ => 8192,
+    }
+}
+
+fn effort_max_tokens(effort: &str) -> u64 {
+    match effort {
+        "low" => 1024,
+        "medium" => 2048,
+        "high" => 4096,
+        "max" => 8192,
+        _ => 4096,
+    }
+}
+
+fn anthropic_budget_tokens(effort: &str) -> u64 {
+    match effort {
+        "low" => 2048,
+        "medium" => 8192,
+        "high" | "max" => 16384,
+        _ => 8192,
+    }
+}
+
+fn strip_ide_context(text: &str) -> String {
+    text.split("<backboard_ide_context>")
+        .next()
+        .unwrap_or(text)
+        .trim_end()
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fast_intensity_omits_thinking_payload() {
+        assert_eq!(thinking_payload("fast", "openai", "gpt-4o"), None);
+    }
+
+    #[test]
+    fn thinking_payload_uses_provider_schema_without_enabled_key() {
+        let openai = thinking_payload("balanced", "openai", "gpt-4o").unwrap();
+        assert_eq!(openai, json!({"effort": "low"}));
+        assert!(openai.get("enabled").is_none());
+
+        assert_eq!(
+            thinking_payload("deep", "anthropic", "claude-sonnet-4").unwrap(),
+            json!({"budget_tokens": 16384})
+        );
+        assert_eq!(
+            thinking_payload("balanced", "openrouter", "some-reasoning-model").unwrap(),
+            json!({"max_tokens": 1024})
+        );
+    }
+
+    #[test]
+    fn parses_authoritative_context_usage_block() {
+        let chunk = json!({
+            "type": "run_ended",
+            "input_tokens": 1200,
+            "output_tokens": 300,
+            "context_usage": {
+                "used_tokens": "42000",
+                "context_limit": 102400,
+                "summary_tokens": 5000,
+                "model": "openai/gpt-5"
+            }
+        });
+
+        let usage = parse_context_usage(&chunk).expect("context_usage should parse");
+        assert_eq!(usage.used_tokens, 42000);
+        assert_eq!(usage.context_limit, 102400);
+        assert_eq!(usage.summary_tokens, 5000);
+        assert_eq!(usage.model.as_deref(), Some("openai/gpt-5"));
+    }
+}

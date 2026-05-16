@@ -3777,6 +3777,25 @@ impl ThreadView {
         let max = crate::humanize_token_count(usage.max_tokens);
         let input_tokens_label = crate::humanize_token_count(usage.input_tokens);
         let output_tokens_label = crate::humanize_token_count(usage.output_tokens);
+        let remaining_tokens_label = usage
+            .remaining_tokens
+            .map(crate::humanize_token_count)
+            .unwrap_or_else(|| {
+                crate::humanize_token_count(usage.max_tokens.saturating_sub(usage.used_tokens))
+            });
+        let summary_tokens_label = usage
+            .summary_tokens
+            .map(crate::humanize_token_count)
+            .unwrap_or_else(|| "0".to_string());
+        let context_model_label = usage.context_model.clone().or_else(|| {
+            speed_metrics
+                .as_ref()
+                .and_then(|metrics| match (&metrics.provider, &metrics.model) {
+                    (Some(provider), Some(model)) => Some(format!("{provider}/{model}").into()),
+                    (_, Some(model)) => Some(model.clone()),
+                    _ => None,
+                })
+        });
 
         let progress_ratio = if usage.max_tokens > 0 {
             usage.used_tokens as f32 / usage.max_tokens as f32
@@ -3788,6 +3807,10 @@ impl ThreadView {
         let stroke_width = px(2.);
 
         let percentage = format!("{}%", (progress_ratio * 100.0).round() as u32);
+        let percentage = usage
+            .context_percent
+            .map(|percent| format!("{}%", percent.min(100)))
+            .unwrap_or(percentage);
         let visible_tokens_label = if has_usage {
             format!("{used} / {max} tokens")
         } else {
@@ -3843,6 +3866,9 @@ impl ThreadView {
                 let output_tokens_label = output_tokens_label.clone();
                 let input_max_label = input_max_label.clone();
                 let output_max_label = output_max_label.clone();
+                let remaining_tokens = remaining_tokens_label.clone();
+                let summary_tokens = summary_tokens_label.clone();
+                let context_model = context_model_label.clone();
                 let project_entry_ids = project_entry_ids.clone();
                 let workspace = workspace.clone();
                 let cost_label = tooltip_cost_label.clone();
@@ -3855,6 +3881,9 @@ impl ThreadView {
                     output_tokens: output_tokens_label,
                     input_max: input_max_label,
                     output_max: output_max_label,
+                    remaining_tokens,
+                    summary_tokens,
+                    context_model,
                     show_split,
                     cost_label,
                     speed_metrics,
@@ -4479,6 +4508,9 @@ struct TokenUsageTooltip {
     output_tokens: String,
     input_max: String,
     output_max: String,
+    remaining_tokens: String,
+    summary_tokens: String,
+    context_model: Option<SharedString>,
     show_split: bool,
     cost_label: Option<String>,
     speed_metrics: Option<acp_thread::SpeedMetrics>,
@@ -4643,6 +4675,9 @@ impl Render for TokenUsageTooltip {
         let output_tokens = self.output_tokens.clone();
         let input_max = self.input_max.clone();
         let output_max = self.output_max.clone();
+        let remaining_tokens = self.remaining_tokens.clone();
+        let summary_tokens = self.summary_tokens.clone();
+        let context_model = self.context_model.clone();
         let show_split = self.show_split;
         let cost_label = self.cost_label.clone();
         let speed_metrics = self.speed_metrics.clone();
@@ -4693,6 +4728,42 @@ impl Render for TokenUsageTooltip {
                             ),
                     )
                 })
+                .child(
+                    v_flex()
+                        .mt_1p5()
+                        .pt_1p5()
+                        .gap_0p5()
+                        .border_t_1()
+                        .border_color(cx.theme().colors().border_variant)
+                        .child(
+                            Label::new("Window")
+                                .color(Color::Muted)
+                                .size(LabelSize::Small),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_0p5()
+                                .justify_between()
+                                .child(Label::new("Remaining").color(Color::Muted))
+                                .child(Label::new(remaining_tokens)),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_0p5()
+                                .justify_between()
+                                .child(Label::new("Summary").color(Color::Muted))
+                                .child(Label::new(summary_tokens)),
+                        )
+                        .when_some(context_model, |this, context_model| {
+                            this.child(
+                                h_flex()
+                                    .gap_0p5()
+                                    .justify_between()
+                                    .child(Label::new("Context model").color(Color::Muted))
+                                    .child(Label::new(context_model)),
+                            )
+                        }),
+                )
                 .when_some(cost_label, |this, cost_label| {
                     this.child(
                         v_flex()

@@ -287,6 +287,7 @@ dependencies = [
  "feature_flags",
  "fs",
  "futures 0.3.32",
+ "globset",
  "google_ai",
  "gpui",
  "gpui_tokio",
@@ -297,6 +298,7 @@ dependencies = [
  "log",
  "nix 0.29.0",
  "project",
+ "regex",
  "release_channel",
  "remote",
  "reqwest_client",
@@ -310,6 +312,7 @@ dependencies = [
  "ui",
  "util",
  "uuid",
+ "walkdir",
  "watch",
  "zed_credentials_provider",
 ]
@@ -1914,6 +1917,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.17",
+ "tokio",
  "zed-reqwest",
 ]
 
