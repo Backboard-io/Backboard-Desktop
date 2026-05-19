@@ -164,8 +164,13 @@ impl Icon {
     }
 
     pub fn from_external_svg(svg: SharedString) -> Self {
+        let source = if svg.starts_with("icons/") || svg.starts_with("images/") {
+            IconSource::Embedded(svg)
+        } else {
+            IconSource::ExternalSvg(svg)
+        };
         Self {
-            source: IconSource::ExternalSvg(svg),
+            source,
             color: Color::default(),
             size: IconSize::default().rems(),
             transformation: Transformation::default(),
