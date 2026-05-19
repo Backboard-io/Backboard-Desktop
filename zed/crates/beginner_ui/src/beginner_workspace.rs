@@ -10,6 +10,7 @@ use agent_ui::thread_metadata_store::ThreadMetadataStore;
 use agent_ui::{AgentPanel, ConversationView, ModelSelectorPopover};
 use db::kvp::KeyValueStore;
 use editor::Editor;
+use indexmap::IndexMap;
 use gpui::{
     App, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
     PathPromptOptions, Render, SharedString, Subscription, Task, WeakEntity, Window,
@@ -66,6 +67,21 @@ fn curated_display_name(model_id: &str) -> Option<&'static str> {
     })
 }
 
+fn model_speed_rank(label: &str, model_id: &str) -> usize {
+    let text = format!("{label} {model_id}").to_lowercase();
+    if text.contains("fast") || text.contains("haiku") || text.contains("flash") {
+        0
+    } else if text.contains("reasoning") || text.contains("r1") || text.contains("o3") {
+        1
+    } else if text.contains("balanced") || text.contains("sonnet") || text.contains("v3") {
+        2
+    } else if text.contains("powerful") || text.contains("opus") || text.contains("pro") {
+        3
+    } else {
+        4
+    }
+}
+
 /// Wraps an inner `AgentModelSelector` and returns only the curated model list.
 /// Model selection and all mutations pass through to the inner selector unchanged.
 struct CuratedModelSelector {
@@ -82,34 +98,51 @@ impl AgentModelSelector for CuratedModelSelector {
                 AgentModelList::Grouped(groups) => groups.into_values().flatten().collect(),
             };
             // Filter to curated entries in the defined order.
-            let mut curated: Vec<acp_thread::AgentModelInfo> = Vec::new();
+            let mut grouped: IndexMap<String, Vec<acp_thread::AgentModelInfo>> = IndexMap::default();
             for &(provider_id, model_prefix, display_name) in CURATED_MODELS {
-                if let Some(mut info) = all_models.iter().find(|m| {
+                let info = if let Some(mut info) = all_models.iter().find(|m| {
                     let id: &str = &m.id.0;
                     let model_part = id.split_once('/').map(|(_, part)| part).unwrap_or(id);
                     model_part.starts_with(model_prefix)
                 }).cloned() {
                     info.name = SharedString::from(display_name);
-                    curated.push(info);
+                    info
                 } else {
                     // Keep options visible in simple mode even if the server omits
                     // them from `available_models` for this session.
-                    curated.push(acp_thread::AgentModelInfo {
+                    acp_thread::AgentModelInfo {
                         id: acp::ModelId::new(format!("{provider_id}/{model_prefix}")),
                         name: SharedString::from(display_name),
                         description: None,
                         icon: None,
                         is_latest: false,
                         cost: None,
-                    });
-                }
+                    }
+                };
+                let provider_label = match provider_id {
+                    "openai" => "OpenAI",
+                    "anthropic" => "Anthropic",
+                    "google" => "Google",
+                    "deepseek" => "DeepSeek",
+                    _ => provider_id,
+                };
+                grouped
+                    .entry(provider_label.to_string())
+                    .or_default()
+                    .push(info);
             }
             // Fallback: if no curated models are available (provider not configured),
             // show the first 10 from whatever the server provides.
-            if curated.is_empty() {
-                curated = all_models.into_iter().take(10).collect();
+            if grouped.is_empty() {
+                return Ok(AgentModelList::Flat(all_models.into_iter().take(10).collect()));
             }
-            Ok(AgentModelList::Flat(curated))
+            let grouped = grouped
+                .into_iter()
+                .map(|(k, mut v)| {
+                    v.sort_by_key(|m| model_speed_rank(m.name.as_ref(), m.id.0.as_ref()));
+                    (acp_thread::AgentModelGroupName(k.into()), v)
+                });
+            Ok(AgentModelList::Grouped(grouped.collect()))
         })
     }
 
@@ -270,6 +303,7 @@ pub struct BeginnerWorkspace {
     web_preview: Option<crate::web_preview::WebPreview>,
     // Shows a notice when the user tries to open a 4th tab.
     show_tab_limit_notice: bool,
+    chats_sidebar_open: bool,
     background_sessions: Vec<ProjectSession>,
     chat_history: Vec<BeginnerChatRecord>,
     _tasks: Vec<Task<()>>,
@@ -278,6 +312,10 @@ pub struct BeginnerWorkspace {
 }
 
 impl BeginnerWorkspace {
+    fn handle_enter_submit(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
+        self.submit_follow_up(window, cx);
+    }
+
     fn make_chat_editor(window: &mut Window, cx: &mut Context<Self>, placeholder: &str) -> (Entity<Editor>, Subscription) {
         let workspace = cx.entity().downgrade();
         let editor = cx.new(|cx| {
@@ -434,6 +472,7 @@ impl BeginnerWorkspace {
             dev_server_task: None,
             web_preview: None,
             show_tab_limit_notice: false,
+            chats_sidebar_open: true,
             background_sessions: Vec::new(),
             chat_history: Vec::new(),
             _tasks: vec![load_recent],
@@ -1320,6 +1359,7 @@ impl BeginnerWorkspace {
             || matches!(self.state, BeginnerState::ActiveProject { .. });
 
         let is_on_landing = matches!(self.state, BeginnerState::Landing);
+        let chats_open = self.chats_sidebar_open;
 
         h_flex()
             .h(px(32.))
@@ -1330,7 +1370,32 @@ impl BeginnerWorkspace {
             .gap_0p5()
             .border_b_1()
             .border_color(border)
-            // Home icon button — always leftmost; highlighted when on the home page
+            // Chats toggle
+            .child(
+                div()
+                    .id("tab-chats")
+                    .h(px(28.))
+                    .w(px(28.))
+                    .mb_px()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .when(chats_open, |el| el.bg(cx.theme().colors().element_selected))
+                    .when(!chats_open, |el| el.hover(|el| el.bg(cx.theme().colors().element_hover)))
+                    .tooltip(Tooltip::text("Chats"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.chats_sidebar_open = !this.chats_sidebar_open;
+                        cx.notify();
+                    }))
+                    .child(
+                        Icon::new(IconName::Thread)
+                            .size(IconSize::XSmall)
+                            .color(if chats_open { Color::Default } else { Color::Muted }),
+                    ),
+            )
+            // Home button
             .child(
                 div()
                     .id("tab-home")
@@ -1348,56 +1413,59 @@ impl BeginnerWorkspace {
                     .when(!is_on_landing, |el| {
                         el.hover(|el| el.bg(cx.theme().colors().element_hover))
                     })
+                    .tooltip(Tooltip::text("Home"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.go_home(window, cx);
                     }))
                     .child(
-                        Icon::new(IconName::Thread)
+                        Icon::new(IconName::OpenFolder)
                             .size(IconSize::XSmall)
                             .color(if is_on_landing { Color::Default } else { Color::Muted }),
                     ),
             )
-            // Active tab
-            .child(
-                h_flex()
-                    .id("tab-active")
-                    .h(px(28.))
-                    .pl_3()
-                    .pr_1p5()
-                    .gap_1p5()
-                    .items_center()
-                    .rounded_t_md()
-                    .border_1()
-                    .border_b_0()
-                    .border_color(border)
-                    .bg(active_bg)
-                    .child(
-                        Label::new(active_title)
-                            .size(LabelSize::Small)
-                            .color(Color::Default),
-                    )
-                    .when(show_active_close, |el| {
-                        el.child(
-                            div()
-                                .id("tab-active-close")
-                                .size(px(14.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded_sm()
-                                .cursor_pointer()
-                                .hover(|el| el.bg(cx.theme().colors().element_hover))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.close_active_session(window, cx);
-                                }))
-                                .child(
-                                    Icon::new(IconName::Close)
-                                        .size(IconSize::XSmall)
-                                        .color(Color::Muted),
-                                ),
+            // Active tab (hidden on Home/New Project page)
+            .when(!is_on_landing, |this| {
+                this.child(
+                    h_flex()
+                        .id("tab-active")
+                        .h(px(28.))
+                        .pl_3()
+                        .pr_1p5()
+                        .gap_1p5()
+                        .items_center()
+                        .rounded_t_md()
+                        .border_1()
+                        .border_b_0()
+                        .border_color(border)
+                        .bg(active_bg)
+                        .child(
+                            Label::new(active_title)
+                                .size(LabelSize::Small)
+                                .color(Color::Default),
                         )
-                    }),
-            )
+                        .when(show_active_close, |el| {
+                            el.child(
+                                div()
+                                    .id("tab-active-close")
+                                    .size(px(14.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .hover(|el| el.bg(cx.theme().colors().element_hover))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.close_active_session(window, cx);
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::Close)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Muted),
+                                    ),
+                            )
+                        }),
+                )
+            })
             // Background session tabs
             .children(background_titles.into_iter().enumerate().map(|(ix, title)| {
                 h_flex()
@@ -1441,23 +1509,28 @@ impl BeginnerWorkspace {
             .child(div().flex_1())
             // "+" always visible; at limit it shows a notice instead of opening
             .child(
-                IconButton::new("tab-bar-new", IconName::Plus)
-                    .icon_size(IconSize::XSmall)
-                    .icon_color(if can_add { Color::Muted } else { Color::Disabled })
-                    .tooltip(Tooltip::text(if can_add {
-                        "New project tab"
-                    } else {
-                        "3 project limit reached"
-                    }))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if can_add {
-                            this.show_tab_limit_notice = false;
-                            this.stash_current_session_and_reset(window, cx);
-                        } else {
-                            this.show_tab_limit_notice = true;
-                            cx.notify();
-                        }
-                    })),
+                h_flex()
+                    .h_full()
+                    .items_center()
+                    .child(
+                        IconButton::new("tab-bar-new", IconName::Plus)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(if can_add { Color::Muted } else { Color::Disabled })
+                            .tooltip(Tooltip::text(if can_add {
+                                "New project tab"
+                            } else {
+                                "3 project limit reached"
+                            }))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if can_add {
+                                    this.show_tab_limit_notice = false;
+                                    this.stash_current_session_and_reset(window, cx);
+                                } else {
+                                    this.show_tab_limit_notice = true;
+                                    cx.notify();
+                                }
+                            })),
+                    ),
             )
     }
 
@@ -1493,10 +1566,125 @@ impl BeginnerWorkspace {
             )
     }
 
-    fn render_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
+    fn render_chats_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let border = cx.theme().colors().border;
         let chat_history = self.chat_history.clone();
         let no_history = chat_history.is_empty();
+
+        v_flex()
+            .w(px(240.))
+            .h_full()
+            .flex_shrink_0()
+            .border_r_1()
+            .border_color(border)
+            .bg(cx.theme().colors().surface_background)
+            .child(
+                v_flex()
+                    .id("chat-history-list")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .p_2()
+                    .gap_0p5()
+                    .child(
+                        h_flex()
+                            .px_1()
+                            .py_0p5()
+                            .child(
+                                Label::new("Chats")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            ),
+                    )
+                    .when(no_history, |el| {
+                        el.child(
+                            v_flex()
+                                .px_2()
+                                .py_2()
+                                .gap_0p5()
+                                .child(
+                                    Label::new("No chats yet")
+                                        .size(LabelSize::Small)
+                                        .color(Color::Disabled),
+                                )
+                                .child(
+                                    Label::new("Start a new project to get started.")
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Disabled),
+                                ),
+                        )
+                    })
+                    .children(chat_history.into_iter().map(|record| {
+                        let name = SharedString::from(record.name.clone());
+                        let folder_label = record.folder_name();
+                        let record_for_click = record.clone();
+                        let record_id_for_delete = record.id.clone();
+                        let hover_bg = cx.theme().colors().element_hover;
+                        h_flex()
+                            .id(SharedString::from(format!("chat-{}", record.id)))
+                            .group("chat-entry")
+                            .px_2()
+                            .py_1()
+                            .gap_1p5()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .hover(move |el| el.bg(hover_bg))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.open_chat_record(record_for_click.clone(), window, cx);
+                            }))
+                            .child(
+                                Icon::new(IconName::Folder)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_0p5()
+                                    .child(
+                                        Label::new(name)
+                                            .size(LabelSize::Small)
+                                            .truncate(),
+                                    )
+                                    .child(
+                                        Label::new(folder_label)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted)
+                                            .truncate(),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .id(SharedString::from(format!(
+                                        "chat-del-{}",
+                                        record_id_for_delete.clone()
+                                    )))
+                                    .size(px(14.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_sm()
+                                    .flex_none()
+                                    .cursor_pointer()
+                                    .hover(move |el| el.bg(hover_bg))
+                                    .on_click(cx.listener(move |this, _event, _, cx| {
+                                        cx.stop_propagation();
+                                        this.delete_chat_record(record_id_for_delete.clone(), cx);
+                                        cx.notify();
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::Close)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Muted),
+                                    ),
+                            )
+                    })),
+            )
+    }
+
+    fn render_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
+        let no_history = self.chat_history.is_empty();
         let chat_editor = self.chat_editor.clone();
         let header_height = platform_title_bar_height(window);
         let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
@@ -1514,6 +1702,7 @@ impl BeginnerWorkspace {
         v_flex()
             .key_context("BeginnerLanding")
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::handle_enter_submit))
             .size_full()
             .bg(cx.theme().colors().editor_background)
             // Title bar drag strip
@@ -1543,120 +1732,7 @@ impl BeginnerWorkspace {
                 h_flex()
                     .flex_1()
                     .overflow_hidden()
-                    // ── Left sidebar ──────────────────────────────────────────
-                    .child(
-                        v_flex()
-                            .w(px(220.))
-                            .h_full()
-                            .flex_shrink_0()
-                            .border_r_1()
-                            .border_color(border)
-                            .bg(cx.theme().colors().surface_background)
-                            // Chat history list
-                            .child(
-                                v_flex()
-                                    .id("chat-history-list")
-                                    .flex_1()
-                                    .overflow_y_scroll()
-                                    .p_2()
-                                    .gap_0p5()
-                                    .child(
-                                        h_flex()
-                                            .px_1()
-                                            .py_0p5()
-                                            .child(
-                                                Label::new("Recent")
-                                                    .size(LabelSize::XSmall)
-                                                    .color(Color::Muted),
-                                            ),
-                                    )
-                                    .when(no_history, |el| {
-                                        el.child(
-                                            v_flex()
-                                                .px_2()
-                                                .py_2()
-                                                .gap_0p5()
-                                                .child(
-                                                    Label::new("No chats yet")
-                                                        .size(LabelSize::Small)
-                                                        .color(Color::Disabled),
-                                                )
-                                                .child(
-                                                    Label::new("Start a new project to get started.")
-                                                        .size(LabelSize::XSmall)
-                                                        .color(Color::Disabled),
-                                                ),
-                                        )
-                                    })
-                                    .children(chat_history.into_iter().map(|record| {
-                                        let name = SharedString::from(record.name.clone());
-                                        let folder_label = record.folder_name();
-                                        let record_for_click = record.clone();
-                                        let record_id_for_delete = record.id.clone();
-                                        let hover_bg = cx.theme().colors().element_hover;
-                                        h_flex()
-                                            .id(SharedString::from(format!("chat-{}", record.id)))
-                                            .group("chat-entry")
-                                            .px_2()
-                                            .py_1()
-                                            .gap_1p5()
-                                            .rounded_md()
-                                            .cursor_pointer()
-                                            .hover(move |el| el.bg(hover_bg))
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                this.open_chat_record(
-                                                    record_for_click.clone(),
-                                                    window,
-                                                    cx,
-                                                );
-                                            }))
-                                            .child(
-                                                Icon::new(IconName::Folder)
-                                                    .size(IconSize::XSmall)
-                                                    .color(Color::Muted),
-                                            )
-                                            .child(
-                                                v_flex()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .gap_0p5()
-                                                    .child(
-                                                        Label::new(name)
-                                                            .size(LabelSize::Small)
-                                                            .truncate(),
-                                                    )
-                                                    .child(
-                                                        Label::new(folder_label)
-                                                            .size(LabelSize::XSmall)
-                                                            .color(Color::Muted)
-                                                            .truncate(),
-                                                    ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .id(SharedString::from(format!("chat-del-{}", record_id_for_delete.clone())))
-                                                    .size(px(14.))
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .rounded_sm()
-                                                    .flex_none()
-                                                    .cursor_pointer()
-                                                    .hover(move |el| el.bg(hover_bg))
-                                                    .on_click(cx.listener(move |this, _event, _, cx| {
-                                                        cx.stop_propagation();
-                                                        this.delete_chat_record(record_id_for_delete.clone(), cx);
-                                                        cx.notify();
-                                                    }))
-                                                    .child(
-                                                        Icon::new(IconName::Close)
-                                                            .size(IconSize::XSmall)
-                                                            .color(Color::Muted),
-                                                    ),
-                                            )
-                                    })),
-                            )
-                    )
+                    .when(self.chats_sidebar_open, |el| el.child(self.render_chats_sidebar(cx)))
                     // ── Main content ──────────────────────────────────────────
                     .child(
                         v_flex()
@@ -1664,14 +1740,14 @@ impl BeginnerWorkspace {
                             .h_full()
                             .items_center()
                             .justify_center()
-                            .gap_6()
+                            .gap_5()
                             .px_8()
-                            .py_6()
+                            .py_8()
                             // Headline
                             .child(
                                 v_flex()
                                     .items_center()
-                                    .gap_1()
+                                    .gap_2()
                                     .child(
                                         Headline::new(if no_history {
                                             "Welcome to Backboard"
@@ -1686,7 +1762,7 @@ impl BeginnerWorkspace {
                                         } else {
                                             "Describe your idea and Backboard will start building."
                                         })
-                                        .size(LabelSize::Small)
+                                        .size(LabelSize::Default)
                                         .color(Color::Muted),
                                     ),
                             )
@@ -1694,7 +1770,7 @@ impl BeginnerWorkspace {
                             .child(
                                 v_flex()
                                     .w(px(520.))
-                                    .gap_4()
+                                    .gap_3()
                                     .children(
                                         [
                                             (
@@ -1713,29 +1789,19 @@ impl BeginnerWorkspace {
                                         .into_iter()
                                         .map(|(title, subtitle)| {
                                             h_flex()
-                                                .gap_3()
+                                                .gap_2()
                                                 .items_start()
-                                                .child(
-                                                    // Empty checkbox square
-                                                    div()
-                                                        .mt(px(2.))
-                                                        .size(px(16.))
-                                                        .flex_shrink_0()
-                                                        .rounded_sm()
-                                                        .border_1()
-                                                        .border_color(border),
-                                                )
                                                 .child(
                                                     v_flex()
                                                         .gap_0p5()
                                                         .child(
                                                             Label::new(title)
-                                                                .size(LabelSize::Small)
+                                                                .size(LabelSize::Default)
                                                                 .color(Color::Default),
                                                         )
                                                         .child(
                                                             Label::new(subtitle)
-                                                                .size(LabelSize::XSmall)
+                                                                .size(LabelSize::Small)
                                                                 .color(Color::Muted),
                                                         ),
                                                 )
@@ -1748,12 +1814,12 @@ impl BeginnerWorkspace {
                             .child(
                                 v_flex()
                                     .w(px(520.))
-                                    .gap_2()
+                                    .gap_3()
                                     .rounded_xl()
                                     .border_1()
                                     .border_color(border)
                                     .bg(cx.theme().colors().editor_background)
-                                    .p_3()
+                                    .p_4()
                                     .child(chat_editor)
                                     .child(
                                         h_flex()
@@ -1764,6 +1830,9 @@ impl BeginnerWorkspace {
                                                 Button::new("attach-folder", "Attach")
                                                     .style(ButtonStyle::Subtle)
                                                     .start_icon(Icon::new(IconName::FolderOpen))
+                                                    .tooltip(Tooltip::text(
+                                                        "Attach project root directory",
+                                                    ))
                                                     .on_click(cx.listener(|this, _, window, cx| {
                                                         this.pick_folder(window, cx);
                                                     })),
@@ -1780,10 +1849,24 @@ impl BeginnerWorkspace {
                                             ),
                                     ),
                             )
+                            // Hint
+                            .child(
+                                h_flex()
+                                    .gap_1p5()
+                                    .items_center()
+                                    .child(
+                                        Label::new(
+                                            "Not sure what to build? Try one of the examples above.",
+                                        )
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Muted),
+                                    ),
+                            )
                             // Template chips
                             .child(
                                 h_flex()
                                     .w(px(520.))
+                                    .justify_center()
                                     .gap_2()
                                     .flex_wrap()
                                     .children(
@@ -1827,26 +1910,6 @@ impl BeginnerWorkspace {
                                                 )
                                         }),
                                     ),
-                            )
-                            // Hint
-                            .child(
-                                h_flex()
-                                    .gap_1p5()
-                                    .items_center()
-                                    .child(
-                                        div()
-                                            .size(px(12.))
-                                            .rounded_sm()
-                                            .border_1()
-                                            .border_color(border),
-                                    )
-                                    .child(
-                                        Label::new(
-                                            "Not sure what to build? Try one of the examples above.",
-                                        )
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Muted),
-                                    ),
                             ),
                     ),
             )
@@ -1883,6 +1946,7 @@ impl BeginnerWorkspace {
 
         v_flex()
             .size_full()
+            .on_action(cx.listener(Self::handle_enter_submit))
             .bg(cx.theme().colors().panel_background)
             // Title bar
             .child(
@@ -1927,6 +1991,7 @@ impl BeginnerWorkspace {
                 h_flex()
                     .flex_1()
                     .overflow_hidden()
+                    .when(self.chats_sidebar_open, |el| el.child(self.render_chats_sidebar(cx)))
                     // ── Left panel: project nav ──────────────────────────────
                     .child(self.render_left_panel(left_tab, cx))
                     // ── Centre: chat activity + input ────────────────────────
