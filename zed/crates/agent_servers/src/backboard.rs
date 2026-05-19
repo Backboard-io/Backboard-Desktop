@@ -25,7 +25,7 @@ impl BackboardAgentServer {
     pub fn new(agent_id: AgentId) -> Self {
         Self {
             agent_id,
-            default_mode: acp::SessionModeId::new("agent"),
+            default_mode: acp::SessionModeId::new("free"),
         }
     }
 
@@ -69,5 +69,38 @@ impl AgentServer for BackboardAgentServer {
 
     fn into_any(self: Rc<Self>) -> Rc<dyn Any> {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use project::FakeFs;
+    use std::path::Path;
+
+    #[gpui::test]
+    async fn connect_uses_native_rust_connection(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = settings::SettingsStore::test(cx);
+            cx.set_global(settings_store);
+        });
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [Path::new("/project")], cx).await;
+        let store = project.read_with(cx, |project, _| project.agent_server_store().clone());
+        let delegate = AgentServerDelegate::new(store, None);
+        let server = BackboardAgentServer::new(AgentId::new(BACKBOARD_AGENT_ID));
+
+        let connection = cx
+            .update(|cx| server.connect(delegate, project, cx))
+            .await
+            .unwrap();
+
+        assert_eq!(connection.telemetry_id().to_string(), "backboard-native");
+        assert_eq!(
+            connection
+                .agent_version()
+                .map(|version| version.to_string()),
+            Some("native-rust".to_string())
+        );
     }
 }

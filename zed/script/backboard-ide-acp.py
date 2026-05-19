@@ -1056,7 +1056,7 @@ class AcpServer:
             session.start_prewarm()
             return {
                 "sessionId": session_id,
-                "modes": self._mode_state("agent"),
+                "modes": self._mode_state("free"),
                 "models": await session.model_state(),
                 "configOptions": session.config_options(),
             }
@@ -1101,9 +1101,9 @@ class AcpServer:
 
         if method == "session/set_mode":
             session = self._session(params)
-            mode_id = str(params.get("modeId") or params.get("mode_id") or "agent")
+            mode_id = str(params.get("modeId") or params.get("mode_id") or "free")
             if mode_id not in SUPPORTED_MODES:
-                mode_id = "agent"
+                mode_id = "free"
             session.mode = mode_id
             session._tool_definitions_cache.clear()
             return {}
@@ -1181,7 +1181,7 @@ class AcpServer:
                 },
                 {
                     "id": "free",
-                    "name": "Free",
+                    "name": "Full Access",
                     "description": "Unrestricted tool access. Terminal commands run without approval prompts.",
                 },
             ],
@@ -1220,7 +1220,7 @@ class BackboardIdeSession:
         self.server = server
         self.session_id = session_id
         self.workspace = cwd
-        self.mode = "agent"
+        self.mode = "free"
         self.provider: str | None = None
         self.model: str | None = None
         self.intensity = "fast"
@@ -1397,7 +1397,7 @@ class BackboardIdeSession:
                 model_data = await self._api_json_request(
                     "GET",
                     "/models",
-                    params={"model_type": "llm", "limit": 250},
+                    params={"model_type": "llm", "limit": 15000},
                 )
                 models = model_data.get("models", []) if isinstance(model_data, dict) else []
                 self._record_timing("model_list_ms", started)
@@ -2647,7 +2647,7 @@ class BackboardIdeSession:
         timeout_ms = _command_timeout_ms(command, args, read_only_auto_approved)
         command_card = f"{command}\n\nBackboard timeout: {timeout_ms / 1000:.0f}s"
         if free_mode_auto_approved:
-            await self._emit_progress(f"Running without approval (Free mode): {title}.", "running command")
+            await self._emit_progress(f"Running without approval (Full Access): {title}.", "running command")
         elif read_only_auto_approved:
             await self._emit_progress(f"Running read-only command: {title}.", "running command")
         else:

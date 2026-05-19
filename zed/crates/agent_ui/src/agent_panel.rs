@@ -206,10 +206,10 @@ impl BackboardAgentWorkspaceKind {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum BackboardAgentWorkspaceMode {
-    #[default]
     Agent,
     Ask,
     Manual,
+    #[default]
     Free,
 }
 
@@ -219,7 +219,7 @@ impl BackboardAgentWorkspaceMode {
             Self::Agent => "Agent",
             Self::Ask => "Ask",
             Self::Manual => "Manual",
-            Self::Free => "Free",
+            Self::Free => "Full Access",
         }
     }
 
@@ -3880,7 +3880,7 @@ impl AgentPanel {
         let workspace_path = current_workspace_agent_path(self.project.read(cx), cx);
         let thread_id = self.create_backboard_workspace_agent_conversation(
             title.clone(),
-            BackboardAgentWorkspaceMode::Agent,
+            BackboardAgentWorkspaceMode::Free,
             None,
             None,
             window,
@@ -3894,7 +3894,7 @@ impl AgentPanel {
                 task,
                 kind: BackboardAgentWorkspaceKind::Build,
                 scope: BackboardAgentWorkspaceScope::WholeProject,
-                mode: BackboardAgentWorkspaceMode::Agent,
+                mode: BackboardAgentWorkspaceMode::Free,
                 base_workspace_path: workspace_path.clone(),
                 worktree_path: workspace_path,
                 branch_name: String::new(),
@@ -3937,9 +3937,9 @@ impl AgentPanel {
                 auto_submit: true,
             })
         };
-        // Use "free" mode so the Python bridge auto-approves every tool call
-        // without emitting ACP permission requests. Beginner mode is a separate
-        // product layer where users never interact with tool confirmations.
+        // Use "free" mode so the native Backboard runtime auto-approves every
+        // tool call. Beginner mode is a separate product layer where users
+        // never interact with tool confirmations.
         let server_override: Rc<dyn AgentServer> =
             Rc::new(BackboardAgentServer::with_default_mode(
                 AgentId::new(BACKBOARD_AGENT_ID),
@@ -3975,7 +3975,7 @@ impl AgentPanel {
         let metadata = ThreadMetadataStore::try_global(cx)
             .and_then(|store| store.read(cx).entry(thread_id).cloned())?;
         let agent = Agent::from(metadata.agent_id.clone());
-        // Keep beginner mode behavior consistent: free mode auto-approves
+        // Keep beginner mode behavior consistent: Full Access auto-approves
         // tool calls in the simple-mode UX.
         let server_override: Rc<dyn AgentServer> =
             Rc::new(BackboardAgentServer::with_default_mode(
@@ -8343,7 +8343,7 @@ mod tests {
         assert_eq!(metadata.batch_id, "");
         assert_eq!(metadata.batch_index, 0);
         assert_eq!(metadata.batch_size, 0);
-        assert_eq!(metadata.mode, BackboardAgentWorkspaceMode::Agent);
+        assert_eq!(metadata.mode, BackboardAgentWorkspaceMode::Free);
         assert!(!metadata.current_workspace);
     }
 

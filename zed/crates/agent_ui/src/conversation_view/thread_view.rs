@@ -840,64 +840,10 @@ impl ThreadView {
             .turn_fields
             .turn_started_at
             .map(|started_at| ("Working for", started_at.elapsed()));
-        let token_usage = self.thread.read(cx).token_usage().cloned();
 
-        if elapsed.is_none() && token_usage.is_none() {
+        if elapsed.is_none() {
             return None;
         }
-
-        let context_card = token_usage.map(|usage| {
-            let used = crate::humanize_token_count(usage.used_tokens);
-            let max = crate::humanize_token_count(usage.max_tokens);
-            let ratio = if usage.max_tokens > 0 {
-                usage.used_tokens as f32 / usage.max_tokens as f32
-            } else {
-                0.0
-            };
-            let percentage = (ratio * 100.0).round() as u32;
-            let remaining = 100_u32.saturating_sub(percentage);
-            let color = if ratio >= 0.85 {
-                cx.theme().status().warning
-            } else {
-                cx.theme().colors().text_muted
-            };
-
-            h_flex()
-                .gap_2()
-                .items_center()
-                .rounded_md()
-                .border_1()
-                .border_color(cx.theme().colors().border_variant)
-                .bg(cx.theme().colors().editor_background)
-                .px_3()
-                .py_2()
-                .child(
-                    CircularProgress::new(
-                        usage.used_tokens as f32,
-                        usage.max_tokens as f32,
-                        px(18.),
-                        cx,
-                    )
-                    .stroke_width(px(2.))
-                    .progress_color(color),
-                )
-                .child(
-                    v_flex()
-                        .gap_0p5()
-                        .child(
-                            Label::new(format!(
-                                "Context window: {percentage}% used ({remaining}% left)"
-                            ))
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                        )
-                        .child(
-                            Label::new(format!("{used} / {max} tokens used"))
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        ),
-                )
-        });
 
         Some(
             h_flex()
@@ -925,7 +871,6 @@ impl ThreadView {
                             )
                         }),
                 )
-                .children(context_card)
                 .into_any_element(),
         )
     }

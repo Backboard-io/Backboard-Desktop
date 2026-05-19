@@ -1,3 +1,4 @@
+mod index;
 mod session_store;
 mod stream;
 mod tool_schemas;
@@ -7,11 +8,14 @@ mod workspace;
 use std::{
     any::Any,
     cell::RefCell,
+    collections::BTreeSet,
+    path::PathBuf,
     rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Instant,
 };
 
 use ::backboard::{BackboardClient, BackboardConfig};
@@ -27,7 +31,7 @@ use chrono::Utc;
 use collections::{HashMap, IndexMap};
 use gpui::{App, AppContext as _, Entity, SharedString, Task, WeakEntity};
 use project::{AgentId, Project};
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 use ui::IconName;
 use util::path_list::PathList;
 use uuid::Uuid;
@@ -36,6 +40,7 @@ const BACKBOARD_TELEMETRY_ID: &str = "backboard-native";
 const DEFAULT_PROVIDER: &str = "openai";
 const DEFAULT_MODEL: &str = "gpt-4o";
 const DEFAULT_INTENSITY: &str = "fast";
+const DEFAULT_CONTEXT_WINDOW: u64 = 258_000;
 const HISTORY_REPLAY_MAX_MESSAGES: usize = 80;
 
 static EMPTY_AUTH_METHODS: &[acp::AuthMethod] = &[];
@@ -48,7 +53,9 @@ pub(crate) struct BackboardNativeState {
     agent_id: AgentId,
     default_mode: acp::SessionModeId,
     sessions: RefCell<HashMap<acp::SessionId, NativeSession>>,
+    indexing_workspaces: RefCell<BTreeSet<PathBuf>>,
     model_cache: RefCell<Option<Vec<AgentModelInfo>>>,
+    model_context_windows: RefCell<HashMap<String, u64>>,
     prompt_capabilities: acp::PromptCapabilities,
 }
 
@@ -63,6 +70,9 @@ pub(crate) struct NativeSession {
     mode: acp::SessionModeId,
     intensity: String,
     cancel_flag: Arc<AtomicBool>,
+    metrics: NativeTurnMetrics,
+    context_window_tokens: Option<u64>,
+    estimated_used_tokens: u64,
 }
 
 #[derive(Clone)]
@@ -77,6 +87,150 @@ pub(crate) struct SessionRuntime {
     pub cancel_flag: Arc<AtomicBool>,
 }
 
+#[derive(Default)]
+pub(crate) struct NativeTurnMetrics {
+    turn_started_at: Option<Instant>,
+    first_token_seen: bool,
+    timings_ms: HashMap<String, f64>,
+    totals_ms: HashMap<String, f64>,
+    counts: HashMap<String, u64>,
+    slowest_tool: Option<String>,
+    slowest_tool_ms: f64,
+}
+
+impl NativeTurnMetrics {
+    fn reset(&mut self) {
+        *self = Self {
+            turn_started_at: Some(Instant::now()),
+            ..Self::default()
+        };
+    }
+
+    fn record_timing(&mut self, key: &str, started_at: Instant) {
+        self.timings_ms
+            .insert(key.to_string(), rounded_ms(started_at.elapsed()));
+    }
+
+    fn add_duration_ms(&mut self, key: &str, duration_ms: f64) {
+        *self.totals_ms.entry(key.to_string()).or_insert(0.0) += duration_ms;
+    }
+
+    fn add_timing(&mut self, key: &str, started_at: Instant) {
+        self.add_duration_ms(key, rounded_ms(started_at.elapsed()));
+    }
+
+    fn mark_first_token(&mut self) -> bool {
+        if self.first_token_seen {
+            return false;
+        }
+        self.first_token_seen = true;
+        if let Some(started_at) = self.turn_started_at {
+            self.timings_ms.insert(
+                "first_token_ms".to_string(),
+                rounded_ms(started_at.elapsed()),
+            );
+        }
+        true
+    }
+
+    fn record_tool_duration(&mut self, tool_name: &str, duration_ms: f64) {
+        let (total_key, count_key) = tool_metric_bucket(tool_name);
+        self.add_duration_ms(total_key, duration_ms);
+        *self.counts.entry(count_key.to_string()).or_insert(0) += 1;
+        *self
+            .counts
+            .entry("tool_calls_count".to_string())
+            .or_insert(0) += 1;
+        if duration_ms >= self.slowest_tool_ms {
+            self.slowest_tool_ms = duration_ms;
+            self.slowest_tool = Some(tool_name.to_string());
+        }
+    }
+
+    fn speed_meta(&self, runtime: &SessionRuntime) -> Value {
+        let mut object = Map::new();
+        object.insert("model".to_string(), runtime.model.clone().into());
+        object.insert("provider".to_string(), runtime.provider.clone().into());
+        object.insert("intensity".to_string(), runtime.intensity.clone().into());
+
+        for (key, value) in &self.timings_ms {
+            object.insert(key.clone(), json!(*value));
+        }
+        for (key, value) in &self.totals_ms {
+            object.insert(key.clone(), json!(rounded_number(*value)));
+        }
+        for (key, value) in &self.counts {
+            object.insert(key.clone(), json!(*value));
+        }
+        if let Some(started_at) = self.turn_started_at {
+            object.insert(
+                "total_turn_ms".to_string(),
+                json!(rounded_ms(started_at.elapsed())),
+            );
+        }
+        if let Some(tool_name) = &self.slowest_tool {
+            object.insert("slowest_tool".to_string(), tool_name.clone().into());
+            object.insert(
+                "slowest_tool_ms".to_string(),
+                json!(rounded_number(self.slowest_tool_ms)),
+            );
+        }
+        Value::Object(object)
+    }
+}
+
+fn tool_metric_bucket(tool_name: &str) -> (&'static str, &'static str) {
+    match tool_name {
+        "bash" | "run_terminal_cmd" | "run_code" | "repl" | "computer" => {
+            ("shell_tools_ms", "shell_tools_count")
+        }
+        "read_file" | "list_dir" | "read_lints" => ("read_tools_ms", "read_tools_count"),
+        "glob" | "glob_file_search" | "grep" | "codebase_search" | "web_search" | "web_fetch" => {
+            ("search_tools_ms", "search_tools_count")
+        }
+        "write" | "edit" | "search_replace" | "delete_file" | "create_directory" => {
+            ("edit_tools_ms", "edit_tools_count")
+        }
+        _ => ("other_tools_ms", "other_tools_count"),
+    }
+}
+
+pub(crate) fn rounded_ms(duration: std::time::Duration) -> f64 {
+    rounded_number(duration.as_secs_f64() * 1000.0)
+}
+
+fn rounded_number(value: f64) -> f64 {
+    (value * 10.0).round() / 10.0
+}
+
+fn model_context_key(provider: &str, model: &str) -> String {
+    format!(
+        "{}/{}",
+        provider.trim().to_lowercase(),
+        model.trim().to_lowercase()
+    )
+}
+
+fn inferred_context_window(provider: &str, model: &str) -> u64 {
+    let provider = provider.to_lowercase();
+    let model = model.to_lowercase().replace('_', "-");
+    if model.contains("claude") && model.contains("4-6") {
+        1_000_000
+    } else if provider.contains("google") || model.contains("gemini") {
+        1_000_000
+    } else if model.contains("gpt-4.1") {
+        1_047_576
+    } else if model.contains("claude") {
+        200_000
+    } else if model.contains("o3") || model.contains("o4") {
+        200_000
+    } else if model.contains("gpt-4o") {
+        128_000
+    } else {
+        DEFAULT_CONTEXT_WINDOW
+    }
+}
+
 impl BackboardNativeConnection {
     pub fn new(agent_id: AgentId, default_mode: Option<acp::SessionModeId>) -> Self {
         log::info!(
@@ -85,9 +239,11 @@ impl BackboardNativeConnection {
         Self {
             state: Rc::new(BackboardNativeState {
                 agent_id,
-                default_mode: default_mode.unwrap_or_else(|| acp::SessionModeId::new("agent")),
+                default_mode: default_mode.unwrap_or_else(|| acp::SessionModeId::new("free")),
                 sessions: RefCell::default(),
+                indexing_workspaces: RefCell::default(),
                 model_cache: RefCell::default(),
+                model_context_windows: RefCell::default(),
                 prompt_capabilities: acp::PromptCapabilities::new().embedded_context(true),
             }),
         }
@@ -151,6 +307,162 @@ impl BackboardNativeState {
         if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
             session.current_run_id = run_id;
         }
+    }
+
+    pub(crate) fn reset_turn_metrics(&self, session_id: &acp::SessionId) {
+        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+            session.metrics.reset();
+            session.estimated_used_tokens = 0;
+        }
+    }
+
+    pub(crate) fn set_estimated_used_tokens(&self, session_id: &acp::SessionId, tokens: u64) {
+        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+            session.estimated_used_tokens = tokens;
+        }
+    }
+
+    pub(crate) fn record_turn_timing(
+        &self,
+        session_id: &acp::SessionId,
+        key: &str,
+        started_at: Instant,
+    ) {
+        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+            session.metrics.record_timing(key, started_at);
+        }
+    }
+
+    pub(crate) fn add_turn_timing(
+        &self,
+        session_id: &acp::SessionId,
+        key: &str,
+        started_at: Instant,
+    ) {
+        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+            session.metrics.add_timing(key, started_at);
+        }
+    }
+
+    pub(crate) fn add_turn_duration_ms(
+        &self,
+        session_id: &acp::SessionId,
+        key: &str,
+        duration_ms: f64,
+    ) {
+        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+            session.metrics.add_duration_ms(key, duration_ms);
+        }
+    }
+
+    pub(crate) fn mark_first_token(&self, session_id: &acp::SessionId) -> bool {
+        self.sessions
+            .borrow_mut()
+            .get_mut(session_id)
+            .is_some_and(|session| session.metrics.mark_first_token())
+    }
+
+    pub(crate) fn record_tool_duration_ms(
+        &self,
+        session_id: &acp::SessionId,
+        tool_name: &str,
+        duration_ms: f64,
+    ) {
+        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+            session
+                .metrics
+                .record_tool_duration(tool_name, rounded_number(duration_ms));
+        }
+    }
+
+    pub(crate) fn speed_meta(&self, runtime: &SessionRuntime) -> Value {
+        self.sessions
+            .borrow()
+            .get(&runtime.session_id)
+            .map(|session| session.metrics.speed_meta(runtime))
+            .unwrap_or_else(|| {
+                json!({
+                    "model": runtime.model.clone(),
+                    "provider": runtime.provider.clone(),
+                    "intensity": runtime.intensity.clone(),
+                })
+            })
+    }
+
+    pub(crate) fn usage_snapshot(&self, runtime: &SessionRuntime) -> (u64, u64) {
+        let sessions = self.sessions.borrow();
+        let used = sessions
+            .get(&runtime.session_id)
+            .map(|session| session.estimated_used_tokens)
+            .unwrap_or(0);
+        let size = sessions
+            .get(&runtime.session_id)
+            .and_then(|session| session.context_window_tokens)
+            .or_else(|| {
+                self.model_context_windows
+                    .borrow()
+                    .get(&model_context_key(&runtime.provider, &runtime.model))
+                    .copied()
+            })
+            .unwrap_or_else(|| inferred_context_window(&runtime.provider, &runtime.model));
+        (used.min(size), size)
+    }
+
+    pub(crate) fn context_window_for_runtime(&self, runtime: &SessionRuntime) -> u64 {
+        self.usage_snapshot(runtime).1
+    }
+
+    fn remember_model_context_window(&self, provider: &str, model: &str, context_window: u64) {
+        if context_window == 0 {
+            return;
+        }
+        let key = model_context_key(provider, model);
+        self.model_context_windows
+            .borrow_mut()
+            .insert(key, context_window);
+        for session in self.sessions.borrow_mut().values_mut() {
+            if session.provider.as_deref() == Some(provider)
+                && session.model.as_deref() == Some(model)
+            {
+                session.context_window_tokens = Some(context_window);
+            }
+        }
+    }
+
+    fn prepare_workspace_and_start_indexing(self: &Rc<Self>, workspace: PathBuf, cx: &mut App) {
+        let workspace_key = index::workspace_key(&workspace);
+        if !self
+            .indexing_workspaces
+            .borrow_mut()
+            .insert(workspace_key.clone())
+        {
+            return;
+        }
+
+        let state = self.clone();
+        cx.spawn(async move |cx| {
+            let workspace_for_task = workspace.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    index::prepare_workspace(&workspace_for_task)?;
+                    index::build_workspace_index(&workspace_for_task)?;
+                    anyhow::Ok(())
+                })
+                .await;
+
+            state
+                .indexing_workspaces
+                .borrow_mut()
+                .remove(&workspace_key);
+            if let Err(error) = result {
+                log::debug!(
+                    "Backboard native workspace indexing failed for {}: {error:#}",
+                    workspace.display()
+                );
+            }
+        })
+        .detach();
     }
 
     pub(crate) fn emit_update(
@@ -288,7 +600,7 @@ impl AgentConnection for BackboardNativeConnection {
             session_id,
             NativeSession {
                 thread: thread.downgrade(),
-                workspace,
+                workspace: workspace.clone(),
                 assistant_id: None,
                 thread_id: None,
                 current_run_id: None,
@@ -297,8 +609,13 @@ impl AgentConnection for BackboardNativeConnection {
                 mode,
                 intensity: DEFAULT_INTENSITY.to_string(),
                 cancel_flag,
+                metrics: NativeTurnMetrics::default(),
+                context_window_tokens: None,
+                estimated_used_tokens: 0,
             },
         );
+        self.state
+            .prepare_workspace_and_start_indexing(workspace, cx);
 
         Task::ready(Ok(thread))
     }
@@ -494,8 +811,13 @@ impl BackboardNativeConnection {
                 mode: self.state.default_mode.clone(),
                 intensity: DEFAULT_INTENSITY.to_string(),
                 cancel_flag: Arc::new(AtomicBool::new(false)),
+                metrics: NativeTurnMetrics::default(),
+                context_window_tokens: None,
+                estimated_used_tokens: 0,
             },
         );
+        self.state
+            .prepare_workspace_and_start_indexing(workspace.clone(), cx);
 
         if replay_history {
             let state = self.state.clone();
@@ -523,7 +845,7 @@ impl AgentSessionModes for BackboardSessionModes {
             .borrow()
             .get(&self.session_id)
             .map(|session| session.mode.clone())
-            .unwrap_or_else(|| acp::SessionModeId::new("agent"))
+            .unwrap_or_else(|| acp::SessionModeId::new("free"))
     }
 
     fn all_modes(&self) -> Vec<acp::SessionMode> {
@@ -534,7 +856,7 @@ impl AgentSessionModes for BackboardSessionModes {
         let mode = if supported_modes().iter().any(|item| item.id == mode) {
             mode
         } else {
-            acp::SessionModeId::new("agent")
+            acp::SessionModeId::new("free")
         };
         if let Some(session) = self.state.sessions.borrow_mut().get_mut(&self.session_id) {
             session.mode = mode.clone();
@@ -624,17 +946,24 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
             let models = match state.client() {
                 Ok((_config, client)) => {
                     log::info!(
-                        "Backboard native endpoint call: GET /models?model_type=llm&limit=250 agent_id={}",
+                        "Backboard native endpoint call: GET /models?model_type=llm&limit=15000 agent_id={}",
                         state.agent_id
                     );
                     let models = gpui_tokio::Tokio::spawn_result(cx, async move {
-                        client.list_models(None, Some("llm"), Some(250)).await
+                        client.list_models(None, Some("llm"), Some(15_000)).await
                     })
                     .await?;
                     models
                         .into_iter()
                         .filter(|model| !model.provider.is_empty() && !model.name.is_empty())
                         .map(|model| {
+                            if let Some(context_limit) = model.context_limit {
+                                state.remember_model_context_window(
+                                    &model.provider,
+                                    &model.name,
+                                    context_limit,
+                                );
+                            }
                             let id = format!("{}/{}", model.provider, model.name);
                             let mut info = AgentModelInfo {
                                 id: acp::ModelId::new(id),
@@ -682,6 +1011,12 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
         if let Some(session) = self.state.sessions.borrow_mut().get_mut(&self.session_id) {
             session.provider = Some(provider.clone());
             session.model = Some(model.clone());
+            session.context_window_tokens = self
+                .state
+                .model_context_windows
+                .borrow()
+                .get(&model_context_key(&provider, &model))
+                .copied();
             if let (Some(assistant_id), Some(thread_id)) =
                 (session.assistant_id.clone(), session.thread_id.clone())
             {
@@ -786,7 +1121,7 @@ fn supported_modes() -> Vec<acp::SessionMode> {
             .description("Read, search, and explain without file writes or shell mutation."),
         acp::SessionMode::new("manual", "Manual")
             .description("Focused edit proposals with explicit diff review."),
-        acp::SessionMode::new("free", "Free").description(
+        acp::SessionMode::new("free", "Full Access").description(
             "Unrestricted tool access. Terminal commands run without approval prompts.",
         ),
     ]

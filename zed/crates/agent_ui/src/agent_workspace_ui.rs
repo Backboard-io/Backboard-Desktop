@@ -75,7 +75,7 @@ impl BackboardAgentWorkspacePage {
                 task_editor,
                 selected_scope: BackboardAgentWorkspaceScope::WholeProject,
                 selected_kind: BackboardAgentWorkspaceKind::Build,
-                selected_mode: BackboardAgentWorkspaceMode::Agent,
+                selected_mode: BackboardAgentWorkspaceMode::Free,
                 selected_thread_id: None,
                 pending_launch_batch_id: None,
                 run_list_scroll_handle: ScrollHandle::new(),
@@ -1170,118 +1170,28 @@ impl BackboardAgentWorkspacePage {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let count = summaries.len();
-        let mut rows = Vec::new();
-        for summary in summaries.into_iter().take(3) {
-            let thread_id = summary.thread_id;
-            let title = summary.title.clone();
-            let reason = summary.blocked_reason.clone();
-            rows.push(
-                h_flex()
-                    .gap_2()
-                    .justify_between()
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(cx.theme().status().warning_border.opacity(0.6))
-                    .bg(cx.theme().status().warning_background.opacity(0.06))
-                    .px_3()
-                    .py_2()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Icon::new(IconName::Warning)
-                                    .size(IconSize::Small)
-                                    .color(Color::Warning),
-                            )
-                            .child(
-                                v_flex()
-                                    .gap_0p5()
-                                    .child(Label::new(title.clone()).size(LabelSize::Default))
-                                    .child(
-                                        Label::new(
-                                            reason
-                                                .clone()
-                                                .unwrap_or_else(|| "Needs attention".into()),
-                                        )
-                                        .size(LabelSize::Small)
-                                        .color(Color::Warning),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(
-                                Button::new(format!("revise-blocked-{thread_id:?}"), "Revise")
-                                    .start_icon(Icon::new(IconName::Pencil))
-                                    .style(ButtonStyle::Outlined)
-                                    .size(ButtonSize::Compact)
-                                    .on_click(cx.listener({
-                                        let title = title.clone();
-                                        let reason = reason.clone();
-                                        move |this, _, window, cx| {
-                                            this.revise_run(
-                                                title.clone(),
-                                                reason.clone(),
-                                                window,
-                                                cx,
-                                            );
-                                        }
-                                    })),
-                            )
-                            .child(
-                                IconButton::new(
-                                    format!("open-blocked-{thread_id:?}"),
-                                    IconName::ArrowUpRight,
-                                )
-                                .icon_size(IconSize::Small)
-                                .tooltip(Tooltip::text("Open blocked chat"))
-                                .on_click(cx.listener(
-                                    move |this, _, window, cx| {
-                                        this.open_run(thread_id, window, cx);
-                                    },
-                                )),
-                            ),
-                    )
-                    .into_any_element(),
-            );
-        }
+        let suffix = if count == 1 { "" } else { "s" };
 
-        v_flex()
+        h_flex()
             .mx_5()
-            .mt_4()
+            .mt_2()
             .gap_2()
-            .rounded_md()
+            .rounded_sm()
             .border_1()
-            .border_color(cx.theme().status().warning_border.opacity(0.65))
-            .bg(cx.theme().status().warning_background.opacity(0.08))
-            .p_3()
+            .border_color(cx.theme().status().warning_border.opacity(0.45))
+            .bg(cx.theme().status().warning_background.opacity(0.04))
+            .px_2()
+            .py_1()
             .child(
-                h_flex()
-                    .justify_between()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Icon::new(IconName::Warning)
-                                    .size(IconSize::Small)
-                                    .color(Color::Warning),
-                            )
-                            .child(
-                                Label::new(format!(
-                                    "{count} blocked agent{suffix}",
-                                    suffix = if count == 1 { "" } else { "s" }
-                                ))
-                                .color(Color::Warning),
-                            ),
-                    )
-                    .child(
-                        Label::new("Open detail or revise the prompt to unblock work")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    ),
+                Icon::new(IconName::Warning)
+                    .size(IconSize::XSmall)
+                    .color(Color::Warning),
             )
-            .children(rows)
+            .child(
+                Label::new(format!("{count} blocked agent{suffix}"))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Warning),
+            )
     }
 
     fn render_agent_card(
@@ -2477,7 +2387,7 @@ impl BackboardAgentWorkspacePage {
                                 ),
                         )
                         .child(
-                            Label::new("Open a chat to start Jarvis.")
+                            Label::new("Open a chat to start Agent Workspace.")
                                 .size(LabelSize::Small)
                                 .color(Color::Muted),
                         )

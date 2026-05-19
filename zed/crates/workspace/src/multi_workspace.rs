@@ -65,6 +65,13 @@ pub struct SidebarRenderState {
     pub side: SidebarSide,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum WorkspaceModeTab {
+    CodeEditor,
+    AgentWorkspace,
+    Jarvis,
+}
+
 pub fn sidebar_side_context_menu(
     id: impl Into<ElementId>,
     cx: &App,
@@ -307,6 +314,7 @@ pub struct MultiWorkspace {
     previous_focus_handle: Option<FocusHandle>,
     pub interface_mode: InterfaceMode,
     pub multi_agent_expanded: bool,
+    pub jarvis_placeholder_expanded: bool,
     pub beginner_view: Option<AnyView>,
     pub agent_workspace_view: Option<AnyView>,
 }
@@ -372,6 +380,7 @@ impl MultiWorkspace {
             previous_focus_handle: None,
             interface_mode: InterfaceMode::Expert,
             multi_agent_expanded: false,
+            jarvis_placeholder_expanded: false,
             beginner_view: None,
             agent_workspace_view: None,
         }
@@ -388,11 +397,31 @@ impl MultiWorkspace {
     }
 
     pub fn set_multi_agent_expanded(&mut self, expanded: bool, cx: &mut Context<Self>) {
-        if self.multi_agent_expanded == expanded {
+        let next_tab = if expanded {
+            WorkspaceModeTab::AgentWorkspace
+        } else {
+            WorkspaceModeTab::CodeEditor
+        };
+        self.set_workspace_mode_tab(next_tab, cx);
+    }
+
+    fn selected_workspace_mode_tab(&self) -> WorkspaceModeTab {
+        if self.jarvis_placeholder_expanded {
+            WorkspaceModeTab::Jarvis
+        } else if self.multi_agent_expanded {
+            WorkspaceModeTab::AgentWorkspace
+        } else {
+            WorkspaceModeTab::CodeEditor
+        }
+    }
+
+    fn set_workspace_mode_tab(&mut self, tab: WorkspaceModeTab, cx: &mut Context<Self>) {
+        if self.selected_workspace_mode_tab() == tab {
             return;
         }
 
-        self.multi_agent_expanded = expanded;
+        self.multi_agent_expanded = tab == WorkspaceModeTab::AgentWorkspace;
+        self.jarvis_placeholder_expanded = tab == WorkspaceModeTab::Jarvis;
         cx.notify();
     }
 
@@ -2059,6 +2088,8 @@ impl MultiWorkspace {
     }
 
     fn render_workspace_mode_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
+        let selected_tab = self.selected_workspace_mode_tab();
+
         h_flex()
             .h(px(44.))
             .w_full()
@@ -2073,15 +2104,22 @@ impl MultiWorkspace {
             .child(self.render_workspace_mode_tab(
                 "multi-workspace-code-editor-tab",
                 "Code Editor",
-                !self.multi_agent_expanded,
-                false,
+                selected_tab == WorkspaceModeTab::CodeEditor,
+                WorkspaceModeTab::CodeEditor,
                 cx,
             ))
             .child(self.render_workspace_mode_tab(
                 "multi-workspace-agent-tab",
+                "Agent Workspace",
+                selected_tab == WorkspaceModeTab::AgentWorkspace,
+                WorkspaceModeTab::AgentWorkspace,
+                cx,
+            ))
+            .child(self.render_workspace_mode_tab(
+                "multi-workspace-jarvis-tab",
                 "Jarvis",
-                self.multi_agent_expanded,
-                true,
+                selected_tab == WorkspaceModeTab::Jarvis,
+                WorkspaceModeTab::Jarvis,
                 cx,
             ))
             .into_any_element()
@@ -2092,7 +2130,7 @@ impl MultiWorkspace {
         id: &'static str,
         label: &'static str,
         selected: bool,
-        expanded: bool,
+        target_tab: WorkspaceModeTab,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
@@ -2117,7 +2155,7 @@ impl MultiWorkspace {
             .cursor_pointer()
             .hover(|style| style.bg(cx.theme().colors().element_hover))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.set_multi_agent_expanded(expanded, cx);
+                this.set_workspace_mode_tab(target_tab, cx);
             }))
             .child(Label::new(label).size(LabelSize::Small).color(if selected {
                 Color::Accent
@@ -2224,6 +2262,42 @@ impl Render for MultiWorkspace {
         } else {
             (sidebar, None)
         };
+
+        if self.jarvis_placeholder_expanded {
+            let titlebar = self.workspace().read(cx).titlebar_item();
+            return client_side_decorations(
+                div()
+                    .key_context("JarvisPlaceholderView")
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .size_full()
+                    .font(ui_font)
+                    .text_color(text_color)
+                    .on_action(cx.listener(Self::close_window))
+                    .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
+                        this.set_multi_agent_expanded(false, cx);
+                    }))
+                    .children(titlebar)
+                    .child(self.render_workspace_mode_switcher(cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Label::new("This is a placeholder tab for the future")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            ),
+                    ),
+                window,
+                cx,
+                Tiling::default(),
+            );
+        }
 
         if self.multi_agent_expanded {
             if let Some(view) = self.agent_workspace_view.as_ref() {

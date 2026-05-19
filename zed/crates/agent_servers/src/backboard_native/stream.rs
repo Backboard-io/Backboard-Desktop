@@ -1,5 +1,4 @@
-use std::pin::Pin;
-use std::rc::Rc;
+use std::{pin::Pin, rc::Rc, time::Instant};
 
 use ::backboard::{SendMessageRequest, SubmitToolOutputsRequest};
 use acp_thread::{AcpThread, UserMessageId};
@@ -21,6 +20,7 @@ pub async fn run_prompt(
     cx: &mut AsyncApp,
 ) -> Result<acp::PromptResponse> {
     let runtime = state.runtime_for_session(&params.session_id)?;
+    state.reset_turn_metrics(&params.session_id);
     log::info!(
         "Backboard native prompt start: session_id={} provider={} model={} mode={} intensity={} path=rust-native",
         params.session_id,
@@ -51,6 +51,7 @@ pub async fn run_prompt(
         cx,
     )?;
 
+    let runtime_load_started = Instant::now();
     let (config, client) = match state.client() {
         Ok(parts) => parts,
         Err(_) => {
@@ -58,17 +59,24 @@ pub async fn run_prompt(
             return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
         }
     };
+    state.record_turn_timing(&params.session_id, "runtime_load_ms", runtime_load_started);
 
+    let assistant_started = Instant::now();
     let thread_id = state
         .clone()
         .ensure_thread_binding(&params.session_id, cx)
         .await?;
+    state.record_turn_timing(&params.session_id, "assistant_create_ms", assistant_started);
     let provider = Some(runtime.provider.clone());
     let model = Some(runtime.model.clone());
     let tools = Some(tool_schemas::tool_definitions(&runtime.mode.to_string()));
     let thinking = thinking_payload(&runtime.intensity, &runtime.provider, &runtime.model);
+    let context_pack_started = Instant::now();
     let augmented =
         workspace::augment_prompt(&message, &runtime.workspace, &runtime.mode.to_string());
+    state.record_turn_timing(&params.session_id, "context_pack_ms", context_pack_started);
+    state.set_estimated_used_tokens(&params.session_id, estimate_tokens(&augmented));
+    emit_speed_update(&state, &runtime, cx).ok();
 
     emit_progress(
         &state,
@@ -219,6 +227,9 @@ async fn consume_stream(
                 "reasoning_ended" => {}
                 "content_streaming" => {
                     if let Some(text) = chunk_text(&chunk) {
+                        if state.mark_first_token(&runtime.session_id) {
+                            emit_speed_update(&state, &runtime, cx).ok();
+                        }
                         emit_agent_text(&state, &runtime, &text, cx)?;
                     }
                 }
@@ -291,6 +302,7 @@ async fn consume_stream(
                         .and_then(Value::as_str)
                         .unwrap_or("Backboard run failed.");
                     emit_agent_text(&state, &runtime, message, cx)?;
+                    emit_speed_update(&state, &runtime, cx).ok();
                     state.set_current_run_id(&runtime.session_id, None);
                     return Ok(acp::StopReason::EndTurn);
                 }
@@ -333,7 +345,10 @@ async fn submit_tools(
         ),
         cx,
     )?;
+    let tool_batch_started = Instant::now();
     let outputs = tools::execute_tool_batch(state.clone(), runtime, tool_calls, cx).await?;
+    state.add_turn_timing(&runtime.session_id, "tool_batch_ms", tool_batch_started);
+    emit_speed_update(&state, runtime, cx).ok();
     let (_config, client) = state.client()?;
     let thread_id = thread_id.to_string();
     let run_id = run_id.to_string();
@@ -424,7 +439,10 @@ fn emit_usage(
         .map(|usage| usage.used_tokens)
         .or_else(|| usage_number(chunk, &["used_tokens", "total_tokens"]))
         .or_else(|| nested_usage_number(chunk, &["used_tokens", "total_tokens"]))
-        .unwrap_or(input_tokens + output_tokens);
+        .unwrap_or_else(|| {
+            let (snapshot_used, _) = state.usage_snapshot(runtime);
+            snapshot_used.max(input_tokens + output_tokens)
+        });
     let size = context_usage
         .as_ref()
         .map(|usage| usage.context_limit)
@@ -434,10 +452,8 @@ fn emit_usage(
                 &["context_limit", "context_window", "max_context_tokens"],
             )
         })
-        .unwrap_or(0);
-    if used == 0 && size == 0 {
-        return Ok(());
-    }
+        .unwrap_or_else(|| state.context_window_for_runtime(runtime));
+    state.set_estimated_used_tokens(&runtime.session_id, used);
     let remaining_tokens = size.saturating_sub(used);
     let context_percent = if size > 0 {
         ((used as f64 / size as f64) * 100.0).round() as u64
@@ -482,6 +498,7 @@ fn emit_usage(
     if let Some(max_output_tokens) = max_output_tokens {
         meta.insert("max_output_tokens".to_string(), max_output_tokens.into());
     }
+    meta.insert("backboard_speed".to_string(), state.speed_meta(runtime));
     meta.insert(
         "backboard_context".to_string(),
         json!({
@@ -493,6 +510,39 @@ fn emit_usage(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
         }),
+    );
+    state.emit_update(
+        runtime,
+        acp::SessionUpdate::UsageUpdate(acp::UsageUpdate::new(used, size).meta(meta)),
+        cx,
+    )
+}
+
+fn emit_speed_update(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let mut meta = acp::Meta::new();
+    meta.insert("backboard_speed".to_string(), state.speed_meta(runtime));
+    let (used, size) = state.usage_snapshot(runtime);
+    let remaining_tokens = size.saturating_sub(used);
+    let context_percent = if size > 0 {
+        ((used as f64 / size as f64) * 100.0).round() as u64
+    } else {
+        0
+    };
+    meta.insert("model".to_string(), runtime.model.clone().into());
+    meta.insert("provider".to_string(), runtime.provider.clone().into());
+    meta.insert("intensity".to_string(), runtime.intensity.clone().into());
+    meta.insert("remaining_tokens".to_string(), remaining_tokens.into());
+    meta.insert(
+        "context_percent".to_string(),
+        context_percent.min(100).into(),
+    );
+    meta.insert(
+        "context_model".to_string(),
+        format!("{}/{}", runtime.provider, runtime.model).into(),
     );
     state.emit_update(
         runtime,
@@ -557,6 +607,10 @@ fn value_to_u64(value: &Value) -> Option<u64> {
             })
         })
         .or_else(|| value.as_str().and_then(|text| text.parse::<u64>().ok()))
+}
+
+fn estimate_tokens(text: &str) -> u64 {
+    ((text.chars().count() as f64) / 4.0).ceil().max(1.0) as u64
 }
 
 fn prompt_text(blocks: &[acp::ContentBlock]) -> String {

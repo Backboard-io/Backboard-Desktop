@@ -47,7 +47,7 @@ pub fn language_model_selector(
     if popover_styles {
         Picker::list(delegate, window, cx)
             .show_scrollbar(true)
-            .width(rems(20.))
+            .width(rems(40.))
             .max_height(Some(rems(20.).into()))
     } else {
         Picker::list(delegate, window, cx).show_scrollbar(true)

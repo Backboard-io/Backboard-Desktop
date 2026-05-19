@@ -117,23 +117,38 @@ impl ModelSelectorListItem {
 
 impl RenderOnce for ModelSelectorListItem {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let model_icon_color = if self.is_selected {
+        let Self {
+            index,
+            title,
+            icon,
+            is_selected,
+            is_focused,
+            is_latest,
+            is_favorite,
+            on_toggle_favorite,
+            cost_info,
+        } = self;
+
+        let model_icon_color = if is_selected {
             Color::Accent
         } else {
             Color::Muted
         };
 
-        let is_favorite = self.is_favorite;
+        let title_tooltip = title.clone();
 
-        ListItem::new(self.index)
+        ListItem::new(index)
             .inset(true)
             .spacing(ListItemSpacing::Sparse)
-            .toggle_state(self.is_focused)
+            .toggle_state(is_focused)
+            .tooltip(Tooltip::text(title_tooltip))
             .child(
                 h_flex()
                     .w_full()
+                    .min_w_0()
                     .gap_1p5()
-                    .when_some(self.icon, |this, icon| {
+                    .items_center()
+                    .when_some(icon, |this, icon| {
                         this.child(
                             match icon {
                                 ModelIcon::Name(icon_name) => Icon::new(icon_name),
@@ -143,24 +158,22 @@ impl RenderOnce for ModelSelectorListItem {
                             .size(IconSize::Small),
                         )
                     })
-                    .child(Label::new(self.title).truncate())
-                    .when(self.is_latest, |parent| parent.child(Chip::new("Latest")))
-                    .when_some(self.cost_info, |this, cost_info| {
-                        let tooltip_text = if cost_info.ends_with('×') {
-                            format!("Cost Multiplier: {}", cost_info)
-                        } else if cost_info.contains('$') {
-                            format!("Cost per Million Tokens: {}", cost_info)
-                        } else {
-                            format!("Cost: {}", cost_info)
-                        };
-
-                        this.child(Chip::new(cost_info).tooltip(Tooltip::text(tooltip_text)))
+                    .child(Label::new(title).truncate().flex_1())
+                    .when(is_latest, |parent| parent.child(Chip::new("Latest")))
+                    .when_some(cost_info, |this, cost_info| {
+                        this.child(
+                            Label::new(cost_info)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted)
+                                .buffer_font(_cx)
+                                .flex_none(),
+                        )
                     }),
             )
-            .end_slot(div().pr_2().when(self.is_selected, |this| {
+            .end_slot(div().pr_2().when(is_selected, |this| {
                 this.child(Icon::new(IconName::Check).color(Color::Accent))
             }))
-            .end_slot_on_hover(div().pr_1p5().when_some(self.on_toggle_favorite, {
+            .end_slot_on_hover(div().pr_1p5().when_some(on_toggle_favorite, {
                 |this, handle_click| {
                     let (icon, color, tooltip) = if is_favorite {
                         (IconName::StarFilled, Color::Accent, "Unfavorite Model")
@@ -168,7 +181,7 @@ impl RenderOnce for ModelSelectorListItem {
                         (IconName::Star, Color::Default, "Favorite Model")
                     };
                     this.child(
-                        IconButton::new(("toggle-favorite", self.index), icon)
+                        IconButton::new(("toggle-favorite", index), icon)
                             .layer(ElevationIndex::ElevatedSurface)
                             .icon_color(color)
                             .icon_size(IconSize::Small)

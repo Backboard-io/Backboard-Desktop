@@ -23,14 +23,37 @@ fn blocked_tools(mode: &str) -> &'static [&'static str] {
             "create_directory",
             "bash",
             "run_terminal_cmd",
+            "run_code",
+            "repl",
+            "computer",
+            "task",
         ],
-        "manual" => &["bash", "run_terminal_cmd"],
+        "manual" => &[
+            "bash",
+            "run_terminal_cmd",
+            "run_code",
+            "repl",
+            "computer",
+            "task",
+        ],
         _ => &[],
     }
 }
 
 fn all_tool_definitions() -> Vec<Value> {
     vec![
+        function(
+            "bash",
+            "Execute a shell command. Do not use for file operations; use read_file, edit, write, grep, or glob instead. Fresh shell each call. Use working_directory for specific dirs. Set is_background=true for long-running processes.",
+            json!({
+                "command": {"type": "string", "description": "The shell command to execute"},
+                "description": {"type": "string", "description": "Short description of what this command does"},
+                "timeout": {"type": "integer", "description": "Timeout in milliseconds"},
+                "working_directory": {"type": "string", "description": "Directory to run the command in. Defaults to workspace root."},
+                "is_background": {"type": "boolean", "description": "Accepted for compatibility; native runtime captures bounded output"}
+            }),
+            &["command"],
+        ),
         function(
             "read_file",
             "Read a file. Use target_file or file_path. Supports offset and limit line ranges.",
@@ -43,12 +66,24 @@ fn all_tool_definitions() -> Vec<Value> {
             &["target_file"],
         ),
         function(
-            "list_dir",
-            "List directory contents with file types and sizes.",
+            "write",
+            "Write a complete file. Prefer edit for existing files.",
             json!({
-                "target_directory": {"type": "string", "description": "Directory path, relative to workspace or absolute"}
+                "file_path": {"type": "string", "description": "Path to file"},
+                "contents": {"type": "string", "description": "Complete file contents"}
             }),
-            &["target_directory"],
+            &["file_path", "contents"],
+        ),
+        function(
+            "edit",
+            "Perform exact string replacement in a file.",
+            json!({
+                "file_path": {"type": "string", "description": "Path to file"},
+                "old_string": {"type": "string", "description": "Exact text to replace"},
+                "new_string": {"type": "string", "description": "Replacement text"},
+                "replace_all": {"type": "boolean", "description": "Replace all occurrences"}
+            }),
+            &["file_path", "old_string", "new_string"],
         ),
         function(
             "glob",
@@ -74,53 +109,12 @@ fn all_tool_definitions() -> Vec<Value> {
             &["pattern"],
         ),
         function(
-            "codebase_search",
-            "Search workspace code by natural-language query. The native IDE runtime uses a fast local lexical fallback.",
+            "list_dir",
+            "List directory contents with file types and sizes.",
             json!({
-                "query": {"type": "string", "description": "Natural language search query"},
-                "target_directories": {"type": "array", "items": {"type": "string"}},
-                "num_results": {"type": "integer"}
+                "target_directory": {"type": "string", "description": "Directory path, relative to workspace or absolute"}
             }),
-            &["query"],
-        ),
-        function(
-            "read_lints",
-            "Read diagnostics/lints for paths. The native runtime returns a lightweight status for now.",
-            json!({
-                "paths": {"type": "array", "items": {"type": "string"}}
-            }),
-            &[],
-        ),
-        function(
-            "write",
-            "Write a complete file. Prefer edit for existing files.",
-            json!({
-                "file_path": {"type": "string", "description": "Path to file"},
-                "contents": {"type": "string", "description": "Complete file contents"}
-            }),
-            &["file_path", "contents"],
-        ),
-        function(
-            "edit",
-            "Perform exact string replacement in a file.",
-            json!({
-                "file_path": {"type": "string", "description": "Path to file"},
-                "old_string": {"type": "string", "description": "Exact text to replace"},
-                "new_string": {"type": "string", "description": "Replacement text"},
-                "replace_all": {"type": "boolean", "description": "Replace all occurrences"}
-            }),
-            &["file_path", "old_string", "new_string"],
-        ),
-        function(
-            "search_replace",
-            "Alias for edit. Replace exact text in a file.",
-            json!({
-                "file_path": {"type": "string"},
-                "old_string": {"type": "string"},
-                "new_string": {"type": "string"},
-                "replace_all": {"type": "boolean"}
-            }),
-            &["file_path", "old_string", "new_string"],
+            &["target_directory"],
         ),
         function(
             "delete_file",
@@ -132,35 +126,20 @@ fn all_tool_definitions() -> Vec<Value> {
             &["target_file"],
         ),
         function(
-            "create_directory",
-            "Create a directory and any missing parent directories.",
+            "web_search",
+            "Search the web for real-time information. Returns summarized results and URLs.",
             json!({
-                "path": {"type": "string", "description": "Directory path"},
-                "target_directory": {"type": "string", "description": "Alias for path"}
+                "query": {"type": "string", "description": "The search query. Be specific and include version numbers or dates if relevant."}
             }),
-            &["path"],
+            &["query"],
         ),
         function(
-            "bash",
-            "Run a shell command in the workspace. Read-only commands auto-run; mutating commands require approval unless in Free mode.",
+            "web_fetch",
+            "Fetch URL content as readable text. Read-only, no binary support.",
             json!({
-                "command": {"type": "string", "description": "Shell command to execute"},
-                "description": {"type": "string", "description": "Short description"},
-                "timeout": {"type": "integer", "description": "Timeout in milliseconds"},
-                "working_directory": {"type": "string", "description": "Working directory"},
-                "is_background": {"type": "boolean", "description": "Accepted for compatibility; native runtime captures bounded output"}
+                "url": {"type": "string", "description": "The full URL to fetch"}
             }),
-            &["command"],
-        ),
-        function(
-            "run_terminal_cmd",
-            "Alias for bash.",
-            json!({
-                "command": {"type": "string"},
-                "timeout": {"type": "integer"},
-                "working_directory": {"type": "string"}
-            }),
-            &["command"],
+            &["url"],
         ),
         function(
             "todo_write",
@@ -181,6 +160,99 @@ fn all_tool_definitions() -> Vec<Value> {
                 }
             }),
             &["merge", "todos"],
+        ),
+        function(
+            "read_lints",
+            "Check files for linter errors. Native runtime returns a lightweight status for now.",
+            json!({
+                "paths": {"type": "array", "items": {"type": "string"}}
+            }),
+            &[],
+        ),
+        function(
+            "task",
+            "Launch a focused sub-agent task. Native Rust currently reports this as unavailable until subagents are ported.",
+            json!({
+                "prompt": {"type": "string"},
+                "description": {"type": "string"}
+            }),
+            &["prompt", "description"],
+        ),
+        function(
+            "enter_plan_mode",
+            "Enter read-only plan mode. Only use when the user explicitly requests planning.",
+            json!({
+                "reason": {"type": "string"}
+            }),
+            &["reason"],
+        ),
+        function(
+            "exit_plan_mode",
+            "Exit plan mode and present an implementation plan for user approval.",
+            json!({
+                "plan": {"type": "string"}
+            }),
+            &["plan"],
+        ),
+        function(
+            "persistence_decide",
+            "Persistence-gate decision tool. Only valid for persistence-armed prompts.",
+            json!({
+                "action": {"type": "string", "enum": ["continue", "done"]},
+                "reason": {"type": "string"},
+                "focus": {"type": "string"}
+            }),
+            &["action", "reason"],
+        ),
+        function(
+            "sleep",
+            "Wait for specified seconds without holding a shell process. User can interrupt.",
+            json!({
+                "seconds": {"type": "integer", "description": "Duration to sleep in seconds"}
+            }),
+            &["seconds"],
+        ),
+        function(
+            "repl",
+            "Persistent Python REPL. Native Rust currently runs this as a one-off Python snippet until the persistent REPL is ported.",
+            json!({
+                "code": {"type": "string"},
+                "reset": {"type": "boolean"}
+            }),
+            &["code"],
+        ),
+        function(
+            "run_code",
+            "Execute a one-off code snippet. Supports Python and Shell in the native runtime.",
+            json!({
+                "code": {"type": "string"},
+                "language": {"type": "string", "enum": ["python", "node", "typescript", "shell", "ruby", "go"]},
+                "timeout": {"type": "integer"},
+                "description": {"type": "string"}
+            }),
+            &["code"],
+        ),
+        function(
+            "computer",
+            "Desktop automation. Native Rust currently reports this as unavailable until desktop automation is ported.",
+            json!({
+                "action": {"type": "string"},
+                "x": {"type": "integer"},
+                "y": {"type": "integer"},
+                "text": {"type": "string"},
+                "key": {"type": "string"}
+            }),
+            &["action"],
+        ),
+        function(
+            "ask_user_question",
+            "Ask the user for required input that cannot be inferred.",
+            json!({
+                "question": {"type": "string"},
+                "options": {"type": "array", "items": {"type": "string"}},
+                "allow_multiple": {"type": "boolean"}
+            }),
+            &["question"],
         ),
     ]
 }
@@ -219,5 +291,46 @@ mod tests {
         assert!(names.contains(&"read_file".to_string()));
         assert!(!names.contains(&"write".to_string()));
         assert!(!names.contains(&"bash".to_string()));
+        assert!(!names.contains(&"task".to_string()));
+    }
+
+    #[test]
+    fn advertised_tools_match_python_bridge_base_catalog() {
+        let names = tool_definitions("agent")
+            .into_iter()
+            .filter_map(|tool| {
+                tool.get("function")
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "bash",
+                "read_file",
+                "write",
+                "edit",
+                "glob",
+                "grep",
+                "list_dir",
+                "delete_file",
+                "web_search",
+                "web_fetch",
+                "todo_write",
+                "read_lints",
+                "task",
+                "enter_plan_mode",
+                "exit_plan_mode",
+                "persistence_decide",
+                "sleep",
+                "repl",
+                "run_code",
+                "computer",
+                "ask_user_question",
+            ]
+        );
     }
 }

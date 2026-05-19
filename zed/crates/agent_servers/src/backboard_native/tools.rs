@@ -1,8 +1,12 @@
 use std::{
-    fs,
+    collections::{BTreeMap, BTreeSet},
+    fs::{self, File},
+    io::{BufRead, BufReader},
+    net::{IpAddr, ToSocketAddrs},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
     rc::Rc,
+    sync::mpsc::{self, TryRecvError},
     thread,
     time::{Duration, Instant},
 };
@@ -21,11 +25,18 @@ use terminal::TerminalBuilder;
 use terminal::terminal_settings::{AlternateScroll, CursorShape};
 use walkdir::WalkDir;
 
-use super::{BackboardNativeState, SessionRuntime};
+use super::{BackboardNativeState, SessionRuntime, index, rounded_ms};
 
-const MAX_READ_BYTES: u64 = 512 * 1024;
+const MAX_READ_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_SEARCH_RESULTS: usize = 120;
 const MAX_OUTPUT_CHARS: usize = 16_000;
+const MAX_GLOB_RESULTS: usize = 10_000;
+const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(45);
+const READ_ONLY_COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
+const CHECK_COMMAND_TIMEOUT: Duration = Duration::from_secs(90);
+const INSTALL_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+const DEV_SERVER_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_COMMAND_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Clone, Debug)]
 pub struct ToolCallRequest {
@@ -69,12 +80,14 @@ pub async fn execute_tool_batch(
                     move |call| {
                         let runtime = runtime.clone();
                         async move {
+                            let started_at = Instant::now();
                             let output = execute_read_only_tool(&runtime.workspace, &call).await;
-                            (call, output)
+                            (call, output, rounded_ms(started_at.elapsed()))
                         }
                     }
                 });
-                for (call, output) in join_all(tasks).await {
+                for (call, output, duration_ms) in join_all(tasks).await {
+                    state.record_tool_duration_ms(&runtime.session_id, &call.name, duration_ms);
                     let output = output
                         .unwrap_or_else(|err| json!({"success": false, "error": err.to_string()}));
                     emit_tool_result(state.clone(), runtime, &call, &output, cx)?;
@@ -82,7 +95,8 @@ pub async fn execute_tool_batch(
                 }
             } else {
                 let call = group[0].clone();
-                let output = execute_tool_call(state.clone(), runtime, call.clone(), cx).await;
+                let output =
+                    execute_timed_tool_call(state.clone(), runtime, call.clone(), cx).await;
                 outputs.push(tool_output_payload(
                     &call,
                     output
@@ -92,7 +106,7 @@ pub async fn execute_tool_batch(
         } else {
             let call = calls[index].clone();
             index += 1;
-            let output = execute_tool_call(state.clone(), runtime, call.clone(), cx).await;
+            let output = execute_timed_tool_call(state.clone(), runtime, call.clone(), cx).await;
             outputs.push(tool_output_payload(
                 &call,
                 output.unwrap_or_else(|err| json!({"success": false, "error": err.to_string()})),
@@ -108,6 +122,19 @@ pub async fn execute_tool_batch(
     }
 
     Ok(outputs)
+}
+
+async fn execute_timed_tool_call(
+    state: Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    call: ToolCallRequest,
+    cx: &mut AsyncApp,
+) -> Result<Value> {
+    let name = call.name.clone();
+    let started_at = Instant::now();
+    let output = execute_tool_call(state.clone(), runtime, call, cx).await;
+    state.record_tool_duration_ms(&runtime.session_id, &name, rounded_ms(started_at.elapsed()));
+    output
 }
 
 pub fn parse_tool_call(value: Value) -> Result<ToolCallRequest> {
@@ -141,7 +168,15 @@ pub fn parse_tool_call(value: Value) -> Result<ToolCallRequest> {
 fn is_parallel_read_only(call: &ToolCallRequest) -> bool {
     matches!(
         call.name.as_str(),
-        "read_file" | "list_dir" | "glob" | "grep" | "codebase_search" | "read_lints"
+        "read_file"
+            | "list_dir"
+            | "glob"
+            | "glob_file_search"
+            | "grep"
+            | "codebase_search"
+            | "read_lints"
+            | "web_search"
+            | "web_fetch"
     )
 }
 
@@ -171,7 +206,8 @@ async fn execute_tool_call(
     }
 
     match call.name.as_str() {
-        "read_file" | "list_dir" | "glob" | "grep" | "codebase_search" | "read_lints" => {
+        "read_file" | "list_dir" | "glob" | "glob_file_search" | "grep" | "codebase_search"
+        | "read_lints" | "web_search" | "web_fetch" => {
             let output = execute_read_only_tool(&runtime.workspace, &call).await?;
             emit_tool_result(state, runtime, &call, &output, cx)?;
             Ok(output)
@@ -181,7 +217,10 @@ async fn execute_tool_call(
         }
         "create_directory" => execute_create_directory(state, runtime, &call, cx).await,
         "bash" | "run_terminal_cmd" => execute_shell_tool(state, runtime, &call, cx).await,
+        "run_code" | "repl" => execute_code_tool(state, runtime, &call, cx).await,
         "todo_write" => execute_todo_write(state, runtime, &call, cx),
+        "enter_plan_mode" | "exit_plan_mode" | "persistence_decide" | "sleep" | "task"
+        | "computer" | "ask_user_question" => execute_flow_tool(state, runtime, &call, cx).await,
         _ => {
             let output = json!({"success": false, "error": format!("Unsupported native Backboard IDE tool `{}`.", call.name)});
             emit_tool_result(state, runtime, &call, &output, cx)?;
@@ -194,13 +233,15 @@ async fn execute_read_only_tool(workspace: &Path, call: &ToolCallRequest) -> Res
     match call.name.as_str() {
         "read_file" => read_file(workspace, &call.args),
         "list_dir" => list_dir(workspace, &call.args),
-        "glob" => glob_files(workspace, &call.args),
+        "glob" | "glob_file_search" => glob_files(workspace, &call.args),
         "grep" => grep_files(workspace, &call.args),
         "codebase_search" => codebase_search(workspace, &call.args),
         "read_lints" => Ok(json!({
             "success": true,
             "message": "Native lint diagnostics are not wired yet; run the relevant test or lint command if exact diagnostics are needed."
         })),
+        "web_search" => web_search(workspace, &call.args),
+        "web_fetch" => web_fetch(workspace, &call.args),
         _ => bail!("{} is not a read-only native tool", call.name),
     }
 }
@@ -263,6 +304,7 @@ async fn execute_file_mutation(
         .meta(meta_with_tool_name(&call.name));
     emit_tool_call(state.clone(), runtime, tool_call, cx)?;
 
+    let write_started_at = Instant::now();
     if call.name == "delete_file" {
         let executor = cx.background_executor().clone();
         executor
@@ -302,6 +344,11 @@ async fn execute_file_mutation(
             })
             .await?;
     }
+    state.add_turn_duration_ms(
+        &runtime.session_id,
+        "file_write_ms",
+        rounded_ms(write_started_at.elapsed()),
+    );
 
     let output = json!({"success": true, "path": path, "applied": true});
     emit_tool_update(
@@ -334,6 +381,7 @@ async fn execute_create_directory(
         .meta(meta_with_tool_name(&call.name));
     emit_tool_call(state.clone(), runtime, tool_call, cx)?;
     let executor = cx.background_executor().clone();
+    let write_started_at = Instant::now();
     executor
         .spawn({
             let path = path.clone();
@@ -343,6 +391,11 @@ async fn execute_create_directory(
             }
         })
         .await?;
+    state.add_turn_duration_ms(
+        &runtime.session_id,
+        "file_write_ms",
+        rounded_ms(write_started_at.elapsed()),
+    );
     let output = json!({"success": true, "path": path});
     emit_tool_update(
         state,
@@ -362,13 +415,20 @@ async fn execute_shell_tool(
     call: &ToolCallRequest,
     cx: &mut AsyncApp,
 ) -> Result<Value> {
-    let command = string_arg(&call.args, &["command"]).context("shell tool needs command")?;
-    let cwd = string_arg(&call.args, &["working_directory"])
+    let command = extract_shell_command(&call.name, &call.args);
+    if command.trim().is_empty() || command.trim() == call.name {
+        bail!(
+            "{} needs a concrete shell command in command, cmd, code, or script",
+            call.name
+        );
+    }
+    let cwd = string_arg(&call.args, &["working_directory", "cwd"])
         .map(|path| resolve_workspace_path(&runtime.workspace, path))
         .transpose()?
         .unwrap_or_else(|| runtime.workspace.clone());
     let read_only = is_read_only_shell_command(&command);
     let auto_approved = read_only || runtime.mode.to_string() == "free";
+    let timeout = command_timeout(&command, &call.args, read_only);
     let terminal_id = acp::TerminalId::new(format!(
         "backboard-terminal-{}",
         uuid::Uuid::new_v4().simple()
@@ -387,7 +447,10 @@ async fn execute_shell_tool(
         })
         .content(vec![
             acp::ToolCallContent::Terminal(acp::Terminal::new(terminal_id.clone())),
-            text_content(command.clone()),
+            text_content(format!(
+                "{command}\n\nBackboard timeout: {:.0}s",
+                timeout.as_secs_f64()
+            )),
         ])
         .raw_input(Some(call.args.clone()))
         .meta(meta.clone());
@@ -441,21 +504,29 @@ async fn execute_shell_tool(
         }
     }
 
-    let timeout = duration_arg(&call.args, "timeout").unwrap_or_else(|| {
-        if read_only {
-            Duration::from_secs(30)
-        } else {
-            Duration::from_secs(120)
-        }
-    });
-    let executor = cx.background_executor().clone();
-    let result = executor
-        .spawn({
-            let command = command.clone();
-            let cwd = cwd.clone();
-            async move { run_shell_command(&command, &cwd, timeout) }
-        })
-        .await?;
+    if bool_arg(&call.args, "is_background") {
+        let output = run_background_command(&command, &cwd)?;
+        emit_tool_update(
+            state,
+            runtime,
+            call,
+            acp::ToolCallStatus::Completed,
+            vec![text_content(value_to_text(&output))],
+            Some(output.clone()),
+            cx,
+        )?;
+        return Ok(output);
+    }
+    emit_terminal_output(runtime, &terminal_id, format!("$ {command}\n"), cx);
+    let command_started_at = Instant::now();
+    let is_dev_server = is_dev_server_command(&command);
+    let result =
+        run_shell_command_streaming(&command, &cwd, timeout, runtime, &terminal_id, cx).await?;
+    state.add_turn_duration_ms(
+        &runtime.session_id,
+        "command_wait_ms",
+        rounded_ms(command_started_at.elapsed()),
+    );
 
     runtime
         .thread
@@ -479,17 +550,28 @@ async fn execute_shell_tool(
         .ok();
 
     let output = json!({
-        "success": result.exit_code == Some(0),
+        "success": result.exit_code == Some(0) || (result.timed_out && is_dev_server),
         "exit_code": result.exit_code,
         "stdout": truncate(&result.stdout, MAX_OUTPUT_CHARS),
         "stderr": truncate(&result.stderr, MAX_OUTPUT_CHARS),
+        "output": truncate(&result.output, MAX_OUTPUT_CHARS),
         "cwd": cwd,
+        "timed_out": result.timed_out,
+        "note": if result.timed_out && is_dev_server {
+            "Backboard stopped this long-running dev-server command after the startup window. Use captured output to verify startup."
+        } else {
+            ""
+        },
     });
     emit_tool_update(
         state,
         runtime,
         call,
-        if result.exit_code == Some(0) {
+        if output
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             acp::ToolCallStatus::Completed
         } else {
             acp::ToolCallStatus::Failed
@@ -539,6 +621,86 @@ fn execute_todo_write(
         cx,
     )?;
     let output = json!({"success": true, "todos": todos});
+    emit_tool_result(state, runtime, call, &output, cx)?;
+    Ok(output)
+}
+
+async fn execute_code_tool(
+    state: Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    call: &ToolCallRequest,
+    cx: &mut AsyncApp,
+) -> Result<Value> {
+    let code = string_arg(&call.args, &["code"]).context("run_code/repl needs code")?;
+    let language = string_arg(&call.args, &["language"]).unwrap_or_else(|| "python".to_string());
+    let command = match language.as_str() {
+        "shell" => code,
+        "node" | "typescript" => format!("node <<'JS'\n{code}\nJS"),
+        "ruby" => format!("ruby <<'RB'\n{code}\nRB"),
+        "go" => format!(
+            "cat > /tmp/backboard-run-code.go <<'GO'\n{code}\nGO\ngo run /tmp/backboard-run-code.go"
+        ),
+        _ => format!("python3 <<'PY'\n{code}\nPY"),
+    };
+    let mut args = call.args.clone();
+    if let Some(object) = args.as_object_mut() {
+        object.insert("command".to_string(), command.into());
+        object
+            .entry("description".to_string())
+            .or_insert_with(|| format!("Running {}", call.name).into());
+    }
+    let shell_call = ToolCallRequest {
+        id: call.id.clone(),
+        name: "bash".to_string(),
+        args,
+    };
+    execute_shell_tool(state, runtime, &shell_call, cx).await
+}
+
+async fn execute_flow_tool(
+    state: Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    call: &ToolCallRequest,
+    cx: &mut AsyncApp,
+) -> Result<Value> {
+    let output = match call.name.as_str() {
+        "enter_plan_mode" => json!({
+            "success": true,
+            "message": "Plan mode entered. Explore read-only, then call exit_plan_mode with the complete plan."
+        }),
+        "exit_plan_mode" => json!({
+            "success": true,
+            "plan": string_arg(&call.args, &["plan"]).unwrap_or_default(),
+            "message": "Plan submitted for user review."
+        }),
+        "persistence_decide" => json!({
+            "success": false,
+            "error": "persistence_decide is only valid when persistence is armed; native persistence is not wired yet."
+        }),
+        "sleep" => {
+            let seconds = int_arg(&call.args, "seconds").unwrap_or(1).clamp(1, 300) as u64;
+            let executor = cx.background_executor().clone();
+            executor
+                .spawn(async move {
+                    thread::sleep(Duration::from_secs(seconds));
+                })
+                .await;
+            json!({"success": true, "slept_seconds": seconds})
+        }
+        "task" => json!({
+            "success": false,
+            "error": "Native sub-agent task execution is not wired yet. Use direct read/search/edit tools in this session."
+        }),
+        "computer" => json!({
+            "success": false,
+            "error": "Native desktop automation is not wired yet."
+        }),
+        "ask_user_question" => json!({
+            "success": false,
+            "error": "Interactive user-question tools are not wired in the native runtime yet. Ask in the assistant response instead."
+        }),
+        _ => json!({"success": false, "error": format!("Unsupported flow tool `{}`.", call.name)}),
+    };
     emit_tool_result(state, runtime, call, &output, cx)?;
     Ok(output)
 }
@@ -662,16 +824,40 @@ fn create_display_terminal(
     Ok(())
 }
 
+fn emit_terminal_output(
+    runtime: &SessionRuntime,
+    terminal_id: &acp::TerminalId,
+    data: impl Into<Vec<u8>>,
+    cx: &mut AsyncApp,
+) {
+    runtime
+        .thread
+        .update(cx, |thread, cx| {
+            thread.on_terminal_provider_event(
+                TerminalProviderEvent::Output {
+                    terminal_id: terminal_id.clone(),
+                    data: data.into(),
+                },
+                cx,
+            );
+        })
+        .ok();
+}
+
 fn read_file(workspace: &Path, args: &Value) -> Result<Value> {
     let path = path_arg(args).context("read_file needs target_file or file_path")?;
     let path = resolve_workspace_path(workspace, path)?;
     let metadata = fs::metadata(&path)?;
-    if metadata.len() > MAX_READ_BYTES {
-        bail!(
-            "{} is too large to read directly ({} bytes)",
-            path.display(),
-            metadata.len()
-        );
+    if metadata.len() > MAX_READ_BYTES
+        && int_arg(args, "offset").is_none()
+        && int_arg(args, "limit").is_none()
+    {
+        return Ok(json!({
+            "success": true,
+            "large_file": true,
+            "size": metadata.len(),
+            "message": format!("File is {} bytes. Use offset/limit params to read sections, or bash with head/tail/wc for inspection.", metadata.len())
+        }));
     }
     let content =
         fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
@@ -736,10 +922,17 @@ fn glob_files(workspace: &Path, args: &Value) -> Result<Value> {
     builder.add(Glob::new(&glob)?);
     let set = builder.build()?;
     let mut matches = Vec::new();
+    let mut walked = 0usize;
+    let mut truncated = false;
     for entry in WalkDir::new(&root)
         .into_iter()
         .filter_entry(skip_hidden_heavy_dirs)
     {
+        walked += 1;
+        if walked > MAX_GLOB_RESULTS {
+            truncated = true;
+            break;
+        }
         let entry = entry?;
         if !entry.file_type().is_file() {
             continue;
@@ -756,13 +949,100 @@ fn glob_files(workspace: &Path, args: &Value) -> Result<Value> {
     matches.sort_by(|left, right| right.0.cmp(&left.0));
     let files = matches
         .into_iter()
-        .take(MAX_SEARCH_RESULTS)
+        .take(MAX_GLOB_RESULTS)
         .map(|(_, path)| path)
         .collect::<Vec<_>>();
-    Ok(json!({"success": true, "pattern": glob, "files": files}))
+    Ok(
+        json!({"success": true, "pattern": glob, "files": files, "count": files.len(), "truncated": truncated}),
+    )
 }
 
 fn grep_files(workspace: &Path, args: &Value) -> Result<Value> {
+    if let Ok(output) = grep_files_with_rg(workspace, args) {
+        return Ok(output);
+    }
+    grep_files_with_walkdir(workspace, args)
+}
+
+fn grep_files_with_rg(workspace: &Path, args: &Value) -> Result<Value> {
+    let pattern = string_arg(args, &["pattern"]).context("grep needs pattern")?;
+    let root = string_arg(args, &["path"])
+        .map(|path| resolve_workspace_path(workspace, path))
+        .transpose()?
+        .unwrap_or_else(|| workspace.to_path_buf());
+    let mut command = Command::new("rg");
+    command.arg("--json").arg(&pattern);
+    if bool_arg(args, "case_insensitive") {
+        command.arg("-i");
+    }
+    if let Some(context_lines) = int_arg(args, "context_lines") {
+        command.arg("-C").arg(context_lines.to_string());
+    }
+    if bool_arg(args, "multiline") {
+        command.arg("-U").arg("--multiline-dotall");
+    }
+    if let Some(glob) = string_arg(args, &["glob"]) {
+        command.arg("--glob").arg(glob);
+    }
+    command.arg(root);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let mut child = command.spawn().context("starting rg")?;
+    let stdout = child.stdout.take().context("capturing rg stdout")?;
+    let reader = BufReader::new(stdout);
+    let mode = string_arg(args, &["output_mode"]).unwrap_or_else(|| "content".to_string());
+    let mut matches = Vec::new();
+    let mut files = BTreeSet::new();
+    let mut counts = BTreeMap::<String, usize>::new();
+
+    for line in reader.lines().take(MAX_SEARCH_RESULTS * 3) {
+        let line = line?;
+        let Ok(event) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if event.get("type").and_then(Value::as_str) != Some("match") {
+            continue;
+        }
+        let Some(data) = event.get("data") else {
+            continue;
+        };
+        let path = data
+            .get("path")
+            .and_then(|path| path.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if path.is_empty() {
+            continue;
+        }
+        files.insert(path.clone());
+        *counts.entry(path.clone()).or_default() += 1;
+        if mode == "content" && matches.len() < MAX_SEARCH_RESULTS {
+            matches.push(json!({
+                "file": path,
+                "line_number": data.get("line_number").and_then(Value::as_u64).unwrap_or_default(),
+                "line": data.get("lines").and_then(|lines| lines.get("text")).and_then(Value::as_str).unwrap_or_default(),
+            }));
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+
+    match mode.as_str() {
+        "files_with_matches" => {
+            let count = files.len();
+            Ok(json!({
+                "success": true,
+                "files": files.into_iter().collect::<Vec<_>>(),
+                "count": count
+            }))
+        }
+        "count" => Ok(json!({"success": true, "counts": counts})),
+        _ => Ok(json!({"success": true, "matches": matches, "count": matches.len()})),
+    }
+}
+
+fn grep_files_with_walkdir(workspace: &Path, args: &Value) -> Result<Value> {
     let pattern = string_arg(args, &["pattern"]).context("grep needs pattern")?;
     let root = string_arg(args, &["path"])
         .map(|path| resolve_workspace_path(workspace, path))
@@ -831,6 +1111,14 @@ fn grep_files(workspace: &Path, args: &Value) -> Result<Value> {
 fn codebase_search(workspace: &Path, args: &Value) -> Result<Value> {
     let query = string_arg(args, &["query"]).context("codebase_search needs query")?;
     let limit = int_arg(args, "num_results").unwrap_or(15).clamp(1, 15) as usize;
+    if let Ok(Some(results)) = index::search_index(workspace, &query, limit) {
+        return Ok(json!({
+            "success": true,
+            "query": query,
+            "results": results,
+        }));
+    }
+
     let terms = query
         .split_whitespace()
         .map(|term| term.to_lowercase())
@@ -875,17 +1163,407 @@ fn codebase_search(workspace: &Path, args: &Value) -> Result<Value> {
     }))
 }
 
+fn web_fetch(workspace: &Path, args: &Value) -> Result<Value> {
+    let url = string_arg(args, &["url"]).context("web_fetch needs url")?;
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        bail!("web_fetch requires an http or https URL");
+    }
+    if let Some(error) = ssrf_block_reason(&url) {
+        bail!(error);
+    }
+    let command = format!("curl -L --max-time 20 {}", shell_quote(&url));
+    let result = run_shell_command(&command, workspace, Duration::from_secs(30))?;
+    Ok(json!({
+        "success": result.exit_code == Some(0),
+        "url": url,
+        "content": truncate(&result.stdout, MAX_OUTPUT_CHARS),
+        "stderr": truncate(&result.stderr, 4000),
+        "exit_code": result.exit_code,
+    }))
+}
+
+fn web_search(workspace: &Path, args: &Value) -> Result<Value> {
+    let query = string_arg(args, &["query"]).context("web_search needs query")?;
+    let command = format!(
+        "curl -L --max-time 15 --get --data-urlencode {} --data-urlencode format=json --data-urlencode no_html=1 --data-urlencode skip_disambig=1 https://api.duckduckgo.com/",
+        shell_quote(&format!("q={query}"))
+    );
+    let result = run_shell_command(&command, workspace, Duration::from_secs(20))?;
+    if result.exit_code != Some(0) {
+        return Ok(json!({
+            "success": false,
+            "error": truncate(&result.stderr, 4000),
+            "query": query,
+        }));
+    }
+    let data: Value = serde_json::from_str(&result.stdout).context("parsing web_search JSON")?;
+    let mut results = Vec::new();
+    if let Some(abstract_text) = data.get("AbstractText").and_then(Value::as_str)
+        && !abstract_text.is_empty()
+    {
+        results.push(json!({
+            "title": data.get("Heading").and_then(Value::as_str).unwrap_or_default(),
+            "snippet": abstract_text,
+            "url": data.get("AbstractURL").and_then(Value::as_str).unwrap_or_default(),
+        }));
+    }
+    if let Some(topics) = data.get("RelatedTopics").and_then(Value::as_array) {
+        for topic in topics.iter().take(8) {
+            if let Some(text) = topic.get("Text").and_then(Value::as_str) {
+                results.push(json!({
+                    "title": text.chars().take(100).collect::<String>(),
+                    "snippet": text,
+                    "url": topic.get("FirstURL").and_then(Value::as_str).unwrap_or_default(),
+                }));
+            }
+        }
+    }
+    Ok(json!({
+        "success": true,
+        "query": query,
+        "count": results.len(),
+        "results": results,
+        "message": if results.is_empty() { "No instant results found. Try web_fetch with a specific documentation URL." } else { "" },
+    }))
+}
+
+fn ssrf_block_reason(url: &str) -> Option<String> {
+    let after_scheme = url.split_once("://")?.1;
+    let authority = after_scheme.split('/').next().unwrap_or_default();
+    let host = authority
+        .rsplit('@')
+        .next()
+        .unwrap_or(authority)
+        .trim_matches('[')
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .to_lowercase();
+    if host.is_empty() {
+        return Some("URL missing hostname".to_string());
+    }
+    if matches!(
+        host.as_str(),
+        "localhost" | "ip6-localhost" | "ip6-loopback"
+    ) {
+        return Some("Blocked: localhost is not reachable via web_fetch.".to_string());
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return blocked_ip_reason(&host, ip);
+    }
+    let addresses = (host.as_str(), 80).to_socket_addrs().ok()?;
+    for address in addresses {
+        if let Some(reason) = blocked_ip_reason(&host, address.ip()) {
+            return Some(reason);
+        }
+    }
+    None
+}
+
+fn blocked_ip_reason(host: &str, ip: IpAddr) -> Option<String> {
+    let blocked = match ip {
+        IpAddr::V4(ip) => {
+            ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_private()
+                || ip.is_multicast()
+                || ip.is_unspecified()
+        }
+        IpAddr::V6(ip) => ip.is_loopback() || ip.is_unspecified() || ip.is_multicast(),
+    };
+    blocked.then(|| format!("Blocked: {host} resolves to private or local address {ip}."))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn extract_shell_command(name: &str, args: &Value) -> String {
+    string_arg(args, &["command", "cmd", "code", "script"]).unwrap_or_else(|| name.to_string())
+}
+
+fn command_timeout(command: &str, args: &Value, read_only: bool) -> Duration {
+    if is_dev_server_command(command) {
+        return DEV_SERVER_STARTUP_TIMEOUT;
+    }
+    if let Some(timeout) = duration_arg(args, "timeout") {
+        return timeout.min(MAX_COMMAND_TIMEOUT);
+    }
+    if read_only {
+        READ_ONLY_COMMAND_TIMEOUT
+    } else if is_install_command(command) {
+        INSTALL_COMMAND_TIMEOUT
+    } else if is_check_command(command) {
+        CHECK_COMMAND_TIMEOUT
+    } else {
+        DEFAULT_COMMAND_TIMEOUT
+    }
+}
+
+fn is_dev_server_command(command: &str) -> bool {
+    let command = normalized_command(command);
+    [
+        "npm run dev",
+        "npm start",
+        "pnpm dev",
+        "pnpm start",
+        "yarn dev",
+        "yarn start",
+        "bun dev",
+        "bun start",
+        "vite",
+        "next dev",
+    ]
+    .iter()
+    .any(|marker| command == *marker || command.starts_with(&format!("{marker} ")))
+}
+
+fn is_install_command(command: &str) -> bool {
+    let tokens = command_tokens(command);
+    let Some(executable) = tokens.first().map(|token| executable_name(token)) else {
+        return false;
+    };
+    match executable.as_str() {
+        "npm" => tokens
+            .get(1)
+            .is_some_and(|arg| matches!(arg.as_str(), "install" | "i" | "ci")),
+        "pnpm" | "yarn" | "bun" => tokens
+            .get(1)
+            .is_some_and(|arg| matches!(arg.as_str(), "install" | "i" | "add")),
+        _ => false,
+    }
+}
+
+fn is_check_command(command: &str) -> bool {
+    let tokens = command_tokens(command);
+    let Some(executable) = tokens.first().map(|token| executable_name(token)) else {
+        return false;
+    };
+    matches!(
+        executable.as_str(),
+        "cargo" | "go" | "pytest" | "ruff" | "tsc" | "vitest" | "jest" | "eslint"
+    ) || matches!(executable.as_str(), "npm" | "pnpm" | "yarn" | "bun")
+        && tokens
+            .iter()
+            .any(|token| matches!(token.as_str(), "test" | "build" | "lint" | "check"))
+}
+
+fn normalized_command(command: &str) -> String {
+    let mut normalized = command.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.ends_with('&') {
+        normalized.pop();
+        normalized = normalized.trim_end().to_string();
+    }
+    if let Some(rest) = normalized.strip_prefix("cd ")
+        && let Some((_, command)) = rest.split_once("&&")
+    {
+        normalized = command.trim().to_string();
+    }
+    normalized.to_lowercase()
+}
+
+fn command_tokens(command: &str) -> Vec<String> {
+    command
+        .split_whitespace()
+        .map(|token| token.trim_matches(['"', '\'']).to_string())
+        .collect()
+}
+
+fn executable_name(token: &str) -> String {
+    Path::new(token)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(token)
+        .to_string()
+}
+
+fn shell_path() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    let Some(home) = std::env::var_os("HOME") else {
+        return current;
+    };
+    let backboard_bin = PathBuf::from(home).join(".backboard").join("bin");
+    format!("{}:{current}", backboard_bin.display())
+}
+
 #[derive(Debug)]
 struct ShellResult {
     exit_code: Option<i32>,
     stdout: String,
     stderr: String,
     output: String,
+    timed_out: bool,
 }
 
-fn run_shell_command(command: &str, cwd: &Path, timeout: Duration) -> Result<ShellResult> {
+enum ShellEvent {
+    Output(Vec<u8>),
+    Finished(Result<ShellResult, String>),
+}
+
+async fn run_shell_command_streaming(
+    command: &str,
+    cwd: &Path,
+    timeout: Duration,
+    runtime: &SessionRuntime,
+    terminal_id: &acp::TerminalId,
+    cx: &mut AsyncApp,
+) -> Result<ShellResult> {
+    let receiver = spawn_shell_command(command.to_string(), cwd.to_path_buf(), timeout);
+    loop {
+        match receiver.try_recv() {
+            Ok(ShellEvent::Output(data)) => emit_terminal_output(runtime, terminal_id, data, cx),
+            Ok(ShellEvent::Finished(result)) => {
+                return result.map_err(|error| anyhow!(error));
+            }
+            Err(TryRecvError::Empty) => {
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
+            }
+            Err(TryRecvError::Disconnected) => bail!("shell command runner disconnected"),
+        }
+    }
+}
+
+fn spawn_shell_command(
+    command: String,
+    cwd: PathBuf,
+    timeout: Duration,
+) -> mpsc::Receiver<ShellEvent> {
+    let (event_tx, event_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let result = run_shell_command_with_events(&command, &cwd, timeout, &event_tx)
+            .map_err(|error| error.to_string());
+        let _ = event_tx.send(ShellEvent::Finished(result));
+    });
+    event_rx
+}
+
+fn run_shell_command_with_events(
+    command: &str,
+    cwd: &Path,
+    timeout: Duration,
+    event_tx: &mpsc::Sender<ShellEvent>,
+) -> Result<ShellResult> {
     let started = Instant::now();
-    let mut command_builder = if cfg!(target_os = "windows") {
+    let mut command_builder = shell_command_builder(command);
+    let mut child = command_builder
+        .current_dir(cwd)
+        .env("PATH", shell_path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let (chunk_tx, chunk_rx) = mpsc::channel::<(bool, Vec<u8>)>();
+    let mut pumps = Vec::new();
+    if let Some(stdout) = stdout {
+        pumps.push(spawn_pipe_pump(stdout, false, chunk_tx.clone()));
+    }
+    if let Some(stderr) = stderr {
+        pumps.push(spawn_pipe_pump(stderr, true, chunk_tx.clone()));
+    }
+    drop(chunk_tx);
+
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
+    let mut timed_out = false;
+    loop {
+        while let Ok((is_stderr, data)) = chunk_rx.try_recv() {
+            if is_stderr {
+                stderr_bytes.extend_from_slice(&data);
+            } else {
+                stdout_bytes.extend_from_slice(&data);
+            }
+            let _ = event_tx.send(ShellEvent::Output(data));
+        }
+        if child.try_wait()?.is_some() {
+            break;
+        }
+        if started.elapsed() >= timeout {
+            timed_out = true;
+            child.kill().ok();
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    let output = child.wait_with_output()?;
+    for pump in pumps {
+        let _ = pump.join();
+    }
+    stdout_bytes.extend_from_slice(&output.stdout);
+    stderr_bytes.extend_from_slice(&output.stderr);
+    while let Ok((is_stderr, data)) = chunk_rx.try_recv() {
+        if is_stderr {
+            stderr_bytes.extend_from_slice(&data);
+        } else {
+            stdout_bytes.extend_from_slice(&data);
+        }
+        let _ = event_tx.send(ShellEvent::Output(data));
+    }
+
+    let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
+    let mut stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+    if timed_out {
+        if !stderr.is_empty() {
+            stderr.push('\n');
+        }
+        stderr.push_str(&format!(
+            "Command timed out after {}ms",
+            timeout.as_millis()
+        ));
+        let _ = event_tx.send(ShellEvent::Output(
+            format!("\nCommand timed out after {}ms\n", timeout.as_millis()).into_bytes(),
+        ));
+    }
+    let combined = if stderr.is_empty() {
+        stdout.clone()
+    } else if stdout.is_empty() {
+        stderr.clone()
+    } else {
+        format!("{stdout}\n{stderr}")
+    };
+    Ok(ShellResult {
+        exit_code: if timed_out {
+            Some(124)
+        } else {
+            output.status.code()
+        },
+        stdout,
+        stderr,
+        output: combined,
+        timed_out,
+    })
+}
+
+fn spawn_pipe_pump<R>(
+    reader: R,
+    is_stderr: bool,
+    chunk_tx: mpsc::Sender<(bool, Vec<u8>)>,
+) -> thread::JoinHandle<()>
+where
+    R: std::io::Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        loop {
+            let mut buffer = Vec::new();
+            match reader.read_until(b'\n', &mut buffer) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let _ = chunk_tx.send((is_stderr, buffer));
+                }
+                Err(_) => break,
+            }
+        }
+    })
+}
+
+fn shell_command_builder(command: &str) -> Command {
+    if cfg!(target_os = "windows") {
         let mut command_builder = Command::new("cmd");
         command_builder.arg("/C").arg(command);
         command_builder
@@ -893,10 +1571,17 @@ fn run_shell_command(command: &str, cwd: &Path, timeout: Duration) -> Result<She
         let mut command_builder = Command::new("bash");
         command_builder.arg("-lc").arg(command);
         command_builder
-    };
+    }
+}
+
+fn run_shell_command(command: &str, cwd: &Path, timeout: Duration) -> Result<ShellResult> {
+    let started = Instant::now();
+    let mut command_builder = shell_command_builder(command);
 
     let mut child = command_builder
         .current_dir(cwd)
+        .env("PATH", shell_path())
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
@@ -933,14 +1618,45 @@ fn run_shell_command(command: &str, cwd: &Path, timeout: Duration) -> Result<She
     };
     Ok(ShellResult {
         exit_code: if timed_out {
-            None
+            Some(124)
         } else {
             output.status.code()
         },
         stdout,
         stderr,
         output: combined,
+        timed_out,
     })
+}
+
+fn run_background_command(command: &str, cwd: &Path) -> Result<Value> {
+    let output_dir = cwd.join(".backboard").join("background");
+    fs::create_dir_all(&output_dir)?;
+    let output_file = output_dir.join(format!("{}.log", uuid::Uuid::new_v4().simple()));
+    let stdout = File::create(&output_file)?;
+    let stderr = stdout.try_clone()?;
+    let mut command_builder = if cfg!(target_os = "windows") {
+        let mut command_builder = Command::new("cmd");
+        command_builder.arg("/C").arg(command);
+        command_builder
+    } else {
+        let mut command_builder = Command::new("bash");
+        command_builder.arg("-lc").arg(command);
+        command_builder
+    };
+    let child = command_builder
+        .current_dir(cwd)
+        .env("PATH", shell_path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()?;
+    Ok(json!({
+        "success": true,
+        "pid": child.id(),
+        "output_file": output_file,
+        "message": format!("Background process started (PID: {}). Output: {}", child.id(), output_file.display())
+    }))
 }
 
 fn tool_output_payload(call: &ToolCallRequest, output: Value) -> Value {
@@ -953,7 +1669,14 @@ fn tool_output_payload(call: &ToolCallRequest, output: Value) -> Value {
 fn compress_output(name: &str, mut output: Value) -> Value {
     if !matches!(
         name,
-        "read_file" | "list_dir" | "glob" | "grep" | "codebase_search" | "read_lints"
+        "read_file"
+            | "list_dir"
+            | "glob"
+            | "grep"
+            | "codebase_search"
+            | "read_lints"
+            | "web_search"
+            | "web_fetch"
     ) {
         return output;
     }
@@ -998,7 +1721,7 @@ fn tool_title(call: &ToolCallRequest) -> String {
             string_arg(&call.args, &["target_directory", "path"])
                 .unwrap_or_else(|| ".".to_string())
         ),
-        "glob" => format!(
+        "glob" | "glob_file_search" => format!(
             "Finding `{}`",
             string_arg(&call.args, &["pattern", "glob_pattern"]).unwrap_or_default()
         ),
@@ -1009,8 +1732,10 @@ fn tool_title(call: &ToolCallRequest) -> String {
         "write" | "edit" | "search_replace" | "delete_file" => {
             format!("Editing `{}`", path_arg(&call.args).unwrap_or_default())
         }
-        "bash" | "run_terminal_cmd" => string_arg(&call.args, &["description"])
-            .unwrap_or_else(|| string_arg(&call.args, &["command"]).unwrap_or_default()),
+        "bash" | "run_terminal_cmd" | "run_code" | "repl" => {
+            string_arg(&call.args, &["description"])
+                .unwrap_or_else(|| string_arg(&call.args, &["command"]).unwrap_or_default())
+        }
         other => other.to_string(),
     }
 }
@@ -1018,11 +1743,15 @@ fn tool_title(call: &ToolCallRequest) -> String {
 fn tool_kind(name: &str) -> acp::ToolKind {
     match name {
         "read_file" | "list_dir" | "read_lints" => acp::ToolKind::Read,
-        "glob" | "grep" | "codebase_search" => acp::ToolKind::Search,
+        "glob" | "glob_file_search" | "grep" | "codebase_search" | "web_search" | "web_fetch" => {
+            acp::ToolKind::Search
+        }
         "write" | "edit" | "search_replace" | "create_directory" => acp::ToolKind::Edit,
         "delete_file" => acp::ToolKind::Delete,
-        "bash" | "run_terminal_cmd" => acp::ToolKind::Execute,
-        "todo_write" => acp::ToolKind::Think,
+        "bash" | "run_terminal_cmd" | "run_code" | "repl" | "computer" => acp::ToolKind::Execute,
+        "todo_write" | "enter_plan_mode" | "exit_plan_mode" | "persistence_decide" | "task" => {
+            acp::ToolKind::Think
+        }
         _ => acp::ToolKind::Other,
     }
 }
@@ -1037,11 +1766,18 @@ fn is_mutating_tool(name: &str) -> bool {
             | "create_directory"
             | "bash"
             | "run_terminal_cmd"
+            | "run_code"
+            | "repl"
+            | "computer"
+            | "task"
     )
 }
 
 fn is_shell_tool(name: &str) -> bool {
-    matches!(name, "bash" | "run_terminal_cmd")
+    matches!(
+        name,
+        "bash" | "run_terminal_cmd" | "run_code" | "repl" | "computer"
+    )
 }
 
 fn is_read_only_shell_command(command: &str) -> bool {
@@ -1303,7 +2039,25 @@ fn skip_hidden_heavy_dirs(entry: &walkdir::DirEntry) -> bool {
     !(entry.file_type().is_dir()
         && matches!(
             name.as_ref(),
-            ".git" | "node_modules" | "target" | ".next" | ".venv" | "__pycache__"
+            ".git"
+                | ".backboard"
+                | ".backboard_index"
+                | "node_modules"
+                | "target"
+                | "dist"
+                | "build"
+                | ".next"
+                | ".nuxt"
+                | ".venv"
+                | "venv"
+                | "__pycache__"
+                | ".tox"
+                | ".mypy_cache"
+                | ".pytest_cache"
+                | ".ruff_cache"
+                | ".svelte-kit"
+                | "coverage"
+                | "vendor"
         ))
 }
 
@@ -1314,6 +2068,13 @@ fn path_arg(args: &Value) -> Option<String> {
             "target_file",
             "file_path",
             "path",
+            "filepath",
+            "file",
+            "filename",
+            "target",
+            "absolute_path",
+            "src",
+            "source_file",
             "target_path",
             "target_directory",
         ],
@@ -1321,10 +2082,21 @@ fn path_arg(args: &Value) -> Option<String> {
 }
 
 fn string_arg(args: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| args.get(*key).and_then(Value::as_str))
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    keys.iter().find_map(|key| {
+        let value = args.get(*key)?;
+        let value = if let Some(array) = value.as_array()
+            && array.len() == 1
+        {
+            array.first()?
+        } else {
+            value
+        };
+        match value {
+            Value::String(text) => (!text.trim().is_empty()).then(|| text.trim().to_string()),
+            Value::Number(number) => Some(number.to_string()),
+            _ => None,
+        }
+    })
 }
 
 fn bool_arg(args: &Value, key: &str) -> bool {
@@ -1332,7 +2104,11 @@ fn bool_arg(args: &Value, key: &str) -> bool {
 }
 
 fn int_arg(args: &Value, key: &str) -> Option<i64> {
-    args.get(key).and_then(Value::as_i64)
+    args.get(key).and_then(|value| {
+        value
+            .as_i64()
+            .or_else(|| value.as_str()?.trim().parse::<i64>().ok())
+    })
 }
 
 fn duration_arg(args: &Value, key: &str) -> Option<Duration> {
@@ -1372,5 +2148,86 @@ mod tests {
         assert!(!is_read_only_shell_command(
             "curl -X POST https://example.com"
         ));
+    }
+
+    #[test]
+    fn tool_args_accept_python_bridge_alias_shapes() {
+        let args = json!({
+            "filepath": ["src/main.rs"],
+            "offset": "12",
+            "limit": 30,
+        });
+
+        assert_eq!(path_arg(&args).as_deref(), Some("src/main.rs"));
+        assert_eq!(int_arg(&args, "offset"), Some(12));
+        assert_eq!(int_arg(&args, "limit"), Some(30));
+    }
+
+    #[test]
+    fn web_fetch_blocks_local_targets() {
+        assert!(ssrf_block_reason("http://localhost:3000").is_some());
+        assert!(ssrf_block_reason("http://127.0.0.1:3000").is_some());
+    }
+
+    #[test]
+    fn codebase_search_falls_back_when_index_is_missing() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let workspace = tempdir.path();
+        fs::create_dir_all(workspace.join("src")).unwrap();
+        fs::write(
+            workspace.join("src/main.rs"),
+            "fn fallback_marker() { println!(\"fallback search\"); }",
+        )
+        .unwrap();
+
+        let output = codebase_search(workspace, &json!({"query": "fallback marker"})).unwrap();
+
+        assert_eq!(output.get("success").and_then(Value::as_bool), Some(true));
+        let results = output.get("results").and_then(Value::as_array).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]
+                .get("preview")
+                .and_then(Value::as_str)
+                .unwrap()
+                .contains("fallback_marker")
+        );
+    }
+
+    #[test]
+    fn codebase_search_uses_index_and_ignores_backboard_artifacts() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let workspace = tempdir.path();
+        fs::create_dir_all(workspace.join("src")).unwrap();
+        fs::create_dir_all(workspace.join(".backboard")).unwrap();
+        fs::create_dir_all(workspace.join("node_modules/pkg")).unwrap();
+        fs::write(
+            workspace.join("src/main.rs"),
+            "fn indexed_marker() { println!(\"indexed search\"); }",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join(".backboard/hidden.rs"),
+            "indexed_marker hidden",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join("node_modules/pkg/hidden.rs"),
+            "indexed_marker hidden",
+        )
+        .unwrap();
+        index::build_workspace_index(workspace).unwrap();
+
+        let output = codebase_search(workspace, &json!({"query": "indexed marker"})).unwrap();
+
+        let results = output.get("results").and_then(Value::as_array).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap()
+                .ends_with("src/main.rs")
+        );
     }
 }

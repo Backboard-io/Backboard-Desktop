@@ -39,7 +39,7 @@ pub fn acp_model_selector(
     let delegate = ModelPickerDelegate::new(selector, agent_server, fs, focus_handle, window, cx);
     Picker::list(delegate, window, cx)
         .show_scrollbar(true)
-        .width(rems(20.))
+        .width(rems(40.))
         .max_height(Some(rems(20.).into()))
 }
 
