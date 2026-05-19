@@ -29,6 +29,7 @@ test-support = [
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+backboard.workspace = true
 clock.workspace = true
 collections.workspace = true
 ec4rs.workspace = true

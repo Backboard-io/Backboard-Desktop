@@ -531,15 +531,28 @@ pub struct CodestralSettings {
 
 #[derive(Clone, Debug)]
 pub struct BackboardSettings {
-    pub provider: String,
+    /// Base URL of the OpenAI-compatible completions endpoint.
+    pub api_url: String,
     pub model: String,
+    pub timeout_ms: u64,
+}
+
+const DEFAULT_BACKBOARD_API_URL: &str = "https://app.backboard.io/api";
+const DEFAULT_BACKBOARD_TIMEOUT_MS: u64 = 20_000;
+
+fn default_backboard_model() -> String {
+    backboard::BackboardConfig::load_or_default()
+        .default_model
+        .filter(|model| !model.trim().is_empty())
+        .unwrap_or_default()
 }
 
 impl Default for BackboardSettings {
     fn default() -> Self {
         Self {
-            provider: "openrouter".into(),
-            model: "deepseek/deepseek-chat".into(),
+            api_url: DEFAULT_BACKBOARD_API_URL.into(),
+            model: default_backboard_model(),
+            timeout_ms: DEFAULT_BACKBOARD_TIMEOUT_MS,
         }
     }
 }
@@ -867,8 +880,13 @@ impl settings::Settings for AllLanguageSettings {
 
         let backboard = edit_predictions.backboard.unwrap_or_default();
         let backboard_settings = BackboardSettings {
-            provider: backboard.provider.unwrap_or_else(|| "openrouter".into()),
-            model: backboard.model.unwrap_or_else(|| "deepseek/deepseek-chat".into()),
+            api_url: backboard
+                .api_url
+                .unwrap_or_else(|| DEFAULT_BACKBOARD_API_URL.into()),
+            model: backboard
+                .model
+                .unwrap_or_else(default_backboard_model),
+            timeout_ms: backboard.timeout_ms.unwrap_or(DEFAULT_BACKBOARD_TIMEOUT_MS),
         };
 
         let ollama = edit_predictions.ollama.unwrap();

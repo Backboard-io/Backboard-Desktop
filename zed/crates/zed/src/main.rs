@@ -726,6 +726,7 @@ fn main() {
             false,
             cx,
         );
+        backboard_ui::init(cx);
 
         repl::init(app_state.fs.clone(), cx);
         recent_projects::init(cx);
@@ -1644,7 +1645,7 @@ struct Args {
     /// Use `path:line:row` syntax to open a file at a specific location.
     /// Non-existing paths and directories will ignore `:line:row` suffix.
     ///
-    /// URLs can either be `file://`, `backboard://`, or `zed://` scheme, or relative to <https://zed.dev>.
+    /// URLs can either be `file://` or `zed://` scheme, or relative to <https://zed.dev>.
     paths_or_urls: Vec<String>,
 
     /// Pairs of file paths to diff. Can be specified multiple times.
@@ -1771,8 +1772,6 @@ fn parse_url_arg(arg: &str, cx: &App) -> String {
             if arg.starts_with("file://")
                 || arg.starts_with("zed://")
                 || arg.starts_with("zed-cli://")
-                || arg.starts_with("backboard://")
-                || arg.starts_with("backboard-cli://")
                 || arg.starts_with("ssh://")
                 || parse_zed_link(arg, cx).is_some()
             {

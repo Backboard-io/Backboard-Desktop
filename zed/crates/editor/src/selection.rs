@@ -723,6 +723,26 @@ impl Editor {
             self.refresh_matching_bracket_highlights(&display_map, cx);
             self.refresh_outline_symbols_at_cursor(cx);
             self.update_visible_edit_prediction(window, cx);
+            // When the user navigates to a blank line without typing, no buffer edit
+            // fires to trigger a prediction. Kick one off here so they get a suggestion.
+            if local && !self.has_active_edit_prediction() {
+                let cursor = self.selections.newest_anchor().head();
+                if let Some((buf, cursor_pos)) =
+                    self.buffer.read(cx).text_anchor_for_position(cursor, cx)
+                {
+                    let snap = buf.read(cx).snapshot();
+                    let row = cursor_pos.to_point(&snap).row;
+                    let line_is_blank = snap
+                        .text_for_range(
+                            language::Point::new(row, 0)
+                                ..language::Point::new(row, snap.line_len(row)),
+                        )
+                        .all(|chunk| chunk.bytes().all(|b| b == b' ' || b == b'\t'));
+                    if line_is_blank {
+                        self.refresh_edit_prediction(false, false, window, cx);
+                    }
+                }
+            }
             self.hide_blame_popover(true, cx);
             if self.git_blame_inline_enabled {
                 self.start_inline_blame_timer(window, cx);

@@ -17,6 +17,7 @@ cli-support = []
 [dependencies]
 ai_onboarding.workspace = true
 anyhow.workspace = true
+backboard_api = { package = "backboard", path = "../backboard" }
 heapless.workspace = true
 buffer_diff.workspace = true
 client.workspace = true

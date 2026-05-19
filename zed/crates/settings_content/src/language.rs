@@ -81,9 +81,12 @@ impl merge_from::MergeFrom for AllLanguageSettingsContent {
 #[serde(rename_all = "snake_case")]
 pub enum EditPredictionProvider {
     None,
-    #[default]
     Copilot,
-    Zed,
+    /// Backboard AI inline completions via a stateless OpenAI-compatible endpoint.
+    /// Serialises as `"backboard"`; also accepts the legacy `"zed"` alias.
+    #[default]
+    #[serde(alias = "zed")]
+    Backboard,
     Codestral,
     Ollama,
     OpenAiCompatibleApi,
@@ -91,21 +94,13 @@ pub enum EditPredictionProvider {
 }
 
 impl EditPredictionProvider {
-    pub fn is_zed(&self) -> bool {
-        match self {
-            EditPredictionProvider::Zed => true,
-            EditPredictionProvider::None
-            | EditPredictionProvider::Copilot
-            | EditPredictionProvider::Codestral
-            | EditPredictionProvider::Ollama
-            | EditPredictionProvider::OpenAiCompatibleApi
-            | EditPredictionProvider::Mercury => false,
-        }
+    pub fn is_backboard(&self) -> bool {
+        matches!(self, EditPredictionProvider::Backboard)
     }
 
     pub fn display_name(&self) -> Option<&'static str> {
         match self {
-            EditPredictionProvider::Zed => Some("Backboard AI"),
+            EditPredictionProvider::Backboard => Some("Backboard AI"),
             EditPredictionProvider::Copilot => Some("GitHub Copilot"),
             EditPredictionProvider::Codestral => Some("Codestral"),
             EditPredictionProvider::Mercury => Some("Mercury"),
@@ -243,14 +238,25 @@ pub struct CodestralSettingsContent {
 #[with_fallible_options]
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, MergeFrom, PartialEq)]
 pub struct BackboardSettingsContent {
-    /// LLM provider to use for inline completions.
+    /// Base URL of the Backboard completions API.
     ///
-    /// Default: "openrouter"
-    pub provider: Option<String>,
+    /// Default: "https://app.backboard.io/api"
+    pub api_url: Option<String>,
     /// Model name for inline completions.
     ///
-    /// Default: "deepseek/deepseek-chat"
+    /// OpenRouter model IDs like `qwen/qwen-2.5-coder-7b-instruct` only work
+    /// with OpenRouter-compatible `/chat/completions` APIs. Backboard model
+    /// names must come from Backboard's supported model registry and can be
+    /// overridden in user settings. If this is unset, Zed uses the model saved
+    /// in `~/.backboard/config.json` or resolves one from Backboard's live
+    /// model registry.
+    ///
+    /// Default: resolved from the Backboard config or registry
     pub model: Option<String>,
+    /// Timeout for inline autocomplete requests in milliseconds.
+    ///
+    /// Default: 20000
+    pub timeout_ms: Option<u64>,
 }
 
 /// Ollama model name for edit predictions.

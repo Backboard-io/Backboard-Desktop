@@ -323,13 +323,13 @@ impl Render for EditPredictionButton {
                         .with_handle(self.popover_menu_handle.clone()),
                 )
             }
-            provider @ (EditPredictionProvider::Zed | EditPredictionProvider::Mercury) => {
+            provider @ (EditPredictionProvider::Backboard | EditPredictionProvider::Mercury) => {
                 let enabled = self.editor_enabled.unwrap_or(true);
                 let file = self.file.clone();
                 let language = self.language.clone();
                 let project = self.project.clone();
                 let provider_name: &'static str = match provider {
-                    EditPredictionProvider::Zed => "zed",
+                    EditPredictionProvider::Backboard => "zed",
                     _ => "unknown",
                 };
                 let icons = self
@@ -426,7 +426,7 @@ impl Render for EditPredictionButton {
                 };
 
                 let zed_cloud_needs_sign_in =
-                    matches!(provider, EditPredictionProvider::Zed) && user.is_none();
+                    matches!(provider, EditPredictionProvider::Backboard) && user.is_none();
                 let provider_unavailable =
                     missing_token || mercury_has_error || zed_cloud_needs_sign_in;
 
@@ -595,7 +595,7 @@ impl EditPredictionButton {
                 };
                 let is_current = provider == current_provider;
                 let is_disabled_zed_provider =
-                    provider == EditPredictionProvider::Zed && is_zed_provider_disabled;
+                    provider == EditPredictionProvider::Backboard && is_zed_provider_disabled;
                 let fs = self.fs.clone();
 
                 menu = menu.item(
@@ -806,7 +806,7 @@ impl EditPredictionButton {
 
         menu = menu.separator().header("Privacy");
 
-        if matches!(provider, EditPredictionProvider::Zed) {
+        if matches!(provider, EditPredictionProvider::Backboard) {
             if let Some(provider) = &self.edit_prediction_provider {
                 let data_collection = provider.data_collection_state(cx);
 
@@ -1077,7 +1077,7 @@ impl EditPredictionButton {
             let needs_sign_in = user.is_none()
                 && matches!(
                     provider,
-                    EditPredictionProvider::None | EditPredictionProvider::Zed
+                    EditPredictionProvider::None | EditPredictionProvider::Backboard
                 );
 
             if needs_sign_in {
@@ -1453,7 +1453,7 @@ pub fn set_completion_provider(fs: Arc<dyn Fs>, cx: &mut App, provider: EditPred
 pub fn get_available_providers(cx: &mut App) -> Vec<EditPredictionProvider> {
     let mut providers = Vec::new();
 
-    providers.push(EditPredictionProvider::Zed);
+    providers.push(EditPredictionProvider::Backboard);
 
     let app_state = workspace::AppState::global(cx);
     if copilot::GlobalCopilotAuth::try_get_or_init(app_state, cx)

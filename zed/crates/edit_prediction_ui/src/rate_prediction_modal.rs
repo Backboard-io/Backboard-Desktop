@@ -321,14 +321,16 @@ impl RatePredictionsModal {
                 return;
             }
 
+            let Some(edit_preview) = prediction.edit_preview.clone() else {
+                return;
+            };
             self.diff_editor.update(cx, |editor, cx| {
-                let new_buffer = prediction.edit_preview.build_result_buffer(cx);
+                let new_buffer = edit_preview.build_result_buffer(cx);
                 let new_buffer_snapshot = new_buffer.read(cx).snapshot();
                 let old_buffer_snapshot = prediction.snapshot.clone();
                 let new_buffer_id = new_buffer_snapshot.remote_id();
 
-                let range = prediction
-                    .edit_preview
+                let range = edit_preview
                     .compute_visible_range(&prediction.edits)
                     .unwrap_or(Point::zero()..Point::zero());
                 let start = Point::new(range.start.row.saturating_sub(5), 0);
@@ -367,8 +369,7 @@ impl RatePredictionsModal {
 
                 if let Some(cursor_position) = prediction.cursor_position.as_ref() {
                     let multibuffer_snapshot = editor.buffer().read(cx).snapshot(cx);
-                    let cursor_offset = prediction
-                        .edit_preview
+                    let cursor_offset = edit_preview
                         .anchor_to_offset_in_result(cursor_position.anchor)
                         + cursor_position.offset;
                     let cursor_anchor = new_buffer.read(cx).snapshot().anchor_after(cursor_offset);
