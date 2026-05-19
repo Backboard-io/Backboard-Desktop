@@ -257,7 +257,7 @@ impl EditPredictionDelegate for ZedEditPredictionDelegate {
                 id: Some(prediction.id.0.clone()),
                 edits: edits[edit_start_ix..edit_end_ix].to_vec(),
                 cursor_position: prediction.cursor_position,
-                edit_preview: Some(prediction.edit_preview.clone()),
+                edit_preview: prediction.edit_preview.clone(),
             })
         })
     }

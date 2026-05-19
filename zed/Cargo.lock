@@ -1910,6 +1910,7 @@ name = "backboard"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel 2.5.0",
  "futures 0.3.32",
  "serde",
  "serde_json",
@@ -5350,6 +5351,7 @@ version = "0.1.0"
 dependencies = [
  "ai_onboarding",
  "anyhow",
+ "backboard",
  "buffer_diff",
  "client",
  "clock",
@@ -9600,6 +9602,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "backboard",
  "clock",
  "collections",
  "criterion",

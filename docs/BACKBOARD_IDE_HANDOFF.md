@@ -30,7 +30,7 @@ Use this map before changing anything. The Backboard IDE is not one single integ
 | Simple/beginner UI | `ide/zed/crates/beginner_ui/src/*.rs` | Beginner chat-first workspace, folder selection, friendly feed, file changes panel, switch-to-editor handoff; chat history home page (BeginnerChatRecord, KVP persistence), curated model filtering (CuratedModelSelector), tab bar home icon |
 | Workspace shell | `ide/zed/crates/workspace/src/multi_workspace.rs`, `ide/zed/crates/title_bar/src/title_bar.rs` | Editor/Agents switching, Simple/Expert mode, full-page Multi-Agent rendering |
 | Backboard Rust API client | `ide/zed/crates/backboard/src/backboard.rs` | Rust mirror of the Backboard HTTP client used by older UI code and as a reference for endpoint shapes |
-| Inline autocomplete | `ide/zed/crates/edit_prediction/src/backboard.rs` and edit-prediction registry/settings files | BYOK ghost-text completions via Backboard API; separate from ACP chat/Agent Workspace |
+| Inline autocomplete | `ide/zed/crates/edit_prediction/src/backboard.rs` and edit-prediction registry/settings files | BYOK ghost-text completions via Backboard assistant/thread API; pre-filtered, FIM-prompted, streamed with early exit, cached-thread, context-gated, chunk-split; separate from ACP chat/Agent Workspace |
 
 Rule of thumb:
 
@@ -195,7 +195,7 @@ Important framing:
 - `f701758d` - 2026-05-13 - Youseph El-Khouly - Route inline completions to Backboard API.
   - Purpose: rerouted Zed edit predictions to Backboard API-backed inline completions using BYOK credentials and pure cursor insertion.
   - Main files changed: `ide/zed/crates/edit_prediction/src/backboard.rs`, `ide/zed/crates/edit_prediction/src/edit_prediction.rs`, `ide/zed/crates/zed/src/zed/edit_prediction_registry.rs`, `ide/zed/crates/language/src/language_settings.rs`, `ide/zed/crates/settings_content/src/language.rs`, `ide/zed/crates/settings_ui/src/pages/edit_prediction_provider_setup.rs`, `BACKBOARD_IDE_HANDOFF.md`.
-  - Current role: `EditPredictionProvider::Zed` maps to `EditPredictionModel::Backboard`; settings expose `edit_predictions.backboard.provider/model`; the settings UI shows only the Backboard AI API key card.
+  - Current role: `EditPredictionProvider::Backboard` (alias `"zed"`) maps to `EditPredictionModel::Backboard`; settings expose `edit_predictions.backboard.api_url/model/timeout_ms`; assistant/thread are cached per API URL so cold start only happens once per session; pre-filter, FIM prompt, SSE streaming with early exit, response gating, and chunking are all applied before ghost text is shown.
 
 ### Documentation-Only And Merge Commits
 
@@ -713,7 +713,7 @@ Inline autocomplete is a Backboard API integration, but it is not ACP chat:
 
 - It lives under `ide/zed/crates/edit_prediction/src/backboard.rs` and related edit-prediction settings/registry files.
 - It uses BYOK API key storage through edit-prediction provider setup.
-- It creates/reuses a Backboard assistant, creates a thread, sends a completion prompt, and inserts ghost text at the cursor.
+- It pre-filters the cursor position, creates/reuses a cached Backboard assistant and thread, sends a FIM prompt, streams the response with early exit, filters and optionally chunks the completion, then inserts ghost text at the cursor.
 - It does not use `backboard-ide-acp.py`, `AcpThread`, Agent Workspace, or CLI tools.
 
 ## Tooling, Permissions, And Modes
@@ -1151,25 +1151,38 @@ Backboard Studio includes a native inline autocomplete feature powered by the Ba
 
 ### Provider Routing
 
-Zed's edit prediction system has an `EditPredictionProvider` enum in settings. The `Zed` variant is repurposed as the Backboard provider:
+Zed's edit prediction system has an `EditPredictionProvider` enum in settings. The `Backboard` variant (serialized as `"backboard"`, also accepts legacy alias `"zed"`) is the Backboard provider:
 
-- Settings: `"edit_predictions": { "provider": "zed" }`
-- Registry maps `EditPredictionProvider::Zed` → `EditPredictionModel::Backboard`
+- Settings: `"edit_predictions": { "provider": "backboard" }`
+- Registry maps `EditPredictionProvider::Backboard` → `EditPredictionModel::Backboard`
 - `EditPredictionStore` dispatches `EditPredictionModel::Backboard` → `BackboardCompletions::request_prediction()`
 
-No new provider enum variant was added — `Zed` was reused to avoid changing serialized settings keys.
+The `"zed"` alias is kept for backward compatibility with existing settings files. New settings should use `"backboard"`.
 
 ### API Flow
 
-Each completion fires three sequential HTTP calls to `https://app.backboard.io/api`:
+The assistant and thread are created once per session (cold start), then reused for all completions in that session:
 
-1. `POST /api/assistants` — create or reuse a named assistant (cached per session per API key)
-2. `POST /api/assistants/{id}/threads` — create a fresh thread for this completion
-3. `POST /api/threads/{id}/messages` — send the prompt, receive the completion text
+1. Cold start (first completion only): `POST /api/assistants` — create a named assistant; cached in a process-level `LazyLock` map keyed by API URL
+2. Cold start: `POST /api/assistants/{id}/threads` — create a thread; also cached per API URL
+3. Every completion: `POST /api/threads/{id}/messages` with `stream=true` — send the FIM prompt, stream the completion
+
+The assistant/thread pair is stored in process-static `LazyLock<Mutex<HashMap>>` maps so subsequent completions skip creation entirely. An in-flight guard (`BackboardRequestInFlightGuard`) ensures only one completion request is active per API URL at a time — a second trigger while one is in flight is silently dropped.
 
 Auth: `X-API-Key: {user_key}` header on every request.
 
-Model: `deepseek/deepseek-chat` via provider `openrouter` (default, configurable in settings).
+Model: resolved from user settings → cached model → live Backboard model registry. Currently falls back to `claude-haiku-4-5-20251001` via Anthropic when the registry is bypassed.
+
+### Pre-Filter
+
+Before making any HTTP request, `should_request_completion()` inspects the cursor position and skips positions where a completion would rarely be useful:
+
+- Always triggers on a blank line after a line ending with `:` or `{` (function/class stubs).
+- Always triggers after `.`, `(`, `=`, or ` =` (expression continuation).
+- Skips mid-word positions (alphanumeric/underscore on both sides of cursor).
+- Skips when the current line ends with `;` or `]`.
+
+This avoids API calls for positions where completions are almost never useful.
 
 ### Pure Cursor Insertion
 
@@ -1183,55 +1196,112 @@ The old range is always empty so the model can never delete existing text. This 
 
 ### Prompt Format
 
-The prompt sent to Backboard:
+The prompt sent to Backboard uses a Fill-in-the-Middle (FIM) format with a windowed context:
 
 ```
-You are a code completion engine. Complete the code at the cursor position marked with <CURSOR>.
-Output ONLY the text to insert at <CURSOR>. Do not repeat any code that already exists.
-Do not include markdown code fences. Do not explain anything.
+System:
+You are an inline code completion engine.
+Return ONLY the exact code that should be inserted at the cursor.
+Do not explain. Do not use markdown. Do not repeat the prefix. ...
 
-File: {file_path}
+User:
+Complete the code at <cursor>.
 
-{code_before_cursor}<CURSOR>{code_after_cursor}
+Rules:
+- Output only the code to insert at <cursor>.
+- Do not include explanations or markdown.
+- Keep the completion short.
+- Return an empty string if no useful completion exists.
+
+Language: {lang}
+
+<prefix>
+{code_before_cursor (max 300 bytes)}
+</prefix>
+<suffix>
+{code_after_cursor (max 200 bytes)}
+</suffix>
+<cursor>
 ```
 
-Recent edit events from the buffer are appended as context when available.
+Context window is intentionally small: 300 bytes before the cursor (~5–6 lines) and 200 bytes after (~3 lines). Larger windows cause chat models to regenerate whole file sections instead of producing targeted insertions.
 
-Code fence stripping runs on the response before the edit is constructed to handle models that wrap output in ` ```python\n` or ` ``` ` blocks.
+### SSE Streaming And Early Exit
+
+The completion endpoint is called with `stream=true`. The bridge reads SSE `data:` lines and returns early when:
+
+- A `content_streaming` chunk arrives that brings the total accumulated text to ≥5 non-whitespace characters AND the accumulated text contains at least one newline.
+- A `run_ended` event arrives.
+- The configurable timeout elapses (default 20 seconds).
+
+Early return avoids waiting for the full model response when a short, useful completion has already arrived. A fused `futures::select!` races the background stream against the timeout.
+
+### Response Filtering
+
+`filtered_function_completion_chunks()` gates whether a completion is shown, based on both the completion text and cursor context. A completion passes only when at least one of the following is true:
+
+- Cursor is on a blank line (both the line before and line after the cursor are empty).
+- Cursor is completing a function definition (last non-empty line before cursor starts with `fn`, `def`, `function`, etc.).
+- Cursor is inside a function body (detected via brace depth for brace-style languages, indentation depth for Python/Ruby).
+- The completion itself looks like a function definition or top-level definition (`class`, `struct`, `enum`, `interface`, `import`, etc.).
+
+Additional rejections applied to the completion text before the context check:
+
+- Empty or whitespace-only completions.
+- Completions longer than 30 lines.
+- Completions that duplicate existing code after the cursor (>40% non-empty line overlap).
+- Completions that are prose rather than code (detected by phrase list, sentence structure heuristics, and absence of code symbols).
+- Completions that echo prompt structure markers (`<|fim_prefix|>`, `<cursor>`, `File:`, `Language:`, etc.).
+
+### Chunking
+
+When a passing completion has more than 14 lines or 6 control-flow statements (`COMPLETION_CHUNK_LINE_THRESHOLD` / `COMPLETION_CHUNK_COMPLEXITY_THRESHOLD`), `split_completion_into_chunks()` breaks it into smaller pieces. Each chunk targets ~8 lines (`COMPLETION_TARGET_CHUNK_LINES`) and splits at blank lines, closing braces at depth ≤1, or when the line count hits the target.
+
+### Model Resolution
+
+`resolve_backboard_model()` picks the model in this order:
+
+1. `edit_predictions.backboard.model` from user settings if non-empty.
+2. Cached model from the previous completion in the same session.
+3. Live model registry from `GET /models` at the configured API URL.
+4. *(Currently bypassed for debugging)* Falls back to `claude-haiku-4-5-20251001` via Anthropic provider.
 
 ### BYOK Model
 
-Completions are entirely BYOK (bring your own key). If no API key is configured, `request_prediction()` returns `Task::ready(Ok(None))` and no completion fires. There is no embedded free-tier key and no quota tracking.
+Completions are entirely BYOK (bring your own key). If no API key is configured, `request_prediction()` returns `Task::ready(Ok(None))` and no completion fires. HTTP 402 and 429 responses set `quota_exceeded = true` on the store, silently suppressing further completions for the session.
 
 The user enters their key in: Settings → Editor → Edit Predictions → Configure Providers → Backboard AI.
 
 The key is stored in the system keychain via `ApiKeyState` and can also be set via `BACKBOARD_API_KEY` environment variable.
 
-### Configurable Model Settings
+### Configurable Settings
 
-Users can override the provider and model in settings JSON:
+Users can override the API URL, model, and timeout in settings JSON:
 
 ```json
 {
   "edit_predictions": {
-    "provider": "zed",
+    "provider": "backboard",
     "backboard": {
-      "provider": "openrouter",
-      "model": "deepseek/deepseek-chat"
+      "api_url": "https://app.backboard.io/api",
+      "model": "claude-haiku-4-5-20251001",
+      "timeout_ms": 20000
     }
   }
 }
 ```
 
+`api_url` defaults to `https://app.backboard.io/api`. `model` defaults to the model saved in `~/.backboard/config.json` or whatever the live Backboard registry returns. `timeout_ms` defaults to 20,000 (20 seconds).
+
 ### Key Files
 
 | File | Role |
 |------|------|
-| `crates/edit_prediction/src/backboard.rs` | `BackboardCompletions`, API key state, 3-step API calls, prompt builder, response parsing |
+| `crates/edit_prediction/src/backboard.rs` | `BackboardCompletions`, BYOK API key, process-level thread/model cache, in-flight guard, pre-filter, FIM prompt builder, SSE streaming with early exit, response filter, chunk splitter |
 | `crates/edit_prediction/src/edit_prediction.rs` | `EditPredictionModel::Backboard` variant, dispatch to `BackboardCompletions`, `backboard` field on `EditPredictionStore` |
-| `crates/zed/src/zed/edit_prediction_registry.rs` | Maps `EditPredictionProvider::Zed` → `EditPredictionModel::Backboard`, loads API token |
-| `crates/settings_content/src/language.rs` | `BackboardSettingsContent` with `provider` and `model` fields |
-| `crates/language/src/language_settings.rs` | `BackboardSettings` runtime struct, wired into `EditPredictionSettings` |
+| `crates/zed/src/zed/edit_prediction_registry.rs` | Maps `EditPredictionProvider::Backboard` (alias `"zed"`) → `EditPredictionModel::Backboard`, loads API token |
+| `crates/settings_content/src/language.rs` | `BackboardSettingsContent` with `api_url`, `model`, and `timeout_ms` fields |
+| `crates/language/src/language_settings.rs` | `BackboardSettings` runtime struct with `api_url`, `model`, `timeout_ms`; wired into `EditPredictionSettings` |
 | `crates/settings_ui/src/pages/edit_prediction_provider_setup.rs` | Settings UI — shows only the Backboard AI API key card, all other providers removed |
 
 ### Testing Autocomplete
@@ -1240,13 +1310,13 @@ Users can override the provider and model in settings JSON:
 BACKBOARD_API_KEY=your_key cargo run -p zed
 ```
 
-1. Set `"edit_predictions": { "provider": "zed" }` in settings JSON (`Cmd+,`)
+1. Set `"edit_predictions": { "provider": "backboard" }` in settings JSON (`Cmd+,`)
 2. Open Settings → Editor → Edit Predictions → Configure Providers → paste API key
-3. Open any code file, type the start of a statement, pause ~1 second
+3. Open any code file, type the start of a function definition or an expression ending with `.`/`(`/`=`, pause ~1 second
 4. Ghost text appears — Tab to accept, Esc to dismiss
 5. `Cmd+Alt+Z` manually triggers a prediction
 
-To watch API calls in real time:
+To watch API calls and filter decisions in real time:
 
 ```sh
 BACKBOARD_API_KEY=your_key RUST_LOG=edit_prediction=debug cargo run -p zed 2>&1 | grep -i backboard
@@ -1256,15 +1326,26 @@ BACKBOARD_API_KEY=your_key RUST_LOG=edit_prediction=debug cargo run -p zed 2>&1 
 
 If no ghost text appears:
 
-1. Confirm `"provider": "zed"` is set in edit predictions settings.
+1. Confirm `"provider": "backboard"` (or the legacy `"zed"`) is set in edit predictions settings.
 2. Confirm the API key is saved (Settings → Configure Providers should show "API Key Configured").
-3. Check `RUST_LOG=edit_prediction=debug` output for Backboard API errors.
-4. Confirm the key is valid — a 401 response means key format is wrong; a 402 means quota exceeded.
+3. Check `RUST_LOG=edit_prediction=debug` output for `backboard: skipped` — the pre-filter may be rejecting the position.
+4. Check for `backboard: filtered` log lines — the response filter may be rejecting the completion (`is_non_completion`, `filtered — no matching context`, etc.).
+5. Check for Backboard API errors — 401 means the key format is wrong; 402/429 means quota exceeded and completions are suppressed for the session.
 
 If completions delete or replace existing code:
 
 1. Check `backboard.rs::request_prediction` — edits must be `(cursor_anchor..cursor_anchor, text)` not a range replacement.
 2. Do not re-introduce `compute_edits` from `zeta.rs` — that function uses text diff and is designed only for fine-tuned Zeta/Mercury models, not general-purpose LLMs.
+
+If completions fire in wrong positions (mid-word, after completed statements, etc.):
+
+1. Check `should_request_completion()` in `backboard.rs` — the pre-filter should reject those positions.
+2. The filter is intentionally conservative; new trigger conditions should be added there, not removed.
+
+If completions show LLM prose or prompt echo instead of code:
+
+1. Check `is_non_completion()` and `contains_prose_like_line()` in `backboard.rs`.
+2. Add the offending phrase to the `prose_phrases` list or the prompt-echo detector in `is_non_completion`.
 
 If the provider dropdown in settings shows other providers (Mercury, Codestral, etc.):
 
@@ -1705,7 +1786,7 @@ Use this table when you need to decide where to start. The deeper step-by-step g
 | Terminal card missing or output appears late | `backboard-ide-acp.py::_run_shell_tool`, `backboard-ide-acp.py::_run_shell_subprocess`, `agent_servers/src/acp.rs::handle_session_notification`, `acp_thread/src/terminal.rs` | `_meta.terminal_*` metadata or terminal provider buffering |
 | Agent Workspace apply/review is wrong | `agent_panel.rs`, `agent_workspace_ui.rs`, `agent_diff.rs` | Worktree metadata, batch conflict detection, patch application |
 | Context/cost/speed display wrong | `backboard-ide-acp.py::_usage`, `backboard-ide-acp.py::_speed_meta`, `acp_thread.rs::SpeedMetrics`, `thread_view.rs::render_token_usage` | ACP `usage_update` payload or UI footer rendering |
-| Autocomplete not firing | `edit_prediction/src/backboard.rs`, edit-prediction registry/settings files | Separate Backboard API completion path, not ACP |
+| Autocomplete not firing | `edit_prediction/src/backboard.rs`, edit-prediction registry/settings files | Separate Backboard API completion path, not ACP; check pre-filter log (`backboard: skipped`) and response filter log (`backboard: filtered`) |
 
 Maintenance rules:
 

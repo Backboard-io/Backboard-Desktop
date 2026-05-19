@@ -84,10 +84,10 @@ pub mod zeta;
 #[cfg(test)]
 mod edit_prediction_tests;
 
+use crate::backboard::BackboardCompletions;
 use crate::cursor_excerpt::expand_context_syntactically_then_linewise;
 use crate::example_spec::ExampleSpec;
 use crate::license_detection::LicenseDetectionWatcher;
-use crate::backboard::BackboardCompletions;
 use crate::mercury::Mercury;
 pub use crate::metrics::{KeptRateResult, compute_kept_rate};
 use crate::onboarding_modal::ZedPredictModal;
@@ -2100,7 +2100,7 @@ impl EditPredictionStore {
         true
     }
 
-    pub const THROTTLE_TIMEOUT: Duration = Duration::from_millis(300);
+    pub const THROTTLE_TIMEOUT: Duration = Duration::from_millis(150);
 }
 
 fn currently_following(project: &Entity<Project>, cx: &App) -> bool {
@@ -2124,7 +2124,7 @@ fn currently_following(project: &Entity<Project>, cx: &App) -> bool {
 
 fn is_ep_store_provider(provider: EditPredictionProvider) -> bool {
     match provider {
-        EditPredictionProvider::Zed
+        EditPredictionProvider::Backboard
         | EditPredictionProvider::Mercury
         | EditPredictionProvider::Ollama
         | EditPredictionProvider::OpenAiCompatibleApi => true,
@@ -2133,8 +2133,6 @@ fn is_ep_store_provider(provider: EditPredictionProvider) -> bool {
         | EditPredictionProvider::Codestral => false,
     }
 }
-
-// EditPredictionProvider::Zed maps to EditPredictionModel::Backboard at runtime.
 
 impl EditPredictionStore {
     fn queue_prediction_refresh(
@@ -2164,7 +2162,7 @@ impl EditPredictionStore {
 
         let (needs_acceptance_tracking, max_pending_predictions) =
             match all_language_settings(None, cx).edit_predictions.provider {
-                EditPredictionProvider::Zed | EditPredictionProvider::Mercury => (false, 2),
+                EditPredictionProvider::Backboard | EditPredictionProvider::Mercury => (false, 2),
                 EditPredictionProvider::Ollama => (false, 1),
                 EditPredictionProvider::OpenAiCompatibleApi => (false, 2),
                 EditPredictionProvider::None
@@ -2422,6 +2420,8 @@ impl EditPredictionStore {
 
         let capture_data = (can_collect_data && rand::random_ratio(1, 1000)).then(|| stored_events);
 
+        let allow_diagnostic_fallback =
+            !matches!(self.edit_prediction_model, EditPredictionModel::Backboard);
         let task = match self.edit_prediction_model {
             EditPredictionModel::Zeta => {
                 zeta::request_prediction_with_zeta(self, inputs, capture_data, cx)
@@ -2444,6 +2444,7 @@ impl EditPredictionStore {
             // the model had nothing to suggest for the buffer
             if prediction.is_none()
                 && allow_jump
+                && allow_diagnostic_fallback
                 && has_events
                 && !matches!(trigger, PredictEditsRequestTrigger::Diagnostics)
             {
@@ -2862,9 +2863,9 @@ impl EditPredictionStore {
             let client = self.client.clone();
             let prediction_id = prediction.id.to_string();
             let inputs = serde_json::to_value(&prediction.inputs);
-            let output = prediction
-                .edit_preview
-                .as_unified_diff(prediction.snapshot.file(), &prediction.edits);
+            let output = prediction.edit_preview.as_ref().and_then(|edit_preview| {
+                edit_preview.as_unified_diff(prediction.snapshot.file(), &prediction.edits)
+            });
             async move {
                 client
                     .cloud_client()

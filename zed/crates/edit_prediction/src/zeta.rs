@@ -403,13 +403,16 @@ pub fn request_prediction_with_zeta(
         )
         .await;
 
-        if can_collect_data && let Ok(prediction) = &result.prediction {
+        if can_collect_data
+            && let Ok(prediction) = &result.prediction
+            && let Some(edit_preview_value) = prediction.edit_preview.clone()
+        {
             let weak_this = this.clone();
             let request_id = prediction.id.clone();
             let edited_buffer = edited_buffer.clone();
             let edited_buffer_snapshot = edited_buffer_snapshot.clone();
             let editable_range_in_buffer = editable_range_in_buffer.clone();
-            let edit_preview = prediction.edit_preview.clone();
+            let edit_preview = edit_preview_value;
             let example_task = capture_data.and_then(|stored_events| {
                 cx.update(|cx| {
                     crate::capture_example(

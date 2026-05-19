@@ -26,6 +26,7 @@ const INITIAL_VISIBLE_MODELS: usize = 120;
 const MODEL_LOAD_INCREMENT: usize = 120;
 const ACTIVITY_LIMIT: usize = 24;
 const LOADING_TICK_MS: u64 = 900;
+const INLINE_COMPLETION_CHUNK_OUTPUT_DELAY_MILLIS: u64 = 80;
 const LOADING_COPY: &[&str] = &[
     "Initializing everything...",
     "Loading tiny pixels...",
@@ -175,6 +176,7 @@ pub struct BackboardPanel {
 struct BackboardMessage {
     role: MessageRole,
     body: String,
+    full_body: bool,
 }
 
 #[derive(Clone)]
@@ -197,6 +199,24 @@ enum BackboardUiEvent {
     Append { index: usize, text: String },
     Activity(String),
     FileChange(FileChange),
+}
+
+impl BackboardMessage {
+    fn compact(role: MessageRole, body: impl Into<String>) -> Self {
+        Self {
+            role,
+            body: body.into(),
+            full_body: false,
+        }
+    }
+
+    fn full(role: MessageRole, body: impl Into<String>) -> Self {
+        Self {
+            role,
+            body: body.into(),
+            full_body: true,
+        }
+    }
 }
 
 impl BackboardPanel {
@@ -244,17 +264,19 @@ impl BackboardPanel {
             editor
         });
 
+        let initial_message = if api_ready {
+            "Backboard IDE is connected. Choose a model, then ask it to inspect files, create code, run tools, or plan work in this workspace."
+        } else {
+            "Paste your Backboard API key in the setup card above. It saves to the same ~/.backboard/config.json file used by the CLI."
+        };
+
         let mut panel = Self {
             focus_handle: cx.focus_handle(),
             workspace,
-            messages: vec![BackboardMessage {
-                role: MessageRole::Backboard,
-                body: if api_ready {
-                    "Backboard IDE is connected. Choose a model, then ask it to inspect files, create code, run tools, or plan work in this workspace.".into()
-                } else {
-                    "Paste your Backboard API key in the setup card above. It saves to the same ~/.backboard/config.json file used by the CLI.".into()
-                },
-            }],
+            messages: vec![BackboardMessage::compact(
+                MessageRole::Backboard,
+                initial_message,
+            )],
             composer,
             api_key_editor,
             status,
@@ -283,6 +305,7 @@ impl BackboardPanel {
         if panel.api_ready {
             panel.load_models(cx);
         }
+        panel.subscribe_inline_completion_outputs(cx);
 
         panel
     }
@@ -302,10 +325,10 @@ impl BackboardPanel {
 
     fn new_chat(&mut self, cx: &mut Context<Self>) {
         self.messages.clear();
-        self.messages.push(BackboardMessage {
-            role: MessageRole::Backboard,
-            body: "New Backboard chat started.".into(),
-        });
+        self.messages.push(BackboardMessage::compact(
+            MessageRole::Backboard,
+            "New Backboard chat started.",
+        ));
         self.activity_log.clear();
         self.file_changes.clear();
         self.files_changed_open = true;
@@ -423,12 +446,10 @@ impl BackboardPanel {
                 self.status = format!("Saved API key to ~/.backboard/config.json ({})", config.env);
                 self.api_key_editor
                     .update(cx, |editor, cx| editor.set_text("", window, cx));
-                self.messages.push(BackboardMessage {
-                    role: MessageRole::Backboard,
-                    body:
-                        "API key saved. The IDE and Backboard CLI now share the same config file."
-                            .into(),
-                });
+                self.messages.push(BackboardMessage::compact(
+                    MessageRole::Backboard,
+                    "API key saved. The IDE and Backboard CLI now share the same config file.",
+                ));
                 self.model_picker_open = true;
                 self.load_models(cx);
             }
@@ -486,14 +507,12 @@ impl BackboardPanel {
         let selected_model = self.selected_model.clone();
         let response_index = self.messages.len() + 1;
 
-        self.messages.push(BackboardMessage {
-            role: MessageRole::User,
-            body: prompt.clone(),
-        });
-        self.messages.push(BackboardMessage {
-            role: MessageRole::Backboard,
-            body: String::new(),
-        });
+        self.messages
+            .push(BackboardMessage::compact(MessageRole::User, prompt.clone()));
+        self.messages.push(BackboardMessage::compact(
+            MessageRole::Backboard,
+            String::new(),
+        ));
         self.streaming = true;
         self.activity_open = true;
         self.loading_tick = 0;
@@ -589,10 +608,10 @@ impl BackboardPanel {
                         this.push_activity("Backboard finished.");
                     }
                     Err(error) => {
-                        this.messages.push(BackboardMessage {
-                            role: MessageRole::Error,
-                            body: format!("Backboard run failed: {error:#}"),
-                        });
+                        this.messages.push(BackboardMessage::compact(
+                            MessageRole::Error,
+                            format!("Backboard run failed: {error:#}"),
+                        ));
                         this.push_activity(format!("Run failed: {error:#}"));
                         this.status = "Backboard run failed.".into();
                     }
@@ -619,6 +638,111 @@ impl BackboardPanel {
         if let Some(message) = self.messages.get_mut(index) {
             message.body.push_str(text);
         }
+    }
+
+    fn subscribe_inline_completion_outputs(&mut self, cx: &mut Context<Self>) {
+        let receiver = backboard::subscribe_inline_completion_outputs();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            while let Ok(output) = receiver.recv().await {
+                if output.chunks.is_empty() {
+                    continue;
+                }
+
+                let title = output.title;
+                let path = output.path.unwrap_or_else(|| "current buffer".to_string());
+                let language = output.language.unwrap_or_else(|| "text".to_string());
+                let chunks = output.chunks;
+                let chunk_count = chunks.len();
+
+                let started = this.update(cx, |this, cx| {
+                    this.start_inline_completion_output(&path, cx);
+                });
+                if started.is_err() {
+                    break;
+                }
+
+                for (chunk_index, chunk) in chunks.into_iter().enumerate() {
+                    if chunk_index > 0 {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(
+                                INLINE_COMPLETION_CHUNK_OUTPUT_DELAY_MILLIS,
+                            ))
+                            .await;
+                    }
+
+                    let appended = this.update(cx, |this, cx| {
+                        this.append_inline_completion_output_chunk(
+                            &title,
+                            &path,
+                            &language,
+                            chunk_count,
+                            chunk_index,
+                            chunk,
+                            cx,
+                        );
+                    });
+                    if appended.is_err() {
+                        break;
+                    }
+                }
+
+                if this
+                    .update(cx, |this, cx| {
+                        this.finish_inline_completion_output(cx);
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn start_inline_completion_output(&mut self, path: &str, cx: &mut Context<Self>) {
+        self.messages.push(BackboardMessage::compact(
+            MessageRole::User,
+            format!("Inline autocomplete finished for {path}"),
+        ));
+        self.streaming = true;
+        self.activity_open = false;
+        self.status = "Inline autocomplete output is streaming to Backboard.".into();
+        self.push_activity("Inline autocomplete output started.");
+        cx.notify();
+    }
+
+    fn append_inline_completion_output_chunk(
+        &mut self,
+        title: &str,
+        path: &str,
+        language: &str,
+        chunk_count: usize,
+        chunk_index: usize,
+        chunk: String,
+        cx: &mut Context<Self>,
+    ) {
+        let heading = if chunk_count > 1 {
+            format!(
+                "{title} ({}/{})\n{path}\n{language}",
+                chunk_index + 1,
+                chunk_count
+            )
+        } else {
+            format!("{title}\n{path}\n{language}")
+        };
+        self.messages.push(BackboardMessage::full(
+            MessageRole::Backboard,
+            format!("{heading}\n\n{chunk}"),
+        ));
+        cx.notify();
+    }
+
+    fn finish_inline_completion_output(&mut self, cx: &mut Context<Self>) {
+        self.streaming = false;
+        self.activity_open = false;
+        self.status = "Inline autocomplete output is ready in Backboard.".into();
+        self.push_activity("Inline autocomplete completed.");
+        cx.notify();
     }
 
     fn push_activity(&mut self, activity: impl Into<String>) {
@@ -1049,6 +1173,36 @@ impl BackboardPanel {
             })
     }
 
+    fn render_full_message_body(body: &str, cx: &mut Context<Self>) -> impl IntoElement {
+        let text_color = cx.theme().colors().text;
+        let background = cx.theme().colors().element_background;
+        let border = cx.theme().colors().border;
+        let lines = body
+            .lines()
+            .map(|line| {
+                div()
+                    .text_sm()
+                    .line_height(gpui::relative(1.32))
+                    .text_color(text_color)
+                    .child(if line.is_empty() {
+                        " ".to_string()
+                    } else {
+                        line.to_string()
+                    })
+            })
+            .collect::<Vec<_>>();
+
+        v_flex()
+            .gap_1()
+            .px_2()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(border)
+            .bg(background)
+            .children(lines)
+    }
+
     fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let active_backboard_index = self
             .messages
@@ -1066,7 +1220,11 @@ impl BackboardPanel {
                 let is_active_backboard = matches!(message.role, MessageRole::Backboard)
                     && Some(ix) == active_backboard_index
                     && (self.streaming || !self.activity_log.is_empty());
-                let compact_body = compact_message_body(message.role, &message.body);
+                let display_body = if message.full_body {
+                    strip_thinking_blocks(&message.body)
+                } else {
+                    compact_message_body(message.role, &message.body)
+                };
                 let (label, color) = match message.role {
                     MessageRole::User => ("You", Color::Muted),
                     MessageRole::Backboard => ("backboard", Color::Muted),
@@ -1106,7 +1264,7 @@ impl BackboardPanel {
                         .text_sm()
                         .line_height(gpui::relative(1.32))
                         .text_color(cx.theme().colors().text)
-                        .child(compact_body.clone())
+                        .child(display_body.clone())
                         .into_any_element()
                 };
 
@@ -1129,7 +1287,7 @@ impl BackboardPanel {
                                 .text_sm()
                                 .line_height(gpui::relative(1.32))
                                 .text_color(cx.theme().colors().text)
-                                .child(compact_body),
+                                .child(display_body),
                         )
                         .into_any_element()
                 } else {
@@ -1156,7 +1314,11 @@ impl BackboardPanel {
                                     this.child(self.render_inline_activity(cx))
                                 }),
                         )
-                        .child(body)
+                        .child(if message.full_body {
+                            Self::render_full_message_body(&message.body, cx).into_any_element()
+                        } else {
+                            body
+                        })
                         .when(is_active_backboard && self.activity_open, |this| {
                             this.child(self.render_activity_details(cx))
                         })
