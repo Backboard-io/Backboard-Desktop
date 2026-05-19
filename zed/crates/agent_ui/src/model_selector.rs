@@ -278,18 +278,14 @@ impl PickerDelegate for ModelPickerDelegate {
             self.filtered_entries.get(self.selected_index)
         {
             if window.modifiers().secondary() {
-                let default_model = self.agent_server.default_model(cx);
-                let is_default = default_model.as_ref() == Some(&model_info.id);
-
-                self.agent_server.set_default_model(
-                    if is_default {
-                        None
-                    } else {
-                        Some(model_info.id.clone())
-                    },
+                let is_favorite = self.favorites.contains(&model_info.id);
+                self.agent_server.toggle_favorite_model(
+                    model_info.id.clone(),
+                    !is_favorite,
                     self.fs.clone(),
                     cx,
                 );
+                return;
             }
 
             self.selector
@@ -426,6 +422,21 @@ fn info_list_to_picker_entries(
     model_list: AgentModelList,
     favorites: &HashSet<acp::ModelId>,
 ) -> Vec<ModelPickerEntry> {
+    fn model_speed_rank(name: &str, model_id: &str) -> usize {
+        let text = format!("{name} {model_id}").to_lowercase();
+        if text.contains("fast") || text.contains("haiku") || text.contains("flash") {
+            0
+        } else if text.contains("reasoning") || text.contains("r1") || text.contains("o3") {
+            1
+        } else if text.contains("balanced") || text.contains("sonnet") || text.contains("v3") {
+            2
+        } else if text.contains("powerful") || text.contains("opus") || text.contains("pro") {
+            3
+        } else {
+            4
+        }
+    }
+
     let mut entries = Vec::new();
 
     let all_models: Vec<_> = match &model_list {
@@ -452,12 +463,40 @@ fn info_list_to_picker_entries(
             if has_favorites {
                 entries.push(ModelPickerEntry::Separator("All".into()));
             }
+            let mut grouped: IndexMap<String, Vec<AgentModelInfo>> = IndexMap::default();
             for model in list {
-                let is_favorite = favorites.contains(&model.id);
-                if has_favorites && is_favorite {
-                    continue;
+                let provider = model
+                    .id
+                    .0
+                    .split_once('/')
+                    .map(|(provider, _)| provider)
+                    .unwrap_or("Other");
+                let provider_label = match provider {
+                    "openai" => "OpenAI",
+                    "anthropic" => "Anthropic",
+                    "google" => "Google",
+                    "deepseek" => "DeepSeek",
+                    "xai" => "xAI",
+                    "ollama" => "Ollama",
+                    "openrouter" => "OpenRouter",
+                    _ => provider,
+                };
+                grouped
+                    .entry(provider_label.to_string())
+                    .or_default()
+                    .push(model);
+            }
+            for (group_name, models) in grouped {
+                entries.push(ModelPickerEntry::Separator(group_name.into()));
+                let mut models = models;
+                models.sort_by_key(|m| model_speed_rank(m.name.as_ref(), m.id.0.as_ref()));
+                for model in models {
+                    let is_favorite = favorites.contains(&model.id);
+                    if has_favorites && is_favorite {
+                        continue;
+                    }
+                    entries.push(ModelPickerEntry::Model(model, is_favorite));
                 }
-                entries.push(ModelPickerEntry::Model(model, is_favorite));
             }
         }
         AgentModelList::Grouped(index_map) => {

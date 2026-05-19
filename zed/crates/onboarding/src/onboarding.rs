@@ -389,14 +389,14 @@ impl Onboarding {
             .w_full()
             .py_12()
             .items_center()
-            .gap_10()
+            .gap_8()
             .child(
                 v_flex()
                     .items_center()
                     .gap_2()
                     .child(Headline::new("How do you want to work?").size(HeadlineSize::Large))
                     .child(
-                        Label::new("You can change this any time in Settings")
+                        Label::new("You can switch modes any time in Settings.")
                             .color(Color::Muted)
                             .size(LabelSize::Small),
                     ),
@@ -406,16 +406,16 @@ impl Onboarding {
                     .gap_4()
                     .child(self.render_level_card(
                         ExperienceLevel::Beginner,
-                        IconName::Chat,
+                        true,
                         "Simple",
-                        "Describe what you want to build in plain language. No code required.",
+                        "Prompt-first, preview-first. Chat in plain language and iterate on visible results.",
                         cx,
                     ))
                     .child(self.render_level_card(
                         ExperienceLevel::Developer,
-                        IconName::Code,
+                        false,
                         "Expert",
-                        "Full editor with AI agents. Code, run, and ship with full control.",
+                        "Full editor with AI agents, files, and tools for implementation and shipping.",
                         cx,
                     )),
             )
@@ -425,7 +425,7 @@ impl Onboarding {
     fn render_level_card(
         &mut self,
         level: ExperienceLevel,
-        icon: IconName,
+        is_simple: bool,
         title: &'static str,
         description: &'static str,
         cx: &mut Context<Self>,
@@ -433,11 +433,11 @@ impl Onboarding {
         let colors = cx.theme().colors();
         div()
             .id(SharedString::from(title))
-            .w(rems_from_px(220.))
+            .w(rems_from_px(460.))
             .p_6()
             .flex()
             .flex_col()
-            .gap_3()
+            .gap_4()
             .border_1()
             .border_color(colors.border)
             .rounded_lg()
@@ -450,19 +450,253 @@ impl Onboarding {
                 cx.notify();
             }))
             .child(
-                Icon::new(icon)
-                    .size(IconSize::Custom(rems_from_px(28.)))
-                    .color(Color::Accent),
+                h_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .p_1p5()
+                            .rounded_md()
+                            .bg(colors.element_background)
+                            .child(
+                                Vector::new(
+                                    VectorName::BackboardLogo,
+                                    rems_from_px(13.),
+                                    rems_from_px(18.),
+                                )
+                                .color(Color::Accent),
+                            ),
+                    )
+                    .child(Headline::new(title).size(HeadlineSize::Small)),
             )
             .child(
                 v_flex()
                     .gap_1()
-                    .child(Headline::new(title).size(HeadlineSize::Small))
                     .child(
                         Label::new(description)
                             .color(Color::Muted)
                             .size(LabelSize::Small),
                     ),
+            )
+            .child(if is_simple {
+                self.render_simple_mode_mockup(cx).into_any_element()
+            } else {
+                self.render_expert_mode_mockup(cx).into_any_element()
+            })
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_4()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(Icon::new(IconName::Check).size(IconSize::XSmall))
+                            .child(
+                                Label::new(if is_simple {
+                                    "Natural conversation"
+                                } else {
+                                    "Full code editor"
+                                })
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(Icon::new(IconName::Check).size(IconSize::XSmall))
+                            .child(
+                                Label::new(if is_simple {
+                                    "Instant preview"
+                                } else {
+                                    "Multi-agent workspace"
+                                })
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(Icon::new(IconName::Check).size(IconSize::XSmall))
+                            .child(
+                                Label::new(if is_simple {
+                                    "No setup required"
+                                } else {
+                                    "Terminal and tools"
+                                })
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                            ),
+                    ),
+            )
+            .child(
+                Button::new(
+                    SharedString::from(format!("continue-{title}")),
+                    format!("Continue with {title}"),
+                )
+                .style(ButtonStyle::Filled)
+                .full_width()
+                .on_click(cx.listener(move |this, _, _window, cx| {
+                    this.step = OnboardingStep::Setup(level);
+                    cx.notify();
+                })),
+            )
+    }
+
+    fn render_simple_mode_mockup(&self, cx: &Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        v_flex()
+            .w_full()
+            .gap_1p5()
+            .p_2()
+            .rounded_md()
+            .bg(colors.element_background)
+            .border_1()
+            .border_color(colors.border_variant)
+            .child(
+                h_flex()
+                    .gap_1p5()
+                    .child(
+                        v_flex()
+                            .w(rems_from_px(115.))
+                            .h(rems_from_px(126.))
+                            .rounded_sm()
+                            .bg(colors.editor_background)
+                            .border_1()
+                            .border_color(colors.border_variant)
+                            .p_1()
+                            .gap_1()
+                            .child(Label::new("Threads").size(LabelSize::XSmall).color(Color::Muted))
+                            .child(div().h(rems_from_px(18.)).rounded_sm().bg(colors.element_background))
+                            .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background))
+                            .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background))
+                            .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background)),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .h(rems_from_px(126.))
+                            .gap_1p5()
+                            .child(
+                                v_flex()
+                                    .h(rems_from_px(64.))
+                                    .rounded_sm()
+                                    .bg(colors.editor_background)
+                                    .border_1()
+                                    .border_color(colors.border_variant)
+                                    .p_1()
+                                    .gap_1()
+                                    .child(Label::new("Chat").size(LabelSize::XSmall).color(Color::Muted))
+                                    .child(
+                                        div()
+                                            .h(rems_from_px(32.))
+                                            .rounded_sm()
+                                            .bg(colors.element_background)
+                                            .child(
+                                                Label::new("Create a dashboard for active users.")
+                                                    .size(LabelSize::XSmall)
+                                                    .color(Color::Muted),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .rounded_sm()
+                                    .bg(colors.editor_background)
+                                    .border_1()
+                                    .border_color(colors.border_variant)
+                                    .p_1()
+                                    .gap_1()
+                                    .child(Label::new("Preview").size(LabelSize::XSmall).color(Color::Muted))
+                                    .child(
+                                        h_flex()
+                                            .gap_1()
+                                            .child(div().h(rems_from_px(14.)).flex_1().rounded_sm().bg(colors.element_background))
+                                            .child(div().h(rems_from_px(14.)).flex_1().rounded_sm().bg(colors.element_background))
+                                            .child(div().h(rems_from_px(14.)).flex_1().rounded_sm().bg(colors.element_background)),
+                                    )
+                                    .child(div().h(rems_from_px(28.)).rounded_sm().bg(colors.element_background))
+                                    .child(div().h(rems_from_px(18.)).rounded_sm().bg(colors.element_background)),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .h(rems_from_px(24.))
+                    .rounded_sm()
+                    .bg(colors.editor_background)
+                    .border_1()
+                    .border_color(colors.border_variant)
+                    .child(
+                        Label::new("Ask anything...")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
+            )
+    }
+
+    fn render_expert_mode_mockup(&self, cx: &Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        h_flex()
+            .w_full()
+            .gap_1p5()
+            .p_2()
+            .rounded_md()
+            .bg(colors.element_background)
+            .border_1()
+            .border_color(colors.border_variant)
+            .child(
+                v_flex()
+                    .w(rems_from_px(90.))
+                    .h(rems_from_px(126.))
+                    .rounded_sm()
+                    .bg(colors.editor_background)
+                    .border_1()
+                    .border_color(colors.border_variant)
+                    .p_1()
+                    .gap_1()
+                    .child(Label::new("Explorer").size(LabelSize::XSmall).color(Color::Muted))
+                    .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background))
+                    .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background))
+                    .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background))
+                    .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background)),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .h(rems_from_px(126.))
+                    .rounded_sm()
+                    .bg(colors.editor_background)
+                    .border_1()
+                    .border_color(colors.border_variant)
+                    .p_1()
+                    .gap_1()
+                    .child(Label::new("app.tsx").size(LabelSize::XSmall).color(Color::Muted))
+                    .child(div().h(rems_from_px(12.)).w(rems_from_px(140.)).rounded_sm().bg(colors.element_background))
+                    .child(div().h(rems_from_px(12.)).w(rems_from_px(110.)).rounded_sm().bg(colors.element_background))
+                    .child(div().h(rems_from_px(12.)).w(rems_from_px(132.)).rounded_sm().bg(colors.element_background))
+                    .child(div().h(rems_from_px(12.)).w(rems_from_px(96.)).rounded_sm().bg(colors.element_background))
+                    .child(div().h(rems_from_px(12.)).w(rems_from_px(120.)).rounded_sm().bg(colors.element_background)),
+            )
+            .child(
+                v_flex()
+                    .w(rems_from_px(108.))
+                    .h(rems_from_px(126.))
+                    .rounded_sm()
+                    .bg(colors.editor_background)
+                    .border_1()
+                    .border_color(colors.border_variant)
+                    .p_1()
+                    .gap_1()
+                    .child(Label::new("Agents").size(LabelSize::XSmall).color(Color::Muted))
+                    .child(div().h(rems_from_px(22.)).rounded_sm().bg(colors.element_background))
+                    .child(div().h(rems_from_px(22.)).rounded_sm().bg(colors.element_background))
+                    .child(div().h(rems_from_px(22.)).rounded_sm().bg(colors.element_background)),
             )
     }
 }

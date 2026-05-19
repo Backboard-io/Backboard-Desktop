@@ -6001,6 +6001,13 @@ impl AgentPanel {
                 .agent_display_name(&id)
                 .unwrap_or_else(|| self.selected_agent.label());
             (icon, label)
+        } else if matches!(self.selected_agent, Agent::NativeAgent) {
+            (
+                Some(SharedString::from(
+                    ui::VectorName::BackboardLogo.path().to_string(),
+                )),
+                self.selected_agent.label(),
+            )
         } else {
             (None, self.selected_agent.label())
         };
@@ -6060,7 +6067,9 @@ impl AgentPanel {
                                     !showing_terminal && is_agent_selected(Agent::NativeAgent),
                                     |this| this.action(Box::new(NewThread)),
                                 )
-                                .icon(IconName::Sparkle)
+                                .custom_icon_svg(SharedString::from(
+                                    ui::VectorName::BackboardLogo.path().to_string(),
+                                ))
                                 .icon_color(Color::Muted)
                                 .handler({
                                     let workspace = workspace.clone();
@@ -6083,15 +6092,6 @@ impl AgentPanel {
                                             });
                                         }
                                     }
-                                }),
-                        )
-                        .item(
-                            ContextMenuEntry::new("Agent Workspace")
-                                .icon(IconName::Blocks)
-                                .icon_color(Color::Muted)
-                                .handler(move |window, cx| {
-                                    window
-                                        .dispatch_action(Box::new(OpenBackboardAgentWorkspace), cx);
                                 }),
                         )
                         .when(supports_terminal, |menu| {
