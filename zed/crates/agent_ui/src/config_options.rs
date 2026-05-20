@@ -15,7 +15,8 @@ use picker::popover_menu::PickerPopoverMenu;
 use picker::{Picker, PickerDelegate};
 use settings::SettingsStore;
 use ui::{
-    ElevationIndex, IconButton, ListItem, ListItemSpacing, PopoverMenuHandle, Tooltip, prelude::*,
+    ButtonLike, ElevationIndex, IconButton, ListItem, ListItemSpacing, PopoverMenuHandle,
+    TintColor, Tooltip, prelude::*,
 };
 use util::ResultExt as _;
 
@@ -232,9 +233,15 @@ impl Render for ConfigOptionsView {
             return div().into_any_element();
         }
 
-        h_flex()
-            .gap_1()
-            .children(self.selectors.iter().cloned())
+        v_flex()
+            .w_full()
+            .gap_0()
+            .children(
+                self.selectors
+                    .iter()
+                    .cloned()
+                    .map(|selector| div().w_full().min_w_0().child(selector)),
+            )
             .into_any_element()
     }
 }
@@ -329,33 +336,77 @@ impl ConfigOptionSelector {
         }
     }
 
-    fn render_trigger_button(&self, _window: &mut Window, _cx: &mut Context<Self>) -> Button {
+    fn render_trigger_button(&self, _window: &mut Window, _cx: &mut Context<Self>) -> ButtonLike {
         let Some(option) = self.current_option() else {
-            return Button::new("config-option-trigger", "Unknown")
-                .label_size(LabelSize::Small)
-                .color(Color::Muted)
+            return ButtonLike::new("config-option-trigger")
+                .full_width()
+                .height(px(30.).into())
+                .child(
+                    Label::new("Unknown")
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
                 .disabled(true);
         };
 
+        let is_deployed = self.picker_handle.is_deployed();
         let icon = if self.picker_handle.is_deployed() {
             IconName::ChevronUp
         } else {
             IconName::ChevronDown
         };
+        let option_name = option.name.clone();
+        let value_name = self.current_value_name();
 
-        let label = if option.category == Some(acp::SessionConfigOptionCategory::ThoughtLevel) {
-            format!("{}: {}", option.name, self.current_value_name())
-        } else {
-            self.current_value_name()
-        };
-
-        Button::new(
-            ElementId::Name(format!("config-option-{}", option.id.0).into()),
-            label,
+        ButtonLike::new(ElementId::Name(
+            format!("config-option-{}", option.id.0).into(),
+        ))
+        .full_width()
+        .height(px(32.).into())
+        .style(ButtonStyle::Subtle)
+        .selected_style(ButtonStyle::Tinted(TintColor::Accent))
+        .toggle_state(is_deployed)
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div().min_w_0().flex_1().child(
+                        Label::new(option_name)
+                            .size(LabelSize::Small)
+                            .color(Color::Default)
+                            .truncate(),
+                    ),
+                )
+                .child(
+                    h_flex()
+                        .flex_none()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            Label::new(value_name)
+                                .size(LabelSize::XSmall)
+                                .color(if is_deployed {
+                                    Color::Accent
+                                } else {
+                                    Color::Muted
+                                })
+                                .truncate(),
+                        )
+                        .child(
+                            Icon::new(icon)
+                                .size(IconSize::XSmall)
+                                .color(if is_deployed {
+                                    Color::Accent
+                                } else {
+                                    Color::Muted
+                                }),
+                        ),
+                ),
         )
-        .label_size(LabelSize::Small)
-        .color(Color::Muted)
-        .end_icon(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
         .disabled(self.setting_value)
     }
 }
@@ -383,16 +434,21 @@ impl Render for ConfigOptionSelector {
             content.into_any()
         });
 
-        PickerPopoverMenu::new(
-            self.picker.clone(),
-            trigger_button,
-            tooltip,
-            gpui::Anchor::BottomRight,
-            cx,
-        )
-        .with_handle(self.picker_handle.clone())
-        .render(window, cx)
-        .into_any_element()
+        div()
+            .w_full()
+            .min_w_0()
+            .child(
+                PickerPopoverMenu::new(
+                    self.picker.clone(),
+                    trigger_button,
+                    tooltip,
+                    gpui::Anchor::BottomRight,
+                    cx,
+                )
+                .with_handle(self.picker_handle.clone())
+                .render(window, cx),
+            )
+            .into_any_element()
     }
 }
 

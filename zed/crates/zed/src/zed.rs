@@ -5392,13 +5392,10 @@ mod tests {
         cx.text_system()
             .add_fonts(vec![
                 Assets
-                    .load("fonts/lilex/Lilex-Regular.ttf")
+                    .load("fonts/jetbrains-mono/JetBrainsMono-Regular.ttf")
                     .unwrap()
                     .unwrap(),
-                Assets
-                    .load("fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf")
-                    .unwrap()
-                    .unwrap(),
+                Assets.load("fonts/inter/Inter.ttf").unwrap().unwrap(),
             ])
             .unwrap();
         let themes = ThemeRegistry::default();

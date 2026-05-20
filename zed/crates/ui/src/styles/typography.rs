@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use gpui::{
     AnyElement, App, IntoElement, ParentElement, Rems, RenderOnce, SharedString, Styled, Window,
-    div, rems,
+    div,
 };
 use theme::ActiveTheme;
 
@@ -43,7 +43,7 @@ pub trait StyledTypography: Styled + Sized {
 
     /// The default size for UI text.
     ///
-    /// `0.825rem` or `14px` at the default scale of `1rem` = `16px`.
+    /// `0.8125rem` or `13px` at the default scale of `1rem` = `16px`.
     ///
     /// Note: The absolute size of this text will change based on a user's `ui_scale` setting.
     ///
@@ -93,7 +93,7 @@ impl<E: Styled> StyledTypography for E {}
 pub enum TextSize {
     /// The default size for UI text.
     ///
-    /// `0.825rem` or `14px` at the default scale of `1rem` = `16px`.
+    /// `0.8125rem` or `13px` at the default scale of `1rem` = `16px`.
     ///
     /// Note: The absolute size of this text will change based on a user's `ui_scale` setting.
     #[default]
@@ -136,7 +136,7 @@ impl TextSize {
 
         match self {
             Self::Large => rems_from_px(16.),
-            Self::Default => rems_from_px(14.),
+            Self::Default => rems_from_px(13.),
             Self::Small => rems_from_px(12.),
             Self::XSmall => rems_from_px(10.),
             Self::Ui => rems_from_px(settings.ui_font_size(cx)),
@@ -149,7 +149,7 @@ impl TextSize {
 
         match self {
             Self::Large => px(16.),
-            Self::Default => px(14.),
+            Self::Default => px(13.),
             Self::Small => px(12.),
             Self::XSmall => px(10.),
             Self::Ui => settings.ui_font_size(cx),
@@ -163,16 +163,16 @@ impl TextSize {
 /// Defaults to a Major Second scale.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Default)]
 pub enum HeadlineSize {
-    /// An extra small headline - `~14px` @16px/rem
+    /// An extra small headline - `12px` @16px/rem
     XSmall,
-    /// A small headline - `16px` @16px/rem
+    /// A small headline - `13px` @16px/rem
     Small,
     #[default]
-    /// A medium headline - `~18px` @16px/rem
+    /// A medium headline - `13px` @16px/rem
     Medium,
-    /// A large headline - `~20px` @16px/rem
+    /// A large headline - `16px` @16px/rem
     Large,
-    /// An extra large headline - `~22px` @16px/rem
+    /// An extra large headline - `20px` @16px/rem
     XLarge,
 }
 
@@ -180,22 +180,22 @@ impl HeadlineSize {
     /// Returns the headline size in rems.
     pub fn rems(self) -> Rems {
         match self {
-            Self::XSmall => rems(0.88),
-            Self::Small => rems(1.0),
-            Self::Medium => rems(1.125),
-            Self::Large => rems(1.27),
-            Self::XLarge => rems(1.43),
+            Self::XSmall => rems_from_px(12.),
+            Self::Small => rems_from_px(13.),
+            Self::Medium => rems_from_px(13.),
+            Self::Large => rems_from_px(16.),
+            Self::XLarge => rems_from_px(20.),
         }
     }
 
     /// Returns the line height for the headline size.
     pub fn line_height(self) -> Rems {
         match self {
-            Self::XSmall => rems(1.6),
-            Self::Small => rems(1.6),
-            Self::Medium => rems(1.6),
-            Self::Large => rems(1.6),
-            Self::XLarge => rems(1.6),
+            Self::XSmall => rems_from_px(16.),
+            Self::Small => rems_from_px(16.),
+            Self::Medium => rems_from_px(16.),
+            Self::Large => rems_from_px(20.),
+            Self::XLarge => rems_from_px(24.),
         }
     }
 }

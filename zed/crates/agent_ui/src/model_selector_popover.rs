@@ -6,7 +6,7 @@ use acp_thread::{AgentModelIcon, AgentModelInfo, AgentModelSelector};
 use fs::Fs;
 use gpui::{Entity, FocusHandle, ObjectFit, img};
 use picker::popover_menu::PickerPopoverMenu;
-use ui::{ButtonLike, PopoverMenuHandle, Tooltip, prelude::*};
+use ui::{ButtonLike, PopoverMenuHandle, TintColor, Tooltip, prelude::*};
 
 use crate::ui::ModelSelectorTooltip;
 use crate::{ModelSelector, model_selector::acp_model_selector};
@@ -99,25 +99,53 @@ impl Render for ModelSelectorPopover {
 
         let trigger_label = self.trigger_label.clone();
         let trigger_logo = self.trigger_logo.clone();
+        let branded_trigger = trigger_label.is_some() || trigger_logo.is_some();
+        let has_trigger_logo = trigger_logo.is_some();
         let has_model_icon = model_icon.is_some();
+        let trigger_model_name = if branded_trigger {
+            model_name
+                .rsplit('/')
+                .next()
+                .filter(|name| !name.is_empty())
+                .map(SharedString::from)
+                .unwrap_or_else(|| model_name.clone())
+        } else {
+            model_name.clone()
+        };
 
         let trigger = ButtonLike::new("active-model")
-            .width(px(28.))
-            .height(px(28.).into())
+            .width(if branded_trigger { px(124.) } else { px(28.) })
+            .height(if branded_trigger {
+                px(26.).into()
+            } else {
+                px(28.).into()
+            })
+            .style(if branded_trigger {
+                ButtonStyle::Transparent
+            } else {
+                ButtonStyle::Subtle
+            })
+            .when(branded_trigger, |this| {
+                this.selected_style(ButtonStyle::Tinted(TintColor::Accent))
+                    .toggle_state(self.menu_handle.is_deployed())
+            })
             .child(
                 h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_1()
                     .justify_center()
                     .items_center()
                     .when_some(trigger_logo, |this, path| {
                         this.child(
                             img(path)
-                                .h(px(14.))
+                                .h(px(12.))
                                 .w_auto()
                                 .flex_none()
                                 .object_fit(ObjectFit::ScaleDown),
                         )
                     })
-                    .when(trigger_label.is_none(), |this| {
+                    .when(!has_trigger_logo, |this| {
                         this.when_some(model_icon, |this, icon| {
                             this.child(
                                 match icon {
@@ -129,7 +157,29 @@ impl Render for ModelSelectorPopover {
                             )
                         })
                     })
-                    .when(trigger_label.is_none() && !has_model_icon, |this| {
+                    .when(branded_trigger, |this| {
+                        this.child(
+                            Label::new(trigger_model_name.clone())
+                                .size(LabelSize::XSmall)
+                                .color(if self.menu_handle.is_deployed() {
+                                    Color::Accent
+                                } else {
+                                    Color::Muted
+                                })
+                                .truncate()
+                                .flex_1(),
+                        )
+                        .child(
+                            Icon::new(if self.menu_handle.is_deployed() {
+                                IconName::ChevronUp
+                            } else {
+                                IconName::ChevronDown
+                            })
+                            .color(Color::Muted)
+                            .size(IconSize::XSmall),
+                        )
+                    })
+                    .when(!branded_trigger && !has_model_icon, |this| {
                         this.child(
                             Icon::new(IconName::ChevronDown)
                                 .color(color)
@@ -142,7 +192,11 @@ impl Render for ModelSelectorPopover {
             self.selector.clone(),
             trigger,
             tooltip,
-            gpui::Anchor::BottomRight,
+            if branded_trigger {
+                gpui::Anchor::BottomLeft
+            } else {
+                gpui::Anchor::BottomRight
+            },
             cx,
         )
         .with_handle(self.menu_handle.clone())

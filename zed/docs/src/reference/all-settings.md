@@ -338,7 +338,7 @@ Note that a save will be triggered when an unsaved tab is closed, even if this i
 
 - Description: The name of a font to use for rendering text in the editor.
 - Setting: `buffer_font_family`
-- Default: `.ZedMono`. This currently aliases to [Lilex](https://lilex.myrt.co).
+- Default: `JetBrains Mono`. The `.ZedMono` alias currently resolves to JetBrains Mono.
 
 **Options**
 
@@ -396,7 +396,7 @@ For example, to use `Nerd Font` as a fallback, add the following to your setting
 
 - Description: The default font size for text in the editor.
 - Setting: `buffer_font_size`
-- Default: `15`
+- Default: `13`
 
 **Options**
 
@@ -406,7 +406,7 @@ A font size from `6` to `100` pixels (inclusive)
 
 - Description: The default font weight for text in the editor.
 - Setting: `buffer_font_weight`
-- Default: `400`
+- Default: `500`
 
 **Options**
 
@@ -416,7 +416,7 @@ A font size from `6` to `100` pixels (inclusive)
 
 - Description: The default line height for text in the editor.
 - Setting: `buffer_line_height`
-- Default: `"comfortable"`
+- Default: `{ "custom": 1.6923077 }`
 
 **Options**
 
@@ -5480,7 +5480,7 @@ Float values between `0.0` and `0.9`, where:
 
 - Description: The name of the font to use for text in the UI.
 - Setting: `ui_font_family`
-- Default: `.ZedSans`. This currently aliases to [IBM Plex](https://www.ibm.com/plex/).
+- Default: `Inter`. The `.ZedSans` alias currently resolves to Inter.
 
 **Options**
 
@@ -5557,7 +5557,7 @@ For example, to use `Nerd Font` as a fallback, add the following to your setting
 
 - Description: The default font weight for text in the UI.
 - Setting: `ui_font_weight`
-- Default: `400`
+- Default: `500`
 
 **Options**
 

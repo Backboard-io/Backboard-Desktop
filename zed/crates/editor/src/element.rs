@@ -8175,7 +8175,7 @@ pub fn render_breadcrumb_text(
 
     let highlighted_segments = segments.into_iter().enumerate().map(|(index, segment)| {
         let mut text_style = window.text_style();
-        if let Some(font) = &breadcrumb_font {
+        if multibuffer_header && let Some(font) = &breadcrumb_font {
             text_style.font_family = font.family.clone();
             text_style.font_features = font.features.clone();
             text_style.font_style = font.style;

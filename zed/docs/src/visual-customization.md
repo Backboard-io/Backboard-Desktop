@@ -45,18 +45,18 @@ If you would like to use distinct themes for light mode/dark mode that can be se
 
 ```json [settings]
   // UI Font. Use ".SystemUIFont" to use the default system font (SF Pro on macOS),
-  // or ".ZedSans" for the bundled default (currently IBM Plex)
+  // or ".ZedSans" for the bundled default (currently Inter)
   "ui_font_family": ".SystemUIFont",
-  "ui_font_weight": 400, // Font weight in standard CSS units from 100 to 900.
+  "ui_font_weight": 500, // Font weight in standard CSS units from 100 to 900.
   "ui_font_size": 16,
 
   // Buffer Font - Used by editor buffers
-  // use ".ZedMono" for the bundled default monospace (currently Lilex)
-  "buffer_font_family": "Berkeley Mono", // Font name for editor buffers
-  "buffer_font_size": 15,                 // Font size for editor buffers
-  "buffer_font_weight": 400,              // Font weight in CSS units [100-900]
+  // use ".ZedMono" for the bundled default monospace (currently JetBrains Mono)
+  "buffer_font_family": "JetBrains Mono", // Font name for editor buffers
+  "buffer_font_size": 13,                 // Font size for editor buffers
+  "buffer_font_weight": 500,              // Font weight in CSS units [100-900]
   // Line height "comfortable" (1.618), "standard" (1.3) or custom: `{ "custom": 2 }`
-  "buffer_line_height": "comfortable",
+  "buffer_line_height": { "custom": 1.6923077 },
 
   // Terminal Font Settings
   "terminal": {

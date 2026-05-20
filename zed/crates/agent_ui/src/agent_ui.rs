@@ -74,6 +74,7 @@ pub use crate::agent_workspace_ui::BackboardAgentWorkspacePage;
 pub use crate::inline_assistant::InlineAssistant;
 pub use crate::thread_metadata_store::ThreadId;
 pub use agent_diff::{AgentDiffPane, AgentDiffToolbar};
+pub use config_options::ConfigOptionsView;
 pub use conversation_view::ConversationView;
 pub use external_source_prompt::ExternalSourcePrompt;
 pub(crate) use mode_selector::ModeSelector;

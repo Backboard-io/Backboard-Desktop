@@ -24,9 +24,9 @@
   // 6. "TextMate"
   "base_keymap": "VSCode",
   // The name of a font to use for rendering text in the editor
-  // ".ZedMono" currently aliases to Lilex
+  // ".ZedMono" currently aliases to JetBrains Mono
   // but this may change in the future.
-  "buffer_font_family": ".ZedMono",
+  "buffer_font_family": "JetBrains Mono",
   // Set the buffer text's font fallbacks, this will be merged with
   // the platform's default fallbacks.
   "buffer_font_fallbacks": null,
@@ -36,9 +36,9 @@
     // "calt": false
   },
   // The default font size for text in the editor
-  "buffer_font_size": 15,
+  "buffer_font_size": 13,
   // The weight of the editor font in standard CSS units from 100 to 900.
-  "buffer_font_weight": 400,
+  "buffer_font_weight": 500,
   // Set the buffer's line height.
   // May take 3 values:
   //  1. Use a line height that's comfortable for reading (1.618)
@@ -49,12 +49,14 @@
   //         "buffer_line_height": {
   //           "custom": 2
   //         },
-  "buffer_line_height": "comfortable",
+  "buffer_line_height": {
+    "custom": 1.6923077
+  },
   // The name of a font to use for rendering text in the UI
   // You can set this to ".SystemUIFont" to use the system font
-  // ".ZedSans" currently aliases to "IBM Plex Sans", but this may
+  // ".ZedSans" currently aliases to Inter, but this may
   // change in the future
-  "ui_font_family": ".ZedSans",
+  "ui_font_family": "Inter",
   // Set the UI's font fallbacks, this will be merged with the platform's
   // default font fallbacks.
   "ui_font_fallbacks": null,
@@ -64,7 +66,7 @@
     "calt": false,
   },
   // The weight of the UI font in standard CSS units from 100 to 900.
-  "ui_font_weight": 400,
+  "ui_font_weight": 500,
   // The default font size for text in the UI
   "ui_font_size": 16,
   // The default font size for agent responses in the agent panel. Falls back to the UI font size if unset.

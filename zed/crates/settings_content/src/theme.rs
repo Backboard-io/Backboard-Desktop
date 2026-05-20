@@ -247,7 +247,7 @@ fn default_font_fallbacks() -> Option<Vec<FontFamilyName>> {
 }
 
 fn default_buffer_font_weight() -> Option<FontWeightContent> {
-    Some(FontWeightContent::NORMAL)
+    Some(FontWeightContent::MEDIUM)
 }
 
 /// Represents the selection of a theme, which can be either static or dynamic.
@@ -1334,7 +1334,7 @@ impl From<f32> for FontWeightContent {
 
 impl Default for FontWeightContent {
     fn default() -> Self {
-        Self::NORMAL
+        Self::MEDIUM
     }
 }
 
@@ -1361,7 +1361,7 @@ impl schemars::JsonSchema for FontWeightContent {
             "type": "number",
             "minimum": Self::THIN.0,
             "maximum": Self::BLACK.0,
-            "default": Self::NORMAL.0,
+            "default": Self::MEDIUM.0,
             "description": "Font weight value between 100 (thin) and 900 (black)"
         })
     }
@@ -1435,8 +1435,8 @@ mod tests {
         let default_value = &buffer_font_weight["default"];
         assert_eq!(
             default_value.as_f64(),
-            Some(FontWeightContent::NORMAL.0 as f64),
-            "buffer_font_weight default should be 400.0 (FontWeightContent::NORMAL)"
+            Some(FontWeightContent::MEDIUM.0 as f64),
+            "buffer_font_weight default should be 500.0 (FontWeightContent::MEDIUM)"
         );
 
         let defs = &schema_value["$defs"];
@@ -1454,8 +1454,8 @@ mod tests {
         );
         assert_eq!(
             font_weight_def["default"].as_f64(),
-            Some(FontWeightContent::NORMAL.0 as f64),
-            "FontWeightContent should have default of 400.0"
+            Some(FontWeightContent::MEDIUM.0 as f64),
+            "FontWeightContent should have default of 500.0"
         );
     }
 }

@@ -175,7 +175,7 @@ impl SystemWindowTabs {
             .overflow_hidden()
             .h(Tab::content_height(cx))
             .relative()
-            .px(DynamicSpacing::Base16.px(cx))
+            .px(DynamicSpacing::Base12.px(cx))
             .justify_center()
             .border_l_1()
             .border_color(cx.theme().colors().border)
@@ -242,7 +242,7 @@ impl SystemWindowTabs {
                 _ => this.child(
                     div()
                         .absolute()
-                        .top_2()
+                        .top_1()
                         .w_4()
                         .h_4()
                         .map(|this| match close_side {
@@ -514,7 +514,7 @@ impl Render for DraggedWindowTab {
         h_flex()
             .h(Tab::container_height(cx))
             .w(self.width)
-            .px(DynamicSpacing::Base16.px(cx))
+            .px(DynamicSpacing::Base12.px(cx))
             .justify_center()
             .bg(if self.is_active {
                 self.active_background_color

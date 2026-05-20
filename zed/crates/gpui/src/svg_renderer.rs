@@ -252,8 +252,8 @@ impl SvgRenderer {
 
 fn load_bundled_fonts(asset_source: &dyn AssetSource, db: &mut usvg::fontdb::Database) {
     let font_paths = [
-        "fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf",
-        "fonts/lilex/Lilex-Regular.ttf",
+        "fonts/inter/Inter.ttf",
+        "fonts/jetbrains-mono/JetBrainsMono-Regular.ttf",
     ];
     for path in font_paths {
         match asset_source.load(path) {
@@ -271,12 +271,12 @@ fn fix_generic_font_families(db: &mut usvg::fontdb::Database) {
     use usvg::fontdb::{Family, Query};
 
     let families_and_fallbacks: &[(Family<'_>, &str)] = &[
-        (Family::SansSerif, "IBM Plex Sans"),
+        (Family::SansSerif, "Inter"),
         // No serif font bundled; use sans-serif as best available fallback.
-        (Family::Serif, "IBM Plex Sans"),
-        (Family::Monospace, "Lilex"),
-        (Family::Cursive, "IBM Plex Sans"),
-        (Family::Fantasy, "IBM Plex Sans"),
+        (Family::Serif, "Inter"),
+        (Family::Monospace, "JetBrains Mono"),
+        (Family::Cursive, "Inter"),
+        (Family::Fantasy, "Inter"),
     ];
 
     for (family, fallback_name) in families_and_fallbacks {
@@ -302,14 +302,14 @@ mod tests {
     use super::*;
     use usvg::fontdb::{Database, Family, Query};
 
-    const IBM_PLEX_REGULAR: &[u8] =
-        include_bytes!("../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf");
-    const LILEX_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/lilex/Lilex-Regular.ttf");
+    const INTER_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/inter/Inter.ttf");
+    const JETBRAINS_MONO_REGULAR: &[u8] =
+        include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf");
 
     fn db_with_bundled_fonts() -> Database {
         let mut db = Database::new();
-        db.load_font_data(IBM_PLEX_REGULAR.to_vec());
-        db.load_font_data(LILEX_REGULAR.to_vec());
+        db.load_font_data(INTER_REGULAR.to_vec());
+        db.load_font_data(JETBRAINS_MONO_REGULAR.to_vec());
         db
     }
 
@@ -373,31 +373,31 @@ mod tests {
     fn test_select_emoji_font_skips_family_without_glyph() {
         let mut db = db_with_bundled_fonts();
 
-        let ibm_plex_sans = db
+        let inter = db
             .query(&usvg::fontdb::Query {
-                families: &[usvg::fontdb::Family::Name("IBM Plex Sans")],
+                families: &[usvg::fontdb::Family::Name("Inter")],
                 weight: usvg::fontdb::Weight(400),
                 stretch: usvg::fontdb::Stretch::Normal,
                 style: usvg::fontdb::Style::Normal,
             })
             .unwrap();
-        let lilex = db
+        let jetbrains_mono = db
             .query(&usvg::fontdb::Query {
-                families: &[usvg::fontdb::Family::Name("Lilex")],
+                families: &[usvg::fontdb::Family::Name("JetBrains Mono")],
                 weight: usvg::fontdb::Weight(400),
                 stretch: usvg::fontdb::Stretch::Normal,
                 style: usvg::fontdb::Style::Normal,
             })
             .unwrap();
-        let selected = select_emoji_font('│', &[], &db, &["IBM Plex Sans", "Lilex"]).unwrap();
+        let selected = select_emoji_font('│', &[], &db, &["Inter", "JetBrains Mono"]).unwrap();
 
-        assert_eq!(selected, lilex);
-        assert!(!font_has_char(&db, ibm_plex_sans, '│'));
+        assert_eq!(selected, jetbrains_mono);
+        assert!(!font_has_char(&db, inter, '│'));
         assert!(font_has_char(&db, selected, '│'));
     }
 
     #[test]
-    fn fix_generic_font_families_monospace_resolves_to_lilex() {
+    fn fix_generic_font_families_monospace_resolves_to_jetbrains_mono() {
         let mut db = db_with_bundled_fonts();
         fix_generic_font_families(&mut db);
 
@@ -408,8 +408,10 @@ mod tests {
         let id = db.query(&query).expect("Monospace should resolve");
         let face = db.face(id).expect("Face should exist");
         assert!(
-            face.families.iter().any(|(name, _)| name.contains("Lilex")),
-            "Monospace should map to Lilex, got {:?}",
+            face.families
+                .iter()
+                .any(|(name, _)| name.contains("JetBrains Mono")),
+            "Monospace should map to JetBrains Mono, got {:?}",
             face.families
         );
     }

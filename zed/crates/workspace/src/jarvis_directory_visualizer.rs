@@ -16,7 +16,7 @@ use project::{
 use ui::{TintColor, Tooltip, prelude::*};
 use util::rel_path::RelPath;
 
-const DEFAULT_MAX_DEPTH: usize = 3;
+const DEFAULT_MAX_FILE_DEPTH: usize = 3;
 const MAX_GRAPH_NODES: usize = 250;
 const DEFAULT_GRAPH_ZOOM: f32 = 0.82;
 const MIN_GRAPH_ZOOM: f32 = 0.35;
@@ -1859,7 +1859,11 @@ fn build_graph_from_project(project: &Entity<Project>, cx: &App) -> DirectoryGra
                     .filter(|entry| {
                         !entry.path.is_empty()
                             && !entry.is_ignored
-                            && entry.path.components().count() <= DEFAULT_MAX_DEPTH
+                            && include_entry_in_graph(
+                                entry.is_dir(),
+                                entry.path.as_ref(),
+                                DEFAULT_MAX_FILE_DEPTH,
+                            )
                     })
                     .map(|entry| DirectoryGraphEntryInput {
                         path: entry.path.clone(),
@@ -1871,12 +1875,12 @@ fn build_graph_from_project(project: &Entity<Project>, cx: &App) -> DirectoryGra
         })
         .collect::<Vec<_>>();
 
-    build_graph_from_worktree_entries(worktrees, DEFAULT_MAX_DEPTH, MAX_GRAPH_NODES)
+    build_graph_from_worktree_entries(worktrees, DEFAULT_MAX_FILE_DEPTH, MAX_GRAPH_NODES)
 }
 
 pub(crate) fn build_graph_from_worktree_entries(
     worktrees: Vec<DirectoryGraphWorktreeInput>,
-    max_depth: usize,
+    max_file_depth: usize,
     max_nodes: usize,
 ) -> DirectoryGraph {
     let mut nodes = Vec::new();
@@ -1907,7 +1911,7 @@ pub(crate) fn build_graph_from_worktree_entries(
             .filter(|entry| {
                 !entry.is_ignored
                     && !entry.path.is_empty()
-                    && entry.path.components().count() <= max_depth
+                    && include_entry_in_graph(entry.is_dir, entry.path.as_ref(), max_file_depth)
             })
             .collect::<Vec<_>>();
 
@@ -1967,6 +1971,10 @@ pub(crate) fn build_graph_from_worktree_entries(
     }
 }
 
+fn include_entry_in_graph(is_dir: bool, path: &RelPath, max_file_depth: usize) -> bool {
+    is_dir || path.components().count() <= max_file_depth
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2021,13 +2029,16 @@ mod tests {
     }
 
     #[test]
-    fn graph_caps_depth_to_top_three_levels() {
+    fn graph_includes_deep_folders_but_caps_deep_files() {
         let graph = build_graph_from_worktree_entries(
             vec![worktree(vec![
                 entry("a", true, false),
                 entry("a/b", true, false),
                 entry("a/b/c", true, false),
+                entry("a/b/c/d", true, false),
+                entry("a/b/c/d/e", true, false),
                 entry("a/b/c/d.rs", false, false),
+                entry("a/b/c/d/e/mod.rs", false, false),
             ])],
             3,
             250,
@@ -2036,7 +2047,38 @@ mod tests {
         assert!(contains_path(&graph, "a"));
         assert!(contains_path(&graph, "a/b"));
         assert!(contains_path(&graph, "a/b/c"));
+        assert!(contains_path(&graph, "a/b/c/d"));
+        assert!(contains_path(&graph, "a/b/c/d/e"));
         assert!(!contains_path(&graph, "a/b/c/d.rs"));
+        assert!(!contains_path(&graph, "a/b/c/d/e/mod.rs"));
+    }
+
+    #[test]
+    fn graph_links_deep_folder_chain() {
+        let graph = build_graph_from_worktree_entries(
+            vec![worktree(vec![
+                entry("src", true, false),
+                entry("src/components", true, false),
+                entry("src/components/pages", true, false),
+                entry("src/components/pages/home", true, false),
+            ])],
+            3,
+            250,
+        );
+        let pages =
+            DirectoryGraphNodeId::new(WorktreeId::from_usize(1), rel_path("src/components/pages"));
+        let home = DirectoryGraphNodeId::new(
+            WorktreeId::from_usize(1),
+            rel_path("src/components/pages/home"),
+        );
+
+        assert!(contains_path(&graph, "src/components/pages/home"));
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| edge.parent == pages && edge.child == home)
+        );
     }
 
     #[test]

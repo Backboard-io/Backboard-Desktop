@@ -11,8 +11,8 @@ use acp_thread::{ContentBlock, PlanEntry};
 use cloud_api_types::{SubmitAgentThreadFeedbackBody, SubmitAgentThreadFeedbackCommentsBody};
 use editor::actions::OpenExcerpts;
 
-use gpui::List;
 use gpui::TaskExt;
+use gpui::{DismissEvent, List};
 use heapless::Vec as ArrayVec;
 use language_model::{LanguageModelEffortLevel, Speed};
 use settings::{SidebarSide, update_settings_file};
@@ -217,6 +217,75 @@ impl RenderOnce for GeneratingSpinnerElement {
     }
 }
 
+struct AgentOptionsMenu {
+    focus_handle: FocusHandle,
+    config_options_view: Entity<ConfigOptionsView>,
+}
+
+impl AgentOptionsMenu {
+    fn new(config_options_view: Entity<ConfigOptionsView>, cx: &mut Context<Self>) -> Self {
+        Self {
+            focus_handle: cx.focus_handle(),
+            config_options_view,
+        }
+    }
+}
+
+impl Focusable for AgentOptionsMenu {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl EventEmitter<DismissEvent> for AgentOptionsMenu {}
+
+impl Render for AgentOptionsMenu {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+
+        div()
+            .key_context("AgentOptionsMenu")
+            .track_focus(&self.focus_handle)
+            .p_1()
+            .min_w(px(300.))
+            .max_w(px(340.))
+            .rounded_md()
+            .border_1()
+            .border_color(colors.border_variant.opacity(0.64))
+            .bg(colors.elevated_surface_background)
+            .elevation_2(cx)
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .px_1()
+                            .py_0p5()
+                            .child(
+                                Label::new("Agent Options")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Default),
+                            )
+                            .child(
+                                Icon::new(IconName::Sliders)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Muted),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .h(px(1.))
+                            .w_full()
+                            .bg(colors.border_variant.opacity(0.48)),
+                    )
+                    .child(self.config_options_view.clone()),
+            )
+    }
+}
+
 pub enum AcpThreadViewEvent {
     Interacted,
 }
@@ -335,6 +404,7 @@ pub struct ThreadView {
     pub _subscriptions: Vec<Subscription>,
     pub message_editor: Entity<MessageEditor>,
     pub add_context_menu_handle: PopoverMenuHandle<ContextMenu>,
+    agent_options_menu_handle: PopoverMenuHandle<AgentOptionsMenu>,
     pub thinking_effort_menu_handle: PopoverMenuHandle<ContextMenu>,
     pub project: WeakEntity<Project>,
     pub show_external_source_prompt_warning: bool,
@@ -560,6 +630,7 @@ impl ThreadView {
             in_flight_prompt: None,
             message_editor,
             add_context_menu_handle: PopoverMenuHandle::default(),
+            agent_options_menu_handle: PopoverMenuHandle::default(),
             thinking_effort_menu_handle: PopoverMenuHandle::default(),
             project,
             show_external_source_prompt_warning,
@@ -776,9 +847,29 @@ impl ThreadView {
         let tooltip_label = format!("Change model: {model_label}");
 
         ButtonLike::new("backboard-footer-model-selector")
-            .width(px(28.))
-            .height(px(28.).into())
-            .child(self.render_backboard_logo(px(14.)))
+            .width(px(156.))
+            .height(px(26.).into())
+            .style(ButtonStyle::Subtle)
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_1()
+                    .items_center()
+                    .child(self.render_backboard_logo(px(12.)))
+                    .child(
+                        Label::new(model_label)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Default)
+                            .truncate()
+                            .flex_1(),
+                    )
+                    .child(
+                        Icon::new(IconName::ChevronDown)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    ),
+            )
             .tooltip(Tooltip::text(tooltip_label))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.toggle_model_selector(window, cx);
@@ -827,13 +918,9 @@ impl ThreadView {
             return;
         }
 
-        if let Some(config_options_view) = self.config_options_view.clone() {
-            let handled = config_options_view.update(cx, |view, cx| {
-                view.toggle_category_picker(acp::SessionConfigOptionCategory::Mode, window, cx)
-            });
-            if handled {
-                return;
-            }
+        if self.config_options_view.is_some() {
+            self.agent_options_menu_handle.toggle(window, cx);
+            return;
         }
 
         if let Some(profile_selector) = self.profile_selector.clone() {
@@ -853,10 +940,44 @@ impl ThreadView {
 
         let focus_handle = self.message_editor.focus_handle(cx);
 
+        if let Some(config_options_view) = self.config_options_view.clone() {
+            let menu_handle = self.agent_options_menu_handle.clone();
+            return Some(
+                PopoverMenu::new("thread-agent-options-menu")
+                    .trigger_with_tooltip(
+                        IconButton::new("thread-session-options", IconName::Sliders)
+                            .icon_size(IconSize::Small)
+                            .icon_color(Color::Muted)
+                            .style(ButtonStyle::Transparent)
+                            .shape(ui::IconButtonShape::Square),
+                        move |_, cx| {
+                            Tooltip::for_action_in(
+                                "Change Agent Options",
+                                &ToggleProfileSelector,
+                                &focus_handle,
+                                cx,
+                            )
+                        },
+                    )
+                    .anchor(gpui::Anchor::BottomRight)
+                    .offset(gpui::Point {
+                        x: px(0.0),
+                        y: px(-2.0),
+                    })
+                    .with_handle(menu_handle)
+                    .menu(move |_window, cx| {
+                        Some(cx.new(|cx| AgentOptionsMenu::new(config_options_view.clone(), cx)))
+                    })
+                    .into_any_element(),
+            );
+        }
+
         Some(
-            IconButton::new("session-options", IconName::Sliders)
+            IconButton::new("thread-session-options", IconName::Sliders)
                 .icon_size(IconSize::Small)
                 .icon_color(Color::Muted)
+                .style(ButtonStyle::Transparent)
+                .shape(ui::IconButtonShape::Square)
                 .tooltip(move |_, cx| {
                     Tooltip::for_action_in(
                         "Change Agent Options",
@@ -3439,9 +3560,10 @@ impl ThreadView {
 
         let focus_handle = self.message_editor.focus_handle(cx);
         let colors = cx.theme().colors();
-        let editor_bg_color = colors
-            .panel_background
-            .blend(colors.editor_background.opacity(0.62));
+        let editor_bg_color = colors.panel_background.blend(colors.editor_background.opacity(0.32));
+        let composer_surface_bg = colors
+            .editor_background
+            .blend(colors.element_background.opacity(0.14));
 
         let editor_expanded = self.editor_expanded;
         let (expand_icon, expand_tooltip) = if editor_expanded {
@@ -3450,13 +3572,13 @@ impl ThreadView {
             (IconName::Maximize, "Expand Message Editor")
         };
 
-        let max_content_width = AgentSettings::get_global(cx).max_content_width;
         let has_messages = self.list_state.item_count() > 0;
-        let fills_container = !has_messages || editor_expanded;
+        let fills_container = editor_expanded;
 
         h_flex()
             .px_2()
-            .py_1p5()
+            .pt_1p5()
+            .pb_2()
             .bg(editor_bg_color)
             .justify_center()
             .map(|this| {
@@ -3464,29 +3586,33 @@ impl ThreadView {
                     this.on_action(cx.listener(Self::expand_message_editor))
                         .when(editor_expanded, |this| this.h(vh(0.8, window)))
                 } else {
-                    this.flex_1().size_full()
+                    this
                 }
             })
             .child(
                 v_flex()
-                    .when_some(max_content_width, |this, max_w| this.flex_basis(max_w))
+                    .w_full()
+                    .max_w_full()
                     .when(fills_container, |this| this.h_full())
                     .flex_shrink()
-                    .flex_grow_0()
+                    .flex_grow()
                     .justify_between()
                     .child(
                         v_flex()
                             .relative()
                             .w_full()
-                            .min_h_0()
+                            .min_h(px(116.))
                             .when(fills_container, |this| this.flex_1())
-                            .p_2()
+                            .px_3()
+                            .pt_2()
+                            .pb_1p5()
                             .rounded_lg()
                             .border_1()
-                            .border_color(colors.border_variant.opacity(0.56))
-                            .bg(colors
-                                .element_background
-                                .blend(colors.editor_background.opacity(0.48)))
+                            .border_color(colors.border_variant.opacity(0.24))
+                            .hover(|style| {
+                                style.border_color(colors.border_variant.opacity(0.36))
+                            })
+                            .bg(composer_surface_bg)
                             .child(self.message_editor.clone())
                             .when(has_messages, |this| {
                                 this.child(
@@ -3526,29 +3652,47 @@ impl ThreadView {
                                     .flex_none()
                                     .items_center()
                                     .justify_between()
+                                    .flex_wrap()
                                     .gap_1()
+                                    .mt_1()
                                     .pt_1()
+                                    .border_t_1()
+                                    .border_color(colors.border_variant.opacity(0.18))
                                     .child(
                                         h_flex()
                                             .min_w_0()
                                             .flex_1()
-                                            .children(self.render_selected_model_readout(cx)),
+                                            .items_center()
+                                            .gap_1()
+                                            .child(self.render_add_context_button(cx))
+                                            .map(|this| {
+                                                if let Some(model_selector) =
+                                                    self.model_selector.clone()
+                                                {
+                                                    this.child(model_selector)
+                                                } else if self.agent_display_name.as_ref()
+                                                    == "Backboard"
+                                                {
+                                                    this.child(
+                                                        self.render_backboard_footer_status(cx),
+                                                    )
+                                                } else {
+                                                    this.children(
+                                                        self.render_selected_model_readout(cx),
+                                                    )
+                                                }
+                                            }),
                                     )
                                     .child(
                                         h_flex()
                                             .flex_none()
                                             .flex_wrap()
+                                            .items_center()
                                             .justify_end()
-                                            .gap_0p5()
-                                            .child(self.render_add_context_button(cx))
+                                            .gap_1()
                                             .child(self.render_follow_toggle(cx))
                                             .children(self.render_fast_mode_control(cx))
                                             .children(self.render_thinking_control(cx))
-                                            .map(|this| match self.model_selector.clone() {
-                                                Some(model_selector) => this.child(model_selector),
-                                                None => this
-                                                    .child(self.render_backboard_footer_status(cx)),
-                                            })
                                             .children(self.render_token_usage(cx))
                                             .children(self.render_session_options_button(cx))
                                             .child(self.render_send_button(cx)),
@@ -3957,6 +4101,8 @@ impl ThreadView {
             IconButton::new("fast-mode", icon)
                 .icon_size(IconSize::Small)
                 .icon_color(color)
+                .style(ButtonStyle::Transparent)
+                .shape(ui::IconButtonShape::Square)
                 .tooltip(move |_, cx| {
                     Tooltip::for_action_in(tooltip_label, &ToggleFastMode, &focus_handle, cx)
                 })
@@ -3997,6 +4143,8 @@ impl ThreadView {
         let thinking_toggle = IconButton::new("thinking-mode", icon)
             .icon_size(IconSize::Small)
             .icon_color(color)
+            .style(ButtonStyle::Transparent)
+            .shape(ui::IconButtonShape::Square)
             .tooltip(move |_, cx| {
                 Tooltip::for_action_in(tooltip_label, &ToggleThinkingMode, &focus_handle, cx)
             })
@@ -4218,6 +4366,8 @@ impl ThreadView {
             IconButton::new("stop-generation", IconName::Stop)
                 .icon_color(Color::Error)
                 .style(ButtonStyle::Tinted(TintColor::Error))
+                .shape(ui::IconButtonShape::Square)
+                .icon_size(IconSize::Small)
                 .tooltip(move |_window, cx| {
                     Tooltip::for_action("Stop Generation", &editor::actions::Cancel, cx)
                 })
@@ -4230,12 +4380,16 @@ impl ThreadView {
                 IconName::Send
             };
             IconButton::new("send-message", send_icon)
-                .style(ButtonStyle::Filled)
+                .shape(ui::IconButtonShape::Square)
+                .icon_size(IconSize::Small)
                 .map(|this| {
                     if is_editor_empty && !is_generating {
-                        this.disabled(true).icon_color(Color::Muted)
+                        this.disabled(true)
+                            .style(ButtonStyle::Subtle)
+                            .icon_color(Color::Disabled)
                     } else {
-                        this.icon_color(Color::Accent)
+                        this.style(ButtonStyle::Tinted(TintColor::Accent))
+                            .icon_color(Color::Accent)
                     }
                 })
                 .tooltip(move |_window, cx| {
@@ -4289,7 +4443,9 @@ impl ThreadView {
             .trigger_with_tooltip(
                 IconButton::new("add-context", IconName::Plus)
                     .icon_size(IconSize::Small)
-                    .icon_color(Color::Muted),
+                    .icon_color(Color::Muted)
+                    .style(ButtonStyle::Transparent)
+                    .shape(ui::IconButtonShape::Square),
                 {
                     move |_window, cx| {
                         Tooltip::for_action_in(
@@ -4476,6 +4632,8 @@ impl ThreadView {
         IconButton::new("follow-agent", IconName::Crosshair)
             .icon_size(IconSize::Small)
             .icon_color(Color::Muted)
+            .style(ButtonStyle::Transparent)
+            .shape(ui::IconButtonShape::Square)
             .toggle_state(following)
             .selected_icon_color(Some(Color::Custom(cx.theme().players().agent().cursor)))
             .tooltip(move |_window, cx| {
@@ -5072,8 +5230,10 @@ impl ThreadView {
             .my_1p5()
             .rounded_md()
             .border_1()
-            .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().editor_background)
+            .border_color(cx.theme().colors().border_variant.opacity(0.34))
+            .bg(cx.theme().colors().editor_background.blend(
+                cx.theme().colors().element_background.opacity(0.08),
+            ))
             .overflow_hidden()
             .child(
                 h_flex()
@@ -5121,7 +5281,7 @@ impl ThreadView {
                         .px_3()
                         .py_2()
                         .border_t_1()
-                        .border_color(cx.theme().colors().border_variant)
+                        .border_color(cx.theme().colors().border_variant.opacity(0.26))
                         .children(detail_rows),
                 )
             })
@@ -5289,13 +5449,13 @@ impl ThreadView {
                                         cx.theme()
                                             .colors()
                                             .editor_background
-                                            .blend(cx.theme().colors().element_background.opacity(0.2)),
+                                            .blend(cx.theme().colors().element_background.opacity(0.06)),
                                     )
                                     .border_1()
                                     .when(is_indented, |this| {
-                                        this.py_2().px_2().shadow_sm()
+                                        this.py_2().px_2()
                                     })
-                                    .border_color(cx.theme().colors().border_variant.opacity(0.68))
+                                    .border_color(cx.theme().colors().border_variant.opacity(0.24))
                                     .map(|this| {
                                         if !is_editable {
                                             if is_subagent {
@@ -5309,9 +5469,7 @@ impl ThreadView {
                                         if editing && !editor_focus {
                                             return this.border_dashed()
                                         }
-                                        this.shadow_md().hover(|s| {
-                                            s.border_color(focus_border.opacity(0.8))
-                                        })
+                                        this.hover(|s| s.border_color(focus_border.opacity(0.42)))
                                     })
                                     .text_xs()
                                     .child(editor.clone().into_any_element())
@@ -5321,12 +5479,7 @@ impl ThreadView {
                                     .absolute()
                                     .top_neg_3p5()
                                     .right_3()
-                                    .gap_1()
-                                    .rounded_sm()
-                                    .border_1()
-                                    .border_color(cx.theme().colors().border_variant.opacity(0.68))
-                                    .bg(cx.theme().colors().element_background)
-                                    .overflow_hidden();
+                                    .gap_0p5();
 
                                 let is_loading_contents = self.is_loading_contents;
                                 if is_editable {
@@ -5624,12 +5777,12 @@ impl ThreadView {
             .gap_1()
             .rounded_md()
             .border_1()
-            .border_color(cx.theme().colors().border_variant.opacity(0.68))
+            .border_color(cx.theme().colors().border_variant.opacity(0.24))
             .bg(cx
                 .theme()
                 .colors()
                 .editor_background
-                .blend(cx.theme().colors().element_background.opacity(0.2)))
+                .blend(cx.theme().colors().element_background.opacity(0.06)))
             .child(div().w_full().child(editor))
             .child(
                 h_flex()
@@ -6747,12 +6900,8 @@ impl ThreadView {
             "terminal-tool-header-group-{}",
             terminal.entity_id()
         ));
-        let header_bg = cx
-            .theme()
-            .colors()
-            .element_background
-            .blend(cx.theme().colors().editor_foreground.opacity(0.025));
-        let border_color = cx.theme().colors().border_variant.opacity(0.68);
+        let header_bg = self.tool_card_header_bg(cx);
+        let border_color = self.tool_card_border_color(cx);
 
         let working_dir = working_dir
             .as_ref()
@@ -6777,7 +6926,6 @@ impl ThreadView {
             .flex_none()
             .gap_1()
             .justify_between()
-            .rounded_t_md()
             .child(
                 div()
                     .id(("command-target-path", terminal.entity_id()))
@@ -6949,7 +7097,6 @@ impl ThreadView {
                             .colors()
                             .editor_background
                             .blend(cx.theme().colors().panel_background.opacity(0.18)))
-                        .rounded_b_md()
                         .text_ui_sm(cx)
                         .h_full()
                         .children(terminal_view.map(|terminal_view| {
@@ -9087,12 +9234,12 @@ impl ThreadView {
     fn tool_card_header_bg(&self, cx: &Context<Self>) -> Hsla {
         cx.theme()
             .colors()
-            .element_background
-            .blend(cx.theme().colors().editor_foreground.opacity(0.025))
+            .editor_background
+            .blend(cx.theme().colors().element_background.opacity(0.08))
     }
 
     fn tool_card_border_color(&self, cx: &Context<Self>) -> Hsla {
-        cx.theme().colors().border_variant.opacity(0.72)
+        cx.theme().colors().border_variant.opacity(0.34)
     }
 
     fn tool_name_font_size(&self) -> Rems {
@@ -9813,7 +9960,7 @@ impl Render for ThreadView {
         let colors = cx.theme().colors();
         let thread_bg = colors
             .panel_background
-            .blend(colors.editor_background.opacity(0.48));
+            .blend(colors.editor_background.opacity(0.68));
 
         let conversation = v_flex()
             .when(self.resumed_without_history, |this| {
@@ -9827,7 +9974,7 @@ impl Render for ThreadView {
                         .vertical_scrollbar_for(&list_state, window, cx)
                         .into_any()
                 } else {
-                    this.into_any()
+                    this.flex_1().size_full().into_any()
                 }
             });
 

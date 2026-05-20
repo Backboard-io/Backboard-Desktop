@@ -81,6 +81,8 @@ pub(crate) struct NativeSession {
     mode: acp::SessionModeId,
     intensity: String,
     feature_settings: FeatureSettings,
+    config_tx: watch::Sender<()>,
+    config_rx: watch::Receiver<()>,
     cancel_flag: Arc<AtomicBool>,
     metrics: NativeTurnMetrics,
     context_window_tokens: Option<u64>,
@@ -589,6 +591,10 @@ impl BackboardNativeState {
     }
 }
 
+fn config_watch_channel() -> (watch::Sender<()>, watch::Receiver<()>) {
+    watch::channel(())
+}
+
 impl AgentConnection for BackboardNativeConnection {
     fn agent_id(&self) -> AgentId {
         self.state.agent_id.clone()
@@ -617,6 +623,7 @@ impl AgentConnection for BackboardNativeConnection {
         let config = self.state.load_config();
         let (provider, model) = BackboardNativeState::fallback_provider_model(&config);
         let cancel_flag = Arc::new(AtomicBool::new(false));
+        let (config_tx, config_rx) = config_watch_channel();
         let action_log = cx.new(|_| ActionLog::new(project.clone()));
         let thread = cx.new(|cx| {
             AcpThread::new(
@@ -645,6 +652,8 @@ impl AgentConnection for BackboardNativeConnection {
                 mode,
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
+                config_tx,
+                config_rx,
                 cancel_flag,
                 metrics: NativeTurnMetrics::default(),
                 context_window_tokens: None,
@@ -812,6 +821,7 @@ impl BackboardNativeConnection {
         let config = self.state.load_config();
         let (default_provider, default_model) =
             BackboardNativeState::fallback_provider_model(&config);
+        let (config_tx, config_rx) = config_watch_channel();
         let action_log = cx.new(|_| ActionLog::new(project.clone()));
         let thread = cx.new(|cx| {
             AcpThread::new(
@@ -848,6 +858,8 @@ impl BackboardNativeConnection {
                 mode: self.state.default_mode.clone(),
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
+                config_tx,
+                config_rx,
                 cancel_flag: Arc::new(AtomicBool::new(false)),
                 metrics: NativeTurnMetrics::default(),
                 context_window_tokens: None,
@@ -978,6 +990,9 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
                     }
                     _ => {}
                 }
+                if changed {
+                    session.config_tx.send(()).ok();
+                }
             }
         }
         if changed {
@@ -999,6 +1014,14 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
             .detach();
         }
         Task::ready(Ok(options))
+    }
+
+    fn watch(&self, _cx: &mut App) -> Option<watch::Receiver<()>> {
+        self.state
+            .sessions
+            .borrow()
+            .get(&self.session_id)
+            .map(|session| session.config_rx.clone())
     }
 }
 

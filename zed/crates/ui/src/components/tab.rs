@@ -5,8 +5,8 @@ use smallvec::SmallVec;
 
 use crate::prelude::*;
 
-const START_TAB_SLOT_SIZE: Pixels = px(12.);
-const END_TAB_SLOT_SIZE: Pixels = px(14.);
+const START_TAB_SLOT_SIZE: Pixels = px(10.);
+const END_TAB_SLOT_SIZE: Pixels = px(12.);
 
 /// The position of a [`Tab`] within a list of tabs.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -77,11 +77,11 @@ impl Tab {
     }
 
     pub fn content_height(cx: &App) -> Pixels {
-        DynamicSpacing::Base32.px(cx)
+        DynamicSpacing::Base24.px(cx)
     }
 
     pub fn container_height(cx: &App) -> Pixels {
-        DynamicSpacing::Base40.px(cx)
+        DynamicSpacing::Base32.px(cx)
     }
 }
 
@@ -163,8 +163,8 @@ impl RenderOnce for Tab {
                     .group("")
                     .relative()
                     .h_full()
-                    .px(DynamicSpacing::Base06.px(cx))
-                    .gap(DynamicSpacing::Base06.rems(cx))
+                    .px(DynamicSpacing::Base04.px(cx))
+                    .gap(DynamicSpacing::Base04.rems(cx))
                     .text_color(text_color)
                     .child(start_slot)
                     .children(self.children)
