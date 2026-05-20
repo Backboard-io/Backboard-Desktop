@@ -113,8 +113,13 @@ impl Render for StatusBar {
             .w_full()
             .justify_between()
             .gap(DynamicSpacing::Base08.rems(cx))
-            .p(DynamicSpacing::Base04.rems(cx))
-            .bg(cx.theme().colors().status_bar_background)
+            .px(DynamicSpacing::Base06.rems(cx))
+            .py(DynamicSpacing::Base04.rems(cx))
+            .bg(cx
+                .theme()
+                .colors()
+                .status_bar_background
+                .blend(cx.theme().colors().panel_background.opacity(0.16)))
             .map(|el| match window.window_decorations() {
                 Decorations::Server => el,
                 Decorations::Client { tiling, .. } => el
@@ -144,6 +149,8 @@ impl Render for StatusBar {
                     .border_b(px(1.0))
                     .border_color(cx.theme().colors().status_bar_background),
             })
+            .border_t_1()
+            .border_color(cx.theme().colors().border_variant.opacity(0.56))
             .child(self.render_left_tools(&sidebar, cx))
             .child(self.render_right_tools(&sidebar, cx))
     }

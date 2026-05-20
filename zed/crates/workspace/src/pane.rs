@@ -3555,7 +3555,7 @@ impl Pane {
                     .when(is_scrollable && is_scrolled, |this| {
                         this.when(has_active_unpinned_tab, |this| this.border_r_2())
                             .when(!has_active_unpinned_tab, |this| this.border_r_1())
-                            .border_color(cx.theme().colors().border)
+                            .border_color(cx.theme().colors().border_variant.opacity(0.72))
                     })
             }))
             .child(self.render_unpinned_tabs_container(unpinned_tabs, tab_count, cx));
@@ -3613,6 +3613,7 @@ impl Pane {
             .id("unpinned tabs")
             .overflow_x_scroll()
             .w_full()
+            .gap_0p5()
             .track_scroll(&self.tab_bar_scroll_handle)
             .on_scroll_wheel(cx.listener(|this, _, _, _| {
                 this.suppress_scroll = true;
@@ -3629,7 +3630,7 @@ impl Pane {
         div()
             .id("tab_bar_drop_target")
             .min_w_6()
-            .h(Tab::container_height(cx))
+            .h(Tab::content_height(cx))
             .flex_grow()
             // HACK: This empty child is currently necessary to force the drop target to appear
             // despite us setting a min width above.
@@ -3673,10 +3674,10 @@ impl Pane {
             .id("pinned_tabs_border")
             .debug_selector(|| "pinned_tabs_border".into())
             .min_w_6()
-            .h(Tab::container_height(cx))
+            .h(Tab::content_height(cx))
             .flex_grow()
             .border_l_1()
-            .border_color(cx.theme().colors().border)
+            .border_color(cx.theme().colors().border_variant.opacity(0.72))
             // HACK: This empty child is currently necessary to force the drop target to appear
             // despite us setting a min width above.
             .child("")
@@ -4307,12 +4308,21 @@ impl Render for Pane {
             return div().track_focus(&self.focus_handle(cx));
         };
         let is_local = project.read(cx).is_local();
+        let colors = cx.theme().colors();
+        let pane_background = colors
+            .panel_background
+            .blend(colors.editor_background.opacity(0.46));
+        let editor_card_background = colors
+            .editor_background
+            .blend(colors.element_background.opacity(0.18));
+        let editor_card_border = colors.border_variant.opacity(0.52);
 
         v_flex()
             .key_context(key_context)
             .track_focus(&self.focus_handle(cx))
             .size_full()
             .flex_none()
+            .bg(pane_background)
             .overflow_hidden()
             .on_action(cx.listener(|pane, split: &SplitLeft, window, cx| {
                 pane.split(SplitDirection::Left, split.mode, window, cx)
@@ -4478,6 +4488,8 @@ impl Render for Pane {
                     .flex_1()
                     .relative()
                     .group("")
+                    .p_1()
+                    .bg(pane_background)
                     .overflow_hidden()
                     .on_drag_move::<DraggedTab>(cx.listener(Self::handle_drag_move))
                     .on_drag_move::<DraggedSelection>(cx.listener(Self::handle_drag_move))
@@ -4489,6 +4501,10 @@ impl Render for Pane {
                             div.id("pane_placeholder")
                                 .v_flex()
                                 .size_full()
+                                .rounded_xl()
+                                .border_1()
+                                .border_color(editor_card_border)
+                                .bg(editor_card_background)
                                 .overflow_hidden()
                                 .child(self.toolbar.clone())
                                 .child(item.to_any_view())
@@ -4497,6 +4513,10 @@ impl Render for Pane {
                                 .id("pane_placeholder")
                                 .h_flex()
                                 .size_full()
+                                .rounded_xl()
+                                .border_1()
+                                .border_color(editor_card_border)
+                                .bg(editor_card_background)
                                 .justify_center()
                                 .on_click(cx.listener(
                                     move |this, event: &ClickEvent, window, cx| {

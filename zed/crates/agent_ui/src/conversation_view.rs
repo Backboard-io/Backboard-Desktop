@@ -2343,7 +2343,7 @@ impl ConversationView {
             .p_3p5()
             .gap_2p5()
             .border_t_1()
-            .border_color(cx.theme().colors().border)
+            .border_color(cx.theme().colors().border_variant.opacity(0.68))
             .bg(linear_gradient(
                 180.,
                 linear_color_stop(cx.theme().colors().editor_background.opacity(0.4), 4.),

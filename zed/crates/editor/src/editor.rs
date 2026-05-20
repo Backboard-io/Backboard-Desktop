@@ -18104,7 +18104,7 @@ impl Editor {
 
         EditorStyle {
             background,
-            border: cx.theme().colors().border,
+            border: cx.theme().colors().border_variant,
             local_player: cx.theme().players().local(),
             text: text_style,
             scrollbar_width: EditorElement::SCROLLBAR_WIDTH,

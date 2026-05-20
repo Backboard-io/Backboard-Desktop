@@ -33,7 +33,7 @@ impl RenderOnce for ModelSelectorHeader {
                 this.mt_1()
                     .pt_2()
                     .border_t_1()
-                    .border_color(cx.theme().colors().border_variant)
+                    .border_color(cx.theme().colors().border_variant.opacity(0.68))
             })
             .child(
                 Label::new(self.title)
@@ -217,7 +217,7 @@ impl RenderOnce for ModelSelectorFooter {
             .w_full()
             .p_1p5()
             .border_t_1()
-            .border_color(cx.theme().colors().border_variant)
+            .border_color(cx.theme().colors().border_variant.opacity(0.68))
             .child(
                 Button::new("configure", "Configure")
                     .full_width()

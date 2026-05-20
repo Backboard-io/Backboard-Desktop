@@ -6030,7 +6030,11 @@ impl EditorElement {
                                 CurrentLineHighlight::None => None,
                             };
                         if let Some(range) = highlight_h_range {
-                            let active_line_bg = cx.theme().colors().editor_active_line_background;
+                            let active_line_bg = cx
+                                .theme()
+                                .colors()
+                                .editor_active_line_background
+                                .opacity(0.76);
                             let bounds = Bounds {
                                 origin: point(
                                     range.start,
@@ -9923,7 +9927,15 @@ impl Element for EditorElement {
 
                     let right_margin = minimap_width + vertical_scrollbar_width;
 
-                    let extended_right = 2 * em_width + right_margin;
+                    let extra_right_padding = if matches!(
+                        &self.editor.read(cx).mode,
+                        EditorMode::AutoHeight { .. } | EditorMode::Minimap { .. }
+                    ) {
+                        em_width * 2.0
+                    } else {
+                        em_width * 3.0
+                    };
+                    let extended_right = extra_right_padding + right_margin;
                     let editor_width = text_width - gutter_dimensions.margin - extended_right;
                     let editor_margins = EditorMargins {
                         gutter: gutter_dimensions,

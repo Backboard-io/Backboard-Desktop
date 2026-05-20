@@ -26,8 +26,8 @@ use gpui::{
     ListHorizontalSizingBehavior, ListSizingBehavior, Modifiers, ModifiersChangedEvent,
     MouseButton, MouseDownEvent, ParentElement, PathPromptOptions, Pixels, Point, PromptLevel,
     Render, ScrollStrategy, Stateful, Styled, Subscription, Task, UniformListScrollHandle,
-    WeakEntity, Window, actions, anchored, deferred, div, hsla, linear_color_stop, linear_gradient,
-    point, px, size, transparent_white, uniform_list,
+    WeakEntity, Window, actions, anchored, deferred, div, linear_color_stop, linear_gradient,
+    point, px, size, uniform_list,
 };
 use language::DiagnosticSeverity;
 use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
@@ -567,16 +567,24 @@ fn get_item_color(is_sticky: bool, cx: &App) -> ItemColors {
 
     ItemColors {
         default: if is_sticky {
-            colors.panel_overlay_background
+            colors
+                .panel_overlay_background
+                .blend(colors.panel_background.opacity(0.24))
         } else {
-            colors.panel_background
+            colors
+                .element_background
+                .blend(colors.panel_background.opacity(0.42))
         },
         hover: if is_sticky {
             colors.panel_overlay_hover
         } else {
-            colors.element_hover
+            colors
+                .element_hover
+                .blend(colors.element_background.opacity(0.18))
         },
-        marked: colors.element_selected,
+        marked: colors
+            .element_selected
+            .blend(colors.element_hover.opacity(0.18)),
         focused: colors.panel_focused_border,
         drag_over: colors.drop_target_background,
     }
@@ -5415,7 +5423,8 @@ impl ProjectPanel {
             .relative()
             .group(GROUP_NAME)
             .cursor_pointer()
-            .rounded_none()
+            .my_0p5()
+            .rounded_lg()
             .bg(bg_color)
             .border_1()
             .border_r_2()
@@ -5426,7 +5435,7 @@ impl ProjectPanel {
                 this.when(
                     is_highlighted && folded_directory_drag_target.is_none(),
                     |this| {
-                        this.border_color(transparent_white())
+                        this.border_color(cx.theme().colors().border_transparent)
                             .bg(item_colors.drag_over)
                     },
                 )
@@ -5742,8 +5751,8 @@ impl ProjectPanel {
                     .indent_level(depth)
                     .indent_step_size(px(settings.indent_size))
                     .spacing(match settings.entry_spacing {
-                        ProjectPanelEntrySpacing::Comfortable => ListItemSpacing::Dense,
-                        ProjectPanelEntrySpacing::Standard => ListItemSpacing::ExtraDense,
+                        ProjectPanelEntrySpacing::Comfortable => ListItemSpacing::Sparse,
+                        ProjectPanelEntrySpacing::Standard => ListItemSpacing::Dense,
                     })
                     .selectable(false)
                     .when(
@@ -6491,8 +6500,8 @@ impl ProjectPanel {
                 );
                 self.render_entry(entry.id, details, window, cx)
                     .when(index == last_item_index, |this| {
-                        let shadow_color_top = hsla(0.0, 0.0, 0.0, 0.1);
-                        let shadow_color_bottom = hsla(0.0, 0.0, 0.0, 0.);
+                        let shadow_color_top = cx.theme().colors().border_variant.opacity(0.42);
+                        let shadow_color_bottom = cx.theme().colors().border_variant.opacity(0.);
                         let sticky_shadow = div()
                             .absolute()
                             .left_0()
@@ -6552,6 +6561,13 @@ impl Render for ProjectPanel {
         };
 
         let is_local = project.is_local();
+        let colors = cx.theme().colors();
+        let panel_bg = colors
+            .panel_background
+            .blend(colors.editor_background.opacity(0.46));
+        let card_bg = colors
+            .element_background
+            .blend(colors.panel_background.opacity(0.36));
 
         if has_worktree {
             let item_count = self
@@ -6637,6 +6653,7 @@ impl Render for ProjectPanel {
                 })
                 .size_full()
                 .relative()
+                .bg(panel_bg)
                 .on_modifiers_changed(cx.listener(
                     |this, event: &ModifiersChangedEvent, window, cx| {
                         this.refresh_drag_cursor_style(&event.modifiers, window, cx);
@@ -6710,6 +6727,10 @@ impl Render for ProjectPanel {
                 .track_focus(&self.focus_handle(cx))
                 .child(
                     v_flex()
+                        .size_full()
+                        .bg(card_bg)
+                        .overflow_hidden()
+                        .p_1()
                         .child(
                             uniform_list("entries", item_count, {
                                 cx.processor(|this, range: Range<usize>, window, cx| {
@@ -7082,8 +7103,7 @@ impl Render for ProjectPanel {
                                         },
                                     ))
                                 }),
-                        )
-                        .size_full(),
+                        ),
                 )
                 .custom_scrollbars(
                     {
@@ -7091,10 +7111,8 @@ impl Render for ProjectPanel {
                             Scrollbars::for_settings::<ProjectPanelScrollbarProxy>()
                                 .tracked_scroll_handle(&self.scroll_handle);
                         if horizontal_scroll {
-                            scrollbars = scrollbars.with_track_along(
-                                ScrollAxes::Horizontal,
-                                cx.theme().colors().panel_background,
-                            );
+                            scrollbars =
+                                scrollbars.with_track_along(ScrollAxes::Horizontal, panel_bg);
                         }
                         scrollbars.notify_content()
                     },

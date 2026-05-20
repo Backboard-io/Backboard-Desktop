@@ -1231,11 +1231,21 @@ impl Render for TerminalView {
         let terminal_view_handle = cx.entity();
 
         let focused = self.focus_handle.is_focused(window);
+        let colors = cx.theme().colors();
+        let shell_bg = colors
+            .panel_background
+            .blend(colors.editor_background.opacity(0.46));
+        let terminal_bg = colors
+            .terminal_background
+            .blend(colors.editor_background.opacity(0.36));
+        let terminal_border = colors.border_variant.opacity(0.56);
 
         div()
             .id("terminal-view")
             .size_full()
             .relative()
+            .p_1()
+            .bg(shell_bg)
             .track_focus(&self.focus_handle(cx))
             .key_context(self.dispatch_context(cx))
             .on_action(cx.listener(TerminalView::send_text))
@@ -1284,7 +1294,11 @@ impl Render for TerminalView {
                 div()
                     .id("terminal-view-container")
                     .size_full()
-                    .bg(cx.theme().colors().editor_background)
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(terminal_border)
+                    .overflow_hidden()
+                    .bg(terminal_bg)
                     .child(TerminalElement::new(
                         terminal_handle,
                         terminal_view_handle,
@@ -1296,14 +1310,10 @@ impl Render for TerminalView {
                         self.mode.clone(),
                     ))
                     .when(self.content_mode(window, cx).is_scrollable(), |div| {
-                        let colors = cx.theme().colors();
                         div.custom_scrollbars(
                             Scrollbars::for_settings::<TerminalScrollbarSettingsWrapper>()
                                 .show_along(ScrollAxes::Vertical)
-                                .with_stable_track_along(
-                                    ScrollAxes::Vertical,
-                                    colors.editor_background,
-                                )
+                                .with_stable_track_along(ScrollAxes::Vertical, terminal_bg)
                                 .tracked_scroll_handle(&self.scroll_handle),
                             window,
                             cx,

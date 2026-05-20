@@ -2365,7 +2365,10 @@ impl ThreadView {
     }
 
     fn activity_bar_bg(&self, cx: &Context<Self>) -> Hsla {
-        let editor_bg_color = cx.theme().colors().editor_background;
+        let colors = cx.theme().colors();
+        let editor_bg_color = colors
+            .panel_background
+            .blend(colors.editor_background.opacity(0.62));
         let active_color = cx.theme().colors().element_selected;
         editor_bg_color.blend(active_color.opacity(0.3))
     }
@@ -2420,10 +2423,10 @@ impl ThreadView {
                     .bg(self.activity_bar_bg(cx))
                     .border_1()
                     .border_b_0()
-                    .border_color(cx.theme().colors().border)
+                    .border_color(cx.theme().colors().border_variant.opacity(0.68))
                     .rounded_t_md()
                     .shadow(vec![gpui::BoxShadow {
-                        color: gpui::black().opacity(0.12),
+                        color: cx.theme().colors().border_variant.opacity(0.5),
                         offset: point(px(1.), px(-1.)),
                         blur_radius: px(2.),
                         spread_radius: px(0.),
@@ -3389,7 +3392,10 @@ impl ThreadView {
         }
 
         let focus_handle = self.message_editor.focus_handle(cx);
-        let editor_bg_color = cx.theme().colors().editor_background;
+        let colors = cx.theme().colors();
+        let editor_bg_color = colors
+            .panel_background
+            .blend(colors.editor_background.opacity(0.62));
 
         let editor_expanded = self.editor_expanded;
         let (expand_icon, expand_tooltip) = if editor_expanded {
@@ -3403,14 +3409,15 @@ impl ThreadView {
         let fills_container = !has_messages || editor_expanded;
 
         h_flex()
-            .p_2()
+            .px_2()
+            .py_1p5()
             .bg(editor_bg_color)
             .justify_center()
             .map(|this| {
                 if has_messages {
                     this.on_action(cx.listener(Self::expand_message_editor))
                         .border_t_1()
-                        .border_color(cx.theme().colors().border)
+                        .border_color(colors.border_variant.opacity(0.68))
                         .when(editor_expanded, |this| this.h(vh(0.8, window)))
                 } else {
                     this.flex_1().size_full()
@@ -3430,8 +3437,13 @@ impl ThreadView {
                             .w_full()
                             .min_h_0()
                             .when(fills_container, |this| this.flex_1())
-                            .pt_1()
-                            .pr_2p5()
+                            .p_2()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(colors.border_variant.opacity(0.56))
+                            .bg(colors
+                                .element_background
+                                .blend(colors.editor_background.opacity(0.48)))
                             .child(self.message_editor.clone())
                             .when(has_messages, |this| {
                                 this.child(
@@ -5234,12 +5246,17 @@ impl ThreadView {
                                     .py_3()
                                     .px_2()
                                     .rounded_md()
-                                    .bg(cx.theme().colors().editor_background)
+                                    .bg(
+                                        cx.theme()
+                                            .colors()
+                                            .editor_background
+                                            .blend(cx.theme().colors().element_background.opacity(0.2)),
+                                    )
                                     .border_1()
                                     .when(is_indented, |this| {
                                         this.py_2().px_2().shadow_sm()
                                     })
-                                    .border_color(cx.theme().colors().border)
+                                    .border_color(cx.theme().colors().border_variant.opacity(0.68))
                                     .map(|this| {
                                         if !is_editable {
                                             if is_subagent {
@@ -5268,8 +5285,8 @@ impl ThreadView {
                                     .gap_1()
                                     .rounded_sm()
                                     .border_1()
-                                    .border_color(cx.theme().colors().border)
-                                    .bg(cx.theme().colors().editor_background)
+                                    .border_color(cx.theme().colors().border_variant.opacity(0.68))
+                                    .bg(cx.theme().colors().element_background)
                                     .overflow_hidden();
 
                                 let is_loading_contents = self.is_loading_contents;
@@ -5500,7 +5517,7 @@ impl ThreadView {
                         .top(line_top)
                         .bottom_0()
                         .w_px()
-                        .bg(cx.theme().colors().border.opacity(0.6)),
+                        .bg(cx.theme().colors().border_variant.opacity(0.62)),
                 )
                 .child(primary)
                 .into_any_element()
@@ -5568,8 +5585,12 @@ impl ThreadView {
             .gap_1()
             .rounded_md()
             .border_1()
-            .border_color(cx.theme().colors().border)
-            .bg(cx.theme().colors().editor_background)
+            .border_color(cx.theme().colors().border_variant.opacity(0.68))
+            .bg(cx
+                .theme()
+                .colors()
+                .editor_background
+                .blend(cx.theme().colors().element_background.opacity(0.2)))
             .child(div().w_full().child(editor))
             .child(
                 h_flex()
@@ -6692,7 +6713,7 @@ impl ThreadView {
             .colors()
             .element_background
             .blend(cx.theme().colors().editor_foreground.opacity(0.025));
-        let border_color = cx.theme().colors().border.opacity(0.6);
+        let border_color = cx.theme().colors().border_variant.opacity(0.68);
 
         let working_dir = working_dir
             .as_ref()
@@ -6884,7 +6905,11 @@ impl ThreadView {
                         .border_t_1()
                         .when(tool_failed || command_failed, |card| card.border_dashed())
                         .border_color(border_color)
-                        .bg(cx.theme().colors().editor_background)
+                        .bg(cx
+                            .theme()
+                            .colors()
+                            .editor_background
+                            .blend(cx.theme().colors().panel_background.opacity(0.18)))
                         .rounded_b_md()
                         .text_ui_sm(cx)
                         .h_full()
@@ -9028,7 +9053,7 @@ impl ThreadView {
     }
 
     fn tool_card_border_color(&self, cx: &Context<Self>) -> Hsla {
-        cx.theme().colors().border.opacity(0.8)
+        cx.theme().colors().border_variant.opacity(0.72)
     }
 
     fn tool_name_font_size(&self) -> Rems {
@@ -9538,8 +9563,12 @@ impl ThreadView {
                 .w_full()
                 .gap_1p5()
                 .border_t_1()
-                .border_color(cx.theme().colors().border)
-                .bg(cx.theme().colors().element_background)
+                .border_color(cx.theme().colors().border_variant.opacity(0.68))
+                .bg(cx
+                    .theme()
+                    .colors()
+                    .element_background
+                    .blend(cx.theme().colors().panel_background.opacity(0.2)))
                 .child(
                     h_flex()
                         .flex_1()
@@ -9742,8 +9771,21 @@ impl Render for ThreadView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_messages = self.list_state.item_count() > 0;
         let list_state = self.list_state.clone();
+        let colors = cx.theme().colors();
+        let thread_bg = colors
+            .panel_background
+            .blend(colors.editor_background.opacity(0.48));
+        let conversation_bg = colors
+            .element_background
+            .blend(colors.panel_background.opacity(0.34));
+        let conversation_border = colors.border_variant.opacity(0.54);
 
         let conversation = v_flex()
+            .rounded_lg()
+            .border_1()
+            .border_color(conversation_border)
+            .bg(conversation_bg)
+            .overflow_hidden()
             .when(self.resumed_without_history, |this| {
                 this.child(Self::render_resume_notice(cx))
             })
@@ -9915,6 +9957,9 @@ impl Render for ThreadView {
                 }
             }))
             .size_full()
+            .gap_1()
+            .p_1()
+            .bg(thread_bg)
             .children(self.render_subagent_titlebar(cx))
             .children(self.render_backboard_run_overview(cx))
             .child(conversation)

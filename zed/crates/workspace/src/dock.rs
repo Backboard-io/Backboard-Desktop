@@ -1087,6 +1087,14 @@ impl Render for Dock {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dispatch_context = Self::dispatch_context();
         if let Some(entry) = self.visible_entry() {
+            let colors = cx.theme().colors();
+            let dock_bg = colors
+                .panel_background
+                .blend(colors.editor_background.opacity(0.42));
+            let panel_bg = colors
+                .element_background
+                .blend(colors.panel_background.opacity(0.34));
+            let panel_border = colors.border_variant.opacity(0.5);
             let position = self.position;
             let create_resize_handle = || {
                 let handle = div()
@@ -1153,8 +1161,9 @@ impl Render for Dock {
                 .track_focus(&self.focus_handle(cx))
                 .focus_follows_mouse(self.focus_follows_mouse, cx)
                 .flex()
-                .bg(cx.theme().colors().panel_background)
-                .border_color(cx.theme().colors().border)
+                .p_1()
+                .bg(dock_bg)
+                .border_color(colors.border_variant.opacity(0.48))
                 .overflow_hidden()
                 .map(|this| match self.position().axis() {
                     // Width and height are always set on the workspace wrapper in
@@ -1169,6 +1178,11 @@ impl Render for Dock {
                 })
                 .child(
                     div()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(panel_border)
+                        .bg(panel_bg)
+                        .overflow_hidden()
                         .map(|this| match self.position().axis() {
                             Axis::Horizontal => this.w_full().h_full(),
                             Axis::Vertical => this.h_full().w_full(),

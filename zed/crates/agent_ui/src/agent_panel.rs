@@ -5605,114 +5605,6 @@ impl AgentPanel {
         true
     }
 
-    fn render_expert_header(
-        &self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        // Collect open thread tabs: active first, then retained sorted by update time.
-        let active_id = self.active_thread_id(cx);
-        let mut thread_tabs: Vec<(ThreadId, SharedString)> = Vec::new();
-        if let Some(cv) = self.active_conversation_view() {
-            let id = cv.read(cx).thread_id;
-            let title = cv.read(cx).title(cx);
-            thread_tabs.push((id, title));
-        }
-        let mut retained: Vec<_> = self
-            .retained_threads
-            .values()
-            .map(|cv| {
-                let id = cv.read(cx).thread_id;
-                let title = cv.read(cx).title(cx);
-                let updated = cv.read(cx).updated_at(cx);
-                (id, title, updated)
-            })
-            .collect();
-        retained.sort_by(|a, b| b.2.cmp(&a.2));
-        thread_tabs.extend(retained.into_iter().map(|(id, title, _)| (id, title)));
-
-        let show_tabs = thread_tabs.len() > 1;
-        let thread_tab_elements = if show_tabs {
-            thread_tabs
-                .into_iter()
-                .enumerate()
-                .map(|(i, (id, title))| {
-                    let is_active = Some(id) == active_id;
-                    div()
-                        .id(ElementId::Integer(i as u64))
-                        .h_full()
-                        .px_3()
-                        .cursor_pointer()
-                        .flex()
-                        .items_center()
-                        .flex_shrink_0()
-                        .max_w_40()
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .when(is_active, |el| {
-                            el.border_b_2()
-                                .border_color(cx.theme().colors().border_focused)
-                                .text_color(cx.theme().colors().text)
-                        })
-                        .when(!is_active, |el| {
-                            el.text_color(cx.theme().colors().text_muted)
-                                .hover(|el| el.bg(cx.theme().colors().element_hover))
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.activate_retained_thread(id, true, window, cx);
-                                }))
-                        })
-                        .child(Label::new(title).size(LabelSize::XSmall).single_line())
-                        .into_any_element()
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-
-        h_flex()
-            .id("agent-thread-tabs")
-            .w_full()
-            .h(Tab::container_height(cx))
-            .flex_shrink_0()
-            .overflow_x_hidden()
-            .bg(cx.theme().colors().tab_bar_background)
-            .border_b_1()
-            .border_color(cx.theme().colors().border)
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .children(thread_tab_elements),
-            )
-            .child(
-                h_flex()
-                    .h_full()
-                    .flex_none()
-                    .gap_0p5()
-                    .px_2()
-                    .child(
-                        IconButton::new("new-agent-thread", IconName::Plus)
-                            .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("New Agent"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.activate_new_thread(true, "expert_header", window, cx);
-                            })),
-                    )
-                    .child(
-                        IconButton::new("agent-history", IconName::HistoryRerun)
-                            .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Thread History"))
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(
-                                    Box::new(ToggleThreadSwitcher { select_last: false }),
-                                    cx,
-                                );
-                            }),
-                    ),
-            )
-    }
-
     fn render_title_view(&self, _window: &mut Window, cx: &Context<Self>) -> AnyElement {
         let content = match self.visible_surface() {
             VisibleSurface::AgentThread(conversation_view) => {
@@ -5981,6 +5873,15 @@ impl AgentPanel {
                 move |_window, cx| {
                     Tooltip::for_action_in("Go Back", &workspace::GoBack, &focus_handle, cx)
                 }
+            })
+    }
+
+    fn render_thread_history_button(&self) -> impl IntoElement {
+        IconButton::new("agent-history", IconName::HistoryRerun)
+            .icon_size(IconSize::Small)
+            .tooltip(Tooltip::text("Thread History"))
+            .on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(ToggleThreadSwitcher { select_last: false }), cx);
             })
     }
 
@@ -6391,6 +6292,7 @@ impl AgentPanel {
                         .pl_1()
                         .pr_1()
                         .child(full_screen_button)
+                        .child(self.render_thread_history_button())
                         .child(self.render_panel_options_menu(window, cx)),
                 )
                 .into_any_element()
@@ -6436,6 +6338,7 @@ impl AgentPanel {
                         .pr_1()
                         .child(new_thread_menu)
                         .child(full_screen_button)
+                        .child(self.render_thread_history_button())
                         .child(self.render_panel_options_menu(window, cx)),
                 )
                 .into_any_element()
@@ -6695,7 +6598,6 @@ impl Render for AgentPanel {
                     })
                 }
             }))
-            .child(self.render_expert_header(window, cx))
             .child(self.render_toolbar(window, cx))
             .children(self.render_new_user_onboarding(window, cx))
             .map(|parent| match self.visible_surface() {

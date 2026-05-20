@@ -77,11 +77,11 @@ impl Tab {
     }
 
     pub fn content_height(cx: &App) -> Pixels {
-        DynamicSpacing::Base32.px(cx) - px(1.)
+        DynamicSpacing::Base32.px(cx)
     }
 
     pub fn container_height(cx: &App) -> Pixels {
-        DynamicSpacing::Base32.px(cx)
+        DynamicSpacing::Base40.px(cx)
     }
 }
 
@@ -109,20 +109,28 @@ impl ParentElement for Tab {
 impl RenderOnce for Tab {
     #[allow(refining_impl_trait)]
     fn render(self, _: &mut Window, cx: &mut App) -> Stateful<Div> {
-        let (text_color, tab_bg, _tab_hover_bg, _tab_active_bg) = match self.selected {
+        let colors = cx.theme().colors();
+        let (text_color, tab_bg, tab_hover_bg, tab_active_bg) = match self.selected {
             false => (
-                cx.theme().colors().text_muted,
-                cx.theme().colors().tab_inactive_background,
-                cx.theme().colors().ghost_element_hover,
-                cx.theme().colors().ghost_element_active,
+                colors.text_muted,
+                colors
+                    .element_background
+                    .blend(colors.tab_inactive_background.opacity(0.5)),
+                colors.element_hover.opacity(0.78),
+                colors.element_active.opacity(0.78),
             ),
             true => (
-                cx.theme().colors().text,
-                cx.theme().colors().tab_active_background,
-                cx.theme().colors().element_hover,
-                cx.theme().colors().element_active,
+                colors.text,
+                colors
+                    .tab_active_background
+                    .blend(colors.element_selected.opacity(0.36)),
+                colors.element_hover.opacity(0.64),
+                colors.element_active.opacity(0.64),
             ),
         };
+        let border_color = colors
+            .border_variant
+            .opacity(if self.selected { 0.92 } else { 0.48 });
 
         let (start_slot, end_slot) = {
             let start_slot = h_flex()
@@ -142,36 +150,21 @@ impl RenderOnce for Tab {
         };
 
         self.div
-            .h(Tab::container_height(cx))
+            .h(Tab::content_height(cx))
+            .rounded_full()
             .bg(tab_bg)
-            .border_color(cx.theme().colors().border)
-            .map(|this| match self.position {
-                TabPosition::First => {
-                    if self.selected {
-                        this.pl_px().border_r_1().pb_px()
-                    } else {
-                        this.pl_px().pr_px().border_b_1()
-                    }
-                }
-                TabPosition::Last => {
-                    if self.selected {
-                        this.border_l_1().border_r_1().pb_px()
-                    } else {
-                        this.pl_px().border_b_1().border_r_1()
-                    }
-                }
-                TabPosition::Middle(Ordering::Equal) => this.border_l_1().border_r_1().pb_px(),
-                TabPosition::Middle(Ordering::Less) => this.border_l_1().pr_px().border_b_1(),
-                TabPosition::Middle(Ordering::Greater) => this.border_r_1().pl_px().border_b_1(),
-            })
+            .border_1()
+            .border_color(border_color)
+            .hover(move |style| style.bg(tab_hover_bg))
+            .active(move |style| style.bg(tab_active_bg))
             .cursor_pointer()
             .child(
                 h_flex()
                     .group("")
                     .relative()
-                    .h(Tab::content_height(cx))
-                    .px(DynamicSpacing::Base04.px(cx))
-                    .gap(DynamicSpacing::Base04.rems(cx))
+                    .h_full()
+                    .px(DynamicSpacing::Base06.px(cx))
+                    .gap(DynamicSpacing::Base06.rems(cx))
                     .text_color(text_color)
                     .child(start_slot)
                     .children(self.children)

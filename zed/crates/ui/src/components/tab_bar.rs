@@ -91,6 +91,12 @@ impl ParentElement for TabBar {
 
 impl RenderOnce for TabBar {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let divider_color = colors.border_variant.opacity(0.52);
+        let control_bg = colors
+            .element_background
+            .blend(colors.tab_bar_background.opacity(0.36));
+
         div()
             .id(self.id)
             .group("tab_bar")
@@ -98,16 +104,21 @@ impl RenderOnce for TabBar {
             .flex_none()
             .w_full()
             .h(Tab::container_height(cx))
-            .bg(cx.theme().colors().tab_bar_background)
+            .p_1()
+            .bg(colors
+                .tab_bar_background
+                .blend(colors.panel_background.opacity(0.28)))
             .when(!self.start_children.is_empty(), |this| {
                 this.child(
                     h_flex()
                         .flex_none()
-                        .gap(DynamicSpacing::Base04.rems(cx))
-                        .px(DynamicSpacing::Base06.rems(cx))
-                        .border_b_1()
-                        .border_r_1()
-                        .border_color(cx.theme().colors().border)
+                        .items_center()
+                        .gap(DynamicSpacing::Base06.rems(cx))
+                        .px(DynamicSpacing::Base08.rems(cx))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(divider_color)
+                        .bg(control_bg)
                         .children(self.start_children),
                 )
             })
@@ -118,18 +129,11 @@ impl RenderOnce for TabBar {
                     .h_full()
                     .overflow_x_hidden()
                     .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .size_full()
-                            .border_b_1()
-                            .border_color(cx.theme().colors().border),
-                    )
-                    .child(
                         h_flex()
                             .id("tabs")
                             .flex_grow()
+                            .items_center()
+                            .gap_0p5()
                             .overflow_x_scroll()
                             .when_some(self.scroll_handle, |cx, scroll_handle| {
                                 cx.track_scroll(&scroll_handle)
@@ -141,11 +145,13 @@ impl RenderOnce for TabBar {
                 this.child(
                     h_flex()
                         .flex_none()
-                        .gap(DynamicSpacing::Base04.rems(cx))
-                        .px(DynamicSpacing::Base06.rems(cx))
-                        .border_color(cx.theme().colors().border)
-                        .border_b_1()
-                        .border_l_1()
+                        .items_center()
+                        .gap(DynamicSpacing::Base06.rems(cx))
+                        .px(DynamicSpacing::Base08.rems(cx))
+                        .rounded_full()
+                        .border_color(divider_color)
+                        .border_1()
+                        .bg(control_bg)
                         .children(self.end_children),
                 )
             })

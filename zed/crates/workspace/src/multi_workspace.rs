@@ -2089,39 +2089,56 @@ impl MultiWorkspace {
 
     fn render_workspace_mode_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
         let selected_tab = self.selected_workspace_mode_tab();
+        let colors = cx.theme().colors();
+        let switcher_bg = colors
+            .tab_bar_background
+            .blend(colors.panel_background.opacity(0.32));
+        let pill_group_bg = colors
+            .element_background
+            .blend(colors.panel_background.opacity(0.3));
+        let pill_group_border = colors.border_variant.opacity(0.5);
 
         h_flex()
             .h(px(44.))
             .w_full()
             .flex_shrink_0()
             .items_center()
-            .gap_0p5()
+            .gap_1()
             .pl(px(74.))
-            .pr_3()
+            .pr_4()
             .border_b_1()
-            .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().tab_bar_background)
-            .child(self.render_workspace_mode_tab(
-                "multi-workspace-code-editor-tab",
-                "Code Editor",
-                selected_tab == WorkspaceModeTab::CodeEditor,
-                WorkspaceModeTab::CodeEditor,
-                cx,
-            ))
-            .child(self.render_workspace_mode_tab(
-                "multi-workspace-agent-tab",
-                "Agent Workspace",
-                selected_tab == WorkspaceModeTab::AgentWorkspace,
-                WorkspaceModeTab::AgentWorkspace,
-                cx,
-            ))
-            .child(self.render_workspace_mode_tab(
-                "multi-workspace-jarvis-tab",
-                "Jarvis",
-                selected_tab == WorkspaceModeTab::Jarvis,
-                WorkspaceModeTab::Jarvis,
-                cx,
-            ))
+            .border_color(colors.border_variant.opacity(0.5))
+            .bg(switcher_bg)
+            .child(
+                h_flex()
+                    .gap_1()
+                    .p_1()
+                    .rounded_full()
+                    .border_1()
+                    .border_color(pill_group_border)
+                    .bg(pill_group_bg)
+                    .child(self.render_workspace_mode_tab(
+                        "multi-workspace-code-editor-tab",
+                        "Code Editor",
+                        selected_tab == WorkspaceModeTab::CodeEditor,
+                        WorkspaceModeTab::CodeEditor,
+                        cx,
+                    ))
+                    .child(self.render_workspace_mode_tab(
+                        "multi-workspace-agent-tab",
+                        "Agent Workspace",
+                        selected_tab == WorkspaceModeTab::AgentWorkspace,
+                        WorkspaceModeTab::AgentWorkspace,
+                        cx,
+                    ))
+                    .child(self.render_workspace_mode_tab(
+                        "multi-workspace-jarvis-tab",
+                        "Jarvis",
+                        selected_tab == WorkspaceModeTab::Jarvis,
+                        WorkspaceModeTab::Jarvis,
+                        cx,
+                    )),
+            )
             .into_any_element()
     }
 
@@ -2133,6 +2150,12 @@ impl MultiWorkspace {
         target_tab: WorkspaceModeTab,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let colors = cx.theme().colors();
+        let selected_bg = colors
+            .element_selected
+            .blend(colors.element_hover.opacity(0.34));
+        let idle_bg = colors.element_background.opacity(0.);
+
         div()
             .id(id)
             .h(px(30.))
@@ -2140,20 +2163,16 @@ impl MultiWorkspace {
             .flex()
             .items_center()
             .justify_center()
-            .rounded_sm()
+            .rounded_full()
             .border_1()
             .border_color(if selected {
-                cx.theme().colors().border
+                colors.border_selected.opacity(0.82)
             } else {
-                gpui::transparent_black()
+                colors.border_transparent
             })
-            .bg(if selected {
-                cx.theme().colors().element_selected
-            } else {
-                gpui::transparent_black()
-            })
+            .bg(if selected { selected_bg } else { idle_bg })
             .cursor_pointer()
-            .hover(|style| style.bg(cx.theme().colors().element_hover))
+            .hover(|style| style.bg(colors.element_hover))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.set_workspace_mode_tab(target_tab, cx);
             }))
