@@ -1232,20 +1232,15 @@ impl Render for TerminalView {
 
         let focused = self.focus_handle.is_focused(window);
         let colors = cx.theme().colors();
-        let shell_bg = colors
-            .panel_background
-            .blend(colors.editor_background.opacity(0.46));
         let terminal_bg = colors
             .terminal_background
             .blend(colors.editor_background.opacity(0.36));
-        let terminal_border = colors.border_variant.opacity(0.56);
 
         div()
             .id("terminal-view")
             .size_full()
             .relative()
-            .p_1()
-            .bg(shell_bg)
+            .bg(terminal_bg)
             .track_focus(&self.focus_handle(cx))
             .key_context(self.dispatch_context(cx))
             .on_action(cx.listener(TerminalView::send_text))
@@ -1294,10 +1289,6 @@ impl Render for TerminalView {
                 div()
                     .id("terminal-view-container")
                     .size_full()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(terminal_border)
-                    .overflow_hidden()
                     .bg(terminal_bg)
                     .child(TerminalElement::new(
                         terminal_handle,

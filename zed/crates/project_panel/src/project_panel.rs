@@ -562,6 +562,10 @@ struct ItemColors {
     focused: Hsla,
 }
 
+fn compact_project_panel_indent_size(indent_size: f32) -> f32 {
+    (indent_size * 0.65).max(7.)
+}
+
 fn get_item_color(is_sticky: bool, cx: &App) -> ItemColors {
     let colors = cx.theme().colors();
 
@@ -571,16 +575,14 @@ fn get_item_color(is_sticky: bool, cx: &App) -> ItemColors {
                 .panel_overlay_background
                 .blend(colors.panel_background.opacity(0.24))
         } else {
-            colors
-                .element_background
-                .blend(colors.panel_background.opacity(0.42))
+            colors.panel_background.opacity(0.)
         },
         hover: if is_sticky {
             colors.panel_overlay_hover
         } else {
             colors
-                .element_hover
-                .blend(colors.element_background.opacity(0.18))
+                .ghost_element_hover
+                .blend(colors.element_background.opacity(0.12))
         },
         marked: colors
             .element_selected
@@ -5423,11 +5425,9 @@ impl ProjectPanel {
             .relative()
             .group(GROUP_NAME)
             .cursor_pointer()
-            .my_0p5()
-            .rounded_lg()
+            .rounded_xs()
             .bg(bg_color)
             .border_1()
-            .border_r_2()
             .border_color(border_color)
             .hover(|style| style.bg(bg_hover_color).border_color(border_hover_color))
             .when(is_sticky, |this| this.block_mouse_except_scroll())
@@ -5749,10 +5749,10 @@ impl ProjectPanel {
             .child(
                 ListItem::new(id)
                     .indent_level(depth)
-                    .indent_step_size(px(settings.indent_size))
+                    .indent_step_size(px(compact_project_panel_indent_size(settings.indent_size)))
                     .spacing(match settings.entry_spacing {
-                        ProjectPanelEntrySpacing::Comfortable => ListItemSpacing::Sparse,
-                        ProjectPanelEntrySpacing::Standard => ListItemSpacing::Dense,
+                        ProjectPanelEntrySpacing::Comfortable => ListItemSpacing::ExtraDense,
+                        ProjectPanelEntrySpacing::Standard => ListItemSpacing::ExtraDense,
                     })
                     .selectable(false)
                     .when(
@@ -5773,20 +5773,20 @@ impl ProjectPanel {
                                     })
                                     .child(
                                         Icon::new(IconName::ArrowUpRight)
-                                            .size(IconSize::Indicator)
+                                            .size(IconSize::XSmall)
                                             .color(filename_text_color),
                                     )
                             });
                             this.end_slot::<AnyElement>(
                                 h_flex()
-                                    .gap_1()
+                                    .gap_0p5()
                                     .flex_none()
-                                    .pr_3()
+                                    .pr_1()
                                     .when_some(diagnostic_count, |this, count| {
                                         this.when(count.error_count > 0, |this| {
                                             this.child(
                                                 Label::new(count.capped_error_count())
-                                                    .size(LabelSize::Small)
+                                                    .size(LabelSize::XSmall)
                                                     .color(Color::Error),
                                             )
                                         })
@@ -5795,7 +5795,7 @@ impl ProjectPanel {
                                             |this| {
                                                 this.child(
                                                     Label::new(count.capped_warning_count())
-                                                        .size(LabelSize::Small)
+                                                        .size(LabelSize::XSmall)
                                                         .color(Color::Warning),
                                                 )
                                             },
@@ -5808,7 +5808,7 @@ impl ProjectPanel {
                                                 .into_any_element()
                                         } else {
                                             Label::new(label)
-                                                .size(LabelSize::Small)
+                                                .size(LabelSize::XSmall)
                                                 .color(color)
                                                 .into_any_element()
                                         };
@@ -5829,7 +5829,9 @@ impl ProjectPanel {
                                 .unwrap_or(false);
                             div().child(
                                 DecoratedIcon::new(
-                                    Icon::from_path(icon.clone()).color(Color::Muted),
+                                    Icon::from_path(icon.clone())
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Muted),
                                     Some(
                                         IconDecoration::new(
                                             if kind.is_file() {
@@ -5856,25 +5858,29 @@ impl ProjectPanel {
                                 .into_any_element(),
                             )
                         } else {
-                            h_flex().child(Icon::from_path(icon.to_string()).color(Color::Muted))
+                            h_flex().child(
+                                Icon::from_path(icon.to_string())
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Muted),
+                            )
                         }
                     } else if let Some((icon_name, color)) =
                         entry_diagnostic_aware_icon_name_and_color(diagnostic_severity)
                     {
                         h_flex()
-                            .size(IconSize::default().rems())
-                            .child(Icon::new(icon_name).color(color).size(IconSize::Small))
+                            .size(IconSize::XSmall.rems())
+                            .child(Icon::new(icon_name).color(color).size(IconSize::XSmall))
                     } else {
                         h_flex()
-                            .size(IconSize::default().rems())
+                            .size(IconSize::XSmall.rems())
                             .invisible()
                             .flex_none()
                     })
                     .child(if show_editor {
-                        h_flex().h_6().w_full().child(self.filename_editor.clone())
+                        h_flex().h_5().w_full().child(self.filename_editor.clone())
                     } else {
                         h_flex()
-                            .h_6()
+                            .h_5()
                             .map(|this| match self.state.ancestors.get(&entry_id) {
                                 Some(folded_ancestors) => {
                                     this.children(self.render_folder_elements(
@@ -5897,6 +5903,8 @@ impl ProjectPanel {
                                 None => this.child(
                                     Label::new(file_name)
                                         .single_line()
+                                        .size(LabelSize::XSmall)
+                                        .line_height_style(LineHeightStyle::UiLabel)
                                         .color(filename_text_color)
                                         .when(
                                             settings.bold_folder_labels && kind.is_dir(),
@@ -6065,6 +6073,8 @@ impl ProjectPanel {
                         .child(
                             Label::new(component)
                                 .single_line()
+                                .size(LabelSize::XSmall)
+                                .line_height_style(LineHeightStyle::UiLabel)
                                 .color(filename_text_color)
                                 .when(bold_folder_labels && !is_file, |this| {
                                     this.weight(FontWeight::SEMIBOLD)
@@ -6153,6 +6163,8 @@ impl ProjectPanel {
             .child(
                 Label::new(delimiter.clone())
                     .single_line()
+                    .size(LabelSize::XSmall)
+                    .line_height_style(LineHeightStyle::UiLabel)
                     .color(filename_text_color),
             )
     }
@@ -6547,7 +6559,7 @@ impl Render for ProjectPanel {
         let has_worktree = !self.state.visible_entries.is_empty();
         let project = self.project.read(cx);
         let panel_settings = ProjectPanelSettings::get_global(cx);
-        let indent_size = panel_settings.indent_size;
+        let indent_size = compact_project_panel_indent_size(panel_settings.indent_size);
         let show_indent_guides = panel_settings.indent_guides.show == ShowIndentGuides::Always;
         let horizontal_scroll = panel_settings.scrollbar.horizontal_scroll;
         let show_sticky_entries = {
@@ -6730,7 +6742,7 @@ impl Render for ProjectPanel {
                         .size_full()
                         .bg(card_bg)
                         .overflow_hidden()
-                        .p_1()
+                        .p_0p5()
                         .child(
                             uniform_list("entries", item_count, {
                                 cx.processor(|this, range: Range<usize>, window, cx| {
@@ -6807,9 +6819,9 @@ impl Render for ProjectPanel {
                                     .with_render_fn(
                                         cx.entity(),
                                         move |this, params, _, cx| {
-                                            const LEFT_OFFSET: Pixels = px(14.);
-                                            const PADDING_Y: Pixels = px(4.);
-                                            const HITBOX_OVERDRAW: Pixels = px(3.);
+                                            const LEFT_OFFSET: Pixels = px(10.);
+                                            const PADDING_Y: Pixels = px(2.);
+                                            const HITBOX_OVERDRAW: Pixels = px(2.);
 
                                             let active_indent_guide_index = this
                                                 .find_active_indent_guide(
@@ -6903,7 +6915,7 @@ impl Render for ProjectPanel {
                                         .with_render_fn(
                                             cx.entity(),
                                             move |_, params, _, _| {
-                                                const LEFT_OFFSET: Pixels = px(14.);
+                                                const LEFT_OFFSET: Pixels = px(10.);
 
                                                 let indent_size = params.indent_size;
                                                 let item_height = params.item_height;

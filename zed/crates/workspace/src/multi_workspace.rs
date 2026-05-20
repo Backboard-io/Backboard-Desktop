@@ -26,6 +26,7 @@ use ui::{ContextMenu, right_click_menu};
 
 const SIDEBAR_RESIZE_HANDLE_SIZE: Pixels = px(6.0);
 
+use crate::jarvis_directory_visualizer::{JarvisDirectoryVisualizer, JarvisThreadSummary};
 use crate::open_remote_project_with_existing_connection;
 use crate::{
     CloseIntent, CloseWindow, DockPosition, Event as WorkspaceEvent, Item, ModalView, OpenMode,
@@ -317,6 +318,7 @@ pub struct MultiWorkspace {
     pub jarvis_placeholder_expanded: bool,
     pub beginner_view: Option<AnyView>,
     pub agent_workspace_view: Option<AnyView>,
+    jarvis_visualizer: Entity<JarvisDirectoryVisualizer>,
 }
 
 impl EventEmitter<MultiWorkspaceEvent> for MultiWorkspace {}
@@ -362,6 +364,10 @@ impl MultiWorkspace {
         workspace.update(cx, |workspace, cx| {
             workspace.set_multi_workspace(weak_self, cx);
         });
+        let jarvis_visualizer = cx.new(|cx| {
+            let project = workspace.read(cx).project().clone();
+            JarvisDirectoryVisualizer::new(project, cx)
+        });
         Self {
             window_id: window.window_handle().window_id(),
             retained_workspaces: Vec::new(),
@@ -383,6 +389,7 @@ impl MultiWorkspace {
             jarvis_placeholder_expanded: false,
             beginner_view: None,
             agent_workspace_view: None,
+            jarvis_visualizer,
         }
     }
 
@@ -422,7 +429,29 @@ impl MultiWorkspace {
 
         self.multi_agent_expanded = tab == WorkspaceModeTab::AgentWorkspace;
         self.jarvis_placeholder_expanded = tab == WorkspaceModeTab::Jarvis;
+        if self.jarvis_placeholder_expanded {
+            self.update_jarvis_visualizer(cx);
+        }
         cx.notify();
+    }
+
+    fn update_jarvis_visualizer(&self, cx: &mut Context<Self>) {
+        let project = self.active_workspace.read(cx).project().clone();
+        self.jarvis_visualizer.update(cx, |visualizer, cx| {
+            visualizer.set_project(project, cx);
+        });
+    }
+
+    pub fn set_jarvis_code_editor_context(
+        &self,
+        chat_view: Option<AnyView>,
+        thread_summaries: Vec<JarvisThreadSummary>,
+        cx: &mut Context<Self>,
+    ) {
+        self.jarvis_visualizer.update(cx, |visualizer, cx| {
+            visualizer.set_chat_view(chat_view, cx);
+            visualizer.set_thread_summaries(thread_summaries, cx);
+        });
     }
 
     pub fn register_sidebar<T: Sidebar>(&mut self, sidebar: Entity<T>, cx: &mut Context<Self>) {
@@ -1526,6 +1555,7 @@ impl MultiWorkspace {
         }
 
         self.active_workspace = workspace;
+        self.update_jarvis_visualizer(cx);
 
         let active_key = self.active_workspace.read(cx).project_group_key(cx);
         if let Some(group) = self.project_groups.iter_mut().find(|g| g.key == active_key) {
@@ -1811,6 +1841,16 @@ impl MultiWorkspace {
     pub fn test_new(project: Entity<Project>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let workspace = cx.new(|cx| Workspace::test_new(project, window, cx));
         Self::new(workspace, window, cx)
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_select_jarvis_tab(&mut self, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::Jarvis, cx);
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_jarvis_visualizer_node_count(&self, cx: &App) -> usize {
+        self.jarvis_visualizer.read(cx).node_count()
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -2286,7 +2326,7 @@ impl Render for MultiWorkspace {
             let titlebar = self.workspace().read(cx).titlebar_item();
             return client_side_decorations(
                 div()
-                    .key_context("JarvisPlaceholderView")
+                    .key_context("JarvisDirectoryVisualizer")
                     .relative()
                     .flex()
                     .flex_col()
@@ -2303,14 +2343,7 @@ impl Render for MultiWorkspace {
                         div()
                             .flex_1()
                             .min_h_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(
-                                Label::new("This is a placeholder tab for the future")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                            ),
+                            .child(self.jarvis_visualizer.clone()),
                     ),
                 window,
                 cx,

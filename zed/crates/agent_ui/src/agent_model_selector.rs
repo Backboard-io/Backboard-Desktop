@@ -9,7 +9,7 @@ use language_model::IconOrSvg;
 use picker::popover_menu::PickerPopoverMenu;
 use settings::update_settings_file;
 use std::sync::Arc;
-use ui::{PopoverMenuHandle, Tooltip, prelude::*};
+use ui::{ButtonLike, PopoverMenuHandle, Tooltip, prelude::*};
 
 pub struct AgentModelSelector {
     selector: Entity<LanguageModelSelector>,
@@ -101,34 +101,49 @@ impl Render for AgentModelSelector {
         };
 
         let show_cycle_row = self.selector.read(cx).delegate.favorites_count() > 1;
+        let tooltip_model_name = model_name.clone();
 
         let tooltip = Tooltip::element({
             move |_, _cx| {
-                ModelSelectorTooltip::new()
-                    .show_cycle_row(show_cycle_row)
+                v_flex()
+                    .gap_1()
+                    .child(Label::new(tooltip_model_name.clone()).size(LabelSize::Small))
+                    .child(
+                        ModelSelectorTooltip::new()
+                            .show_cycle_row(show_cycle_row)
+                            .into_any_element(),
+                    )
                     .into_any_element()
             }
         });
 
+        let has_provider_icon = provider_icon.is_some();
         PickerPopoverMenu::new(
             self.selector.clone(),
-            Button::new("active-model", model_name)
-                .label_size(LabelSize::Small)
-                .color(color)
-                .when_some(provider_icon, |this, icon| {
-                    this.start_icon(
-                        match icon {
-                            IconOrSvg::Svg(path) => Icon::from_external_svg(path),
-                            IconOrSvg::Icon(name) => Icon::new(name),
-                        }
-                        .color(color)
-                        .size(IconSize::XSmall),
-                    )
-                })
-                .end_icon(
-                    Icon::new(IconName::ChevronDown)
-                        .color(color)
-                        .size(IconSize::XSmall),
+            ButtonLike::new("active-model")
+                .width(px(28.))
+                .height(px(28.).into())
+                .child(
+                    h_flex()
+                        .justify_center()
+                        .items_center()
+                        .when_some(provider_icon, |this, icon| {
+                            this.child(
+                                match icon {
+                                    IconOrSvg::Svg(path) => Icon::from_external_svg(path),
+                                    IconOrSvg::Icon(name) => Icon::new(name),
+                                }
+                                .color(color)
+                                .size(IconSize::XSmall),
+                            )
+                        })
+                        .when(!has_provider_icon, |this| {
+                            this.child(
+                                Icon::new(IconName::ChevronDown)
+                                    .color(color)
+                                    .size(IconSize::XSmall),
+                            )
+                        }),
                 ),
             tooltip,
             gpui::Anchor::TopRight,

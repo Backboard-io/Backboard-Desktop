@@ -773,39 +773,35 @@ impl ThreadView {
         let model_label = self
             .current_model_label(cx)
             .unwrap_or_else(|| SharedString::from("Select model"));
+        let tooltip_label = format!("Change model: {model_label}");
 
-        h_flex()
-            .id("backboard-footer-model-selector")
-            .gap_1()
-            .items_center()
-            .px_1p5()
-            .py_0p5()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().editor_background)
-            .hover(|style| style.bg(cx.theme().colors().element_hover))
-            .cursor_pointer()
+        ButtonLike::new("backboard-footer-model-selector")
+            .width(px(28.))
+            .height(px(28.).into())
             .child(self.render_backboard_logo(px(14.)))
-            .child(
-                Label::new(self.agent_display_name.clone())
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            )
-            .child(
-                Label::new(model_label)
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
-            )
-            .child(
-                Icon::new(IconName::ChevronDown)
-                    .size(IconSize::XSmall)
-                    .color(Color::Muted),
-            )
-            .tooltip(Tooltip::text("Change Backboard model"))
+            .tooltip(Tooltip::text(tooltip_label))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.toggle_model_selector(window, cx);
             }))
+    }
+
+    fn render_selected_model_readout(&self, cx: &App) -> Option<impl IntoElement> {
+        let model_label = self.current_model_label(cx)?;
+
+        Some(
+            h_flex()
+                .min_w_0()
+                .max_w_64()
+                .gap_1()
+                .items_center()
+                .child(self.render_backboard_logo(px(12.)))
+                .child(
+                    Label::new(model_label)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted)
+                        .truncate(),
+                ),
+        )
     }
 
     fn toggle_model_selector(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -824,6 +820,56 @@ impl ThreadView {
         if let Some(model_selector) = self.model_selector.clone() {
             model_selector.update(cx, |model_selector, cx| model_selector.toggle(window, cx));
         }
+    }
+
+    fn toggle_session_options(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.thread.read(cx).status() != ThreadStatus::Idle {
+            return;
+        }
+
+        if let Some(config_options_view) = self.config_options_view.clone() {
+            let handled = config_options_view.update(cx, |view, cx| {
+                view.toggle_category_picker(acp::SessionConfigOptionCategory::Mode, window, cx)
+            });
+            if handled {
+                return;
+            }
+        }
+
+        if let Some(profile_selector) = self.profile_selector.clone() {
+            profile_selector.read(cx).menu_handle().toggle(window, cx);
+        } else if let Some(mode_selector) = self.mode_selector.clone() {
+            mode_selector.read(cx).menu_handle().toggle(window, cx);
+        }
+    }
+
+    fn render_session_options_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.config_options_view.is_none()
+            && self.profile_selector.is_none()
+            && self.mode_selector.is_none()
+        {
+            return None;
+        }
+
+        let focus_handle = self.message_editor.focus_handle(cx);
+
+        Some(
+            IconButton::new("session-options", IconName::Sliders)
+                .icon_size(IconSize::Small)
+                .icon_color(Color::Muted)
+                .tooltip(move |_, cx| {
+                    Tooltip::for_action_in(
+                        "Change Agent Options",
+                        &ToggleProfileSelector,
+                        &focus_handle,
+                        cx,
+                    )
+                })
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.toggle_session_options(window, cx);
+                }))
+                .into_any_element(),
+        )
     }
 
     fn render_backboard_run_overview(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -3416,8 +3462,6 @@ impl ThreadView {
             .map(|this| {
                 if has_messages {
                     this.on_action(cx.listener(Self::expand_message_editor))
-                        .border_t_1()
-                        .border_color(colors.border_variant.opacity(0.68))
                         .when(editor_expanded, |this| this.h(vh(0.8, window)))
                 } else {
                     this.flex_1().size_full()
@@ -3430,7 +3474,6 @@ impl ThreadView {
                     .flex_shrink()
                     .flex_grow_0()
                     .justify_between()
-                    .gap_2()
                     .child(
                         v_flex()
                             .relative()
@@ -3476,35 +3519,40 @@ impl ThreadView {
                                                 })),
                                         ),
                                 )
-                            }),
-                    )
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .flex_none()
-                            .flex_wrap()
-                            .justify_between()
+                            })
                             .child(
                                 h_flex()
-                                    .gap_0p5()
-                                    .child(self.render_add_context_button(cx))
-                                    .child(self.render_follow_toggle(cx))
-                                    .children(self.render_fast_mode_control(cx))
-                                    .children(self.render_thinking_control(cx)),
-                            )
-                            .child(
-                                h_flex()
-                                    .flex_wrap()
+                                    .w_full()
+                                    .flex_none()
+                                    .items_center()
+                                    .justify_between()
                                     .gap_1()
-                                    .map(|this| match self.model_selector.clone() {
-                                        Some(model_selector) => this.child(model_selector),
-                                        None => this.child(self.render_backboard_footer_status(cx)),
-                                    })
-                                    .children(self.render_token_usage(cx))
-                                    .children(self.profile_selector.clone())
-                                    .children(self.mode_selector.clone())
-                                    .children(self.config_options_view.clone())
-                                    .child(self.render_send_button(cx)),
+                                    .pt_1()
+                                    .child(
+                                        h_flex()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .children(self.render_selected_model_readout(cx)),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .flex_none()
+                                            .flex_wrap()
+                                            .justify_end()
+                                            .gap_0p5()
+                                            .child(self.render_add_context_button(cx))
+                                            .child(self.render_follow_toggle(cx))
+                                            .children(self.render_fast_mode_control(cx))
+                                            .children(self.render_thinking_control(cx))
+                                            .map(|this| match self.model_selector.clone() {
+                                                Some(model_selector) => this.child(model_selector),
+                                                None => this
+                                                    .child(self.render_backboard_footer_status(cx)),
+                                            })
+                                            .children(self.render_token_usage(cx))
+                                            .children(self.render_session_options_button(cx))
+                                            .child(self.render_send_button(cx)),
+                                    ),
                             ),
                     ),
             )
@@ -3768,12 +3816,6 @@ impl ThreadView {
             .context_percent
             .map(|percent| format!("{}%", percent.min(100)))
             .unwrap_or(percentage);
-        let visible_tokens_label = if has_usage {
-            format!("{used} / {max} tokens")
-        } else {
-            "tokens".to_string()
-        };
-
         let tooltip_separator_color = Color::Custom(cx.theme().colors().text_disabled.opacity(0.6));
 
         let (user_rules_count, first_user_rules_id, project_rules_count, project_entry_ids) = self
@@ -3863,8 +3905,10 @@ impl ThreadView {
                     "circular_progress_tokens"
                 })
                 .flex_shrink_0()
-                .gap_1()
-                .mr_1()
+                .items_center()
+                .justify_center()
+                .w(px(28.))
+                .h(px(28.))
                 .child(
                     CircularProgress::new(
                         usage.used_tokens as f32,
@@ -3874,11 +3918,6 @@ impl ThreadView {
                     )
                     .stroke_width(stroke_width)
                     .progress_color(progress_color(progress_ratio)),
-                )
-                .child(
-                    Label::new(visible_tokens_label)
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
                 )
                 .hoverable_tooltip(build_tooltip)
                 .into_any_element(),
@@ -9775,17 +9814,8 @@ impl Render for ThreadView {
         let thread_bg = colors
             .panel_background
             .blend(colors.editor_background.opacity(0.48));
-        let conversation_bg = colors
-            .element_background
-            .blend(colors.panel_background.opacity(0.34));
-        let conversation_border = colors.border_variant.opacity(0.54);
 
         let conversation = v_flex()
-            .rounded_lg()
-            .border_1()
-            .border_color(conversation_border)
-            .bg(conversation_bg)
-            .overflow_hidden()
             .when(self.resumed_without_history, |this| {
                 this.child(Self::render_resume_notice(cx))
             })
@@ -9957,8 +9987,6 @@ impl Render for ThreadView {
                 }
             }))
             .size_full()
-            .gap_1()
-            .p_1()
             .bg(thread_bg)
             .children(self.render_subagent_titlebar(cx))
             .children(self.render_backboard_run_overview(cx))

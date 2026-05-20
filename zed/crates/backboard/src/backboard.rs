@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     sync::{LazyLock, Mutex, MutexGuard},
+    time::Duration,
 };
 
 #[cfg(unix)]
@@ -11,7 +12,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use anyhow::{Context as _, Result};
 use futures::{Stream, StreamExt as _};
 use reqwest::{
-    Client, Response, StatusCode,
+    Client, RequestBuilder, Response, StatusCode,
     multipart::{Form, Part},
 };
 use serde::{Deserialize, Serialize};
@@ -252,6 +253,13 @@ pub struct UpdateAssistantRequest {
     pub tools: Option<Vec<Value>>,
 }
 
+#[derive(Clone, Debug)]
+pub struct AudioAttachment {
+    pub data: Vec<u8>,
+    pub file_name: String,
+    pub mime_type: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SendMessageRequest {
     pub content: String,
@@ -268,7 +276,19 @@ pub struct SendMessageRequest {
     #[serde(default = "default_web_search")]
     pub web_search: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_generation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_model_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_model_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_to_llm: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    #[serde(skip_serializing)]
+    pub audio_file: Option<AudioAttachment>,
 }
 
 fn default_memory() -> String {
@@ -289,7 +309,13 @@ impl Default for SendMessageRequest {
             thinking: None,
             tools: None,
             web_search: default_web_search(),
+            image_generation: None,
+            image_model_provider: None,
+            image_model_name: None,
+            voice: None,
+            send_to_llm: None,
             max_tokens: None,
+            audio_file: None,
         }
     }
 }
@@ -431,12 +457,11 @@ impl BackboardClient {
         thread_id: &str,
         request: SendMessageRequest,
     ) -> Result<Value> {
-        self.json(
-            self.client
-                .post(self.url(&format!("/threads/{thread_id}/messages")))
-                .header("X-API-Key", self.api_key_header()?)
-                .form(&message_form(request, false)?),
-        )
+        self.json(self.message_request_builder(
+            self.url(&format!("/threads/{thread_id}/messages")),
+            request,
+            false,
+        )?)
         .await
     }
 
@@ -445,15 +470,23 @@ impl BackboardClient {
         thread_id: &str,
         request: SendMessageRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<Value>> + Send>>> {
-        let response = self
-            .client
-            .post(self.url(&format!("/threads/{thread_id}/messages")))
-            .header("X-API-Key", self.api_key_header()?)
-            .form(&message_form(request, true)?)
-            .send()
-            .await?;
-        let response = self.ensure_success(response).await?;
-        Ok(Box::pin(sse_json_stream(response)))
+        validate_message_request(&request, true)?;
+        let client = self.client.clone();
+        let url = self.url(&format!("/threads/{thread_id}/messages"));
+        let api_key = self.api_key_header()?;
+        Ok(retrying_sse_json_stream(move || {
+            message_request_builder(
+                client.clone(),
+                url.clone(),
+                api_key.clone(),
+                request.clone(),
+                true,
+            )
+        }))
+    }
+
+    pub fn realtime_voice_url(&self) -> String {
+        realtime_voice_url(&self.base_url, &self.api_key)
     }
 
     pub async fn upload_document(&self, assistant_id: &str, file_path: &Path) -> Result<Value> {
@@ -630,6 +663,22 @@ impl BackboardClient {
         format!("{}{}", self.base_url, path)
     }
 
+    fn message_request_builder(
+        &self,
+        url: String,
+        request: SendMessageRequest,
+        stream: bool,
+    ) -> Result<RequestBuilder> {
+        validate_message_request(&request, stream)?;
+        Ok(message_request_builder(
+            self.client.clone(),
+            url,
+            self.api_key_header()?,
+            request,
+            stream,
+        ))
+    }
+
     fn json_headers(&self) -> Result<reqwest::header::HeaderMap> {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("X-API-Key", self.api_key_header()?);
@@ -669,29 +718,94 @@ async fn parse_json_response<T: serde::de::DeserializeOwned>(response: Response)
     Ok(serde_json::from_str(&text)?)
 }
 
-fn message_form(request: SendMessageRequest, stream: bool) -> Result<Vec<(String, String)>> {
+fn message_form(request: &SendMessageRequest, stream: bool) -> Result<Vec<(String, String)>> {
     let mut form = vec![
-        ("content".to_string(), request.content),
+        ("content".to_string(), request.content.clone()),
         ("stream".to_string(), stream.to_string()),
-        ("memory".to_string(), request.memory),
-        ("web_search".to_string(), request.web_search),
+        ("memory".to_string(), request.memory.clone()),
+        ("web_search".to_string(), request.web_search.clone()),
     ];
-    if let Some(provider) = request.provider {
+    if let Some(provider) = request.provider.clone() {
         form.push(("llm_provider".to_string(), provider));
     }
-    if let Some(model) = request.model {
+    if let Some(model) = request.model.clone() {
         form.push(("model_name".to_string(), model));
+    }
+    if let Some(image_generation) = request.image_generation.clone() {
+        form.push(("image_generation".to_string(), image_generation));
+    }
+    if let Some(image_model_provider) = request.image_model_provider.clone() {
+        form.push(("image_model_provider".to_string(), image_model_provider));
+    }
+    if let Some(image_model_name) = request.image_model_name.clone() {
+        form.push(("image_model_name".to_string(), image_model_name));
+    }
+    if let Some(voice) = request.voice.clone() {
+        form.push(("voice".to_string(), serde_json::to_string(&voice)?));
+    }
+    if let Some(send_to_llm) = request.send_to_llm {
+        form.push(("send_to_llm".to_string(), send_to_llm.to_string()));
     }
     if let Some(max_tokens) = request.max_tokens {
         form.push(("max_tokens".to_string(), max_tokens.to_string()));
     }
-    if let Some(thinking) = request.thinking {
+    if let Some(thinking) = request.thinking.clone() {
         form.push(("thinking".to_string(), serde_json::to_string(&thinking)?));
     }
-    if let Some(tools) = request.tools {
+    if let Some(tools) = request.tools.clone() {
         form.push(("tools".to_string(), serde_json::to_string(&tools)?));
     }
     Ok(form)
+}
+
+fn message_multipart_form(request: SendMessageRequest, stream: bool) -> Result<Form> {
+    let mut form = Form::new();
+    for (key, value) in message_form(&request, stream)? {
+        form = form.text(key, value);
+    }
+    if let Some(audio) = request.audio_file {
+        let part = Part::bytes(audio.data)
+            .file_name(audio.file_name)
+            .mime_str(&audio.mime_type)?;
+        form = form.part("audio_file", part);
+    }
+    Ok(form)
+}
+
+fn message_request_builder(
+    client: Client,
+    url: String,
+    api_key: reqwest::header::HeaderValue,
+    request: SendMessageRequest,
+    stream: bool,
+) -> RequestBuilder {
+    let builder = client.post(url).header("X-API-Key", api_key);
+    if request.audio_file.is_some() {
+        builder.multipart(message_multipart_form(request, stream).unwrap_or_else(|_| Form::new()))
+    } else {
+        builder.form(&message_form(&request, stream).unwrap_or_default())
+    }
+}
+
+fn validate_message_request(request: &SendMessageRequest, stream: bool) -> Result<()> {
+    if request.audio_file.is_some() {
+        message_multipart_form(request.clone(), stream).map(|_| ())
+    } else {
+        message_form(request, stream).map(|_| ())
+    }
+}
+
+fn realtime_voice_url(base_url: &str, api_key: &str) -> String {
+    let mut base = base_url.trim_end_matches('/').to_string();
+    if let Some(rest) = base.strip_prefix("https://") {
+        base = format!("wss://{rest}");
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        base = format!("ws://{rest}");
+    }
+    format!(
+        "{base}/threads/messages?api_key={}",
+        urlencoding::encode(api_key)
+    )
 }
 
 fn sse_json_stream(response: Response) -> impl Stream<Item = Result<Value>> {
@@ -736,4 +850,203 @@ fn sse_json_stream(response: Response) -> impl Stream<Item = Result<Value>> {
             }
         },
     )
+}
+
+const STREAM_MAX_RETRIES: u32 = 5;
+const STREAM_RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
+
+struct RetryStreamState<F> {
+    make_request: F,
+    attempt: u32,
+    streamed_any: bool,
+    stream: Option<Pin<Box<dyn Stream<Item = Result<Value>> + Send>>>,
+    sleep_before_request: Option<Duration>,
+}
+
+fn retrying_sse_json_stream<F>(make_request: F) -> Pin<Box<dyn Stream<Item = Result<Value>> + Send>>
+where
+    F: FnMut() -> RequestBuilder + Send + 'static,
+{
+    Box::pin(futures::stream::unfold(
+        RetryStreamState {
+            make_request,
+            attempt: 0,
+            streamed_any: false,
+            stream: None,
+            sleep_before_request: None,
+        },
+        |mut state| async move {
+            loop {
+                if let Some(stream) = state.stream.as_mut() {
+                    match stream.next().await {
+                        Some(Ok(value)) => {
+                            state.streamed_any = true;
+                            return Some((Ok(value), state));
+                        }
+                        Some(Err(error)) => {
+                            if state.streamed_any
+                                || state.attempt >= STREAM_MAX_RETRIES
+                                || !is_transient_error(&error)
+                            {
+                                return Some((Err(error), state));
+                            }
+                            let retry = retry_chunk(state.attempt, None, Some(error.to_string()));
+                            state.attempt += 1;
+                            state.stream = None;
+                            state.sleep_before_request = Some(retry_delay(state.attempt - 1));
+                            return Some((Ok(retry), state));
+                        }
+                        None => return None,
+                    }
+                }
+
+                if let Some(delay) = state.sleep_before_request.take() {
+                    tokio::time::sleep(delay).await;
+                }
+
+                match (state.make_request)().send().await {
+                    Ok(response) if response.status().is_success() => {
+                        state.stream = Some(Box::pin(sse_json_stream(response)));
+                    }
+                    Ok(response)
+                        if is_retryable_status(response.status())
+                            && state.attempt < STREAM_MAX_RETRIES =>
+                    {
+                        let status = response.status();
+                        let retry = retry_chunk(state.attempt, Some(status), None);
+                        state.attempt += 1;
+                        state.sleep_before_request = Some(retry_delay(state.attempt - 1));
+                        return Some((Ok(retry), state));
+                    }
+                    Ok(response) => {
+                        let status = response.status();
+                        let body = response.text().await.unwrap_or_default();
+                        return Some((Err(BackboardError::Api { status, body }.into()), state));
+                    }
+                    Err(error)
+                        if is_transient_reqwest_error(&error)
+                            && state.attempt < STREAM_MAX_RETRIES =>
+                    {
+                        let retry = retry_chunk(state.attempt, None, Some(error.to_string()));
+                        state.attempt += 1;
+                        state.sleep_before_request = Some(retry_delay(state.attempt - 1));
+                        return Some((Ok(retry), state));
+                    }
+                    Err(error) => return Some((Err(error.into()), state)),
+                }
+            }
+        },
+    ))
+}
+
+fn retry_chunk(attempt: u32, status: Option<StatusCode>, error: Option<String>) -> Value {
+    let delay = retry_delay(attempt).as_secs_f64();
+    let mut chunk = json!({
+        "type": "retry",
+        "attempt": attempt + 1,
+        "max_retries": STREAM_MAX_RETRIES,
+        "delay": delay,
+    });
+    if let Some(status) = status {
+        chunk["status_code"] = json!(status.as_u16());
+    }
+    if let Some(error) = error {
+        chunk["error"] = json!(error);
+    }
+    chunk
+}
+
+fn retry_delay(attempt: u32) -> Duration {
+    STREAM_RETRY_BASE_DELAY.saturating_mul(2u32.saturating_pow(attempt))
+}
+
+fn is_retryable_status(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::BAD_GATEWAY
+            | StatusCode::SERVICE_UNAVAILABLE
+            | StatusCode::GATEWAY_TIMEOUT
+            | StatusCode::TOO_MANY_REQUESTS
+    )
+}
+
+fn is_transient_error(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<reqwest::Error>()
+        .is_some_and(is_transient_reqwest_error)
+}
+
+fn is_transient_reqwest_error(error: &reqwest::Error) -> bool {
+    error.is_timeout() || error.is_connect() || error.is_request() || error.is_body()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn message_form_serializes_media_voice_and_search_fields() {
+        let request = SendMessageRequest {
+            content: "make a diagram".to_string(),
+            provider: Some("openai".to_string()),
+            model: Some("gpt-4o".to_string()),
+            web_search: "Auto".to_string(),
+            image_generation: Some("auto".to_string()),
+            image_model_provider: Some("openrouter".to_string()),
+            image_model_name: Some("google/gemini-3.1-flash-image-preview".to_string()),
+            voice: Some(json!({
+                "tts": {
+                    "provider": "openai",
+                    "model": "gpt-4o-mini-tts",
+                    "voice": "alloy",
+                }
+            })),
+            send_to_llm: Some(true),
+            ..SendMessageRequest::default()
+        };
+
+        let form = message_form(&request, true).unwrap();
+        assert!(form.contains(&("web_search".to_string(), "Auto".to_string())));
+        assert!(form.contains(&("image_generation".to_string(), "auto".to_string())));
+        assert!(form.contains(&("image_model_provider".to_string(), "openrouter".to_string())));
+        assert!(form.contains(&(
+            "image_model_name".to_string(),
+            "google/gemini-3.1-flash-image-preview".to_string()
+        )));
+        assert!(form.iter().any(|(key, value)| {
+            key == "voice" && value.contains("gpt-4o-mini-tts") && value.contains("alloy")
+        }));
+        assert!(form.contains(&("send_to_llm".to_string(), "true".to_string())));
+    }
+
+    #[test]
+    fn multipart_message_accepts_audio_file() {
+        let request = SendMessageRequest {
+            voice: Some(json!({
+                "stt": {
+                    "provider": "openai",
+                    "model": "gpt-4o-mini-transcribe",
+                    "language": "en",
+                }
+            })),
+            send_to_llm: Some(false),
+            audio_file: Some(AudioAttachment {
+                data: vec![1, 2, 3],
+                file_name: "voice.mp3".to_string(),
+                mime_type: "audio/mpeg".to_string(),
+            }),
+            ..SendMessageRequest::default()
+        };
+
+        message_multipart_form(request, true).expect("multipart form should build");
+    }
+
+    #[test]
+    fn realtime_voice_url_uses_ws_scheme_and_encoded_key() {
+        assert_eq!(
+            realtime_voice_url("https://app.backboard.io/api", "key with spaces"),
+            "wss://app.backboard.io/api/threads/messages?api_key=key%20with%20spaces"
+        );
+    }
 }

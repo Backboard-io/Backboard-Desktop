@@ -74,30 +74,39 @@ impl Render for ModelSelectorPopover {
 
         let model_icon = model.as_ref().and_then(|model| model.icon.clone());
 
-        let (color, icon) = if self.menu_handle.is_deployed() {
-            (Color::Accent, IconName::ChevronUp)
+        let color = if self.menu_handle.is_deployed() {
+            Color::Accent
         } else {
-            (Color::Muted, IconName::ChevronDown)
+            Color::Muted
         };
 
         let show_cycle_row = selector.delegate.favorites_count() > 1;
+        let tooltip_model_name = model_name.clone();
 
         let tooltip = Tooltip::element({
             move |_, _cx| {
-                ModelSelectorTooltip::new()
-                    .show_cycle_row(show_cycle_row)
+                v_flex()
+                    .gap_1()
+                    .child(Label::new(tooltip_model_name.clone()).size(LabelSize::Small))
+                    .child(
+                        ModelSelectorTooltip::new()
+                            .show_cycle_row(show_cycle_row)
+                            .into_any_element(),
+                    )
                     .into_any_element()
             }
         });
 
         let trigger_label = self.trigger_label.clone();
         let trigger_logo = self.trigger_logo.clone();
+        let has_model_icon = model_icon.is_some();
 
         let trigger = ButtonLike::new("active-model")
-            .style(ButtonStyle::Outlined)
+            .width(px(28.))
+            .height(px(28.).into())
             .child(
                 h_flex()
-                    .gap_1()
+                    .justify_center()
                     .items_center()
                     .when_some(trigger_logo, |this, path| {
                         this.child(
@@ -108,21 +117,25 @@ impl Render for ModelSelectorPopover {
                                 .object_fit(ObjectFit::ScaleDown),
                         )
                     })
-                    .when_some(trigger_label, |this, label| {
-                        this.child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+                    .when(trigger_label.is_none(), |this| {
+                        this.when_some(model_icon, |this, icon| {
+                            this.child(
+                                match icon {
+                                    AgentModelIcon::Path(path) => Icon::from_external_svg(path),
+                                    AgentModelIcon::Named(icon_name) => Icon::new(icon_name),
+                                }
+                                .color(color)
+                                .size(IconSize::XSmall),
+                            )
+                        })
                     })
-                    .when_some(model_icon, |this, icon| {
+                    .when(trigger_label.is_none() && !has_model_icon, |this| {
                         this.child(
-                            match icon {
-                                AgentModelIcon::Path(path) => Icon::from_external_svg(path),
-                                AgentModelIcon::Named(icon_name) => Icon::new(icon_name),
-                            }
-                            .color(color)
-                            .size(IconSize::XSmall),
+                            Icon::new(IconName::ChevronDown)
+                                .color(color)
+                                .size(IconSize::XSmall),
                         )
-                    })
-                    .child(Label::new(model_name).size(LabelSize::Small).color(color))
-                    .child(Icon::new(icon).color(Color::Muted).size(IconSize::XSmall)),
+                    }),
             );
 
         PickerPopoverMenu::new(

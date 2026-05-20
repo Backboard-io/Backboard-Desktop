@@ -83,7 +83,13 @@ These are the endpoints called by the CLI API client and mirrored by the existin
 | `llm_provider` | Yes in current callers | Provider name such as `openai`. |
 | `model_name` | Yes in current callers | Model name such as `gpt-4o`. |
 | `memory` | Yes | Usually `"Auto"`. |
-| `web_search` | Yes | Usually `"off"` unless explicitly enabled. |
+| `web_search` | Yes | `"off"` or `"Auto"` from the Web composer chip. |
+| `image_generation` | No | `"auto"` when the Image chip is enabled. |
+| `image_model_provider` | No | Image model provider. IDE default: `openrouter`. |
+| `image_model_name` | No | Image model name. IDE default: `google/gemini-3.1-flash-image-preview`. |
+| `voice` | No | JSON-encoded REST voice config with `stt`, `tts`, or both. |
+| `send_to_llm` | No | `"false"` for STT-only, `"true"` for TTS/conversation voice modes. |
+| `audio_file` | No | Multipart audio file for REST STT/conversation mode. |
 | `thinking` | No | JSON-encoded reasoning controls. |
 | `tools` | No | JSON-encoded tool definitions for this turn. |
 | `max_tokens` | No | Output cap from config. |
@@ -99,6 +105,21 @@ null
 ```
 
 The native Rust client should keep this as a `serde_json::Value` field and serialize it into the form body only when present.
+
+Text-only turns use form encoding. Voice STT and conversation turns use multipart form data so `audio_file` can be uploaded while keeping scalar fields as strings and `voice`/`tools`/`thinking` JSON-stringified.
+
+REST voice defaults in the IDE:
+
+- STT: `{"provider":"openai","model":"gpt-4o-mini-transcribe","language":"en"}`
+- TTS: `{"provider":"openai","model":"gpt-4o-mini-tts","voice":"alloy","output_format":"mp3"}`
+
+Realtime voice uses a WebSocket URL derived from the configured API root:
+
+```text
+wss://app.backboard.io/api/threads/messages?api_key=...
+```
+
+The first text frame is a setup JSON object containing `thread_id`, `voice.stt` with ElevenLabs `scribe_v2_realtime`, optional `voice.tts`, model settings, and memory settings. Audio frames are raw `pcm_16000` when a live microphone capture control is connected.
 
 ## Streaming Contract
 
@@ -120,8 +141,12 @@ The Rust stream processor should support these chunk types initially:
 | `reasoning_delta` | Treat like reasoning delta. |
 | `reasoning_ended` | Mark thinking inactive and close the thought block. |
 | `content_streaming` | Append assistant-visible text. |
+| `media_generated` | Render generated image/media URLs as resource links in chat. |
+| `stt_text_delta` | Append streaming transcript text. |
+| `stt_stream_end` | Render the final transcript. |
+| `tts_audio_delta` | Render an audio resource link when the event includes a URL. |
 | `tool_submit_required` | Execute local tools, submit outputs, and continue the stream. |
-| `run_ended` | Record usage/cost/context and finish unless status requires tools. |
+| `run_ended` | Record usage/cost/context, render `generated_media` and `voice_records`, and finish unless status requires tools. |
 | `run_failed` | Surface a failed assistant message and diagnostic detail. |
 | `error` | Surface a failed assistant message and diagnostic detail. |
 | `retry` | Optional client-side synthetic event for pre-stream retry notices. |

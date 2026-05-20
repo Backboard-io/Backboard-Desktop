@@ -280,6 +280,7 @@ dependencies = [
  "anyhow",
  "async-channel 2.5.0",
  "backboard",
+ "base64 0.22.1",
  "chrono",
  "client",
  "collections",
@@ -1919,6 +1920,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
+ "urlencoding",
  "zed-reqwest",
 ]
 

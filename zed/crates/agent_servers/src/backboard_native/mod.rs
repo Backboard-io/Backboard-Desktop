@@ -42,6 +42,17 @@ const DEFAULT_MODEL: &str = "gpt-4o";
 const DEFAULT_INTENSITY: &str = "fast";
 const DEFAULT_CONTEXT_WINDOW: u64 = 258_000;
 const HISTORY_REPLAY_MAX_MESSAGES: usize = 80;
+pub(crate) const DEFAULT_IMAGE_PROVIDER: &str = "openrouter";
+pub(crate) const DEFAULT_IMAGE_MODEL: &str = "google/gemini-3.1-flash-image-preview";
+pub(crate) const DEFAULT_TTS_PROVIDER: &str = "openai";
+pub(crate) const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
+pub(crate) const DEFAULT_TTS_VOICE: &str = "alloy";
+pub(crate) const DEFAULT_TTS_FORMAT: &str = "mp3";
+pub(crate) const DEFAULT_STT_PROVIDER: &str = "openai";
+pub(crate) const DEFAULT_STT_MODEL: &str = "gpt-4o-mini-transcribe";
+pub(crate) const DEFAULT_STT_LANGUAGE: &str = "en";
+pub(crate) const DEFAULT_REALTIME_STT_PROVIDER: &str = "elevenlabs";
+pub(crate) const DEFAULT_REALTIME_STT_MODEL: &str = "scribe_v2_realtime";
 
 static EMPTY_AUTH_METHODS: &[acp::AuthMethod] = &[];
 
@@ -69,6 +80,7 @@ pub(crate) struct NativeSession {
     model: Option<String>,
     mode: acp::SessionModeId,
     intensity: String,
+    feature_settings: FeatureSettings,
     cancel_flag: Arc<AtomicBool>,
     metrics: NativeTurnMetrics,
     context_window_tokens: Option<u64>,
@@ -84,7 +96,27 @@ pub(crate) struct SessionRuntime {
     pub model: String,
     pub mode: acp::SessionModeId,
     pub intensity: String,
+    pub feature_settings: FeatureSettings,
     pub cancel_flag: Arc<AtomicBool>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct FeatureSettings {
+    pub web_search: String,
+    pub image_generation: String,
+    pub voice_mode: String,
+    pub live_voice: String,
+}
+
+impl Default for FeatureSettings {
+    fn default() -> Self {
+        Self {
+            web_search: "off".to_string(),
+            image_generation: "off".to_string(),
+            voice_mode: "off".to_string(),
+            live_voice: "off".to_string(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -244,7 +276,10 @@ impl BackboardNativeConnection {
                 indexing_workspaces: RefCell::default(),
                 model_cache: RefCell::default(),
                 model_context_windows: RefCell::default(),
-                prompt_capabilities: acp::PromptCapabilities::new().embedded_context(true),
+                prompt_capabilities: acp::PromptCapabilities::new()
+                    .embedded_context(true)
+                    .image(true)
+                    .audio(true),
             }),
         }
     }
@@ -292,6 +327,7 @@ impl BackboardNativeState {
             model: session.model.clone().unwrap_or(default_model),
             mode: session.mode.clone(),
             intensity: session.intensity.clone(),
+            feature_settings: session.feature_settings.clone(),
             cancel_flag: session.cancel_flag.clone(),
         })
     }
@@ -608,6 +644,7 @@ impl AgentConnection for BackboardNativeConnection {
                 model: Some(model),
                 mode,
                 intensity: DEFAULT_INTENSITY.to_string(),
+                feature_settings: FeatureSettings::default(),
                 cancel_flag,
                 metrics: NativeTurnMetrics::default(),
                 context_window_tokens: None,
@@ -810,6 +847,7 @@ impl BackboardNativeConnection {
                     .or(Some(default_model)),
                 mode: self.state.default_mode.clone(),
                 intensity: DEFAULT_INTENSITY.to_string(),
+                feature_settings: FeatureSettings::default(),
                 cancel_flag: Arc::new(AtomicBool::new(false)),
                 metrics: NativeTurnMetrics::default(),
                 context_window_tokens: None,
@@ -882,14 +920,14 @@ struct BackboardConfigOptions {
 
 impl AgentSessionConfigOptions for BackboardConfigOptions {
     fn config_options(&self) -> Vec<acp::SessionConfigOption> {
-        let intensity = self
+        let (intensity, feature_settings) = self
             .state
             .sessions
             .borrow()
             .get(&self.session_id)
-            .map(|session| session.intensity.clone())
-            .unwrap_or_else(|| DEFAULT_INTENSITY.to_string());
-        config_options(&intensity)
+            .map(|session| (session.intensity.clone(), session.feature_settings.clone()))
+            .unwrap_or_else(|| (DEFAULT_INTENSITY.to_string(), FeatureSettings::default()));
+        config_options(&intensity, &feature_settings)
     }
 
     fn set_config_option(
@@ -900,16 +938,50 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
     ) -> Task<Result<Vec<acp::SessionConfigOption>>> {
         let value = value.to_string();
         let mut options = self.config_options();
-        if config_id.to_string() == "backboard_intensity" {
-            let intensity = if matches!(value.as_str(), "fast" | "balanced" | "deep") {
-                value
-            } else {
-                DEFAULT_INTENSITY.to_string()
-            };
+        let config_id_string = config_id.to_string();
+        let mut changed = false;
+        {
             if let Some(session) = self.state.sessions.borrow_mut().get_mut(&self.session_id) {
-                session.intensity = intensity.clone();
+                match config_id_string.as_str() {
+                    "backboard_intensity" => {
+                        session.intensity =
+                            if matches!(value.as_str(), "fast" | "balanced" | "deep") {
+                                value
+                            } else {
+                                DEFAULT_INTENSITY.to_string()
+                            };
+                        changed = true;
+                    }
+                    "backboard_web_search" => {
+                        session.feature_settings.web_search =
+                            if value == "Auto" { "Auto" } else { "off" }.to_string();
+                        changed = true;
+                    }
+                    "backboard_image_generation" => {
+                        session.feature_settings.image_generation =
+                            if value == "auto" { "auto" } else { "off" }.to_string();
+                        changed = true;
+                    }
+                    "backboard_voice_mode" => {
+                        session.feature_settings.voice_mode =
+                            if matches!(value.as_str(), "tts" | "stt" | "conversation") {
+                                value
+                            } else {
+                                "off".to_string()
+                            };
+                        changed = true;
+                    }
+                    "backboard_live_voice" => {
+                        session.feature_settings.live_voice =
+                            if value == "on" { "on" } else { "off" }.to_string();
+                        changed = true;
+                    }
+                    _ => {}
+                }
             }
-            options = config_options(&intensity);
+        }
+        if changed {
+            options = self.config_options();
             let state = self.state.clone();
             let session_id = self.session_id.clone();
             let options_for_update = options.clone();
@@ -1127,7 +1199,10 @@ fn supported_modes() -> Vec<acp::SessionMode> {
     ]
 }
 
-fn config_options(intensity: &str) -> Vec<acp::SessionConfigOption> {
+fn config_options(
+    intensity: &str,
+    feature_settings: &FeatureSettings,
+) -> Vec<acp::SessionConfigOption> {
     vec![
         acp::SessionConfigOption::select(
             "backboard_intensity",
@@ -1143,6 +1218,65 @@ fn config_options(intensity: &str) -> Vec<acp::SessionConfigOption> {
             ],
         )
         .description("Controls how much extended model thinking Backboard asks for.")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::select(
+            "backboard_web_search",
+            "Web",
+            feature_settings.web_search.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new("off", "Off")
+                    .description("Do not ask Backboard to run web search for this turn."),
+                acp::SessionConfigSelectOption::new("Auto", "Auto")
+                    .description("Let Backboard use web search when useful."),
+            ],
+        )
+        .description("Controls Backboard web search for each chat turn.")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::select(
+            "backboard_image_generation",
+            "Image",
+            feature_settings.image_generation.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new("off", "Off")
+                    .description("Do not enable the built-in image tool."),
+                acp::SessionConfigSelectOption::new("auto", "Auto").description(
+                    "Let Backboard call the image generator when the prompt asks for images.",
+                ),
+            ],
+        )
+        .description("Enables Backboard image generation for this turn.")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::select(
+            "backboard_voice_mode",
+            "Voice",
+            feature_settings.voice_mode.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new("off", "Off")
+                    .description("Send normal text-only chat turns."),
+                acp::SessionConfigSelectOption::new("tts", "TTS")
+                    .description("Ask Backboard to synthesize the assistant reply as audio."),
+                acp::SessionConfigSelectOption::new("stt", "STT")
+                    .description("Transcribe attached audio without an assistant reply."),
+                acp::SessionConfigSelectOption::new("conversation", "Conversation").description(
+                    "Transcribe attached audio, send it to the LLM, and synthesize audio.",
+                ),
+            ],
+        )
+        .description("Controls Backboard REST voice mode.")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::select(
+            "backboard_live_voice",
+            "Live Voice",
+            feature_settings.live_voice.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new("off", "Off")
+                    .description("Do not start a realtime voice session."),
+                acp::SessionConfigSelectOption::new("on", "On").description(
+                    "Prepare Backboard realtime voice settings for live microphone chat.",
+                ),
+            ],
+        )
+        .description("Controls Backboard realtime voice WebSocket mode.")
         .category(acp::SessionConfigOptionCategory::ThoughtLevel),
     ]
 }
@@ -1180,4 +1314,30 @@ fn json_string(value: &Value, keys: &[&str]) -> Option<String> {
 
 pub(crate) fn missing_api_key_message() -> String {
     "Backboard needs an API key before the IDE agent can run. Set it in the shared config with `backboard config set-api-key <key>`.".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_options_include_media_and_search_chips() {
+        let settings = FeatureSettings {
+            web_search: "Auto".to_string(),
+            image_generation: "auto".to_string(),
+            voice_mode: "tts".to_string(),
+            live_voice: "on".to_string(),
+        };
+        let options = config_options("fast", &settings);
+        let ids = options
+            .iter()
+            .map(|option| option.id.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(ids.contains(&"backboard_intensity".to_string()));
+        assert!(ids.contains(&"backboard_web_search".to_string()));
+        assert!(ids.contains(&"backboard_image_generation".to_string()));
+        assert!(ids.contains(&"backboard_voice_mode".to_string()));
+        assert!(ids.contains(&"backboard_live_voice".to_string()));
+    }
 }

@@ -34,11 +34,11 @@ use git_ui::commit_view::CommitViewToolbar;
 use git_ui::git_panel::GitPanel;
 use git_ui::project_diff::{BranchDiffToolbar, ProjectDiffToolbar};
 use gpui::{
-    Action, App, AppContext as _, AsyncWindowContext, ClipboardItem, Context, DismissEvent,
-    Element, Entity, FocusHandle, Focusable, Image, ImageFormat, KeyBinding, ParentElement,
-    PathPromptOptions, PromptLevel, ReadGlobal, SharedString, Size, Task, TaskExt, TitlebarOptions,
-    UpdateGlobal, WeakEntity, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
-    actions, image_cache, img, point, px, retain_all,
+    Action, AnyView, App, AppContext as _, AsyncWindowContext, ClipboardItem, Context,
+    DismissEvent, Element, Entity, FocusHandle, Focusable, Image, ImageFormat, KeyBinding,
+    ParentElement, PathPromptOptions, PromptLevel, ReadGlobal, SharedString, Size, Task, TaskExt,
+    TitlebarOptions, UpdateGlobal, WeakEntity, Window, WindowBounds, WindowHandle, WindowKind,
+    WindowOptions, actions, image_cache, img, point, px, retain_all,
 };
 use image_viewer::ImageInfo;
 use language::Capability;
@@ -450,7 +450,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         cx.subscribe_in(
             &multi_workspace_handle,
             window,
-            |this, _multi_workspace, event: &workspace::MultiWorkspaceEvent, window, cx| {
+            move |this, _multi_workspace, event: &workspace::MultiWorkspaceEvent, window, cx| {
                 let workspace::MultiWorkspaceEvent::ActiveWorkspaceChanged { source_workspace } =
                     event
                 else {
@@ -480,6 +480,9 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                     ensure_agent_panel_for_workspace(workspace, source_workspace, window, cx)
                         .detach_and_log_err(cx);
                 });
+                let (chat_view, thread_summaries) =
+                    jarvis_code_editor_context(&active_workspace, cx);
+                this.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);
             },
         )
         .detach();
@@ -511,6 +514,9 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                 agent_ui::BackboardAgentWorkspacePage::new(workspace, window, cx)
             });
             _multi_workspace.agent_workspace_view = Some(agent_workspace.into());
+            let (chat_view, thread_summaries) =
+                jarvis_code_editor_context(_multi_workspace.workspace(), cx);
+            _multi_workspace.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);
 
             // Set initial mode from KVP — defaults to Developer.
             let raw = KeyValueStore::global(cx)
@@ -539,6 +545,22 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                 })
                 .ok();
         });
+    })
+    .detach();
+
+    cx.observe_new::<agent_ui::AgentPanel>(|_panel, window, cx| {
+        let Some(window) = window else {
+            return;
+        };
+        let panel = cx.entity();
+        cx.subscribe_in(
+            &panel,
+            window,
+            |_panel, _, _event: &agent_ui::AgentPanelEvent, window, cx| {
+                defer_sync_jarvis_code_editor_context_for_window(window, cx);
+            },
+        )
+        .detach();
     })
     .detach();
 
@@ -863,6 +885,73 @@ fn ensure_agent_panel_for_workspace(
     })
 }
 
+fn sync_jarvis_code_editor_context(
+    multi_workspace: &Entity<MultiWorkspace>,
+    active_workspace: &Entity<Workspace>,
+    cx: &mut App,
+) {
+    let (chat_view, thread_summaries) = jarvis_code_editor_context(active_workspace, cx);
+
+    multi_workspace.update(cx, |multi_workspace, cx| {
+        multi_workspace.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);
+    });
+}
+
+fn jarvis_code_editor_context(
+    active_workspace: &Entity<Workspace>,
+    cx: &mut App,
+) -> (Option<AnyView>, Vec<workspace::JarvisThreadSummary>) {
+    let panel = active_workspace.read(cx).panel::<agent_ui::AgentPanel>(cx);
+    let chat_view: Option<AnyView> = panel.clone().map(Into::into);
+    let thread_summaries = panel
+        .as_ref()
+        .map(|panel| {
+            panel
+                .read(cx)
+                .backboard_agent_run_summaries(cx)
+                .into_iter()
+                .map(|summary| workspace::JarvisThreadSummary {
+                    title: summary.title,
+                    prompt: summary.command,
+                    status: summary.status.label().into(),
+                    changed_paths: summary
+                        .touched_paths
+                        .into_iter()
+                        .take(8)
+                        .map(Into::into)
+                        .collect(),
+                    latest_events: summary
+                        .latest_events
+                        .into_iter()
+                        .take(4)
+                        .map(|event| event.text)
+                        .collect(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    (chat_view, thread_summaries)
+}
+
+fn sync_jarvis_code_editor_context_for_window(window: &mut Window, cx: &mut App) {
+    if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
+        let active_workspace = multi_workspace.read(cx).workspace().clone();
+        sync_jarvis_code_editor_context(&multi_workspace, &active_workspace, cx);
+    }
+}
+
+fn defer_sync_jarvis_code_editor_context_for_window(window: &mut Window, cx: &mut App) {
+    let window_handle = window.window_handle();
+    cx.defer(move |cx| {
+        window_handle
+            .update(cx, |_, window, cx| {
+                sync_jarvis_code_editor_context_for_window(window, cx);
+            })
+            .ok();
+    });
+}
+
 async fn initialize_agent_panel(
     workspace_handle: WeakEntity<Workspace>,
     mut cx: AsyncWindowContext,
@@ -874,6 +963,7 @@ async fn initialize_agent_panel(
         .await?;
 
     workspace_handle.update_in(&mut cx, |workspace, window, cx| {
+        defer_sync_jarvis_code_editor_context_for_window(window, cx);
         cx.observe_global_in::<SettingsStore>(window, move |workspace, window, cx| {
             ensure_agent_panel_for_workspace(workspace, None, window, cx).detach_and_log_err(cx);
         })

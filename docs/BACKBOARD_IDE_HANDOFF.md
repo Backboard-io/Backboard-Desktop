@@ -82,8 +82,25 @@ Important runtime-used endpoint methods:
 - `create_thread(&assistant_id)`
 - `get_thread(&thread_id)`
 - `send_message_stream(&thread_id, SendMessageRequest { ... })`
+- `realtime_voice_url()`
 - `submit_tool_outputs_stream(&thread_id, &run_id, SubmitToolOutputsRequest { ... })`
 - `cancel_run(&thread_id, &run_id)`
+
+Current native composer controls are delivered through session config options, so they render as compact chips in the existing chat control row:
+
+- `Intensity`: `Fast`, `Balanced`, `Deep`.
+- `Web`: `Off`, `Auto`; maps to message `web_search`.
+- `Image`: `Off`, `Auto`; maps to `image_generation=auto`, `image_model_provider=openrouter`, and `image_model_name=google/gemini-3.1-flash-image-preview`.
+- `Voice`: `Off`, `TTS`, `STT`, `Conversation`; maps to the REST message `voice` JSON and `send_to_llm`.
+- `Live Voice`: `Off`, `On`; prepares the realtime WebSocket URL/setup payload for `wss://.../api/threads/messages?api_key=...`.
+
+REST voice defaults:
+
+- STT: OpenAI `gpt-4o-mini-transcribe`, language `en`.
+- TTS: OpenAI `gpt-4o-mini-tts`, voice `alloy`, output format `mp3`.
+- Realtime STT setup: ElevenLabs `scribe_v2_realtime`, raw `pcm_16000`.
+
+Audio prompt blocks are decoded and uploaded as multipart `audio_file` for STT and Conversation voice modes. Text-only turns keep the existing form-encoded path.
 
 The Rust SSE endpoint layer now preserves the old Python client's important retry invariant:
 
@@ -103,6 +120,10 @@ The native stream translator handles these Backboard chunk types:
 - `reasoning_delta`
 - `reasoning_ended`
 - `content_streaming`
+- `media_generated`
+- `stt_text_delta`
+- `stt_stream_end`
+- `tts_audio_delta`
 - `tool_submit_required`
 - `run_ended`
 - `run_failed`
@@ -115,6 +136,8 @@ Important fixes already made:
 - Balanced/deep thinking now uses provider-shaped payloads, such as `effort`, `budget_tokens`, or `max_tokens`.
 - `run_ended.context_usage` is now parsed as the authoritative context-window source. This fixes the broken `102k / 0 tokens` display.
 - Usage metadata now carries input tokens, output tokens, remaining tokens, summary tokens, context percent, context model, and optional max output tokens.
+- `media_generated` and `run_ended.generated_media` URLs are rendered as chat resource links.
+- `voice_records.stt` transcripts and TTS audio URLs are surfaced in chat when present.
 - `AcpThread` now copies those usage metadata fields into `TokenUsage`.
 - `agent_ui/src/conversation_view/thread_view.rs` now shows more context-window tooltip stats, including Remaining, Summary, and Context model.
 
@@ -176,6 +199,12 @@ Recent checks run during the migration/debug pass:
 
 Current native unit coverage includes:
 
+- Backboard message form serialization for Web/Image/Voice fields.
+- Multipart voice request building with `audio_file`.
+- Realtime voice URL generation.
+- Native media/search/voice config chip inventory.
+- `media_generated` resource-link parsing.
+- Voice payload defaults for STT/TTS/conversation modes.
 - Tool schema filtering for Ask mode.
 - Conservative read-only shell classification.
 - Fast intensity omitting thinking payload.
@@ -185,6 +214,7 @@ Current native unit coverage includes:
 ### Known Follow-Up Areas
 
 - Live IDE/API manual verification is still useful: send a prompt, inspect logs for `path=rust-native`, run a read tool, run an approved shell command, create/edit a file, cancel a turn, and restore a thread.
+- Full realtime microphone capture/playback still needs a dedicated composer action/control that streams PCM frames over the prepared WebSocket. The native endpoint URL/setup state exists; the UI capture loop is not complete.
 - The Rust-native `read_lints` tool is currently a lightweight placeholder message, not full diagnostics integration.
 - `codebase_search` is a lexical fallback, not the full CLI semantic index/RLM path.
 - MCP, browser, web fetch/search, RLM/subagents, notebook tools, and the CLI's richer skill system are not fully ported into the Rust-native tool layer.

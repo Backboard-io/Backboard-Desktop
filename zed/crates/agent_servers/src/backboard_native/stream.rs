@@ -1,9 +1,10 @@
 use std::{pin::Pin, rc::Rc, time::Instant};
 
-use ::backboard::{SendMessageRequest, SubmitToolOutputsRequest};
+use ::backboard::{AudioAttachment, SendMessageRequest, SubmitToolOutputsRequest};
 use acp_thread::{AcpThread, UserMessageId};
 use agent_client_protocol::schema as acp;
 use anyhow::{Context as _, Result, anyhow};
+use base64::Engine as _;
 use futures::{Stream, StreamExt as _};
 use gpui::{AsyncApp, WeakEntity};
 use serde_json::{Value, json};
@@ -33,8 +34,22 @@ pub async fn run_prompt(
         .cancel_flag
         .store(false, std::sync::atomic::Ordering::SeqCst);
 
-    let message = prompt_text(&params.prompt);
+    let prompt_parts = prompt_parts(&params.prompt);
+    let message = prompt_parts.text.clone();
     if message.trim().is_empty() {
+        if matches!(
+            runtime.feature_settings.voice_mode.as_str(),
+            "stt" | "conversation"
+        ) && prompt_parts.audio.is_empty()
+        {
+            emit_agent_text(
+                &state,
+                &runtime,
+                "Attach an audio clip before using Backboard voice transcription.",
+                cx,
+            )?;
+            return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
+        }
         emit_agent_text(
             &state,
             &runtime,
@@ -71,6 +86,37 @@ pub async fn run_prompt(
     let model = Some(runtime.model.clone());
     let tools = Some(tool_schemas::tool_definitions(&runtime.mode.to_string()));
     let thinking = thinking_payload(&runtime.intensity, &runtime.provider, &runtime.model);
+    let voice = voice_payload(&runtime.feature_settings);
+    let audio_file = audio_attachment_for_voice(&runtime.feature_settings, &prompt_parts.audio);
+    if matches!(
+        runtime.feature_settings.voice_mode.as_str(),
+        "stt" | "conversation"
+    ) && audio_file.is_none()
+    {
+        emit_agent_text(
+            &state,
+            &runtime,
+            "Attach an audio clip before using Backboard voice transcription.",
+            cx,
+        )?;
+        return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
+    }
+    if runtime.feature_settings.live_voice == "on" {
+        let realtime_url = client.realtime_voice_url();
+        let setup = realtime_voice_setup(&thread_id, &runtime.feature_settings);
+        log::info!(
+            "Backboard native realtime voice prepared: session_id={} endpoint={} setup={}",
+            params.session_id,
+            realtime_url,
+            setup
+        );
+        emit_progress(
+            &state,
+            &runtime,
+            &format!("Realtime voice is enabled for {realtime_url}."),
+            cx,
+        )?;
+    }
     let context_pack_started = Instant::now();
     let augmented =
         workspace::augment_prompt(&message, &runtime.workspace, &runtime.mode.to_string());
@@ -92,8 +138,17 @@ pub async fn run_prompt(
         memory: "Auto".to_string(),
         thinking,
         tools,
-        web_search: "off".to_string(),
+        web_search: runtime.feature_settings.web_search.clone(),
+        image_generation: (runtime.feature_settings.image_generation == "auto")
+            .then(|| "auto".to_string()),
+        image_model_provider: (runtime.feature_settings.image_generation == "auto")
+            .then(|| super::DEFAULT_IMAGE_PROVIDER.to_string()),
+        image_model_name: (runtime.feature_settings.image_generation == "auto")
+            .then(|| super::DEFAULT_IMAGE_MODEL.to_string()),
+        voice,
+        send_to_llm: send_to_llm_for_voice(&runtime.feature_settings),
         max_tokens: None,
+        audio_file,
     };
     let thread_id_for_request = thread_id.clone();
     log::info!(
@@ -233,6 +288,32 @@ async fn consume_stream(
                         emit_agent_text(&state, &runtime, &text, cx)?;
                     }
                 }
+                "media_generated" => {
+                    emit_media_generated(&state, &runtime, &chunk, cx)?;
+                }
+                "stt_text_delta" => {
+                    if let Some(text) = chunk_text(&chunk) {
+                        emit_agent_text(&state, &runtime, &text, cx)?;
+                    }
+                }
+                "stt_stream_end" => {
+                    if let Some(transcript) = chunk
+                        .get("transcript")
+                        .or_else(|| chunk.get("content"))
+                        .and_then(Value::as_str)
+                        .filter(|text| !text.is_empty())
+                    {
+                        emit_agent_text(
+                            &state,
+                            &runtime,
+                            &format!("\n\nTranscript: {transcript}"),
+                            cx,
+                        )?;
+                    }
+                }
+                "tts_audio_delta" => {
+                    emit_voice_audio_delta(&state, &runtime, &chunk, cx)?;
+                }
                 "tool_submit_required" => {
                     let run_id = chunk
                         .get("run_id")
@@ -291,6 +372,8 @@ async fn consume_stream(
                         );
                         break;
                     }
+                    emit_generated_media_records(&state, &runtime, &chunk, cx).ok();
+                    emit_voice_records(&state, &runtime, &chunk, cx).ok();
                     emit_usage(&state, &runtime, &chunk, cx).ok();
                     state.set_current_run_id(&runtime.session_id, None);
                     return Ok(acp::StopReason::EndTurn);
@@ -551,6 +634,190 @@ fn emit_speed_update(
     )
 }
 
+fn emit_media_generated(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    chunk: &Value,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let links = generated_media_links(chunk);
+    if links.is_empty() {
+        emit_progress(state, runtime, "Backboard generated media.", cx)?;
+        return Ok(());
+    }
+    for link in links {
+        state.emit_update(
+            runtime,
+            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+                acp::ContentBlock::ResourceLink(link),
+            )),
+            cx,
+        )?;
+    }
+    Ok(())
+}
+
+fn emit_generated_media_records(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    chunk: &Value,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    for link in generated_media_links(chunk) {
+        state.emit_update(
+            runtime,
+            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+                acp::ContentBlock::ResourceLink(link),
+            )),
+            cx,
+        )?;
+    }
+    Ok(())
+}
+
+fn emit_voice_audio_delta(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    chunk: &Value,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    if let Some(url) = chunk
+        .get("url")
+        .or_else(|| chunk.get("audio_url"))
+        .and_then(Value::as_str)
+        .filter(|url| !url.is_empty())
+    {
+        let mut link = acp::ResourceLink::new("Backboard voice audio", url);
+        link.mime_type = chunk
+            .get("mime_type")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or(Some("audio/mpeg".to_string()));
+        state.emit_update(
+            runtime,
+            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+                acp::ContentBlock::ResourceLink(link),
+            )),
+            cx,
+        )?;
+    }
+    Ok(())
+}
+
+fn emit_voice_records(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    chunk: &Value,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let Some(records) = chunk.get("voice_records") else {
+        return Ok(());
+    };
+    if let Some(transcript) = records
+        .get("stt")
+        .and_then(|stt| stt.get("transcript").or_else(|| stt.get("text")))
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+    {
+        emit_agent_text(state, runtime, &format!("\n\nTranscript: {transcript}"), cx)?;
+    }
+    for link in voice_record_links(records) {
+        state.emit_update(
+            runtime,
+            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+                acp::ContentBlock::ResourceLink(link),
+            )),
+            cx,
+        )?;
+    }
+    Ok(())
+}
+
+fn generated_media_links(chunk: &Value) -> Vec<acp::ResourceLink> {
+    let mut links = Vec::new();
+    collect_media_links(chunk.get("generated_media"), &mut links);
+    collect_media_links(chunk.get("media"), &mut links);
+    collect_media_links(Some(chunk), &mut links);
+    links
+}
+
+fn collect_media_links(value: Option<&Value>, links: &mut Vec<acp::ResourceLink>) {
+    let Some(value) = value else {
+        return;
+    };
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_media_links(Some(item), links);
+            }
+        }
+        Value::Object(object) => {
+            if let Some(url) = object
+                .get("url")
+                .or_else(|| object.get("image_url"))
+                .or_else(|| object.get("download_url"))
+                .and_then(Value::as_str)
+                .filter(|url| !url.is_empty())
+            {
+                let mut link = acp::ResourceLink::new(
+                    object
+                        .get("name")
+                        .or_else(|| object.get("document_id"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("Backboard generated image"),
+                    url,
+                );
+                link.mime_type = object
+                    .get("mime_type")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                link.size = object.get("file_size_bytes").and_then(Value::as_i64);
+                links.push(link);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn voice_record_links(records: &Value) -> Vec<acp::ResourceLink> {
+    let mut links = Vec::new();
+    if let Some(tts) = records.get("tts") {
+        collect_audio_links(Some(tts), &mut links);
+    }
+    links
+}
+
+fn collect_audio_links(value: Option<&Value>, links: &mut Vec<acp::ResourceLink>) {
+    let Some(value) = value else {
+        return;
+    };
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_audio_links(Some(item), links);
+            }
+        }
+        Value::Object(object) => {
+            if let Some(url) = object
+                .get("url")
+                .or_else(|| object.get("audio_url"))
+                .or_else(|| object.get("download_url"))
+                .and_then(Value::as_str)
+                .filter(|url| !url.is_empty())
+            {
+                let mut link = acp::ResourceLink::new("Backboard voice audio", url);
+                link.mime_type = object
+                    .get("mime_type")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .or(Some("audio/mpeg".to_string()));
+                links.push(link);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ContextUsage {
     used_tokens: u64,
@@ -613,8 +880,15 @@ fn estimate_tokens(text: &str) -> u64 {
     ((text.chars().count() as f64) / 4.0).ceil().max(1.0) as u64
 }
 
-fn prompt_text(blocks: &[acp::ContentBlock]) -> String {
-    blocks
+#[derive(Clone, Debug, Default)]
+struct PromptParts {
+    text: String,
+    audio: Vec<AudioAttachment>,
+}
+
+fn prompt_parts(blocks: &[acp::ContentBlock]) -> PromptParts {
+    let mut audio = Vec::new();
+    let text = blocks
         .iter()
         .map(|block| match block {
             acp::ContentBlock::Text(text) => text.text.clone(),
@@ -626,13 +900,113 @@ fn prompt_text(blocks: &[acp::ContentBlock]) -> String {
                 "[Image omitted in native Backboard runtime]".to_string()
             }
             acp::ContentBlock::Audio(_) => {
-                "[Audio omitted in native Backboard runtime]".to_string()
+                if let Some(attachment) = audio_attachment_from_block(block) {
+                    audio.push(attachment);
+                }
+                String::new()
             }
             _ => String::new(),
         })
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
-        .join("\n\n")
+        .join("\n\n");
+    PromptParts { text, audio }
+}
+
+fn audio_attachment_from_block(block: &acp::ContentBlock) -> Option<AudioAttachment> {
+    let acp::ContentBlock::Audio(audio) = block else {
+        return None;
+    };
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(audio.data.as_bytes())
+        .ok()?;
+    let extension = match audio.mime_type.as_str() {
+        "audio/mpeg" | "audio/mp3" => "mp3",
+        "audio/wav" | "audio/x-wav" => "wav",
+        "audio/ogg" => "ogg",
+        "audio/flac" => "flac",
+        "audio/webm" => "webm",
+        "audio/mp4" | "audio/m4a" => "m4a",
+        _ => "audio",
+    };
+    Some(AudioAttachment {
+        data,
+        file_name: format!("backboard-voice-input.{extension}"),
+        mime_type: audio.mime_type.clone(),
+    })
+}
+
+fn audio_attachment_for_voice(
+    feature_settings: &super::FeatureSettings,
+    attachments: &[AudioAttachment],
+) -> Option<AudioAttachment> {
+    matches!(feature_settings.voice_mode.as_str(), "stt" | "conversation")
+        .then(|| attachments.first().cloned())
+        .flatten()
+}
+
+fn voice_payload(feature_settings: &super::FeatureSettings) -> Option<Value> {
+    match feature_settings.voice_mode.as_str() {
+        "tts" => Some(json!({
+            "tts": {
+                "provider": super::DEFAULT_TTS_PROVIDER,
+                "model": super::DEFAULT_TTS_MODEL,
+                "voice": super::DEFAULT_TTS_VOICE,
+                "output_format": super::DEFAULT_TTS_FORMAT,
+            }
+        })),
+        "stt" => Some(json!({
+            "stt": {
+                "provider": super::DEFAULT_STT_PROVIDER,
+                "model": super::DEFAULT_STT_MODEL,
+                "language": super::DEFAULT_STT_LANGUAGE,
+            }
+        })),
+        "conversation" => Some(json!({
+            "stt": {
+                "provider": super::DEFAULT_STT_PROVIDER,
+                "model": super::DEFAULT_STT_MODEL,
+                "language": super::DEFAULT_STT_LANGUAGE,
+            },
+            "tts": {
+                "provider": super::DEFAULT_TTS_PROVIDER,
+                "model": super::DEFAULT_TTS_MODEL,
+                "voice": super::DEFAULT_TTS_VOICE,
+                "output_format": super::DEFAULT_TTS_FORMAT,
+            }
+        })),
+        _ => None,
+    }
+}
+
+fn realtime_voice_setup(thread_id: &str, feature_settings: &super::FeatureSettings) -> Value {
+    json!({
+        "thread_id": thread_id,
+        "voice": {
+            "stt": {
+                "provider": super::DEFAULT_REALTIME_STT_PROVIDER,
+                "model": super::DEFAULT_REALTIME_STT_MODEL,
+                "audio_format": "pcm_16000",
+            },
+            "tts": (feature_settings.voice_mode == "conversation").then(|| json!({
+                "provider": super::DEFAULT_TTS_PROVIDER,
+                "model": super::DEFAULT_TTS_MODEL,
+                "voice": super::DEFAULT_TTS_VOICE,
+                "output_format": super::DEFAULT_TTS_FORMAT,
+            })),
+        },
+        "llm_provider": "openai",
+        "model_name": "gpt-4o",
+        "memory": "Auto",
+    })
+}
+
+fn send_to_llm_for_voice(feature_settings: &super::FeatureSettings) -> Option<bool> {
+    match feature_settings.voice_mode.as_str() {
+        "stt" => Some(false),
+        "tts" | "conversation" => Some(true),
+        _ => None,
+    }
 }
 
 fn chunk_text(chunk: &Value) -> Option<String> {
@@ -754,5 +1128,51 @@ mod tests {
         assert_eq!(usage.context_limit, 102400);
         assert_eq!(usage.summary_tokens, 5000);
         assert_eq!(usage.model.as_deref(), Some("openai/gpt-5"));
+    }
+
+    #[test]
+    fn voice_payload_uses_backboard_defaults() {
+        let settings = super::super::FeatureSettings {
+            voice_mode: "conversation".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            voice_payload(&settings),
+            Some(json!({
+                "stt": {
+                    "provider": "openai",
+                    "model": "gpt-4o-mini-transcribe",
+                    "language": "en",
+                },
+                "tts": {
+                    "provider": "openai",
+                    "model": "gpt-4o-mini-tts",
+                    "voice": "alloy",
+                    "output_format": "mp3",
+                }
+            }))
+        );
+        assert_eq!(send_to_llm_for_voice(&settings), Some(true));
+    }
+
+    #[test]
+    fn generated_media_links_accept_media_generated_shape() {
+        let chunk = json!({
+            "type": "media_generated",
+            "generated_media": [{
+                "document_id": "doc_123",
+                "media_type": "image",
+                "mime_type": "image/png",
+                "file_size_bytes": 904100,
+                "url": "https://example.com/generated.png"
+            }]
+        });
+
+        let links = generated_media_links(&chunk);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].uri, "https://example.com/generated.png");
+        assert_eq!(links[0].mime_type.as_deref(), Some("image/png"));
+        assert_eq!(links[0].size, Some(904100));
     }
 }

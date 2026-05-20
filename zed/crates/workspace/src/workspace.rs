@@ -3,6 +3,7 @@ pub mod dock;
 pub mod history_manager;
 pub mod invalid_item_view;
 pub mod item;
+mod jarvis_directory_visualizer;
 mod modal_layer;
 mod multi_workspace;
 #[cfg(test)]
@@ -29,6 +30,7 @@ mod workspace_settings;
 
 pub use crate::notifications::NotificationFrame;
 pub use dock::Panel;
+pub use jarvis_directory_visualizer::JarvisThreadSummary;
 pub use multi_workspace::{
     CloseWorkspaceSidebar, DraggedSidebar, FocusWorkspaceSidebar, InterfaceMode,
     MoveProjectToNewWindow, MultiWorkspace, MultiWorkspaceEvent, NewThread, NextProject,
