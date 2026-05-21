@@ -369,8 +369,8 @@ Important framing:
   - Main files changed: `ide/zed/crates/feedback/src/feedback.rs`, `ide/zed/crates/workspace/src/workspace.rs`, `ide/zed/crates/zed/src/zed/app_menus.rs`, `ide/zed/crates/auto_update_ui/src/auto_update_ui.rs`.
   - Current role: prevents Zed support/community flows from surfacing in the Backboard build.
 
-- `81183082` - 2026-05-12 - ErinTomorri - Add Backboard Agent Portal and multi-task launcher.
-  - Purpose: added an older separate-window portal for multi-agent task launching and expanded Agent Workspace controls.
+- `81183082` - 2026-05-12 - ErinTomorri - Add Backboard Agent Portal and multi-agent experiments.
+  - Purpose: added an older separate-window portal for multi-agent experiments and expanded Agent Workspace controls.
   - Main files changed: `ide/zed/crates/agent_ui/src/agent_portal_window.rs`, `ide/zed/crates/agent_ui/src/agent_workspace_ui.rs`, `ide/zed/crates/agent_ui/src/agent_panel.rs`, `ide/zed/crates/agent_ui/src/agent_ui.rs`, `ide/zed/script/backboard-ide-acp.py`.
   - Current role: `agent_portal_window.rs` remains as the older portal implementation; the current preferred UI is the full-page Multi-Agent workspace.
 
@@ -409,7 +409,7 @@ Important framing:
 - `59efd845` - 2026-05-13 - ErinTomorri - Add agent workspace modes, batching & apply flow.
   - Purpose: added Agent/Ask/Manual/Free modes to workspace launches, multi-task batching, batch conflict checks, and richer apply/review metadata.
   - Main files changed: `ide/zed/crates/agent_ui/src/agent_panel.rs`, `ide/zed/crates/agent_ui/src/agent_workspace_ui.rs`, `ide/zed/crates/agent_ui/src/agent_portal_window.rs`, `ide/zed/crates/agent_servers/src/backboard.rs`, `ide/zed/crates/agent_ui/src/agent_ui.rs`, `BACKBOARD_IDE_HANDOFF.md`.
-  - Current role: one task line becomes one retained Backboard ACP thread; git runs are batched, tracked, reviewable, and applied with conflict guards.
+  - Current role: retained Backboard ACP threads can be batched, tracked, reviewable, and applied with conflict guards.
 
 - `bbada1db` - 2026-05-13 - ErinTomorri - Integrate full-page multi-agent workspace.
   - Purpose: moved Agent Workspace into the full-page `MultiWorkspace` experience instead of opening it as an editor tab or separate window.
@@ -851,9 +851,9 @@ The cancel path is intentionally multi-layered:
 
 ## Backboard Editor To Native Runtime Flow
 
-This is the current flow for a normal Backboard chat turn and for Agent Workspace auto-submitted tasks.
+This is the current flow for a normal Backboard chat turn.
 
-1. User submits a prompt in the native Backboard composer, Beginner UI follow-up box, or Agent Workspace task launcher.
+1. User submits a prompt in the native Backboard composer or Beginner UI follow-up box.
 2. `ThreadView.send()` resolves editor content and clears/queues the composer.
 3. `AcpThread.send()` optimistically appends the local user message and asks the active `AgentConnection` to prompt.
 4. `BackboardNativeConnection` receives the prompt directly inside Rust, resolves the `NativeSession`, records turn metrics, and ensures assistant/thread binding.
@@ -916,16 +916,11 @@ Primary files:
 What the user sees:
 
 - Full-page `Agent Workspace` / `Multi-Agent` dashboard.
-- One task per line input.
-- Scope controls: Whole Project, Selected Files, Git Changes, Tests Only.
-- Type controls: Build, Review, Test, Docs.
-- Mode controls: Agent, Ask, Manual, Free.
 - Run cards grouped by batch, with status, cost, changed files, events, branch/worktree labels, apply state, and actions.
 - A right-side live `AgentPanel` host for the selected/draft chat, plus run cards on the dashboard.
 
 Runtime behavior:
 
-- Each task line becomes a retained native Backboard conversation.
 - In git projects, each task gets a linked worktree and branch from the same base commit.
 - The ACP session work_dirs point at that agent worktree, so reads/writes happen in isolation.
 - `Review` opens the existing `AgentDiffPane`.
@@ -1743,11 +1738,6 @@ Purpose:
 
 ### Page UI
 
-`BackboardAgentWorkspacePage` includes two modes:
-
-- Dashboard
-- Configure
-
 Dashboard:
 
 - Header counters:
@@ -1756,38 +1746,8 @@ Dashboard:
   - ready to apply
   - blocked
 - Scrollable main dashboard with responsive cards grouped by batch when multiple tasks launch together.
-- Persistent right task rail for writing one task per line, choosing mode/scope/type, and launching agents.
-- Empty state points users to the right task rail.
-- Selected agent details render in the right rail below the task composer.
+- Right-side live Backboard chat panel for the selected or draft conversation.
 - Bottom status strip with active agent count, changed file count, and system status.
-
-Configure view:
-
-- Single-line task prompt.
-- Scope selector:
-  - `Whole Project`
-  - `Selected Files`
-  - `Git Changes`
-  - `Tests Only`
-- Agent type selector:
-  - `Build`
-  - `Review`
-  - `Test`
-  - `Docs`
-- `Run Agent` button.
-
-Defaults:
-
-- Scope: `Whole Project`
-- Type: `Build`
-- Mode: `Agent`
-
-The Agent Workspace launcher also exposes mode selection:
-
-- `Agent`: normal autonomous coding with command approval.
-- `Ask`: planning/answering mode with mutating tools blocked by the bridge.
-- `Manual`: file proposal style, with shell/subagent tasks blocked by the bridge.
-- `Free`: autonomous mode where routine shell command approvals are bypassed by the bridge.
 
 ### Agent Workspace Runtime
 
@@ -1817,11 +1777,10 @@ The workspace page asks `AgentPanel` to create a managed git worktree when a loc
 
 Worktree behavior:
 
-- One submitted task line becomes one retained Backboard thread/session.
-- One retained thread is one ACP session and one `ConversationView`; parallel coding should use separate retained threads rather than sharing a single chat conversation.
+- One retained Backboard thread maps to one ACP session and one `ConversationView`; parallel coding should use separate retained threads rather than sharing a single chat conversation.
 - Each Agent Workspace run creates a branch like `backboard/agent/<task-slug>-<id>`.
 - The worktree path is resolved with the existing `git.worktree_directory` setting through `Repository::path_for_new_linked_worktree`.
-- Multi-task git launches plan all worktree paths first, create all linked worktrees as one batch, roll back attempted worktrees if any creation fails, and only then start the agent threads.
+- Batched git launches plan all worktree paths first, create all linked worktrees as one batch, roll back attempted worktrees if any creation fails, and only then start the agent threads.
 - New worktrees are added to the project before their ACP sessions start, so `fs/write_text_file` and editor diffs resolve inside each agent worktree.
 - `AgentPanel::update_thread_work_dirs` preserves per-agent work_dirs instead of replacing them with the project-wide default path list.
 
@@ -2268,7 +2227,7 @@ The current Backboard IDE work has touched or added these important files. This 
 
 - `ide/zed/crates/agent_ui/src/agent_workspace_ui.rs`
   - Current full-page Multi-Agent workspace page.
-  - Renders task input, mode/scope/type controls, dashboard counters, grouped cards, card controls, draft/new-chat state, live right-panel `AgentPanel`, and status strips.
+  - Renders dashboard counters, grouped cards, card controls, draft/new-chat state, live right-panel `AgentPanel`, and status strips.
   - This is the preferred Agent Workspace UI. It is shown by expanding `MultiWorkspace`, not by opening a normal editor tab.
 
 - `ide/zed/crates/agent_ui/src/agent_portal_window.rs`

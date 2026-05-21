@@ -469,6 +469,10 @@ pub struct ThreadView {
     /// Tracks which tool calls have their content/output expanded.
     /// Used for showing/hiding tool call results, terminal output, etc.
     pub expanded_tool_calls: HashSet<acp::ToolCallId>,
+    command_details_expanded: HashSet<acp::ToolCallId>,
+    expanded_assistant_turns: HashSet<usize>,
+    collapsed_assistant_turns: HashSet<usize>,
+    assistant_turn_durations: HashMap<usize, Duration>,
     pub expanded_tool_call_raw_inputs: HashSet<acp::ToolCallId>,
     pub expanded_thinking_blocks: HashSet<(usize, usize)>,
     auto_expanded_thinking_block: Option<(usize, usize)>,
@@ -697,6 +701,10 @@ impl ThreadView {
             last_token_limit_telemetry: None,
             thread_feedback: Default::default(),
             expanded_tool_calls: HashSet::default(),
+            command_details_expanded: HashSet::default(),
+            expanded_assistant_turns: HashSet::default(),
+            collapsed_assistant_turns: HashSet::default(),
+            assistant_turn_durations: HashMap::default(),
             expanded_tool_call_raw_inputs: HashSet::default(),
             expanded_thinking_blocks: HashSet::default(),
             auto_expanded_thinking_block: None,
@@ -920,12 +928,12 @@ impl ThreadView {
         let model_label = self.current_model_label(cx);
 
         h_flex()
-            .gap_1p5()
+            .gap_1()
             .items_center()
-            .child(self.render_backboard_logo(px(16.)))
+            .child(self.render_backboard_logo(px(14.)))
             .child(
                 Label::new(self.agent_display_name.clone())
-                    .size(LabelSize::Small)
+                    .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
             .when_some(model_label, |this, model| {
@@ -935,6 +943,49 @@ impl ThreadView {
                         .color(Color::Muted),
                 )
             })
+    }
+
+    fn is_backboard_progress_text(text: &str) -> bool {
+        let text = text.trim_start();
+        text.starts_with("Backboard ")
+            || text.starts_with("Loading the Backboard agent runtime.")
+            || text.starts_with("Preparing workspace context and tools.")
+            || text.starts_with("Preparing workspace context.")
+            || text.starts_with("Sending the task to the selected model.")
+            || text.starts_with("Sending to model.")
+            || text.starts_with("Connected to model.")
+            || text.starts_with("Planning next step.")
+            || text.starts_with("Running ")
+            || text.starts_with("Retrying request.")
+            || text.starts_with("Realtime voice enabled ")
+            || text.starts_with("Generated media.")
+            || text.starts_with("Updating the visible task plan.")
+    }
+
+    fn render_backboard_progress_status(
+        &self,
+        markdown: Entity<Markdown>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let label = markdown
+            .read(cx)
+            .source()
+            .trim()
+            .trim_end_matches('.')
+            .to_string();
+
+        h_flex()
+            .gap_1p5()
+            .items_center()
+            .opacity(0.72)
+            .child(self.render_backboard_logo(px(11.)))
+            .child(
+                Label::new(label)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .truncate(),
+            )
+            .into_any_element()
     }
 
     fn render_backboard_footer_status(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1090,55 +1141,6 @@ impl ThreadView {
         )
     }
 
-    fn render_backboard_run_overview(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.agent_display_name.as_ref() != "Backboard" {
-            return None;
-        }
-
-        let is_generating = matches!(self.thread.read(cx).status(), ThreadStatus::Generating);
-        if !is_generating {
-            return None;
-        }
-
-        let elapsed = self
-            .turn_fields
-            .turn_started_at
-            .map(|started_at| ("Working for", started_at.elapsed()));
-
-        if elapsed.is_none() {
-            return None;
-        }
-
-        Some(
-            h_flex()
-                .mx_5()
-                .mt_3()
-                .mb_1()
-                .pb_3()
-                .justify_between()
-                .border_b_1()
-                .border_color(cx.theme().colors().border_variant)
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .child(self.render_backboard_logo(px(16.)))
-                        .when_some(elapsed, |this, (label, duration)| {
-                            this.child(
-                                Label::new(format!("{label} {}", duration_alt_display(duration)))
-                                    .size(LabelSize::Small)
-                                    .color(if is_generating {
-                                        Color::Default
-                                    } else {
-                                        Color::Muted
-                                    }),
-                            )
-                        }),
-                )
-                .into_any_element(),
-        )
-    }
-
     /// Returns the currently active editor, either for a message that is being
     /// edited or the editor for a new message.
     pub(crate) fn active_editor(&self, cx: &App) -> Entity<MessageEditor> {
@@ -1180,14 +1182,17 @@ impl ThreadView {
             ViewEvent::NewDiff(tool_call_id) => {
                 let is_zed_native_agent = self.agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref();
                 let is_backboard_agent = self.agent_id.as_ref() == "backboard";
-                if is_backboard_agent
-                    || (AgentSettings::get_global(cx).expand_edit_card && !is_zed_native_agent)
+                if !is_backboard_agent
+                    && AgentSettings::get_global(cx).expand_edit_card
+                    && !is_zed_native_agent
                 {
                     self.expanded_tool_calls.insert(tool_call_id.clone());
                 }
             }
             ViewEvent::NewTerminal(tool_call_id) => {
-                if AgentSettings::get_global(cx).expand_terminal_card {
+                if self.agent_id.as_ref() != "backboard"
+                    && AgentSettings::get_global(cx).expand_terminal_card
+                {
                     self.expanded_tool_calls.insert(tool_call_id.clone());
                 }
             }
@@ -1312,15 +1317,24 @@ impl ThreadView {
         generation
     }
 
-    pub fn stop_turn(&mut self, generation: usize, _cx: &mut Context<Self>) {
+    pub fn stop_turn(&mut self, generation: usize, cx: &mut Context<Self>) {
         if self.turn_fields.turn_generation != generation {
             return;
         }
-        self.turn_fields.last_turn_duration = self
+        let duration = self
             .turn_fields
             .turn_started_at
             .take()
             .map(|started| started.elapsed());
+        self.turn_fields.last_turn_duration = duration;
+        if let Some(duration) = duration {
+            let entries = self.thread.read(cx).entries();
+            let start = entries
+                .iter()
+                .rposition(|entry| matches!(entry, AgentThreadEntry::UserMessage(_)))
+                .map_or(0, |ix| ix + 1);
+            self.assistant_turn_durations.insert(start, duration);
+        }
         self.turn_fields.last_turn_tokens = self.turn_fields.turn_tokens.take();
         self.turn_fields._turn_timer_task = None;
     }
@@ -5152,6 +5166,221 @@ impl Render for TokenUsageTooltip {
 }
 
 impl ThreadView {
+    fn uses_compact_assistant_turns(&self) -> bool {
+        self.agent_id.as_ref() == "backboard" || self.agent_display_name.as_ref() == "Backboard"
+    }
+
+    fn assistant_turn_bounds_for_index(
+        &self,
+        entries: &[AgentThreadEntry],
+        index: usize,
+        cx: &Context<Self>,
+    ) -> Option<(usize, usize)> {
+        if !self.uses_compact_assistant_turns() {
+            return None;
+        }
+
+        if matches!(entries.get(index)?, AgentThreadEntry::UserMessage(_)) {
+            return None;
+        }
+
+        let mut start = index;
+        while start > 0 && !matches!(entries[start - 1], AgentThreadEntry::UserMessage(_)) {
+            start -= 1;
+        }
+
+        let mut end = index + 1;
+        while end < entries.len() && !matches!(entries[end], AgentThreadEntry::UserMessage(_)) {
+            end += 1;
+        }
+
+        let is_active_turn = matches!(self.thread.read(cx).status(), ThreadStatus::Generating)
+            && end == entries.len();
+        if !is_active_turn
+            && let Some(final_response_ix) =
+                self.assistant_turn_final_response_index(entries, start, end, cx)
+        {
+            if index >= final_response_ix {
+                return None;
+            }
+
+            end = final_response_ix;
+            if start == end {
+                return None;
+            }
+        }
+
+        Some((start, end))
+    }
+
+    fn active_assistant_turn_bounds(
+        &self,
+        entries: &[AgentThreadEntry],
+        cx: &Context<Self>,
+    ) -> Option<(usize, usize)> {
+        if !self.uses_compact_assistant_turns() {
+            return None;
+        }
+
+        if !matches!(self.thread.read(cx).status(), ThreadStatus::Generating) {
+            return None;
+        }
+
+        let start = entries
+            .iter()
+            .rposition(|entry| matches!(entry, AgentThreadEntry::UserMessage(_)))
+            .map_or(0, |ix| ix + 1);
+
+        Some((start, entries.len()))
+    }
+
+    fn assistant_turn_is_expanded(
+        &self,
+        start: usize,
+        end: usize,
+        total_entries: usize,
+        cx: &Context<Self>,
+    ) -> bool {
+        if self.collapsed_assistant_turns.contains(&start) {
+            return false;
+        }
+
+        if self.expanded_assistant_turns.contains(&start) {
+            return true;
+        }
+
+        matches!(self.thread.read(cx).status(), ThreadStatus::Generating) && end == total_entries
+    }
+
+    fn assistant_turn_status_label(
+        &self,
+        start: usize,
+        end: usize,
+        total_entries: usize,
+        cx: &Context<Self>,
+    ) -> String {
+        let is_active_turn = matches!(self.thread.read(cx).status(), ThreadStatus::Generating)
+            && end == total_entries;
+
+        if is_active_turn {
+            return self
+                .turn_fields
+                .turn_started_at
+                .map(|started_at| {
+                    format!("Working for {}", duration_alt_display(started_at.elapsed()))
+                })
+                .unwrap_or_else(|| "Working".to_string());
+        }
+
+        if end == total_entries
+            && let Some(duration) = self.turn_fields.last_turn_duration
+        {
+            return format!("Worked for {}", duration_alt_display(duration));
+        }
+
+        if let Some(duration) = self.assistant_turn_durations.get(&start) {
+            return format!("Worked for {}", duration_alt_display(*duration));
+        }
+
+        "Worked".to_string()
+    }
+
+    fn render_assistant_turn_group(
+        &self,
+        start: usize,
+        end: usize,
+        entries: &[AgentThreadEntry],
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let total_entries = entries.len();
+        let is_expanded = self.assistant_turn_is_expanded(start, end, total_entries, cx);
+        let label = self.assistant_turn_status_label(start, end, total_entries, cx);
+        let show_generating = self.generating_indicator_in_list
+            && self.active_assistant_turn_bounds(entries, cx) == Some((start, end));
+        let confirmation = entries
+            .last()
+            .is_some_and(|entry| Self::is_waiting_for_confirmation(entry));
+
+        let mut content = v_flex().w_full();
+        if is_expanded {
+            let mut ix = start;
+            while ix < end {
+                if let Some(group) = self.exploration_group_at(entries, ix, cx) {
+                    content = content.child(self.render_exploration_group(
+                        &group,
+                        entries.len(),
+                        entries,
+                        window,
+                        cx,
+                    ));
+                    ix = group.end;
+                    continue;
+                }
+
+                content =
+                    content.child(self.render_entry(ix, entries.len(), &entries[ix], window, cx));
+                ix += 1;
+            }
+
+            if show_generating {
+                content = content.child(self.render_generating(confirmation, cx));
+            }
+        }
+
+        v_flex()
+            .w_full()
+            .child(self.render_assistant_turn_header(start, is_expanded, label, cx))
+            .child(content)
+            .into_any_element()
+    }
+
+    fn render_assistant_turn_header(
+        &self,
+        start: usize,
+        is_expanded: bool,
+        label: String,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let header_id = SharedString::from(format!("assistant-turn-{start}"));
+
+        h_flex()
+            .id(header_id.clone())
+            .group(&header_id)
+            .mx_5()
+            .pt_1()
+            .pb_1()
+            .justify_between()
+            .items_center()
+            .cursor(CursorStyle::PointingHand)
+            .border_b_1()
+            .border_color(cx.theme().colors().border_variant.opacity(0.7))
+            .hover(|style| style.bg(cx.theme().colors().element_hover.opacity(0.35)))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+                    .child(
+                        Disclosure::new(("assistant-turn-disclosure", start), is_expanded)
+                            .opened_icon(IconName::ChevronUp)
+                            .closed_icon(IconName::ChevronDown)
+                            .visible_on_hover(&header_id),
+                    ),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if is_expanded {
+                    this.expanded_assistant_turns.remove(&start);
+                    this.collapsed_assistant_turns.insert(start);
+                } else {
+                    this.collapsed_assistant_turns.remove(&start);
+                    this.expanded_assistant_turns.insert(start);
+                }
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
     fn render_entries(&mut self, cx: &mut Context<Self>) -> List {
         let max_content_width = AgentSettings::get_global(cx).max_content_width;
         let centered_container = move |content: AnyElement| {
@@ -5168,6 +5397,18 @@ impl ThreadView {
             cx.processor(move |this, index: usize, window, cx| {
                 let entries = this.thread.read(cx).entries();
                 if let Some(entry) = entries.get(index) {
+                    if let Some((start, end)) =
+                        this.assistant_turn_bounds_for_index(entries, index, cx)
+                    {
+                        if index != start {
+                            return Empty.into_any();
+                        }
+
+                        let rendered =
+                            this.render_assistant_turn_group(start, end, entries, window, cx);
+                        return centered_container(rendered).into_any_element();
+                    }
+
                     if let Some(group) = this.exploration_group_at(entries, index, cx) {
                         if index != group.start {
                             return Empty.into_any();
@@ -5185,6 +5426,14 @@ impl ThreadView {
                     let rendered = this.render_entry(index, entries.len(), entry, window, cx);
                     centered_container(rendered.into_any_element()).into_any_element()
                 } else if this.generating_indicator_in_list {
+                    if let Some((start, end)) = this.active_assistant_turn_bounds(entries, cx) {
+                        if start == entries.len() {
+                            let rendered =
+                                this.render_assistant_turn_group(start, end, entries, window, cx);
+                            return centered_container(rendered).into_any_element();
+                        }
+                        return Empty.into_any();
+                    }
                     let confirmation = entries
                         .last()
                         .is_some_and(|entry| Self::is_waiting_for_confirmation(entry));
@@ -5298,6 +5547,99 @@ impl ThreadView {
         saw_thought
     }
 
+    fn assistant_message_has_regular_content(
+        &self,
+        message: &AssistantMessage,
+        cx: &Context<Self>,
+    ) -> bool {
+        message.chunks.iter().any(|chunk| match chunk {
+            AssistantMessageChunk::Message { block } => block
+                .markdown()
+                .is_some_and(|md| !md.read(cx).source().trim().is_empty()),
+            AssistantMessageChunk::Thought { .. } => false,
+        })
+    }
+
+    fn assistant_turn_final_response_index(
+        &self,
+        entries: &[AgentThreadEntry],
+        start: usize,
+        end: usize,
+        cx: &Context<Self>,
+    ) -> Option<usize> {
+        if end <= start {
+            return None;
+        }
+
+        let final_ix = end - 1;
+        let AgentThreadEntry::AssistantMessage(message) = entries.get(final_ix)? else {
+            return None;
+        };
+
+        if self.assistant_message_has_regular_content(message, cx) {
+            Some(final_ix)
+        } else {
+            None
+        }
+    }
+
+    fn assistant_message_has_visible_content(
+        &self,
+        message: &AssistantMessage,
+        entry_ix: usize,
+        total_entries: usize,
+        cx: &Context<Self>,
+    ) -> bool {
+        let is_last = entry_ix + 1 == total_entries;
+        let is_generating = matches!(self.thread.read(cx).status(), ThreadStatus::Generating);
+
+        message.chunks.iter().any(|chunk| match chunk {
+            AssistantMessageChunk::Message { block } => block
+                .markdown()
+                .is_some_and(|md| !md.read(cx).source().trim().is_empty()),
+            AssistantMessageChunk::Thought { block } => block.markdown().is_some_and(|md| {
+                let source = md.read(cx).source().to_string();
+                if source.trim().is_empty() {
+                    return false;
+                }
+
+                if Self::is_backboard_progress_text(&source) {
+                    is_last && is_generating
+                } else {
+                    true
+                }
+            }),
+        })
+    }
+
+    fn is_first_visible_assistant_content_in_turn(
+        &self,
+        entry_ix: usize,
+        total_entries: usize,
+        cx: &Context<Self>,
+    ) -> bool {
+        let entries = self.thread.read(cx).entries();
+
+        for previous_ix in (0..entry_ix).rev() {
+            match &entries[previous_ix] {
+                AgentThreadEntry::UserMessage(_) => break,
+                AgentThreadEntry::AssistantMessage(message) => {
+                    if self.assistant_message_has_visible_content(
+                        message,
+                        previous_ix,
+                        total_entries,
+                        cx,
+                    ) {
+                        return false;
+                    }
+                }
+                AgentThreadEntry::ToolCall(_) | AgentThreadEntry::CompletedPlan(_) => {}
+            }
+        }
+
+        true
+    }
+
     fn render_exploration_group(
         &self,
         group: &ExplorationGroup,
@@ -5324,8 +5666,8 @@ impl ThreadView {
 
         v_flex()
             .mx_5()
-            .my_1p5()
-            .rounded_md()
+            .my_0p5()
+            .rounded(rems_from_px(5.))
             .border_1()
             .border_color(cx.theme().colors().border_variant.opacity(0.34))
             .bg(cx
@@ -5340,21 +5682,21 @@ impl ThreadView {
                     .group(&header_id)
                     .w_full()
                     .justify_between()
-                    .px_2()
-                    .py_1p5()
+                    .px_1p5()
+                    .py_0p5()
                     .hover(|style| style.bg(cx.theme().colors().element_hover))
                     .child(
                         h_flex()
-                            .gap_2()
+                            .gap_1p5()
                             .items_center()
                             .child(
                                 Icon::new(IconName::ToolSearch)
-                                    .size(IconSize::Small)
+                                    .size(IconSize::XSmall)
                                     .color(Color::Muted),
                             )
                             .child(
                                 Label::new(summary)
-                                    .size(LabelSize::Small)
+                                    .size(LabelSize::XSmall)
                                     .color(Color::Muted),
                             ),
                     )
@@ -5376,9 +5718,9 @@ impl ThreadView {
             .when(is_open, |this| {
                 this.child(
                     v_flex()
-                        .gap_1()
-                        .px_3()
-                        .py_2()
+                        .gap_0p5()
+                        .px_2()
+                        .py_1()
                         .border_t_1()
                         .border_color(cx.theme().colors().border_variant.opacity(0.26))
                         .children(detail_rows),
@@ -5447,10 +5789,10 @@ impl ThreadView {
 
         h_flex()
             .id(("exploration-detail-row", entry_ix))
-            .gap_2()
+            .gap_1p5()
             .items_center()
-            .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
-            .child(div().text_ui_sm(cx).child(self.render_markdown(
+            .child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
+            .child(div().text_xs().child(self.render_markdown(
                 tool_call.label.clone(),
                 MarkdownStyle::themed(MarkdownFont::Agent, window, cx).with_buffer_font(cx),
             )))
@@ -5655,12 +5997,13 @@ impl ThreadView {
                 is_subagent_output,
             }) => {
                 let mut is_blank = true;
+                let mut rendered_regular_content = false;
                 let is_last = entry_ix + 1 == total_entries;
 
                 let style = MarkdownStyle::themed(MarkdownFont::Agent, window, cx);
                 let message_body = v_flex()
                     .w_full()
-                    .gap_3()
+                    .gap_1p5()
                     .children(chunks.iter().enumerate().filter_map(
                         |(chunk_ix, chunk)| match chunk {
                             AssistantMessageChunk::Message { block } => {
@@ -5670,6 +6013,7 @@ impl ThreadView {
                                     if this_is_blank {
                                         return None;
                                     }
+                                    rendered_regular_content = true;
 
                                     Some(
                                         self.render_markdown(md.clone(), style.clone())
@@ -5679,11 +6023,29 @@ impl ThreadView {
                             }
                             AssistantMessageChunk::Thought { block } => {
                                 block.markdown().and_then(|md| {
-                                    let this_is_blank = md.read(cx).source().trim().is_empty();
+                                    let source = md.read(cx).source().to_string();
+                                    let this_is_blank = source.trim().is_empty();
+                                    if Self::is_backboard_progress_text(&source) {
+                                        let is_generating = matches!(
+                                            self.thread.read(cx).status(),
+                                            ThreadStatus::Generating
+                                        );
+                                        if is_last && is_generating && !this_is_blank {
+                                            is_blank = false;
+                                            return Some(
+                                                self.render_backboard_progress_status(
+                                                    md.clone(),
+                                                    cx,
+                                                ),
+                                            );
+                                        }
+                                        return None;
+                                    }
                                     is_blank = is_blank && this_is_blank;
                                     if this_is_blank {
                                         return None;
                                     }
+                                    rendered_regular_content = true;
                                     Some(
                                         self.render_thinking_block(
                                             entry_ix,
@@ -5703,14 +6065,23 @@ impl ThreadView {
                 if is_blank {
                     Empty.into_any()
                 } else {
+                    let show_header = !*is_subagent_output
+                        && rendered_regular_content
+                        && self.is_first_visible_assistant_content_in_turn(
+                            entry_ix,
+                            total_entries,
+                            cx,
+                        );
+
                     v_flex()
                         .px_5()
-                        .py_1p5()
-                        .when(is_last, |this| this.pb_4())
-                        .gap_1p5()
+                        .when(show_header, |this| this.pt_1().pb_0p5())
+                        .when(!show_header, |this| this.pt_0().pb_0p5())
+                        .when(is_last, |this| this.pb_2())
+                        .gap_1()
                         .w_full()
                         .text_ui(cx)
-                        .when(!*is_subagent_output, |this| {
+                        .when(show_header, |this| {
                             this.child(self.render_assistant_message_header(cx))
                         })
                         .child(self.render_message_context_menu(entry_ix, message_body, cx))
@@ -5977,7 +6348,7 @@ impl ThreadView {
 
         let mut container = h_flex()
             .w_full()
-            .py_2()
+            .py_1()
             .px_5()
             .gap_px()
             .opacity(0.6)
@@ -6373,6 +6744,15 @@ impl ThreadView {
         } else {
             IconName::ArrowDown
         };
+        let status_label = if confirmation {
+            None
+        } else if is_blocked_on_terminal_command {
+            Some("Command running")
+        } else if is_waiting {
+            Some("Thinking")
+        } else {
+            Some("Streaming")
+        };
 
         h_flex()
             .id("generating-spinner")
@@ -6406,17 +6786,12 @@ impl ThreadView {
                     )
                 }
             })
-            .child(self.render_backboard_status(
-                if confirmation {
-                    "awaiting confirmation"
-                } else if is_waiting {
-                    "thinking"
-                } else {
-                    "streaming"
-                },
-                !confirmation,
-                cx,
-            ))
+            .children(status_label.map(|label| {
+                Label::new(label)
+                    .size(LabelSize::Small)
+                    .color(Color::Muted)
+                    .into_any_element()
+            }))
             .when_some(elapsed_label, |this, elapsed| {
                 this.child(
                     Label::new(elapsed)
@@ -6901,15 +7276,11 @@ impl ThreadView {
         // The label's markdown source is a fenced code block (```\n...\n```);
         // strip the fences so the copy button yields just the command text.
         let command_source = command.read(cx).source();
-        let command_text = command_source
-            .strip_prefix("```\n")
-            .and_then(|s| s.strip_suffix("\n```"))
-            .unwrap_or(&command_source)
-            .to_string();
+        let command_text = Self::markdown_code_block_text(&command_source);
 
         let mut style = MarkdownStyle::themed(MarkdownFont::Agent, window, cx).with_buffer_font(cx);
-        style.container_style.text.font_size = Some(rems_from_px(12.).into());
-        style.container_style.text.line_height = Some(rems_from_px(17.).into());
+        style.container_style.text.font_size = Some(rems_from_px(11.).into());
+        style.container_style.text.line_height = Some(rems_from_px(15.).into());
         style.height_is_multiple_of_line_height = true;
 
         let header_bg = self.tool_card_header_bg(cx);
@@ -6941,11 +7312,25 @@ impl ThreadView {
         v_flex()
             .group(group)
             .relative()
-            .p_1p5()
+            .p_1()
             .bg(header_bg)
-            .when(is_preview, |this| this.pt_1().children(run_command_label))
+            .when(is_preview, |this| this.pt_0p5().children(run_command_label))
             .child(markdown_element)
             .child(div().absolute().top_1().right_1().child(copy_button))
+    }
+
+    fn markdown_code_block_text(source: &str) -> String {
+        let trimmed = source.trim();
+        if !trimmed.starts_with("```") {
+            return source.to_string();
+        }
+
+        let mut lines = trimmed.lines();
+        lines.next();
+        lines
+            .take_while(|line| !line.trim_start().starts_with("```"))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     fn render_terminal_tool_call(
@@ -7015,28 +7400,49 @@ impl ThreadView {
             cx,
         );
 
-        let is_expanded = self.expanded_tool_calls.contains(&tool_call.id);
+        let is_expanded = self.command_details_expanded.contains(&tool_call.id);
 
         let header = h_flex()
             .id(header_id)
-            .pt_1()
-            .pl_1p5()
-            .pr_1()
+            .py_0p5()
+            .pl_1()
+            .pr_0p5()
             .flex_none()
             .gap_1()
             .justify_between()
             .child(
-                div()
-                    .id(("command-target-path", terminal.entity_id()))
-                    .w_full()
-                    .max_w_full()
-                    .overflow_x_scroll()
+                h_flex()
+                    .id(("command-summary", terminal.entity_id()))
+                    .min_w_0()
+                    .flex_1()
+                    .gap_1p5()
+                    .items_center()
                     .child(
-                        Label::new(working_dir)
-                            .buffer_font(cx)
+                        Icon::new(IconName::ToolTerminal)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new(if needs_confirmation {
+                            "Approve command"
+                        } else if !command_finished {
+                            "Running command"
+                        } else if command_failed {
+                            "Command failed"
+                        } else {
+                            "Command complete"
+                        })
                             .size(LabelSize::XSmall)
                             .color(Color::Muted),
-                    ),
+                    )
+                    .child(
+                        Label::new(working_dir.clone())
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .truncate_start()
+                            .flex_1(),
+                    )
+                    .tooltip(Tooltip::text("Command details are hidden by default.")),
             )
             .child(
                 Disclosure::new(
@@ -7053,9 +7459,9 @@ impl ThreadView {
                     let id = tool_call.id.clone();
                     move |this, _event, _window, cx| {
                         if is_expanded {
-                            this.expanded_tool_calls.remove(&id);
+                            this.command_details_expanded.remove(&id);
                         } else {
-                            this.expanded_tool_calls.insert(id.clone());
+                            this.command_details_expanded.insert(id.clone());
                         }
                         cx.notify();
                     }
@@ -7168,12 +7574,12 @@ impl ThreadView {
 
         v_flex()
             .when(!is_subagent, |this| {
-                this.my_1p5()
+                this.my_0p5()
                     .mx_5()
                     .border_1()
                     .when(tool_failed || command_failed, |card| card.border_dashed())
                     .border_color(border_color)
-                    .rounded_md()
+                    .rounded(rems_from_px(5.))
             })
             .overflow_hidden()
             .child(
@@ -7182,12 +7588,14 @@ impl ThreadView {
                     .bg(header_bg)
                     .text_xs()
                     .child(header)
-                    .child(command_element),
+                    .when(is_expanded || needs_confirmation, |this| {
+                        this.child(command_element)
+                    }),
             )
             .when(is_expanded && terminal_view.is_some(), |this| {
                 this.child(
                     div()
-                        .pt_2()
+                        .pt_1()
                         .border_t_1()
                         .when(tool_failed || command_failed, |card| card.border_dashed())
                         .border_color(border_color)
@@ -7352,7 +7760,11 @@ impl ThreadView {
 
         let has_image_content = tool_call.content.iter().any(|c| c.image().is_some());
         let is_collapsible = !tool_call.content.is_empty() && !needs_confirmation;
-        let mut is_open = self.expanded_tool_calls.contains(&tool_call.id);
+        let mut is_open = if is_terminal_tool {
+            self.command_details_expanded.contains(&tool_call.id)
+        } else {
+            self.expanded_tool_calls.contains(&tool_call.id)
+        };
 
         is_open |= needs_confirmation;
 
@@ -7535,15 +7947,15 @@ impl ThreadView {
                 if is_subagent {
                     this
                 } else if use_card_layout {
-                    this.my_1p5()
-                        .rounded_md()
+                    this.my_0p5()
+                        .rounded(rems_from_px(5.))
                         .border_1()
                         .when(failed_or_canceled, |this| this.border_dashed())
                         .border_color(self.tool_card_border_color(cx))
                         .bg(cx.theme().colors().editor_background)
                         .overflow_hidden()
                 } else {
-                    this.my_1()
+                    this.my_0p5()
                 }
             })
             .when(!is_subagent, |this| {
@@ -7558,13 +7970,73 @@ impl ThreadView {
             })
             .map(|this| {
                 if is_terminal_tool {
-                    this.child(self.render_collapsible_command(
-                        card_header_id.clone(),
-                        true,
-                        tool_call.label.clone(),
-                        window,
-                        cx,
-                    ))
+                    let command_status = match &tool_call.status {
+                        ToolCallStatus::WaitingForConfirmation { .. } => "Approve command",
+                        ToolCallStatus::Pending | ToolCallStatus::InProgress => "Running command",
+                        ToolCallStatus::Failed | ToolCallStatus::Rejected => "Command failed",
+                        ToolCallStatus::Canceled => "Command canceled",
+                        ToolCallStatus::Completed => "Command complete",
+                    };
+
+                    this.child(
+                        h_flex()
+                            .group(&card_header_id)
+                            .relative()
+                            .w_full()
+                            .justify_between()
+                            .px_1()
+                            .py_0p5()
+                            .rounded_t(rems_from_px(5.))
+                            .bg(self.tool_card_header_bg(cx))
+                            .child(
+                                h_flex()
+                                    .min_w_0()
+                                    .gap_1()
+                                    .items_center()
+                                    .h(window.line_height() - px(2.))
+                                    .child(
+                                        Icon::new(IconName::ToolTerminal)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(
+                                        Label::new(command_status)
+                                            .size(LabelSize::Custom(self.tool_name_font_size()))
+                                            .color(Color::Muted),
+                                    ),
+                            )
+                            .child(
+                                h_flex().pr_0p5().when(is_collapsible, |this| {
+                                    this.child(
+                                        Disclosure::new(("expand-output", entry_ix), is_open)
+                                            .opened_icon(IconName::ChevronUp)
+                                            .closed_icon(IconName::ChevronDown)
+                                            .visible_on_hover(&card_header_id)
+                                            .on_click(cx.listener({
+                                                let id = tool_call.id.clone();
+                                                move |this: &mut Self, _, _, cx| {
+                                                    if is_open {
+                                                        this.command_details_expanded.remove(&id);
+                                                    } else {
+                                                        this.command_details_expanded
+                                                            .insert(id.clone());
+                                                    }
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    )
+                                }),
+                            ),
+                    )
+                    .when(is_open || needs_confirmation, |this| {
+                        this.child(self.render_collapsible_command(
+                            card_header_id.clone(),
+                            true,
+                            tool_call.label.clone(),
+                            window,
+                            cx,
+                        ))
+                    })
                 } else {
                     this.child(
                         h_flex()
@@ -7831,7 +8303,7 @@ impl ThreadView {
         h_flex()
             .w_full()
             .p_1()
-            .gap_2()
+            .gap_1()
             .justify_between()
             .border_t_1()
             .border_color(self.tool_card_border_color(cx))
@@ -8279,7 +8751,7 @@ impl ThreadView {
         };
 
         v_flex()
-            .p_3()
+            .p_2()
             .gap_1()
             .rounded_b_md()
             .bg(cx.theme().colors().editor_background)
@@ -8396,7 +8868,7 @@ impl ThreadView {
             .w_full()
             .h(window.line_height() - px(2.))
             .text_size(self.tool_name_font_size())
-            .gap_1p5()
+            .gap_1()
             .when(has_location || use_card_layout, |this| this.px_1())
             .when(has_location, |this| {
                 this.cursor(CursorStyle::PointingHand)
@@ -8750,16 +9222,16 @@ impl ThreadView {
         let button_id = SharedString::from(format!("tool_output-{:?}", tool_call_id));
 
         v_flex()
-            .gap_2()
+            .gap_1()
             .map(|this| {
                 if card_layout {
-                    this.p_2().when(context_ix > 0, |this| {
+                    this.p_1p5().when(context_ix > 0, |this| {
                         this.border_t_1()
                             .border_color(self.tool_card_border_color(cx))
                     })
                 } else {
                     this.ml(rems(0.4))
-                        .px_3p5()
+                        .px_2()
                         .border_l_1()
                         .border_color(self.tool_card_border_color(cx))
                 }
@@ -8818,13 +9290,13 @@ impl ThreadView {
         };
 
         v_flex()
-            .gap_2()
+            .gap_1()
             .map(|this| {
                 if card_layout {
                     this
                 } else {
                     this.ml(rems(0.4))
-                        .px_3p5()
+                        .px_2()
                         .border_l_1()
                         .border_color(self.tool_card_border_color(cx))
                 }
@@ -9342,7 +9814,7 @@ impl ThreadView {
     }
 
     fn tool_name_font_size(&self) -> Rems {
-        rems_from_px(13.)
+        rems_from_px(12.)
     }
 
     pub(crate) fn render_thread_error(
@@ -10235,7 +10707,6 @@ impl Render for ThreadView {
             .size_full()
             .bg(thread_bg)
             .children(self.render_subagent_titlebar(cx))
-            .children(self.render_backboard_run_overview(cx))
             .child(conversation)
             .children(self.render_multi_root_callout(cx))
             .children(self.render_activity_bar(window, cx))

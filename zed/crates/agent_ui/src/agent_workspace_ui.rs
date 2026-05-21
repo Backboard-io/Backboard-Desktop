@@ -1,13 +1,9 @@
 use collections::HashSet;
-use editor::{Editor, EditorElement, EditorEvent, EditorStyle};
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement,
     ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, TextStyle, WeakEntity, Window, prelude::*,
+    Subscription, WeakEntity, Window, prelude::*,
 };
-use language::language_settings::SoftWrap;
-use settings::Settings;
-use theme_settings::ThemeSettings;
 use ui::{
     Button, ButtonSize, ButtonStyle, ElevationIndex, Icon, IconButton, IconSize, Label, LabelSize,
     TintColor, Tooltip, Vector, VectorName, WithScrollbar, prelude::*,
@@ -17,21 +13,15 @@ use workspace::Workspace;
 use crate::ConversationView;
 use crate::agent_panel::{
     AgentPanel, AgentPanelEvent, BackboardAgentRunEventState, BackboardAgentRunStatus,
-    BackboardAgentRunSummary, BackboardAgentWorkspaceKind, BackboardAgentWorkspaceMode,
-    BackboardAgentWorkspaceScope,
+    BackboardAgentRunSummary,
 };
 use crate::thread_metadata_store::ThreadId;
 use zed_actions::agent::Chat;
 
 pub struct BackboardAgentWorkspacePage {
     workspace: WeakEntity<Workspace>,
-    task_editor: Entity<Editor>,
-    selected_scope: BackboardAgentWorkspaceScope,
-    selected_kind: BackboardAgentWorkspaceKind,
-    selected_mode: BackboardAgentWorkspaceMode,
+    focus_handle: FocusHandle,
     selected_thread_id: Option<ThreadId>,
-    pending_launch_batch_id: Option<String>,
-    run_list_scroll_handle: ScrollHandle,
     dashboard_scroll_handle: ScrollHandle,
     dismissed_threads: HashSet<ThreadId>,
     show_token_context: bool,
@@ -49,20 +39,6 @@ impl BackboardAgentWorkspacePage {
         let workspace = workspace.weak_handle();
 
         cx.new(|cx| {
-            let task_editor = cx.new(|cx| {
-                let mut editor = Editor::auto_height(2, 5, window, cx);
-                editor.set_soft_wrap_mode(SoftWrap::EditorWidth, cx);
-                editor.set_placeholder_text(
-                    "One task per line. Each line starts an isolated agent",
-                    window,
-                    cx,
-                );
-                editor
-            });
-
-            cx.subscribe(&task_editor, Self::handle_task_editor_event)
-                .detach();
-
             let mut subscriptions = Vec::new();
             let observing_agent_panel = panel.is_some();
             if let Some(panel) = panel {
@@ -72,13 +48,8 @@ impl BackboardAgentWorkspacePage {
 
             Self {
                 workspace,
-                task_editor,
-                selected_scope: BackboardAgentWorkspaceScope::WholeProject,
-                selected_kind: BackboardAgentWorkspaceKind::Build,
-                selected_mode: BackboardAgentWorkspaceMode::Free,
+                focus_handle: cx.focus_handle(),
                 selected_thread_id: None,
-                pending_launch_batch_id: None,
-                run_list_scroll_handle: ScrollHandle::new(),
                 dashboard_scroll_handle: ScrollHandle::new(),
                 dismissed_threads: HashSet::default(),
                 show_token_context: false,
@@ -86,15 +57,6 @@ impl BackboardAgentWorkspacePage {
                 _subscriptions: subscriptions,
             }
         })
-    }
-
-    fn handle_task_editor_event(
-        &mut self,
-        _: Entity<Editor>,
-        _: &EditorEvent,
-        cx: &mut Context<Self>,
-    ) {
-        cx.notify();
     }
 
     fn handle_agent_panel_event(
@@ -107,38 +69,16 @@ impl BackboardAgentWorkspacePage {
         match event {
             AgentPanelEvent::BackboardWorkspaceRunCreated {
                 thread_id,
-                batch_id,
                 auto_select,
+                ..
             } => {
-                let is_pending_launch = self
-                    .pending_launch_batch_id
-                    .as_ref()
-                    .is_some_and(|pending| pending == batch_id);
-                let should_select =
-                    *auto_select && (is_pending_launch || self.selected_thread_id.is_none());
-
-                if should_select {
+                if *auto_select && self.selected_thread_id.is_none() {
                     self.selected_thread_id = Some(*thread_id);
-                    if is_pending_launch {
-                        self.pending_launch_batch_id = None;
-                        self.task_editor
-                            .update(cx, |editor, cx| editor.set_text("", window, cx));
-                    }
                     self.focus_selected_conversation(window, cx);
                 }
                 cx.notify();
             }
-            AgentPanelEvent::BackboardWorkspaceLaunchFailed { batch_id } => {
-                if self
-                    .pending_launch_batch_id
-                    .as_ref()
-                    .is_some_and(|pending| pending == batch_id)
-                {
-                    self.pending_launch_batch_id = None;
-                    self.task_editor.focus_handle(cx).focus(window, cx);
-                    cx.notify();
-                }
-            }
+            AgentPanelEvent::BackboardWorkspaceLaunchFailed { .. } => {}
             AgentPanelEvent::ActiveViewChanged
             | AgentPanelEvent::ActiveViewFocused
             | AgentPanelEvent::EntryChanged
@@ -159,11 +99,6 @@ impl BackboardAgentWorkspacePage {
                     .collect()
             })
             .unwrap_or_default()
-    }
-
-    fn show_configure(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.task_editor.focus_handle(cx).focus(window, cx);
-        cx.notify();
     }
 
     fn ensure_agent_panel(
@@ -204,54 +139,6 @@ impl BackboardAgentWorkspacePage {
         cx.notify();
     }
 
-    fn task_lines(&self, cx: &App) -> Vec<String> {
-        self.task_editor
-            .read(cx)
-            .text(cx)
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(ToOwned::to_owned)
-            .collect()
-    }
-
-    fn run_agent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tasks = self.task_lines(cx);
-        if tasks.is_empty() {
-            return;
-        }
-
-        let mut created_thread_ids = Vec::new();
-        let mut pending_batch_id = None;
-        if let Some(panel) = self.ensure_agent_panel(window, cx) {
-            panel.update(cx, |panel, cx| {
-                let result = panel.spawn_backboard_workspace_agents(
-                    tasks.clone(),
-                    self.selected_scope,
-                    self.selected_kind,
-                    self.selected_mode,
-                    window,
-                    cx,
-                );
-                if result.pending_worktree_setup && result.accepted_count > 0 {
-                    pending_batch_id = Some(result.batch_id.clone());
-                }
-                created_thread_ids = result.created_thread_ids;
-            });
-        }
-
-        if let Some(thread_id) = created_thread_ids.first().copied() {
-            self.selected_thread_id = Some(thread_id);
-            self.task_editor
-                .update(cx, |editor, cx| editor.set_text("", window, cx));
-            self.focus_selected_conversation(window, cx);
-            cx.notify();
-        } else if let Some(batch_id) = pending_batch_id {
-            self.pending_launch_batch_id = Some(batch_id);
-            cx.notify();
-        }
-    }
-
     fn focus_selected_conversation(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(thread_id) = self.selected_thread_id
             && let Some(conversation) = self.conversation_for_thread(thread_id, cx)
@@ -260,20 +147,7 @@ impl BackboardAgentWorkspacePage {
         }
     }
 
-    fn submit_task_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.task_editor.focus_handle(cx).is_focused(window) {
-            self.run_agent(window, cx);
-            cx.notify();
-        }
-    }
-
     fn submit_chat_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.task_editor.focus_handle(cx).is_focused(window) {
-            self.run_agent(window, cx);
-            cx.notify();
-            return;
-        }
-
         let Some(panel) = self.ensure_agent_panel(window, cx) else {
             return;
         };
@@ -386,23 +260,9 @@ impl BackboardAgentWorkspacePage {
         }
     }
 
-    fn revise_run(
-        &mut self,
-        title: SharedString,
-        blocked_reason: Option<SharedString>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let mut prompt = format!(
-            "Continue the blocked Backboard agent `{}`. Diagnose what is stuck, adjust the approach, and keep going.",
-            title.as_ref()
-        );
-        if let Some(reason) = blocked_reason {
-            prompt.push_str(&format!(" Blocked reason: {}.", reason.as_ref()));
-        }
-        self.task_editor
-            .update(cx, |editor, cx| editor.set_text(prompt, window, cx));
-        self.show_configure(window, cx);
+    fn revise_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_run(thread_id, window, cx);
+        self.focus_selected_conversation(window, cx);
     }
 
     fn dismiss_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
@@ -420,30 +280,6 @@ impl BackboardAgentWorkspacePage {
             });
         }
         cx.notify();
-    }
-
-    fn render_text_input(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let settings = ThemeSettings::get_global(cx);
-        let text_style = TextStyle {
-            color: cx.theme().colors().text,
-            font_family: settings.ui_font.family.clone(),
-            font_features: settings.ui_font.features.clone(),
-            font_fallbacks: settings.ui_font.fallbacks.clone(),
-            font_size: rems(0.82).into(),
-            font_weight: settings.ui_font.weight,
-            line_height: relative(1.25),
-            ..Default::default()
-        };
-
-        EditorElement::new(
-            &self.task_editor,
-            EditorStyle {
-                background: cx.theme().colors().element_background,
-                local_player: cx.theme().players().local(),
-                text: text_style,
-                ..Default::default()
-            },
-        )
     }
 
     fn render_header(
@@ -464,15 +300,19 @@ impl BackboardAgentWorkspacePage {
             .filter(|summary| summary.status == BackboardAgentRunStatus::Blocked)
             .count();
         let ready = summaries.iter().filter(|summary| summary.can_apply).count();
+        let colors = cx.theme().colors();
+        let header_background = colors
+            .tab_bar_background
+            .blend(colors.panel_background.opacity(0.32));
 
         h_flex()
-            .h(rems_from_px(38.))
+            .h(rems_from_px(40.))
             .px_3()
             .gap_3()
             .justify_between()
             .border_b_1()
-            .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().editor_background)
+            .border_color(colors.border_variant.opacity(0.58))
+            .bg(header_background)
             .child(
                 h_flex()
                     .gap_3()
@@ -629,347 +469,6 @@ impl BackboardAgentWorkspacePage {
                     .size(LabelSize::Small)
                     .weight(FontWeight::MEDIUM)
                     .color(color),
-            )
-    }
-
-    fn render_launch_strip(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let task_count = self.task_lines(cx).len();
-        let runnable_task_count = task_count.min(20);
-        let launch_pending = self.pending_launch_batch_id.is_some();
-        let run_label = if launch_pending {
-            "Setting up".to_string()
-        } else if runnable_task_count == 1 {
-            "Run 1 agent".to_string()
-        } else {
-            format!("Run {runnable_task_count} agents")
-        };
-
-        v_flex()
-            .flex_shrink_0()
-            .gap_1p5()
-            .p_2()
-            .border_b_1()
-            .border_color(cx.theme().colors().border_variant)
-            .child(
-                h_flex()
-                    .justify_between()
-                    .items_center()
-                    .child(
-                        v_flex()
-                            .child(
-                                Label::new("New agents")
-                                    .size(LabelSize::Small)
-                                    .weight(FontWeight::MEDIUM)
-                                    .color(Color::Default),
-                            )
-                            .child(
-                                Label::new(if launch_pending {
-                                    "Preparing an isolated workspace"
-                                } else {
-                                    "One task per line, up to 20"
-                                })
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                            ),
-                    )
-                    .child(
-                        Button::new("run-agents", run_label)
-                            .start_icon(Icon::new(IconName::PlayFilled))
-                            .style(ButtonStyle::Tinted(TintColor::Accent))
-                            .size(ButtonSize::Compact)
-                            .disabled(task_count == 0 || launch_pending)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.run_agent(window, cx);
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().colors().border_variant)
-                    .bg(cx.theme().colors().element_background)
-                    .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
-                    .p_1p5()
-                    .child(self.render_text_input(cx)),
-            )
-            .child(
-                v_flex()
-                    .gap_1p5()
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                Label::new("Mode")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .flex_wrap()
-                                    .child(
-                                        self.render_mode_button(
-                                            BackboardAgentWorkspaceMode::Agent,
-                                            cx,
-                                        ),
-                                    )
-                                    .child(
-                                        self.render_mode_button(
-                                            BackboardAgentWorkspaceMode::Ask,
-                                            cx,
-                                        ),
-                                    )
-                                    .child(self.render_mode_button(
-                                        BackboardAgentWorkspaceMode::Manual,
-                                        cx,
-                                    ))
-                                    .child(
-                                        self.render_mode_button(
-                                            BackboardAgentWorkspaceMode::Free,
-                                            cx,
-                                        ),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                Label::new("Scope")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .flex_wrap()
-                                    .child(self.render_scope_button(
-                                        BackboardAgentWorkspaceScope::WholeProject,
-                                        cx,
-                                    ))
-                                    .child(self.render_scope_button(
-                                        BackboardAgentWorkspaceScope::SelectedFiles,
-                                        cx,
-                                    ))
-                                    .child(self.render_scope_button(
-                                        BackboardAgentWorkspaceScope::GitChanges,
-                                        cx,
-                                    ))
-                                    .child(self.render_scope_button(
-                                        BackboardAgentWorkspaceScope::TestsOnly,
-                                        cx,
-                                    )),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                Label::new("Type")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .flex_wrap()
-                                    .child(
-                                        self.render_kind_button(
-                                            BackboardAgentWorkspaceKind::Build,
-                                            cx,
-                                        ),
-                                    )
-                                    .child(self.render_kind_button(
-                                        BackboardAgentWorkspaceKind::Review,
-                                        cx,
-                                    ))
-                                    .child(
-                                        self.render_kind_button(
-                                            BackboardAgentWorkspaceKind::Test,
-                                            cx,
-                                        ),
-                                    )
-                                    .child(
-                                        self.render_kind_button(
-                                            BackboardAgentWorkspaceKind::Docs,
-                                            cx,
-                                        ),
-                                    ),
-                            ),
-                    ),
-            )
-    }
-
-    fn render_left_rail(
-        &self,
-        summaries: &[BackboardAgentRunSummary],
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        v_flex()
-            .w(rems_from_px(380.))
-            .min_w(rems_from_px(320.))
-            .max_w(rems_from_px(440.))
-            .h_full()
-            .flex_shrink_0()
-            .border_l_1()
-            .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().elevated_surface_background)
-            .child(self.render_launch_strip(cx))
-            .child(self.render_run_list(summaries, window, cx))
-    }
-
-    fn render_run_list(
-        &self,
-        summaries: &[BackboardAgentRunSummary],
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let count = summaries.len();
-        v_flex()
-            .flex_1()
-            .min_h_0()
-            .child(
-                h_flex()
-                    .h(rems_from_px(36.))
-                    .px_3()
-                    .justify_between()
-                    .border_b_1()
-                    .border_color(cx.theme().colors().border_variant)
-                    .child(
-                        Label::new("Agents")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .child(
-                        Label::new(format!("{count} total"))
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    ),
-            )
-            .child(if summaries.is_empty() {
-                v_flex()
-                    .flex_1()
-                    .items_center()
-                    .justify_center()
-                    .gap_2()
-                    .px_4()
-                    .child(
-                        Icon::new(IconName::Sparkle)
-                            .size(IconSize::Medium)
-                            .color(Color::Muted),
-                    )
-                    .child(
-                        Label::new("Send a task to start an agent.")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .into_any_element()
-            } else {
-                v_flex()
-                    .id("backboard-agent-run-list")
-                    .track_scroll(&self.run_list_scroll_handle)
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .p_2()
-                    .child(
-                        v_flex().gap_1().children(
-                            summaries.iter().cloned().map(|summary| {
-                                self.render_agent_row(summary, cx).into_any_element()
-                            }),
-                        ),
-                    )
-                    .vertical_scrollbar_for(&self.run_list_scroll_handle, window, cx)
-                    .into_any_element()
-            })
-    }
-
-    fn render_agent_row(
-        &self,
-        summary: BackboardAgentRunSummary,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let thread_id = summary.thread_id;
-        let thread_key = thread_id.to_key_string();
-        let selected = self.selected_thread_id == Some(thread_id);
-        let row_bg = if selected {
-            cx.theme().colors().element_selected
-        } else {
-            cx.theme().colors().editor_background
-        };
-        let border_color = if selected {
-            cx.theme().colors().text_accent
-        } else {
-            cx.theme().colors().border_variant
-        };
-        let status_color = Self::status_label_color(summary.status);
-
-        v_flex()
-            .id(format!("backboard-agent-row-{thread_key}"))
-            .w_full()
-            .min_h(rems_from_px(76.))
-            .rounded_md()
-            .border_1()
-            .border_color(border_color)
-            .bg(row_bg)
-            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
-            .cursor_pointer()
-            .hover(|style| style.bg(cx.theme().colors().element_hover))
-            .p_2()
-            .gap_1()
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.open_run(thread_id, window, cx);
-                this.focus_selected_conversation(window, cx);
-            }))
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .justify_between()
-                    .min_w_0()
-                    .child(
-                        h_flex()
-                            .gap_1p5()
-                            .min_w_0()
-                            .child(self.render_status_dot(summary.status, cx))
-                            .child(
-                                Label::new(summary.title.clone())
-                                    .size(LabelSize::Small)
-                                    .color(if selected {
-                                        Color::Accent
-                                    } else {
-                                        Color::Default
-                                    }),
-                            ),
-                    )
-                    .child(
-                        Label::new(summary.status.label())
-                            .size(LabelSize::Small)
-                            .color(status_color),
-                    ),
-            )
-            .child(
-                Label::new(summary.command.clone())
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .justify_between()
-                    .child(
-                        Label::new(format!("{} files", summary.files_changed))
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .children(
-                        summary.cost.clone().map(|cost| {
-                            Label::new(cost).size(LabelSize::Small).color(Color::Muted)
-                        }),
-                    ),
             )
     }
 
@@ -1504,8 +1003,6 @@ impl BackboardAgentWorkspacePage {
                                 },
                             )
                             .when(summary.status == BackboardAgentRunStatus::Blocked, |this| {
-                                let title = summary.title.clone();
-                                let reason = summary.blocked_reason.clone();
                                 this.child(
                                     Button::new(format!("revise-agent-{thread_key}"), "Revise")
                                         .start_icon(Icon::new(IconName::Pencil))
@@ -1513,12 +1010,7 @@ impl BackboardAgentWorkspacePage {
                                         .size(ButtonSize::Compact)
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             cx.stop_propagation();
-                                            this.revise_run(
-                                                title.clone(),
-                                                reason.clone(),
-                                                window,
-                                                cx,
-                                            );
+                                            this.revise_run(thread_id, window, cx);
                                         })),
                                 )
                             })
@@ -1880,83 +1372,6 @@ impl BackboardAgentWorkspacePage {
         }
     }
 
-    fn render_event_row(
-        text: SharedString,
-        state: BackboardAgentRunEventState,
-    ) -> impl IntoElement {
-        let (icon, color) = match state {
-            BackboardAgentRunEventState::Active => (IconName::LoadCircle, Color::Accent),
-            BackboardAgentRunEventState::Done => (IconName::Check, Color::Success),
-            BackboardAgentRunEventState::Waiting => (IconName::Warning, Color::Warning),
-            BackboardAgentRunEventState::Failed => (IconName::XCircle, Color::Error),
-            BackboardAgentRunEventState::Muted => (IconName::ArrowRight, Color::Accent),
-        };
-
-        h_flex()
-            .min_h(rems_from_px(21.))
-            .min_w_0()
-            .gap_1p5()
-            .child(Icon::new(icon).size(IconSize::XSmall).color(color))
-            .child(Label::new(text).size(LabelSize::Small).color(color))
-    }
-
-    fn render_mode_button(
-        &self,
-        mode: BackboardAgentWorkspaceMode,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let selected = self.selected_mode == mode;
-        Button::new(format!("agent-mode-button-{}", mode.label()), mode.label())
-            .style(if selected {
-                ButtonStyle::Tinted(TintColor::Accent)
-            } else {
-                ButtonStyle::Outlined
-            })
-            .size(ButtonSize::Compact)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.selected_mode = mode;
-                cx.notify();
-            }))
-    }
-
-    fn render_scope_button(
-        &self,
-        scope: BackboardAgentWorkspaceScope,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let selected = self.selected_scope == scope;
-        Button::new(format!("agent-scope-{}", scope.label()), scope.label())
-            .style(if selected {
-                ButtonStyle::Tinted(TintColor::Accent)
-            } else {
-                ButtonStyle::Outlined
-            })
-            .size(ButtonSize::Compact)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.selected_scope = scope;
-                cx.notify();
-            }))
-    }
-
-    fn render_kind_button(
-        &self,
-        kind: BackboardAgentWorkspaceKind,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let selected = self.selected_kind == kind;
-        Button::new(format!("agent-kind-button-{}", kind.label()), kind.label())
-            .style(if selected {
-                ButtonStyle::Tinted(TintColor::Accent)
-            } else {
-                ButtonStyle::Outlined
-            })
-            .size(ButtonSize::Compact)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.selected_kind = kind;
-                cx.notify();
-            }))
-    }
-
     fn render_bottom_bar(
         &self,
         summaries: &[BackboardAgentRunSummary],
@@ -2044,7 +1459,7 @@ impl BackboardAgentWorkspacePage {
                         .color(Color::Default),
                 )
                 .child(
-                    Label::new("Use the task composer on the left to open a real Backboard chat.")
+                    Label::new("Use New Chat to open a real Backboard chat.")
                         .size(LabelSize::Small)
                         .color(Color::Muted),
                 )
@@ -2140,15 +1555,13 @@ impl BackboardAgentWorkspacePage {
                     .gap_1()
                     .child(self.render_status_badge(summary.status, cx))
                     .when(summary.status == BackboardAgentRunStatus::Blocked, |this| {
-                        let title = summary.title.clone();
-                        let reason = summary.blocked_reason.clone();
                         this.child(
                             Button::new(format!("revise-selected-{thread_key}"), "Revise")
                                 .start_icon(Icon::new(IconName::Pencil))
                                 .style(ButtonStyle::Outlined)
                                 .size(ButtonSize::Compact)
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.revise_run(title.clone(), reason.clone(), window, cx);
+                                    this.revise_run(thread_id, window, cx);
                                 })),
                         )
                     })
@@ -2410,21 +1823,24 @@ impl Render for BackboardAgentWorkspacePage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let summaries = self.summaries(cx);
         let selected_detail_exists = self.selected_thread_id.and_then(|thread_id| {
-            let summary = summaries
+            summaries
                 .iter()
-                .find(|summary| summary.thread_id == thread_id)
-                .cloned()?;
-            let conversation = self.conversation_for_thread(thread_id, cx)?;
-            Some((summary, conversation))
+                .find(|summary| summary.thread_id == thread_id)?;
+            self.conversation_for_thread(thread_id, cx)?;
+            Some(())
         });
         if self.selected_thread_id.is_some() && selected_detail_exists.is_none() {
             self.selected_thread_id = None;
         }
         let agent_panel = self.ensure_agent_panel(window, cx);
+        let colors = cx.theme().colors();
+        let workspace_background = colors
+            .panel_background
+            .blend(colors.editor_background.opacity(0.42));
 
         v_flex()
             .size_full()
-            .bg(cx.theme().colors().editor_background)
+            .bg(workspace_background)
             .key_context("BackboardAgentWorkspace")
             .on_action(cx.listener(|this, _: &Chat, window, cx| {
                 this.submit_chat_action(window, cx);
@@ -2435,6 +1851,7 @@ impl Render for BackboardAgentWorkspacePage {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
+                    .bg(workspace_background)
                     .child(
                         div().flex_1().min_w_0().h_full().overflow_hidden().child(
                             self.render_dashboard(summaries.clone(), window, cx)
@@ -2443,18 +1860,22 @@ impl Render for BackboardAgentWorkspacePage {
                     )
                     .child(self.render_right_panel(agent_panel, window, cx)),
             )
+            .child(self.render_bottom_bar(&summaries, cx))
     }
 }
 
 impl Focusable for BackboardAgentWorkspacePage {
-    fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.task_editor.read(cx).focus_handle(cx)
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_panel::{
+        BackboardAgentWorkspaceKind, BackboardAgentWorkspaceMode, BackboardAgentWorkspaceScope,
+    };
     use crate::conversation_view::tests::init_test;
     use fs::FakeFs;
     use gpui::{TestAppContext, VisualTestContext};
@@ -2747,63 +2168,6 @@ mod tests {
             assert_eq!(summaries.len(), 1);
             assert_eq!(summaries[0].thread_id, sent_thread_id);
             assert_eq!(summaries[0].command.as_ref(), "build the dashboard");
-        });
-    }
-
-    #[gpui::test]
-    async fn test_workspace_agent_page_git_launch_creates_worktree_threads(
-        cx: &mut TestAppContext,
-    ) {
-        let (_workspace, panel, page, mut cx) = setup_workspace_page(cx, true).await;
-        let prompt = "fix the chat composer\npolish the run list";
-
-        page.update_in(&mut cx, |page, window, cx| {
-            page.task_editor
-                .update(cx, |editor, cx| editor.set_text(prompt, window, cx));
-            page.task_editor.focus_handle(cx).focus(window, cx);
-            page.run_agent(window, cx);
-        });
-
-        page.read_with(&cx, |page, cx| {
-            assert_eq!(page.task_editor.read(cx).text(cx), prompt);
-            assert!(
-                page.pending_launch_batch_id.is_some(),
-                "git workspaces should use async worktree setup"
-            );
-            assert!(page.selected_thread_id.is_none());
-        });
-
-        cx.run_until_parked();
-
-        let selected_thread_id = page.read_with(&cx, |page, cx| {
-            assert_eq!(page.task_editor.read(cx).text(cx), "");
-            assert!(page.pending_launch_batch_id.is_none());
-            page.selected_thread_id
-                .expect("first created git workspace agent should be selected")
-        });
-
-        panel.read_with(&cx, |panel, cx| {
-            let summaries = panel.backboard_agent_run_summaries(cx);
-            assert_eq!(summaries.len(), 2);
-            for summary in summaries {
-                assert_eq!(
-                    summary
-                        .apply_state_label
-                        .as_ref()
-                        .map(|label| label.as_ref()),
-                    Some("Ready to apply")
-                );
-                assert!(summary.worktree_label.is_some());
-                assert!(summary.working_directory_label.is_some());
-                assert!(summary.working_directory_path.is_some());
-                assert!(summary.working_directory_is_worktree);
-                assert!(summary.branch_label.is_some());
-            }
-            let conversation = panel
-                .backboard_workspace_conversation_view(selected_thread_id, cx)
-                .expect("selected git workspace chat should expose a real conversation");
-            assert_eq!(conversation.read(cx).parent_id(), selected_thread_id);
-            assert!(panel.is_retained_thread(&selected_thread_id));
         });
     }
 }

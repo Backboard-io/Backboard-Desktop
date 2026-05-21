@@ -1891,7 +1891,15 @@ impl AcpThread {
         text.starts_with("Backboard ")
             || text.starts_with("Loading the Backboard agent runtime.")
             || text.starts_with("Preparing workspace context and tools.")
+            || text.starts_with("Preparing workspace context.")
             || text.starts_with("Sending the task to the selected model.")
+            || text.starts_with("Sending to model.")
+            || text.starts_with("Connected to model.")
+            || text.starts_with("Planning next step.")
+            || text.starts_with("Running ")
+            || text.starts_with("Retrying request.")
+            || text.starts_with("Realtime voice enabled ")
+            || text.starts_with("Generated media.")
             || text.starts_with("Updating the visible task plan.")
     }
 

@@ -59,12 +59,7 @@ pub async fn run_prompt(
         return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
     }
 
-    emit_progress(
-        &state,
-        &runtime,
-        "Preparing workspace context and tools.",
-        cx,
-    )?;
+    emit_progress(&state, &runtime, "Preparing workspace context.", cx)?;
 
     let runtime_load_started = Instant::now();
     let (config, client) = match state.client() {
@@ -113,7 +108,7 @@ pub async fn run_prompt(
         emit_progress(
             &state,
             &runtime,
-            &format!("Realtime voice is enabled for {realtime_url}."),
+            &format!("Realtime voice enabled for {realtime_url}."),
             cx,
         )?;
     }
@@ -124,12 +119,7 @@ pub async fn run_prompt(
     state.set_estimated_used_tokens(&params.session_id, estimate_tokens(&augmented));
     emit_speed_update(&state, &runtime, cx).ok();
 
-    emit_progress(
-        &state,
-        &runtime,
-        "Sending the task to the selected model.",
-        cx,
-    )?;
+    emit_progress(&state, &runtime, "Sending to model.", cx)?;
 
     let request = SendMessageRequest {
         content: augmented,
@@ -263,10 +253,10 @@ async fn consume_stream(
                         .and_then(Value::as_str)
                         .map(str::to_string);
                     state.set_current_run_id(&runtime.session_id, run_id);
-                    emit_progress(&state, &runtime, "Backboard connected to the model.", cx)?;
+                    emit_progress(&state, &runtime, "Connected to model.", cx)?;
                 }
                 "reasoning_started" => {
-                    emit_progress(&state, &runtime, "Backboard is planning the next step.", cx)?;
+                    emit_progress(&state, &runtime, "Planning next step.", cx)?;
                 }
                 "reasoning_streaming" | "reasoning_delta" => {
                     if let Some(text) = chunk_text(&chunk) {
@@ -390,12 +380,7 @@ async fn consume_stream(
                     return Ok(acp::StopReason::EndTurn);
                 }
                 "retry" => {
-                    emit_progress(
-                        &state,
-                        &runtime,
-                        "Backboard is retrying a transient request.",
-                        cx,
-                    )?;
+                    emit_progress(&state, &runtime, "Retrying request.", cx)?;
                 }
                 _ => {}
             }
@@ -422,7 +407,7 @@ async fn submit_tools(
         &state,
         runtime,
         &format!(
-            "Backboard is running {} tool action{}.",
+            "Running {} tool action{}.",
             tool_calls.len(),
             if tool_calls.len() == 1 { "" } else { "s" }
         ),
@@ -642,7 +627,7 @@ fn emit_media_generated(
 ) -> Result<()> {
     let links = generated_media_links(chunk);
     if links.is_empty() {
-        emit_progress(state, runtime, "Backboard generated media.", cx)?;
+        emit_progress(state, runtime, "Generated media.", cx)?;
         return Ok(());
     }
     for link in links {
