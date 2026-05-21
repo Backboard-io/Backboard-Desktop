@@ -97,14 +97,10 @@ pub(crate) struct ReusedSubtree {
 }
 
 impl ReusedSubtree {
-    pub fn refresh_node_id(&self, node_id: DispatchNodeId) -> DispatchNodeId {
-        debug_assert!(
-            self.old_range.contains(&node_id.0),
-            "node {} was not part of the reused subtree {:?}",
-            node_id.0,
-            self.old_range
-        );
-        DispatchNodeId((node_id.0 - self.old_range.start) + self.new_range.start)
+    pub fn try_refresh_node_id(&self, node_id: DispatchNodeId) -> Option<DispatchNodeId> {
+        self.old_range
+            .contains(&node_id.0)
+            .then(|| DispatchNodeId((node_id.0 - self.old_range.start) + self.new_range.start))
     }
 
     pub fn contains_focus(&self) -> bool {

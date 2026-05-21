@@ -84,6 +84,7 @@ impl ConfigOptionsView {
         selector.update(cx, |selector, cx| {
             selector.toggle_picker(window, cx);
         });
+        cx.notify();
 
         true
     }
@@ -112,6 +113,54 @@ impl ConfigOptionsView {
             }
         })
         .detach();
+        cx.notify();
+
+        true
+    }
+
+    pub(crate) fn option_summaries(&self) -> Vec<ConfigOptionSummary> {
+        self.config_options
+            .config_options()
+            .into_iter()
+            .map(|option| {
+                let current_value_name = match &option.kind {
+                    acp::SessionConfigKind::Select(select) => {
+                        find_option_name(&select.options, &select.current_value)
+                            .unwrap_or_else(|| "Unknown".to_string())
+                    }
+                    _ => "Unknown".to_string(),
+                };
+
+                ConfigOptionSummary {
+                    id: option.id,
+                    name: option.name,
+                    description: option.description,
+                    current_value_name,
+                }
+            })
+            .collect()
+    }
+
+    pub fn cycle_option(
+        &mut self,
+        config_id: &acp::SessionConfigId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(next_value) = self.next_value_for_config(config_id, false, cx) else {
+            return false;
+        };
+
+        let task = self
+            .config_options
+            .set_config_option(config_id.clone(), next_value, cx);
+
+        cx.spawn(async move |_, _| {
+            if let Err(err) = task.await {
+                log::error!("Failed to set config option: {:?}", err);
+            }
+        })
+        .detach();
+        cx.notify();
 
         true
     }
@@ -244,6 +293,14 @@ impl Render for ConfigOptionsView {
             )
             .into_any_element()
     }
+}
+
+#[derive(Clone)]
+pub(crate) struct ConfigOptionSummary {
+    pub id: acp::SessionConfigId,
+    pub name: String,
+    pub description: Option<String>,
+    pub current_value_name: String,
 }
 
 struct ConfigOptionSelector {
@@ -445,6 +502,7 @@ impl Render for ConfigOptionSelector {
                     gpui::Anchor::BottomRight,
                     cx,
                 )
+                .id(format!("config-option-picker-popover-{}", self.config_id.0))
                 .with_handle(self.picker_handle.clone())
                 .render(window, cx),
             )

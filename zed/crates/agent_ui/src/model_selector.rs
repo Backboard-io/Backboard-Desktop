@@ -87,12 +87,15 @@ impl ModelPickerDelegate {
                             )
                         })?;
 
-                        let (models, selected_model) =
-                            futures::join!(models_task, selected_model_task);
+                        let selected_model = selected_model_task.await;
+                        this.update_in(cx, |this, window, cx| {
+                            this.delegate.selected_model = selected_model.ok();
+                            this.refresh(window, cx)
+                        })?;
 
+                        let models = models_task.await;
                         this.update_in(cx, |this, window, cx| {
                             this.delegate.models = models.ok();
-                            this.delegate.selected_model = selected_model.ok();
                             this.refresh(window, cx)
                         })
                     }

@@ -12,57 +12,79 @@ The existing CLI lives under:
 
 - `cli/backboard_cli/`
 
-Do not edit `cli/` for IDE UI/runtime work unless the user explicitly approves it. The current integration imports the CLI as an engine from IDE-owned code, but the CLI source itself should remain untouched.
+Do not edit `cli/` for IDE UI/runtime work unless the user explicitly approves it. The active IDE chat runtime no longer imports the CLI; it is native Rust. The CLI remains useful as historical/API reference and for the standalone terminal product.
+
+## Current Status / Superseded Docs
+
+This handoff is the current source of truth for `bb-ide-zed` as of May 21, 2026.
+
+- Active branch: `bb-ide-zed`.
+- Audited commit range: `origin/main..bb-ide-zed`, 74 commits.
+- Current HEAD during this update: `27aeb9ce Update agent_workspace_ui.rs`.
+- Current working tree also has uncommitted Rust/UI changes and a docs move/delete state; they are documented below as working tree state.
+- Active Backboard IDE chat runtime: Rust native `BackboardNativeConnection`.
+- Historical runtime still present: `ide/zed/script/backboard-ide-acp.py`, but it is not the default chat path.
+
+Several docs still describe older planning states. In this working tree the old planning docs appear under untracked `ide/docs/md/` while the tracked root-level copies are deleted; treat those filenames as historical unless this file explicitly says otherwise:
+
+- `ide/docs/md/BACKBOARD_IDE_NATIVE_ENDPOINTS_NEXT_STEPS.md` says Python ACP is still active and native Rust should remain behind a flag. That is superseded: native Rust is the active runtime.
+- `ide/docs/md/BACKBOARD_IDE_EMBEDDED_CLI_NEXT_STEPS.md` planned bundling the Python CLI runtime. That is mostly superseded for active chat because the app now uses the Rust-native runtime, though the packaging/history notes remain useful.
+- `ide/docs/md/BACKBOARD_IDE_PACKAGING.md` still contains Python bridge/CLI bundle guidance in places. Packaging has moved toward native runtime metadata for active chat; re-check `script/bundle-mac` before following the old bundle layout.
+- `ide/docs/md/IDE_FOLDER_GUIDE.md` still lists the Python ACP bridge as a primary Backboard integration point. Use it as folder orientation, not active runtime truth.
+- The testcase markdown under `ide/docs/testcase/` is prompt/sample material for IDE validation, not architecture guidance.
 
 ## Current Source-Of-Truth Map
 
-Use this map before changing anything. The Backboard IDE is not one single integration point; it is a small Rust ACP launcher, a Python bridge that imports the CLI, and several native Zed UI surfaces rendering the same `AcpThread` state.
+Use this map before changing anything. The Backboard IDE is not one single integration point; it is a native Rust `AgentConnection`, a Rust Backboard endpoint client, a Rust-native tool/index layer, and several Zed UI surfaces rendering `AcpThread` state.
 
 | Area | Source of truth | What it owns |
 |------|-----------------|--------------|
-| CLI runtime | `cli/backboard_cli/` | CLI commands, config, API client, chat loop, tool manager, MCP, skills, pricing, semantic index, RLM/subagents |
-| CLI HTTP contract | `cli/backboard_cli/api/client.py` | Backboard assistant/thread/message/run/model/billing endpoints consumed by both CLI chat and the IDE bridge |
-| Python ACP bridge | `ide/zed/script/backboard-ide-acp.py` | JSON-RPC stdio server, CLI import, IDE session runtime, prompt augmentation, tool execution adapters, file/terminal/diff/plan/usage ACP updates |
-| Rust ACP launcher/client | `ide/zed/crates/agent_servers/src/backboard.rs`, `ide/zed/crates/agent_servers/src/acp.rs` | Launches the bridge, negotiates ACP sessions, forwards prompts/cancel/model/mode/config state, handles bridge requests like permissions and `fs/write_text_file` |
-| ACP thread model | `ide/zed/crates/acp_thread/src/acp_thread.rs`, `ide/zed/crates/acp_thread/src/connection.rs`, `ide/zed/crates/acp_thread/src/terminal.rs` | Stores conversation entries, tool calls, diffs, terminal handles/output, token/cost/speed metrics, and permission state |
-| Native chat UI | `ide/zed/crates/agent_ui/src/conversation_view.rs`, `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs` | Backboard chat surface, composer, model/mode/config controls, progress, grouped exploration, collapsed edits, terminal/diff/tool rendering |
-| Agent Workspace | `ide/zed/crates/agent_ui/src/agent_workspace_ui.rs`, `ide/zed/crates/agent_ui/src/agent_panel.rs` | Multi-agent dashboard, retained conversations, task launcher, git worktrees, review/apply/stop/retry/dismiss flow |
+| Native Backboard agent server | `ide/zed/crates/agent_servers/src/backboard.rs` | Registers Backboard as the native agent and returns `BackboardNativeConnection`; default mode is `free`. |
+| Native runtime | `ide/zed/crates/agent_servers/src/backboard_native/{mod.rs,stream.rs,tools.rs,tool_schemas.rs,workspace.rs,session_store.rs,index.rs}` | Session lifecycle, assistant/thread binding, stream translation, native tools, mode/config chips, workspace prompt, persisted IDE sessions, native codebase index. |
+| Backboard Rust API client | `ide/zed/crates/backboard/src/backboard.rs`, `ide/zed/crates/backboard/src/endpoints/**` | Rust HTTP/SSE/multipart client for assistants, threads, streamed messages, tool outputs, cancel, models, usage, voice/realtime helpers. |
+| ACP thread model | `ide/zed/crates/acp_thread/src/acp_thread.rs`, `ide/zed/crates/acp_thread/src/connection.rs`, `ide/zed/crates/acp_thread/src/terminal.rs` | Stores conversation entries, tool calls, diffs, display-only terminals, approvals, token/context/cost/speed metrics, and history. |
+| Native chat UI | `ide/zed/crates/agent_ui/src/conversation_view.rs`, `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs`, `ide/zed/crates/agent_ui/src/config_options.rs`, `ide/zed/crates/agent_ui/src/model_selector*.rs` | Backboard chat surface, composer, model/config controls, Agent Options menu, progress, grouped exploration, collapsed edits, terminal/diff/tool rendering. |
+| Agent Workspace | `ide/zed/crates/agent_ui/src/agent_workspace_ui.rs`, `ide/zed/crates/agent_ui/src/agent_panel.rs` | Multi-agent dashboard, retained conversations, draft chat promotion, git worktrees, review/apply/stop/retry/dismiss flow, run summaries. |
 | Simple/beginner UI | `ide/zed/crates/beginner_ui/src/*.rs` | Beginner chat-first workspace, folder selection, friendly feed, file changes panel, switch-to-editor handoff; chat history home page (BeginnerChatRecord, KVP persistence), curated model filtering (CuratedModelSelector), tab bar home icon |
-| Workspace shell | `ide/zed/crates/workspace/src/multi_workspace.rs`, `ide/zed/crates/title_bar/src/title_bar.rs` | Editor/Agents switching, Simple/Expert mode, full-page Multi-Agent rendering |
-| Backboard Rust API client | `ide/zed/crates/backboard/src/backboard.rs` | Rust mirror of the Backboard HTTP client used by older UI code and as a reference for endpoint shapes |
-| Inline autocomplete | `ide/zed/crates/edit_prediction/src/backboard.rs` and edit-prediction registry/settings files | BYOK ghost-text completions via Backboard assistant/thread API; pre-filtered, FIM-prompted, streamed with early exit, cached-thread, context-gated, chunk-split; separate from ACP chat/Agent Workspace |
+| Workspace shell and app chrome | `ide/zed/crates/workspace/src/multi_workspace.rs`, `ide/zed/crates/title_bar/src/title_bar.rs`, `ide/zed/crates/zed/src/zed.rs`, `ide/zed/crates/agent_settings/src/agent_settings.rs` | Simple/Expert mode, full-page Multi-Agent rendering, Backboard mode controls, default dock positions, app startup wiring. |
+| Inline autocomplete | `ide/zed/crates/edit_prediction/src/backboard.rs` and edit-prediction registry/settings files | BYOK ghost text via Backboard assistant/thread/message APIs; default provider `"backboard"` with legacy alias `"zed"`; cached assistant, 120-second thread TTL, FIM prompt, streaming early exit, strict prose/code filtering, inline completion output publishing. |
+| Visual defaults | `ide/zed/assets/fonts/**`, `ide/zed/assets/themes/backboard/backboard_tints.json`, `ide/zed/assets/settings/{default.json,initial_user_settings.json}` | Inter UI font, JetBrains Mono buffer font, Backboard Tints theme family, edit prediction defaults, left-dock defaults for project/outline/collab/git. |
+| Historical Python ACP bridge | `ide/zed/script/backboard-ide-acp.py` | Historical bridge and behavior reference only. It should not be treated as the active Backboard IDE chat runtime. |
+| CLI runtime | `cli/backboard_cli/` | Standalone CLI product and useful reference for API contracts, prompts, tools, MCP, skills, pricing, semantic index, RLM/subagents. Do not edit for IDE work without explicit approval. |
 
 Rule of thumb:
 
-- If the issue is "Backboard could not start", inspect Rust launch and bridge import paths first.
-- If the issue is "model/tool/API behavior is wrong", inspect `cli/backboard_cli/api/client.py`, the CLI tool manager, and bridge adapters.
+- If the issue is "Backboard could not start", inspect `agent_servers/src/backboard.rs`, `backboard_native/mod.rs`, API key/config loading, and native runtime logs first.
+- If the issue is "model/API behavior is wrong", inspect `backboard/src/backboard.rs`, `backboard/src/endpoints/**`, and `backboard_native/stream.rs`.
+- If the issue is "tool/index behavior is wrong", inspect `backboard_native/tools.rs`, `tool_schemas.rs`, and `index.rs`.
 - If the issue is "the IDE did not render the thing", inspect `acp_thread` storage first, then `conversation_view/thread_view.rs`.
 - If the issue is "Agent Workspace applied/reviewed wrong", inspect `agent_panel.rs` worktree/run metadata before the page view.
 
-## Native Rust Runtime Migration Status (2026-05-16)
+## Native Rust Runtime Status (2026-05-21)
 
-This section reflects the current working tree after the native runtime migration. It supersedes older sections in this document that describe the Python ACP bridge as the active Backboard IDE chat path. Those older sections are still useful as branch history and as reference for the behavior that was ported.
+This section reflects the current committed branch plus the current dirty working tree. It supersedes older sections in this document that describe the Python ACP bridge as the active Backboard IDE chat path. Those older sections are historical reference for behavior that was ported or replaced.
 
 ### Runtime Routing
 
 - `ide/zed/crates/agent_servers/src/backboard.rs` now returns `BackboardNativeConnection` directly from `BackboardAgentServer::connect`.
 - The active Backboard IDE chat path is now: Zed Rust agent UI/runtime -> `agent_servers/src/backboard_native/*` -> `backboard` Rust endpoint client -> Backboard HTTP API -> Rust-native tool execution.
-- The active path no longer launches `ide/zed/script/backboard-ide-acp.py`.
-- The active path no longer imports or shells through `cli/backboard_cli/`.
+- The current Rust path does not start `ide/zed/script/backboard-ide-acp.py`.
+- The current Rust path does not import or shell through `cli/backboard_cli/`.
 - `ide/zed/script/backboard-ide-acp.py` still exists in the repository as a reference/historical bridge, but it is not the default runtime.
 - Generic ACP infrastructure remains in place for other/custom ACP agents. `AcpThread` also remains the internal chat/thread UI model for Backboard because it owns tool cards, diffs, terminals, approvals, token usage, history, and rendering.
-- `ide/zed/script/bundle-mac` no longer copies the Backboard Python bridge or CLI resources into the app bundle. It writes native runtime metadata under `Contents/Resources/backboard/runtime.txt`.
+- `ide/zed/script/bundle-mac` no longer needs the Python bridge/CLI resources for the active chat runtime. Native-runtime packaging should be re-checked against the current script instead of following old embedded-CLI docs.
 
 ### New Native Runtime Modules
 
 New runtime code lives under `ide/zed/crates/agent_servers/src/backboard_native/`:
 
-- `mod.rs`: `BackboardNativeConnection`, session lifecycle, modes, config options, model selector, cancellation, assistant/thread binding, and session list integration.
+- `mod.rs`: `BackboardNativeConnection`, session lifecycle, modes, config options, model selector, cancellation, assistant/thread binding, session list integration, feature settings, native turn metrics, and usage snapshot APIs.
 - `stream.rs`: prompt handling, Backboard SSE translation, history replay, tool-output continuation, usage/context-window parsing, provider-shaped thinking payloads, and Tokio wrapping for HTTP/SSE futures.
 - `tools.rs`: Rust-native execution for advertised IDE tools, tool batching, file edits, terminal cards, permission prompts, shell timeout enforcement, and compressed read/search outputs.
 - `tool_schemas.rs`: tool schemas filtered by mode (`agent`, `ask`, `manual`, `free`).
 - `workspace.rs`: system prompt and lightweight workspace prompt augmentation.
 - `session_store.rs`: persisted IDE session/thread mappings in `~/.backboard/ide_sessions.json`.
+- `index.rs`: native codebase index preparation/build/search. It writes CLI-compatible index data under `.backboard_index/codebase_index.json`, prepares `.backboard/scratchpad`, skips heavy/internal directories, and feeds `codebase_search` before falling back to lexical search.
 
 The runtime keeps the existing user-facing modes:
 
@@ -70,6 +92,12 @@ The runtime keeps the existing user-facing modes:
 - `ask`: read/search/explain only; mutating and shell tools are hidden/blocked.
 - `manual`: focused edit proposals; shell tools are hidden/blocked.
 - `free`: shell tools can run without approval prompts.
+
+Current default mode:
+
+- `BackboardAgentServer::new(...)` defaults to `free`.
+- Agent Workspace can still create sessions with an explicit mode.
+- Mode can now be changed through the `backboard_mode` session config option, and the native runtime emits a current-mode update after mode changes.
 
 ### Rust Endpoint Client Work
 
@@ -88,6 +116,7 @@ Important runtime-used endpoint methods:
 
 Current native composer controls are delivered through session config options, so they render as compact chips in the existing chat control row:
 
+- `Mode`: `Agent`, `Ask`, `Manual`, `Full Access`; maps to native session mode and tool filtering.
 - `Intensity`: `Fast`, `Balanced`, `Deep`.
 - `Web`: `Off`, `Auto`; maps to message `web_search`.
 - `Image`: `Off`, `Auto`; maps to `image_generation=auto`, `image_model_provider=openrouter`, and `image_model_name=google/gemini-3.1-flash-image-preview`.
@@ -132,6 +161,9 @@ The native stream translator handles these Backboard chunk types:
 
 Important fixes already made:
 
+- Native turn metrics now track timing buckets, counts, slowest tool, first-token latency, and usage snapshots. These are emitted through `backboard_speed` metadata for the same footer/card surfaces that previously consumed Python bridge metrics.
+- Context window size is inferred from model/catalog data and remembered per provider/model; `run_ended.context_usage` remains authoritative when present.
+- `codebase_search` uses the native `.backboard_index/codebase_index.json` when available and falls back to lexical search when the index is missing or empty.
 - Fast intensity now omits `thinking` entirely instead of sending `{"enabled": false}`. The server rejects the `enabled` key.
 - Balanced/deep thinking now uses provider-shaped payloads, such as `effort`, `budget_tokens`, or `max_tokens`.
 - `run_ended.context_usage` is now parsed as the authoritative context-window source. This fixes the broken `102k / 0 tokens` display.
@@ -152,6 +184,7 @@ Advertised and implemented native tools:
 
 Tool behavior:
 
+- Native workspace indexing starts in the background when sessions are created or loaded.
 - Read/search tools can batch in parallel.
 - Read/search outputs are compressed before being sent back to the model.
 - Existing-file writes use `AcpThread::write_text_file` so Zed owns buffers, diffs, action log, and saves.
@@ -216,22 +249,24 @@ Current native unit coverage includes:
 - Live IDE/API manual verification is still useful: send a prompt, inspect logs for `path=rust-native`, run a read tool, run an approved shell command, create/edit a file, cancel a turn, and restore a thread.
 - Full realtime microphone capture/playback still needs a dedicated composer action/control that streams PCM frames over the prepared WebSocket. The native endpoint URL/setup state exists; the UI capture loop is not complete.
 - The Rust-native `read_lints` tool is currently a lightweight placeholder message, not full diagnostics integration.
-- `codebase_search` is a lexical fallback, not the full CLI semantic index/RLM path.
+- `codebase_search` is now native-index-backed when `.backboard_index/codebase_index.json` exists and lexical fallback otherwise. It is still not the full CLI semantic/RLM path.
 - MCP, browser, web fetch/search, RLM/subagents, notebook tools, and the CLI's richer skill system are not fully ported into the Rust-native tool layer.
-- Older sections below still describe the Python bridge as the active path. Treat them as historical/reference until the whole handoff doc is rewritten around the native runtime.
+- Older branch-history sections below still mention the Python bridge because that was the active path at the time of those commits. Treat those entries as historical/reference, not current architecture.
 
 ## Branch History
 
 Branch range audited:
 
-- `83939300^..HEAD`
+- `origin/main..bb-ide-zed`
+- Commit count: 74
 - Current branch: `bb-ide-zed`
-- Current HEAD during this handoff update: `f701758d Route inline completions to Backboard API`
+- Current HEAD during this handoff update: `27aeb9ce Update agent_workspace_ui.rs`
 
 Important framing:
 
 - `83939300 Cloned Zed` is the baseline IDE import. It added the upstream Zed tree under `ide/zed/` and is intentionally summarized instead of listing all imported files.
 - The branch also merged unrelated `origin/main` API/product work on May 13, 2026. Those commits are acknowledged below, but the IDE handoff focuses on files under `ide/zed/` plus the root handoff/feature notes.
+- Some old "Current role" bullets below were written before the Rust-native migration. When they describe Python ACP as the live runtime, treat that as historical branch context, not active architecture.
 
 ### Baseline Import
 
@@ -255,7 +290,7 @@ Important framing:
 - `523014c5` - 2026-05-11 - ErinTomorri - Add Backboard native agent and ACP bridge.
   - Purpose: created the native Backboard agent server and the Python ACP stdio bridge that imports the CLI runtime.
   - Main files changed: `ide/zed/crates/agent_servers/src/backboard.rs`, `ide/zed/script/backboard-ide-acp.py`, `ide/zed/crates/agent_ui/src/conversation_view.rs`, `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs`, `ide/zed/crates/agent_ui/src/agent_panel.rs`, `ide/zed/crates/agent_ui/src/agent_ui.rs`.
-  - Current role: this is the core IDE-to-Backboard path: Rust launches the Python bridge; Python talks to the existing CLI engine; native Zed ACP UI renders the conversation.
+  - Historical role: this was the original IDE-to-Backboard path. It has been superseded by the Rust-native runtime in `backboard_native/*`.
 
 - `b46533d4` - 2026-05-11 - ErinTomorri - Add Backboard IDE handoff & workspace UI.
   - Purpose: created this handoff document and introduced the first Agent Workspace UI/runtime hooks.
@@ -378,6 +413,90 @@ Important framing:
   - Main files changed: `ide/zed/crates/edit_prediction/src/backboard.rs`, `ide/zed/crates/edit_prediction/src/edit_prediction.rs`, `ide/zed/crates/zed/src/zed/edit_prediction_registry.rs`, `ide/zed/crates/language/src/language_settings.rs`, `ide/zed/crates/settings_content/src/language.rs`, `ide/zed/crates/settings_ui/src/pages/edit_prediction_provider_setup.rs`, `BACKBOARD_IDE_HANDOFF.md`.
   - Current role: `EditPredictionProvider::Backboard` (alias `"zed"`) maps to `EditPredictionModel::Backboard`; settings expose `edit_predictions.backboard.api_url/model/timeout_ms`; assistant/thread are cached per API URL so cold start only happens once per session; pre-filter, FIM prompt, SSE streaming with early exit, response gating, and chunking are all applied before ghost text is shown.
 
+### Post-`f701758d` Timeline And Current Head
+
+This section captures the commits that were missing from the older handoff audit.
+
+- `40bf621b` / `7f9397ea` - 2026-05-14 - Packaging docs and handoff relocation.
+  - Added `ide/docs/BACKBOARD_IDE_PACKAGING.md`, moved the handoff under `ide/docs/`, and documented release artifacts versus local `target/` output.
+
+- `4141d1ac` - 2026-05-14 - Limit Backboard workspace chats to 20.
+  - Added workspace run launch results, batch ids, events, pending worktree setup, and UI handling for the run limit.
+
+- `f4c16e6a` / `a07fcd4f` - 2026-05-14/15 - Agent Workspace UI and metric polish.
+  - Added lazy `AgentPanel` creation for workspace flows, terminal-style activity preview, higher-fidelity cost/token/timing cards, better truncation, and cleaner card styling.
+
+- `3fd37581` - 2026-05-14 - Backboard Studio rebrand and diagnostics.
+  - Updated app identifiers, URL schemes, packaging metadata, and ACP diagnostics/session-store locking for the old bridge era.
+
+- `16d8ad65` - 2026-05-14 - Token/speed metrics and embedded CLI plan.
+  - Added `BACKBOARD_IDE_EMBEDDED_CLI_NEXT_STEPS.md`, workspace token/context/timing cards, and bridge-side helper HTTP calls. The embedded CLI plan is now mostly historical because native Rust chat is active.
+
+- `972d78bf`, `44d4e494`, `9d0d4475`, `1dac0a06` - 2026-05-14 - Simple Mode web preview and lifecycle fixes.
+  - Added `beginner_ui/web_preview.rs`, macOS WKWebView and Windows WebView2 preview support, Enter-to-submit, raw folder navigation, browser-style tabs, per-session dev-server ports 3000-3002, shell login/interactive launch for GUI app PATH, package-manager detection, and hot-reload-friendly follow-up behavior.
+
+- `8c150e8d`, `5d7b446d`, `4cfbbb37` - 2026-05-14/15 - Testcase doc organization.
+  - Added detailed landing-page/web-app prompts and sample React app docs, then moved them into `ide/docs/testcase/`. `AGItestcase.md` is now the one-line billion-dollar SaaS stress prompt.
+
+- `9c0d79ca` - 2026-05-15 - Bundle Backboard runtime and update mac packaging.
+  - Made mac release work more self-contained for the Python bridge era, renamed DMG artifacts to Backboard Studio, and added packaged resource lookup. Active chat later moved to native Rust, so verify current `bundle-mac` before following older CLI bundle steps.
+
+- `b9154644` - 2026-05-15 - Simple Mode curated models and chat history.
+  - Added `CuratedModelSelector`, Simple Mode chat records in KVP key `beginner_chats_v1`, continue/delete chat history, prompt-derived chat names, and a home icon that returns to the landing page without losing the active tab.
+
+- `1a373eb0` / `7c11b716` - 2026-05-15 - IDE folder guide, lofi theme, assets, and Agent Workspace UI adjustments.
+  - Added `IDE_FOLDER_GUIDE.md`, `lofi.json`, refreshed app/icon assets, and continued multi-agent workspace layout polish.
+
+- `03ff9704` - 2026-05-15 - ACP runtime docs and bridge hardening.
+  - Added temporary endpoint docs, clarified protocol stdout/stderr, improved bundled CLI lookup, tightened read-only shell classification, normalized tool-call payloads, and improved bridge context/tool batching. This is historical for active chat.
+
+- `5a12f887` - 2026-05-15 - IDE chat persistence and chat-entry behavior.
+  - Fixed restored history context leakage, session/list/load behavior, archived Backboard chat rescue, and changed the chat button to open the sidebar thread switcher instead of forcing Multi-Agent.
+
+- `f34a5b6e` / `c8039b13` - 2026-05-15 - Rust endpoint docs and endpoint modules.
+  - Added `BACKBOARD_IDE_RUST_ENDPOINTS.md`, `BACKBOARD_IDE_NATIVE_ENDPOINTS_NEXT_STEPS.md`, and Rust endpoint modules under `backboard/src/endpoints/**`.
+
+- `eb73b891` / `802278db` - 2026-05-16 - Native Backboard agent runtime.
+  - Introduced `agent_servers/src/backboard_native/**`, changed `BackboardAgentServer::connect` to return `BackboardNativeConnection`, expanded `TokenUsage`, added native tool execution, and stopped using the Python ACP/CLI bridge as default chat runtime.
+
+- `e120b050` - 2026-05-19 - Native index, metrics, and tools.
+  - Added `backboard_native/index.rs`, background workspace indexing, `.backboard_index/codebase_index.json`, expanded native tool schemas, context-window inference/cache, native speed metadata, token estimates, and index-backed `codebase_search` with lexical fallback. Also changed default session mode to `free`.
+
+- `e0237097` - 2026-05-19 - Backboard inline autocomplete provider.
+  - Made `"backboard"` the default edit prediction provider, preserved legacy `"zed"` alias, added BYOK Backboard completions, assistant cache, 120-second thread TTL, stricter `<prefix>/<suffix>/<cursor>` FIM prompting, prose filtering, and inline completion output pub/sub.
+
+- `d30fbac2` / `13b87634` / `9891bf0c` - 2026-05-19 - UX stabilization and icon update.
+  - Refined Simple/Expert UX, Home/Chats navigation, onboarding mode cards, model picker grouping/favorites, and Backboard icon usage.
+
+- `c5651083` - 2026-05-20 - UI theming, spacing, and speed notes.
+  - Added `CLI_VS_IDE_SPEED_NOTES.md` and broader UI polish across agent UI, editor, terminal, panels, dock, tabs, and status bar. The key product note: the IDE feels faster because the native Rust path removes CLI-side client overhead, not because it lowers model/tool quality.
+
+- `5fcbede3` - 2026-05-20 - Voice/media support and UI controls.
+  - Added feature settings for Web/Image/Voice/Live Voice, REST STT/TTS/conversation defaults, realtime voice setup, multipart audio upload, `send_to_llm`, media/STT/TTS stream handling, generated resource links, and compact session control chips.
+
+- `a8fdb493` - 2026-05-20 - Inter, JetBrains Mono, and Backboard Tints.
+  - Bundled Inter and JetBrains Mono font files and OFL licenses, added `assets/themes/backboard/backboard_tints.json`, and updated default/initial settings to use Inter for UI and JetBrains Mono for buffers.
+
+- `4b975091` - 2026-05-20 - Backboard mode config and left-dock defaults.
+  - Added `backboard_mode` config, current-mode updates, default left docking for project/outline/collab/git panels, non-agent right-dock prevention, and additional Agent Workspace layout/status polish.
+
+- `27aeb9ce` - 2026-05-21 - Agent Workspace UI update.
+  - Reduced older selected-detail UI, keeping the right panel as the live `AgentPanel` host. Current dirty work builds on this with draft-only New Chat, first-prompt promotion, and run ordering changes.
+
+### Working Tree / Uncommitted As Of 2026-05-21
+
+The current checkout has uncommitted changes in Rust UI/runtime files. Do not assume these are accidental; preserve them unless the user asks otherwise.
+
+- `agent_servers/src/backboard_native/mod.rs`: adds tests proving `set_config_option` updates native session state for Web, Mode, and Voice options.
+- `agent_ui/src/config_options.rs` and `conversation_view/thread_view.rs`: add `ConfigOptionSummary`, per-option cycling, stable picker popover ids, and an Agent Options menu that shows all current config options as clickable rows instead of embedding the full selector UI.
+- `picker/src/popover_menu.rs`: allows custom popover ids so multiple config option pickers do not collide.
+- `gpui/src/key_dispatch.rs` and `gpui/src/window.rs`: make reused deferred-draw parent-node remapping fallible and skip stale deferred draws rather than asserting.
+- `agent_ui/src/model_selector.rs` and `model_selector_popover.rs`: update selected model first, then refresh model list; widen branded trigger and make the label more prominent.
+- `agent_ui/src/agent_panel.rs`: adds workspace draft thread persistence, draft-only New Chat, `promote_active_backboard_workspace_draft`, first-prompt run promotion, `auto_select` event semantics, `created_at` run ordering, and guards so drafts do not count as run summaries.
+- `agent_ui/src/agent_workspace_ui.rs`: New Chat now focuses a draft without selecting a run card; first send can promote the draft and open a fresh draft; the right panel embeds the live `AgentPanel`.
+- `settings_ui/src/settings_ui.rs`: removes an unused sub-page helper.
+- Docs working tree: tracked planning docs at `ide/docs/BACKBOARD_IDE_*`, `ide/docs/CLI_VS_IDE_SPEED_NOTES.md`, and `ide/docs/IDE_FOLDER_GUIDE.md` are deleted while copies exist under untracked `ide/docs/md/`. This handoff update intentionally edits only `ide/docs/BACKBOARD_IDE_HANDOFF.md`.
+
 ### Documentation-Only And Merge Commits
 
 - `aa87cbf1` - 2026-05-12 - ErinTomorri - Update `BACKBOARD_IDE_HANDOFF.md`.
@@ -400,9 +519,9 @@ Important framing:
   - Main files changed: `backboard_studio_features.txt`, `backboard_studio_mode_features.txt`, `ide/zed/crates/beginner_ui/src/**`, `ide/zed/crates/title_bar/src/title_bar.rs`, `ide/zed/crates/workspace/src/multi_workspace.rs`, `ide/zed/crates/agent_ui/src/**`, `ide/zed/crates/zed/src/**`.
   - Current role: merge node; inspect `81929251`, `a0a0c69a`, and `59efd845` for implementation intent.
 
-### Simple Mode: Curated Models And Chat History Home Page (Uncommitted As Of 2026-05-15)
+### Simple Mode: Curated Models And Chat History Home Page
 
-The changes below are local on `bb-ide-zed` and have not yet been committed. They represent the current working state.
+These changes landed in the May 15 Simple Mode work and remain part of the current product direction.
 
 **CuratedModelSelector and model filtering**
 
@@ -436,7 +555,7 @@ The changes below are local on `bb-ide-zed` and have not yet been committed. The
 Backboard IDE is a Zed fork using Zed's native agent infrastructure. The important pieces are:
 
 - Rust agent server: `ide/zed/crates/agent_servers/src/backboard.rs`
-- Python ACP bridge: `ide/zed/script/backboard-ide-acp.py`
+- Native Rust runtime: `ide/zed/crates/agent_servers/src/backboard_native/`
 - Native chat UI: `ide/zed/crates/agent_ui/src/conversation_view.rs`
 - Thread/tool rendering: `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs`
 - Agent panel ownership/runtime: `ide/zed/crates/agent_ui/src/agent_panel.rs`
@@ -445,18 +564,20 @@ Backboard IDE is a Zed fork using Zed's native agent infrastructure. The importa
 - Agent action registration: `ide/zed/crates/agent_ui/src/agent_ui.rs`
 - Backboard Rust API/config client: `ide/zed/crates/backboard/src/backboard.rs`
 - Older thin Backboard panel: `ide/zed/crates/backboard_ui/src/backboard_ui.rs`
+- Historical Python ACP bridge: `ide/zed/script/backboard-ide-acp.py`
 
 Runtime flow:
 
 1. Zed opens the native Backboard agent.
-2. `BackboardAgentServer` launches `ide/zed/script/backboard-ide-acp.py` over stdio.
-3. The Python bridge imports the existing CLI package from `cli/backboard_cli`.
-4. The bridge speaks ACP JSON-RPC to Zed and streams model text, progress notes, tool calls, terminal output, diffs, plans, model state, and permission requests.
-5. Zed's native agent UI renders the conversation, tool cards, terminal cards, diffs, model selector, and command approval UI.
+2. `BackboardAgentServer::connect()` returns `BackboardNativeConnection`.
+3. The native runtime creates/restores assistant/thread ids, prepares workspace context, starts background indexing, and sends streamed Backboard API requests through the Rust endpoint client.
+4. Stream chunks are translated directly into `AcpThread` updates: assistant text, progress, tool calls, terminal output, diffs, media links, voice transcripts/audio links, usage, context, speed metrics, and mode/config state.
+5. Rust-native tools execute local reads/searches/edits/shell commands, then submit JSON-string tool outputs back to the same Backboard run.
+6. Zed's native agent UI renders the conversation, tool cards, terminal cards, diffs, model/config controls, and command approval UI.
 
 ## CLI API Surface
 
-The CLI and IDE bridge use the assistant/thread/run API shape exposed by `BackboardAPIClient`. Treat `cli/backboard_cli/api/client.py` as the strongest source of truth for what the current IDE bridge consumes. `ide/zed/crates/backboard/src/backboard.rs` mirrors the same endpoint family in Rust for older Backboard UI/reference code.
+The CLI and IDE both use the assistant/thread/run API family. For the active IDE path, treat `ide/zed/crates/backboard/src/backboard.rs` and `ide/zed/crates/backboard/src/endpoints/**` as the direct implementation. `cli/backboard_cli/api/client.py` remains the strongest historical/reference source for behavior the Rust client was intended to mirror.
 
 The API base URL comes from `~/.backboard/config.json`:
 
@@ -467,7 +588,7 @@ The API base URL comes from `~/.backboard/config.json`:
 - The API key is sent as `X-API-Key`.
 - API key preflight uses `GET /assistants?limit=1` through `cli/backboard_cli/api/validation.py`; `set-api-key` can probe prod/dev and switch the saved env to the one that accepts the key.
 
-The backend and SDK also expose newer stateful convenience endpoints such as `/threads/messages`, but the CLI/IDE path documented here is the assistant/thread/run path below.
+The backend and SDK also expose newer stateful convenience endpoints such as `/threads/messages`, but the IDE native runtime path documented here is the assistant/thread/run path below.
 
 ### Endpoint Matrix Used By CLI And IDE
 
@@ -546,7 +667,7 @@ If a future issue shows duplicated user messages, mismatched run IDs, or "no ass
 
 ## How The CLI Works
 
-The CLI is a full agent runtime, not just a thin HTTP wrapper. The IDE bridge imports this runtime directly and adapts its events into ACP.
+The CLI is a full agent runtime, not just a thin HTTP wrapper. This section is reference material for the standalone CLI and for behavior that the older Python ACP bridge reused. The active IDE chat runtime is Rust native and does not import the CLI.
 
 ### Entrypoint And Commands
 
@@ -599,7 +720,7 @@ Interactive chat starts through `cli/backboard_cli/cli/commands/session.py`:
 
 ### Runtime Services
 
-The CLI runtime includes services the IDE bridge deliberately reuses:
+The CLI runtime includes services the older IDE bridge reused and the native runtime may still use as parity reference:
 
 - `AdvancedToolManager` for file/search/shell/web/todo/task/MCP/tool execution.
 - `MCPManager` for external tool schemas and tool dispatch.
@@ -611,23 +732,23 @@ The CLI runtime includes services the IDE bridge deliberately reuses:
 - Persistent Python REPL and code execution helpers.
 - Browser/computer harness hooks where enabled by the CLI tool layer.
 
-The IDE bridge does not run `backboard chat` as a subprocess. It imports the Python modules above, creates the same objects in-process, and then replaces terminal-oriented display with ACP session updates.
+Historical note: the Python bridge did not run `backboard chat` as a subprocess. It imported Python modules in-process and adapted terminal-oriented behavior into ACP session updates. The active runtime no longer uses this path.
 
-## Python ACP Bridge Contract
+## Historical Python ACP Bridge Contract
 
-`ide/zed/script/backboard-ide-acp.py` is the IDE-owned adapter between Zed ACP and the CLI runtime.
+`ide/zed/script/backboard-ide-acp.py` was the IDE-owned adapter between Zed ACP and the CLI runtime. It is still in the repository as historical/reference code, but it is not the active Backboard IDE chat path as of May 21, 2026.
 
-### Launch Contract
+### Historical Launch Contract
 
-The path is:
+The pre-native path was:
 
-1. Zed requests the native `backboard` agent.
-2. `BackboardAgentServer.connect()` builds an `AgentServerCommand`.
-3. The command launches `backboard-ide-acp.py` with Python.
-4. Rust `agent_servers/src/acp.rs` speaks ACP JSON-RPC over the child process stdio.
-5. The bridge redirects accidental Python stdout to stderr so only protocol JSON goes to stdout.
+1. Zed requested the native `backboard` agent.
+2. `BackboardAgentServer.connect()` built an `AgentServerCommand`.
+3. The command launched `backboard-ide-acp.py` with Python.
+4. Rust `agent_servers/src/acp.rs` spoke ACP JSON-RPC over the child process stdio.
+5. The bridge redirected accidental Python stdout to stderr so only protocol JSON went to stdout.
 
-Important env vars:
+Historical env vars:
 
 | Env var | Purpose |
 |---------|---------|
@@ -638,9 +759,9 @@ Important env vars:
 | `BACKBOARD_IDE=zed` | Marks the runtime as IDE-owned |
 | `NO_BROWSER=1` | Prevents browser launch when the IDE delegate requests no browser |
 
-### ACP Methods Handled
+### Historical ACP Methods Handled
 
-The bridge handles these JSON-RPC requests/notifications:
+The bridge handled these JSON-RPC requests/notifications:
 
 | Method | Bridge behavior |
 |--------|-----------------|
@@ -656,14 +777,14 @@ The bridge handles these JSON-RPC requests/notifications:
 | `session/close` | Closes the IDE session |
 | `session/cancel` | Cancels the local turn, backend run, and active subprocesses |
 
-The bridge also sends requests back into the IDE:
+The bridge also sent requests back into the IDE:
 
 - `session/request_permission` for command/tool approval.
 - `fs/write_text_file` so editor buffers, diffs, action log, and saves are owned by Zed.
 
-### Session Runtime
+### Historical Session Runtime
 
-Each `BackboardIdeSession` owns:
+Each `BackboardIdeSession` owned:
 
 - workspace path and selected mode/model/intensity
 - `BackboardAPIClient`
@@ -677,11 +798,11 @@ Each `BackboardIdeSession` owns:
 - speed/timing buckets
 - terminal/tool/file-write bookkeeping
 
-Session mapping is persisted in `~/.backboard/ide_sessions.json` so a loaded IDE ACP session can bind back to the Backboard assistant/thread when possible.
+Session mapping was persisted in `~/.backboard/ide_sessions.json` so a loaded IDE ACP session could bind back to the Backboard assistant/thread when possible.
 
-### Prompt Augmentation
+### Historical Prompt Augmentation
 
-Before calling `POST /threads/{thread_id}/messages`, the bridge creates an IDE context pack. Depending on intensity and request shape, it can include:
+Before calling `POST /threads/{thread_id}/messages`, the bridge created an IDE context pack. Depending on intensity and request shape, it could include:
 
 - workspace path
 - lightweight file tree
@@ -692,7 +813,7 @@ Before calling `POST /threads/{thread_id}/messages`, the bridge creates an IDE c
 - semantic code-search hits
 - website/app quality guidance for frontend requests
 
-Fast intensity keeps the pack smaller and normally skips semantic search. Balanced/Deep can add semantic hits. Website/app turns get extra frontend guidance and capped thinking even when the selected intensity is Fast.
+Fast intensity kept the pack smaller and normally skipped semantic search. Balanced/Deep could add semantic hits. Website/app turns got extra frontend guidance and capped thinking even when the selected intensity was Fast.
 
 ### Stream Mapping
 
@@ -718,42 +839,33 @@ The cancel path is intentionally multi-layered:
 5. Bridge asks `AdvancedToolManager.cancel_active_subprocesses()` to stop active foreground commands.
 6. Pending terminal output is finalized with exit/cancel metadata.
 
-## Backboard Editor To ACP Bridge Flow
+## Backboard Editor To Native Runtime Flow
 
-This is the exact flow for a normal Backboard chat turn and for Agent Workspace auto-submitted tasks.
+This is the current flow for a normal Backboard chat turn and for Agent Workspace auto-submitted tasks.
 
 1. User submits a prompt in the native Backboard composer, Beginner UI follow-up box, or Agent Workspace task launcher.
 2. `ThreadView.send()` resolves editor content and clears/queues the composer.
-3. `AcpThread.send()` optimistically appends the local user message and asks the `AgentConnection` to prompt.
-4. Rust `agent_servers/src/acp.rs` sends JSON-RPC `session/prompt` with the ACP session id and prompt blocks.
-5. `BackboardIdeSession.prompt()` serializes the turn through `_prompt_lock`.
-6. `_run_prompt()` extracts text/resources, starts heartbeat progress, ensures runtime, augments the prompt, and ensures assistant/thread binding.
-7. The bridge calls `api_client.send_message_stream(thread_id, augmented_message, provider, model, tools, thinking, web_search="off")`.
-8. The backend streams text, reasoning state, tool requests, usage, and run end/failure chunks.
-9. `_consume_stream()` turns visible assistant text into ACP agent message chunks.
-10. When tools are requested, `_handle_tool_submit()` executes bridge/CLI tools and calls `submit_tool_outputs`.
-11. The bridge emits `session/update` for every visible unit of work.
-12. `AcpThread.handle_session_update()` stores messages, tool calls, plans, terminal data, usage, cost, and speed metrics.
-13. `ThreadView` renders assistant text, progress, grouped exploration rows, collapsed write/edit cards, terminal cards, diff cards, permission buttons, and footer context/cost.
+3. `AcpThread.send()` optimistically appends the local user message and asks the active `AgentConnection` to prompt.
+4. `BackboardNativeConnection` receives the prompt directly inside Rust, resolves the `NativeSession`, records turn metrics, and ensures assistant/thread binding.
+5. The native runtime builds workspace context, uses or refreshes the native codebase index, applies mode/config settings, and calls `BackboardClient::send_message_stream`.
+6. The backend streams text, reasoning state, media/voice chunks, tool requests, usage, context, and run end/failure chunks.
+7. `backboard_native/stream.rs` maps visible assistant text, progress, media links, STT/TTS data, usage, and speed metadata into `AcpThread` updates.
+8. When tools are requested, `backboard_native/tools.rs` executes Rust-native tools and submits JSON-string outputs through `submit_tool_outputs_stream`.
+9. `AcpThread.handle_session_update()` stores messages, tool calls, plans, terminal data, usage, cost, context, and speed metrics.
+10. `ThreadView` renders assistant text, progress, grouped exploration rows, collapsed write/edit cards, terminal cards, diff cards, media/resource links, permission buttons, config chips, and footer context/cost.
 
-The file-edit path is the most important special case:
+The file-edit path is still editor-owned:
 
 1. Model calls `write`, `edit`, `search_replace`, or `delete_file`.
-2. Bridge computes old/new text and builds an ACP diff item.
-3. Bridge emits the tool call/diff state so the chat can show what changed.
-4. For writes/edits/search-replace, bridge calls Rust request `fs/write_text_file`.
-5. `agent_servers/src/acp.rs` handles that request by calling `AcpThread::write_text_file(path, content)`.
-6. `AcpThread` applies the edit through editor-owned buffer/save/action-log plumbing.
-7. The UI sees the result as a real editor-backed diff/change instead of a blind Python file write.
-8. If the IDE write request fails, the bridge has a direct write fallback, but that is the less desirable path because it bypasses some editor-owned state.
+2. Native tools compute old/new text and build ACP-visible tool/diff state.
+3. Existing-file writes go through `AcpThread::write_text_file(path, content)` so buffers, diffs, action log, and saves remain Zed-owned.
+4. New files and deletes currently use direct filesystem operations plus ACP diff/tool updates.
 
-Terminal output follows a parallel metadata path:
+Terminal output follows a display-only terminal path:
 
-1. Bridge emits a tool call with `_meta.terminal_info`.
-2. Rust creates/registers a display-only terminal for that tool call.
-3. Bridge streams `_meta.terminal_output` chunks.
-4. Rust forwards chunks to the terminal provider, buffering output if it arrives before the terminal object exists.
-5. Bridge emits `_meta.terminal_exit` when the command finishes, times out, or is cancelled.
+1. Native shell tools create terminal cards through `TerminalProviderEvent`.
+2. Output is streamed/buffered into display-only terminal state.
+3. Exit, timeout, and cancellation metadata are surfaced back through the tool card.
 
 ## IDE Screens And Backboard Editor Flow
 
@@ -772,7 +884,7 @@ What the user sees:
 - Backboard-branded native agent conversation.
 - Composer placeholder: "Message Backboard - @ to include context".
 - Backboard/model pill opening the ACP model selector.
-- Mode/config controls for Agent/Ask/Manual/Free and Intensity.
+- Mode/config controls for Mode, Intensity, Web, Image, Voice, and Live Voice.
 - Permission prompts for tools/commands.
 - Tool cards, grouped exploration, terminal cards, diff cards, plan state, context-window tokens, cost, and speed metrics.
 
@@ -799,7 +911,7 @@ What the user sees:
 - Type controls: Build, Review, Test, Docs.
 - Mode controls: Agent, Ask, Manual, Free.
 - Run cards grouped by batch, with status, cost, changed files, events, branch/worktree labels, apply state, and actions.
-- Detail drawer with the real `ConversationView` for the selected agent.
+- A right-side live `AgentPanel` host for the selected/draft chat, plus run cards on the dashboard.
 
 Runtime behavior:
 
@@ -836,12 +948,12 @@ Runtime behavior:
 
 - `BeginnerWorkspace` asks `AgentPanel::spawn_beginner_thread(text, work_dirs, ...)` to create a native Backboard ACP thread.
 - `spawn_beginner_thread` passes `work_dirs` so the agent writes into the correct folder and creates the `ConversationView` with `suppress_notifications = true` so tool-confirmation popups are never shown in Simple Mode.
-- The ACP session uses `free` mode so the Python bridge auto-approves every tool call without asking the user.
+- The native session uses `free` mode by default so Simple Mode does not show tool-confirmation popups to non-technical users.
 - The initial prompt is `AgentInitialContent::ContentBlock { auto_submit: true }`.
 - The beginner feed observes the same `AcpThread` entries as native chat but hides thought-only chunks and simplifies tool labels.
 - The file changes panel watches the active thread action log, not a separate file-scanning runtime.
 - When the agent finishes, `open_web_app_if_present` searches the project root and one level of subdirectories for a `package.json` with a `"dev"` script or an `index.html`. It starts `npm run dev` for Next.js/Vite projects or sets `preview_url` to a `file://` URL for static HTML.
-- Before starting a new dev server, the code kills any existing process on port 3000 with `lsof -ti :3000 | xargs kill -9` (macOS/Linux), waits 400 ms, then starts fresh. The preview URL is always `http://localhost:3000`.
+- Before starting a dev server, the code claims/reuses a session-specific port and kills only that port when needed.
 - Each session claims a unique port (3000, 3001, or 3002) stored in `dev_server_port: Option<u16>`, which is stashed/swapped alongside `preview_url`. `claim_dev_server_port()` scans background sessions to find the lowest free port. `start_dev_server` only kills that specific port — other sessions' servers are left running. This allows up to 3 live dev servers simultaneously; switching tabs shows the correct session's preview without restarting anything.
 - `start_dev_server` runs via `$SHELL -i -l -c "cd <folder> && <pm> run dev -- --port=<port>"` so both `~/.zprofile` and `~/.zshrc` are sourced, making nvm/Homebrew/mise available from a GUI app launch. The plain `Command::new("npm")` path fails because macOS GUI apps get a minimal PATH.
 - Package manager is auto-detected from lockfiles: `pnpm-lock.yaml` → pnpm, `bun.lockb`/`bun.lock` → bun, `yarn.lock` → yarn, fallback → npm.
@@ -899,54 +1011,49 @@ Inline autocomplete is a Backboard API integration, but it is not ACP chat:
 
 ## Tooling, Permissions, And Modes
 
-The IDE bridge exposes the CLI tool system through ACP-friendly adapters.
+The active IDE runtime exposes Rust-native tool schemas and adapters. The older Python bridge exposed the CLI tool system; that path is historical.
 
 ### Tool Catalog
 
-`AdvancedToolManager.get_tool_definitions()` provides the base catalog:
+`backboard_native/tool_schemas.rs` and `backboard_native/tools.rs` provide the active native catalog:
 
-- File tools: `read_file`, `write`, `edit`, `delete_file`, `create_directory`, `edit_notebook`
-- Search/tools over the workspace: `glob`, `glob_file_search`, `grep`, `list_dir`, `codebase_search`, `read_lints`
-- Shell/code execution: `bash`, `run_terminal_cmd`, `repl`, `run_code`, `computer`
-- Web tools: `web_search`, `web_fetch`
-- Planning/control: `todo_write`, `enter_plan_mode`, `exit_plan_mode`, `ask_user_question`, `persistence_decide`, `sleep`
-- Subagents: `task`
-- MCP tools: appended from enabled MCP servers
-- Memory/update hooks where supported by the CLI tool layer
+- Read/search: `read_file`, `list_dir`, `glob`, `grep`, `codebase_search`, `read_lints`.
+- File mutation: `write`, `edit`, `search_replace`, `delete_file`, `create_directory`.
+- Shell: `bash`, `run_terminal_cmd`.
+- Flow: `todo_write`.
 
-The bridge does not blindly pass every CLI tool through in every mode. It filters definitions before sending them to the backend so the model sees only tools allowed for the current ACP mode.
+The native runtime filters definitions before sending them to the backend so the model sees only tools allowed for the current mode/config. MCP, browser, web fetch/search, RLM/subagents, notebook tools, and the CLI skill system are not fully ported into the Rust-native tool layer.
 
 ### Mode Restrictions
 
-| Mode | Bridge behavior |
+| Mode | Native runtime behavior |
 |------|-----------------|
-| `ask` | Blocks mutating file tools, shell/code/computer tools, and `task`; read/search/web/planning tools remain available |
-| `manual` | Blocks shell/code/computer tools and `task`; file proposals can still be adapted through IDE diff/write paths |
-| `agent` | Normal autonomous coding mode; shell commands generally ask permission unless they are safe read-only commands |
-| `free` | More autonomous mode; routine shell approvals are bypassed by the bridge |
+| `ask` | Blocks mutating file tools and shell tools; read/search/explain tools remain available. |
+| `manual` | Focused edit proposal mode; shell tools are hidden/blocked. |
+| `agent` | Autonomous coding mode; risky shell commands ask permission unless classified safe read-only. |
+| `free` / `Full Access` | Full tool access; routine shell approvals are bypassed. This is the default for new Backboard sessions. |
 
 Ask/Manual/Agent/Free are ACP session modes, not separate backend products. They change tool availability and approval behavior before the request reaches the model.
 
 ### File Tool Adapters
 
-The bridge has dedicated adapters for IDE-safe file changes:
+The native tool layer has dedicated adapters for IDE-safe file changes:
 
-- `write`, `edit`, and `search_replace` compute a diff and request `fs/write_text_file`.
-- `delete_file` computes a diff/delete tool card, then deletes the path.
-- `create_directory` has a dedicated directory proposal path.
-- Mutating tools without a dedicated IDE adapter fail closed with a message that a diff adapter is needed.
+- `write`, `edit`, and `search_replace` compute diffs and use `AcpThread::write_text_file` for existing-file writes.
+- `delete_file` emits diff/tool updates, then deletes the path.
+- `create_directory` has a dedicated directory path.
+- New files and deletes currently use direct filesystem operations plus ACP tool/diff updates.
 
-Path handling is workspace-confined for mutations through the CLI tool manager and bridge path resolution. Reads can inspect broader context where the CLI allows it, but writes should remain inside the session workspace/worktree.
+Path handling should remain workspace/worktree confined for mutations. Agent Workspace runs must keep writes inside each run's assigned worktree or current-workspace path.
 
 ### Shell Policy
 
 Shell tools are intentionally stricter than file/search tools:
 
-- `_is_read_only_shell_command()` auto-approves simple read-only commands such as safe `git`, `ls`, `pwd`, `cat`, `sed`, `rg`, and similar inspection commands.
+- Native shell classification auto-approves simple read-only commands such as safe `git`, `ls`, `pwd`, `cat`, `sed`, `rg`, and similar inspection commands.
 - Commands with shell metacharacters, destructive flags, network mutation, dangerous git operations, or sensitive paths do not get read-only auto-approval.
 - `agent` mode asks the IDE for approval before risky shell execution.
 - `free` mode bypasses routine shell approvals.
-- The CLI tool manager still runs sandbox checks for destructive commands and sensitive paths.
 
 Timeout classes:
 
@@ -958,25 +1065,23 @@ Timeout classes:
 
 ### Tool Batching And Output Compression
 
-The bridge optimizes read-heavy tool turns:
+The native runtime optimizes read-heavy tool turns:
 
 - Consecutive read-only IDE tools can run in parallel.
-- Identical read-only tool calls are de-duped.
-- Mutating tools, shell tools, todos, subagents, MCP calls, and memory operations remain sequential.
+- Mutating tools, shell tools, and todos remain sequential.
 - Tool outputs are compressed before being returned to the model to avoid flooding the next prompt.
 
 This is why a turn can show one grouped exploration row in the UI even when the model actually read several files and ran searches underneath.
 
 ### ACP Rendering Hooks
 
-Important metadata/update paths:
+Important native update paths:
 
-- `_meta.terminal_info` creates a terminal card.
-- `_meta.terminal_output` appends command output.
-- `_meta.terminal_exit` marks command completion.
-- `todo_write` output becomes ACP plan entries via `_emit_plan_from_todos()`.
+- Shell tool execution creates display-only terminal cards through `TerminalProviderEvent`.
+- Terminal output/exit metadata is routed into `acp_thread/src/terminal.rs`.
+- `todo_write` output becomes ACP plan entries.
 - `usage_update` carries context-window tokens and cost.
-- `usage_update._meta.backboard_speed` carries timing buckets parsed by `acp_thread::SpeedMetrics`.
+- `usage_update._meta.backboard_speed` carries native timing buckets parsed by `acp_thread::SpeedMetrics`.
 - Backboard progress thoughts use `_meta.backboardProgress` so `AcpThread` can keep them separate from normal assistant text.
 
 ## Backboard Agent Server
@@ -990,33 +1095,26 @@ Main types/constants:
 - `BACKBOARD_AGENT_ID = "backboard"`
 - `BACKBOARD_AGENT_NAME = "Backboard"`
 - `BackboardAgentServer`
-- Env overrides:
-  - `BACKBOARD_IDE_ACP_PATH`
-  - `BACKBOARD_CLI_PATH`
-  - `BACKBOARD_CLI_ROOT`
-  - `BACKBOARD_IDE_PYTHON`
 
-The server implements Zed's `AgentServer` trait. It returns Backboard as the native agent and defaults to ACP mode `agent`. Agent Workspace can construct a Backboard server instance with a different default mode for that retained thread, such as `free`, before the ACP session auto-submits its initial task.
+The server implements Zed's `AgentServer` trait. It returns Backboard as the native agent and defaults to ACP mode `free`. Agent Workspace can construct a Backboard server instance with a different default mode for a retained thread.
 
-When `connect` runs, it builds an `AgentServerCommand` pointing at the Python bridge:
+When `connect` runs:
 
-- Default bridge path: `ide/zed/script/backboard-ide-acp.py`
-- Default CLI root: `ide/zed/../../cli`
-- Default Python: resolved by `backboard_python()`
+- It logs `Backboard IDE runtime: using native Rust AgentConnection, not Python ACP/CLI bridge`.
+- It returns `Rc<BackboardNativeConnection>` from `crate::backboard_native::BackboardNativeConnection::new(...)`.
+- It does not build an `AgentServerCommand`.
+- It does not launch `ide/zed/script/backboard-ide-acp.py`.
+- It does not resolve `BACKBOARD_CLI_ROOT`, `BACKBOARD_CLI_PATH`, or `BACKBOARD_IDE_PYTHON` for active chat.
 
-The server also passes IDE-specific environment:
+This file should remain the Rust boundary between Zed's agent-server registry and Backboard's native `AgentConnection`.
 
-- `BACKBOARD_IDE=zed`
-- `NO_BROWSER=1` when the delegate store requests no browser
-- Proxy env from `load_proxy_env(cx)`
-
-This file should remain the Rust boundary between Zed and the Python ACP bridge. If a future model needs to change launch behavior, command resolution, or env forwarding, this is the first place to inspect.
-
-## Python ACP Bridge
+## Historical Python ACP Bridge
 
 File:
 
 - `ide/zed/script/backboard-ide-acp.py`
+
+This section is retained as branch-history/reference material only. Do not use it as the active runtime map.
 
 Purpose:
 
@@ -1058,9 +1156,9 @@ The bridge redirects accidental `stdout` output to `stderr` so protocol messages
 - `PROTOCOL_STDOUT = sys.stdout`
 - `sys.stdout = sys.stderr`
 
-### Why The Bridge Is Python Instead Of Rust
+### Historical Rationale For The Python Bridge
 
-Python was chosen for the first serious milestone because the existing Backboard CLI is already Python and already owns the hard parts:
+Python was chosen for the first serious milestone because the existing Backboard CLI was already Python and already owned the hard parts:
 
 - agent engine
 - Backboard API client behavior
@@ -1072,17 +1170,16 @@ Python was chosen for the first serious milestone because the existing Backboard
 - memories/config/model defaults
 - cancellation/tool orchestration patterns
 
-Keeping the ACP bridge in Python lets the IDE call the same runtime directly instead of rewriting or re-modeling all of that in Rust. That reduces product risk: the IDE gets closer to CLI parity quickly, and fixes to the agent runtime continue to live in one source of truth.
+Keeping the ACP bridge in Python let the IDE call the same runtime directly instead of rewriting or re-modeling all of that in Rust. That reduced early product risk: the IDE got closer to CLI parity quickly, and fixes to the agent runtime still lived in one source of truth.
 
-A Rust ACP bridge could make sense later if:
+The later Rust-native path became the active direction because:
 
-- startup latency from Python becomes a real bottleneck
-- distribution/packaging needs a single native binary
-- the CLI runtime is exposed through a stable local server/API
-- the agent engine is ported to Rust or split into language-neutral services
-- we need tighter type safety around ACP protocol evolution
+- startup latency and packaging needed to stop depending on Python/CLI resources for core chat
+- Rust endpoint coverage became broad enough for the IDE runtime
+- native ACP/thread state, metrics, tool schemas, and workspace indexing could be kept inside the Zed process
+- Agent Workspace and Simple Mode needed tighter coupling to the live `AgentPanel`
 
-The tradeoff is that a Rust bridge today would either duplicate the Python CLI agent stack or shell out/scrape another process. Duplication would slow iteration and risk behavior drift; process scraping would be less reliable than structured ACP events. For now, the best boundary is Rust for Zed integration/UI and Python for the Backboard agent runtime bridge.
+Current boundary: Rust owns the Backboard IDE chat runtime (`backboard_native/*`), ACP-thread rendering, native tools, workspace indexing, and UI state. Python remains a historical parity reference plus standalone CLI runtime, not the active IDE bridge.
 
 ### Config And API Key
 
@@ -1090,13 +1187,13 @@ Shared config path:
 
 - `~/.backboard/config.json`
 
-The bridge uses that config for provider/model defaults and the Backboard API key through the CLI config/client. Do not print or copy the API key into docs, logs, or UI. If another model needs to debug key loading, inspect config shape only and redact secrets.
+The historical bridge used that config for provider/model defaults and the Backboard API key through the CLI config/client. The native runtime now reads the same Backboard config concepts through Rust-side config/client code. Do not print or copy the API key into docs, logs, or UI. If another model needs to debug key loading, inspect config shape only and redact secrets.
 
 Session mapping path:
 
 - `~/.backboard/ide_sessions.json`
 
-The bridge persists IDE session mappings with:
+The historical bridge persisted IDE session mappings with:
 
 - ACP session id
 - workspace path
@@ -1108,7 +1205,7 @@ The bridge persists IDE session mappings with:
 
 ### Models
 
-ACP methods include:
+ACP model methods included:
 
 - `session/set_model`
 - model state reporting from `BackboardIdeSession.model_state()`
@@ -1117,7 +1214,7 @@ Model ids are represented as:
 
 - `provider/model`
 
-If the model list API fails, the bridge falls back to defaults from `~/.backboard/config.json` or hardcoded defaults:
+If the model list API failed, the historical bridge fell back to defaults from `~/.backboard/config.json` or hardcoded defaults:
 
 - provider: `openai`
 - model: `gpt-4o`
@@ -1137,39 +1234,38 @@ Relevant files:
 
 ### Intensity
 
-The chat composer exposes an ACP config option named `Intensity`. This is separate from model selection and is meant to control speed/cost feel by changing how much extended thinking the bridge asks the model to do.
+The chat composer now exposes native Backboard config chips for `Mode`, `Intensity`, `Web`, `Image`, `Voice`, and `Live Voice`. `Intensity` is separate from model selection and is meant to control speed/cost feel by changing how much extra reasoning/work the native runtime requests when supported.
 
 Relevant files:
 
-- Bridge state and behavior: `ide/zed/script/backboard-ide-acp.py`
-- ACP config option plumbing: `ide/zed/crates/agent_servers/src/acp.rs`
+- Native state and behavior: `ide/zed/crates/agent_servers/src/backboard_native/mod.rs`
+- Native feature/options plumbing: `ide/zed/crates/agent_servers/src/backboard_native/tool_schemas.rs`
 - Config option UI: `ide/zed/crates/agent_ui/src/config_options.rs`
 - Composer/model selector UI: `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs`
 - Branded model selector trigger: `ide/zed/crates/agent_ui/src/model_selector_popover.rs`
 
 ACP surface:
 
-- `BackboardIdeSession.config_options()` returns `backboard_intensity`.
-- `session/set_config_option` updates `session.intensity`.
-- The option uses ACP category `thought_level`, so the Rust UI labels it as `Intensity: Fast`, `Intensity: Balanced`, or `Intensity: Deep`.
+- `BackboardNativeConnection` exposes `backboard_mode`, `backboard_intensity`, `backboard_web`, `backboard_image`, `backboard_voice`, and `backboard_live_voice`.
+- `session/set_config_option` updates native session state and emits a current-mode/options refresh.
+- The intensity option uses ACP category `thought_level`, so the Rust UI labels it as `Intensity: Fast`, `Intensity: Balanced`, or `Intensity: Deep`.
 
-Behavior in `_thinking_payload()`:
+Current behavior:
 
-- `Fast`: normally returns `None`, so the bridge does not request extended thinking. This is the default because the user said Backboard felt slow.
-- `Fast` + website/app/UI task: uses the same capped thinking behavior as `Balanced` so generated webpages do not lose visible design quality.
-- `Balanced`: starts from the CLI-configured thinking payload, then caps token budget-like fields to `2048` when present.
-- `Deep`: uses the CLI-configured thinking payload as-is through `config.thinking_for_provider(provider, model)`.
+- Default runtime mode is `free`.
+- `Fast`, `Balanced`, and `Deep` are carried in the native request/session state instead of the Python `_thinking_payload()` path.
+- Web/Image/Voice/Live Voice feature chips feed native request metadata and stream handling.
 
 Important nuance:
 
 - Intensity does not change the selected model.
 - Intensity does not expose private chain-of-thought.
-- Intensity only affects the request payload sent by the IDE bridge when the selected provider/model supports thinking-style options. If a provider ignores those fields, the UI may still change while model behavior does not materially change.
+- Intensity only affects request metadata/payload where the selected provider/model supports thinking-style options. If a provider ignores those fields, the UI may still change while model behavior does not materially change.
 - Model selector and config options must coexist. `agent_servers/src/acp.rs::config_state()` intentionally preserves modes/models even when `configOptions` are present; otherwise the Backboard model popup falls back to `Select model` and cannot open correctly.
 
 ### Modes
 
-Backboard IDE modes are enforced in the bridge:
+Backboard IDE modes are enforced in the native runtime:
 
 - `agent`: full tool access, with command approval.
 - `ask`: read/search only. Mutating tools and shell tools are blocked.
@@ -1178,12 +1274,13 @@ Backboard IDE modes are enforced in the bridge:
 
 Mode-blocked tool sets:
 
-- `ASK_BLOCKED_TOOLS = MUTATING_TOOLS | SHELL_TOOLS | {"task"}`
-- `MANUAL_BLOCKED_TOOLS = SHELL_TOOLS | {"task"}`
+- `Ask`: blocks mutating tools and shell tools.
+- `Manual`: blocks shell tools and unported task/subagent-style tools.
+- `Free`: default for Backboard Studio and bypasses shell approval prompts.
 
 ### File Writes And Command Safety
 
-Current behavior:
+Current native behavior:
 
 - File writes/edits/deletes are allowed without user approval.
 - File changes still emit ACP diff/tool cards so the UI can show what happened.
@@ -1199,19 +1296,15 @@ Mutating tools:
 - `search_replace`
 - `delete_file`
 - `create_directory`
-- `edit_notebook`
 
 Shell tools:
 
 - `bash`
 - `run_terminal_cmd`
-- `run_code`
-- `repl`
-- `computer`
 
-Read-only auto-approval is intentionally conservative. The bridge currently auto-approves simple commands such as `pwd`, `ls`, `cat`, `rg`, `grep`, `head`, `tail`, `wc`, `stat`, `file`, safe `find`, safe `sed`, safe read-only `git` commands such as `git status`, `git diff`, `git log`, and `git show`, and safe-read `curl` invocations (`curl <url>`, `curl -L <url>`, `curl -I <url>`, `curl -X GET <url>`).
+Read-only auto-approval is intentionally conservative. The native runtime auto-approves simple commands such as `pwd`, `ls`, `cat`, `rg`, `grep`, `head`, `tail`, `wc`, `stat`, `file`, safe `find`, safe `sed`, safe read-only `git` commands such as `git status`, `git diff`, `git log`, and `git show`, and safe-read `curl` invocations (`curl <url>`, `curl -L <url>`, `curl -I <url>`, `curl -X GET <url>`).
 
-The bridge does not auto-approve commands with shell control syntax, redirects, command substitution, package managers, GitHub mutation risk, or dangerous git operations. Examples that must keep asking for permission include:
+The native runtime does not auto-approve commands with shell control syntax, redirects, command substitution, package managers, GitHub mutation risk, or dangerous git operations. Examples that must keep asking for permission include:
 
 - `git push`
 - `git pull`
@@ -1230,7 +1323,7 @@ The user explicitly asked that reading commands should be automatically approved
 
 ### Website/App Prompt Defaults
 
-The bridge appends an IDE-specific system prompt in `_ensure_thread_binding()`. For website/app requests, it tells the agent:
+The native runtime builds IDE/workspace prompt context in `backboard_native/workspace.rs` and session request metadata in `backboard_native/mod.rs`. The historical Python bridge appended similar guidance in `_ensure_thread_binding()`. Preserve these product rules when editing the native prompt path:
 
 - Use Next.js TypeScript for empty workspaces unless the user asks for static/single-file HTML.
 - Baseline files should include:
@@ -1255,17 +1348,17 @@ The bridge appends an IDE-specific system prompt in `_ensure_thread_binding()`. 
 
 This is why future website generation should not collapse into only `index.html` or a bare static scaffold.
 
-The bridge also detects website/app/UI turns at prompt time. On those turns, even when the visible `Intensity` selector is set to `Fast`, it activates a website quality profile:
+The native runtime also needs to preserve the website/app/UI quality profile that was introduced in the bridge era:
 
 - injects frontend quality guidance into `<backboard_ide_context>`
 - includes broader file context and semantic context when available
 - sends a capped thinking payload equivalent to `Balanced`
 
-This keeps normal IDE turns fast while making webpage generation closer to CLI quality.
+This keeps normal IDE turns fast while making webpage generation closer to CLI quality. The separate `CLI_VS_IDE_SPEED_NOTES.md` explains why IDE turns feel faster now: native startup avoids Python/CLI process boot, and `Fast` mode trims unnecessary context/thinking for normal editor tasks.
 
 ### Live Progress
 
-The bridge avoids exposing private chain-of-thought. Instead it emits high-level progress notes through ACP:
+The native runtime avoids exposing private chain-of-thought. Instead it emits high-level progress notes and stream metadata through ACP:
 
 - "Backboard is reading your request."
 - "Backboard connected to the model."
@@ -1275,11 +1368,11 @@ The bridge avoids exposing private chain-of-thought. Instead it emits high-level
 - "Waiting for approval: ..."
 - "Applying `path`."
 
-Heartbeat behavior:
+Expected progress behavior:
 
-- A heartbeat task starts when a prompt begins.
-- If no visible event is sent for roughly 2.5 seconds, it emits a truthful status based on the current phase.
-- Heartbeat stops on completion, error, or cancel.
+- Prompt/model/tool phases should produce visible status without leaking private reasoning.
+- Tool preparation and command waits should surface as progress or tool cards, not hidden stalls.
+- Completion, error, and cancel should stop active progress state cleanly.
 
 This makes the chat feel alive during model reasoning, tool preparation, and command waits without showing private reasoning.
 
@@ -1292,39 +1385,25 @@ The chat footer renders the ACP thread token usage as a compact context-window c
 - total context window tokens
 - cumulative session cost when available
 
-The bridge emits this through ACP `usage_update` from `_usage()`. It should not create a visible `Usage` tool card. `acp_thread` accepts `UsageUpdate` and stores it in `TokenUsage`, which `conversation_view/thread_view.rs` renders next to the Backboard/model controls.
+The native runtime emits this through ACP usage updates and native speed metadata. It should not create a visible `Usage` tool card. `acp_thread` accepts `UsageUpdate` and stores it in `TokenUsage`, which `conversation_view/thread_view.rs` renders next to the Backboard/model controls.
 
 ### Pricing / Cost Display
 
-The IDE bridge reuses the CLI pricing implementation without editing CLI files.
+The active IDE runtime should prefer server-provided usage/cost data and native model metadata. Do not assume the native chat path imports CLI `PricingService`; that was the Python bridge implementation.
 
-CLI source-of-truth:
+Native IDE behavior:
 
-- `cli/backboard_cli/cli/chat/pricing.py`
-- Class: `PricingService`
-
-Pricing lookup order in the CLI service:
-
-1. Live model catalog from `/models`, using `input_cost_per_1m_tokens` and `output_cost_per_1m_tokens`.
-2. Persistent snapshot: `~/.backboard/pricing_snapshot.json`.
-3. Tagged last-resort fallback table for common models.
-
-IDE behavior:
-
-- `BackboardIdeSession` constructs `PricingService()`.
-- `model_state()` calls `self.pricing.update_from_catalog(models)` when the model list loads successfully.
-- `_usage()` receives input/output tokens from `run_ended` chunks.
-- `_record_usage_cost()` first checks for server-provided cost fields such as `amount_deducted_usd`, `cost_usd`, `turn_cost_usd`, or `cost`.
-- If the server did not include a cost, the bridge estimates with `PricingService.cost_for_turn(provider, model, input_tokens, output_tokens)`.
-- The bridge accumulates `session_total_cost` and emits ACP `usage_update.cost = { amount, currency: "USD" }`.
-- `acp_thread` stores this as `SessionCost`.
-- `thread_view.rs::render_token_usage()` shows `Session cost: $...` under context-window tokens and includes the same cost in the token tooltip.
+- `backboard_native/stream.rs` consumes usage, timing, and metadata chunks from the Backboard stream.
+- `backboard_native/mod.rs` tracks turn timing buckets, first-token latency, tool counts, slowest tool, usage snapshots, and session totals where available.
+- Server-provided cost fields such as `amount_deducted_usd`, `cost_usd`, `turn_cost_usd`, or `cost` should be forwarded into ACP usage/cost state when present.
+- `acp_thread` stores this as `TokenUsage` / `SessionCost`.
+- `thread_view.rs::render_token_usage()` shows `Session cost: $...` under context-window tokens and includes the same cost in the token tooltip when available.
 
 Important nuance:
 
 - This is a session display estimate unless the server included a billed amount.
 - The CLI has a deeper reconciliation path through `/billing/usage/recent`; the IDE currently does not run that delayed reconciliation.
-- The IDE only imports `PricingService`; it does not modify `cli/`.
+- Keep CLI pricing code unchanged unless the user explicitly asks for CLI work.
 
 ## Inline Autocomplete (Edit Predictions)
 
@@ -1342,17 +1421,19 @@ The `"zed"` alias is kept for backward compatibility with existing settings file
 
 ### API Flow
 
-The assistant and thread are created once per session (cold start), then reused for all completions in that session:
+The provider uses cached assistants plus short-lived reusable completion threads:
 
-1. Cold start (first completion only): `POST /api/assistants` — create a named assistant; cached in a process-level `LazyLock` map keyed by API URL
-2. Cold start: `POST /api/assistants/{id}/threads` — create a thread; also cached per API URL
-3. Every completion: `POST /api/threads/{id}/messages` with `stream=true` — send the FIM prompt, stream the completion
+1. Cold start: `POST /api/assistants` creates a named assistant and caches it in a process-level `LazyLock` map keyed by API URL.
+2. First completion for that assistant: `POST /api/assistants/{id}/threads` creates a thread and stores it with a creation timestamp.
+3. Later completions: the thread is reused only while it matches the cached assistant and is younger than `THREAD_CACHE_TTL_SECS = 120`; after that the provider creates a fresh thread.
+4. Every completion: `POST /api/threads/{id}/messages` with `stream=true` sends the FIM prompt and streams the completion.
+5. Accepted inline text is published through `backboard_api::publish_inline_completion_output(...)` for IDE-side completion telemetry.
 
-The assistant/thread pair is stored in process-static `LazyLock<Mutex<HashMap>>` maps so subsequent completions skip creation entirely. An in-flight guard (`BackboardRequestInFlightGuard`) ensures only one completion request is active per API URL at a time — a second trigger while one is in flight is silently dropped.
+The assistant cache, thread cache, and model cache are process-static `LazyLock<Mutex<HashMap>>` maps. An in-flight guard (`BackboardRequestInFlightGuard`) ensures only one completion request is active per API URL at a time; a second trigger while one is in flight is silently dropped.
 
 Auth: `X-API-Key: {user_key}` header on every request.
 
-Model: resolved from user settings → cached model → live Backboard model registry. Currently falls back to `claude-haiku-4-5-20251001` via Anthropic when the registry is bypassed.
+Model: resolved from user settings → cached model → current debug fallback. The live registry path is present historically, but the current code bypasses it and falls back to `claude-haiku-4-5-20251001` via Anthropic.
 
 ### Pre-Filter
 
@@ -1397,15 +1478,15 @@ Rules:
 Language: {lang}
 
 <prefix>
-{code_before_cursor (max 300 bytes)}
+{code_before_cursor (max 600 bytes)}
 </prefix>
 <suffix>
-{code_after_cursor (max 200 bytes)}
+{code_after_cursor (max 300 bytes)}
 </suffix>
 <cursor>
 ```
 
-Context window is intentionally small: 300 bytes before the cursor (~5–6 lines) and 200 bytes after (~3 lines). Larger windows cause chat models to regenerate whole file sections instead of producing targeted insertions.
+Context window is intentionally small: 600 bytes before the cursor and 300 bytes after. Larger windows cause chat models to regenerate whole file sections instead of producing targeted insertions.
 
 ### SSE Streaming And Early Exit
 
@@ -1444,8 +1525,9 @@ When a passing completion has more than 14 lines or 6 control-flow statements (`
 
 1. `edit_predictions.backboard.model` from user settings if non-empty.
 2. Cached model from the previous completion in the same session.
-3. Live model registry from `GET /models` at the configured API URL.
-4. *(Currently bypassed for debugging)* Falls back to `claude-haiku-4-5-20251001` via Anthropic provider.
+3. Current debug fallback: `claude-haiku-4-5-20251001` via Anthropic provider.
+
+Historical note: an earlier path queried the live model registry from `GET /models`; the current checked-in code bypasses that branch.
 
 ### BYOK Model
 
@@ -1472,13 +1554,13 @@ Users can override the API URL, model, and timeout in settings JSON:
 }
 ```
 
-`api_url` defaults to `https://app.backboard.io/api`. `model` defaults to the model saved in `~/.backboard/config.json` or whatever the live Backboard registry returns. `timeout_ms` defaults to 20,000 (20 seconds).
+`api_url` defaults to `https://app.backboard.io/api`. `model` defaults to the `default_model` saved in `~/.backboard/config.json`; if that field is missing, the runtime setting starts empty and model resolution uses the cache/fallback path above. `timeout_ms` defaults to 20,000 (20 seconds).
 
 ### Key Files
 
 | File | Role |
 |------|------|
-| `crates/edit_prediction/src/backboard.rs` | `BackboardCompletions`, BYOK API key, process-level thread/model cache, in-flight guard, pre-filter, FIM prompt builder, SSE streaming with early exit, response filter, chunk splitter |
+| `crates/edit_prediction/src/backboard.rs` | `BackboardCompletions`, BYOK API key, process-level assistant/thread/model caches, 120-second thread TTL, in-flight guard, pre-filter, FIM prompt builder, SSE streaming with early exit, inline output publishing, stricter prose/marker filter, chunk splitter |
 | `crates/edit_prediction/src/edit_prediction.rs` | `EditPredictionModel::Backboard` variant, dispatch to `BackboardCompletions`, `backboard` field on `EditPredictionStore` |
 | `crates/zed/src/zed/edit_prediction_registry.rs` | Maps `EditPredictionProvider::Backboard` (alias `"zed"`) → `EditPredictionModel::Backboard`, loads API token |
 | `crates/settings_content/src/language.rs` | `BackboardSettingsContent` with `api_url`, `model`, and `timeout_ms` fields |
@@ -1852,33 +1934,27 @@ AgentPanel helper methods:
 - `dismiss_backboard_workspace_agent`
 - `backboard_agent_run_summaries`
 
-ACP bridge command:
+Native runtime entry:
 
-- The Rust server launches `ide/zed/script/backboard-ide-acp.py`.
-- The conceptual CLI entry remains `backboard ide acp`, but current IDE-owned launch path is the script above.
-
-Env overrides:
-
-- `BACKBOARD_IDE_ACP_PATH=/absolute/path/to/backboard-ide-acp.py`
-- `BACKBOARD_CLI_ROOT=/absolute/path/to/cli`
-- `BACKBOARD_CLI_PATH=/absolute/path/to/backboard`
-- `BACKBOARD_IDE_PYTHON=/absolute/path/to/python`
+- The Rust server constructs `BackboardNativeConnection` directly from `ide/zed/crates/agent_servers/src/backboard.rs`.
+- The conceptual CLI entry `backboard ide acp` and `script/backboard-ide-acp.py` remain historical bridge references only.
+- The active chat path does not need `BACKBOARD_IDE_ACP_PATH`, `BACKBOARD_CLI_ROOT`, `BACKBOARD_CLI_PATH`, or `BACKBOARD_IDE_PYTHON`.
 
 ## Important Ownership Notes
 
-The CLI is source-of-truth for agent intelligence:
+The native IDE runtime is the active source-of-truth for Backboard Studio chat:
 
 - tools
-- MCP
-- skills
-- subagents
-- semantic/codebase search
-- Backboard API client
+- ACP stream translation
+- workspace indexing and `codebase_search`
+- Backboard Rust API client integration
+- mode/config feature chips
+- usage/speed/media stream metadata
 - model config
 
 The IDE layer is source-of-truth for:
 
-- ACP bridge behavior
+- native ACP connection behavior
 - chat UX
 - progress/timeline presentation
 - command approval UI
@@ -1886,7 +1962,7 @@ The IDE layer is source-of-truth for:
 - multi-agent workspace dashboard
 - Zed/Backboard branding in the editor
 
-Future work should keep that boundary unless the user changes direction.
+The CLI is still valuable reference material for MCP, skills, subagents, richer semantic search, and standalone agent behavior. Do not treat it as the active IDE runtime unless the user explicitly asks to revive that path.
 
 ## Known Caveats / Next Work
 
@@ -1907,12 +1983,12 @@ The Agent Workspace page is a v1 implementation:
   - installers
   - docs
 
-The ACP bridge is still IDE-owned Python:
+The native runtime is still catching up to some historical CLI/bridge depth:
 
-- It imports the CLI, but does not modify it.
-- Some CLI tool shapes may need more adapters over time.
+- MCP/browser/web fetch/RLM/subagents/notebook/skills are not fully ported into `backboard_native/*`.
+- Some CLI tool shapes may need Rust-native adapters over time.
 - File writes auto-apply because the user requested not to approve writes.
-- Commands require approval in `agent` mode; `free` mode intentionally bypasses shell approval prompts.
+- Commands require approval outside `free`; `free` mode intentionally bypasses shell approval prompts.
 
 ## Build / Verification Commands
 
@@ -1926,7 +2002,7 @@ Useful checks:
 cargo check --locked -p agent_ui
 cargo check --locked -p agent_ui -p agent_servers -p acp_thread
 cargo test -p agent_ui --no-fail-fast workspace_agent
-python3 -m py_compile script/backboard-ide-acp.py
+cargo test -p agent_servers backboard_native --lib
 ```
 
 On Erin's current macOS setup, the targeted `agent_ui` test command may fail before tests run if the Metal shader compiler is not installed. The observed local error says to run `xcodebuild -downloadComponent MetalToolchain`. `cargo check -p agent_ui` still passes without that component.
@@ -1947,7 +2023,7 @@ For this handoff document itself:
 
 ```sh
 rg -n "^##|^###" BACKBOARD_IDE_HANDOFF.md
-rg -n "POST /assistants|POST /threads/\\{thread_id\\}/messages|submit-tool-outputs|GET /models|usage_update|fs/write_text_file" BACKBOARD_IDE_HANDOFF.md
+rg -n "BackboardNativeConnection|backboard_native|usage_update|codebase_search|Live Voice|backboard_mode" BACKBOARD_IDE_HANDOFF.md
 markdownlint BACKBOARD_IDE_HANDOFF.md
 ```
 
@@ -1959,20 +2035,20 @@ Use this table when you need to decide where to start. The deeper step-by-step g
 
 | Symptom | First files to inspect | Likely failure boundary |
 |---------|------------------------|-------------------------|
-| Missing API key, wrong env, or 401/402 on first turn | `cli/backboard_cli/state/config.py`, `cli/backboard_cli/api/validation.py`, `cli/backboard_cli/api/client.py` | Config/env/API-key validation |
-| Bridge cannot launch or import CLI | `ide/zed/crates/agent_servers/src/backboard.rs`, `ide/zed/script/backboard-ide-acp.py` | Python path, CLI root, env vars, stdout protocol cleanliness |
-| Model selector empty or config option missing | `backboard-ide-acp.py::model_state`, `backboard-ide-acp.py::config_options`, `ide/zed/crates/agent_servers/src/acp.rs`, `conversation_view.rs` | ACP model/config state transport |
-| Tool permission card stuck | `backboard-ide-acp.py::_request_tool_permission`, `agent_servers/src/acp.rs::handle_request_permission`, `acp_thread.rs::request_tool_call_authorization`, `thread_view.rs` | JSON-RPC permission round trip |
-| File edit did not appear in IDE diff | `backboard-ide-acp.py::_propose_file_change`, `backboard-ide-acp.py::_write_file_via_ide`, `agent_servers/src/acp.rs::handle_write_text_file`, `acp_thread.rs::write_text_file` | Bridge diff adapter or IDE-owned file write |
-| Terminal card missing or output appears late | `backboard-ide-acp.py::_run_shell_tool`, `backboard-ide-acp.py::_run_shell_subprocess`, `agent_servers/src/acp.rs::handle_session_notification`, `acp_thread/src/terminal.rs` | `_meta.terminal_*` metadata or terminal provider buffering |
+| Missing API key, wrong env, or 401/402 on first turn | `ide/zed/crates/backboard/src/backboard.rs`, `ide/zed/crates/backboard/src/endpoints/**`, `backboard_native/mod.rs` | Rust config/API-key validation |
+| Native runtime cannot start | `ide/zed/crates/agent_servers/src/backboard.rs`, `ide/zed/crates/agent_servers/src/backboard_native/mod.rs` | `BackboardNativeConnection` construction, config loading, session init |
+| Model selector empty or config option missing | `backboard_native/mod.rs`, `agent_servers/src/acp.rs`, `conversation_view.rs`, `config_options.rs` | ACP model/config state transport |
+| Tool permission card stuck | `backboard_native/tools.rs`, `agent_servers/src/acp.rs::handle_request_permission`, `acp_thread.rs::request_tool_call_authorization`, `thread_view.rs` | Native permission round trip |
+| File edit did not appear in IDE diff | `backboard_native/tools.rs`, `agent_servers/src/acp.rs::handle_write_text_file`, `acp_thread.rs::write_text_file` | Native tool adapter or IDE-owned file write |
+| Terminal card missing or output appears late | `backboard_native/tools.rs`, `backboard_native/stream.rs`, `agent_servers/src/acp.rs::handle_session_notification`, `acp_thread/src/terminal.rs` | Terminal metadata or terminal provider buffering |
 | Agent Workspace apply/review is wrong | `agent_panel.rs`, `agent_workspace_ui.rs`, `agent_diff.rs` | Worktree metadata, batch conflict detection, patch application |
-| Context/cost/speed display wrong | `backboard-ide-acp.py::_usage`, `backboard-ide-acp.py::_speed_meta`, `acp_thread.rs::SpeedMetrics`, `thread_view.rs::render_token_usage` | ACP `usage_update` payload or UI footer rendering |
+| Context/cost/speed display wrong | `backboard_native/stream.rs`, `backboard_native/mod.rs`, `acp_thread.rs::SpeedMetrics`, `thread_view.rs::render_token_usage` | ACP `usage_update` / `backboard_speed` payload or UI footer rendering |
 | Autocomplete not firing | `edit_prediction/src/backboard.rs`, edit-prediction registry/settings files | Separate Backboard API completion path, not ACP; check pre-filter log (`backboard: skipped`) and response filter log (`backboard: filtered`) |
 
 Maintenance rules:
 
 - Keep `cli/` unchanged unless the user explicitly asks for CLI work.
-- Prefer adding IDE adapters in `backboard-ide-acp.py` when a CLI tool needs special IDE rendering.
+- Prefer adding IDE adapters in `backboard_native/tools.rs` / `tool_schemas.rs` when a tool needs special IDE rendering.
 - Keep `fs/write_text_file` as the preferred write path for Backboard chat/Agent Workspace file edits.
 - Do not expose private reasoning text; progress/thought chunks should stay summarized.
 - Preserve retry guards that prevent duplicate streamed messages or duplicate tool-output submissions.
@@ -1984,23 +2060,18 @@ Maintenance rules:
 If Backboard fails to launch:
 
 1. Check `ide/zed/crates/agent_servers/src/backboard.rs`.
-2. Confirm `bridge_script_path()` resolves to `ide/zed/script/backboard-ide-acp.py`.
-3. Confirm Python exists or set `BACKBOARD_IDE_PYTHON`.
-4. Confirm CLI root exists or set `BACKBOARD_CLI_ROOT`.
-5. Confirm `~/.backboard/config.json` exists and contains valid Backboard config.
+2. Confirm `BackboardAgentServer::connect()` returns `BackboardNativeConnection`.
+3. Check `ide/zed/crates/agent_servers/src/backboard_native/mod.rs`.
+4. Confirm `~/.backboard/config.json` exists and contains valid Backboard config.
+5. Check logs for `Backboard IDE runtime: using native Rust AgentConnection`.
 
 If chat is blank or stuck:
 
-1. Check `ide/zed/script/backboard-ide-acp.py`.
-2. Inspect bridge stderr/logs for `CLI_IMPORT_ERROR`.
-3. Confirm JSON-RPC messages are only written to protocol stdout.
-4. Check heartbeat/progress methods:
-   - `_start_heartbeat`
-   - `_heartbeat_loop`
-   - `_emit_progress`
-5. Check model state:
-   - `model_state`
-   - `session/set_model`
+1. Check `ide/zed/crates/agent_servers/src/backboard_native/stream.rs`.
+2. Check `ide/zed/crates/agent_servers/src/backboard_native/mod.rs`.
+3. Confirm assistant/thread binding is created or restored.
+4. Confirm stream chunks are mapped into `AcpThread` updates.
+5. Check model/config state transport through `session/set_model` and `session/set_config_option`.
 
 If the model popup does not open:
 
@@ -2012,25 +2083,25 @@ If the model popup does not open:
 
 If file writes do not appear:
 
-1. Check `_execute_tool_call`.
-2. Check `_propose_file_change`.
-3. Check `_write_file_via_ide`.
-4. Check diff item shape from `_diff_item`.
+1. Check `backboard_native/tools.rs`.
+2. Check `agent_servers/src/acp.rs::handle_write_text_file`.
+3. Check `acp_thread.rs::write_text_file`.
+4. Check native diff/tool metadata shape.
 5. Check `thread_view.rs` diff/tool rendering.
 
 If commands do not ask approval outside `free` mode:
 
-1. Check `SHELL_TOOLS`.
-2. Check `_run_shell_tool`.
-3. Check `_request_tool_permission`.
+1. Check native shell tool classification in `backboard_native/tools.rs`.
+2. Check mode state in `backboard_native/mod.rs`.
+3. Check permission request emission.
 4. Check `conversation_view.rs` permission request routing.
 5. Do not bypass command approval outside `free` mode.
 
 If pricing/cost does not show:
 
-1. Check `_usage()` and `_record_usage_cost()` in `ide/zed/script/backboard-ide-acp.py`.
-2. Confirm model catalog loading calls `self.pricing.update_from_catalog(models)`.
-3. Confirm `usage_update` includes `cost`.
+1. Check `backboard_native/stream.rs` usage/cost chunk handling.
+2. Check `backboard_native/mod.rs` usage snapshot/session total handling.
+3. Confirm ACP `usage_update` includes `cost` when server data is present.
 4. Check `acp_thread` usage update handling stores `SessionCost`.
 5. Check `thread_view.rs::render_token_usage()`.
 
@@ -2052,40 +2123,40 @@ If chat/editor turns feel slow while files are being written:
 
 If Backboard feels slow before the first model token:
 
-1. Check `ide/zed/script/backboard-ide-acp.py`.
-2. Per-turn timings are collected in `_speed_timings` / `_speed_totals` and emitted on `usage_update._meta.backboard_speed`.
+1. Check `ide/zed/crates/agent_servers/src/backboard_native/mod.rs`.
+2. Per-turn timings are collected in native turn metrics and emitted on `usage_update._meta.backboard_speed`.
 3. The footer reads those metrics through `acp_thread::SpeedMetrics` and `thread_view.rs::render_token_usage()`.
 4. Important timing keys: `runtime_load_ms`, `model_list_ms`, `assistant_create_ms`, `context_pack_ms`, `semantic_context_ms`, `first_token_ms`, `tool_batch_ms`, `shell_tools_ms`, `read_tools_ms`, `search_tools_ms`, `edit_tools_ms`, `other_tools_ms`, `slowest_tool`, `slowest_tool_ms`, `file_write_ms`, `command_wait_ms`, and `total_turn_ms`.
 5. If `first_token_ms` is high while local timings are low, the delay is provider/model latency rather than IDE setup.
 
 If every prompt appears to rebuild Backboard setup:
 
-1. Check model list caching in `BackboardIdeSession.model_state()`.
-2. Check tool definition caching in `_tool_definitions()`.
-3. Check system prompt/skills caching in `_system_prompt()`.
-4. MCP startup should remain lazy: `MCPManager.start_all()` registers cached schemas only; live MCP processes start on first tool use.
+1. Check native session reuse in `backboard_native/mod.rs`.
+2. Check assistant/thread binding and session-store restoration.
+3. Check native tool-schema reuse in `backboard_native/tool_schemas.rs`.
+4. MCP startup is not yet the active native path; do not debug native startup by chasing the old Python MCP manager first.
 
 If the model keeps manually exploring too much:
 
-1. Check `_prewarm_context()`, `_augment_prompt_with_context()`, and `_format_context_pack()`.
-2. The IDE context pack includes lightweight file tree, stack/package hints, git status/diff stat, project rules, embedded editor context, and optional semantic hits.
-3. Fast intensity keeps the context pack smaller and skips semantic search; Balanced/Deep may add indexed semantic hits when available.
-4. Keep `CONTEXT_PACK_MAX_CHARS` bounded so context help does not become context drag.
+1. Check `backboard_native/workspace.rs`.
+2. Check `backboard_native/index.rs` and `.backboard_index/codebase_index.json`.
+3. The native workspace context should include bounded file tree/package/git/project-rule/editor context, plus native index hits when available.
+4. Keep context pack limits bounded so context help does not become context drag.
 
 If read/search tool batches are slow:
 
-1. Check `_execute_tool_batch()` and `_execute_read_only_batch_parallel()`.
-2. Contiguous groups of read/search/fetch/lint tools in `READ_ONLY_IDE_TOOLS` run concurrently, even when the same batch later contains a write or command.
-3. Writes, shell commands, todos, memories, subagents, and MCP tools remain sequential/approval-safe.
-4. Tool outputs are compressed by `_compress_tool_output()` before being returned to the model.
+1. Check `backboard_native/tools.rs`.
+2. Check `backboard_native/index.rs` for `codebase_search` index availability and lexical fallback.
+3. Writes, shell commands, and todos must remain approval/mode-safe.
+4. Tool outputs should stay compact before being returned to the model.
 
 If shell commands are slow:
 
-1. Check `_run_shell_tool()` and `_run_shell_subprocess()` in `ide/zed/script/backboard-ide-acp.py`.
+1. Check shell handling in `backboard_native/tools.rs`.
 2. Command timeout defaults are capped by command type: read-only commands are short, normal commands are bounded, install/check commands get more time, and dev-server commands get only a startup window.
 3. Long-running dev-server commands such as `npm run dev`, `pnpm dev`, `vite`, `next dev`, and `python -m http.server` are stopped after the startup window so the agent does not sit on a never-ending process.
 4. Dev-server detection also handles the common `cd <dir> && npm run dev ... &` shape, but the system prompt tells agents not to append `&`.
-5. If a background child keeps stdout/stderr open after the shell exits, `_run_shell_subprocess()` cancels output pump tasks after a short drain window so the prompt lock can release.
+5. If a background child keeps stdout/stderr open after the shell exits, native command handling should cancel output pump tasks after a short drain window so the prompt lock can release.
 6. Terminal output is batched with `TERMINAL_UPDATE_INTERVAL_SECONDS` before updating the UI, which keeps noisy commands from making the chat feel frozen.
 7. Command approval wait time is tracked separately as `command_wait_ms`; do not confuse that with actual command runtime.
 
@@ -2125,14 +2196,35 @@ The current Backboard IDE work has touched or added these important files. This 
 
 ### ACP Runtime And Backboard Agent Boundary
 
+- `ide/zed/crates/agent_servers/src/backboard_native/mod.rs`
+  - Active native Backboard runtime: session lifecycle, assistant/thread binding, mode/config options, cancellation, feature settings, model state, usage snapshots, native turn metrics, and session-list integration.
+  - Default runtime mode is `free`, and Agent Workspace can provide per-run defaults.
+
+- `ide/zed/crates/agent_servers/src/backboard_native/stream.rs`
+  - Maps Backboard streaming chunks into ACP-visible text, progress, media/resource links, STT/TTS stream chunks, usage updates, and `backboard_speed` metadata.
+
+- `ide/zed/crates/agent_servers/src/backboard_native/tools.rs`
+  - Active Rust-native tool executor for file reads/writes/search, shell commands, todos, and mode-aware permission behavior.
+
+- `ide/zed/crates/agent_servers/src/backboard_native/tool_schemas.rs`
+  - Active Rust-native tool schema catalog, including read/search, mutation, shell, todo, and expanded Backboard feature/tool metadata.
+
+- `ide/zed/crates/agent_servers/src/backboard_native/workspace.rs`
+  - Builds bounded workspace context for native Backboard turns.
+
+- `ide/zed/crates/agent_servers/src/backboard_native/session_store.rs`
+  - Persists/restores native IDE session metadata.
+
+- `ide/zed/crates/agent_servers/src/backboard_native/index.rs`
+  - Builds and queries the background native codebase index under `.backboard_index/codebase_index.json`; `codebase_search` uses it before lexical fallback.
+
 - `ide/zed/script/backboard-ide-acp.py`
-  - Python JSON-RPC stdio bridge launched by the native Rust agent server.
-  - Imports the existing CLI engine from `cli/backboard_cli` and adapts CLI/model/tool events into ACP session updates.
-  - Owns IDE-specific behavior for modes, `Intensity`, model state, usage/cost/speed updates, progress heartbeat, safe command auto-approval, free-mode shell approval bypass, website quality prompts, context prewarm, read/search batching, command timeouts, and file diff emission.
+  - Historical Python JSON-RPC stdio bridge. It is no longer launched by the active Backboard chat runtime.
+  - Keep it as behavioral reference for older CLI parity, MCP/subagent/skills behavior, and branch history.
 
 - `ide/zed/crates/agent_servers/src/backboard.rs`
   - Rust `AgentServer` implementation for the native Backboard agent.
-  - Resolves and launches `script/backboard-ide-acp.py`, passes IDE/CLI/Python env overrides, exposes Backboard as the visible native agent, and supports Agent Workspace sessions with alternate default ACP modes.
+  - Returns `BackboardNativeConnection`, exposes Backboard as the visible native agent, logs the native runtime path, and supports Agent Workspace sessions with alternate native default modes.
 
 - `ide/zed/crates/agent_servers/src/acp.rs`
   - Shared ACP connection/session plumbing used by Backboard and other ACP agents.
@@ -2157,8 +2249,8 @@ The current Backboard IDE work has touched or added these important files. This 
   - Backboard branding is applied through `set_trigger_brand(...)`; do not replace the trigger with a custom clickable `div`, because GPUI popover anchoring depends on the rendered trigger.
 
 - `ide/zed/crates/agent_ui/src/config_options.rs`
-  - Renders ACP config option controls such as Backboard `Intensity`.
-  - The bridge provides `backboard_intensity`; the Rust UI labels it as Fast, Balanced, or Deep under the thought-level category.
+  - Renders ACP config option controls such as Backboard `Mode`, `Intensity`, `Web`, `Image`, `Voice`, and `Live Voice`.
+  - Current dirty work adds Agent Options row cycling and custom picker popover ids so the compact session chips behave consistently.
 
 ### Agent Workspace And Retained Runtime
 
@@ -2166,10 +2258,11 @@ The current Backboard IDE work has touched or added these important files. This 
   - Owns active and retained Backboard conversations.
   - Provides the Agent Workspace helper surface: spawn, activate, stop, retry, review, open worktree, apply, dismiss, and summarize Backboard workspace agents.
   - Creates isolated git worktrees for git-backed runs, preserves per-agent `work_dirs`, tracks batch/apply metadata, maps ACP thread state into card summaries, and keeps non-git runs in the current workspace with Apply disabled.
+  - Current dirty work adds persisted draft thread id, draft-only New Chat behavior, first-prompt draft promotion, `auto_select` event semantics, and `created_at` ordering.
 
 - `ide/zed/crates/agent_ui/src/agent_workspace_ui.rs`
   - Current full-page Multi-Agent workspace page.
-  - Renders task input, mode/scope/type controls, dashboard counters, grouped cards, card controls, selected run details, retained conversation detail views, and status strips.
+  - Renders task input, mode/scope/type controls, dashboard counters, grouped cards, card controls, draft/new-chat state, live right-panel `AgentPanel`, and status strips.
   - This is the preferred Agent Workspace UI. It is shown by expanding `MultiWorkspace`, not by opening a normal editor tab.
 
 - `ide/zed/crates/agent_ui/src/agent_portal_window.rs`
@@ -2215,21 +2308,21 @@ The current Backboard IDE work has touched or added these important files. This 
 
 - `ide/zed/crates/edit_prediction/src/backboard.rs`
   - Backboard inline autocomplete provider.
-  - Loads BYOK API key from keychain or `BACKBOARD_API_KEY`, calls `https://app.backboard.io/api`, creates/reuses a completion assistant, creates a fresh thread per completion, sends the cursor prompt, strips code fences, and returns pure cursor insertion edits.
+  - Loads BYOK API key from keychain or `BACKBOARD_API_KEY`, calls `https://app.backboard.io/api`, caches assistants, reuses completion threads with a 120-second TTL, sends the FIM cursor prompt, publishes inline completion output, strips code fences/markers/prose, and returns pure cursor insertion edits.
 
 - `ide/zed/crates/edit_prediction/src/edit_prediction.rs`
   - Adds `EditPredictionModel::Backboard`, stores `BackboardCompletions` on `EditPredictionStore`, and dispatches Backboard prediction requests.
   - Keeps Backboard edits as insertions at the cursor; do not reintroduce Zeta/Mercury diff-based replacement for Backboard completions.
 
 - `ide/zed/crates/zed/src/zed/edit_prediction_registry.rs`
-  - Routes serialized settings provider `EditPredictionProvider::Zed` to `EditPredictionModel::Backboard`.
+  - Routes serialized settings provider `EditPredictionProvider::Backboard` to `EditPredictionModel::Backboard`; legacy serialized alias `"zed"` is still accepted.
   - Loads the Backboard API token and presents Backboard as the active edit prediction model.
 
 - `ide/zed/crates/settings_content/src/language.rs`
-  - Adds serialized settings content for `edit_predictions.backboard.provider` and `edit_predictions.backboard.model`.
+  - Adds serialized settings content for `edit_predictions.backboard.api_url`, `edit_predictions.backboard.model`, and `edit_predictions.backboard.timeout_ms`.
 
 - `ide/zed/crates/language/src/language_settings.rs`
-  - Adds runtime `BackboardSettings` defaults: provider `openrouter`, model `deepseek/deepseek-chat`.
+  - Adds runtime `BackboardSettings` defaults: API URL `https://app.backboard.io/api`, model from `~/.backboard/config.json` `default_model` when present, and timeout `20_000`.
 
 - `ide/zed/crates/settings_ui/src/pages/edit_prediction_provider_setup.rs`
   - Settings UI for edit prediction credentials.
@@ -2258,11 +2351,20 @@ The current Backboard IDE work has touched or added these important files. This 
 - `ide/zed/assets/keymaps/default-linux.json`, `ide/zed/assets/keymaps/default-macos.json`, `ide/zed/assets/keymaps/default-windows.json`
   - Zed collaboration keybindings removed.
 
+- `ide/zed/assets/fonts/**`
+  - Bundles Inter for UI and JetBrains Mono for buffer/editor typography.
+
+- `ide/zed/assets/themes/backboard/backboard_tints.json`
+  - Adds the Backboard Tints theme family.
+
+- `ide/zed/assets/settings/default.json`, `ide/zed/assets/settings/initial_user_settings.json`
+  - Defaults Backboard Studio visual settings, edit prediction provider `"backboard"`, and left-side docks for project, outline, collab, and git.
+
 ### Older Backboard API/UI Crates And Reference Notes
 
 - `ide/zed/crates/backboard/src/backboard.rs`
   - Rust Backboard API/config client crate from the early integration.
-  - Still relevant for API/config concepts, though chat intelligence currently flows through the Python ACP bridge and CLI runtime.
+  - Active native chat uses this Rust API/client layer plus `ide/zed/crates/backboard/src/endpoints/**`.
 
 - `ide/zed/crates/backboard_ui/src/backboard_ui.rs`
   - Older thin Backboard UI panel.
@@ -2288,9 +2390,9 @@ This follow-up documents fixes applied after users reported:
 - Some chats disappearing after restart despite successful in-session runs.
 - Chat button routing users to the Agent Workspace page instead of opening the chat list/sidebar.
 
-### Python ACP Bridge (`ide/zed/script/backboard-ide-acp.py`)
+### Historical Python ACP Bridge (`ide/zed/script/backboard-ide-acp.py`)
 
-- Added visible-history sanitization for prompt augmentation payloads:
+- Historical bridge work added visible-history sanitization for prompt augmentation payloads:
   - strips `<backboard_ide_context>...</backboard_ide_context>` before replaying history into UI chunks.
 - Hardened stream handling:
   - catches stream exceptions and emits a visible interruption message instead of hanging on indefinite "Thinking…".
@@ -2332,6 +2434,6 @@ Fixes:
 
 ### Observability Note
 
-- Backboard ACP diagnostics write to `~/.backboard/logs/ide-agent.log`.
+- Historical Backboard ACP diagnostics write to `~/.backboard/logs/ide-agent.log`; native runtime diagnostics should be checked in Rust/Zed logs first.
 - UI thread list persistence/visibility is backed by `sidebar_threads` in:
   - `~/Library/Application Support/Backboard Studio/db/0-dev/db.sqlite` (active data in this environment).

@@ -1401,6 +1401,22 @@ pub(crate) fn missing_api_key_message() -> String {
 mod tests {
     use super::*;
 
+    fn option_current_value(
+        options: &[acp::SessionConfigOption],
+        id: &str,
+    ) -> Option<acp::SessionConfigValueId> {
+        options.iter().find_map(|option| {
+            if option.id.as_ref() != id {
+                return None;
+            }
+
+            match &option.kind {
+                acp::SessionConfigKind::Select(select) => Some(select.current_value.clone()),
+                _ => None,
+            }
+        })
+    }
+
     #[test]
     fn config_options_include_media_and_search_chips() {
         let settings = FeatureSettings {
@@ -1420,5 +1436,83 @@ mod tests {
         assert!(ids.contains(&"backboard_image_generation".to_string()));
         assert!(ids.contains(&"backboard_voice_mode".to_string()));
         assert!(ids.contains(&"backboard_live_voice".to_string()));
+    }
+
+    #[gpui::test]
+    async fn config_option_endpoint_updates_native_session_state(cx: &mut gpui::TestAppContext) {
+        let connection =
+            BackboardNativeConnection::new(AgentId::new("backboard"), Some("free".into()));
+        let state = connection.state.clone();
+        let session_id = acp::SessionId::new("test-session");
+        let (config_tx, config_rx) = config_watch_channel();
+
+        state.sessions.borrow_mut().insert(
+            session_id.clone(),
+            NativeSession {
+                thread: WeakEntity::new_invalid(),
+                workspace: PathBuf::from("/workspace"),
+                assistant_id: None,
+                thread_id: None,
+                current_run_id: None,
+                provider: Some(DEFAULT_PROVIDER.to_string()),
+                model: Some(DEFAULT_MODEL.to_string()),
+                mode: acp::SessionModeId::new("free"),
+                intensity: DEFAULT_INTENSITY.to_string(),
+                feature_settings: FeatureSettings::default(),
+                config_tx,
+                config_rx,
+                cancel_flag: Arc::new(AtomicBool::new(false)),
+                metrics: NativeTurnMetrics::default(),
+                context_window_tokens: None,
+                estimated_used_tokens: 0,
+            },
+        );
+
+        let config_options = BackboardConfigOptions { state, session_id };
+
+        let web_options = cx
+            .update(|cx| {
+                config_options.set_config_option(
+                    acp::SessionConfigId::new("backboard_web_search"),
+                    acp::SessionConfigValueId::new("Auto"),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            option_current_value(&web_options, "backboard_web_search").as_ref(),
+            Some(&acp::SessionConfigValueId::new("Auto"))
+        );
+
+        let mode_options = cx
+            .update(|cx| {
+                config_options.set_config_option(
+                    acp::SessionConfigId::new("backboard_mode"),
+                    acp::SessionConfigValueId::new("agent"),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            option_current_value(&mode_options, "backboard_mode").as_ref(),
+            Some(&acp::SessionConfigValueId::new("agent"))
+        );
+
+        let voice_options = cx
+            .update(|cx| {
+                config_options.set_config_option(
+                    acp::SessionConfigId::new("backboard_voice_mode"),
+                    acp::SessionConfigValueId::new("tts"),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            option_current_value(&voice_options, "backboard_voice_mode").as_ref(),
+            Some(&acp::SessionConfigValueId::new("tts"))
+        );
     }
 }

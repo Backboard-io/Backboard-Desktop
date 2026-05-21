@@ -1,6 +1,7 @@
 use crate::{
     DEFAULT_THREAD_TITLE, SelectPermissionGranularity,
     agent_configuration::configure_context_server_modal::default_markdown_style,
+    config_options::ConfigOptionSummary,
 };
 use agent_client_protocol::schema as acp;
 use std::cell::RefCell;
@@ -241,6 +242,27 @@ impl EventEmitter<DismissEvent> for AgentOptionsMenu {}
 
 impl Render for AgentOptionsMenu {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let option_summaries = self.config_options_view.read(cx).option_summaries();
+
+        let options_list = if option_summaries.is_empty() {
+            div()
+                .px_2()
+                .py_1()
+                .child(
+                    Label::new("No agent options available.")
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+                .into_any_element()
+        } else {
+            let option_rows: Vec<_> = option_summaries
+                .into_iter()
+                .map(|option| self.render_option_row(option, cx).into_any_element())
+                .collect();
+
+            v_flex().gap_0p5().children(option_rows).into_any_element()
+        };
+
         let colors = cx.theme().colors();
 
         div()
@@ -281,8 +303,83 @@ impl Render for AgentOptionsMenu {
                             .w_full()
                             .bg(colors.border_variant.opacity(0.48)),
                     )
-                    .child(self.config_options_view.clone()),
+                    .child(options_list)
+                    .child(
+                        Label::new("Click an option to cycle values.")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .mx_1()
+                            .mt_1()
+                            .mb_0p5(),
+                    ),
             )
+    }
+}
+
+impl AgentOptionsMenu {
+    fn render_option_row(
+        &self,
+        option: ConfigOptionSummary,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let option_id = option.id.clone();
+        let description = option.description.clone();
+
+        ButtonLike::new(ElementId::Name(
+            format!("agent-option-{}", option.id.0).into(),
+        ))
+        .full_width()
+        .height(px(32.).into())
+        .style(ButtonStyle::Subtle)
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div().min_w_0().flex_1().child(
+                        Label::new(option.name)
+                            .size(LabelSize::Small)
+                            .color(Color::Default)
+                            .truncate(),
+                    ),
+                )
+                .child(
+                    h_flex()
+                        .flex_none()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            Label::new(option.current_value_name)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted)
+                                .truncate(),
+                        )
+                        .child(
+                            Icon::new(IconName::ChevronRight)
+                                .size(IconSize::XSmall)
+                                .color(Color::Muted),
+                        ),
+                ),
+        )
+        .tooltip(Tooltip::element(move |_window, _cx| {
+            let mut content = v_flex().gap_1();
+            if let Some(description) = description.clone() {
+                content = content.child(
+                    Label::new(description)
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                );
+            }
+            content.into_any()
+        }))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.config_options_view.update(cx, |view, cx| {
+                view.cycle_option(&option_id, cx);
+            });
+        }))
     }
 }
 
@@ -3560,7 +3657,9 @@ impl ThreadView {
 
         let focus_handle = self.message_editor.focus_handle(cx);
         let colors = cx.theme().colors();
-        let editor_bg_color = colors.panel_background.blend(colors.editor_background.opacity(0.32));
+        let editor_bg_color = colors
+            .panel_background
+            .blend(colors.editor_background.opacity(0.32));
         let composer_surface_bg = colors
             .editor_background
             .blend(colors.element_background.opacity(0.14));
@@ -3609,9 +3708,7 @@ impl ThreadView {
                             .rounded_lg()
                             .border_1()
                             .border_color(colors.border_variant.opacity(0.24))
-                            .hover(|style| {
-                                style.border_color(colors.border_variant.opacity(0.36))
-                            })
+                            .hover(|style| style.border_color(colors.border_variant.opacity(0.36)))
                             .bg(composer_surface_bg)
                             .child(self.message_editor.clone())
                             .when(has_messages, |this| {
@@ -5231,9 +5328,11 @@ impl ThreadView {
             .rounded_md()
             .border_1()
             .border_color(cx.theme().colors().border_variant.opacity(0.34))
-            .bg(cx.theme().colors().editor_background.blend(
-                cx.theme().colors().element_background.opacity(0.08),
-            ))
+            .bg(cx
+                .theme()
+                .colors()
+                .editor_background
+                .blend(cx.theme().colors().element_background.opacity(0.08)))
             .overflow_hidden()
             .child(
                 h_flex()

@@ -1,6 +1,6 @@
 use gpui::{
-    Anchor, AnyView, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Pixels, Point,
-    Subscription,
+    Anchor, AnyView, DismissEvent, ElementId, Entity, EventEmitter, FocusHandle, Focusable, Pixels,
+    Point, Subscription,
 };
 use ui::{
     FluentBuilder as _, IntoElement, PopoverMenu, PopoverMenuHandle, PopoverTrigger, prelude::*,
@@ -20,6 +20,7 @@ where
     handle: Option<PopoverMenuHandle<Picker<P>>>,
     anchor: Anchor,
     offset: Option<Point<Pixels>>,
+    id: ElementId,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -49,7 +50,13 @@ where
                 y: px(-2.0),
             }),
             anchor,
+            id: "popover-menu".into(),
         }
+    }
+
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = id.into();
+        self
     }
 
     pub fn with_handle(mut self, handle: PopoverMenuHandle<Picker<P>>) -> Self {
@@ -91,7 +98,7 @@ where
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let picker = self.picker.clone();
 
-        PopoverMenu::new("popover-menu")
+        PopoverMenu::new(self.id)
             .menu(move |_window, _cx| Some(picker.clone()))
             .trigger_with_tooltip(self.trigger, self.tooltip)
             .anchor(self.anchor)

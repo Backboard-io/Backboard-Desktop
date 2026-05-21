@@ -108,20 +108,18 @@ impl BackboardAgentWorkspacePage {
             AgentPanelEvent::BackboardWorkspaceRunCreated {
                 thread_id,
                 batch_id,
+                auto_select,
             } => {
-                let should_select = self
+                let is_pending_launch = self
                     .pending_launch_batch_id
                     .as_ref()
-                    .is_some_and(|pending| pending == batch_id)
-                    || self.selected_thread_id.is_none();
+                    .is_some_and(|pending| pending == batch_id);
+                let should_select =
+                    *auto_select && (is_pending_launch || self.selected_thread_id.is_none());
 
                 if should_select {
                     self.selected_thread_id = Some(*thread_id);
-                    if self
-                        .pending_launch_batch_id
-                        .as_ref()
-                        .is_some_and(|pending| pending == batch_id)
-                    {
+                    if is_pending_launch {
                         self.pending_launch_batch_id = None;
                         self.task_editor
                             .update(cx, |editor, cx| editor.set_text("", window, cx));
@@ -199,12 +197,10 @@ impl BackboardAgentWorkspacePage {
     fn create_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(panel) = self.ensure_agent_panel(window, cx) {
             panel.update(cx, |panel, cx| {
-                if let Some(thread_id) = panel.create_backboard_workspace_chat(window, cx) {
-                    self.selected_thread_id = Some(thread_id);
-                }
+                panel.create_backboard_workspace_chat(window, cx);
             });
         }
-        self.focus_selected_conversation(window, cx);
+        self.selected_thread_id = None;
         cx.notify();
     }
 
@@ -278,10 +274,15 @@ impl BackboardAgentWorkspacePage {
             return;
         }
 
+        let Some(panel) = self.ensure_agent_panel(window, cx) else {
+            return;
+        };
+
         let active_thread = self
             .selected_thread_id
             .and_then(|thread_id| self.conversation_for_thread(thread_id, cx))
-            .and_then(|conversation| conversation.read(cx).active_thread().cloned());
+            .and_then(|conversation| conversation.read(cx).active_thread().cloned())
+            .or_else(|| panel.read(cx).active_thread_view(cx));
 
         if let Some(active_thread) = active_thread {
             active_thread.update(cx, |thread, cx| thread.send(window, cx));
@@ -560,7 +561,6 @@ impl BackboardAgentWorkspacePage {
                     .start_icon(Icon::new(IconName::Plus))
                     .style(ButtonStyle::Subtle)
                     .size(ButtonSize::Compact)
-                    .disabled(summaries.len() >= 20)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.create_chat(window, cx);
                     })),
@@ -2364,55 +2364,44 @@ impl BackboardAgentWorkspacePage {
                     .overflow_hidden()
                     .child(panel)
                     .into_any_element(),
-                None => {
-                    let chat_count = self.summaries(cx).len();
-                    v_flex()
-                        .flex_1()
-                        .min_h_0()
-                        .items_center()
-                        .justify_center()
-                        .gap_3()
-                        .px_5()
-                        .child(
-                            div()
-                                .size(rems_from_px(52.))
-                                .rounded_lg()
-                                .border_1()
-                                .border_color(cx.theme().colors().border_variant)
-                                .bg(cx.theme().colors().element_background)
-                                .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    Vector::square(VectorName::ZedLogo, rems_from_px(28.))
-                                        .color(Color::Muted),
-                                ),
-                        )
-                        .child(
-                            Label::new("Open a chat to start Agent Workspace.")
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                        )
-                        .child(
-                            Button::new("empty-new-agent-chat", "New Chat")
-                                .start_icon(Icon::new(IconName::Plus))
-                                .style(ButtonStyle::Tinted(TintColor::Accent))
-                                .size(ButtonSize::Compact)
-                                .disabled(chat_count >= 20)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.create_chat(window, cx);
-                                })),
-                        )
-                        .when(chat_count >= 20, |this| {
-                            this.child(
-                                Label::new("Chat limit reached")
-                                    .size(LabelSize::Small)
+                None => v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .items_center()
+                    .justify_center()
+                    .gap_3()
+                    .px_5()
+                    .child(
+                        div()
+                            .size(rems_from_px(52.))
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().colors().border_variant)
+                            .bg(cx.theme().colors().element_background)
+                            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Vector::square(VectorName::ZedLogo, rems_from_px(28.))
                                     .color(Color::Muted),
-                            )
-                        })
-                        .into_any_element()
-                }
+                            ),
+                    )
+                    .child(
+                        Label::new("Open a chat to start Agent Workspace.")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Button::new("empty-new-agent-chat", "New Chat")
+                            .start_icon(Icon::new(IconName::Plus))
+                            .style(ButtonStyle::Tinted(TintColor::Accent))
+                            .size(ButtonSize::Compact)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.create_chat(window, cx);
+                            })),
+                    )
+                    .into_any_element(),
             })
     }
 }
@@ -2591,6 +2580,9 @@ mod tests {
 
         let multi_workspace =
             cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let _ = multi_workspace.update(cx, |multi_workspace, _window, cx| {
+            multi_workspace.set_multi_agent_expanded(true, cx);
+        });
         let workspace = multi_workspace
             .read_with(cx, |multi_workspace, _cx| {
                 multi_workspace.workspace().clone()
@@ -2611,7 +2603,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_workspace_agent_page_new_chat_selects_retained_conversation(
+    async fn test_workspace_agent_page_new_chat_focuses_draft_without_card(
         cx: &mut TestAppContext,
     ) {
         let (_workspace, panel, page, mut cx) = setup_workspace_page(cx, true).await;
@@ -2619,19 +2611,20 @@ mod tests {
         page.update_in(&mut cx, |page, window, cx| {
             page.create_chat(window, cx);
         });
-        cx.run_until_parked();
 
-        let selected_thread_id = page.read_with(&cx, |page, _cx| {
-            page.selected_thread_id
-                .expect("created workspace chat should be selected")
+        page.read_with(&cx, |page, _cx| {
+            assert!(
+                page.selected_thread_id.is_none(),
+                "draft-only workspace chat should not select a run card"
+            );
         });
 
         panel.read_with(&cx, |panel, cx| {
-            let conversation = panel
-                .backboard_workspace_conversation_view(selected_thread_id, cx)
-                .expect("selected workspace chat should expose a real conversation");
-            assert_eq!(conversation.read(cx).parent_id(), selected_thread_id);
-            assert!(panel.is_retained_thread(&selected_thread_id));
+            let draft_thread_id = panel
+                .active_backboard_workspace_draft_thread_id(cx)
+                .expect("New Chat should focus a Backboard workspace draft");
+            assert!(!panel.is_retained_thread(&draft_thread_id));
+            assert!(panel.backboard_agent_run_summaries(cx).is_empty());
         });
     }
 
@@ -2660,6 +2653,9 @@ mod tests {
 
         let multi_workspace =
             cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let _ = multi_workspace.update(cx, |multi_workspace, _window, cx| {
+            multi_workspace.set_multi_agent_expanded(true, cx);
+        });
         let workspace = multi_workspace
             .read_with(cx, |multi_workspace, _cx| {
                 multi_workspace.workspace().clone()
@@ -2680,12 +2676,13 @@ mod tests {
         page.update_in(&mut cx, |page, window, cx| {
             page.create_chat(window, cx);
         });
-        cx.run_until_parked();
 
-        let selected_thread_id = page.read_with(&cx, |page, _cx| {
+        page.read_with(&cx, |page, _cx| {
             assert!(page.observing_agent_panel);
-            page.selected_thread_id
-                .expect("new chat should still be created when the panel was missing")
+            assert!(
+                page.selected_thread_id.is_none(),
+                "new chat should be a draft, not a selected run"
+            );
         });
         let panel = workspace.read_with(&cx, |workspace, cx| {
             workspace
@@ -2694,40 +2691,62 @@ mod tests {
         });
 
         panel.read_with(&cx, |panel, cx| {
-            let summary = panel
-                .backboard_agent_run_summaries(cx)
-                .into_iter()
-                .find(|summary| summary.thread_id == selected_thread_id)
-                .expect("created chat should be listed in the workspace board");
-            assert_eq!(
-                summary
-                    .apply_state_label
-                    .as_ref()
-                    .map(|label| label.as_ref()),
-                Some("Current workspace")
-            );
-            assert!(summary.worktree_label.is_none());
-            assert_eq!(
-                summary
-                    .working_directory_label
-                    .as_ref()
-                    .map(|label| label.as_ref()),
-                Some("project")
-            );
-            assert_eq!(
-                summary
-                    .working_directory_path
-                    .as_ref()
-                    .map(|label| label.as_ref()),
-                Some("/project")
-            );
-            assert!(!summary.working_directory_is_worktree);
+            let draft_thread_id = panel
+                .active_backboard_workspace_draft_thread_id(cx)
+                .expect("New Chat should lazily attach AgentPanel and focus a draft");
+            assert!(!panel.is_retained_thread(&draft_thread_id));
+            assert!(panel.backboard_agent_run_summaries(cx).is_empty());
+        });
+    }
 
-            let conversation = panel
-                .backboard_workspace_conversation_view(selected_thread_id, cx)
-                .expect("created chat should expose a real conversation");
-            assert_eq!(conversation.read(cx).parent_id(), selected_thread_id);
-            assert!(panel.is_retained_thread(&selected_thread_id));
+    #[gpui::test]
+    async fn test_workspace_agent_page_first_draft_send_promotes_and_opens_next_draft(
+        cx: &mut TestAppContext,
+    ) {
+        let (_workspace, panel, page, mut cx) = setup_workspace_page(cx, false).await;
+
+        page.update_in(&mut cx, |page, window, cx| {
+            page.create_chat(window, cx);
+        });
+
+        let sent_thread_id = panel.read_with(&cx, |panel, cx| {
+            panel
+                .active_backboard_workspace_draft_thread_id(cx)
+                .expect("New Chat should focus a draft")
+        });
+        panel.update(&mut cx, |panel, cx| {
+            assert_eq!(
+                panel.promote_active_backboard_workspace_draft(
+                    "build the dashboard".to_string(),
+                    BackboardAgentWorkspaceScope::WholeProject,
+                    BackboardAgentWorkspaceKind::Build,
+                    BackboardAgentWorkspaceMode::Free,
+                    cx,
+                ),
+                Some(sent_thread_id)
+            );
+        });
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.create_backboard_workspace_chat(window, cx);
+        });
+
+        page.read_with(&cx, |page, _cx| {
+            assert!(
+                page.selected_thread_id.is_none(),
+                "auto-promoted run should not steal focus from the fresh draft"
+            );
+        });
+        panel.read_with(&cx, |panel, cx| {
+            assert!(panel.is_retained_thread(&sent_thread_id));
+            let next_draft_id = panel
+                .active_backboard_workspace_draft_thread_id(cx)
+                .expect("first send should open a fresh workspace draft");
+            assert_ne!(next_draft_id, sent_thread_id);
+
+            let summaries = panel.backboard_agent_run_summaries(cx);
+            assert_eq!(summaries.len(), 1);
+            assert_eq!(summaries[0].thread_id, sent_thread_id);
+            assert_eq!(summaries[0].command.as_ref(), "build the dashboard");
         });
     }
 

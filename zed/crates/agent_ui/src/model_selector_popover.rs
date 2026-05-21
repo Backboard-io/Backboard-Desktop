@@ -112,9 +112,13 @@ impl Render for ModelSelectorPopover {
         } else {
             model_name.clone()
         };
+        let trigger_provider_name = model
+            .as_ref()
+            .and_then(|model| model.description.clone())
+            .filter(|provider| !provider.is_empty());
 
         let trigger = ButtonLike::new("active-model")
-            .width(if branded_trigger { px(124.) } else { px(28.) })
+            .width(if branded_trigger { px(188.) } else { px(28.) })
             .height(if branded_trigger {
                 px(26.).into()
             } else {
@@ -159,15 +163,28 @@ impl Render for ModelSelectorPopover {
                     })
                     .when(branded_trigger, |this| {
                         this.child(
-                            Label::new(trigger_model_name.clone())
-                                .size(LabelSize::XSmall)
-                                .color(if self.menu_handle.is_deployed() {
-                                    Color::Accent
-                                } else {
-                                    Color::Muted
+                            v_flex()
+                                .min_w_0()
+                                .flex_1()
+                                .gap_0()
+                                .when_some(trigger_provider_name.clone(), |this, provider| {
+                                    this.child(
+                                        Label::new(provider)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted)
+                                            .truncate(),
+                                    )
                                 })
-                                .truncate()
-                                .flex_1(),
+                                .child(
+                                    Label::new(trigger_model_name.clone())
+                                        .size(LabelSize::XSmall)
+                                        .color(if self.menu_handle.is_deployed() {
+                                            Color::Accent
+                                        } else {
+                                            Color::Muted
+                                        })
+                                        .truncate(),
+                                ),
                         )
                         .child(
                             Icon::new(if self.menu_handle.is_deployed() {

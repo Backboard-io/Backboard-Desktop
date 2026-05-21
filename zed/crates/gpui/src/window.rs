@@ -2888,18 +2888,23 @@ impl Window {
             self.rendered_frame.deferred_draws
                 [range.start.deferred_draws_index..range.end.deferred_draws_index]
                 .iter()
-                .map(|deferred_draw| DeferredDraw {
-                    current_view: deferred_draw.current_view,
-                    parent_node: reused_subtree.refresh_node_id(deferred_draw.parent_node),
-                    element_id_stack: deferred_draw.element_id_stack.clone(),
-                    text_style_stack: deferred_draw.text_style_stack.clone(),
-                    content_mask: deferred_draw.content_mask,
-                    rem_size: deferred_draw.rem_size,
-                    priority: deferred_draw.priority,
-                    element: None,
-                    absolute_offset: deferred_draw.absolute_offset,
-                    prepaint_range: deferred_draw.prepaint_range.clone(),
-                    paint_range: deferred_draw.paint_range.clone(),
+                .filter_map(|deferred_draw| {
+                    let parent_node =
+                        reused_subtree.try_refresh_node_id(deferred_draw.parent_node)?;
+
+                    Some(DeferredDraw {
+                        current_view: deferred_draw.current_view,
+                        parent_node,
+                        element_id_stack: deferred_draw.element_id_stack.clone(),
+                        text_style_stack: deferred_draw.text_style_stack.clone(),
+                        content_mask: deferred_draw.content_mask,
+                        rem_size: deferred_draw.rem_size,
+                        priority: deferred_draw.priority,
+                        element: None,
+                        absolute_offset: deferred_draw.absolute_offset,
+                        prepaint_range: deferred_draw.prepaint_range.clone(),
+                        paint_range: deferred_draw.paint_range.clone(),
+                    })
                 }),
         );
     }
