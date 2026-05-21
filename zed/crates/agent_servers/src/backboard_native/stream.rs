@@ -129,8 +129,7 @@ pub async fn run_prompt(
         thinking,
         tools,
         web_search: runtime.feature_settings.web_search.clone(),
-        image_generation: (runtime.feature_settings.image_generation == "auto")
-            .then(|| "auto".to_string()),
+        image_generation: Some(runtime.feature_settings.image_generation.clone()),
         image_model_provider: (runtime.feature_settings.image_generation == "auto")
             .then(|| super::DEFAULT_IMAGE_PROVIDER.to_string()),
         image_model_name: (runtime.feature_settings.image_generation == "auto")
@@ -279,7 +278,14 @@ async fn consume_stream(
                     }
                 }
                 "media_generated" => {
-                    emit_media_generated(&state, &runtime, &chunk, cx)?;
+                    if runtime.feature_settings.image_generation == "auto" {
+                        emit_media_generated(&state, &runtime, &chunk, cx)?;
+                    } else {
+                        log::warn!(
+                            "Backboard native ignored generated media because image generation is off: session_id={}",
+                            runtime.session_id
+                        );
+                    }
                 }
                 "stt_text_delta" => {
                     if let Some(text) = chunk_text(&chunk) {
@@ -362,7 +368,9 @@ async fn consume_stream(
                         );
                         break;
                     }
-                    emit_generated_media_records(&state, &runtime, &chunk, cx).ok();
+                    if runtime.feature_settings.image_generation == "auto" {
+                        emit_generated_media_records(&state, &runtime, &chunk, cx).ok();
+                    }
                     emit_voice_records(&state, &runtime, &chunk, cx).ok();
                     emit_usage(&state, &runtime, &chunk, cx).ok();
                     state.set_current_run_id(&runtime.session_id, None);

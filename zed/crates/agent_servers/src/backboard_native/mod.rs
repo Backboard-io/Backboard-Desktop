@@ -1406,7 +1406,7 @@ mod tests {
         id: &str,
     ) -> Option<acp::SessionConfigValueId> {
         options.iter().find_map(|option| {
-            if option.id.as_ref() != id {
+            if option.id.to_string() != id {
                 return None;
             }
 

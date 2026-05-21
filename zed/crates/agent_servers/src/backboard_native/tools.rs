@@ -51,11 +51,23 @@ pub async fn execute_tool_batch(
     tool_calls: Vec<Value>,
     cx: &mut AsyncApp,
 ) -> Result<Vec<Value>> {
-    let calls = tool_calls
-        .into_iter()
-        .map(parse_tool_call)
-        .collect::<Result<Vec<_>>>()?;
-    let mut outputs = Vec::with_capacity(calls.len());
+    let mut calls = Vec::new();
+    let mut outputs = Vec::with_capacity(tool_calls.len());
+    for raw_call in tool_calls {
+        match parse_tool_call(raw_call.clone()) {
+            Ok(call) => calls.push(call),
+            Err(err) => {
+                let call = malformed_tool_call(raw_call, err);
+                let output = json!({
+                    "success": false,
+                    "error": "Backboard returned a malformed tool call. The IDE skipped execution and reported the issue back to the model.",
+                    "details": call.args.get("parse_error").cloned().unwrap_or(Value::Null),
+                });
+                emit_tool_result(state.clone(), runtime, &call, &output, cx)?;
+                outputs.push(tool_output_payload(&call, output));
+            }
+        }
+    }
     let mut index = 0;
 
     while index < calls.len() {
@@ -138,24 +150,23 @@ async fn execute_timed_tool_call(
 }
 
 pub fn parse_tool_call(value: Value) -> Result<ToolCallRequest> {
-    let id = value
-        .get("id")
-        .or_else(|| value.get("tool_call_id"))
-        .and_then(Value::as_str)
-        .filter(|id| !id.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("tool-{}", uuid::Uuid::new_v4().simple()));
-    let function = value
-        .get("function")
-        .and_then(Value::as_object)
-        .context("tool call did not include a function object")?;
+    let id = tool_call_id(&value);
+    let function = value.get("function").and_then(Value::as_object);
     let name = function
-        .get("name")
+        .and_then(|function| function.get("name"))
+        .or_else(|| value.get("name"))
+        .or_else(|| value.get("function_name"))
+        .or_else(|| value.get("tool_name"))
         .and_then(Value::as_str)
         .filter(|name| !name.is_empty())
         .context("tool call function did not include a name")?
         .to_string();
-    let args = match function.get("arguments") {
+    let arguments = function
+        .and_then(|function| function.get("arguments"))
+        .or_else(|| value.get("arguments"))
+        .or_else(|| value.get("args"))
+        .or_else(|| value.get("input"));
+    let args = match arguments {
         Some(Value::String(text)) if !text.trim().is_empty() => serde_json::from_str(text)
             .with_context(|| format!("parsing arguments for tool `{name}`"))?,
         Some(value) => value.clone(),
@@ -163,6 +174,27 @@ pub fn parse_tool_call(value: Value) -> Result<ToolCallRequest> {
     };
 
     Ok(ToolCallRequest { id, name, args })
+}
+
+fn tool_call_id(value: &Value) -> String {
+    value
+        .get("id")
+        .or_else(|| value.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("tool-{}", uuid::Uuid::new_v4().simple()))
+}
+
+fn malformed_tool_call(value: Value, err: anyhow::Error) -> ToolCallRequest {
+    ToolCallRequest {
+        id: tool_call_id(&value),
+        name: "invalid_tool_call".to_string(),
+        args: json!({
+            "parse_error": err.to_string(),
+            "raw_tool_call": value,
+        }),
+    }
 }
 
 fn is_parallel_read_only(call: &ToolCallRequest) -> bool {
@@ -2131,6 +2163,39 @@ fn truncate(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_tool_call_accepts_top_level_name_shape() {
+        let call = parse_tool_call(json!({
+            "id": "call_1",
+            "name": "read_file",
+            "arguments": "{\"target_file\":\"src/main.rs\"}",
+        }))
+        .unwrap();
+
+        assert_eq!(call.id, "call_1");
+        assert_eq!(call.name, "read_file");
+        assert_eq!(call.args, json!({"target_file": "src/main.rs"}));
+    }
+
+    #[test]
+    fn malformed_tool_call_preserves_id_for_error_output() {
+        let raw = json!({
+            "id": "call_missing_name",
+            "function": {
+                "arguments": "{}"
+            },
+        });
+        let err = parse_tool_call(raw.clone()).unwrap_err();
+        let call = malformed_tool_call(raw, err);
+
+        assert_eq!(call.id, "call_missing_name");
+        assert_eq!(call.name, "invalid_tool_call");
+        assert_eq!(
+            call.args.get("parse_error").and_then(Value::as_str),
+            Some("tool call function did not include a name")
+        );
+    }
 
     #[test]
     fn read_only_shell_detection_blocks_mutation() {

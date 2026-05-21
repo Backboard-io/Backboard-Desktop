@@ -5285,10 +5285,11 @@ impl ThreadView {
         "Worked".to_string()
     }
 
-    fn render_assistant_turn_group(
+    fn render_assistant_turn_row(
         &self,
         start: usize,
         end: usize,
+        index: usize,
         entries: &[AgentThreadEntry],
         window: &Window,
         cx: &Context<Self>,
@@ -5296,43 +5297,62 @@ impl ThreadView {
         let total_entries = entries.len();
         let is_expanded = self.assistant_turn_is_expanded(start, end, total_entries, cx);
         let label = self.assistant_turn_status_label(start, end, total_entries, cx);
-        let show_generating = self.generating_indicator_in_list
-            && self.active_assistant_turn_bounds(entries, cx) == Some((start, end));
+
+        let mut row = v_flex().w_full();
+        if index == start {
+            row = row.child(self.render_assistant_turn_header(start, is_expanded, label, cx));
+        }
+
+        if is_expanded {
+            if let Some(group) = self.exploration_group_at(entries, index, cx) {
+                if index != group.start {
+                    return if index == start {
+                        row.into_any_element()
+                    } else {
+                        Empty.into_any_element()
+                    };
+                }
+
+                row = row.child(self.render_exploration_group(
+                    &group,
+                    entries.len(),
+                    entries,
+                    window,
+                    cx,
+                ));
+            } else {
+                row =
+                    row.child(self.render_entry(index, entries.len(), &entries[index], window, cx));
+            }
+        }
+
+        row.into_any_element()
+    }
+
+    fn render_assistant_turn_generating_row(
+        &self,
+        start: usize,
+        end: usize,
+        entries: &[AgentThreadEntry],
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let total_entries = entries.len();
+        let is_expanded = self.assistant_turn_is_expanded(start, end, total_entries, cx);
+        let label = self.assistant_turn_status_label(start, end, total_entries, cx);
         let confirmation = entries
             .last()
             .is_some_and(|entry| Self::is_waiting_for_confirmation(entry));
 
-        let mut content = v_flex().w_full();
-        if is_expanded {
-            let mut ix = start;
-            while ix < end {
-                if let Some(group) = self.exploration_group_at(entries, ix, cx) {
-                    content = content.child(self.render_exploration_group(
-                        &group,
-                        entries.len(),
-                        entries,
-                        window,
-                        cx,
-                    ));
-                    ix = group.end;
-                    continue;
-                }
-
-                content =
-                    content.child(self.render_entry(ix, entries.len(), &entries[ix], window, cx));
-                ix += 1;
-            }
-
-            if show_generating {
-                content = content.child(self.render_generating(confirmation, cx));
-            }
+        let mut row = v_flex().w_full();
+        if start == total_entries {
+            row = row.child(self.render_assistant_turn_header(start, is_expanded, label, cx));
         }
 
-        v_flex()
-            .w_full()
-            .child(self.render_assistant_turn_header(start, is_expanded, label, cx))
-            .child(content)
-            .into_any_element()
+        if is_expanded {
+            row = row.child(self.render_generating(confirmation, cx));
+        }
+
+        row.into_any_element()
     }
 
     fn render_assistant_turn_header(
@@ -5401,11 +5421,15 @@ impl ThreadView {
                         this.assistant_turn_bounds_for_index(entries, index, cx)
                     {
                         if index != start {
-                            return Empty.into_any();
+                            let is_expanded =
+                                this.assistant_turn_is_expanded(start, end, entries.len(), cx);
+                            if !is_expanded {
+                                return Empty.into_any();
+                            }
                         }
 
                         let rendered =
-                            this.render_assistant_turn_group(start, end, entries, window, cx);
+                            this.render_assistant_turn_row(start, end, index, entries, window, cx);
                         return centered_container(rendered).into_any_element();
                     }
 
@@ -5427,12 +5451,9 @@ impl ThreadView {
                     centered_container(rendered.into_any_element()).into_any_element()
                 } else if this.generating_indicator_in_list {
                     if let Some((start, end)) = this.active_assistant_turn_bounds(entries, cx) {
-                        if start == entries.len() {
-                            let rendered =
-                                this.render_assistant_turn_group(start, end, entries, window, cx);
-                            return centered_container(rendered).into_any_element();
-                        }
-                        return Empty.into_any();
+                        let rendered =
+                            this.render_assistant_turn_generating_row(start, end, entries, cx);
+                        return centered_container(rendered).into_any_element();
                     }
                     let confirmation = entries
                         .last()
@@ -10540,12 +10561,13 @@ impl Render for ThreadView {
             .map(|this| {
                 if has_messages {
                     this.flex_1()
-                        .size_full()
+                        .min_h_0()
+                        .w_full()
                         .child(self.render_entries(cx))
                         .vertical_scrollbar_for(&list_state, window, cx)
                         .into_any()
                 } else {
-                    this.flex_1().size_full().into_any()
+                    this.flex_1().min_h_0().w_full().into_any()
                 }
             });
 

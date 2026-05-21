@@ -487,7 +487,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                         .detach_and_log_err(cx);
                 });
                 let (chat_view, thread_summaries) =
-                    jarvis_code_editor_context(&active_workspace, cx);
+                    jarvis_code_editor_context(&active_workspace, window, cx);
                 this.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);
             },
         )
@@ -524,7 +524,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             });
             _multi_workspace.tasks_view = Some(tasks_view.into());
             let (chat_view, thread_summaries) =
-                jarvis_code_editor_context(_multi_workspace.workspace(), cx);
+                jarvis_code_editor_context(_multi_workspace.workspace(), window, cx);
             _multi_workspace.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);
 
             _multi_workspace.interface_mode = InterfaceMode::Expert;
@@ -921,9 +921,10 @@ fn ensure_agent_panel_for_workspace(
 fn sync_jarvis_code_editor_context(
     multi_workspace: &Entity<MultiWorkspace>,
     active_workspace: &Entity<Workspace>,
+    window: &mut Window,
     cx: &mut App,
 ) {
-    let (chat_view, thread_summaries) = jarvis_code_editor_context(active_workspace, cx);
+    let (chat_view, thread_summaries) = jarvis_code_editor_context(active_workspace, window, cx);
 
     multi_workspace.update(cx, |multi_workspace, cx| {
         multi_workspace.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);
@@ -947,9 +948,15 @@ fn git_workspace_view_for_workspace(
 
 fn jarvis_code_editor_context(
     active_workspace: &Entity<Workspace>,
+    window: &mut Window,
     cx: &mut App,
 ) -> (Option<AnyView>, Vec<workspace::JarvisThreadSummary>) {
     let panel = active_workspace.read(cx).panel::<agent_ui::AgentPanel>(cx);
+    if let Some(panel) = panel.as_ref() {
+        panel.update(cx, |panel, cx| {
+            panel.ensure_thread_initialized(window, cx);
+        });
+    }
     let chat_view: Option<AnyView> = panel.clone().map(Into::into);
     let thread_summaries = panel
         .as_ref()
@@ -985,7 +992,7 @@ fn jarvis_code_editor_context(
 fn sync_jarvis_code_editor_context_for_window(window: &mut Window, cx: &mut App) {
     if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
         let active_workspace = multi_workspace.read(cx).workspace().clone();
-        sync_jarvis_code_editor_context(&multi_workspace, &active_workspace, cx);
+        sync_jarvis_code_editor_context(&multi_workspace, &active_workspace, window, cx);
     }
 }
 

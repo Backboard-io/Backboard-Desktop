@@ -1,13 +1,16 @@
 use std::{
+    cell::Cell,
     collections::{HashMap, HashSet},
+    rc::Rc,
     sync::Arc,
     time::Instant,
 };
 
 use git::repository::{LogOrder, LogSource};
 use gpui::{
-    AnyView, App, BoxShadow, Context, Entity, Hsla, MouseButton, Pixels, Render, SharedString,
-    Size, StatefulInteractiveElement, Subscription, Window, canvas, div, hsla, point, px, size,
+    AnyView, App, Bounds, BoxShadow, Context, Entity, Hsla, MouseButton, Pixels, Render,
+    SharedString, Size, StatefulInteractiveElement, Subscription, Window, canvas, div, hsla, point,
+    px, size,
 };
 use project::{
     Project, WorktreeId,
@@ -240,6 +243,7 @@ pub(crate) struct JarvisDirectoryVisualizer {
     loading_git_diffs: HashSet<SharedString>,
     thread_summaries: Vec<JarvisThreadSummary>,
     chat_view: Option<AnyView>,
+    graph_canvas_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     last_frame: Option<Instant>,
     _project_subscription: Option<Subscription>,
     _git_subscription: Option<Subscription>,
@@ -263,6 +267,7 @@ impl JarvisDirectoryVisualizer {
             loading_git_diffs: HashSet::default(),
             thread_summaries: Vec::new(),
             chat_view: None,
+            graph_canvas_bounds: Rc::new(Cell::new(None)),
             last_frame: None,
             _project_subscription: None,
             _git_subscription: None,
@@ -771,10 +776,15 @@ impl Render for JarvisDirectoryVisualizer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors();
         let window_size = window.window_bounds().get_bounds().size;
-        let canvas_size = size(
+        let fallback_canvas_size = size(
             (window_size.width - SELECTOR_PANEL_WIDTH - CHAT_PANEL_WIDTH - px(24.)).max(px(320.)),
             (window_size.height - px(112.)).max(px(240.)),
         );
+        let canvas_size = self
+            .graph_canvas_bounds
+            .get()
+            .map(|bounds| bounds.size)
+            .unwrap_or(fallback_canvas_size);
 
         self.step_simulation(canvas_size);
         if !self.graph.nodes.is_empty() {
@@ -1372,9 +1382,12 @@ impl Render for JarvisDirectoryVisualizer {
                     ),
             );
         } else {
+            let graph_canvas_bounds = self.graph_canvas_bounds.clone();
             graph_map = graph_map.child(
                 canvas(
-                    |_, _, _| (),
+                    move |bounds, _, _| {
+                        graph_canvas_bounds.set(Some(bounds));
+                    },
                     move |bounds, _, window, _| {
                         for edge in &visible_edges {
                             let Some(parent) = positions.get(&edge.parent) else {
@@ -1686,7 +1699,9 @@ impl Render for JarvisDirectoryVisualizer {
             .bg(colors.editor_background)
             .child(match self.chat_view.clone() {
                 Some(chat_view) => div()
-                    .size_full()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
                     .overflow_hidden()
                     .child(chat_view)
                     .into_any_element(),

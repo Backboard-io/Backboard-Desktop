@@ -12,7 +12,7 @@ Body is bg: #000. Page is a React app mounted on #root, all components are <scri
 
 Fonts
 Google Fonts:
-
+![alt text](image.png)
 family=Instrument+Serif:ital@0;1&family=Barlow:wght@300;400;500;600
 Tailwind config adds:
 
