@@ -50,7 +50,9 @@ use client::{
     proto::{self, ErrorCode, PanelId, PeerId},
 };
 use collections::{HashMap, HashSet, hash_map};
-use dock::{Dock, DockPosition, PanelButtons, PanelHandle, RESIZE_HANDLE_SIZE};
+use dock::{
+    Dock, DockPosition, PanelButtons, PanelHandle, RESIZE_HANDLE_SIZE, resolved_panel_position,
+};
 use fs::Fs;
 use futures::{
     Future, FutureExt, StreamExt,
@@ -2513,7 +2515,7 @@ impl Workspace {
         cx.on_focus_in(&focus_handle, window, Self::handle_panel_focused)
             .detach();
 
-        let dock_position = panel.position(window, cx);
+        let dock_position = resolved_panel_position(&panel, panel.position(window, cx), cx);
         let dock = self.dock_at_position(dock_position);
         let any_panel = panel.to_any();
         let persisted_size_state =

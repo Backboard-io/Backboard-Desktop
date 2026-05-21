@@ -258,6 +258,18 @@ where
     }
 }
 
+pub(crate) fn resolved_panel_position<T: Panel>(
+    panel: &Entity<T>,
+    position: DockPosition,
+    cx: &App,
+) -> DockPosition {
+    if position == DockPosition::Right && !panel.read(cx).is_agent_panel() {
+        DockPosition::Left
+    } else {
+        position
+    }
+}
+
 impl From<&dyn PanelHandle> for AnyView {
     fn from(val: &dyn PanelHandle) -> Self {
         val.to_any()
@@ -591,7 +603,8 @@ impl Dock {
                 let panel = panel.clone();
 
                 move |this, window, cx| {
-                    let new_position = panel.read(cx).position(window, cx);
+                    let new_position =
+                        resolved_panel_position(&panel, panel.read(cx).position(window, cx), cx);
                     if new_position == this.position {
                         return;
                     }
@@ -667,8 +680,7 @@ impl Dock {
                         workspace
                             .update(cx, |workspace, cx| {
                                 workspace.zoomed = Some(panel.downgrade().into());
-                                workspace.zoomed_position =
-                                    Some(panel.read(cx).position(window, cx));
+                                workspace.zoomed_position = Some(this.position);
                                 cx.emit(Event::ZoomChanged);
                             })
                             .ok();
@@ -1281,6 +1293,10 @@ impl Render for PanelButtons {
                             ContextMenu::build(window, cx, |mut menu, _, cx| {
                                 let mut has_position_entries = false;
                                 for position in POSITIONS {
+                                    if position == DockPosition::Right && !panel.is_agent_panel(cx)
+                                    {
+                                        continue;
+                                    }
                                     if panel.position_is_valid(position, cx) {
                                         let is_current = position == dock_position;
                                         let panel = panel.clone();

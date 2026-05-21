@@ -1542,6 +1542,10 @@ impl Panel for BackboardPanel {
         Box::new(ToggleFocus)
     }
 
+    fn is_agent_panel(&self) -> bool {
+        true
+    }
+
     fn is_zoomed(&self, _window: &Window, _cx: &App) -> bool {
         self.is_zoomed
     }

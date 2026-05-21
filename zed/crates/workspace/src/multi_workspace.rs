@@ -2139,13 +2139,13 @@ impl MultiWorkspace {
         let pill_group_border = colors.border_variant.opacity(0.5);
 
         h_flex()
-            .h(px(44.))
+            .h(px(36.))
             .w_full()
             .flex_shrink_0()
             .items_center()
             .gap_1()
-            .pl(px(74.))
-            .pr_4()
+            .pl(px(104.))
+            .pr_2()
             .border_b_1()
             .border_color(colors.border_variant.opacity(0.5))
             .bg(switcher_bg)
@@ -2198,8 +2198,8 @@ impl MultiWorkspace {
 
         div()
             .id(id)
-            .h(px(30.))
-            .px_3()
+            .h(px(24.))
+            .px(px(10.))
             .flex()
             .items_center()
             .justify_center()
@@ -2212,15 +2212,21 @@ impl MultiWorkspace {
             })
             .bg(if selected { selected_bg } else { idle_bg })
             .cursor_pointer()
-            .hover(|style| style.bg(colors.element_hover))
+            .when(!selected, |style| {
+                style.hover(|style| style.bg(colors.element_hover))
+            })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.set_workspace_mode_tab(target_tab, cx);
             }))
-            .child(Label::new(label).size(LabelSize::Small).color(if selected {
-                Color::Accent
-            } else {
-                Color::Muted
-            }))
+            .child(
+                Label::new(label)
+                    .size(LabelSize::XSmall)
+                    .color(if selected {
+                        Color::Accent
+                    } else {
+                        Color::Muted
+                    }),
+            )
             .into_any_element()
     }
 }

@@ -930,16 +930,33 @@ struct BackboardConfigOptions {
     session_id: acp::SessionId,
 }
 
-impl AgentSessionConfigOptions for BackboardConfigOptions {
-    fn config_options(&self) -> Vec<acp::SessionConfigOption> {
-        let (intensity, feature_settings) = self
-            .state
+impl BackboardConfigOptions {
+    fn current_config(&self) -> (String, String, FeatureSettings) {
+        self.state
             .sessions
             .borrow()
             .get(&self.session_id)
-            .map(|session| (session.intensity.clone(), session.feature_settings.clone()))
-            .unwrap_or_else(|| (DEFAULT_INTENSITY.to_string(), FeatureSettings::default()));
-        config_options(&intensity, &feature_settings)
+            .map(|session| {
+                (
+                    session.mode.to_string(),
+                    session.intensity.clone(),
+                    session.feature_settings.clone(),
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    "free".to_string(),
+                    DEFAULT_INTENSITY.to_string(),
+                    FeatureSettings::default(),
+                )
+            })
+    }
+}
+
+impl AgentSessionConfigOptions for BackboardConfigOptions {
+    fn config_options(&self) -> Vec<acp::SessionConfigOption> {
+        let (mode, intensity, feature_settings) = self.current_config();
+        config_options(&mode, &intensity, &feature_settings)
     }
 
     fn set_config_option(
@@ -952,9 +969,23 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
         let mut options = self.config_options();
         let config_id_string = config_id.to_string();
         let mut changed = false;
+        let mut changed_mode = None;
         {
             if let Some(session) = self.state.sessions.borrow_mut().get_mut(&self.session_id) {
                 match config_id_string.as_str() {
+                    "backboard_mode" => {
+                        let mode = if supported_modes()
+                            .iter()
+                            .any(|item| item.id.to_string() == value)
+                        {
+                            value
+                        } else {
+                            "free".to_string()
+                        };
+                        session.mode = acp::SessionModeId::new(mode.clone());
+                        changed_mode = Some(mode);
+                        changed = true;
+                    }
                     "backboard_intensity" => {
                         session.intensity =
                             if matches!(value.as_str(), "fast" | "balanced" | "deep") {
@@ -1002,6 +1033,13 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
             let options_for_update = options.clone();
             cx.spawn(async move |cx| {
                 let runtime = state.runtime_for_session(&session_id)?;
+                if let Some(mode) = changed_mode {
+                    state.emit_update(
+                        &runtime,
+                        acp::SessionUpdate::CurrentModeUpdate(acp::CurrentModeUpdate::new(mode)),
+                        cx,
+                    )?;
+                }
                 state.emit_update(
                     &runtime,
                     acp::SessionUpdate::ConfigOptionUpdate(acp::ConfigOptionUpdate::new(
@@ -1223,10 +1261,30 @@ fn supported_modes() -> Vec<acp::SessionMode> {
 }
 
 fn config_options(
+    mode: &str,
     intensity: &str,
     feature_settings: &FeatureSettings,
 ) -> Vec<acp::SessionConfigOption> {
     vec![
+        acp::SessionConfigOption::select(
+            "backboard_mode",
+            "Mode",
+            mode.to_string(),
+            vec![
+                acp::SessionConfigSelectOption::new("agent", "Agent")
+                    .description("Autonomous edits, terminal commands, indexing, and memories."),
+                acp::SessionConfigSelectOption::new("ask", "Ask").description(
+                    "Read, search, and explain without file writes or shell mutation.",
+                ),
+                acp::SessionConfigSelectOption::new("manual", "Manual")
+                    .description("Focused edit proposals with explicit diff review."),
+                acp::SessionConfigSelectOption::new("free", "Full Access").description(
+                    "Unrestricted tool access. Terminal commands run without approval prompts.",
+                ),
+            ],
+        )
+        .description("Controls how much autonomy Backboard has for this session.")
+        .category(acp::SessionConfigOptionCategory::Mode),
         acp::SessionConfigOption::select(
             "backboard_intensity",
             "Intensity",
@@ -1351,7 +1409,7 @@ mod tests {
             voice_mode: "tts".to_string(),
             live_voice: "on".to_string(),
         };
-        let options = config_options("fast", &settings);
+        let options = config_options("free", "fast", &settings);
         let ids = options
             .iter()
             .map(|option| option.id.to_string())

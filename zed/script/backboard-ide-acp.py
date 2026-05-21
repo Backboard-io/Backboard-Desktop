@@ -1106,6 +1106,16 @@ class AcpServer:
                 mode_id = "free"
             session.mode = mode_id
             session._tool_definitions_cache.clear()
+            await self.notify(
+                "session/update",
+                {
+                    "sessionId": session.session_id,
+                    "update": {
+                        "sessionUpdate": "config_option_update",
+                        "configOptions": session.config_options(),
+                    },
+                },
+            )
             return {}
 
         if method == "session/set_model":
@@ -1127,7 +1137,19 @@ class AcpServer:
             if isinstance(value, dict):
                 value = value.get("value")
             value_id = str(value or "")
-            if config_id == "backboard_intensity":
+            if config_id == "backboard_mode":
+                session.mode = value_id if value_id in SUPPORTED_MODES else "free"
+                await self.notify(
+                    "session/update",
+                    {
+                        "sessionId": session.session_id,
+                        "update": {
+                            "sessionUpdate": "current_mode_update",
+                            "currentModeId": session.mode,
+                        },
+                    },
+                )
+            elif config_id == "backboard_intensity":
                 session.intensity = value_id if value_id in {"fast", "balanced", "deep"} else "fast"
                 session._tool_definitions_cache.clear()
             return {"configOptions": session.config_options()}
@@ -1443,6 +1465,36 @@ class BackboardIdeSession:
 
     def config_options(self) -> list[dict[str, Any]]:
         return [
+            {
+                "id": "backboard_mode",
+                "name": "Mode",
+                "description": "Controls how much autonomy Backboard has for this session.",
+                "category": "mode",
+                "type": "select",
+                "currentValue": self.mode,
+                "options": [
+                    {
+                        "value": "agent",
+                        "name": "Agent",
+                        "description": "Autonomous edits, terminal commands, MCP, indexing, memories, and subagents.",
+                    },
+                    {
+                        "value": "ask",
+                        "name": "Ask",
+                        "description": "Read, search, and explain without file writes or shell mutation.",
+                    },
+                    {
+                        "value": "manual",
+                        "name": "Manual",
+                        "description": "Focused edit proposals with explicit diff review.",
+                    },
+                    {
+                        "value": "free",
+                        "name": "Full Access",
+                        "description": "Unrestricted tool access. Terminal commands run without approval prompts.",
+                    },
+                ],
+            },
             {
                 "id": "backboard_intensity",
                 "name": "Intensity",

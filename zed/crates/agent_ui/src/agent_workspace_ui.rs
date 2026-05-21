@@ -10,7 +10,7 @@ use settings::Settings;
 use theme_settings::ThemeSettings;
 use ui::{
     Button, ButtonSize, ButtonStyle, ElevationIndex, Icon, IconButton, IconSize, Label, LabelSize,
-    TintColor, Tooltip, Vector, VectorName, WithScrollbar, prelude::*,
+    ProgressBar, TintColor, Tooltip, Vector, VectorName, WithScrollbar, prelude::*,
 };
 use workspace::Workspace;
 
@@ -814,7 +814,7 @@ impl BackboardAgentWorkspacePage {
             .max_w(rems_from_px(440.))
             .h_full()
             .flex_shrink_0()
-            .border_l_1()
+            .border_r_1()
             .border_color(cx.theme().colors().border_variant)
             .bg(cx.theme().colors().elevated_surface_background)
             .child(self.render_launch_strip(cx))
@@ -938,6 +938,7 @@ impl BackboardAgentWorkspacePage {
                             .child(
                                 Label::new(summary.title.clone())
                                     .size(LabelSize::Small)
+                                    .truncate()
                                     .color(if selected {
                                         Color::Accent
                                     } else {
@@ -954,8 +955,10 @@ impl BackboardAgentWorkspacePage {
             .child(
                 Label::new(summary.command.clone())
                     .size(LabelSize::Small)
+                    .truncate()
                     .color(Color::Muted),
             )
+            .child(self.render_agent_progress(&summary, "row", cx))
             .child(
                 h_flex()
                     .gap_2()
@@ -1029,7 +1032,7 @@ impl BackboardAgentWorkspacePage {
             .cloned()
             .collect::<Vec<_>>();
         let mut summary_groups = Vec::<(Option<String>, Vec<BackboardAgentRunSummary>)>::new();
-        for summary in summaries {
+        for summary in summaries.iter().cloned() {
             let key = summary
                 .batch_id
                 .as_ref()
@@ -1069,12 +1072,114 @@ impl BackboardAgentWorkspacePage {
             .track_scroll(&self.dashboard_scroll_handle)
             .overflow_y_scroll()
             .pb_4()
+            .child(self.render_dashboard_overview(&summaries, cx))
             .when(!blocked_summaries.is_empty(), |this| {
                 this.child(self.render_blocked_overview(blocked_summaries, cx))
             })
             .child(v_flex().gap_3().p_4().children(group_elements))
             .vertical_scrollbar_for(&self.dashboard_scroll_handle, window, cx)
             .into_any_element()
+    }
+
+    fn render_dashboard_overview(
+        &self,
+        summaries: &[BackboardAgentRunSummary],
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let running = summaries
+            .iter()
+            .filter(|summary| summary.status == BackboardAgentRunStatus::Running)
+            .count();
+        let ready = summaries.iter().filter(|summary| summary.can_apply).count();
+        let blocked = summaries
+            .iter()
+            .filter(|summary| summary.status == BackboardAgentRunStatus::Blocked)
+            .count();
+        let files = summaries
+            .iter()
+            .map(|summary| summary.files_changed)
+            .sum::<usize>();
+
+        h_flex()
+            .px_4()
+            .pt_3()
+            .gap_2()
+            .flex_wrap()
+            .child(self.render_overview_tile(
+                "Running",
+                running.to_string(),
+                IconName::LoadCircle,
+                if running > 0 {
+                    Color::Accent
+                } else {
+                    Color::Muted
+                },
+                cx,
+            ))
+            .child(self.render_overview_tile(
+                "Ready",
+                ready.to_string(),
+                IconName::Check,
+                if ready > 0 {
+                    Color::Success
+                } else {
+                    Color::Muted
+                },
+                cx,
+            ))
+            .child(self.render_overview_tile(
+                "Blocked",
+                blocked.to_string(),
+                IconName::Warning,
+                if blocked > 0 {
+                    Color::Warning
+                } else {
+                    Color::Muted
+                },
+                cx,
+            ))
+            .child(self.render_overview_tile(
+                "Files",
+                files.to_string(),
+                IconName::Folder,
+                if files > 0 {
+                    Color::Accent
+                } else {
+                    Color::Muted
+                },
+                cx,
+            ))
+    }
+
+    fn render_overview_tile(
+        &self,
+        label: &'static str,
+        value: String,
+        icon: IconName,
+        color: Color,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .min_w(rems_from_px(132.))
+            .h(rems_from_px(40.))
+            .gap_2()
+            .px_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().colors().border_variant)
+            .bg(cx.theme().colors().elevated_surface_background)
+            .child(Icon::new(icon).size(IconSize::Small).color(color))
+            .child(
+                v_flex()
+                    .gap_0()
+                    .child(
+                        Label::new(value)
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::BOLD)
+                            .color(color),
+                    )
+                    .child(Label::new(label).size(LabelSize::XSmall).color(Color::Muted)),
+            )
     }
 
     fn render_batch_group(
@@ -1242,9 +1347,9 @@ impl BackboardAgentWorkspacePage {
 
         v_flex()
             .id(format!("backboard-agent-card-{thread_key}"))
-            .min_w(rems_from_px(320.))
-            .max_w(rems_from_px(420.))
-            .min_h(rems_from_px(248.))
+            .min_w(rems_from_px(300.))
+            .max_w(rems_from_px(380.))
+            .min_h(rems_from_px(264.))
             .flex_1()
             .rounded_lg()
             .border_1()
@@ -1282,6 +1387,7 @@ impl BackboardAgentWorkspacePage {
                                     .child(
                                         Label::new(summary.title.clone())
                                             .size(LabelSize::Small)
+                                            .truncate()
                                             .color(match summary.status {
                                                 BackboardAgentRunStatus::Blocked => Color::Warning,
                                                 BackboardAgentRunStatus::Error
@@ -1318,6 +1424,7 @@ impl BackboardAgentWorkspacePage {
                                                     .child(
                                                         Label::new(label)
                                                             .size(LabelSize::Small)
+                                                            .truncate()
                                                             .color(Color::Accent),
                                                     ),
                                             )
@@ -1352,6 +1459,8 @@ impl BackboardAgentWorkspacePage {
                     .px_3()
                     .flex_1()
                     .min_h_0()
+                    .child(self.render_agent_progress(&summary, "card", cx))
+                    .child(self.render_summary_chips(&summary, cx))
                     .child(if self.show_token_context {
                         self.render_token_context_preview(&summary, cx)
                             .into_any_element()
@@ -1663,7 +1772,10 @@ impl BackboardAgentWorkspacePage {
         summary: &BackboardAgentRunSummary,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let lines = Self::token_context_lines(summary);
+        let mut lines = Self::token_context_lines(summary);
+        if lines.is_empty() {
+            lines.push("Usage metrics will appear after the first model response.".to_string());
+        }
 
         v_flex()
             .flex_1()
@@ -1823,6 +1935,92 @@ impl BackboardAgentWorkspacePage {
         div().size(px(7.)).rounded_full().bg(color)
     }
 
+    fn render_agent_progress(
+        &self,
+        summary: &BackboardAgentRunSummary,
+        id_scope: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let value = summary.progress as f32;
+        let label = match summary.status {
+            BackboardAgentRunStatus::Queued => "queued".to_string(),
+            BackboardAgentRunStatus::Blocked => "needs input".to_string(),
+            BackboardAgentRunStatus::Error => "error".to_string(),
+            BackboardAgentRunStatus::Canceled => "stopped".to_string(),
+            _ => format!("{}%", summary.progress),
+        };
+
+        v_flex()
+            .w_full()
+            .gap_1()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .child(Label::new("Progress").size(LabelSize::XSmall).color(Color::Muted))
+                    .child(
+                        Label::new(label)
+                            .size(LabelSize::XSmall)
+                            .color(Self::status_label_color(summary.status)),
+                    ),
+            )
+            .child(
+                ProgressBar::new(
+                    format!(
+                        "agent-progress-{id_scope}-{}",
+                        summary.thread_id.to_key_string()
+                    ),
+                    value,
+                    100.0,
+                    cx,
+                )
+                .bg_color(cx.theme().colors().element_background)
+                .fg_color(Self::status_hsla(summary.status, cx))
+                .over_color(cx.theme().status().error),
+            )
+    }
+
+    fn render_summary_chips(
+        &self,
+        summary: &BackboardAgentRunSummary,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .gap_1()
+            .flex_wrap()
+            .when_some(summary.kind_label.clone(), |this, label| {
+                this.child(self.render_meta_chip(label, Color::Accent, cx))
+            })
+            .when_some(summary.scope_label.clone(), |this, label| {
+                this.child(self.render_meta_chip(label, Color::Muted, cx))
+            })
+            .when(summary.batch_size > 1, |this| {
+                this.child(self.render_meta_chip(
+                    format!("{} of {}", summary.batch_index + 1, summary.batch_size),
+                    Color::Muted,
+                    cx,
+                ))
+            })
+    }
+
+    fn render_meta_chip(
+        &self,
+        label: impl Into<SharedString>,
+        color: Color,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let label = label.into();
+        div()
+            .h(rems_from_px(22.))
+            .px_2()
+            .rounded_sm()
+            .border_1()
+            .border_color(cx.theme().colors().border_variant)
+            .bg(cx.theme().colors().element_background)
+            .flex()
+            .items_center()
+            .child(Label::new(label).size(LabelSize::XSmall).color(color))
+    }
+
     fn render_status_badge(
         &self,
         status: BackboardAgentRunStatus,
@@ -1874,6 +2072,19 @@ impl BackboardAgentWorkspacePage {
             BackboardAgentRunStatus::Blocked => Color::Warning,
             BackboardAgentRunStatus::Error | BackboardAgentRunStatus::Canceled => Color::Error,
             BackboardAgentRunStatus::Queued | BackboardAgentRunStatus::Running => Color::Accent,
+        }
+    }
+
+    fn status_hsla(status: BackboardAgentRunStatus, cx: &mut Context<Self>) -> gpui::Hsla {
+        match status {
+            BackboardAgentRunStatus::Done => cx.theme().status().success,
+            BackboardAgentRunStatus::Blocked => cx.theme().status().warning,
+            BackboardAgentRunStatus::Error | BackboardAgentRunStatus::Canceled => {
+                cx.theme().status().error
+            }
+            BackboardAgentRunStatus::Queued | BackboardAgentRunStatus::Running => {
+                cx.theme().colors().text_accent
+            }
         }
     }
 
@@ -2443,6 +2654,7 @@ impl Render for BackboardAgentWorkspacePage {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
+                    .child(self.render_left_rail(&summaries, window, cx))
                     .child(
                         div().flex_1().min_w_0().h_full().overflow_hidden().child(
                             self.render_dashboard(summaries.clone(), window, cx)

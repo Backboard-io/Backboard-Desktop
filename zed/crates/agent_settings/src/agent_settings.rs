@@ -38,9 +38,9 @@ impl PanelLayout {
     const AGENT: Self = Self {
         agent_dock: Some(DockPosition::Right),
         project_panel_dock: Some(DockSide::Left),
-        outline_panel_dock: Some(DockSide::Right),
-        collaboration_panel_dock: Some(DockPosition::Right),
-        git_panel_dock: Some(DockPosition::Right),
+        outline_panel_dock: Some(DockSide::Left),
+        collaboration_panel_dock: Some(DockPosition::Left),
+        git_panel_dock: Some(DockPosition::Left),
     };
 
     const EDITOR: Self = Self {
@@ -1265,9 +1265,8 @@ mod tests {
         };
         assert_eq!(user_layout, PanelLayout::default());
 
-        // User explicitly sets agent dock to left (matching the default).
-        // The merged result is still agent, but the user layout captures
-        // only what the user wrote.
+        // User explicitly moves the agent dock to the left, which no longer
+        // matches the Backboard layout because chat stays on the right.
         SettingsStore::update_global(cx, |store, cx| {
             store
                 .set_user_settings(r#"{ "agent": { "dock": "left" } }"#, cx)
@@ -1275,8 +1274,8 @@ mod tests {
         });
 
         let layout = AgentSettings::get_layout(cx);
-        let WindowLayout::Agent(Some(user_layout)) = layout else {
-            panic!("expected Agent(Some), got {:?}", layout);
+        let WindowLayout::Custom(user_layout) = layout else {
+            panic!("expected Custom, got {:?}", layout);
         };
         assert_eq!(user_layout.agent_dock, Some(DockPosition::Left));
         assert_eq!(user_layout.project_panel_dock, None);
@@ -1284,8 +1283,7 @@ mod tests {
         assert_eq!(user_layout.collaboration_panel_dock, None);
         assert_eq!(user_layout.git_panel_dock, None);
 
-        // User sets a combination that doesn't match either preset:
-        // agent on the left but project panel also on the left.
+        // User sets another combination that doesn't match either preset.
         SettingsStore::update_global(cx, |store, cx| {
             store
                 .set_user_settings(
@@ -1390,7 +1388,7 @@ mod tests {
             project::DisableAiSettings::register(cx);
             AgentSettings::register(cx);
 
-            // User has agent=left (matches preset) and project_panel=left (does not)
+            // User has agent=left, which does not match the agent preset.
             SettingsStore::update_global(cx, |store, cx| {
                 store
                     .set_user_settings(
@@ -1419,16 +1417,16 @@ mod tests {
                 store.set_user_settings(&written, cx).unwrap();
             });
 
-            // The user settings should still have agent=left (preserved)
-            // and now project_panel=right (changed to match preset).
+            // The user settings should now have agent=right while keeping
+            // the non-chat panels on the left.
             let store = cx.global::<SettingsStore>();
             let user_layout = store
                 .raw_user_settings()
                 .map(|u| PanelLayout::read_from(u.content.as_ref()))
                 .unwrap_or_default();
 
-            assert_eq!(user_layout.agent_dock, Some(DockPosition::Left));
-            assert_eq!(user_layout.project_panel_dock, Some(DockSide::Right));
+            assert_eq!(user_layout.agent_dock, Some(DockPosition::Right));
+            assert_eq!(user_layout.project_panel_dock, Some(DockSide::Left));
             // Other fields weren't in user settings and didn't need changing.
             assert_eq!(user_layout.outline_panel_dock, None);
 
