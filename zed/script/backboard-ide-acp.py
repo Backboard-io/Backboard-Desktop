@@ -168,6 +168,22 @@ DEFAULT_PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-4o"
 DEFAULT_CONTEXT_WINDOW = 258_000
 MODEL_LIST_CACHE_TTL_SECONDS = 300.0
+MODEL_LIST_PROVIDERS = (
+    "anthropic",
+    "openai",
+    "google",
+    "xai",
+    "deepseek",
+    "openrouter",
+    "aws-bedrock",
+    "cohere",
+    "cerebras",
+    "mistral",
+    "groq",
+    "together",
+    "fireworks",
+    "perplexity",
+)
 TOOL_DEFINITION_CACHE_TTL_SECONDS = 30.0
 CONTEXT_PACK_MAX_CHARS = 9000
 CONTEXT_PREWARM_MAX_FILES = 120
@@ -1056,7 +1072,7 @@ class AcpServer:
             session.start_prewarm()
             return {
                 "sessionId": session_id,
-                "modes": self._mode_state("free"),
+                "modes": self._mode_state("agent"),
                 "models": await session.model_state(),
                 "configOptions": session.config_options(),
             }
@@ -1101,21 +1117,11 @@ class AcpServer:
 
         if method == "session/set_mode":
             session = self._session(params)
-            mode_id = str(params.get("modeId") or params.get("mode_id") or "free")
+            mode_id = str(params.get("modeId") or params.get("mode_id") or "agent")
             if mode_id not in SUPPORTED_MODES:
-                mode_id = "free"
+                mode_id = "agent"
             session.mode = mode_id
             session._tool_definitions_cache.clear()
-            await self.notify(
-                "session/update",
-                {
-                    "sessionId": session.session_id,
-                    "update": {
-                        "sessionUpdate": "config_option_update",
-                        "configOptions": session.config_options(),
-                    },
-                },
-            )
             return {}
 
         if method == "session/set_model":
@@ -1137,19 +1143,7 @@ class AcpServer:
             if isinstance(value, dict):
                 value = value.get("value")
             value_id = str(value or "")
-            if config_id == "backboard_mode":
-                session.mode = value_id if value_id in SUPPORTED_MODES else "free"
-                await self.notify(
-                    "session/update",
-                    {
-                        "sessionId": session.session_id,
-                        "update": {
-                            "sessionUpdate": "current_mode_update",
-                            "currentModeId": session.mode,
-                        },
-                    },
-                )
-            elif config_id == "backboard_intensity":
+            if config_id == "backboard_intensity":
                 session.intensity = value_id if value_id in {"fast", "balanced", "deep"} else "fast"
                 session._tool_definitions_cache.clear()
             return {"configOptions": session.config_options()}
@@ -1203,7 +1197,7 @@ class AcpServer:
                 },
                 {
                     "id": "free",
-                    "name": "Full Access",
+                    "name": "Free",
                     "description": "Unrestricted tool access. Terminal commands run without approval prompts.",
                 },
             ],
@@ -1242,7 +1236,7 @@ class BackboardIdeSession:
         self.server = server
         self.session_id = session_id
         self.workspace = cwd
-        self.mode = "free"
+        self.mode = "agent"
         self.provider: str | None = None
         self.model: str | None = None
         self.intensity = "fast"
@@ -1416,12 +1410,36 @@ class BackboardIdeSession:
                 models = cached_models
             else:
                 started = self._loop_time()
-                model_data = await self._api_json_request(
-                    "GET",
-                    "/models",
-                    params={"model_type": "llm", "limit": 15000},
+                provider_results = await asyncio.gather(
+                    *(
+                        self._api_json_request(
+                            "GET",
+                            "/models",
+                            params={
+                                "model_type": "llm",
+                                "limit": 100,
+                                "provider": provider,
+                            },
+                        )
+                        for provider in MODEL_LIST_PROVIDERS
+                    ),
+                    return_exceptions=True,
                 )
-                models = model_data.get("models", []) if isinstance(model_data, dict) else []
+                models = []
+                for result in provider_results:
+                    if not isinstance(result, dict):
+                        continue
+                    models.extend(
+                        model
+                        for model in result.get("models", [])
+                        if isinstance(model, dict)
+                    )
+                models.sort(
+                    key=lambda model: (
+                        str(model.get("provider") or ""),
+                        str(model.get("name") or model.get("id") or ""),
+                    )
+                )
                 self._record_timing("model_list_ms", started)
                 MODEL_LIST_CACHE["models"] = models
                 MODEL_LIST_CACHE["expires_at"] = now + MODEL_LIST_CACHE_TTL_SECONDS
@@ -1465,36 +1483,6 @@ class BackboardIdeSession:
 
     def config_options(self) -> list[dict[str, Any]]:
         return [
-            {
-                "id": "backboard_mode",
-                "name": "Mode",
-                "description": "Controls how much autonomy Backboard has for this session.",
-                "category": "mode",
-                "type": "select",
-                "currentValue": self.mode,
-                "options": [
-                    {
-                        "value": "agent",
-                        "name": "Agent",
-                        "description": "Autonomous edits, terminal commands, MCP, indexing, memories, and subagents.",
-                    },
-                    {
-                        "value": "ask",
-                        "name": "Ask",
-                        "description": "Read, search, and explain without file writes or shell mutation.",
-                    },
-                    {
-                        "value": "manual",
-                        "name": "Manual",
-                        "description": "Focused edit proposals with explicit diff review.",
-                    },
-                    {
-                        "value": "free",
-                        "name": "Full Access",
-                        "description": "Unrestricted tool access. Terminal commands run without approval prompts.",
-                    },
-                ],
-            },
             {
                 "id": "backboard_intensity",
                 "name": "Intensity",
@@ -2699,7 +2687,7 @@ class BackboardIdeSession:
         timeout_ms = _command_timeout_ms(command, args, read_only_auto_approved)
         command_card = f"{command}\n\nBackboard timeout: {timeout_ms / 1000:.0f}s"
         if free_mode_auto_approved:
-            await self._emit_progress(f"Running without approval (Full Access): {title}.", "running command")
+            await self._emit_progress(f"Running without approval (Free mode): {title}.", "running command")
         elif read_only_auto_approved:
             await self._emit_progress(f"Running read-only command: {title}.", "running command")
         else:

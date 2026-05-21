@@ -172,6 +172,40 @@ impl AgentModelSelector for CuratedModelSelector {
 }
 
 const BEGINNER_CHATS_KVP_KEY: &str = "beginner_chats_v1";
+const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
+
+#[derive(Clone, Copy)]
+struct FirstRunNavTipsState {
+    chats_seen: bool,
+    mode_seen: bool,
+}
+
+impl FirstRunNavTipsState {
+    fn read(cx: &App) -> Option<Self> {
+        let kvp = KeyValueStore::global(cx);
+        let raw = kvp.read_kvp(FIRST_RUN_NAV_TIPS_STATE_KEY).log_err().flatten()?;
+        let (chats, mode) = raw.split_once(',')?;
+        Some(Self {
+            chats_seen: chats == "1",
+            mode_seen: mode == "1",
+        })
+    }
+
+    fn write(self, cx: &mut Context<BeginnerWorkspace>) {
+        let kvp = KeyValueStore::global(cx);
+        let raw = format!(
+            "{},{}",
+            if self.chats_seen { "1" } else { "0" },
+            if self.mode_seen { "1" } else { "0" }
+        );
+        cx.spawn(async move |_, _| {
+            kvp.write_kvp(FIRST_RUN_NAV_TIPS_STATE_KEY.to_string(), raw)
+                .await
+                .log_err();
+        })
+        .detach();
+    }
+}
 
 /// A saved simple-mode conversation entry shown on the home page.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -1360,6 +1394,8 @@ impl BeginnerWorkspace {
 
         let is_on_landing = matches!(self.state, BeginnerState::Landing);
         let chats_open = self.chats_sidebar_open;
+        let show_first_run_chats_tip = FirstRunNavTipsState::read(cx)
+            .is_some_and(|state| !state.chats_seen);
 
         h_flex()
             .h(px(32.))
@@ -1384,9 +1420,19 @@ impl BeginnerWorkspace {
                     .cursor_pointer()
                     .when(chats_open, |el| el.bg(cx.theme().colors().element_selected))
                     .when(!chats_open, |el| el.hover(|el| el.bg(cx.theme().colors().element_hover)))
-                    .tooltip(Tooltip::text("Chats"))
+                    .tooltip(Tooltip::text(if show_first_run_chats_tip {
+                        "Chats: Open your conversation list and start or resume a chat here."
+                    } else {
+                        "Chats"
+                    }))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.chats_sidebar_open = !this.chats_sidebar_open;
+                        if let Some(mut state) = FirstRunNavTipsState::read(cx)
+                            && !state.chats_seen
+                        {
+                            state.chats_seen = true;
+                            state.write(cx);
+                        }
                         cx.notify();
                     }))
                     .child(

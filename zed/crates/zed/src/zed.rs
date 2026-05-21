@@ -99,7 +99,7 @@ use workspace::{
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
     About, OpenAccountSettings, OpenBrowser, OpenDocs, OpenServerSettings, OpenSettingsFile,
-    OpenZedUrl, Quit,
+    OpenZedUrl, Quit, SwitchInterfaceMode,
 };
 
 pub struct CrashHandler(pub Arc<crashes::Client>);
@@ -160,6 +160,20 @@ pub fn init(cx: &mut App) {
     #[cfg(target_os = "macos")]
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.on_action(quit);
+    cx.on_action(|_: &SwitchInterfaceMode, cx| {
+        with_active_or_new_workspace(cx, |_workspace, window, cx| {
+            let Some(multi_workspace) = window.window_handle().downcast::<MultiWorkspace>() else {
+                return;
+            };
+            let _ = multi_workspace.update(cx, |mw, window, cx| {
+                let next = match mw.interface_mode {
+                    workspace::InterfaceMode::Simple => workspace::InterfaceMode::Expert,
+                    workspace::InterfaceMode::Expert => workspace::InterfaceMode::Simple,
+                };
+                mw.set_interface_mode(next, window, cx);
+            });
+        });
+    });
 
     cx.on_action(|_: &RestoreBanner, cx| title_bar::restore_banner(cx));
 
@@ -523,14 +537,20 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                 .read_kvp(onboarding::EXPERIENCE_LEVEL_KVP_KEY)
                 .log_err()
                 .flatten();
-            let mode = raw
-                .as_deref()
-                .and_then(ExperienceLevel::from_str)
-                .map(|level| match level {
-                    ExperienceLevel::Beginner => InterfaceMode::Simple,
-                    ExperienceLevel::Developer | ExperienceLevel::Power => InterfaceMode::Expert,
-                })
-                .unwrap_or(InterfaceMode::Expert);
+            let preferred_mode = WorkspaceSettings::get_global(cx).preferred_interface_mode;
+            let mode = match preferred_mode {
+                settings::PreferredInterfaceMode::Simple => InterfaceMode::Simple,
+                settings::PreferredInterfaceMode::Editor => raw
+                    .as_deref()
+                    .and_then(ExperienceLevel::from_str)
+                    .map(|level| match level {
+                        ExperienceLevel::Beginner => InterfaceMode::Simple,
+                        ExperienceLevel::Developer | ExperienceLevel::Power => {
+                            InterfaceMode::Expert
+                        }
+                    })
+                    .unwrap_or(InterfaceMode::Expert),
+            };
             _multi_workspace.interface_mode = mode;
         }
 
@@ -1287,16 +1307,16 @@ fn register_actions(
                     cx,
                     |workspace, window, cx| {
                         cx.activate(true);
-                        // Create buffer synchronously to avoid flicker
-                        let project = workspace.project().clone();
-                        let buffer = project.update(cx, |project, cx| {
-                            project.create_local_buffer("", None, true, cx)
-                        });
-                        let editor = cx.new(|cx| {
-                            Editor::for_buffer(buffer, Some(project), window, cx)
+                        let welcome = cx.new(|cx| {
+                            workspace::welcome::WelcomePage::new(
+                                workspace.weak_handle(),
+                                false,
+                                window,
+                                cx,
+                            )
                         });
                         workspace.add_item_to_active_pane(
-                            Box::new(editor),
+                            Box::new(welcome),
                             None,
                             true,
                             window,
@@ -1336,15 +1356,16 @@ fn register_actions(
                                 cx,
                                 |workspace, window, cx| {
                                     cx.activate(true);
-                                    let project = workspace.project().clone();
-                                    let buffer = project.update(cx, |project, cx| {
-                                        project.create_local_buffer("", None, true, cx)
-                                    });
-                                    let editor = cx.new(|cx| {
-                                        Editor::for_buffer(buffer, Some(project), window, cx)
+                                    let welcome = cx.new(|cx| {
+                                        workspace::welcome::WelcomePage::new(
+                                            workspace.weak_handle(),
+                                            false,
+                                            window,
+                                            cx,
+                                        )
                                     });
                                     workspace.add_item_to_active_pane(
-                                        Box::new(editor),
+                                        Box::new(welcome),
                                         None,
                                         true,
                                         window,

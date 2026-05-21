@@ -10,14 +10,17 @@ use fs::Fs;
 use futures::FutureExt;
 use fuzzy::{StringMatchCandidate, match_strings};
 use gpui::{
-    Action, AsyncWindowContext, BackgroundExecutor, DismissEvent, FocusHandle, Subscription, Task,
-    TaskExt, WeakEntity,
+    Action, AsyncWindowContext, BackgroundExecutor, DismissEvent, FocusHandle, MouseButton,
+    Subscription, Task, TaskExt, WeakEntity,
 };
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use picker::{Picker, PickerDelegate};
 use settings::SettingsStore;
-use ui::{DocumentationAside, IntoElement, prelude::*};
+use ui::{
+    Checkbox, DocumentationAside, IntoElement, ListItem, ListItemSpacing, TintColor, ToggleState,
+    Tooltip, prelude::*,
+};
 use util::ResultExt;
 use zed_actions::agent::OpenSettings;
 
@@ -44,6 +47,10 @@ pub fn acp_model_selector(
 }
 
 enum ModelPickerEntry {
+    ProviderFilterHeader,
+    ProviderFilterAll { selected: bool },
+    ProviderFilterOption { provider: String, selected: bool },
+    ProviderFilterDone,
     Separator(SharedString),
     Model(AgentModelInfo, bool),
 }
@@ -57,6 +64,8 @@ pub struct ModelPickerDelegate {
     selected_index: usize,
     selected_description: Option<(usize, SharedString, bool)>,
     selected_model: Option<AgentModelInfo>,
+    selected_providers: HashSet<String>,
+    show_provider_filters: bool,
     favorites: HashSet<acp::ModelId>,
     _refresh_models_task: Task<()>,
     _settings_subscription: Subscription,
@@ -130,6 +139,8 @@ impl ModelPickerDelegate {
             filtered_entries: Vec::new(),
             models: None,
             selected_model: None,
+            selected_providers: HashSet::default(),
+            show_provider_filters: false,
             selected_index: 0,
             selected_description: None,
             favorites,
@@ -200,6 +211,64 @@ impl ModelPickerDelegate {
             cx.notify();
         }
     }
+
+    fn available_provider_ids(&self) -> Vec<String> {
+        let mut providers = HashSet::default();
+        let Some(models) = &self.models else {
+            return Vec::new();
+        };
+        match models {
+            AgentModelList::Flat(list) => {
+                for model in list {
+                    if is_featherless_model(model) {
+                        continue;
+                    }
+                    providers.insert(provider_filter_id(&provider_id(model)));
+                }
+            }
+            AgentModelList::Grouped(index_map) => {
+                for (group_name, models) in index_map {
+                    for model in models {
+                        if is_featherless_model(model) {
+                            continue;
+                        }
+                        providers.insert(provider_filter_id(&provider_id_for_group(
+                            group_name.0.as_ref(),
+                            model,
+                        )));
+                    }
+                }
+            }
+        }
+        let mut providers: Vec<_> = providers.into_iter().collect();
+        providers.sort();
+        providers
+    }
+
+    fn provider_filter_entries(&self) -> Vec<ModelPickerEntry> {
+        let mut entries = vec![
+            ModelPickerEntry::ProviderFilterHeader,
+            ModelPickerEntry::ProviderFilterAll {
+                selected: self.selected_providers.is_empty(),
+            },
+        ];
+
+        entries.extend(self.available_provider_ids().into_iter().map(|provider| {
+            ModelPickerEntry::ProviderFilterOption {
+                selected: self.selected_providers.contains(&provider),
+                provider,
+            }
+        }));
+
+        entries.push(ModelPickerEntry::ProviderFilterDone);
+        entries
+    }
+
+    fn toggle_provider_filter(&mut self, provider: &str) {
+        if !self.selected_providers.insert(provider.to_string()) {
+            self.selected_providers.remove(provider);
+        }
+    }
 }
 
 impl PickerDelegate for ModelPickerDelegate {
@@ -220,13 +289,67 @@ impl PickerDelegate for ModelPickerDelegate {
 
     fn can_select(&self, ix: usize, _window: &mut Window, _cx: &mut Context<Picker<Self>>) -> bool {
         match self.filtered_entries.get(ix) {
-            Some(ModelPickerEntry::Model(_, _)) => true,
-            Some(ModelPickerEntry::Separator(_)) | None => false,
+            Some(
+                ModelPickerEntry::Model(_, _)
+                | ModelPickerEntry::ProviderFilterAll { .. }
+                | ModelPickerEntry::ProviderFilterOption { .. }
+                | ModelPickerEntry::ProviderFilterDone,
+            ) => true,
+            Some(ModelPickerEntry::ProviderFilterHeader | ModelPickerEntry::Separator(_))
+            | None => false,
         }
     }
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
         "Select a model…".into()
+    }
+
+    fn render_editor(
+        &self,
+        editor: &Arc<dyn ui_input::ErasedEditor>,
+        window: &mut Window,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Div {
+        v_flex()
+            .child(
+                h_flex()
+                    .overflow_hidden()
+                    .flex_none()
+                    .h_9()
+                    .px_2p5()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(editor.render(window, cx))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|picker, _, window, cx| {
+                                    if picker.delegate.show_provider_filters {
+                                        picker.delegate.show_provider_filters = false;
+                                        picker.refresh(window, cx);
+                                    } else {
+                                        cx.propagate();
+                                    }
+                                }),
+                            ),
+                    )
+                    .child(
+                        Button::new("provider-filter-trigger", "Filter")
+                            .style(ButtonStyle::Subtle)
+                            .size(ButtonSize::Compact)
+                            .toggle_state(self.show_provider_filters)
+                            .selected_style(ButtonStyle::Tinted(TintColor::Accent))
+                            .tooltip(Tooltip::text("Filter providers"))
+                            .on_click(cx.listener(|picker, _, window, cx| {
+                                cx.stop_propagation();
+                                picker.delegate.show_provider_filters =
+                                    !picker.delegate.show_provider_filters;
+                                picker.refresh(window, cx);
+                            })),
+                    ),
+            )
+            .child(div().h(px(1.)).bg(cx.theme().colors().border_variant))
     }
 
     fn update_matches(
@@ -236,11 +359,19 @@ impl PickerDelegate for ModelPickerDelegate {
         cx: &mut Context<Picker<Self>>,
     ) -> Task<()> {
         let favorites = self.favorites.clone();
+        let selected_filter_key = if self.show_provider_filters {
+            self.filtered_entries
+                .get(self.selected_index)
+                .and_then(provider_filter_entry_key)
+        } else {
+            None
+        };
 
         cx.spawn_in(window, async move |this, cx| {
             let filtered_models = match this
                 .read_with(cx, |this, cx| {
                     this.delegate.models.clone().map(move |models| {
+                        let models = apply_model_filters(models, &this.delegate.selected_providers);
                         fuzzy_search(models, query, cx.background_executor().clone())
                     })
                 })
@@ -254,21 +385,42 @@ impl PickerDelegate for ModelPickerDelegate {
             this.update_in(cx, |this, window, cx| {
                 this.delegate.filtered_entries =
                     info_list_to_picker_entries(filtered_models, &favorites);
-                // Finds the currently selected model in the list
-                let new_index = this
-                    .delegate
-                    .selected_model
-                    .as_ref()
-                    .and_then(|selected| {
-                        this.delegate.filtered_entries.iter().position(|entry| {
-                            if let ModelPickerEntry::Model(model_info, _) = entry {
-                                model_info.id == selected.id
-                            } else {
-                                false
-                            }
+                if this.delegate.show_provider_filters {
+                    let mut filter_entries = this.delegate.provider_filter_entries();
+                    filter_entries.append(&mut this.delegate.filtered_entries);
+                    this.delegate.filtered_entries = filter_entries;
+                }
+                // Finds the currently selected model in the list.
+                let new_index = if this.delegate.show_provider_filters {
+                    selected_filter_key
+                        .as_ref()
+                        .and_then(|selected_filter_key| {
+                            this.delegate.filtered_entries.iter().position(|entry| {
+                                provider_filter_entry_key(entry).as_ref()
+                                    == Some(selected_filter_key)
+                            })
                         })
-                    })
-                    .unwrap_or(0);
+                        .or_else(|| {
+                            this.delegate.filtered_entries.iter().position(|entry| {
+                                matches!(entry, ModelPickerEntry::ProviderFilterAll { .. })
+                            })
+                        })
+                        .unwrap_or(0)
+                } else {
+                    this.delegate
+                        .selected_model
+                        .as_ref()
+                        .and_then(|selected| {
+                            this.delegate.filtered_entries.iter().position(|entry| {
+                                if let ModelPickerEntry::Model(model_info, _) = entry {
+                                    model_info.id == selected.id
+                                } else {
+                                    false
+                                }
+                            })
+                        })
+                        .unwrap_or(0)
+                };
                 this.set_selected_index(new_index, Some(picker::Direction::Down), true, window, cx);
                 cx.notify();
             })
@@ -277,32 +429,48 @@ impl PickerDelegate for ModelPickerDelegate {
     }
 
     fn confirm(&mut self, _secondary: bool, window: &mut Window, cx: &mut Context<Picker<Self>>) {
-        if let Some(ModelPickerEntry::Model(model_info, _)) =
-            self.filtered_entries.get(self.selected_index)
-        {
-            if window.modifiers().secondary() {
-                let is_favorite = self.favorites.contains(&model_info.id);
-                self.agent_server.toggle_favorite_model(
-                    model_info.id.clone(),
-                    !is_favorite,
-                    self.fs.clone(),
-                    cx,
-                );
-                return;
+        match self.filtered_entries.get(self.selected_index) {
+            Some(ModelPickerEntry::ProviderFilterAll { .. }) => {
+                self.selected_providers.clear();
+                cx.defer_in(window, |picker, window, cx| picker.refresh(window, cx));
             }
+            Some(ModelPickerEntry::ProviderFilterOption { provider, .. }) => {
+                let provider = provider.clone();
+                self.toggle_provider_filter(&provider);
+                cx.defer_in(window, |picker, window, cx| picker.refresh(window, cx));
+            }
+            Some(ModelPickerEntry::ProviderFilterDone) => {
+                self.show_provider_filters = false;
+                cx.defer_in(window, |picker, window, cx| picker.refresh(window, cx));
+            }
+            Some(ModelPickerEntry::Model(model_info, _)) => {
+                if window.modifiers().secondary() {
+                    let is_favorite = self.favorites.contains(&model_info.id);
+                    self.agent_server.toggle_favorite_model(
+                        model_info.id.clone(),
+                        !is_favorite,
+                        self.fs.clone(),
+                        cx,
+                    );
+                    return;
+                }
 
-            self.selector
-                .select_model(model_info.id.clone(), cx)
-                .detach_and_log_err(cx);
-            self.selected_model = Some(model_info.clone());
-            let current_index = self.selected_index;
-            self.set_selected_index(current_index, window, cx);
+                self.selector
+                    .select_model(model_info.id.clone(), cx)
+                    .detach_and_log_err(cx);
+                self.selected_model = Some(model_info.clone());
+                let current_index = self.selected_index;
+                self.set_selected_index(current_index, window, cx);
 
-            cx.emit(DismissEvent);
+                cx.emit(DismissEvent);
+            }
+            Some(ModelPickerEntry::ProviderFilterHeader | ModelPickerEntry::Separator(_))
+            | None => {}
         }
     }
 
     fn dismissed(&mut self, window: &mut Window, cx: &mut Context<Picker<Self>>) {
+        self.show_provider_filters = false;
         cx.defer_in(window, |picker, window, cx| {
             picker.set_query("", window, cx);
         });
@@ -316,6 +484,41 @@ impl PickerDelegate for ModelPickerDelegate {
         cx: &mut Context<Picker<Self>>,
     ) -> Option<Self::ListItem> {
         match self.filtered_entries.get(ix)? {
+            ModelPickerEntry::ProviderFilterHeader => Some(
+                v_flex()
+                    .id(("provider-filter-header", ix))
+                    .px_3()
+                    .pt_2()
+                    .pb_1()
+                    .gap_0p5()
+                    .child(Label::new("Filter by provider").color(Color::Muted))
+                    .child(
+                        Label::new("Choose one or more providers, then press Done.")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .into_any_element(),
+            ),
+            ModelPickerEntry::ProviderFilterAll {
+                selected: is_checked,
+            } => Some(
+                provider_filter_list_item(ix, selected, *is_checked, "All providers".into())
+                    .into_any_element(),
+            ),
+            ModelPickerEntry::ProviderFilterOption {
+                provider,
+                selected: is_checked,
+            } => {
+                let label = provider_display_name(&provider).into();
+                Some(provider_filter_list_item(ix, selected, *is_checked, label).into_any_element())
+            }
+            ModelPickerEntry::ProviderFilterDone => Some(
+                ListItem::new(("provider-filter-done", ix))
+                    .spacing(ListItemSpacing::Sparse)
+                    .toggle_state(selected)
+                    .child(Label::new("Done").color(Color::Accent))
+                    .into_any_element(),
+            ),
             ModelPickerEntry::Separator(title) => {
                 Some(ModelSelectorHeader::new(title, ix > 1).into_any_element())
             }
@@ -440,6 +643,7 @@ fn info_list_to_picker_entries(
         }
     }
 
+    let model_list = apply_model_filters(model_list, &HashSet::default());
     let mut entries = Vec::new();
 
     let all_models: Vec<_> = match &model_list {
@@ -468,22 +672,8 @@ fn info_list_to_picker_entries(
             }
             let mut grouped: IndexMap<String, Vec<AgentModelInfo>> = IndexMap::default();
             for model in list {
-                let provider = model
-                    .id
-                    .0
-                    .split_once('/')
-                    .map(|(provider, _)| provider)
-                    .unwrap_or("Other");
-                let provider_label = match provider {
-                    "openai" => "OpenAI",
-                    "anthropic" => "Anthropic",
-                    "google" => "Google",
-                    "deepseek" => "DeepSeek",
-                    "xai" => "xAI",
-                    "ollama" => "Ollama",
-                    "openrouter" => "OpenRouter",
-                    _ => provider,
-                };
+                let provider = provider_id(&model);
+                let provider_label = provider_display_name(&provider);
                 grouped
                     .entry(provider_label.to_string())
                     .or_default()
@@ -503,10 +693,26 @@ fn info_list_to_picker_entries(
             }
         }
         AgentModelList::Grouped(index_map) => {
+            let mut grouped: IndexMap<String, Vec<AgentModelInfo>> = IndexMap::default();
             for (group_name, models) in index_map {
-                entries.push(ModelPickerEntry::Separator(group_name.0));
+                for model in models {
+                    let provider = provider_id_for_group(group_name.0.as_ref(), &model);
+                    let provider_label = provider_display_name(&provider);
+                    grouped
+                        .entry(provider_label.to_string())
+                        .or_default()
+                        .push(model);
+                }
+            }
+            for (group_name, models) in grouped {
+                entries.push(ModelPickerEntry::Separator(group_name.into()));
+                let mut models = models;
+                models.sort_by_key(|m| model_speed_rank(m.name.as_ref(), m.id.0.as_ref()));
                 for model in models {
                     let is_favorite = favorites.contains(&model.id);
+                    if has_favorites && is_favorite {
+                        continue;
+                    }
                     entries.push(ModelPickerEntry::Model(model, is_favorite));
                 }
             }
@@ -514,6 +720,279 @@ fn info_list_to_picker_entries(
     }
 
     entries
+}
+
+fn provider_filter_list_item(
+    ix: usize,
+    focused: bool,
+    checked: bool,
+    label: SharedString,
+) -> ListItem {
+    ListItem::new(("provider-filter-option", ix))
+        .spacing(ListItemSpacing::Sparse)
+        .toggle_state(focused)
+        .start_slot(
+            Checkbox::new(
+                format!("provider-filter-checkbox-{ix}"),
+                ToggleState::from(checked),
+            )
+            .visualization_only(true),
+        )
+        .child(Label::new(label))
+}
+
+fn provider_filter_entry_key(entry: &ModelPickerEntry) -> Option<String> {
+    match entry {
+        ModelPickerEntry::ProviderFilterAll { .. } => Some("all".to_string()),
+        ModelPickerEntry::ProviderFilterOption { provider, .. } => {
+            Some(format!("provider:{provider}"))
+        }
+        ModelPickerEntry::ProviderFilterDone => Some("done".to_string()),
+        ModelPickerEntry::ProviderFilterHeader
+        | ModelPickerEntry::Separator(_)
+        | ModelPickerEntry::Model(_, _) => None,
+    }
+}
+
+fn provider_filter_id(provider: &str) -> String {
+    if provider_display_name(provider) == "Other" {
+        "other".to_string()
+    } else {
+        provider.to_string()
+    }
+}
+
+fn provider_id(model: &AgentModelInfo) -> String {
+    let id = model.id.0.as_ref().to_lowercase();
+    let name = model.name.to_lowercase();
+
+    if let Some((provider, _)) = id.split_once('/') {
+        if let Some(family) = canonical_model_family(&format!("{id} {name}")) {
+            return family;
+        }
+        return canonical_provider_id(provider).unwrap_or_else(|| provider.to_string());
+    }
+    if let Some((provider, _)) = id.split_once(':') {
+        if let Some(family) = canonical_model_family(&format!("{id} {name}")) {
+            return family;
+        }
+        return canonical_provider_id(provider).unwrap_or_else(|| provider.to_string());
+    }
+
+    canonical_model_family(&format!("{id} {name}"))
+        .or_else(|| canonical_provider_from_text(&format!("{id} {name}")))
+        .unwrap_or_else(|| "other".to_string())
+}
+
+fn canonical_provider_from_text(text: &str) -> Option<String> {
+    let text = text.to_lowercase();
+    canonical_provider_id(&text)
+}
+
+fn canonical_provider_id(text: &str) -> Option<String> {
+    let text = text.to_lowercase();
+    if text.contains("featherless") {
+        return Some("featherless".to_string());
+    }
+    if text.contains("bedrock") || text.contains("amazon") || text == "aws" {
+        return Some("bedrock".to_string());
+    }
+    if text.contains("openrouter") || text.contains("open_router") {
+        return Some("openrouter".to_string());
+    }
+    if text == "anthropic" {
+        return Some("anthropic".to_string());
+    }
+    if text == "google" || text == "google_ai" {
+        return Some("gemini".to_string());
+    }
+    if text == "openai" {
+        return Some("openai".to_string());
+    }
+    if text == "deepseek" {
+        return Some("deepseek".to_string());
+    }
+    if text == "xai" || text == "x_ai" {
+        return Some("xai".to_string());
+    }
+    if text == "ollama" {
+        return Some("ollama".to_string());
+    }
+    if text == "cohere" {
+        return Some("cohere".to_string());
+    }
+    if text == "cerebras" {
+        return Some("cerebras".to_string());
+    }
+    if text == "mistral" || text == "mistralai" || text == "mistral_ai" {
+        return Some("mistral".to_string());
+    }
+    if text == "groq" {
+        return Some("groq".to_string());
+    }
+    if text == "together" || text == "togetherai" || text == "together_ai" {
+        return Some("together".to_string());
+    }
+    if text == "fireworks" || text == "fireworksai" || text == "fireworks_ai" {
+        return Some("fireworks".to_string());
+    }
+    if text == "perplexity" || text == "pplx" {
+        return Some("perplexity".to_string());
+    }
+    None
+}
+
+fn canonical_model_family(text: &str) -> Option<String> {
+    let text = text.to_lowercase();
+    if text.contains("featherless") {
+        return Some("featherless".to_string());
+    }
+    if text.contains("claude")
+        || text.contains("haiku")
+        || text.contains("sonnet")
+        || text.contains("opus")
+    {
+        return Some("anthropic".to_string());
+    }
+    if text.contains("gemini") {
+        return Some("gemini".to_string());
+    }
+    if text.contains("openai.gpt-oss")
+        || text.contains("gpt-")
+        || text.contains("gpt_")
+        || text.contains("gpt ")
+        || text.contains("/gpt")
+        || text.contains(":gpt")
+        || text.contains(" o1")
+        || text.contains("/o1")
+        || text.contains(" o3")
+        || text.contains("/o3")
+        || text.contains(" o4")
+        || text.contains("/o4")
+    {
+        return Some("openai".to_string());
+    }
+    if text.contains("deepseek") {
+        return Some("deepseek".to_string());
+    }
+    if text.contains("grok") {
+        return Some("xai".to_string());
+    }
+    None
+}
+
+fn provider_id_for_group(group_name: &str, model: &AgentModelInfo) -> String {
+    let id = model.id.0.as_ref();
+    let name = model.name.as_ref();
+    canonical_model_family(&format!("{id} {name}"))
+        .or_else(|| canonical_provider_from_text(group_name))
+        .unwrap_or_else(|| provider_id(model))
+}
+
+fn is_featherless_model(model: &AgentModelInfo) -> bool {
+    let id = model.id.0.as_ref().to_lowercase();
+    let name = model.name.to_lowercase();
+    id.contains("featherless") || name.contains("featherless")
+}
+
+fn provider_display_name(provider: &str) -> &'static str {
+    match provider {
+        "openai" => "OpenAI",
+        "anthropic" => "Anthropic",
+        "google" | "google_ai" | "gemini" => "Google",
+        "deepseek" => "DeepSeek",
+        "xai" | "x_ai" => "xAI",
+        "ollama" => "Ollama",
+        "openrouter" | "open_router" => "OpenRouter",
+        "bedrock" | "aws-bedrock" | "aws_bedrock" => "AWS Bedrock",
+        "cohere" => "Cohere",
+        "cerebras" => "Cerebras",
+        "mistral" => "Mistral",
+        "groq" => "Groq",
+        "together" => "Together",
+        "fireworks" => "Fireworks",
+        "perplexity" => "Perplexity",
+        "featherless" => "Featherless",
+        _ => "Other",
+    }
+}
+
+fn provider_matches_selection(provider: &str, selected_providers: &HashSet<String>) -> bool {
+    selected_providers.contains(provider)
+        || (selected_providers.contains("other") && provider_filter_id(provider) == "other")
+}
+
+fn apply_model_filters(
+    model_list: AgentModelList,
+    selected_providers: &HashSet<String>,
+) -> AgentModelList {
+    match model_list {
+        AgentModelList::Flat(list) => {
+            let base: Vec<_> = list
+                .into_iter()
+                .filter(|model| !is_featherless_model(model))
+                .collect();
+
+            if selected_providers.is_empty() {
+                return AgentModelList::Flat(base);
+            }
+
+            let filtered: Vec<_> = base
+                .iter()
+                .filter(|model| provider_matches_selection(&provider_id(model), selected_providers))
+                .cloned()
+                .collect();
+
+            // If provider matching fails due upstream id format inconsistencies,
+            // keep the Featherless-stripped list instead of blanking the picker.
+            if filtered.is_empty() {
+                AgentModelList::Flat(base)
+            } else {
+                AgentModelList::Flat(filtered)
+            }
+        }
+        AgentModelList::Grouped(index_map) => {
+            let base_map =
+                IndexMap::from_iter(index_map.into_iter().filter_map(|(group_name, models)| {
+                    let base: Vec<_> = models
+                        .into_iter()
+                        .filter(|model| !is_featherless_model(model))
+                        .collect();
+                    if base.is_empty() {
+                        None
+                    } else {
+                        Some((group_name, base))
+                    }
+                }));
+
+            if selected_providers.is_empty() {
+                return AgentModelList::Grouped(base_map);
+            }
+
+            let filtered_map =
+                IndexMap::from_iter(base_map.iter().filter_map(|(group_name, models)| {
+                    let filtered: Vec<_> = models
+                        .iter()
+                        .filter(|model| {
+                            let provider = provider_id_for_group(group_name.0.as_ref(), model);
+                            provider_matches_selection(&provider, selected_providers)
+                        })
+                        .cloned()
+                        .collect();
+                    if filtered.is_empty() {
+                        None
+                    } else {
+                        Some((group_name.clone(), filtered))
+                    }
+                }));
+
+            if filtered_map.is_empty() {
+                AgentModelList::Grouped(base_map)
+            } else {
+                AgentModelList::Grouped(filtered_map)
+            }
+        }
+    }
 }
 
 async fn fuzzy_search(
@@ -643,6 +1122,17 @@ mod tests {
             .collect()
     }
 
+    fn create_model(id: &str, name: &str) -> AgentModelInfo {
+        AgentModelInfo {
+            id: acp::ModelId::new(id.to_string()),
+            name: name.to_string().into(),
+            description: None,
+            icon: None,
+            is_latest: false,
+            cost: None,
+        }
+    }
+
     fn get_entry_model_ids(entries: &[ModelPickerEntry]) -> Vec<&str> {
         entries
             .iter()
@@ -659,8 +1149,38 @@ mod tests {
             .map(|entry| match entry {
                 ModelPickerEntry::Model(info, _) => info.id.0.as_ref(),
                 ModelPickerEntry::Separator(s) => &s,
+                ModelPickerEntry::ProviderFilterHeader => "Filter by provider",
+                ModelPickerEntry::ProviderFilterAll { .. } => "All providers",
+                ModelPickerEntry::ProviderFilterOption { provider, .. } => provider,
+                ModelPickerEntry::ProviderFilterDone => "Done",
             })
             .collect()
+    }
+
+    #[test]
+    fn test_provider_id_prefers_real_provider_prefix() {
+        assert_eq!(
+            provider_id(&create_model("openai/gpt-5", "GPT-5")),
+            "openai"
+        );
+        assert_eq!(
+            provider_id(&create_model("google/gemini-2.5-pro", "Gemini 2.5 Pro")),
+            "gemini"
+        );
+        assert_eq!(
+            provider_id(&create_model(
+                "bedrock/openai.gpt-oss-120b-1:0",
+                "GPT OSS 120B"
+            )),
+            "openai"
+        );
+        assert_eq!(
+            provider_id(&create_model(
+                "openrouter/google/gemini-3-flash",
+                "Gemini 3 Flash"
+            )),
+            "gemini"
+        );
     }
 
     #[gpui::test]

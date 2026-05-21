@@ -20,8 +20,8 @@ This handoff is the current source of truth for `bb-ide-zed` as of May 21, 2026.
 
 - Active branch: `bb-ide-zed`.
 - Audited commit range: `origin/main..bb-ide-zed`, 74 commits.
-- Current HEAD during this update: `27aeb9ce Update agent_workspace_ui.rs`.
-- Current working tree also has uncommitted Rust/UI changes and a docs move/delete state; they are documented below as working tree state.
+- Current HEAD during this update: `5b9853be Backboard: switch to native Rust runtime and docs`.
+- Current working tree also has uncommitted Rust/UI changes layered on top of that native-runtime update; they are documented below as working tree state.
 - Active Backboard IDE chat runtime: Rust native `BackboardNativeConnection`.
 - Historical runtime still present: `ide/zed/script/backboard-ide-acp.py`, but it is not the default chat path.
 
@@ -43,13 +43,13 @@ Use this map before changing anything. The Backboard IDE is not one single integ
 | Native runtime | `ide/zed/crates/agent_servers/src/backboard_native/{mod.rs,stream.rs,tools.rs,tool_schemas.rs,workspace.rs,session_store.rs,index.rs}` | Session lifecycle, assistant/thread binding, stream translation, native tools, mode/config chips, workspace prompt, persisted IDE sessions, native codebase index. |
 | Backboard Rust API client | `ide/zed/crates/backboard/src/backboard.rs`, `ide/zed/crates/backboard/src/endpoints/**` | Rust HTTP/SSE/multipart client for assistants, threads, streamed messages, tool outputs, cancel, models, usage, voice/realtime helpers. |
 | ACP thread model | `ide/zed/crates/acp_thread/src/acp_thread.rs`, `ide/zed/crates/acp_thread/src/connection.rs`, `ide/zed/crates/acp_thread/src/terminal.rs` | Stores conversation entries, tool calls, diffs, display-only terminals, approvals, token/context/cost/speed metrics, and history. |
-| Native chat UI | `ide/zed/crates/agent_ui/src/conversation_view.rs`, `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs`, `ide/zed/crates/agent_ui/src/config_options.rs`, `ide/zed/crates/agent_ui/src/model_selector*.rs` | Backboard chat surface, composer, model/config controls, Agent Options menu, progress, grouped exploration, collapsed edits, terminal/diff/tool rendering. |
+| Native chat UI | `ide/zed/crates/agent_ui/src/conversation_view.rs`, `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs`, `ide/zed/crates/agent_ui/src/config_options.rs`, `ide/zed/crates/agent_ui/src/model_selector*.rs` | Backboard chat surface, composer, model/config controls, provider-filtered model selector, Agent Options menu, progress, grouped exploration, collapsed edits, terminal/diff/tool rendering. |
 | Agent Workspace | `ide/zed/crates/agent_ui/src/agent_workspace_ui.rs`, `ide/zed/crates/agent_ui/src/agent_panel.rs` | Multi-agent dashboard, retained conversations, draft chat promotion, git worktrees, review/apply/stop/retry/dismiss flow, run summaries. |
 | Simple/beginner UI | `ide/zed/crates/beginner_ui/src/*.rs` | Beginner chat-first workspace, folder selection, friendly feed, file changes panel, switch-to-editor handoff; chat history home page (BeginnerChatRecord, KVP persistence), curated model filtering (CuratedModelSelector), tab bar home icon |
-| Workspace shell and app chrome | `ide/zed/crates/workspace/src/multi_workspace.rs`, `ide/zed/crates/title_bar/src/title_bar.rs`, `ide/zed/crates/zed/src/zed.rs`, `ide/zed/crates/agent_settings/src/agent_settings.rs` | Simple/Expert mode, full-page Multi-Agent rendering, Backboard mode controls, default dock positions, app startup wiring. |
+| Workspace shell and app chrome | `ide/zed/crates/workspace/src/multi_workspace.rs`, `ide/zed/crates/title_bar/src/title_bar.rs`, `ide/zed/crates/zed/src/zed.rs`, `ide/zed/crates/agent_settings/src/agent_settings.rs` | Simple/Expert mode, preferred launch mode, full-page Multi-Agent rendering, Backboard mode controls, default dock positions, app startup/new-window wiring. |
 | Inline autocomplete | `ide/zed/crates/edit_prediction/src/backboard.rs` and edit-prediction registry/settings files | BYOK ghost text via Backboard assistant/thread/message APIs; default provider `"backboard"` with legacy alias `"zed"`; cached assistant, 120-second thread TTL, FIM prompt, streaming early exit, strict prose/code filtering, inline completion output publishing. |
 | Visual defaults | `ide/zed/assets/fonts/**`, `ide/zed/assets/themes/backboard/backboard_tints.json`, `ide/zed/assets/settings/{default.json,initial_user_settings.json}` | Inter UI font, JetBrains Mono buffer font, Backboard Tints theme family, edit prediction defaults, left-dock defaults for project/outline/collab/git. |
-| Historical Python ACP bridge | `ide/zed/script/backboard-ide-acp.py` | Historical bridge and behavior reference only. It should not be treated as the active Backboard IDE chat runtime. |
+| Historical Python ACP bridge | `ide/zed/script/backboard-ide-acp.py` | Historical bridge and behavior reference only. Its model catalog path now fetches provider-scoped `/models` results to avoid Featherless-heavy catalogs, but it should not be treated as the active Backboard IDE chat runtime. |
 | CLI runtime | `cli/backboard_cli/` | Standalone CLI product and useful reference for API contracts, prompts, tools, MCP, skills, pricing, semantic index, RLM/subagents. Do not edit for IDE work without explicit approval. |
 
 Rule of thumb:
@@ -73,6 +73,13 @@ This section reflects the current committed branch plus the current dirty workin
 - `ide/zed/script/backboard-ide-acp.py` still exists in the repository as a reference/historical bridge, but it is not the default runtime.
 - Generic ACP infrastructure remains in place for other/custom ACP agents. `AcpThread` also remains the internal chat/thread UI model for Backboard because it owns tool cards, diffs, terminals, approvals, token usage, history, and rendering.
 - `ide/zed/script/bundle-mac` no longer needs the Python bridge/CLI resources for the active chat runtime. Native-runtime packaging should be re-checked against the current script instead of following old embedded-CLI docs.
+
+### Current Working Tree UI/Entry Changes
+
+- `agent_ui/src/model_selector.rs` now strips Featherless models from the visible picker, groups models by canonical provider/family, and adds an inline provider filter section with stable multi-select behavior. Provider IDs are normalized so OpenAI/GPT OSS, Gemini, xAI/Grok, Anthropic/Claude, Bedrock-hosted OpenAI, OpenRouter-hosted Gemini, and other routed families appear under useful provider labels.
+- `script/backboard-ide-acp.py` remains historical for active chat, but its model list reference path now fetches `/models` per major provider (`anthropic`, `openai`, `google`, `xai`, `deepseek`, `openrouter`, `aws-bedrock`, `cohere`, `cerebras`, `mistral`, `groq`, `together`, `fireworks`, `perplexity`) instead of one unfiltered broad request.
+- Workspace settings now include `preferred_interface_mode` (`simple` or `editor`), surfaced in Settings as a dropdown and used on launch/new workspace routing.
+- App chrome adds a more prominent top-right Open Chat affordance, keeps a direct macOS Switch Mode menu item with dynamic Simple/Editor wording, and opens the welcome page for new windows instead of an untitled text buffer.
 
 ### New Native Runtime Modules
 
@@ -105,7 +112,7 @@ The `backboard` crate remains the Rust HTTP client source for IDE runtime calls.
 
 Important runtime-used endpoint methods:
 
-- `list_models(None, Some("llm"), Some(250))`
+- `list_models(None, Some("llm"), Some(15_000))`
 - `create_assistant(CreateAssistantRequest { ... })`
 - `create_thread(&assistant_id)`
 - `get_thread(&thread_id)`
@@ -204,7 +211,7 @@ The native path now logs explicit markers so runtime routing can be verified fro
 - `Backboard native endpoint call: POST /threads/{thread_id}/runs/{run_id}/submit-tool-outputs?stream=true ...`
 - `Backboard native endpoint call: GET /threads/{thread_id} ... path=rust-native`
 - `Backboard native endpoint call: POST /assistants then POST /assistants/{assistant_id}/threads ...`
-- `Backboard native endpoint call: GET /models?model_type=llm&limit=250 ...`
+- `Backboard native endpoint call: GET /models?model_type=llm&limit=15000 ...`
 - `Backboard native endpoint call: POST /threads/{thread_id}/runs/{run_id}/cancel ...`
 
 If the old bridge is active, these native markers will be absent and process/log output will reference Python ACP/CLI startup instead.
@@ -2284,6 +2291,7 @@ The current Backboard IDE work has touched or added these important files. This 
 
 - `ide/zed/crates/beginner_ui/src/beginner_workspace.rs`
   - Simple mode's chat-first workspace, landing/active-project states, and switch-to-Expert event.
+  - Current working tree also stores one-time first-run chat tooltip state in KVP so the chat toggle can be explained without persisting a long-term onboarding state.
 
 - `ide/zed/crates/beginner_ui/src/beginner_chat_feed.rs`
   - Beginner chat feed surface used by Simple mode.
@@ -2298,10 +2306,11 @@ The current Backboard IDE work has touched or added these important files. This 
   - Backboard-branded onboarding basics page, telemetry/trust choices, and dashboard/API-key entry point.
 
 - `ide/zed/crates/settings_ui/src/page_data.rs`
-  - Settings entries for Backboard Studio, including the Simple/Expert mode toggle and Backboard-branded settings text.
+  - Settings entries for Backboard Studio, including preferred Simple/Editor launch mode and Backboard-branded settings text.
 
 - `ide/zed/crates/title_bar/src/title_bar.rs`
   - Top bar mode switcher and Multi-Agent/Expert/Simple controls.
+  - Current working tree also adds the top-right Open Chat button and first-run mode tooltip state.
   - Also contains residual collab/update UI paths that were rebranded or disconnected from Zed services.
 
 ### Inline Autocomplete / Edit Predictions
@@ -2392,6 +2401,7 @@ This follow-up documents fixes applied after users reported:
 
 ### Historical Python ACP Bridge (`ide/zed/script/backboard-ide-acp.py`)
 
+- Current working tree note: the historical bridge's model catalog path fetches provider-specific `/models` results and merges/sorts them. This keeps the reference bridge aligned with the filtered IDE picker and avoids unfiltered catalogs being dominated by Featherless entries.
 - Historical bridge work added visible-history sanitization for prompt augmentation payloads:
   - strips `<backboard_ide_context>...</backboard_ide_context>` before replaying history into UI chunks.
 - Hardened stream handling:

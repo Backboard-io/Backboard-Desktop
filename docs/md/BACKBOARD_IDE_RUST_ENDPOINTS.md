@@ -72,6 +72,8 @@ These are the endpoints called by the CLI API client and mirrored by the existin
 | List providers | `GET /models/providers` | None | Provider picker/catalog. |
 | Recent usage/cost | `GET /billing/usage/recent` | Query `page`, `page_size`, optional `model_name`, `input_tokens`, `output_tokens` | Reconciles displayed turn cost. |
 
+Native Rust currently uses the broad `limit=15000` model catalog request. The historical Python ACP bridge has a provider-scoped catalog path that calls the same `/models` endpoint once per major provider and merges the results; that is bridge-specific compatibility behavior to avoid unfiltered catalogs being dominated by Featherless entries, not a separate backend route.
+
 ## Message Wire Format
 
 `POST /threads/{thread_id}/messages` sends form data:

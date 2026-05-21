@@ -1513,17 +1513,23 @@ fn open_new_workspace_callback(
         .flatten()
         .as_deref()
         .and_then(ExperienceLevel::from_str);
+    let preferred_mode = WorkspaceSettings::get_global(cx).preferred_interface_mode;
 
-    match level {
-        Some(ExperienceLevel::Beginner) => {
+    match preferred_mode {
+        settings::PreferredInterfaceMode::Simple => {
             // Simple mode — the BeginnerWorkspace UI is shown; no pane item needed.
         }
-        _ => {
-            // Expert mode (or no level set) — show the welcome / recents page.
-            let welcome = cx.new(|cx| {
-                workspace::welcome::WelcomePage::new(workspace.weak_handle(), false, window, cx)
-            });
-            workspace.add_item_to_active_pane(Box::new(welcome), None, true, window, cx);
+        settings::PreferredInterfaceMode::Editor => match level {
+            Some(ExperienceLevel::Beginner) => {
+                // Backward compatibility: honor legacy first-run preference when present.
+            }
+            _ => {
+                // Editor mode — show the welcome / recents page.
+                let welcome = cx.new(|cx| {
+                    workspace::welcome::WelcomePage::new(workspace.weak_handle(), false, window, cx)
+                });
+                workspace.add_item_to_active_pane(Box::new(welcome), None, true, window, cx);
+            }
         }
     }
 }

@@ -26,7 +26,7 @@ use workspace::{
     notifications::NotifyResultExt as _,
     open_new, register_serializable_item, with_active_or_new_workspace,
 };
-use zed_actions::{OpenOnboarding, SwitchInterfaceMode};
+use zed_actions::OpenOnboarding;
 
 mod base_keymap_picker;
 mod basics_page;
@@ -134,27 +134,6 @@ pub fn init(cx: &mut App) {
                             window,
                             cx,
                         )
-                    }
-                })
-                .detach();
-        });
-    });
-
-    cx.on_action(|_: &SwitchInterfaceMode, cx| {
-        with_active_or_new_workspace(cx, |workspace, window, cx| {
-            workspace
-                .with_local_workspace(window, cx, |workspace, window, cx| {
-                    let existing = workspace
-                        .active_pane()
-                        .read(cx)
-                        .items()
-                        .find_map(|item| item.downcast::<Onboarding>());
-
-                    if let Some(existing) = existing {
-                        workspace.activate_item(&existing, true, true, window, cx);
-                    } else {
-                        let page = Onboarding::new(workspace, cx);
-                        workspace.add_item_to_active_pane(Box::new(page), None, true, window, cx)
                     }
                 })
                 .detach();
@@ -275,11 +254,6 @@ pub fn show_onboarding_view(app_state: Arc<AppState>, cx: &mut App) -> Task<anyh
 
                 cx.notify();
             };
-            let kvp = KeyValueStore::global(cx);
-            db::write_and_log(cx, move || async move {
-                kvp.write_kvp(FIRST_OPEN.to_string(), "false".to_string())
-                    .await
-            });
         },
     )
 }
@@ -331,6 +305,10 @@ impl Onboarding {
         db::write_and_log(cx, move || async move {
             kvp.write_kvp(EXPERIENCE_LEVEL_KVP_KEY.to_string(), level_str)
                 .await
+        });
+        let kvp = KeyValueStore::global(cx);
+        db::write_and_log(cx, move || async move {
+            kvp.write_kvp(FIRST_OPEN.to_string(), "false".to_string()).await
         });
 
         telemetry::event!("Finish Setup");
