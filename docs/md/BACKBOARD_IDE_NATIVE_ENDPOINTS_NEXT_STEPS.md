@@ -1,36 +1,35 @@
 # Backboard IDE Native Endpoints Next Steps
 
-This document explains what the IDE does today, what the new Rust endpoint folder currently provides, and how to move from "IDE relies on the CLI through a Python ACP bridge" to "IDE talks to Backboard directly through native Rust code."
+This document is historical migration planning for the move from "IDE relies on the CLI through a Python ACP bridge" to "IDE talks to Backboard directly through native Rust code."
 
-The current runtime must remain unchanged until the native path reaches parity. The Python bridge still exists and is still the active chat path.
+Current state: the native Rust path is active. The Python bridge has been removed and is not an available chat path.
 
 ## Current State
 
-The live IDE chat flow is:
+The live IDE chat flow is now:
 
 ```text
 Zed Rust agent server
-  -> launches ide/zed/script/backboard-ide-acp.py
-  -> Python bridge imports cli/backboard_cli
-  -> CLI BackboardAPIClient calls Backboard HTTP API
-  -> Python bridge executes CLI tools locally
-  -> Python bridge sends ACP updates back to Zed
+  -> creates BackboardNativeConnection
+  -> Rust Backboard client calls Backboard HTTP API
+  -> Rust native tools execute locally
+  -> Rust native runtime sends ACP-thread updates back to Zed
   -> Zed renders messages, tool cards, diffs, terminal output, usage, and cost
 ```
 
 Current source-of-truth files:
 
-- [`ide/zed/crates/agent_servers/src/backboard.rs`](../zed/crates/agent_servers/src/backboard.rs): still launches the Python ACP bridge.
-- [`ide/zed/script/backboard-ide-acp.py`](../zed/script/backboard-ide-acp.py): current IDE runtime bridge, prompt prep, tool execution adapter, and ACP event emitter.
-- [`cli/backboard_cli/api/client.py`](../../cli/backboard_cli/api/client.py): current HTTP API behavior used by both CLI chat and the IDE bridge.
-- [`cli/backboard_cli/tools/`](../../cli/backboard_cli/tools): current local tool engine used by the bridge.
-- [`ide/zed/crates/backboard/src/endpoints/`](../zed/crates/backboard/src/endpoints): new Rust endpoint modules, currently scaffolded and compile-checked, but not yet wired into the live agent runtime.
+- [`ide/zed/crates/agent_servers/src/backboard.rs`](../zed/crates/agent_servers/src/backboard.rs): creates the native Rust Backboard connection.
+- [`ide/zed/crates/agent_servers/src/backboard_native/`](../zed/crates/agent_servers/src/backboard_native): current IDE runtime, prompt prep, tool execution adapter, and ACP-thread event mapping.
+- [`cli/backboard_cli/api/client.py`](../../cli/backboard_cli/api/client.py): HTTP API behavior reference used by standalone CLI chat.
+- [`cli/backboard_cli/tools/`](../../cli/backboard_cli/tools): standalone CLI local tool engine reference.
+- [`ide/zed/crates/backboard/src/endpoints/`](../zed/crates/backboard/src/endpoints): Rust endpoint modules used by the native runtime.
 
-Important: the new Rust endpoint folder does not change behavior by itself. It prepares the direct Rust client layer, while the active IDE agent still uses Python plus CLI.
+Important: older notes below may describe the pre-native migration state. Treat Python bridge details here as parity/reference material, not active runtime instructions.
 
-## What The Python Bridge Calls Today
+## Historical Python Bridge API Surface
 
-The Python ACP bridge actively uses this Backboard API subset:
+The removed Python ACP bridge used this Backboard API subset:
 
 | Purpose | Route | Rust endpoint module |
 |---|---|---|
@@ -188,17 +187,11 @@ Compare:
 
 ### 7. Switch Default Only After Parity
 
-Once the native path passes parity:
-
-- Flip default agent runtime to the Rust native runner.
-- Keep Python bridge fallback behind an env var for one release.
-- Log which runtime is active in diagnostics.
-- Remove packaged Python/CLI dependency only after the fallback window is no longer needed.
+The native path has passed the default-runtime switch. Keep diagnostics explicit about which runtime is active.
 
 ## Do Not Break These While Migrating
 
-- `ide/zed/script/backboard-ide-acp.py` must remain present until the native path is the default and fallback is no longer needed.
-- `BackboardAgentServer::connect` should keep launching Python unless the native feature flag is explicitly enabled.
+- `BackboardAgentServer::connect` should create `BackboardNativeConnection`; do not reintroduce a Python launch path for Backboard.
 - The API wire contract must not change: same routes, same auth header, same form fields, same SSE shape, same tool output payload.
 - Tool output order must match incoming tool call order even if read-only tools execute in parallel.
 - Do not retry streamed message or tool-output POSTs after the first SSE chunk has been yielded.

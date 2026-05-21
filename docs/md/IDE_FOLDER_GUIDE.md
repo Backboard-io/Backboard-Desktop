@@ -26,9 +26,9 @@ These are the folders and files to inspect first for Backboard Studio behavior.
 | --- | --- | --- |
 | Backboard handoff docs | `ide/docs/BACKBOARD_IDE_HANDOFF.md` | Implementation history and source-of-truth map for the IDE integration. |
 | Packaging notes | `ide/docs/BACKBOARD_IDE_PACKAGING.md` | How the app is built, why `target/` is large, and what should ship. |
-| Embedded CLI plan | `ide/docs/BACKBOARD_IDE_EMBEDDED_CLI_NEXT_STEPS.md` | Plan for making the IDE work without a globally installed CLI. |
-| Python ACP bridge | `ide/zed/script/backboard-ide-acp.py` | JSON-RPC stdio bridge between the Rust IDE and Backboard CLI/runtime behavior. |
-| Rust Backboard agent launcher | `ide/zed/crates/agent_servers/src/backboard.rs` | Launches and communicates with the Backboard ACP bridge. |
+| Embedded CLI plan | `ide/docs/BACKBOARD_IDE_EMBEDDED_CLI_NEXT_STEPS.md` | Historical plan from the Python-bridge era. |
+| Rust Backboard agent launcher | `ide/zed/crates/agent_servers/src/backboard.rs` | Creates the native Rust Backboard connection. |
+| Rust Backboard native runtime | `ide/zed/crates/agent_servers/src/backboard_native/` | Active Backboard IDE chat runtime and native tool adapter. |
 | ACP transport/client code | `ide/zed/crates/agent_servers/src/acp.rs` | Generic Agent Client Protocol session plumbing. |
 | ACP conversation model | `ide/zed/crates/acp_thread/` | Stores agent messages, tool calls, diffs, terminal output, permissions, usage, and progress. |
 | Native agent UI | `ide/zed/crates/agent_ui/` | Chat panel, conversation view, agent workspace, Backboard model/config UI, and thread rendering. |
@@ -115,7 +115,6 @@ These are the folders and files to inspect first for Backboard Studio behavior.
 
 | Folder or file group | What it does |
 | --- | --- |
-| `backboard-ide-acp.py` | Backboard-specific Python bridge used by the native agent integration. |
 | `bundle-*`, `install-*`, `upload-*`, `trigger-release` | Platform packaging and release scripts. |
 | `bootstrap`, `bootstrap.ps1` | Development bootstrap scripts. |
 | `cargo`, `clippy`, `prettier`, `shellcheck-scripts` | Wrapper scripts for common developer checks. |
@@ -371,7 +370,7 @@ Start with the user-visible area you are changing:
 | Task | Start here |
 | --- | --- |
 | Change Backboard chat rendering | `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs` |
-| Change Backboard agent launch/runtime | `ide/zed/crates/agent_servers/src/backboard.rs` and `ide/zed/script/backboard-ide-acp.py` |
+| Change Backboard agent launch/runtime | `ide/zed/crates/agent_servers/src/backboard.rs` and `ide/zed/crates/agent_servers/src/backboard_native/` |
 | Change agent thread state | `ide/zed/crates/acp_thread/` |
 | Change multi-agent workspace | `ide/zed/crates/agent_ui/src/agent_workspace_ui.rs` and `ide/zed/crates/workspace/src/multi_workspace.rs` |
 | Change beginner/simple mode | `ide/zed/crates/beginner_ui/` |
@@ -388,5 +387,4 @@ Start with the user-visible area you are changing:
 | `ide/zed/Cargo.lock` | Large generated dependency lockfile. Edit only through Cargo unless intentionally resolving lockfile conflicts. |
 | `ide/zed/crates/gpui*` | Low-level UI/platform layer. Changes can affect the whole app. |
 | `ide/zed/crates/workspace`, `project`, `editor` | Core editor architecture. Small changes can have broad user-facing effects. |
-| `ide/zed/script/backboard-ide-acp.py` | Critical Backboard runtime bridge. Keep behavior compatible with Rust ACP expectations. |
 | `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs` | Large rendering file with many Backboard-specific UI paths. Read nearby state carefully before editing. |

@@ -23,14 +23,14 @@ This handoff is the current source of truth for `bb-ide-zed` as of May 21, 2026.
 - Current HEAD during this update: `5b9853be Backboard: switch to native Rust runtime and docs`.
 - Current working tree also has uncommitted Rust/UI changes layered on top of that native-runtime update; they are documented below as working tree state.
 - Active Backboard IDE chat runtime: Rust native `BackboardNativeConnection`.
-- Historical runtime still present: `ide/zed/script/backboard-ide-acp.py`, but it is not the default chat path.
+- Removed legacy runtime: `ide/zed/script/backboard-ide-acp.py` has been deleted from the working tree.
 
 Several docs still describe older planning states. In this working tree the old planning docs appear under untracked `ide/docs/md/` while the tracked root-level copies are deleted; treat those filenames as historical unless this file explicitly says otherwise:
 
-- `ide/docs/md/BACKBOARD_IDE_NATIVE_ENDPOINTS_NEXT_STEPS.md` says Python ACP is still active and native Rust should remain behind a flag. That is superseded: native Rust is the active runtime.
-- `ide/docs/md/BACKBOARD_IDE_EMBEDDED_CLI_NEXT_STEPS.md` planned bundling the Python CLI runtime. That is mostly superseded for active chat because the app now uses the Rust-native runtime, though the packaging/history notes remain useful.
-- `ide/docs/md/BACKBOARD_IDE_PACKAGING.md` still contains Python bridge/CLI bundle guidance in places. Packaging has moved toward native runtime metadata for active chat; re-check `script/bundle-mac` before following the old bundle layout.
-- `ide/docs/md/IDE_FOLDER_GUIDE.md` still lists the Python ACP bridge as a primary Backboard integration point. Use it as folder orientation, not active runtime truth.
+- `ide/docs/md/BACKBOARD_IDE_NATIVE_ENDPOINTS_NEXT_STEPS.md` is historical migration planning. Native Rust is the active runtime.
+- `ide/docs/md/BACKBOARD_IDE_EMBEDDED_CLI_NEXT_STEPS.md` is historical Python-bridge packaging planning and is superseded for active chat.
+- `ide/docs/md/BACKBOARD_IDE_PACKAGING.md` should describe native runtime metadata for active chat, not Python bridge bundling.
+- `ide/docs/md/IDE_FOLDER_GUIDE.md` should point runtime work at `agent_servers/src/backboard.rs` and `agent_servers/src/backboard_native/`.
 - The testcase markdown under `ide/docs/testcase/` is prompt/sample material for IDE validation, not architecture guidance.
 
 ## Current Source-Of-Truth Map
@@ -46,10 +46,9 @@ Use this map before changing anything. The Backboard IDE is not one single integ
 | Native chat UI | `ide/zed/crates/agent_ui/src/conversation_view.rs`, `ide/zed/crates/agent_ui/src/conversation_view/thread_view.rs`, `ide/zed/crates/agent_ui/src/config_options.rs`, `ide/zed/crates/agent_ui/src/model_selector*.rs` | Backboard chat surface, composer, model/config controls, provider-filtered model selector, Agent Options menu, progress, grouped exploration, collapsed edits, terminal/diff/tool rendering. |
 | Agent Workspace | `ide/zed/crates/agent_ui/src/agent_workspace_ui.rs`, `ide/zed/crates/agent_ui/src/agent_panel.rs` | Multi-agent dashboard, retained conversations, draft chat promotion, git worktrees, review/apply/stop/retry/dismiss flow, run summaries. |
 | Simple/beginner UI | `ide/zed/crates/beginner_ui/src/*.rs` | Beginner chat-first workspace, folder selection, friendly feed, file changes panel, switch-to-editor handoff; chat history home page (BeginnerChatRecord, KVP persistence), curated model filtering (CuratedModelSelector), tab bar home icon |
-| Workspace shell and app chrome | `ide/zed/crates/workspace/src/multi_workspace.rs`, `ide/zed/crates/title_bar/src/title_bar.rs`, `ide/zed/crates/zed/src/zed.rs`, `ide/zed/crates/agent_settings/src/agent_settings.rs` | Simple/Expert mode, preferred launch mode, full-page Multi-Agent rendering, Backboard mode controls, default dock positions, app startup/new-window wiring. |
+| Workspace shell and app chrome | `ide/zed/crates/workspace/src/multi_workspace.rs`, `ide/zed/crates/title_bar/src/title_bar.rs`, `ide/zed/crates/zed/src/zed.rs`, `ide/zed/crates/agent_settings/src/agent_settings.rs` | Simple/Expert mode, full-page Multi-Agent rendering, Backboard mode controls, default dock positions, app startup/new-window wiring. |
 | Inline autocomplete | `ide/zed/crates/edit_prediction/src/backboard.rs` and edit-prediction registry/settings files | BYOK ghost text via Backboard assistant/thread/message APIs; default provider `"backboard"` with legacy alias `"zed"`; cached assistant, 120-second thread TTL, FIM prompt, streaming early exit, strict prose/code filtering, inline completion output publishing. |
 | Visual defaults | `ide/zed/assets/fonts/**`, `ide/zed/assets/themes/backboard/backboard_tints.json`, `ide/zed/assets/settings/{default.json,initial_user_settings.json}` | Inter UI font, JetBrains Mono buffer font, Backboard Tints theme family, edit prediction defaults, left-dock defaults for project/outline/collab/git. |
-| Historical Python ACP bridge | `ide/zed/script/backboard-ide-acp.py` | Historical bridge and behavior reference only. Its model catalog path now fetches provider-scoped `/models` results to avoid Featherless-heavy catalogs, but it should not be treated as the active Backboard IDE chat runtime. |
 | CLI runtime | `cli/backboard_cli/` | Standalone CLI product and useful reference for API contracts, prompts, tools, MCP, skills, pricing, semantic index, RLM/subagents. Do not edit for IDE work without explicit approval. |
 
 Rule of thumb:
@@ -68,11 +67,15 @@ This section reflects the current committed branch plus the current dirty workin
 
 - `ide/zed/crates/agent_servers/src/backboard.rs` now returns `BackboardNativeConnection` directly from `BackboardAgentServer::connect`.
 - The active Backboard IDE chat path is now: Zed Rust agent UI/runtime -> `agent_servers/src/backboard_native/*` -> `backboard` Rust endpoint client -> Backboard HTTP API -> Rust-native tool execution.
-- The current Rust path does not start `ide/zed/script/backboard-ide-acp.py`.
+- The legacy `ide/zed/script/backboard-ide-acp.py` bridge has been deleted.
 - The current Rust path does not import or shell through `cli/backboard_cli/`.
-- `ide/zed/script/backboard-ide-acp.py` still exists in the repository as a reference/historical bridge, but it is not the default runtime.
 - Generic ACP infrastructure remains in place for other/custom ACP agents. `AcpThread` also remains the internal chat/thread UI model for Backboard because it owns tool cards, diffs, terminals, approvals, token usage, history, and rendering.
-- `ide/zed/script/bundle-mac` no longer needs the Python bridge/CLI resources for the active chat runtime. Native-runtime packaging should be re-checked against the current script instead of following old embedded-CLI docs.
+- `ide/zed/script/bundle-mac` writes native runtime metadata instead of bundling Python bridge/CLI resources for active chat.
+
+### Current Working Tree UI/Entry Changes
+
+- `agent_ui/src/model_selector.rs` now strips Featherless models from the visible picker, groups models by canonical provider/family, and adds an inline provider filter section with stable multi-select behavior. Provider IDs are normalized so OpenAI/GPT OSS, Gemini, xAI/Grok, Anthropic/Claude, Bedrock-hosted OpenAI, OpenRouter-hosted Gemini, and other routed families appear under useful provider labels.
+- App chrome adds a more prominent top-right Open Chat affordance and opens the welcome page for new windows instead of an untitled text buffer.
 
 ### Current Working Tree UI/Entry Changes
 
@@ -741,9 +744,9 @@ The CLI runtime includes services the older IDE bridge reused and the native run
 
 Historical note: the Python bridge did not run `backboard chat` as a subprocess. It imported Python modules in-process and adapted terminal-oriented behavior into ACP session updates. The active runtime no longer uses this path.
 
-## Historical Python ACP Bridge Contract
+## Removed Python ACP Bridge Contract
 
-`ide/zed/script/backboard-ide-acp.py` was the IDE-owned adapter between Zed ACP and the CLI runtime. It is still in the repository as historical/reference code, but it is not the active Backboard IDE chat path as of May 21, 2026.
+`ide/zed/script/backboard-ide-acp.py` was the IDE-owned adapter between Zed ACP and the CLI runtime. It has been deleted from the working tree; the active Backboard IDE chat path is Rust native as of May 21, 2026.
 
 ### Historical Launch Contract
 
@@ -1110,16 +1113,12 @@ When `connect` runs:
 - It logs `Backboard IDE runtime: using native Rust AgentConnection, not Python ACP/CLI bridge`.
 - It returns `Rc<BackboardNativeConnection>` from `crate::backboard_native::BackboardNativeConnection::new(...)`.
 - It does not build an `AgentServerCommand`.
-- It does not launch `ide/zed/script/backboard-ide-acp.py`.
+- It cannot launch `ide/zed/script/backboard-ide-acp.py`; that bridge file has been removed.
 - It does not resolve `BACKBOARD_CLI_ROOT`, `BACKBOARD_CLI_PATH`, or `BACKBOARD_IDE_PYTHON` for active chat.
 
 This file should remain the Rust boundary between Zed's agent-server registry and Backboard's native `AgentConnection`.
 
-## Historical Python ACP Bridge
-
-File:
-
-- `ide/zed/script/backboard-ide-acp.py`
+## Removed Python ACP Bridge
 
 This section is retained as branch-history/reference material only. Do not use it as the active runtime map.
 
@@ -2310,7 +2309,7 @@ The current Backboard IDE work has touched or added these important files. This 
 
 - `ide/zed/crates/title_bar/src/title_bar.rs`
   - Top bar mode switcher and Multi-Agent/Expert/Simple controls.
-  - Current working tree also adds the top-right Open Chat button and first-run mode tooltip state.
+  - Current working tree also adds the top-right Open Chat button.
   - Also contains residual collab/update UI paths that were rebranded or disconnected from Zed services.
 
 ### Inline Autocomplete / Edit Predictions
@@ -2399,9 +2398,9 @@ This follow-up documents fixes applied after users reported:
 - Some chats disappearing after restart despite successful in-session runs.
 - Chat button routing users to the Agent Workspace page instead of opening the chat list/sidebar.
 
-### Historical Python ACP Bridge (`ide/zed/script/backboard-ide-acp.py`)
+### Removed Python ACP Bridge
 
-- Current working tree note: the historical bridge's model catalog path fetches provider-specific `/models` results and merges/sorts them. This keeps the reference bridge aligned with the filtered IDE picker and avoids unfiltered catalogs being dominated by Featherless entries.
+- The legacy Python ACP bridge file, `ide/zed/script/backboard-ide-acp.py`, was removed after the IDE moved to the native Rust ACP runtime. Do not reintroduce it for active chat/runtime work.
 - Historical bridge work added visible-history sanitization for prompt augmentation payloads:
   - strips `<backboard_ide_context>...</backboard_ide_context>` before replaying history into UI chunks.
 - Hardened stream handling:

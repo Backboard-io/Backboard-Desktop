@@ -70,6 +70,8 @@ pub struct SidebarRenderState {
 enum WorkspaceModeTab {
     CodeEditor,
     AgentWorkspace,
+    Tasks,
+    Git,
     Jarvis,
 }
 
@@ -315,9 +317,13 @@ pub struct MultiWorkspace {
     previous_focus_handle: Option<FocusHandle>,
     pub interface_mode: InterfaceMode,
     pub multi_agent_expanded: bool,
+    pub tasks_expanded: bool,
+    pub git_expanded: bool,
     pub jarvis_placeholder_expanded: bool,
     pub beginner_view: Option<AnyView>,
     pub agent_workspace_view: Option<AnyView>,
+    pub tasks_view: Option<AnyView>,
+    pub git_view: Option<AnyView>,
     jarvis_visualizer: Entity<JarvisDirectoryVisualizer>,
 }
 
@@ -386,9 +392,13 @@ impl MultiWorkspace {
             previous_focus_handle: None,
             interface_mode: InterfaceMode::Expert,
             multi_agent_expanded: false,
+            tasks_expanded: false,
+            git_expanded: false,
             jarvis_placeholder_expanded: false,
             beginner_view: None,
             agent_workspace_view: None,
+            tasks_view: None,
+            git_view: None,
             jarvis_visualizer,
         }
     }
@@ -412,9 +422,22 @@ impl MultiWorkspace {
         self.set_workspace_mode_tab(next_tab, cx);
     }
 
+    pub fn set_tasks_expanded(&mut self, expanded: bool, cx: &mut Context<Self>) {
+        let next_tab = if expanded {
+            WorkspaceModeTab::Tasks
+        } else {
+            WorkspaceModeTab::CodeEditor
+        };
+        self.set_workspace_mode_tab(next_tab, cx);
+    }
+
     fn selected_workspace_mode_tab(&self) -> WorkspaceModeTab {
         if self.jarvis_placeholder_expanded {
             WorkspaceModeTab::Jarvis
+        } else if self.git_expanded {
+            WorkspaceModeTab::Git
+        } else if self.tasks_expanded {
+            WorkspaceModeTab::Tasks
         } else if self.multi_agent_expanded {
             WorkspaceModeTab::AgentWorkspace
         } else {
@@ -428,6 +451,8 @@ impl MultiWorkspace {
         }
 
         self.multi_agent_expanded = tab == WorkspaceModeTab::AgentWorkspace;
+        self.tasks_expanded = tab == WorkspaceModeTab::Tasks;
+        self.git_expanded = tab == WorkspaceModeTab::Git;
         self.jarvis_placeholder_expanded = tab == WorkspaceModeTab::Jarvis;
         if self.jarvis_placeholder_expanded {
             self.update_jarvis_visualizer(cx);
@@ -1849,6 +1874,26 @@ impl MultiWorkspace {
     }
 
     #[cfg(any(test, feature = "test-support"))]
+    pub fn test_select_git_tab(&mut self, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::Git, cx);
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_select_agent_workspace_tab(&mut self, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::AgentWorkspace, cx);
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_select_tasks_tab(&mut self, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::Tasks, cx);
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_select_code_editor_tab(&mut self, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::CodeEditor, cx);
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
     pub fn test_jarvis_visualizer_node_count(&self, cx: &App) -> usize {
         self.jarvis_visualizer.read(cx).node_count()
     }
@@ -2172,6 +2217,20 @@ impl MultiWorkspace {
                         cx,
                     ))
                     .child(self.render_workspace_mode_tab(
+                        "multi-workspace-tasks-tab",
+                        "Tasks",
+                        selected_tab == WorkspaceModeTab::Tasks,
+                        WorkspaceModeTab::Tasks,
+                        cx,
+                    ))
+                    .child(self.render_workspace_mode_tab(
+                        "multi-workspace-git-tab",
+                        "Git",
+                        selected_tab == WorkspaceModeTab::Git,
+                        WorkspaceModeTab::Git,
+                        cx,
+                    ))
+                    .child(self.render_workspace_mode_tab(
                         "multi-workspace-jarvis-tab",
                         "Jarvis",
                         selected_tab == WorkspaceModeTab::Jarvis,
@@ -2381,6 +2440,71 @@ impl Render for MultiWorkspace {
                     Tiling::default(),
                 );
             }
+        }
+
+        if self.tasks_expanded {
+            if let Some(view) = self.tasks_view.as_ref() {
+                let titlebar = self.workspace().read(cx).titlebar_item();
+                return client_side_decorations(
+                    div()
+                        .key_context("BackboardTasksView")
+                        .relative()
+                        .flex()
+                        .flex_col()
+                        .size_full()
+                        .font(ui_font)
+                        .text_color(text_color)
+                        .on_action(cx.listener(Self::close_window))
+                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
+                            this.set_multi_agent_expanded(false, cx);
+                        }))
+                        .children(titlebar)
+                        .child(self.render_workspace_mode_switcher(cx))
+                        .child(div().flex_1().min_h_0().child(view.clone())),
+                    window,
+                    cx,
+                    Tiling::default(),
+                );
+            }
+        }
+
+        if self.git_expanded {
+            let titlebar = self.workspace().read(cx).titlebar_item();
+            return client_side_decorations(
+                div()
+                    .key_context("GitView")
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .size_full()
+                    .font(ui_font)
+                    .text_color(text_color)
+                    .on_action(cx.listener(Self::close_window))
+                    .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
+                        this.set_multi_agent_expanded(false, cx);
+                    }))
+                    .children(titlebar)
+                    .child(self.render_workspace_mode_switcher(cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .child(self.git_view.clone().map_or_else(
+                                || {
+                                    v_flex()
+                                        .size_full()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(Label::new("Git is loading").color(Color::Muted))
+                                        .into_any_element()
+                                },
+                                |view| view.into_any_element(),
+                            )),
+                    ),
+                window,
+                cx,
+                Tiling::default(),
+            );
         }
 
         let workspace = self.workspace().clone();

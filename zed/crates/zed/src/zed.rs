@@ -99,7 +99,7 @@ use workspace::{
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
     About, OpenAccountSettings, OpenBrowser, OpenDocs, OpenServerSettings, OpenSettingsFile,
-    OpenZedUrl, Quit, SwitchInterfaceMode,
+    OpenZedUrl, Quit,
 };
 
 pub struct CrashHandler(pub Arc<crashes::Client>);
@@ -160,20 +160,6 @@ pub fn init(cx: &mut App) {
     #[cfg(target_os = "macos")]
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.on_action(quit);
-    cx.on_action(|_: &SwitchInterfaceMode, cx| {
-        with_active_or_new_workspace(cx, |_workspace, window, cx| {
-            let Some(multi_workspace) = window.window_handle().downcast::<MultiWorkspace>() else {
-                return;
-            };
-            let _ = multi_workspace.update(cx, |mw, window, cx| {
-                let next = match mw.interface_mode {
-                    workspace::InterfaceMode::Simple => workspace::InterfaceMode::Expert,
-                    workspace::InterfaceMode::Expert => workspace::InterfaceMode::Simple,
-                };
-                mw.set_interface_mode(next, window, cx);
-            });
-        });
-    });
 
     cx.on_action(|_: &RestoreBanner, cx| title_bar::restore_banner(cx));
 
@@ -477,6 +463,12 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                     agent_ui::BackboardAgentWorkspacePage::new(workspace, window, cx)
                 });
                 this.agent_workspace_view = Some(agent_workspace.into());
+                let multi_weak = cx.weak_entity();
+                let tasks_view = active_workspace.update(cx, |workspace, cx| {
+                    agent_ui::BackboardTasksPage::new(workspace, multi_weak, window, cx)
+                });
+                this.tasks_view = Some(tasks_view.into());
+                this.git_view = git_workspace_view_for_workspace(&active_workspace, window, cx);
 
                 active_workspace.update(cx, |workspace, cx| {
                     if let Some(ref source) = source_workspace {
@@ -502,8 +494,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         .detach();
 
         {
-            use db::kvp::KeyValueStore;
-            use onboarding::ExperienceLevel;
             use workspace::InterfaceMode;
 
             // Always create the beginner chat view so it's ready when the user switches to Chat.
@@ -528,30 +518,16 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                 agent_ui::BackboardAgentWorkspacePage::new(workspace, window, cx)
             });
             _multi_workspace.agent_workspace_view = Some(agent_workspace.into());
+            let tasks_multi_weak = cx.weak_entity();
+            let tasks_view = _multi_workspace.workspace().update(cx, |workspace, cx| {
+                agent_ui::BackboardTasksPage::new(workspace, tasks_multi_weak, window, cx)
+            });
+            _multi_workspace.tasks_view = Some(tasks_view.into());
             let (chat_view, thread_summaries) =
                 jarvis_code_editor_context(_multi_workspace.workspace(), cx);
             _multi_workspace.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);
 
-            // Set initial mode from KVP — defaults to Developer.
-            let raw = KeyValueStore::global(cx)
-                .read_kvp(onboarding::EXPERIENCE_LEVEL_KVP_KEY)
-                .log_err()
-                .flatten();
-            let preferred_mode = WorkspaceSettings::get_global(cx).preferred_interface_mode;
-            let mode = match preferred_mode {
-                settings::PreferredInterfaceMode::Simple => InterfaceMode::Simple,
-                settings::PreferredInterfaceMode::Editor => raw
-                    .as_deref()
-                    .and_then(ExperienceLevel::from_str)
-                    .map(|level| match level {
-                        ExperienceLevel::Beginner => InterfaceMode::Simple,
-                        ExperienceLevel::Developer | ExperienceLevel::Power => {
-                            InterfaceMode::Expert
-                        }
-                    })
-                    .unwrap_or(InterfaceMode::Expert),
-            };
-            _multi_workspace.interface_mode = mode;
+            _multi_workspace.interface_mode = InterfaceMode::Expert;
         }
 
         cx.defer(move |cx| {
@@ -832,11 +808,48 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
             }
         }
 
+        async fn add_git_panel_when_ready(
+            panel_task: impl Future<Output = anyhow::Result<Entity<GitPanel>>> + 'static,
+            workspace_handle: WeakEntity<Workspace>,
+            mut cx: gpui::AsyncWindowContext,
+        ) {
+            if let Some(panel) = panel_task.await.context("failed to load git panel").log_err() {
+                let workspace_id = workspace_handle.entity_id();
+                let Some(workspace_entity) = workspace_handle.upgrade() else {
+                    return;
+                };
+                workspace_handle
+                    .update_in(&mut cx, |workspace, window, cx| {
+                        let project = workspace.project().clone();
+                        workspace.add_panel(panel.clone(), window, cx);
+
+                        if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
+                            let git_view = cx.new(|cx| {
+                                git_ui::GitWorkspaceView::new(
+                                    project,
+                                    workspace_entity,
+                                    panel,
+                                    window,
+                                    cx,
+                                )
+                            });
+                            multi_workspace.update(cx, |multi_workspace, cx| {
+                                if multi_workspace.workspace().entity_id() == workspace_id {
+                                    multi_workspace.git_view = Some(git_view.into());
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    })
+                    .log_err();
+            }
+        }
+
         futures::join!(
             add_panel_when_ready(project_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(outline_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(terminal_panel, workspace_handle.clone(), cx.clone()),
-            add_panel_when_ready(git_panel, workspace_handle.clone(), cx.clone()),
+            add_git_panel_when_ready(git_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(debug_panel, workspace_handle.clone(), cx.clone()),
             initialize_agent_panel(workspace_handle, cx.clone()).map(|r| r.log_err()),
         );
@@ -915,6 +928,21 @@ fn sync_jarvis_code_editor_context(
     multi_workspace.update(cx, |multi_workspace, cx| {
         multi_workspace.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);
     });
+}
+
+fn git_workspace_view_for_workspace(
+    active_workspace: &Entity<Workspace>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyView> {
+    let git_panel = active_workspace.read(cx).panel::<GitPanel>(cx)?;
+    let project = active_workspace.read(cx).project().clone();
+    Some(
+        cx.new(|cx| {
+            git_ui::GitWorkspaceView::new(project, active_workspace.clone(), git_panel, window, cx)
+        })
+        .into(),
+    )
 }
 
 fn jarvis_code_editor_context(
@@ -5900,6 +5928,17 @@ mod tests {
                     .expect("agent workspace view should be a BackboardAgentWorkspacePage")
             })
             .unwrap();
+        let initial_tasks_view = window
+            .read_with(cx, |multi_workspace, _cx| {
+                multi_workspace
+                    .tasks_view
+                    .as_ref()
+                    .expect("tasks view should be initialized")
+                    .clone()
+                    .downcast::<agent_ui::BackboardTasksPage>()
+                    .expect("tasks view should be a BackboardTasksPage")
+            })
+            .unwrap();
 
         let project2 = Project::test(app_state.fs.clone(), [path!("/dir2").as_ref()], cx).await;
         let workspace2 = window
@@ -5927,11 +5966,134 @@ mod tests {
                     .expect("agent workspace view should still be a BackboardAgentWorkspacePage")
             })
             .unwrap();
+        let updated_tasks_view = window
+            .read_with(cx, |multi_workspace, _cx| {
+                multi_workspace
+                    .tasks_view
+                    .as_ref()
+                    .expect("tasks view should still be initialized")
+                    .clone()
+                    .downcast::<agent_ui::BackboardTasksPage>()
+                    .expect("tasks view should still be a BackboardTasksPage")
+            })
+            .unwrap();
 
         assert_ne!(
             initial_agent_workspace.entity_id(),
             updated_agent_workspace.entity_id(),
             "agent workspace page should be rebound when the active workspace changes"
+        );
+        assert_ne!(
+            initial_tasks_view.entity_id(),
+            updated_tasks_view.entity_id(),
+            "tasks page should be rebound when the active workspace changes"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_git_view_is_recreated_for_active_workspace(cx: &mut TestAppContext) {
+        let app_state = init_test(cx);
+
+        app_state
+            .fs
+            .as_fake()
+            .insert_tree(
+                path!("/"),
+                json!({
+                    "dir1": {},
+                    "dir2": {}
+                }),
+            )
+            .await;
+
+        let project1 = Project::test(app_state.fs.clone(), [path!("/dir1").as_ref()], cx).await;
+        let window = cx.add_window({
+            let project = project1.clone();
+            |window, cx| MultiWorkspace::test_new(project, window, cx)
+        });
+        window
+            .update(cx, |multi_workspace, window, cx| {
+                let workspace = multi_workspace.workspace().clone();
+                workspace.update(cx, |workspace, cx| {
+                    workspace.set_panels_task(initialize_panels(window, cx));
+                });
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        let initial_git_panel = window
+            .read_with(cx, |multi_workspace, cx| {
+                let git_panel = multi_workspace
+                    .workspace()
+                    .read(cx)
+                    .panel::<GitPanel>(cx)
+                    .expect("git panel should be initialized");
+                let git_view = multi_workspace
+                    .git_view
+                    .as_ref()
+                    .expect("git view should be initialized")
+                    .clone()
+                    .downcast::<git_ui::GitWorkspaceView>()
+                    .expect("git view should be the workspace GitWorkspaceView");
+
+                assert_eq!(
+                    git_panel.entity_id(),
+                    git_view.read(cx).git_panel_entity_id()
+                );
+                git_panel
+            })
+            .unwrap();
+
+        let project2 = Project::test(app_state.fs.clone(), [path!("/dir2").as_ref()], cx).await;
+        let workspace2 = window
+            .update(cx, |multi_workspace, window, cx| {
+                multi_workspace.test_add_workspace(project2.clone(), window, cx)
+            })
+            .unwrap();
+        window
+            .update(cx, |_multi_workspace, window, cx| {
+                workspace2.update(cx, |workspace, cx| {
+                    workspace.set_panels_task(initialize_panels(window, cx));
+                });
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |multi_workspace, window, cx| {
+                multi_workspace.activate(workspace2.clone(), None, window, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        let updated_git_panel = window
+            .read_with(cx, |multi_workspace, cx| {
+                assert_eq!(multi_workspace.workspace(), &workspace2);
+                let git_panel = multi_workspace
+                    .workspace()
+                    .read(cx)
+                    .panel::<GitPanel>(cx)
+                    .expect("new active workspace git panel should be initialized");
+                let git_view = multi_workspace
+                    .git_view
+                    .as_ref()
+                    .expect("git view should still be initialized")
+                    .clone()
+                    .downcast::<git_ui::GitWorkspaceView>()
+                    .expect("git view should still be a GitWorkspaceView");
+
+                assert_eq!(
+                    git_panel.entity_id(),
+                    git_view.read(cx).git_panel_entity_id()
+                );
+                git_panel
+            })
+            .unwrap();
+
+        assert_ne!(
+            initial_git_panel.entity_id(),
+            updated_git_panel.entity_id(),
+            "git view should be rebound when the active workspace changes"
         );
     }
 

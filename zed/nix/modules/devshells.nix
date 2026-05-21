@@ -65,8 +65,8 @@
             # outside the nix store instead of to `$src`
             FONTCONFIG_FILE = pkgs.makeFontsConf {
               fontDirectories = [
-                "./assets/fonts/lilex"
-                "./assets/fonts/ibm-plex-sans"
+                "./assets/fonts/inter"
+                "./assets/fonts/jetbrains-mono"
               ];
             };
             PROTOC = "${pkgs.protobuf}/bin/protoc";

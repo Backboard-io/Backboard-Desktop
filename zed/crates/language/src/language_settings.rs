@@ -883,9 +883,7 @@ impl settings::Settings for AllLanguageSettings {
             api_url: backboard
                 .api_url
                 .unwrap_or_else(|| DEFAULT_BACKBOARD_API_URL.into()),
-            model: backboard
-                .model
-                .unwrap_or_else(default_backboard_model),
+            model: backboard.model.unwrap_or_else(default_backboard_model),
             timeout_ms: backboard.timeout_ms.unwrap_or(DEFAULT_BACKBOARD_TIMEOUT_MS),
         };
 

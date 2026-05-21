@@ -7,6 +7,7 @@ mod agent_model_selector;
 mod agent_panel;
 mod agent_portal_window;
 mod agent_registry_ui;
+mod agent_tasks_page;
 mod agent_workspace_ui;
 mod buffer_codegen;
 mod completion_provider;
@@ -70,6 +71,7 @@ pub use crate::agent_panel::{
     AgentPanel, AgentPanelEvent, AgentPanelTerminalInfo, MaxIdleRetainedThreads, TerminalId,
 };
 use crate::agent_registry_ui::AgentRegistryPage;
+pub use crate::agent_tasks_page::BackboardTasksPage;
 pub use crate::agent_workspace_ui::BackboardAgentWorkspacePage;
 pub use crate::inline_assistant::InlineAssistant;
 pub use crate::thread_metadata_store::ThreadId;

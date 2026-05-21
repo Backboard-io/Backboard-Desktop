@@ -31,7 +31,6 @@ Useful targeted compile checks:
 cd path/to/Espri-API/ide/zed
 cargo check --locked -p agent_ui
 cargo check --locked -p agent_ui -p agent_servers -p acp_thread
-python3 -m py_compile script/backboard-ide-acp.py
 ```
 
 ### macOS Build Prerequisites
@@ -106,7 +105,6 @@ cargo run -p zed
 - `cargo run -p zed --release` is slower the first time but closer to the downloadable app behavior.
 - `cargo check --locked -p agent_ui` is a good quick sanity check for most Backboard UI work.
 - `cargo test -p agent_ui --no-fail-fast workspace_agent` may require the Metal toolchain before tests even start.
-- The Python ACP bridge should still compile separately with `python3 -m py_compile script/backboard-ide-acp.py`.
 - If the build gets weird after Xcode/Rust upgrades, try `cargo clean` and rebuild.
 
 ## Short Answer
@@ -217,27 +215,34 @@ That is why a source checkout plus `target/` can be 30GB-120GB while a downloada
 
 ## Backboard-Specific Packaging Catch
 
-Backboard Studio is not only the Rust/Zed app. Our native Backboard agent path also depends on:
+Backboard Studio is the Rust/Zed app plus native Backboard runtime metadata. The active Backboard agent path is Rust native and does not depend on the Python ACP bridge or CLI runtime.
 
 ```txt
-ide/zed/script/backboard-ide-acp.py
-cli/backboard_cli/
+ide/zed/crates/agent_servers/src/backboard.rs
+ide/zed/crates/agent_servers/src/backboard_native/
+ide/zed/crates/backboard/
 ```
 
-During development, `BackboardAgentServer` resolves these from the repo layout:
+During development, `BackboardAgentServer` creates `BackboardNativeConnection` directly.
 
 ```txt
-ide/zed/script/backboard-ide-acp.py
-ide/zed/../../cli
+BackboardAgentServer::connect
+  -> BackboardNativeConnection
 ```
 
-That works in a source checkout, but it will not automatically work in a packaged `.app` unless we intentionally bundle those files or require a separate installed CLI.
+The current macOS bundle writes native runtime metadata to app resources:
 
-Before shipping a web download, choose one packaging strategy.
+```txt
+Backboard Studio.app/
+  Contents/
+    Resources/
+      backboard/
+        runtime.txt
+```
 
 ## Recommended Packaging Strategy
 
-Bundle the Backboard ACP bridge and CLI runtime inside the app.
+Do not bundle the old Backboard ACP bridge or CLI runtime for active chat. Bundle the Rust app, `git`, `cli`, and native Backboard runtime metadata.
 
 Recommended app layout:
 
@@ -250,42 +255,10 @@ Backboard Studio.app/
       git
     Resources/
       backboard/
-        backboard-ide-acp.py
-        cli/
-          backboard_cli/
-          pyproject.toml
-          requirements.txt
-          setup.py
-          ...
-        python/
-          ... Python packages installed from `cli/pyproject.toml`
+        runtime.txt
 ```
 
-Then update the Rust bridge resolution so packaged builds look in app resources first:
-
-1. Check `BACKBOARD_IDE_ACP_PATH` and `BACKBOARD_CLI_ROOT` env overrides.
-2. Check packaged resource paths under `Contents/Resources/backboard/`.
-3. Fall back to the development repo layout.
-
-This preserves local development while making the downloaded app self-contained. End users who download the signed/notarized DMG do not need Xcode or Rust; only the release builder needs full Xcode, Python 3.11+, and the packaging toolchain.
-
-The macOS bundle script installs the Backboard CLI Python dependencies into `Contents/Resources/backboard/python` by default. Set `BACKBOARD_BUNDLE_PYTHON_DEPS=0` only for local debugging builds where those dependencies are already available on the launch interpreter.
-
-## Alternative Packaging Strategy
-
-Require users to install the Backboard CLI separately.
-
-In that model, the `.app` ships only the IDE and bridge launcher, then resolves:
-
-```txt
-~/.backboard/
-~/.backboard/bin/backboard
-~/.backboard/venv/bin/python
-```
-
-This makes the app bundle smaller but creates a worse first-run experience because the IDE agent can fail if the CLI is missing, outdated, or installed in a different location.
-
-For a consumer-facing Backboard Studio download, bundled runtime is the safer default.
+End users who download the signed/notarized DMG do not need Xcode, Rust, Python, or the standalone Backboard CLI for active IDE chat; only the release builder needs the platform build toolchain.
 
 ## Disk Cleanup For Local Development
 
@@ -346,10 +319,9 @@ End users do not need Xcode to install or run a completed release artifact. Xcod
 Before Backboard Studio is downloadable from the web:
 
 1. Rename/rebrand bundle metadata from Zed to Backboard Studio where required.
-2. Decide whether to bundle the Python CLI runtime or depend on a separately installed CLI.
-3. If bundling, copy `backboard-ide-acp.py` and `cli/backboard_cli` into app resources during `script/bundle-mac`.
-4. Update `BackboardAgentServer` path resolution for packaged resource paths.
-5. Build a release DMG locally.
+2. Confirm `script/bundle-mac` writes `Contents/Resources/backboard/runtime.txt` with `native-rust`.
+3. Confirm `BackboardAgentServer::connect` creates `BackboardNativeConnection`.
+4. Build a release DMG locally.
 6. Install it on a clean machine or clean user account.
 7. Verify the app launches without the source repo present.
 8. Verify Backboard chat can start, import the CLI runtime, read `~/.backboard/config.json`, and create an ACP session.

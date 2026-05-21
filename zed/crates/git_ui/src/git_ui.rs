@@ -39,6 +39,7 @@ pub mod file_diff_view;
 pub mod git_panel;
 mod git_panel_settings;
 pub mod git_picker;
+mod git_workspace_view;
 pub mod multi_diff_view;
 pub mod picker_prompt;
 pub mod project_diff;
@@ -51,6 +52,7 @@ pub mod worktree_picker;
 pub mod worktree_service;
 
 pub use conflict_view::MergeConflictIndicator;
+pub use git_workspace_view::GitWorkspaceView;
 
 pub fn init(cx: &mut App) {
     editor::set_blame_renderer(blame_ui::GitBlameRenderer, cx);

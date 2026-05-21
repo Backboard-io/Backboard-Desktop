@@ -1,6 +1,6 @@
 # Backboard IDE Rust Endpoints
 
-This document describes how to replace the current Python CLI plus ACP bridge path with a native Rust integration inside Backboard Studio.
+This document describes the native Rust integration inside Backboard Studio. The older Python CLI plus ACP bridge path has been removed.
 
 Target architecture:
 
@@ -16,9 +16,9 @@ Use these files when implementing or auditing the Rust-native path:
 
 - [`cli/backboard_cli/api/client.py`](../../cli/backboard_cli/api/client.py) is the strongest source of truth for the current HTTP contract.
 - [`ide/zed/crates/backboard/src/backboard.rs`](../zed/crates/backboard/src/backboard.rs) is the existing partial Rust mirror of the Backboard client and should become the primary IDE API client.
-- [`ide/zed/script/backboard-ide-acp.py`](../zed/script/backboard-ide-acp.py) is the current bridge reference for IDE-specific behavior such as context prewarm, tool batching, file diffs, terminal output, usage updates, and speed metrics.
+- [`ide/zed/crates/agent_servers/src/backboard_native/`](../zed/crates/agent_servers/src/backboard_native) is the active IDE runtime and tool adapter.
 
-ACP should only be treated as current-state reference material. The native implementation should not launch `backboard-ide-acp.py` and should not route chat through stdio JSON-RPC.
+Generic ACP infrastructure still exists for custom agents, but Backboard chat should not route through stdio JSON-RPC.
 
 ## API Environments And Auth
 

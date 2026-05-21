@@ -140,12 +140,6 @@
   //  3. Do not restore previous workspaces
   //         "restore_on_startup": "none",
   "restore_on_startup": "last_session",
-  // Preferred interface mode on launch.
-  //  1. Simple chat-first mode
-  //         "preferred_interface_mode": "simple"
-  //  2. Editor mode
-  //         "preferred_interface_mode": "editor"
-  "preferred_interface_mode": "editor",
   // The default behavior when opening paths from the CLI without
   // an explicit `-e` (existing window) or `-n` (new window) flag.
   //

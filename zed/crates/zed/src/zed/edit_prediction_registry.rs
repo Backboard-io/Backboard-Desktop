@@ -209,7 +209,11 @@ fn assign_edit_prediction_providers(
     if provider_config == Some(EditPredictionProviderConfig::Codestral) {
         load_codestral_api_key(cx).detach();
     }
-    if provider_config == Some(EditPredictionProviderConfig::Zed(EditPredictionModel::Backboard)) {
+    if provider_config
+        == Some(EditPredictionProviderConfig::Zed(
+            EditPredictionModel::Backboard,
+        ))
+    {
         edit_prediction::backboard::load_backboard_api_token(cx).detach();
     }
     for (editor, window) in editors.borrow().iter() {

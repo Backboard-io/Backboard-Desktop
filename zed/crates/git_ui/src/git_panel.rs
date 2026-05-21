@@ -5993,6 +5993,25 @@ impl GitPanel {
 }
 
 impl GitPanel {
+    pub(crate) fn changes_count(&self) -> usize {
+        self.changes_count
+    }
+
+    pub(crate) fn active_repository_name(&self, cx: &App) -> Option<SharedString> {
+        self.active_repository
+            .as_ref()
+            .map(|repo| repo.read(cx).display_name())
+    }
+
+    pub(crate) fn active_branch_name(&self, cx: &App) -> Option<SharedString> {
+        self.active_repository
+            .as_ref()?
+            .read(cx)
+            .branch
+            .as_ref()
+            .map(|branch| branch.name().to_owned().into())
+    }
+
     pub fn selected_file_history_target(&self) -> Option<(Entity<Repository>, RepoPath)> {
         let entry = self.get_selected_entry()?.status_entry()?;
         let repository = self.active_repository.clone()?;

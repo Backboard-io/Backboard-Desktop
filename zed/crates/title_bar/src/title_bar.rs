@@ -9,7 +9,6 @@ use crate::application_menu::{ApplicationMenu, show_menus};
 use crate::plan_chip::PlanChip;
 use agent_settings::{AgentSettings, WindowLayout};
 use arrayvec::ArrayVec;
-use db::kvp::KeyValueStore;
 use git_ui::worktree_picker::WorktreePicker;
 pub use platform_title_bar::{
     self, DraggedWindowTab, MergeAllWindows, MoveTabToNewWindow, PlatformTitleBar,
@@ -65,45 +64,6 @@ pub use onboarding_banner::restore_banner;
 const MAX_PROJECT_NAME_LENGTH: usize = 40;
 const MAX_BRANCH_NAME_LENGTH: usize = 40;
 const MAX_SHORT_SHA_LENGTH: usize = 8;
-const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
-
-#[derive(Clone, Copy)]
-struct FirstRunNavTipsState {
-    chats_seen: bool,
-    mode_seen: bool,
-}
-
-fn read_first_run_nav_tips_state(cx: &App) -> Option<FirstRunNavTipsState> {
-    let kvp = KeyValueStore::global(cx);
-    let raw = kvp.read_kvp(FIRST_RUN_NAV_TIPS_STATE_KEY).log_err().flatten()?;
-    let (chats, mode) = raw.split_once(',')?;
-    Some(FirstRunNavTipsState {
-        chats_seen: chats == "1",
-        mode_seen: mode == "1",
-    })
-}
-
-fn mark_mode_tip_seen(cx: &mut App) {
-    let kvp = KeyValueStore::global(cx);
-    let Some(mut state) = read_first_run_nav_tips_state(cx) else {
-        return;
-    };
-    if state.mode_seen {
-        return;
-    }
-    state.mode_seen = true;
-    let raw = format!(
-        "{},{}",
-        if state.chats_seen { "1" } else { "0" },
-        if state.mode_seen { "1" } else { "0" }
-    );
-    cx.spawn(async move |_| {
-        kvp.write_kvp(FIRST_RUN_NAV_TIPS_STATE_KEY.to_string(), raw)
-            .await
-            .log_err();
-    })
-    .detach();
-}
 
 actions!(
     collab,
@@ -1199,13 +1159,6 @@ impl TitleBar {
         let mw_read = mw.read(cx);
         let simple_active = mw_read.interface_mode == InterfaceMode::Simple;
         let agents_active = simple_active || mw_read.multi_agent_expanded;
-        let show_first_run_mode_tip =
-            read_first_run_nav_tips_state(cx).is_some_and(|state| !state.mode_seen);
-        let mode_tooltip = if show_first_run_mode_tip {
-            "Mode: switch between Editor and Agents. Agents opens Agent Workspace."
-        } else {
-            "Switch between Editor and Agents. Agents opens Agent Workspace."
-        };
         let multi_workspace = mw.downgrade();
         Some(
             h_flex()
@@ -1229,13 +1182,11 @@ impl TitleBar {
                                             cx,
                                         );
                                         multi_workspace.multi_agent_expanded = false;
-                                        mark_mode_tip_seen(cx);
                                         cx.notify();
                                     })
                                     .log_err();
                             })
                         })
-                        .tooltip(Tooltip::text(mode_tooltip))
                         .child(Label::new("Editor").size(LabelSize::Small)),
                 )
                 .child(
@@ -1248,13 +1199,11 @@ impl TitleBar {
                                 multi_workspace
                                     .update(cx, |multi_workspace, cx| {
                                         multi_workspace.multi_agent_expanded = true;
-                                        mark_mode_tip_seen(cx);
                                         cx.notify();
                                     })
                                     .log_err();
                             })
                         })
-                        .tooltip(Tooltip::text(mode_tooltip))
                         .child(Label::new("Agents").size(LabelSize::Small)),
                 ),
         )

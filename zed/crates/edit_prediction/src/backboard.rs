@@ -4,15 +4,17 @@ use crate::{
     prediction::{EditPredictionId, EditPredictionResult},
 };
 use anyhow::{Context as _, Result};
+use backboard_api::BackboardModel;
 use credentials_provider::CredentialsProvider;
-use futures::{AsyncBufReadExt as _, AsyncReadExt as _, FutureExt as _, StreamExt as _, io::BufReader};
+use futures::{
+    AsyncBufReadExt as _, AsyncReadExt as _, FutureExt as _, StreamExt as _, io::BufReader,
+};
 use gpui::{
     App, AppContext as _, Context, Entity, Global, SharedString, Task,
     http_client::{self, AsyncBody, HttpClient, Method},
 };
 use language::{ToOffset, ToPoint as _};
 use language_model::{ApiKeyState, EnvVar, env_var};
-use backboard_api::BackboardModel;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -110,15 +112,19 @@ fn store_cached_backboard_assistant(base_url: &str, assistant_id: &str) {
 
 fn load_cached_backboard_thread(base_url: &str, assistant_id: &str) -> Option<String> {
     let cache_key = base_url.trim_end_matches('/');
-    BACKBOARD_THREAD_CACHE.lock().ok()?.get(cache_key).and_then(|thread| {
-        if thread.assistant_id == assistant_id
-            && thread.created_at.elapsed() < Duration::from_secs(THREAD_CACHE_TTL_SECS)
-        {
-            Some(thread.thread_id.clone())
-        } else {
-            None
-        }
-    })
+    BACKBOARD_THREAD_CACHE
+        .lock()
+        .ok()?
+        .get(cache_key)
+        .and_then(|thread| {
+            if thread.assistant_id == assistant_id
+                && thread.created_at.elapsed() < Duration::from_secs(THREAD_CACHE_TTL_SECS)
+            {
+                Some(thread.thread_id.clone())
+            } else {
+                None
+            }
+        })
 }
 
 fn store_cached_backboard_thread(base_url: &str, assistant_id: &str, thread_id: &str) {
@@ -134,7 +140,6 @@ fn store_cached_backboard_thread(base_url: &str, assistant_id: &str, thread_id: 
         );
     }
 }
-
 
 pub struct BackboardCompletions {
     pub api_token: Entity<ApiKeyState>,
@@ -229,16 +234,17 @@ impl BackboardCompletions {
             .clone()
             .or_else(|| load_cached_backboard_assistant(&base_url));
         if let Some(assistant_id) = cached_assistant.as_ref() {
-            log::info!("backboard: assistant cache hit assistant_id={}", assistant_id);
+            log::info!(
+                "backboard: assistant cache hit assistant_id={}",
+                assistant_id
+            );
             self.cached_assistant = cached_assistant.clone();
         } else {
             log::info!("backboard: assistant cache miss");
         }
 
-        let cached_thread_id = load_cached_backboard_thread(
-            &base_url,
-            cached_assistant.as_deref().unwrap_or(""),
-        );
+        let cached_thread_id =
+            load_cached_backboard_thread(&base_url, cached_assistant.as_deref().unwrap_or(""));
         if let Some(thread_id) = cached_thread_id.as_ref() {
             log::info!("backboard: thread cache hit thread_id={}", thread_id);
             self.cached_thread = Some(thread_id.clone());
@@ -418,8 +424,7 @@ impl BackboardCompletions {
                 inputs,
                 language_name,
                 insertion_offset,
-            )) =
-                result
+            )) = result
             else {
                 return anyhow::Ok(None);
             };
@@ -442,9 +447,11 @@ impl BackboardCompletions {
                 response_str.chars().take(200).collect::<String>()
             );
 
-            let Some(chunks) =
-                filtered_function_completion_chunks(response_str, &inputs, language_name.as_deref())
-            else {
+            let Some(chunks) = filtered_function_completion_chunks(
+                response_str,
+                &inputs,
+                language_name.as_deref(),
+            ) else {
                 return anyhow::Ok(None);
             };
             log::info!(
@@ -454,16 +461,21 @@ impl BackboardCompletions {
             );
 
             let path = inputs.cursor_path.to_string_lossy().to_string();
-            backboard_api::publish_inline_completion_output(backboard_api::InlineCompletionOutput {
-                title: "Inline autocomplete completion".to_string(),
-                path: Some(path),
-                language: language_name,
-                chunks,
-            });
+            backboard_api::publish_inline_completion_output(
+                backboard_api::InlineCompletionOutput {
+                    title: "Inline autocomplete completion".to_string(),
+                    path: Some(path),
+                    language: language_name,
+                    chunks,
+                },
+            );
 
             let insertion_anchor = old_snapshot.anchor_after(insertion_offset);
-            let edits: Arc<[(std::ops::Range<language::Anchor>, Arc<str>)]> =
-                vec![(insertion_anchor.clone()..insertion_anchor, Arc::from(response_str))].into();
+            let edits: Arc<[(std::ops::Range<language::Anchor>, Arc<str>)]> = vec![(
+                insertion_anchor.clone()..insertion_anchor,
+                Arc::from(response_str),
+            )]
+            .into();
             let e2e_latency = cx.background_executor().now() - request_start;
             let result = EditPredictionResult::new(
                 EditPredictionId(uuid::Uuid::new_v4().to_string().into()),
@@ -669,7 +681,10 @@ async fn backboard_completion(
         thread_id,
         selected_model.provider,
         selected_model.name,
-        Some(format!("{}/{}", selected_model.provider, selected_model.name))
+        Some(format!(
+            "{}/{}",
+            selected_model.provider, selected_model.name
+        ))
     );
 
     let form_body = encode_form_body(&[
@@ -816,7 +831,9 @@ async fn resolve_backboard_model(
     cached_model: Option<&BackboardModel>,
     http_client: &Arc<dyn HttpClient>,
 ) -> Result<BackboardModel> {
-    if let Some(configured_model) = configured_model.map(str::trim).filter(|model| !model.is_empty())
+    if let Some(configured_model) = configured_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
     {
         if cached_model
             .as_ref()
@@ -898,7 +915,12 @@ fn select_preferred_backboard_model(models: Vec<BackboardModel>) -> Option<Backb
         let cost = model.input_cost_per_1m_tokens.unwrap_or(f64::INFINITY)
             + model.output_cost_per_1m_tokens.unwrap_or(f64::INFINITY);
         let context_limit = model.context_limit.unwrap_or(u64::MAX);
-        (cost, context_limit, model.provider.as_str(), model.name.as_str())
+        (
+            cost,
+            context_limit,
+            model.provider.as_str(),
+            model.name.as_str(),
+        )
     }
 
     models.into_iter().min_by(|left, right| {
@@ -942,7 +964,11 @@ async fn backboard_post_json(
         .body_mut()
         .read_to_string(&mut response_body)
         .await?;
-    log::info!("backboard: POST {} response: {}", url, &response_body[..response_body.len().min(400)]);
+    log::info!(
+        "backboard: POST {} response: {}",
+        url,
+        &response_body[..response_body.len().min(400)]
+    );
     serde_json::from_str(&response_body).context("Failed to parse Backboard JSON response")
 }
 
@@ -1022,7 +1048,9 @@ Do not repeat the prefix.\n\
 If no useful code completion exists, return an empty string.";
 
 fn build_completion_prompt(inputs: &ZetaPromptInput, language_name: Option<&str>) -> String {
-    let cursor_offset = inputs.cursor_offset_in_excerpt.min(inputs.cursor_excerpt.len());
+    let cursor_offset = inputs
+        .cursor_offset_in_excerpt
+        .min(inputs.cursor_excerpt.len());
     let full_before = &inputs.cursor_excerpt[..cursor_offset];
     let full_after = &inputs.cursor_excerpt[cursor_offset..];
     let code_before = trim_prefix_to_last_n_bytes(full_before, FIM_MAX_BEFORE_BYTES);
@@ -1105,20 +1133,56 @@ fn is_non_completion(response: &str) -> bool {
     // Reject known assistant-speak prefixes (first line starts with these)
     let lower_first = first_line.trim().to_ascii_lowercase();
     let assistant_prefixes = [
-        "i appreciate", "i notice", "i can see", "i'm sorry", "i am sorry",
-        "looking at", "based on", "this appears", "it appears", "it seems",
-        "you've asked", "you've provided", "you have provided", "you have asked",
-        "let me clarify", "let me explain", "to complete", "to answer",
-        "here is", "here's", "here are",
-        "the cursor", "the code", "this code", "the prefix", "the suffix",
-        "there is", "there are", "in this", "in the",
-        "as an inline", "as a code", "my role", "my job",
-        "i need to", "i should", "i would", "i will",
-        "certainly", "sure,", "of course",
-        "note:", "note that",
-        "please note", "please provide",
+        "i appreciate",
+        "i notice",
+        "i can see",
+        "i'm sorry",
+        "i am sorry",
+        "looking at",
+        "based on",
+        "this appears",
+        "it appears",
+        "it seems",
+        "you've asked",
+        "you've provided",
+        "you have provided",
+        "you have asked",
+        "let me clarify",
+        "let me explain",
+        "to complete",
+        "to answer",
+        "here is",
+        "here's",
+        "here are",
+        "the cursor",
+        "the code",
+        "this code",
+        "the prefix",
+        "the suffix",
+        "there is",
+        "there are",
+        "in this",
+        "in the",
+        "as an inline",
+        "as a code",
+        "my role",
+        "my job",
+        "i need to",
+        "i should",
+        "i would",
+        "i will",
+        "certainly",
+        "sure,",
+        "of course",
+        "note:",
+        "note that",
+        "please note",
+        "please provide",
     ];
-    if assistant_prefixes.iter().any(|p| lower_first.starts_with(p)) {
+    if assistant_prefixes
+        .iter()
+        .any(|p| lower_first.starts_with(p))
+    {
         log::info!("backboard: filtered — natural_language_prefix");
         return true;
     }
@@ -1221,9 +1285,12 @@ fn is_prose_like_line(line: &str) -> bool {
         return true;
     }
 
-    let has_code_symbols = trimmed
-        .chars()
-        .any(|c| matches!(c, '{' | '}' | '(' | ')' | ';' | '=' | '[' | ']' | ':' | '<' | '>' | '_' | '"' | '\''));
+    let has_code_symbols = trimmed.chars().any(|c| {
+        matches!(
+            c,
+            '{' | '}' | '(' | ')' | ';' | '=' | '[' | ']' | ':' | '<' | '>' | '_' | '"' | '\''
+        )
+    });
 
     let word_count = trimmed.split_whitespace().count();
 
@@ -1236,7 +1303,10 @@ fn is_prose_like_line(line: &str) -> bool {
 
     // Uppercase-starting, multi-word, no code symbols
     word_count >= 6
-        && trimmed.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && trimmed
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase())
         && !has_code_symbols
 }
 
@@ -1261,7 +1331,9 @@ fn filtered_function_completion_chunks(
         return None;
     }
 
-    let cursor_offset = inputs.cursor_offset_in_excerpt.min(inputs.cursor_excerpt.len());
+    let cursor_offset = inputs
+        .cursor_offset_in_excerpt
+        .min(inputs.cursor_excerpt.len());
     let code_after = &inputs.cursor_excerpt[cursor_offset..];
     if completion_duplicates_existing_code(&completion, code_after) {
         log::info!("backboard: filtered — duplicates existing code");
@@ -1312,7 +1384,11 @@ fn extract_first_code_fence(response: &str) -> Option<String> {
         .map(|index| &after_start[index + 1..])
         .unwrap_or(after_start);
     let end = after_language.find("```")?;
-    Some(after_language[..end].trim_matches(|c| c == '\n' || c == '\r').to_string())
+    Some(
+        after_language[..end]
+            .trim_matches(|c| c == '\n' || c == '\r')
+            .to_string(),
+    )
 }
 
 fn starts_with_control_keyword(lower: &str) -> bool {
@@ -1469,7 +1545,9 @@ mod tests {
         // Model echoing the [CURSOR] marker back
         assert!(is_non_completion("def greet()[CURSOR]:\n    pass"));
         // Model echoing old-style FIM tokens
-        assert!(is_non_completion("<|fim_prefix|>some code<|fim_suffix|>more<|fim_middle|>"));
+        assert!(is_non_completion(
+            "<|fim_prefix|>some code<|fim_suffix|>more<|fim_middle|>"
+        ));
         // Model echoing new-style FIM tags
         assert!(is_non_completion("<prefix>\nsome code\n</prefix>"));
         // Prose response
@@ -1483,18 +1561,32 @@ mod tests {
     #[test]
     fn rejects_assistant_prose() {
         // Natural language prefixes
-        assert!(is_non_completion("I appreciate you providing context, but I need to clarify..."));
-        assert!(is_non_completion("Looking at this Python code, I need to complete..."));
-        assert!(is_non_completion("I notice there's some confusion in the prompt."));
-        assert!(is_non_completion("You've provided multiple system prompts..."));
-        assert!(is_non_completion("Based on the pattern, this looks like a helper function."));
+        assert!(is_non_completion(
+            "I appreciate you providing context, but I need to clarify..."
+        ));
+        assert!(is_non_completion(
+            "Looking at this Python code, I need to complete..."
+        ));
+        assert!(is_non_completion(
+            "I notice there's some confusion in the prompt."
+        ));
+        assert!(is_non_completion(
+            "You've provided multiple system prompts..."
+        ));
+        assert!(is_non_completion(
+            "Based on the pattern, this looks like a helper function."
+        ));
         assert!(is_non_completion("Here is the completion you requested:"));
-        assert!(is_non_completion("To complete this code, I would suggest..."));
+        assert!(is_non_completion(
+            "To complete this code, I would suggest..."
+        ));
         // Valid code should pass
         assert!(!is_non_completion("response.json()"));
         assert!(!is_non_completion("return response.json()"));
         assert!(!is_non_completion("except Exception as e:"));
         assert!(!is_non_completion("headers=headers,\n        json=payload"));
-        assert!(!is_non_completion("    value = compute(x)\n    return value"));
+        assert!(!is_non_completion(
+            "    value = compute(x)\n    return value"
+        ));
     }
 }
