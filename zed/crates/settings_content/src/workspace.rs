@@ -49,6 +49,10 @@ pub struct WorkspaceSettingsContent {
     /// Values: empty_tab, last_workspace, last_session, launchpad
     /// Default: last_session
     pub restore_on_startup: Option<RestoreOnStartupBehavior>,
+    /// Preferred interface mode on launch.
+    ///
+    /// Default: editor
+    pub preferred_interface_mode: Option<PreferredInterfaceMode>,
     /// The default behavior when opening paths from the CLI without
     /// an explicit `-e` or `-n` flag.
     ///
@@ -258,6 +262,27 @@ pub enum ShowDiagnostics {
     Off,
     Errors,
     All,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    PartialEq,
+    Eq,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PreferredInterfaceMode {
+    Simple,
+    #[default]
+    Editor,
 }
 
 #[derive(

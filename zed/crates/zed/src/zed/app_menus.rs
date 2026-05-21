@@ -1,10 +1,20 @@
 use gpui::{App, Menu, MenuItem, OsAction};
 use release_channel::ReleaseChannel;
 use terminal_view::terminal_panel;
+use workspace::{InterfaceMode, MultiWorkspace};
 use zed_actions::{debug_panel, dev};
 
 pub fn app_menus(cx: &mut App) -> Vec<Menu> {
     use zed_actions::Quit;
+    let switch_mode_label = cx
+        .active_window()
+        .and_then(|window| window.downcast::<MultiWorkspace>())
+        .and_then(|mw| mw.read_with(cx, |mw, _| mw.interface_mode).ok())
+        .map(|mode| match mode {
+            InterfaceMode::Simple => "Switch to Editor Mode",
+            InterfaceMode::Expert => "Switch to Simple Mode",
+        })
+        .unwrap_or("Switch Mode");
 
     let mut view_items = vec![
         MenuItem::action(
@@ -63,6 +73,8 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
             items: vec![
                 MenuItem::action("About Backboard Studio", zed_actions::About),
                 MenuItem::action("Check for Updates", auto_update::Check),
+                MenuItem::separator(),
+                MenuItem::action(switch_mode_label, zed_actions::SwitchInterfaceMode),
                 MenuItem::separator(),
                 MenuItem::submenu(Menu::new("Settings").items([
                     MenuItem::action("Open Settings", zed_actions::OpenSettings),

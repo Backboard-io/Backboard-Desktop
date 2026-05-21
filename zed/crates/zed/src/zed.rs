@@ -99,7 +99,7 @@ use workspace::{
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
     About, OpenAccountSettings, OpenBrowser, OpenDocs, OpenServerSettings, OpenSettingsFile,
-    OpenZedUrl, Quit,
+    OpenZedUrl, Quit, SwitchInterfaceMode,
 };
 
 pub struct CrashHandler(pub Arc<crashes::Client>);
@@ -160,6 +160,34 @@ pub fn init(cx: &mut App) {
     #[cfg(target_os = "macos")]
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.on_action(quit);
+    cx.on_action(|_: &SwitchInterfaceMode, cx| {
+        let Some(multi_workspace) = cx
+            .active_window()
+            .and_then(|window| window.downcast::<MultiWorkspace>())
+        else {
+            return;
+        };
+
+        cx.defer(move |cx| {
+            multi_workspace
+                .update(cx, |mw, window, cx| {
+                    let next = match mw.interface_mode {
+                        workspace::InterfaceMode::Simple => workspace::InterfaceMode::Expert,
+                        workspace::InterfaceMode::Expert => workspace::InterfaceMode::Simple,
+                    };
+                    log::info!(
+                        "Switching Backboard Studio interface mode from {:?} to {:?}",
+                        mw.interface_mode,
+                        next
+                    );
+                    mw.set_interface_mode(next, window, cx);
+                })
+                .log_err();
+
+            let menus = app_menus(cx);
+            cx.set_menus(menus);
+        });
+    });
 
     cx.on_action(|_: &RestoreBanner, cx| title_bar::restore_banner(cx));
 
