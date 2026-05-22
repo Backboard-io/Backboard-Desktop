@@ -2405,3 +2405,108 @@ Fixes:
 - Historical Backboard ACP diagnostics write to `~/.backboard/logs/ide-agent.log`; native runtime diagnostics should be checked in Rust/Zed logs first.
 - UI thread list persistence/visibility is backed by `sidebar_threads` in:
   - `~/Library/Application Support/Backboard Studio/db/0-dev/db.sqlite` (active data in this environment).
+
+## 2026-05-22 Inline Autocomplete Overhaul
+
+This session rebuilt the Backboard inline autocomplete pipeline. All changes are in `ide/zed/crates/edit_prediction/src/backboard.rs`.
+
+### Stateless Thread Model
+
+The autocomplete provider now creates a fresh assistant thread for every single request. The old 120-second thread TTL cache has been removed. This eliminates stale-thread failures and role-alternation errors that previously caused silent rejection of predictions after a thread got into a bad state.
+
+- `load_cached_backboard_thread` / `store_cached_backboard_thread` have been removed.
+- Each call to `request_prediction` creates a new thread, sends the FIM prompt as a single user message, and discards the thread.
+- The assistant (`BackboardAssistant`) is still cached per API key + base URL so the assistant creation round-trip is paid once per session, not per keystroke.
+
+### Typed-Prefix Stripping (`strip_typed_prefix_from_completion`)
+
+The Backboard model sometimes echoes back the text the user has already typed as the start of its completion. That echo was previously inserted as duplicate text into the editor. The new `strip_typed_prefix_from_completion` function (line ~1091) removes the already-typed prefix before the completion is used.
+
+Logic: it takes the current line up to the cursor and, if the completion starts with that text (case-insensitively, ignoring leading whitespace differences), removes that prefix. The stripped completion is then passed to `filtered_function_completion_chunks` for further validation and applied to the buffer.
+
+### Midline-Aware Line Limits
+
+`filtered_function_completion_chunks` (line ~1319) now distinguishes two contexts:
+
+- **Midline** (cursor is on a non-empty line): capped at 4 completion lines. Prevents the model from completing a half-written expression into a massive block of code.
+- **Block-level** (cursor is on an empty line or at the start of a new block): capped at 15 lines.
+
+The current line is detected via `rfind('\n')` on the text before the cursor — not `.lines().last()`, which silently ignores a trailing newline and misidentifies the current line when the cursor is at the start of a new empty line.
+
+### Syntax Validation Layer (`validate_completion_syntax`)
+
+A fast, local validation pass runs before any completion is accepted (line ~1534). It returns a rejection reason string (used in log output) or `None` to pass. Rules:
+
+**Python** (detected by extension `.py` or language name `"Python"`):
+- Rejects completions that start with incorrect dedentation relative to the cursor's current indent level.
+- Rejects completions that start with a new block-level declaration (`class`, `def`, `async def`) unless the cursor is at indent level 0.
+- Rejects completions that start with extra indentation without a preceding colon on the previous non-empty line.
+
+**TypeScript / JavaScript** (`.ts`, `.tsx`, `.js`, `.jsx`):
+- When midline: rejects completions that start with a statement-level declaration keyword (`const`, `let`, `var`, `function`, `class`, `interface`, `type`, `enum`, `export`, `import`).
+- When at block level: rejects completions that start with an `import` statement unless the cursor is inside the file's import section (defined as "no non-import, non-comment, non-empty line has appeared before the cursor").
+
+**All languages**:
+- Rejects completions where the text immediately before/after the cursor would result in unbalanced brackets (`(`, `[`, `{`).
+
+Language detection is handled by `detect_language` (line ~1512) which checks both the language server name and the file extension.
+
+### Dynamic Model Selection (Registry-Based)
+
+Instead of hardcoding `claude-haiku-4-5-20251001`, the provider now fetches the model registry at `GET /models?model_type=llm&limit=200` on first use and selects the cheapest trusted model.
+
+- `resolve_backboard_model` (line ~767): checks for a user-configured override, then falls back to the cache, then fetches the registry.
+- `fetch_backboard_models` (line ~849): calls the registry endpoint, parses the `models` array.
+- `select_preferred_backboard_model` (line ~896): filters to `AUTOCOMPLETE_TRUSTED_PROVIDERS = ["anthropic", "openai", "deepseek"]` and ranks by `(input_cost + output_cost, context_length desc, name, provider)`. The provider allowlist prevents a cost-only ranking from selecting unrelated models (story generators, image models) that happen to be cheap.
+- The selected model is cached in `BackboardCompletionStore.cached_model` so subsequent keystrokes do not pay the registry fetch cost.
+- If the model registry fetch fails, the system falls back to `claude-haiku-4-5-20251001`.
+
+### Thundering Herd Prevention
+
+Before this fix, every keystroke fired during the first few seconds of a session would all miss the empty model cache simultaneously and all launch a registry fetch concurrently. Each took ~17 seconds, and all but the first were wasted.
+
+Fix: `static BACKBOARD_REGISTRY_FETCH_IN_PROGRESS: AtomicBool` (line 47). When a fetch is already in flight, new requests skip the fetch and return the hardcoded fallback model immediately. The cache is populated when the first fetch completes, and all subsequent requests hit the cache.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `crates/edit_prediction/src/backboard.rs` | All of the above; primary file for this work |
+
+### Tab Acceptance Bug (Identified, Not Yet Fixed)
+
+Root cause identified for why Tab sometimes requires two presses to accept an inline prediction:
+
+The Tab keybinding context in `assets/keymaps/default-macos.json` is:
+
+```
+"context": "Editor && edit_prediction && edit_prediction_mode == eager && !showing_completions"
+```
+
+The `!showing_completions` guard blocks Tab from accepting the inline prediction whenever the LSP completion dropdown is visible. The first Tab press dismisses the LSP dropdown; the second then matches the context and accepts the prediction.
+
+Alt+Tab does not have this guard and always accepts immediately. The intended fix is to remove `!showing_completions` from the Tab binding, or to make `AcceptEditPrediction` dismiss the LSP dropdown and accept simultaneously. This has not yet been implemented — it requires understanding the interaction between LSP completion state and inline prediction state in `editor.rs`.
+
+### Merge Conflict Resolution (2026-05-22)
+
+After `git stash pop`, upstream (`bb-ide-zed`) had retained old thread-cache functions that our stash had removed. Six conflict regions appeared in `backboard.rs`. All were resolved by keeping the stash (our) version:
+
+1. **Upstream statics block** — kept our version (no thread-cache statics).
+2. **Thread cache loading in `request_prediction`** — kept our version (no thread lookup before assistant creation).
+3. **Completion text pipeline** — kept our `strip_typed_prefix_from_completion` call before `filtered_function_completion_chunks`.
+4. **Edit construction** — kept `Arc::from(completion_text.as_str())` (uses prefix-stripped text, not raw `response_str`).
+5. **Log format** — kept `reason=assistant_preamble` format from our version.
+6. **Midline/line-count filtering logic** — kept our full midline detection and 4/15 line-limit block.
+
+### Verification Commands
+
+```sh
+# Run all Backboard edit-prediction tests
+cargo test -p edit_prediction --lib 'backboard::tests'
+
+# Confirm no remaining conflict markers
+grep -c "<<<<<<\|=======\|>>>>>>>" crates/edit_prediction/src/backboard.rs
+
+# Check model selection and thundering herd prevention
+RUST_LOG=backboard=info cargo run --bin backboard-studio 2>&1 | grep "backboard:"
+```
