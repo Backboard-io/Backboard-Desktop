@@ -9514,6 +9514,7 @@ dependencies = [
  "anyhow",
  "collections",
  "command_palette",
+ "command_palette_hooks",
  "component",
  "db",
  "editor",

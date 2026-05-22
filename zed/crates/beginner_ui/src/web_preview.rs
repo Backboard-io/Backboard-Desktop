@@ -6,7 +6,6 @@
 ///   Linux   — not embedded; returns None so the caller shows "Open in Browser"
 ///
 /// All implementations share the same public API so callers are platform-agnostic.
-
 use gpui::{Bounds, Pixels, Window};
 
 pub struct WebPreview {
@@ -33,12 +32,16 @@ impl WebPreview {
         #[cfg(target_os = "macos")]
         {
             let inner = macos::WebPreviewInner::new(window, url)?;
-            return Some(WebPreview { inner: Inner::Macos(inner) });
+            return Some(WebPreview {
+                inner: Inner::Macos(inner),
+            });
         }
         #[cfg(target_os = "windows")]
         {
             let inner = windows::WebPreviewInner::new(window, url)?;
-            return Some(WebPreview { inner: Inner::Windows(inner) });
+            return Some(WebPreview {
+                inner: Inner::Windows(inner),
+            });
         }
         #[allow(unreachable_code)]
         let _ = (window, url);
@@ -79,7 +82,7 @@ mod macos {
     use cocoa::base::{id, nil};
     use cocoa::foundation::{NSPoint, NSRect, NSSize};
     use gpui::{Bounds, Pixels, Window};
-    use objc::{class, msg_send, sel, sel_impl, runtime::Object};
+    use objc::{class, msg_send, runtime::Object, sel, sel_impl};
     use raw_window_handle::RawWindowHandle;
 
     pub struct WebPreviewInner {
@@ -159,9 +162,15 @@ mod macos {
             return None;
         }
 
-        unsafe { let _: () = msg_send![wv, retain]; }
-        unsafe { let _: () = msg_send![parent, addSubview: wv]; }
-        unsafe { let _: () = msg_send![wv, release]; }
+        unsafe {
+            let _: () = msg_send![wv, retain];
+        }
+        unsafe {
+            let _: () = msg_send![parent, addSubview: wv];
+        }
+        unsafe {
+            let _: () = msg_send![wv, release];
+        }
 
         unsafe { load_url_on_view(wv, url) };
 
@@ -173,12 +182,13 @@ mod macos {
 
     unsafe fn load_url_on_view(wv: id, url: &str) {
         let Ok(cstr) = CString::new(url) else { return };
-        let url_str: id = unsafe {
-            msg_send![class!(NSString), stringWithUTF8String: cstr.as_ptr()]
-        };
+        let url_str: id =
+            unsafe { msg_send![class!(NSString), stringWithUTF8String: cstr.as_ptr()] };
         let nsurl: id = unsafe { msg_send![class!(NSURL), URLWithString: url_str] };
         let request: id = unsafe { msg_send![class!(NSURLRequest), requestWithURL: nsurl] };
-        unsafe { let _: () = msg_send![wv, loadRequest: request]; }
+        unsafe {
+            let _: () = msg_send![wv, loadRequest: request];
+        }
     }
 }
 

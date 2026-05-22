@@ -14,14 +14,15 @@ use editor::actions::Newline;
 use gpui::{
     App, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle, Focusable, Hsla,
     IntoElement, PathBuilder, PathPromptOptions, Render, SharedString, Subscription, Task,
-    WeakEntity, Window, WindowControlArea, canvas, point, rgb,
+    WeakEntity, Window, WindowControlArea, canvas, point,
 };
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
 use project::Project;
 use ui::{
     Button, ButtonStyle, Color, Icon, IconButton, IconName, IconSize, Label, LabelSize, Tooltip,
-    prelude::*, utils::platform_title_bar_height,
+    prelude::*,
+    utils::{ensure_minimum_contrast, platform_title_bar_height},
 };
 use util::ResultExt;
 use workspace::{MultiWorkspace, PathList, Workspace};
@@ -183,24 +184,21 @@ const BEGINNER_CHATS_KVP_KEY: &str = "beginner_chats_v1";
 const BEGINNER_OPEN_TABS_KVP_KEY: &str = "beginner_open_tabs_v1";
 const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
 
-fn simple_color(hex: u32) -> Hsla {
-    rgb(hex).into()
-}
-
-fn render_simple_project_mark(size: f32) -> impl IntoElement {
+fn render_simple_project_mark(size: f32, cx: &App) -> impl IntoElement {
+    let colors = cx.theme().colors().clone();
     div()
         .size(px(size))
         .rounded_sm()
         .border_1()
-        .border_color(simple_color(0xdde3ea))
-        .bg(simple_color(0xfbfcfd))
+        .border_color(colors.border_variant)
+        .bg(colors.element_background)
         .flex()
         .items_center()
         .justify_center()
         .child(
             Icon::new(IconName::Sparkle)
                 .size(IconSize::Indicator)
-                .color(Color::Custom(simple_color(0x5b8cff))),
+                .color(Color::Custom(colors.icon_accent)),
         )
 }
 
@@ -1267,6 +1265,11 @@ impl BeginnerWorkspace {
         3000 // all three taken — reuse 3000 (shouldn't happen with max 3 tabs)
     }
 
+    fn shell_quote_path(path: &PathBuf) -> String {
+        let path = path.to_string_lossy();
+        format!("'{}'", path.replace('\'', "'\\''"))
+    }
+
     fn start_dev_server(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
         // Reuse the already-claimed port for this session; claim a fresh one if first start.
         let port = self
@@ -1305,15 +1308,19 @@ impl BeginnerWorkspace {
             } else {
                 "npm"
             };
+            let install_cmd = match pkg_manager {
+                "pnpm" => "pnpm install",
+                "bun" => "bun install",
+                "yarn" => "yarn install",
+                _ => "npm install",
+            };
 
             // Use the interactive login shell so ~/.zshrc / ~/.bashrc are sourced —
             // this makes nvm, Homebrew, mise, etc. available even from a GUI app launch.
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+            let folder_arg = Self::shell_quote_path(&folder);
             let dev_cmd = format!(
-                "cd {} && {} run dev -- --port={}",
-                folder.display(),
-                pkg_manager,
-                port,
+                "cd {folder_arg} && if [ ! -d node_modules ]; then {install_cmd}; fi && {pkg_manager} run dev -- --port={port}",
             );
 
             let spawned = std::process::Command::new(&shell)
@@ -1693,6 +1700,16 @@ impl BeginnerWorkspace {
                                     )
                                 })
                             });
+                    if let Some(model_selector) = this.model_selector.as_ref() {
+                        let logo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                            .join("../../../../app/logo.png");
+                        model_selector.update(cx, |model_selector, _cx| {
+                            model_selector.set_trigger_brand(
+                                SharedString::from("Backboard"),
+                                Some(logo_path),
+                            );
+                        });
+                    }
                     cx.notify();
                 } else if !is_loading {
                     this.is_agent_running = false;
@@ -1942,13 +1959,14 @@ impl BeginnerWorkspace {
         let total_tabs = self.project_tab_count();
         let can_add = total_tabs < 3;
         // Only show a close button on the active tab when it can be meaningfully closed.
-        let show_active_close = !background_tabs.is_empty()
-            || matches!(self.state, BeginnerState::ActiveProject);
+        let show_active_close =
+            !background_tabs.is_empty() || matches!(self.state, BeginnerState::ActiveProject);
 
         let is_on_landing = matches!(self.state, BeginnerState::Landing);
         let chats_open = self.chats_sidebar_open;
         let show_first_run_chats_tip =
             FirstRunNavTipsState::read(cx).is_some_and(|state| !state.chats_seen);
+        let colors = cx.theme().colors().clone();
 
         h_flex()
             .h(px(32.))
@@ -1958,8 +1976,8 @@ impl BeginnerWorkspace {
             .px_2()
             .gap_0p5()
             .border_b_1()
-            .border_color(simple_color(0xf5f7fa))
-            .bg(simple_color(0xffffff))
+            .border_color(colors.border)
+            .bg(colors.tab_bar_background)
             // Chats toggle
             .child(
                 div()
@@ -1973,18 +1991,18 @@ impl BeginnerWorkspace {
                     .rounded_md()
                     .border_1()
                     .border_color(if chats_open {
-                        simple_color(0xdde3ea)
+                        colors.border_selected
                     } else {
-                        simple_color(0xffffff)
+                        colors.border_transparent
                     })
                     .bg(if chats_open {
-                        simple_color(0xfbfcfd)
+                        colors.element_selected
                     } else {
-                        simple_color(0xffffff)
+                        colors.ghost_element_background
                     })
                     .cursor_pointer()
                     .when(!chats_open, |el| {
-                        el.hover(|el| el.bg(simple_color(0xfbfcfd)))
+                        el.hover(|el| el.bg(colors.ghost_element_hover))
                     })
                     .tooltip(Tooltip::text(if show_first_run_chats_tip {
                         "Chats: Open your conversation list and start or resume a chat here."
@@ -2005,9 +2023,9 @@ impl BeginnerWorkspace {
                         Icon::new(IconName::Chat)
                             .size(IconSize::XSmall)
                             .color(if chats_open {
-                                Color::Custom(simple_color(0x111722))
+                                Color::Custom(colors.icon)
                             } else {
-                                Color::Custom(simple_color(0x8f9bad))
+                                Color::Custom(colors.icon_muted)
                             }),
                     ),
             )
@@ -2024,27 +2042,27 @@ impl BeginnerWorkspace {
                     .rounded_md()
                     .border_1()
                     .border_color(if is_on_landing {
-                        simple_color(0xdde3ea)
+                        colors.border_selected
                     } else {
-                        simple_color(0xffffff)
+                        colors.border_transparent
                     })
                     .bg(if is_on_landing {
-                        simple_color(0xfbfcfd)
+                        colors.element_selected
                     } else {
-                        simple_color(0xffffff)
+                        colors.ghost_element_background
                     })
                     .cursor_pointer()
                     .when(!is_on_landing, |el| {
-                        el.hover(|el| el.bg(simple_color(0xfbfcfd)))
+                        el.hover(|el| el.bg(colors.ghost_element_hover))
                     })
                     .tooltip(Tooltip::text("Home"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.go_home(window, cx);
                     }))
                     .child(render_simple_home_icon(if is_on_landing {
-                        simple_color(0x111722)
+                        colors.icon
                     } else {
-                        simple_color(0x8f9bad)
+                        colors.icon_muted
                     })),
             )
             // Active tab (hidden on Home)
@@ -2060,8 +2078,8 @@ impl BeginnerWorkspace {
                         .rounded_t_md()
                         .border_1()
                         .border_b_0()
-                        .border_color(simple_color(0xf5f7fa))
-                        .bg(simple_color(0xfbfcfd))
+                        .border_color(colors.border)
+                        .bg(colors.tab_active_background)
                         .child(
                             Label::new(active_title)
                                 .size(LabelSize::Small)
@@ -2101,7 +2119,7 @@ impl BeginnerWorkspace {
                     .items_center()
                     .rounded_t_md()
                     .cursor_pointer()
-                    .hover(|el| el.bg(simple_color(0xfbfcfd)))
+                    .hover(|el| el.bg(colors.tab_inactive_background))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.switch_to_session(ix, window, cx);
                     }))
@@ -2115,7 +2133,7 @@ impl BeginnerWorkspace {
                             .justify_center()
                             .rounded_sm()
                             .cursor_pointer()
-                            .hover(|el| el.bg(simple_color(0xf5f7fa)))
+                            .hover(|el| el.bg(colors.element_hover))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.close_background_session(ix, cx);
                             }))
@@ -2190,14 +2208,15 @@ impl BeginnerWorkspace {
     fn render_chats_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let chat_history = self.chat_history.clone();
         let no_history = chat_history.is_empty();
+        let colors = cx.theme().colors().clone();
 
         v_flex()
             .w(px(240.))
             .h_full()
             .flex_shrink_0()
             .border_r_1()
-            .border_color(simple_color(0xf5f7fa))
-            .bg(simple_color(0xffffff))
+            .border_color(colors.border)
+            .bg(colors.panel_background)
             .child(
                 v_flex()
                     .id("chat-history-list")
@@ -2251,7 +2270,7 @@ impl BeginnerWorkspace {
                             .child(
                                 Icon::new(IconName::Chat)
                                     .size(IconSize::XSmall)
-                                    .color(Color::Custom(simple_color(0x8f9bad))),
+                                    .color(Color::Custom(colors.icon_muted)),
                             )
                             .child(
                                 v_flex()
@@ -2295,7 +2314,8 @@ impl BeginnerWorkspace {
             )
     }
 
-    fn render_simple_header(&self, is_running: bool, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_simple_header(&self, is_running: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors().clone();
         h_flex()
             .h(px(44.))
             .w_full()
@@ -2303,36 +2323,37 @@ impl BeginnerWorkspace {
             .px_4()
             .gap_2()
             .items_center()
-            .bg(simple_color(0xffffff))
+            .bg(colors.panel_background)
             .border_b_1()
-            .border_color(simple_color(0xf5f7fa))
-            .child(render_simple_project_mark(16.))
+            .border_color(colors.border)
+            .child(render_simple_project_mark(16., cx))
             .child(
                 Label::new("Simple Page Builder")
                     .size(LabelSize::Small)
-                    .color(Color::Custom(simple_color(0x111722))),
+                    .color(Color::Custom(colors.text)),
             )
             .child(
                 Icon::new(IconName::ChevronDown)
                     .size(IconSize::XSmall)
-                    .color(Color::Custom(simple_color(0x8f9bad))),
+                    .color(Color::Custom(colors.icon_muted)),
             )
             .child(div().flex_1())
             .when(is_running, |el| {
                 el.child(
                     Icon::new(IconName::LoadCircle)
                         .size(IconSize::Medium)
-                        .color(Color::Custom(simple_color(0x5b8cff))),
+                        .color(Color::Custom(colors.icon_accent)),
                 )
             })
             .child(
                 Icon::new(IconName::Ellipsis)
                     .size(IconSize::Medium)
-                    .color(Color::Custom(simple_color(0x8f9bad))),
+                    .color(Color::Custom(colors.icon_muted)),
             )
     }
 
     fn render_empty_conversation(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors().clone();
         v_flex()
             .flex_1()
             .items_center()
@@ -2346,7 +2367,7 @@ impl BeginnerWorkspace {
                     .child(
                         Label::new("What do you want to build or ask?")
                             .size(LabelSize::Large)
-                            .color(Color::Custom(simple_color(0x111722))),
+                            .color(Color::Custom(colors.text)),
                     )
                     .child(
                         v_flex()
@@ -2355,14 +2376,14 @@ impl BeginnerWorkspace {
                             .child(
                                 Label::new("Use Build for changes, or Ask for guidance.")
                                     .size(LabelSize::Small)
-                                    .color(Color::Custom(simple_color(0x8f9bad))),
+                                    .color(Color::Custom(colors.text_muted)),
                             )
                             .child(
                                 Label::new(
                                     "Attach a folder when you want Backboard to work in a project.",
                                 )
                                 .size(LabelSize::Small)
-                                .color(Color::Custom(simple_color(0x8f9bad))),
+                                .color(Color::Custom(colors.text_muted)),
                             ),
                     ),
             )
@@ -2406,16 +2427,17 @@ impl BeginnerWorkspace {
         mode: ChatMode,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let colors = cx.theme().colors().clone();
         h_flex()
             .id(SharedString::from(format!("simple-chip-{label}")))
             .px_3()
             .py_1p5()
             .rounded_lg()
             .border_1()
-            .border_color(simple_color(0xf5f7fa))
-            .bg(simple_color(0xfbfcfd))
+            .border_color(colors.border_variant)
+            .bg(colors.element_background)
             .cursor_pointer()
-            .hover(|el| el.border_color(simple_color(0xdde3ea)))
+            .hover(|el| el.border_color(colors.border))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.set_chat_mode(mode, window, cx);
                 this.apply_suggested_prompt(prompt, window, cx);
@@ -2423,7 +2445,7 @@ impl BeginnerWorkspace {
             .child(
                 Label::new(label)
                     .size(LabelSize::Small)
-                    .color(Color::Custom(simple_color(0x414b5c))),
+                    .color(Color::Custom(colors.text)),
             )
     }
 
@@ -2435,6 +2457,7 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let selected = self.chat_mode == mode;
+        let colors = cx.theme().colors().clone();
         h_flex()
             .id(SharedString::from(format!(
                 "simple-mode-{}",
@@ -2446,19 +2469,19 @@ impl BeginnerWorkspace {
             .py_1()
             .rounded_sm()
             .bg(if selected {
-                simple_color(0xffffff)
+                colors.element_selected
             } else {
-                simple_color(0xfbfcfd)
+                colors.ghost_element_background
             })
             .border_1()
             .border_color(if selected {
-                simple_color(0xdde3ea)
+                colors.border_selected
             } else {
-                simple_color(0xfbfcfd)
+                colors.border_transparent
             })
             .when(!is_running && !is_connecting, |el| {
                 el.cursor_pointer()
-                    .hover(|el| el.border_color(simple_color(0xdde3ea)))
+                    .hover(|el| el.border_color(colors.border_variant))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.set_chat_mode(mode, window, cx);
                     }))
@@ -2467,15 +2490,19 @@ impl BeginnerWorkspace {
                 Icon::new(mode.icon())
                     .size(IconSize::Indicator)
                     .color(Color::Custom(if selected {
-                        simple_color(0x5b8cff)
+                        colors.icon_accent
                     } else {
-                        simple_color(0x8f9bad)
+                        colors.icon_muted
                     })),
             )
             .child(
                 Label::new(mode.label())
                     .size(LabelSize::XSmall)
-                    .color(Color::Custom(simple_color(0x414b5c))),
+                    .color(Color::Custom(if selected {
+                        colors.text_accent
+                    } else {
+                        colors.text
+                    })),
             )
     }
 
@@ -2484,6 +2511,7 @@ impl BeginnerWorkspace {
         let header_height = platform_title_bar_height(window);
         let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
         let background_tabs = self.background_project_tabs();
+        let colors = cx.theme().colors().clone();
 
         v_flex()
             .key_context("BeginnerLanding")
@@ -2491,7 +2519,7 @@ impl BeginnerWorkspace {
             .on_action(cx.listener(Self::handle_enter_submit))
             .size_full()
             .font_family("Inter")
-            .bg(simple_color(0xffffff))
+            .bg(colors.editor_background)
             // Title bar drag strip
             .child(
                 h_flex()
@@ -2503,8 +2531,8 @@ impl BeginnerWorkspace {
                         this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
                     })
                     .border_b_1()
-                    .border_color(simple_color(0xf5f7fa))
-                    .bg(simple_color(0xffffff)),
+                    .border_color(colors.border)
+                    .bg(colors.title_bar_background),
             )
             .child(self.render_tab_bar(SharedString::from("Home"), background_tabs, cx))
             .when(self.show_tab_limit_notice, |el| {
@@ -2525,7 +2553,7 @@ impl BeginnerWorkspace {
                             .min_h_0()
                             .h_full()
                             .overflow_hidden()
-                            .bg(simple_color(0xffffff))
+                            .bg(colors.editor_background)
                             .child(self.render_empty_conversation(cx))
                             .child(self.render_input_bar(false, false, draft_is_empty, window, cx)),
                     ),
@@ -2551,12 +2579,13 @@ impl BeginnerWorkspace {
         let preview_dominant = right_panel_visible && self.web_preview.is_some() && !is_running;
         let preview_card_state = self.preview_card_state();
         let background_tabs = self.background_project_tabs();
+        let colors = cx.theme().colors().clone();
 
         v_flex()
             .size_full()
             .font_family("Inter")
             .on_action(cx.listener(Self::handle_enter_submit))
-            .bg(simple_color(0xffffff))
+            .bg(colors.editor_background)
             // Title bar
             .child(
                 h_flex()
@@ -2564,8 +2593,8 @@ impl BeginnerWorkspace {
                     .w_full()
                     .flex_shrink_0()
                     .border_b_1()
-                    .border_color(simple_color(0xf5f7fa))
-                    .bg(simple_color(0xffffff))
+                    .border_color(colors.border)
+                    .bg(colors.title_bar_background)
                     .window_control_area(WindowControlArea::Drag)
                     .when(traffic_lights, |this| {
                         this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
@@ -2592,14 +2621,20 @@ impl BeginnerWorkspace {
                             .h_full()
                             .overflow_hidden()
                             .border_r_1()
-                            .border_color(simple_color(0xf5f7fa))
-                            .bg(simple_color(0xffffff))
+                            .border_color(colors.border)
+                            .bg(colors.editor_background)
                             .child(self.render_simple_header(is_running || is_connecting, cx))
                             .when_some(self.chat_feed.as_ref(), |el, feed| {
                                 feed.update(cx, |feed, cx| {
                                     feed.set_preview_state(preview_card_state, cx);
                                 });
-                                el.child(feed.clone())
+                                el.child(
+                                    div()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .overflow_hidden()
+                                        .child(feed.clone()),
+                                )
                             })
                             .when(self.chat_feed.is_none(), |el| {
                                 let (headline, subtext) = if is_connecting {
@@ -2618,6 +2653,7 @@ impl BeginnerWorkspace {
                                 el.child(
                                     v_flex()
                                         .flex_1()
+                                        .min_h_0()
                                         .items_center()
                                         .justify_center()
                                         .gap_3()
@@ -2625,12 +2661,12 @@ impl BeginnerWorkspace {
                                         .child(
                                             Label::new(headline)
                                                 .size(LabelSize::Large)
-                                                .color(Color::Custom(simple_color(0x111722))),
+                                                .color(Color::Custom(colors.text)),
                                         )
                                         .child(
                                             Label::new(subtext)
                                                 .size(LabelSize::Small)
-                                                .color(Color::Custom(simple_color(0x8f9bad))),
+                                                .color(Color::Custom(colors.text_muted)),
                                         ),
                                 )
                             })
@@ -2657,12 +2693,12 @@ impl BeginnerWorkspace {
                                         .child(
                                             Icon::new(IconName::LoadCircle)
                                                 .size(IconSize::XSmall)
-                                                .color(Color::Custom(simple_color(0x5b8cff))),
+                                                .color(Color::Custom(colors.icon_accent)),
                                         )
                                         .child(
                                             Label::new(status)
                                                 .size(LabelSize::XSmall)
-                                                .color(Color::Custom(simple_color(0x8f9bad))),
+                                                .color(Color::Custom(colors.text_muted)),
                                         ),
                                 )
                             })
@@ -2693,9 +2729,10 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let is_code_view = matches!(self.right_panel, RightPanel::CodeView { .. });
-        let border = cx.theme().colors().border;
-        let tab_active_bg = cx.theme().colors().editor_background;
-        let tab_hover = cx.theme().colors().element_hover;
+        let colors = cx.theme().colors().clone();
+        let border = colors.border;
+        let tab_active_bg = colors.editor_background;
+        let tab_hover = colors.element_hover;
         let has_webview = self.web_preview.is_some();
         let workspace = cx.entity().downgrade();
 
@@ -2726,7 +2763,7 @@ impl BeginnerWorkspace {
                                     .bg(tab_active_bg)
                             })
                             .when(is_code_view, |el| {
-                                el.border_color(gpui::transparent_white())
+                                el.border_color(colors.border_transparent)
                                     .hover(move |el| el.bg(tab_hover))
                             })
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -2931,7 +2968,7 @@ impl BeginnerWorkspace {
                     .justify_center()
                     .gap_2()
                     .p_4()
-                    .child(render_simple_project_mark(32.))
+                    .child(render_simple_project_mark(32., cx))
                     .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
                     .into_any_element()
             } else {
@@ -2970,29 +3007,31 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let is_disabled = is_running || is_connecting || draft_is_empty;
+        let colors = cx.theme().colors().clone();
+        let send_icon_color = ensure_minimum_contrast(colors.text, colors.text_accent, 75.);
         v_flex()
             .flex_shrink_0()
-            .bg(simple_color(0xffffff))
+            .bg(colors.panel_background)
             .border_t_1()
-            .border_color(simple_color(0xf5f7fa))
-            .px_4()
-            .pt_2()
-            .pb_4()
-            .gap_3()
+            .border_color(colors.border)
+            .px_3()
+            .pt_1()
+            .pb_2()
+            .gap_2()
             .child(
                 v_flex()
                     .w_full()
                     .rounded_xl()
                     .border_1()
-                    .border_color(simple_color(0xf5f7fa))
-                    .bg(simple_color(0xfbfcfd))
-                    .p_3()
-                    .gap_3()
+                    .border_color(colors.border_variant)
+                    .bg(colors.element_background)
+                    .p_2()
+                    .gap_2()
                     .child(self.chat_editor.clone())
                     .child(
                         h_flex()
                             .items_center()
-                            .gap_3()
+                            .gap_2()
                             .child(
                                 div()
                                     .id("simple-add-folder")
@@ -3002,7 +3041,7 @@ impl BeginnerWorkspace {
                                     .justify_center()
                                     .rounded_sm()
                                     .cursor_pointer()
-                                    .hover(|el| el.bg(simple_color(0xf5f7fa)))
+                                    .hover(|el| el.bg(colors.element_hover))
                                     .tooltip(Tooltip::text("Attach project root directory"))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.pick_folder(window, cx);
@@ -3010,7 +3049,7 @@ impl BeginnerWorkspace {
                                     .child(
                                         Icon::new(IconName::FolderOpenAdd)
                                             .size(IconSize::Small)
-                                            .color(Color::Custom(simple_color(0x8f9bad))),
+                                            .color(Color::Custom(colors.icon_muted)),
                                     ),
                             )
                             .when_some(self.selected_folder.as_ref(), |el, folder| {
@@ -3026,15 +3065,18 @@ impl BeginnerWorkspace {
                                         .child(
                                             Icon::new(IconName::Folder)
                                                 .size(IconSize::XSmall)
-                                                .color(Color::Custom(simple_color(0x8f9bad))),
+                                                .color(Color::Custom(colors.icon_muted)),
                                         )
                                         .child(
                                             Label::new(folder_name)
                                                 .size(LabelSize::XSmall)
-                                                .color(Color::Custom(simple_color(0x414b5c)))
+                                                .color(Color::Custom(colors.text))
                                                 .truncate(),
                                         ),
                                 )
+                            })
+                            .when_some(self.model_selector.clone(), |el, selector| {
+                                el.child(selector)
                             })
                             .child(div().flex_1())
                             .child(
@@ -3043,8 +3085,8 @@ impl BeginnerWorkspace {
                                     .items_center()
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(simple_color(0xf5f7fa))
-                                    .bg(simple_color(0xfbfcfd))
+                                    .border_color(colors.border_variant)
+                                    .bg(colors.editor_background)
                                     .p(px(2.))
                                     .child(self.render_mode_button(
                                         ChatMode::Ask,
@@ -3068,9 +3110,9 @@ impl BeginnerWorkspace {
                                     .justify_center()
                                     .rounded_md()
                                     .bg(if is_disabled {
-                                        simple_color(0xf5f7fa)
+                                        colors.element_disabled
                                     } else {
-                                        simple_color(0x5b8cff)
+                                        colors.text_accent
                                     })
                                     .when(!is_disabled, |el| {
                                         el.cursor_pointer().on_click(cx.listener(
@@ -3081,9 +3123,9 @@ impl BeginnerWorkspace {
                                     })
                                     .child(Icon::new(IconName::Send).size(IconSize::Small).color(
                                         Color::Custom(if is_disabled {
-                                            simple_color(0xaeb8c6)
+                                            colors.icon_disabled
                                         } else {
-                                            simple_color(0xffffff)
+                                            send_icon_color
                                         }),
                                     )),
                             ),
@@ -3122,15 +3164,12 @@ impl BeginnerWorkspace {
                         ),
                 )
             })
-            .when_some(self.model_selector.clone(), |el, selector| {
-                el.child(h_flex().justify_start().pt_0p5().child(selector))
-            })
             .when(is_connecting, |el| {
                 el.child(
                     h_flex().justify_end().child(
                         Label::new("Connecting...")
                             .size(LabelSize::XSmall)
-                            .color(Color::Custom(simple_color(0x8f9bad))),
+                            .color(Color::Custom(colors.text_muted)),
                     ),
                 )
             })

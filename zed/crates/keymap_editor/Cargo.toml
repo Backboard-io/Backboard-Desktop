@@ -15,6 +15,7 @@ path = "src/keymap_editor.rs"
 anyhow.workspace = true
 collections.workspace = true
 command_palette.workspace = true
+command_palette_hooks.workspace = true
 component.workspace = true
 db.workspace = true
 editor.workspace = true

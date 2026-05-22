@@ -12,6 +12,7 @@ mod ui_components;
 
 use anyhow::{Context as _, anyhow};
 use collections::{HashMap, HashSet};
+use command_palette_hooks::CommandPaletteFilter;
 use editor::{CompletionProvider, Editor, EditorEvent, EditorMode, SizingBehavior};
 use fs::Fs;
 use fuzzy::{StringMatch, StringMatchCandidate};
@@ -118,11 +119,13 @@ pub fn init(cx: &mut App) {
 
         if let Some(filter) = filter {
             keymap_editor.update(cx, |editor, cx| {
+                let has_binding = editor.has_binding_for(&filter);
+                let visible_filter = command_palette::humanize_action_name(&filter);
                 editor.filter_editor.update(cx, |editor, cx| {
                     editor.clear(window, cx);
-                    editor.insert(&filter, window, cx);
+                    editor.insert(&visible_filter, window, cx);
                 });
-                if !editor.has_binding_for(&filter) {
+                if !has_binding {
                     open_binding_modal_after_loading(cx)
                 }
             })
@@ -826,6 +829,7 @@ impl KeymapEditor {
         let key_bindings_ptr = cx.key_bindings();
         let lock = key_bindings_ptr.borrow();
         let key_bindings = lock.bindings().collect::<Vec<_>>();
+        let command_palette_filter = CommandPaletteFilter::try_global(cx);
         let mut unmapped_action_names = HashSet::from_iter(cx.all_action_names().iter().copied());
         let action_documentation = cx.action_documentation();
         let mut generator = KeymapFile::action_schema_generator();
@@ -840,6 +844,9 @@ impl KeymapEditor {
 
         for (binding_index, &key_binding) in key_bindings.iter().enumerate() {
             if gpui::is_unbind(key_binding.action()) {
+                continue;
+            }
+            if command_palette_filter.is_some_and(|filter| filter.is_hidden(key_binding.action())) {
                 continue;
             }
 
@@ -894,6 +901,9 @@ impl KeymapEditor {
         }
 
         for action_name in unmapped_action_names.into_iter() {
+            if command_palette_filter.is_some_and(|filter| filter.is_hidden_name(action_name)) {
+                continue;
+            }
             let index = processed_bindings.len();
             let action_information = ActionInformation::new(
                 action_name,
@@ -2539,7 +2549,15 @@ impl KeybindingEditorModal {
         let has_action_editor = create && editing_keybind.action().name == gpui::NoAction.name();
 
         let (action_editor, action_name_to_static) = if has_action_editor {
-            let actions: Vec<&'static str> = cx.all_action_names().to_vec();
+            let command_palette_filter = CommandPaletteFilter::try_global(cx);
+            let actions: Vec<&'static str> = cx
+                .all_action_names()
+                .iter()
+                .copied()
+                .filter(|action_name| {
+                    !command_palette_filter.is_some_and(|filter| filter.is_hidden_name(action_name))
+                })
+                .collect();
 
             let humanized_names: HashMap<&'static str, SharedString> = actions
                 .iter()
