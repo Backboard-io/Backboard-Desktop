@@ -159,12 +159,7 @@ impl RenderOnce for ModelSelectorListItem {
                             .size(IconSize::Small),
                         )
                     })
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .child(Label::new(title).truncate()),
-                    )
+                    .child(div().min_w_0().flex_1().child(Label::new(title).truncate()))
                     .when(is_latest, |parent| parent.child(Chip::new("Latest")))
                     .when_some(cost_info, |this, cost_info| {
                         this.child(
@@ -176,28 +171,24 @@ impl RenderOnce for ModelSelectorListItem {
                         )
                     }),
             )
-            .end_slot(
-                h_flex()
-                    .pr_1p5()
-                    .gap_1()
-                    .when_some(on_toggle_favorite, |this, handle_click| {
-                        let (icon, color, tooltip) = if is_favorite {
-                            (IconName::StarFilled, Color::Accent, "Unfavorite Model")
-                        } else {
-                            (IconName::Star, Color::Muted, "Favorite Model")
-                        };
-                        this.child(
-                            IconButton::new(("toggle-favorite", index), icon)
-                                .layer(ElevationIndex::ElevatedSurface)
-                                .icon_color(color)
-                                .icon_size(IconSize::Small)
-                                .tooltip(Tooltip::text(tooltip))
-                                .on_click(move |event, window, cx| {
-                                    (handle_click)(event, window, cx)
-                                }),
-                        )
-                    }),
-            )
+            .end_slot(h_flex().pr_1p5().gap_1().when_some(
+                on_toggle_favorite,
+                |this, handle_click| {
+                    let (icon, color, tooltip) = if is_favorite {
+                        (IconName::StarFilled, Color::Accent, "Unfavorite Model")
+                    } else {
+                        (IconName::Star, Color::Muted, "Favorite Model")
+                    };
+                    this.child(
+                        IconButton::new(("toggle-favorite", index), icon)
+                            .layer(ElevationIndex::ElevatedSurface)
+                            .icon_color(color)
+                            .icon_size(IconSize::Small)
+                            .tooltip(Tooltip::text(tooltip))
+                            .on_click(move |event, window, cx| (handle_click)(event, window, cx)),
+                    )
+                },
+            ))
     }
 }
 

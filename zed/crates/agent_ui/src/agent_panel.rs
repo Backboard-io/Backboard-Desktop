@@ -1903,8 +1903,10 @@ impl AgentPanel {
                 });
 
         if let Some(agent_workspace) = agent_workspace {
-            agent_workspace.update(cx, |agent_workspace, cx| {
-                agent_workspace.create_chat(window, cx);
+            window.defer(cx, move |window, cx| {
+                agent_workspace.update(cx, |agent_workspace, cx| {
+                    agent_workspace.create_chat(window, cx);
+                });
             });
             return;
         }

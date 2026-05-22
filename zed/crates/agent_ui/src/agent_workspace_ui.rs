@@ -503,9 +503,9 @@ impl BackboardAgentWorkspacePage {
         let card_width = if right_panel_open {
             relative(0.48)
         } else {
-            relative(0.315)
+            relative(0.235)
         };
-        let card_min_width = if right_panel_open { px(320.) } else { px(360.) };
+        let card_min_width = if right_panel_open { px(320.) } else { px(260.) };
 
         if summaries.is_empty() && !draft_composer_open {
             return v_flex()
@@ -585,8 +585,8 @@ impl BackboardAgentWorkspacePage {
                     .items_start()
                     .content_start()
                     .flex_wrap()
-                    .gap(px(16.))
-                    .p(px(16.))
+                    .gap(px(12.))
+                    .p(px(12.))
                     .when(draft_composer_open, |this| {
                         this.child(
                             self.render_new_agent_tile(
@@ -2290,60 +2290,6 @@ impl BackboardAgentWorkspacePage {
             .bg(cx.theme().colors().editor_background)
             .overflow_hidden()
             .child(
-                h_flex()
-                    .h(px(48.))
-                    .px_4()
-                    .gap_2()
-                    .items_center()
-                    .justify_between()
-                    .border_b_1()
-                    .border_color(cx.theme().colors().border_variant.opacity(0.42))
-                    .bg(cx.theme().colors().editor_background)
-                    .child(
-                        h_flex()
-                            .min_w_0()
-                            .gap_2()
-                            .items_center()
-                            .child(self.render_status_dot(summary.status, cx))
-                            .child(
-                                v_flex()
-                                    .min_w_0()
-                                    .gap_0()
-                                    .child(
-                                        Label::new(summary.title.clone())
-                                            .size(LabelSize::Small)
-                                            .weight(FontWeight::MEDIUM)
-                                            .color(Color::Default),
-                                    )
-                                    .child(
-                                        Label::new(summary.command.clone())
-                                            .size(LabelSize::Small)
-                                            .color(Color::Muted)
-                                            .truncate(),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .child(self.render_status_badge(summary.status, cx))
-                            .child(
-                                IconButton::new(
-                                    format!("close-agent-detail-{thread_key}"),
-                                    IconName::ThreadsSidebarRightOpen,
-                                )
-                                .icon_size(IconSize::Small)
-                                .tooltip(Tooltip::text("Close right panel"))
-                                .on_click(cx.listener(
-                                    |this, _, _, cx| {
-                                        this.close_detail(cx);
-                                    },
-                                )),
-                            ),
-                    ),
-            )
-            .child(
                 div()
                     .flex_1()
                     .min_h_0()
@@ -2451,37 +2397,65 @@ impl BackboardAgentWorkspacePage {
             .bg(colors.editor_background)
             .overflow_hidden()
             .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
-            .child(match agent_panel {
-                Some(panel) => div()
+            .child(
+                div()
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .child(panel)
-                    .into_any_element(),
-                None => v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .items_center()
-                    .justify_center()
-                    .gap_3()
-                    .px_5()
+                    .child(match agent_panel {
+                        Some(panel) => div()
+                            .size_full()
+                            .overflow_hidden()
+                            .child(panel)
+                            .into_any_element(),
+                        None => v_flex()
+                            .size_full()
+                            .items_center()
+                            .justify_center()
+                            .gap_3()
+                            .px_5()
+                            .child(
+                                Label::new("Start a new agent")
+                                    .size(LabelSize::Small)
+                                    .weight(FontWeight::BOLD)
+                                    .color(Color::Default),
+                            )
+                            .child(
+                                Button::new("composer-card-new-agent-chat", "New Agent")
+                                    .start_icon(Icon::new(IconName::Plus))
+                                    .style(ButtonStyle::Tinted(TintColor::Accent))
+                                    .size(ButtonSize::Compact)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.create_chat(window, cx);
+                                    })),
+                            )
+                            .into_any_element(),
+                    })
                     .child(
-                        Label::new("Start a new agent")
-                            .size(LabelSize::Small)
-                            .weight(FontWeight::BOLD)
-                            .color(Color::Default),
-                    )
-                    .child(
-                        Button::new("composer-card-new-agent-chat", "New Agent")
-                            .start_icon(Icon::new(IconName::Plus))
-                            .style(ButtonStyle::Tinted(TintColor::Accent))
-                            .size(ButtonSize::Compact)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.create_chat(window, cx);
-                            })),
-                    )
-                    .into_any_element(),
-            })
+                        div()
+                            .absolute()
+                            .top_1()
+                            .left_1()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(colors.border_variant.opacity(0.52))
+                            .bg(colors.element_background.opacity(0.92))
+                            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                                cx.stop_propagation();
+                            })
+                            .child(
+                                IconButton::new("close-new-agent-composer", IconName::ArrowLeft)
+                                    .icon_size(IconSize::XSmall)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(Tooltip::text("Close agent composer"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.close_detail(cx);
+                                    })),
+                            ),
+                    ),
+            )
             .on_action(cx.listener(|this, _: &Chat, window, cx| {
                 this.submit_chat_action(window, cx);
             }))

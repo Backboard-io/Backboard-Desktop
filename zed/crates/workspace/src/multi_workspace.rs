@@ -2198,7 +2198,7 @@ impl MultiWorkspace {
                     ))
                     .child(self.render_workspace_mode_tab(
                         "multi-workspace-git-tab",
-                        "Git",
+                        "Git Terminal",
                         selected_tab == WorkspaceModeTab::Git,
                         WorkspaceModeTab::Git,
                         cx,
@@ -2368,21 +2368,6 @@ impl Render for MultiWorkspace {
                 let left_dock = workspace.update(cx, |workspace, cx| {
                     workspace.render_dock(DockPosition::Left, workspace.left_dock(), window, cx)
                 });
-                let right_dock = workspace.update(cx, |workspace, cx| {
-                    workspace
-                        .right_dock()
-                        .read(cx)
-                        .has_agent_panel(cx)
-                        .then(|| {
-                            workspace.render_dock(
-                                DockPosition::Right,
-                                workspace.right_dock(),
-                                window,
-                                cx,
-                            )
-                        })
-                        .flatten()
-                });
                 let bottom_dock = workspace.update(cx, |workspace, cx| {
                     workspace.render_dock(DockPosition::Bottom, workspace.bottom_dock(), window, cx)
                 });
@@ -2422,8 +2407,7 @@ impl Render for MultiWorkspace {
                                                 .h_full()
                                                 .overflow_hidden()
                                                 .child(view.clone()),
-                                        )
-                                        .children(right_dock),
+                                        ),
                                 )
                                 .children(bottom_dock),
                         )
@@ -2488,7 +2472,10 @@ impl Render for MultiWorkspace {
                                         .size_full()
                                         .items_center()
                                         .justify_center()
-                                        .child(Label::new("Git is loading").color(Color::Muted))
+                                        .child(
+                                            Label::new("Git Terminal is loading")
+                                                .color(Color::Muted),
+                                        )
                                         .into_any_element()
                                 },
                                 |view| view.into_any_element(),

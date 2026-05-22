@@ -1504,7 +1504,11 @@ impl GitRepository for RealGitRepository {
         self.executor
             .spawn(async move {
                 fn logic(repo: &git2::Repository, path: &RepoPath) -> Result<Option<String>> {
-                    let head = repo.head()?.peel_to_tree()?;
+                    let head = match repo.head() {
+                        Ok(head) => head.peel_to_tree()?,
+                        Err(err) if err.code() == ErrorCode::UnbornBranch => return Ok(None),
+                        Err(err) => return Err(err.into()),
+                    };
                     // git2 unwraps internally on empty paths or `.`
                     if path.is_empty() {
                         return Err(anyhow!("empty path has no committed text"));
