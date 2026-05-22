@@ -1,11 +1,7 @@
 use gpui::{Action as _, App, WindowHandle};
-use itertools::Itertools as _;
-use settings::{
-    AudioInputDeviceName, AudioOutputDeviceName, LanguageSettingsContent, SemanticTokens,
-    SettingsContent,
-};
-use std::sync::{Arc, OnceLock};
-use strum::{EnumMessage, IntoDiscriminant as _, VariantArray};
+use settings::{LanguageSettingsContent, SettingsContent};
+use std::sync::Arc;
+use strum::IntoDiscriminant as _;
 use theme::SystemAppearance;
 use ui::IntoElement;
 use workspace::{InterfaceMode, MultiWorkspace};
@@ -13,21 +9,13 @@ use workspace::{InterfaceMode, MultiWorkspace};
 use crate::{
     ActionLink, DynamicItem, PROJECT, SettingField, SettingItem, SettingsFieldMetadata,
     SettingsPage, SettingsPageItem, SubPageLink, USER, active_language, all_language_names,
-    pages::{
-        open_audio_test_window, render_edit_prediction_setup_page,
-        render_tool_permissions_setup_page,
-    },
+    pages::{render_edit_prediction_setup_page, render_tool_permissions_setup_page},
 };
 
 const DEFAULT_STRING: String = String::new();
 /// A default empty string reference. Useful in `pick` functions for cases either in dynamic item fields, or when dealing with `settings::Maybe`
 /// to avoid the "NO DEFAULT" case.
 const DEFAULT_EMPTY_STRING: Option<&String> = Some(&DEFAULT_STRING);
-
-const DEFAULT_AUDIO_OUTPUT: AudioOutputDeviceName = AudioOutputDeviceName(None);
-const DEFAULT_EMPTY_AUDIO_OUTPUT: Option<&AudioOutputDeviceName> = Some(&DEFAULT_AUDIO_OUTPUT);
-const DEFAULT_AUDIO_INPUT: AudioInputDeviceName = AudioInputDeviceName(None);
-const DEFAULT_EMPTY_AUDIO_INPUT: Option<&AudioInputDeviceName> = Some(&DEFAULT_AUDIO_INPUT);
 
 macro_rules! concat_sections {
     (@vec, $($arr:expr),+ $(,)?) => {{
@@ -75,7 +63,6 @@ pub(crate) fn settings_data(cx: &App) -> Vec<SettingsPage> {
         debugger_page(),
         terminal_page(),
         version_control_page(),
-        collaboration_page(),
         ai_page(cx),
         network_page(),
     ];
@@ -355,104 +342,6 @@ fn general_page(cx: &App) -> SettingsPage {
         ]
     }
 
-    fn scoped_settings_section() -> [SettingsPageItem; 3] {
-        [
-            SettingsPageItem::SectionHeader("Scoped Settings"),
-            SettingsPageItem::SettingItem(SettingItem {
-                files: USER,
-                title: "Preview Channel",
-                description: "Which settings should be activated only in Preview build of Backboard Studio.",
-                field: Box::new(
-                    SettingField {
-                        json_path: Some("preview_channel_settings"),
-                        pick: |settings_content| Some(settings_content),
-                        write: |_settings_content, _value, _| {},
-                    }
-                    .unimplemented(),
-                ),
-                metadata: None,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                files: USER,
-                title: "Settings Profiles",
-                description: "Any number of settings profiles that are temporarily applied on top of your existing user settings.",
-                field: Box::new(
-                    SettingField {
-                        json_path: Some("settings_profiles"),
-                        pick: |settings_content| Some(settings_content),
-                        write: |_settings_content, _value, _| {},
-                    }
-                    .unimplemented(),
-                ),
-                metadata: None,
-            }),
-        ]
-    }
-
-    fn privacy_section() -> [SettingsPageItem; 3] {
-        [
-            SettingsPageItem::SectionHeader("Privacy"),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Telemetry Diagnostics",
-                description: "Send debug information like crash reports.",
-                field: Box::new(SettingField {
-                    json_path: Some("telemetry.diagnostics"),
-                    pick: |settings_content| {
-                        settings_content
-                            .telemetry
-                            .as_ref()
-                            .and_then(|telemetry| telemetry.diagnostics.as_ref())
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content
-                            .telemetry
-                            .get_or_insert_default()
-                            .diagnostics = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Telemetry Metrics",
-                description: "Send anonymized usage data like what languages you're using Backboard Studio with.",
-                field: Box::new(SettingField {
-                    json_path: Some("telemetry.metrics"),
-                    pick: |settings_content| {
-                        settings_content
-                            .telemetry
-                            .as_ref()
-                            .and_then(|telemetry| telemetry.metrics.as_ref())
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content.telemetry.get_or_insert_default().metrics = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-        ]
-    }
-
-    fn auto_update_section() -> [SettingsPageItem; 2] {
-        [
-            SettingsPageItem::SectionHeader("Auto Update"),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Auto Update",
-                description: "Whether or not to automatically check for updates.",
-                field: Box::new(SettingField {
-                    json_path: Some("auto_update"),
-                    pick: |settings_content| settings_content.auto_update.as_ref(),
-                    write: |settings_content, value, _| {
-                        settings_content.auto_update = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-        ]
-    }
-
     SettingsPage {
         title: "General",
         items: concat_sections!(
@@ -460,9 +349,6 @@ fn general_page(cx: &App) -> SettingsPage {
             general_settings_section(cx),
             security_section(),
             workspace_restoration_section(),
-            scoped_settings_section(),
-            privacy_section(),
-            auto_update_section(),
         )
         .into(),
     }
@@ -1528,48 +1414,6 @@ fn editor_page() -> SettingsPage {
                         settings::AutosaveSettingDiscriminants::OnWindowChange => vec![],
                     })
                     .collect(),
-            }),
-        ]
-    }
-
-    fn which_key_section() -> [SettingsPageItem; 3] {
-        [
-            SettingsPageItem::SectionHeader("Which-key Menu"),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Show Which-key Menu",
-                description: "Display the which-key menu with matching bindings while a multi-stroke binding is pending.",
-                field: Box::new(SettingField {
-                    json_path: Some("which_key.enabled"),
-                    pick: |settings_content| {
-                        settings_content
-                            .which_key
-                            .as_ref()
-                            .and_then(|settings| settings.enabled.as_ref())
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content.which_key.get_or_insert_default().enabled = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Menu Delay",
-                description: "Delay in milliseconds before the which-key menu appears.",
-                field: Box::new(SettingField {
-                    json_path: Some("which_key.delay_ms"),
-                    pick: |settings_content| {
-                        settings_content
-                            .which_key
-                            .as_ref()
-                            .and_then(|settings| settings.delay_ms.as_ref())
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content.which_key.get_or_insert_default().delay_ms = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
             }),
         ]
     }
@@ -2888,7 +2732,6 @@ fn editor_page() -> SettingsPage {
 
     let items = concat_sections!(
         auto_save_section(),
-        which_key_section(),
         multibuffer_section(),
         scrolling_section(),
         signature_help_section(),
@@ -3086,86 +2929,6 @@ fn languages_and_tools_page(cx: &App) -> SettingsPage {
         ]
     }
 
-    fn lsp_pull_diagnostics_section() -> [SettingsPageItem; 3] {
-        [
-            SettingsPageItem::SectionHeader("LSP Pull Diagnostics"),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Enabled",
-                description: "Whether to pull for language server-powered diagnostics or not.",
-                field: Box::new(SettingField {
-                    json_path: Some("diagnostics.lsp_pull_diagnostics.enabled"),
-                    pick: |settings_content| {
-                        settings_content
-                            .diagnostics
-                            .as_ref()?
-                            .lsp_pull_diagnostics
-                            .as_ref()?
-                            .enabled
-                            .as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content
-                            .diagnostics
-                            .get_or_insert_default()
-                            .lsp_pull_diagnostics
-                            .get_or_insert_default()
-                            .enabled = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-            // todo(settings_ui): Needs unit
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Debounce",
-                description: "Minimum time to wait before pulling diagnostics from the language server(s).",
-                field: Box::new(SettingField {
-                    json_path: Some("diagnostics.lsp_pull_diagnostics.debounce_ms"),
-                    pick: |settings_content| {
-                        settings_content
-                            .diagnostics
-                            .as_ref()?
-                            .lsp_pull_diagnostics
-                            .as_ref()?
-                            .debounce_ms
-                            .as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content
-                            .diagnostics
-                            .get_or_insert_default()
-                            .lsp_pull_diagnostics
-                            .get_or_insert_default()
-                            .debounce_ms = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-        ]
-    }
-
-    fn lsp_highlights_section() -> [SettingsPageItem; 2] {
-        [
-            SettingsPageItem::SectionHeader("LSP Highlights"),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Debounce",
-                description: "The debounce delay before querying highlights from the language.",
-                field: Box::new(SettingField {
-                    json_path: Some("lsp_highlight_debounce"),
-                    pick: |settings_content| {
-                        settings_content.editor.lsp_highlight_debounce.as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content.editor.lsp_highlight_debounce = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-        ]
-    }
-
     fn languages_list_section(cx: &App) -> Box<[SettingsPageItem]> {
         // todo(settings_ui): Refresh on extension (un)/installed
         // Note that `crates/json_schema_store` solves the same problem, there is probably a way to unify the two
@@ -3206,8 +2969,6 @@ fn languages_and_tools_page(cx: &App) -> SettingsPage {
                 file_types_section(),
                 diagnostics_section(),
                 inline_diagnostics_section(),
-                lsp_pull_diagnostics_section(),
-                lsp_highlights_section(),
                 languages_list_section(cx),
             )
         },
@@ -5828,74 +5589,6 @@ fn panels_page() -> SettingsPage {
         ]
     }
 
-    fn collaboration_panel_section() -> [SettingsPageItem; 4] {
-        [
-            SettingsPageItem::SectionHeader("Collaboration Panel"),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Collaboration Panel Button",
-                description: "Show the collaboration panel button in the status bar.",
-                field: Box::new(SettingField {
-                    json_path: Some("collaboration_panel.button"),
-                    pick: |settings_content| {
-                        settings_content
-                            .collaboration_panel
-                            .as_ref()?
-                            .button
-                            .as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content
-                            .collaboration_panel
-                            .get_or_insert_default()
-                            .button = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Collaboration Panel Dock",
-                description: "Where to dock the collaboration panel.",
-                field: Box::new(SettingField {
-                    json_path: Some("collaboration_panel.dock"),
-                    pick: |settings_content| {
-                        settings_content.collaboration_panel.as_ref()?.dock.as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content
-                            .collaboration_panel
-                            .get_or_insert_default()
-                            .dock = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Collaboration Panel Default Width",
-                description: "Default width of the collaboration panel in pixels.",
-                field: Box::new(SettingField {
-                    json_path: Some("collaboration_panel.dock"),
-                    pick: |settings_content| {
-                        settings_content
-                            .collaboration_panel
-                            .as_ref()?
-                            .default_width
-                            .as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content
-                            .collaboration_panel
-                            .get_or_insert_default()
-                            .default_width = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-        ]
-    }
-
     fn agent_panel_section() -> [SettingsPageItem; 7] {
         [
             SettingsPageItem::SectionHeader("Agent Panel"),
@@ -6035,7 +5728,6 @@ fn panels_page() -> SettingsPage {
             outline_panel_section(),
             git_panel_section(),
             debugger_panel_section(),
-            collaboration_panel_section(),
             agent_panel_section(),
         ],
     }
@@ -7364,124 +7056,10 @@ fn version_control_page() -> SettingsPage {
     }
 }
 
-fn collaboration_page() -> SettingsPage {
-    fn calls_section() -> [SettingsPageItem; 3] {
-        [
-            SettingsPageItem::SectionHeader("Calls"),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Mute On Join",
-                description: "Whether the microphone should be muted when joining a channel or a call.",
-                field: Box::new(SettingField {
-                    json_path: Some("calls.mute_on_join"),
-                    pick: |settings_content| settings_content.calls.as_ref()?.mute_on_join.as_ref(),
-                    write: |settings_content, value, _| {
-                        settings_content.calls.get_or_insert_default().mute_on_join = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Share On Join",
-                description: "Whether your current project should be shared when joining an empty channel.",
-                field: Box::new(SettingField {
-                    json_path: Some("calls.share_on_join"),
-                    pick: |settings_content| {
-                        settings_content.calls.as_ref()?.share_on_join.as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content.calls.get_or_insert_default().share_on_join = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-        ]
-    }
-
-    fn audio_settings() -> [SettingsPageItem; 3] {
-        [
-            SettingsPageItem::ActionLink(ActionLink {
-                title: "Test Audio".into(),
-                description: Some("Test your microphone and speaker setup".into()),
-                button_text: "Test Audio".into(),
-                on_click: Arc::new(|_settings_window, window, cx| {
-                    open_audio_test_window(window, cx);
-                }),
-                files: USER,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Output Audio Device",
-                description: "Select output audio device",
-                field: Box::new(SettingField {
-                    json_path: Some("audio.experimental.output_audio_device"),
-                    pick: |settings_content| {
-                        settings_content
-                            .audio
-                            .as_ref()?
-                            .output_audio_device
-                            .as_ref()
-                            .or(DEFAULT_EMPTY_AUDIO_OUTPUT)
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content
-                            .audio
-                            .get_or_insert_default()
-                            .output_audio_device = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Input Audio Device",
-                description: "Select input audio device",
-                field: Box::new(SettingField {
-                    json_path: Some("audio.experimental.input_audio_device"),
-                    pick: |settings_content| {
-                        settings_content
-                            .audio
-                            .as_ref()?
-                            .input_audio_device
-                            .as_ref()
-                            .or(DEFAULT_EMPTY_AUDIO_INPUT)
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content
-                            .audio
-                            .get_or_insert_default()
-                            .input_audio_device = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-        ]
-    }
-
-    SettingsPage {
-        title: "Collaboration",
-        items: concat_sections![calls_section(), audio_settings()],
-    }
-}
-
 fn ai_page(cx: &App) -> SettingsPage {
-    fn general_section() -> [SettingsPageItem; 3] {
+    fn general_section() -> [SettingsPageItem; 2] {
         [
             SettingsPageItem::SectionHeader("General"),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Disable AI",
-                description: "Whether to disable all AI features in Backboard Studio.",
-                field: Box::new(SettingField {
-                    json_path: Some("disable_ai"),
-                    pick: |settings_content| settings_content.project.disable_ai.as_ref(),
-                    write: |settings_content, value, _| {
-                        settings_content.project.disable_ai = value;
-                    },
-                }),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
             SettingsPageItem::SettingItem(SettingItem {
                 title: "Threads Sidebar Side",
                 description: "Which side of the window the threads sidebar appears on.",
@@ -7788,7 +7366,7 @@ fn ai_page(cx: &App) -> SettingsPage {
             title: "Display Mode",
             description: "When to show edit predictions previews in buffer. The eager mode displays them inline, while the subtle mode displays them only when holding a modifier key.",
             field: Box::new(SettingField {
-                json_path: Some("edit_prediction.display_mode"),
+                json_path: Some("edit_predictions.mode"),
                 pick: |settings_content| {
                     settings_content
                         .project
@@ -7825,7 +7403,7 @@ fn ai_page(cx: &App) -> SettingsPage {
 }
 
 fn network_page() -> SettingsPage {
-    fn network_section() -> [SettingsPageItem; 3] {
+    fn network_section() -> [SettingsPageItem; 2] {
         [
             SettingsPageItem::SectionHeader("Network"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -7840,22 +7418,6 @@ fn network_page() -> SettingsPage {
                 }),
                 metadata: Some(Box::new(SettingsFieldMetadata {
                     placeholder: Some("socks5h://localhost:10808"),
-                    ..Default::default()
-                })),
-                files: USER,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Server URL",
-                description: "The URL of the Backboard Studio server to connect to.",
-                field: Box::new(SettingField {
-                    json_path: Some("server_url"),
-                    pick: |settings_content| settings_content.server_url.as_ref(),
-                    write: |settings_content, value, _| {
-                        settings_content.server_url = value;
-                    },
-                }),
-                metadata: Some(Box::new(SettingsFieldMetadata {
-                    placeholder: Some("https://zed.dev"),
                     ..Default::default()
                 })),
                 files: USER,
@@ -8216,7 +7778,7 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
         ]
     }
 
-    fn formatting_section() -> [SettingsPageItem; 8] {
+    fn formatting_section() -> [SettingsPageItem; 7] {
         [
             SettingsPageItem::SectionHeader("Formatting"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -8328,25 +7890,6 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
                     }
                     .unimplemented(),
                 ),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Use On Type Format",
-                description: "Whether to use additional LSP queries to format (and amend) the code after every \"trigger\" symbol input, defined by LSP server capabilities",
-                field: Box::new(SettingField {
-                    json_path: Some("languages.$(language).use_on_type_format"),
-                    pick: |settings_content| {
-                        language_settings_field(settings_content, |language| {
-                            language.use_on_type_format.as_ref()
-                        })
-                    },
-                    write: |settings_content, value, _| {
-                        language_settings_field_mut(settings_content, value, |language, value| {
-                            language.use_on_type_format = value;
-                        })
-                    },
-                }),
                 metadata: None,
                 files: USER | PROJECT,
             }),
@@ -8862,7 +8405,7 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
         ]
     }
 
-    fn tasks_section() -> [SettingsPageItem; 4] {
+    fn tasks_section() -> [SettingsPageItem; 3] {
         [
             SettingsPageItem::SectionHeader("Tasks"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -8907,25 +8450,6 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
                     }
                     .unimplemented(),
                 ),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Prefer LSP",
-                description: "Use LSP tasks over Backboard Studio language extension tasks.",
-                field: Box::new(SettingField {
-                    json_path: Some("languages.$(language).tasks.prefer_lsp"),
-                    pick: |settings_content| {
-                        language_settings_field(settings_content, |language| {
-                            language.tasks.as_ref()?.prefer_lsp.as_ref()
-                        })
-                    },
-                    write: |settings_content, value, _| {
-                        language_settings_field_mut(settings_content, value, |language, value| {
-                            language.tasks.get_or_insert_default().prefer_lsp = value;
-                        })
-                    },
-                }),
                 metadata: None,
                 files: USER | PROJECT,
             }),
@@ -9108,34 +8632,6 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
 
     let is_global = active_language().is_none();
 
-    let code_lens_item = [SettingsPageItem::SettingItem(SettingItem {
-        title: "Code Lens",
-        description: "Whether and how to display code lenses from language servers.",
-        field: Box::new(SettingField {
-            json_path: Some("code_lens"),
-            pick: |settings_content| settings_content.editor.code_lens.as_ref(),
-            write: |settings_content, value, _| {
-                settings_content.editor.code_lens = value;
-            },
-        }),
-        metadata: None,
-        files: USER,
-    })];
-
-    let lsp_document_colors_item = [SettingsPageItem::SettingItem(SettingItem {
-        title: "LSP Document Colors",
-        description: "How to render LSP color previews in the editor.",
-        field: Box::new(SettingField {
-            json_path: Some("lsp_document_colors"),
-            pick: |settings_content| settings_content.editor.lsp_document_colors.as_ref(),
-            write: |settings_content, value, _| {
-                settings_content.editor.lsp_document_colors = value;
-            },
-        }),
-        metadata: None,
-        files: USER,
-    })];
-
     if is_global {
         concat_sections!(
             indentation_section(),
@@ -9146,8 +8642,6 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
             whitespace_section(),
             completions_section(),
             inlay_hints_section(),
-            code_lens_item,
-            lsp_document_colors_item,
             tasks_section(),
             miscellaneous_section(),
             global_only_miscellaneous_sub_section(),
@@ -9162,7 +8656,6 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
             whitespace_section(),
             completions_section(),
             inlay_hints_section(),
-            code_lens_item,
             tasks_section(),
             miscellaneous_section(),
         )
@@ -9172,248 +8665,6 @@ fn language_settings_data() -> Box<[SettingsPageItem]> {
 /// LanguageSettings items that should be included in the "Languages & Tools" page
 /// not the "Editor" page
 fn non_editor_language_settings_data() -> Box<[SettingsPageItem]> {
-    fn lsp_section() -> [SettingsPageItem; 9] {
-        [
-            SettingsPageItem::SectionHeader("LSP"),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Enable Language Server",
-                description: "Whether to use language servers to provide code intelligence.",
-                field: Box::new(SettingField {
-                    json_path: Some("languages.$(language).enable_language_server"),
-                    pick: |settings_content| {
-                        language_settings_field(settings_content, |language| {
-                            language.enable_language_server.as_ref()
-                        })
-                    },
-                    write: |settings_content, value, _| {
-                        language_settings_field_mut(settings_content, value, |language, value| {
-                            language.enable_language_server = value;
-                        })
-                    },
-                }),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Language Servers",
-                description: "The list of language servers to use (or disable) for this language.",
-                field: Box::new(
-                    SettingField {
-                        json_path: Some("languages.$(language).language_servers"),
-                        pick: |settings_content| {
-                            language_settings_field(settings_content, |language| {
-                                language.language_servers.as_ref()
-                            })
-                        },
-                        write: |settings_content, value, _| {
-                            language_settings_field_mut(
-                                settings_content,
-                                value,
-                                |language, value| {
-                                    language.language_servers = value;
-                                },
-                            )
-                        },
-                    }
-                    .unimplemented(),
-                ),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Linked Edits",
-                description: "Whether to perform linked edits of associated ranges, if the LS supports it. For example, when editing opening <html> tag, the contents of the closing </html> tag will be edited as well.",
-                field: Box::new(SettingField {
-                    json_path: Some("languages.$(language).linked_edits"),
-                    pick: |settings_content| {
-                        language_settings_field(settings_content, |language| {
-                            language.linked_edits.as_ref()
-                        })
-                    },
-                    write: |settings_content, value, _| {
-                        language_settings_field_mut(settings_content, value, |language, value| {
-                            language.linked_edits = value;
-                        })
-                    },
-                }),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Go To Definition Fallback",
-                description: "Whether to follow-up empty Go to definition responses from the language server.",
-                field: Box::new(SettingField {
-                    json_path: Some("go_to_definition_fallback"),
-                    pick: |settings_content| {
-                        settings_content.editor.go_to_definition_fallback.as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content.editor.go_to_definition_fallback = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Go To Definition Scroll Strategy",
-                description: "How to scroll the target into view when navigating to a definition or reference.",
-                field: Box::new(SettingField {
-                    json_path: Some("go_to_definition_scroll_strategy"),
-                    pick: |settings_content| {
-                        settings_content
-                            .editor
-                            .go_to_definition_scroll_strategy
-                            .as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content.editor.go_to_definition_scroll_strategy = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Semantic Tokens",
-                description: {
-                    static DESCRIPTION: OnceLock<&'static str> = OnceLock::new();
-                    DESCRIPTION.get_or_init(|| {
-                        SemanticTokens::VARIANTS
-                            .iter()
-                            .filter_map(|v| {
-                                v.get_documentation().map(|doc| format!("{v:?}: {doc}"))
-                            })
-                            .join("\n")
-                            .leak()
-                    })
-                },
-                field: Box::new(SettingField {
-                    json_path: Some("languages.$(language).semantic_tokens"),
-                    pick: |settings_content| {
-                        settings_content
-                            .project
-                            .all_languages
-                            .defaults
-                            .semantic_tokens
-                            .as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content
-                            .project
-                            .all_languages
-                            .defaults
-                            .semantic_tokens = value;
-                    },
-                }),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "LSP Folding Ranges",
-                description: "When enabled, use folding ranges from the language server instead of indent-based folding.",
-                field: Box::new(SettingField {
-                    json_path: Some("languages.$(language).document_folding_ranges"),
-                    pick: |settings_content| {
-                        language_settings_field(settings_content, |language| {
-                            language.document_folding_ranges.as_ref()
-                        })
-                    },
-                    write: |settings_content, value, _| {
-                        language_settings_field_mut(settings_content, value, |language, value| {
-                            language.document_folding_ranges = value;
-                        })
-                    },
-                }),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "LSP Document Symbols",
-                description: "When enabled, use the language server's document symbols for outlines and breadcrumbs instead of tree-sitter.",
-                field: Box::new(SettingField {
-                    json_path: Some("languages.$(language).document_symbols"),
-                    pick: |settings_content| {
-                        language_settings_field(settings_content, |language| {
-                            language.document_symbols.as_ref()
-                        })
-                    },
-                    write: |settings_content, value, _| {
-                        language_settings_field_mut(settings_content, value, |language, value| {
-                            language.document_symbols = value;
-                        })
-                    },
-                }),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-        ]
-    }
-
-    fn lsp_completions_section() -> [SettingsPageItem; 4] {
-        [
-            SettingsPageItem::SectionHeader("LSP Completions"),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Enabled",
-                description: "Whether to fetch LSP completions or not.",
-                field: Box::new(SettingField {
-                    json_path: Some("languages.$(language).completions.lsp"),
-                    pick: |settings_content| {
-                        language_settings_field(settings_content, |language| {
-                            language.completions.as_ref()?.lsp.as_ref()
-                        })
-                    },
-                    write: |settings_content, value, _| {
-                        language_settings_field_mut(settings_content, value, |language, value| {
-                            language.completions.get_or_insert_default().lsp = value;
-                        })
-                    },
-                }),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Fetch Timeout (milliseconds)",
-                description: "When fetching LSP completions, determines how long to wait for a response of a particular server (set to 0 to wait indefinitely).",
-                field: Box::new(SettingField {
-                    json_path: Some("languages.$(language).completions.lsp_fetch_timeout_ms"),
-                    pick: |settings_content| {
-                        language_settings_field(settings_content, |language| {
-                            language.completions.as_ref()?.lsp_fetch_timeout_ms.as_ref()
-                        })
-                    },
-                    write: |settings_content, value, _| {
-                        language_settings_field_mut(settings_content, value, |language, value| {
-                            language
-                                .completions
-                                .get_or_insert_default()
-                                .lsp_fetch_timeout_ms = value;
-                        })
-                    },
-                }),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Insert Mode",
-                description: "Controls how LSP completions are inserted.",
-                field: Box::new(SettingField {
-                    json_path: Some("languages.$(language).completions.lsp_insert_mode"),
-                    pick: |settings_content| {
-                        language_settings_field(settings_content, |language| {
-                            language.completions.as_ref()?.lsp_insert_mode.as_ref()
-                        })
-                    },
-                    write: |settings_content, value, _| {
-                        language_settings_field_mut(settings_content, value, |language, value| {
-                            language.completions.get_or_insert_default().lsp_insert_mode = value;
-                        })
-                    },
-                }),
-                metadata: None,
-                files: USER | PROJECT,
-            }),
-        ]
-    }
-
     fn debugger_section() -> [SettingsPageItem; 2] {
         [
             SettingsPageItem::SectionHeader("Debuggers"),
@@ -9542,12 +8793,7 @@ fn non_editor_language_settings_data() -> Box<[SettingsPageItem]> {
         ]
     }
 
-    concat_sections!(
-        lsp_section(),
-        lsp_completions_section(),
-        debugger_section(),
-        prettier_section(),
-    )
+    concat_sections!(debugger_section(), prettier_section(),)
 }
 
 fn edit_prediction_language_settings_section() -> [SettingsPageItem; 5] {

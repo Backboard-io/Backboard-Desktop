@@ -533,13 +533,21 @@ impl PickerDelegate for ModelPickerDelegate {
                     let fs = self.fs.clone();
                     let agent_server = self.agent_server.clone();
 
-                    cx.listener(move |_, _, _, cx| {
+                    cx.listener(move |picker, _, window, cx| {
+                        cx.stop_propagation();
+                        let should_be_favorite = !is_favorite;
                         agent_server.toggle_favorite_model(
                             model_id.clone(),
-                            !is_favorite,
+                            should_be_favorite,
                             fs.clone(),
                             cx,
                         );
+                        if should_be_favorite {
+                            picker.delegate.favorites.insert(model_id.clone());
+                        } else {
+                            picker.delegate.favorites.remove(&model_id);
+                        }
+                        picker.refresh(window, cx);
                     })
                 };
 

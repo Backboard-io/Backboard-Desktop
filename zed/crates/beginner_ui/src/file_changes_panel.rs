@@ -33,14 +33,13 @@ pub struct FileChangesPanel {
 
 impl FileChangesPanel {
     pub fn new(thread: Entity<AcpThread>, cx: &mut Context<Self>) -> Self {
-        let subscription = cx.subscribe(&thread, |this, _, event: &AcpThreadEvent, cx| {
-            match event {
+        let subscription =
+            cx.subscribe(&thread, |this, _, event: &AcpThreadEvent, cx| match event {
                 AcpThreadEvent::NewEntry | AcpThreadEvent::EntryUpdated(_) => {
                     this.refresh_entries(cx);
                 }
                 _ => {}
-            }
-        });
+            });
         let mut panel = Self {
             thread,
             focus_handle: cx.focus_handle(),
@@ -145,13 +144,14 @@ impl Render for FileChangesPanel {
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_default();
-                        let dir_label = entry
-                            .path
-                            .parent()
-                            .and_then(|p| {
-                                let s = p.to_string_lossy();
-                                if s.is_empty() { None } else { Some(s.into_owned()) }
-                            });
+                        let dir_label = entry.path.parent().and_then(|p| {
+                            let s = p.to_string_lossy();
+                            if s.is_empty() {
+                                None
+                            } else {
+                                Some(s.into_owned())
+                            }
+                        });
 
                         v_flex()
                             .id(SharedString::from(
@@ -178,10 +178,12 @@ impl Render for FileChangesPanel {
                                             ChangeStatus::Modified => IconName::Pencil,
                                         })
                                         .size(IconSize::XSmall)
-                                        .color(match entry.status {
-                                            ChangeStatus::Created => Color::Created,
-                                            ChangeStatus::Modified => Color::Modified,
-                                        }),
+                                        .color(
+                                            match entry.status {
+                                                ChangeStatus::Created => Color::Created,
+                                                ChangeStatus::Modified => Color::Modified,
+                                            },
+                                        ),
                                     )
                                     .child(
                                         Label::new(SharedString::from(file_name))

@@ -1,6 +1,6 @@
 // documentation: https://zed.dev/docs/key-bindings
 //
-// To see the default key bindings run `zed: open default keymap`
+// To see the default key bindings run `backboard: open default keymap`
 // from the command palette.
 [
   {

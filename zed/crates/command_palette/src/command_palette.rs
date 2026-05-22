@@ -695,6 +695,14 @@ impl PickerDelegate for CommandPaletteDelegate {
 }
 
 pub fn humanize_action_name(name: &str) -> String {
+    let name = name
+        .strip_prefix("zed::")
+        .map(|action| format!("backboard::{action}"))
+        .or_else(|| {
+            name.strip_prefix("zed_")
+                .map(|rest| format!("backboard_{rest}"))
+        })
+        .unwrap_or_else(|| name.to_string());
     let capacity = name.len() + name.chars().filter(|c| c.is_uppercase()).count();
     let mut result = String::with_capacity(capacity);
     for char in name.chars() {
@@ -752,6 +760,14 @@ mod tests {
         assert_eq!(
             humanize_action_name("go_to_line::Deploy"),
             "go to line: deploy"
+        );
+        assert_eq!(
+            humanize_action_name("zed::OpenSettings"),
+            "backboard: open settings"
+        );
+        assert_eq!(
+            humanize_action_name("zed_predict_onboarding::Toggle"),
+            "backboard predict onboarding: toggle"
         );
     }
 

@@ -11,7 +11,19 @@ use workspace::Workspace;
 
 /// Initializes the command palette hooks.
 pub fn init(cx: &mut App) {
-    cx.set_global(GlobalCommandPaletteFilter::default());
+    let mut filter = CommandPaletteFilter::default();
+    filter.hide_namespace("collab");
+    filter.hide_namespace("collab_panel");
+    filter.hide_namespace("channel_modal");
+    filter.hide_namespace("dev");
+    filter.hide_namespace("feedback");
+    filter.hide_namespace("journal");
+    filter.hide_namespace("lsp_tool");
+    filter.hide_namespace("notebook");
+    filter.hide_namespace("remote_debug");
+    filter.hide_namespace("repl");
+    filter.hide_namespace("settings_profile_selector");
+    cx.set_global(GlobalCommandPaletteFilter(filter));
 }
 
 /// A filter for the command palette.
@@ -54,15 +66,19 @@ impl CommandPaletteFilter {
     /// Returns whether the given [`Action`] is hidden by the filter.
     pub fn is_hidden(&self, action: &dyn Action) -> bool {
         let name = action.name();
-        let namespace = name.split("::").next().unwrap_or("malformed action name");
 
         // If this action has specifically been shown then it should be visible.
         if self.shown_action_types.contains(&action.type_id()) {
             return false;
         }
 
+        self.is_hidden_name(name) || self.hidden_action_types.contains(&action.type_id())
+    }
+
+    /// Returns whether the given action name is hidden by namespace.
+    pub fn is_hidden_name(&self, name: &str) -> bool {
+        let namespace = name.split("::").next().unwrap_or("malformed action name");
         self.hidden_namespaces.contains(namespace)
-            || self.hidden_action_types.contains(&action.type_id())
     }
 
     /// Hides all actions in the given namespace.
