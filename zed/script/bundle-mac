@@ -12,8 +12,8 @@ local_install=false
 can_code_sign=false
 
 # This must match the team in the provisioning profile.
-IDENTITY="Zed Industries, Inc."
-APPLE_NOTARIZATION_TEAM="MQ55VZLNZQ"
+IDENTITY="Developer ID Application: Bagel Ventures LLC (VR8YRDMDSP)"
+APPLE_NOTARIZATION_TEAM="VR8YRDMDSP"
 
 # Function for displaying help info
 help_info() {

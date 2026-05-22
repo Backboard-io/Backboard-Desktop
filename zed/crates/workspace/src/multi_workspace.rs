@@ -72,7 +72,6 @@ enum WorkspaceModeTab {
     AgentWorkspace,
     Tasks,
     Git,
-    Jarvis,
 }
 
 pub fn sidebar_side_context_menu(
@@ -432,9 +431,7 @@ impl MultiWorkspace {
     }
 
     fn selected_workspace_mode_tab(&self) -> WorkspaceModeTab {
-        if self.jarvis_placeholder_expanded {
-            WorkspaceModeTab::Jarvis
-        } else if self.git_expanded {
+        if self.git_expanded {
             WorkspaceModeTab::Git
         } else if self.tasks_expanded {
             WorkspaceModeTab::Tasks
@@ -453,10 +450,7 @@ impl MultiWorkspace {
         self.multi_agent_expanded = tab == WorkspaceModeTab::AgentWorkspace;
         self.tasks_expanded = tab == WorkspaceModeTab::Tasks;
         self.git_expanded = tab == WorkspaceModeTab::Git;
-        self.jarvis_placeholder_expanded = tab == WorkspaceModeTab::Jarvis;
-        if self.jarvis_placeholder_expanded {
-            self.update_jarvis_visualizer(cx);
-        }
+        self.jarvis_placeholder_expanded = false;
         cx.notify();
     }
 
@@ -1869,11 +1863,6 @@ impl MultiWorkspace {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn test_select_jarvis_tab(&mut self, cx: &mut Context<Self>) {
-        self.set_workspace_mode_tab(WorkspaceModeTab::Jarvis, cx);
-    }
-
-    #[cfg(any(test, feature = "test-support"))]
     pub fn test_select_git_tab(&mut self, cx: &mut Context<Self>) {
         self.set_workspace_mode_tab(WorkspaceModeTab::Git, cx);
     }
@@ -2175,13 +2164,7 @@ impl MultiWorkspace {
     fn render_workspace_mode_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
         let selected_tab = self.selected_workspace_mode_tab();
         let colors = cx.theme().colors();
-        let switcher_bg = colors
-            .tab_bar_background
-            .blend(colors.panel_background.opacity(0.32));
-        let pill_group_bg = colors
-            .element_background
-            .blend(colors.panel_background.opacity(0.3));
-        let pill_group_border = colors.border_variant.opacity(0.5);
+        let switcher_bg = colors.tab_bar_background;
 
         h_flex()
             .h(px(36.))
@@ -2196,12 +2179,9 @@ impl MultiWorkspace {
             .bg(switcher_bg)
             .child(
                 h_flex()
-                    .gap_1()
-                    .p_1()
-                    .rounded_full()
-                    .border_1()
-                    .border_color(pill_group_border)
-                    .bg(pill_group_bg)
+                    .h_full()
+                    .gap_0()
+                    .items_end()
                     .child(self.render_workspace_mode_tab(
                         "multi-workspace-code-editor-tab",
                         "Code Editor",
@@ -2217,24 +2197,10 @@ impl MultiWorkspace {
                         cx,
                     ))
                     .child(self.render_workspace_mode_tab(
-                        "multi-workspace-tasks-tab",
-                        "Tasks",
-                        selected_tab == WorkspaceModeTab::Tasks,
-                        WorkspaceModeTab::Tasks,
-                        cx,
-                    ))
-                    .child(self.render_workspace_mode_tab(
                         "multi-workspace-git-tab",
                         "Git",
                         selected_tab == WorkspaceModeTab::Git,
                         WorkspaceModeTab::Git,
-                        cx,
-                    ))
-                    .child(self.render_workspace_mode_tab(
-                        "multi-workspace-jarvis-tab",
-                        "Jarvis",
-                        selected_tab == WorkspaceModeTab::Jarvis,
-                        WorkspaceModeTab::Jarvis,
                         cx,
                     )),
             )
@@ -2250,42 +2216,38 @@ impl MultiWorkspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors();
-        let selected_bg = colors
-            .element_selected
-            .blend(colors.element_hover.opacity(0.34));
-        let idle_bg = colors.element_background.opacity(0.);
+        let selected_bg = colors.element_selected.opacity(0.42);
+        let hover_bg = colors.element_hover.opacity(0.5);
 
-        div()
+        v_flex()
             .id(id)
-            .h(px(24.))
-            .px(px(10.))
-            .flex()
+            .h_full()
+            .min_w(px(116.))
+            .px(px(14.))
             .items_center()
-            .justify_center()
-            .rounded_full()
-            .border_1()
-            .border_color(if selected {
-                colors.border_selected.opacity(0.82)
+            .justify_between()
+            .bg(if selected {
+                selected_bg
             } else {
                 colors.border_transparent
             })
-            .bg(if selected { selected_bg } else { idle_bg })
             .cursor_pointer()
-            .when(!selected, |style| {
-                style.hover(|style| style.bg(colors.element_hover))
-            })
+            .when(!selected, |style| style.hover(|style| style.bg(hover_bg)))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.set_workspace_mode_tab(target_tab, cx);
             }))
-            .child(
-                Label::new(label)
-                    .size(LabelSize::XSmall)
-                    .color(if selected {
-                        Color::Accent
-                    } else {
-                        Color::Muted
-                    }),
-            )
+            .child(div().flex_1().flex().items_center().justify_center().child(
+                Label::new(label).size(LabelSize::Small).color(if selected {
+                    Color::Accent
+                } else {
+                    Color::Muted
+                }),
+            ))
+            .child(div().h(px(2.)).w_full().bg(if selected {
+                colors.text_accent
+            } else {
+                colors.border_transparent
+            }))
             .into_any_element()
     }
 }
@@ -2387,41 +2349,45 @@ impl Render for MultiWorkspace {
             (sidebar, None)
         };
 
-        if self.jarvis_placeholder_expanded {
-            let titlebar = self.workspace().read(cx).titlebar_item();
-            return client_side_decorations(
-                div()
-                    .key_context("JarvisDirectoryVisualizer")
-                    .relative()
-                    .flex()
-                    .flex_col()
-                    .size_full()
-                    .font(ui_font)
-                    .text_color(text_color)
-                    .on_action(cx.listener(Self::close_window))
-                    .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
-                        this.set_multi_agent_expanded(false, cx);
-                    }))
-                    .children(titlebar)
-                    .child(self.render_workspace_mode_switcher(cx))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .child(self.jarvis_visualizer.clone()),
-                    ),
-                window,
-                cx,
-                Tiling::default(),
-            );
-        }
-
         if self.multi_agent_expanded {
             if let Some(view) = self.agent_workspace_view.as_ref() {
-                let titlebar = self.workspace().read(cx).titlebar_item();
+                let workspace = self.workspace().clone();
+                let workspace_key_context =
+                    workspace.update(cx, |workspace, cx| workspace.key_context(cx));
+                let root =
+                    workspace.update(cx, |workspace, cx| workspace.actions(div(), window, cx));
+                let (titlebar, status_bar) = {
+                    let workspace = workspace.read(cx);
+                    (
+                        workspace.titlebar_item(),
+                        workspace
+                            .status_bar_visible(cx)
+                            .then(|| workspace.status_bar().clone()),
+                    )
+                };
+                let left_dock = workspace.update(cx, |workspace, cx| {
+                    workspace.render_dock(DockPosition::Left, workspace.left_dock(), window, cx)
+                });
+                let right_dock = workspace.update(cx, |workspace, cx| {
+                    workspace
+                        .right_dock()
+                        .read(cx)
+                        .has_agent_panel(cx)
+                        .then(|| {
+                            workspace.render_dock(
+                                DockPosition::Right,
+                                workspace.right_dock(),
+                                window,
+                                cx,
+                            )
+                        })
+                        .flatten()
+                });
+                let bottom_dock = workspace.update(cx, |workspace, cx| {
+                    workspace.render_dock(DockPosition::Bottom, workspace.bottom_dock(), window, cx)
+                });
                 return client_side_decorations(
-                    div()
-                        .key_context("MultiAgentView")
+                    root.key_context(workspace_key_context)
                         .relative()
                         .flex()
                         .flex_col()
@@ -2434,7 +2400,34 @@ impl Render for MultiWorkspace {
                         }))
                         .children(titlebar)
                         .child(self.render_workspace_mode_switcher(cx))
-                        .child(div().flex_1().min_h_0().child(view.clone())),
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .min_h_0()
+                                .overflow_hidden()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .overflow_hidden()
+                                        .children(left_dock)
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .h_full()
+                                                .overflow_hidden()
+                                                .child(view.clone()),
+                                        )
+                                        .children(right_dock),
+                                )
+                                .children(bottom_dock),
+                        )
+                        .children(status_bar),
                     window,
                     cx,
                     Tiling::default(),

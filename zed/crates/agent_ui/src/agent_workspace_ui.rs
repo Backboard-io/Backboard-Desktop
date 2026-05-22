@@ -1,14 +1,14 @@
 use collections::HashSet;
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement,
-    ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, WeakEntity, Window, prelude::*,
+    AnyElement, App, Context, DefiniteLength, Entity, FocusHandle, Focusable, FontWeight, Hsla,
+    InteractiveElement, MouseButton, ParentElement, Pixels, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, prelude::*,
 };
 use ui::{
     Button, ButtonSize, ButtonStyle, ElevationIndex, Icon, IconButton, IconSize, Label, LabelSize,
     TintColor, Tooltip, Vector, VectorName, WithScrollbar, prelude::*,
 };
-use workspace::Workspace;
+use workspace::{Workspace, dock::DockPosition};
 
 use crate::ConversationView;
 use crate::agent_panel::{
@@ -22,11 +22,120 @@ pub struct BackboardAgentWorkspacePage {
     workspace: WeakEntity<Workspace>,
     focus_handle: FocusHandle,
     selected_thread_id: Option<ThreadId>,
+    draft_drawer_open: bool,
     dashboard_scroll_handle: ScrollHandle,
     dismissed_threads: HashSet<ThreadId>,
     show_token_context: bool,
     observing_agent_panel: bool,
     _subscriptions: Vec<Subscription>,
+}
+
+struct BackboardAgentWorkspaceHeader {
+    agent_count: usize,
+    right_panel_open: bool,
+}
+
+impl BackboardAgentWorkspaceHeader {
+    fn new(summaries: &[BackboardAgentRunSummary], right_panel_open: bool) -> Self {
+        Self {
+            agent_count: summaries.len(),
+            right_panel_open,
+        }
+    }
+
+    fn render(self, cx: &mut Context<BackboardAgentWorkspacePage>) -> AnyElement {
+        let colors = cx.theme().colors();
+        let agent_label = if self.agent_count == 1 {
+            "agent"
+        } else {
+            "agents"
+        };
+        let right_panel_open = self.right_panel_open;
+        let header_background = colors
+            .tab_bar_background
+            .blend(colors.panel_background.opacity(0.28));
+        let divider_color = colors.border_variant.opacity(0.52);
+
+        h_flex()
+            .h(px(32.))
+            .p_1()
+            .gap_2()
+            .items_center()
+            .border_b_1()
+            .border_color(divider_color)
+            .bg(header_background)
+            .rounded_t(px(8.))
+            .child(
+                h_flex()
+                    .h_full()
+                    .px_1p5()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Label::new("Agent Workspace")
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::BOLD)
+                            .color(Color::Default),
+                    )
+                    .child(
+                        Label::new(format!("{} {}", self.agent_count, agent_label))
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
+            )
+            .child(div().flex_1())
+            .child(
+                h_flex()
+                    .h_full()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        IconButton::new("agent-workspace-refresh", IconName::Rerun)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .tooltip(Tooltip::text("Refresh agent workspace"))
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        IconButton::new(
+                            "agent-workspace-composer",
+                            if right_panel_open {
+                                IconName::ThreadsSidebarRightOpen
+                            } else {
+                                IconName::ThreadsSidebarRightClosed
+                            },
+                        )
+                        .icon_size(IconSize::XSmall)
+                        .icon_color(Color::Muted)
+                        .tooltip(Tooltip::text(if right_panel_open {
+                            "Close chat"
+                        } else {
+                            "Open composer"
+                        }))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                if right_panel_open {
+                                    this.close_detail(cx);
+                                } else {
+                                    this.create_chat(window, cx);
+                                }
+                            },
+                        )),
+                    )
+                    .child(
+                        Button::new("new-agent-chat", "New Agent")
+                            .start_icon(Icon::new(IconName::Plus))
+                            .style(ButtonStyle::Subtle)
+                            .size(ButtonSize::None)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.create_chat(window, cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
 }
 
 impl BackboardAgentWorkspacePage {
@@ -50,6 +159,7 @@ impl BackboardAgentWorkspacePage {
                 workspace,
                 focus_handle: cx.focus_handle(),
                 selected_thread_id: None,
+                draft_drawer_open: false,
                 dashboard_scroll_handle: ScrollHandle::new(),
                 dismissed_threads: HashSet::default(),
                 show_token_context: false,
@@ -61,7 +171,7 @@ impl BackboardAgentWorkspacePage {
 
     fn handle_agent_panel_event(
         &mut self,
-        _: &Entity<AgentPanel>,
+        panel: &Entity<AgentPanel>,
         event: &AgentPanelEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -74,15 +184,26 @@ impl BackboardAgentWorkspacePage {
             } => {
                 if *auto_select && self.selected_thread_id.is_none() {
                     self.selected_thread_id = Some(*thread_id);
+                    self.draft_drawer_open = false;
                     self.focus_selected_conversation(window, cx);
                 }
                 cx.notify();
             }
             AgentPanelEvent::BackboardWorkspaceLaunchFailed { .. } => {}
+            AgentPanelEvent::ThreadInteracted { .. } => {
+                if panel
+                    .read(cx)
+                    .active_backboard_workspace_draft_thread_id(cx)
+                    .is_some()
+                {
+                    self.selected_thread_id = None;
+                    self.draft_drawer_open = true;
+                    cx.notify();
+                }
+            }
             AgentPanelEvent::ActiveViewChanged
             | AgentPanelEvent::ActiveViewFocused
-            | AgentPanelEvent::EntryChanged
-            | AgentPanelEvent::ThreadInteracted { .. } => {}
+            | AgentPanelEvent::EntryChanged => {}
         }
     }
 
@@ -129,13 +250,24 @@ impl BackboardAgentWorkspacePage {
         Some(panel)
     }
 
-    fn create_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn create_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(panel) = self.ensure_agent_panel(window, cx) {
             panel.update(cx, |panel, cx| {
                 panel.create_backboard_workspace_chat(window, cx);
             });
         }
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                let right_dock = workspace.dock_at_position(DockPosition::Right).clone();
+                right_dock.update(cx, |dock, cx| {
+                    if dock.panel_index_for_type::<AgentPanel>().is_some() {
+                        dock.set_open(false, window, cx);
+                    }
+                });
+            });
+        }
         self.selected_thread_id = None;
+        self.draft_drawer_open = true;
         cx.notify();
     }
 
@@ -165,6 +297,7 @@ impl BackboardAgentWorkspacePage {
 
     fn open_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_thread_id = Some(thread_id);
+        self.draft_drawer_open = false;
         if let Some(workspace) = self.workspace.upgrade() {
             workspace.update(cx, |workspace, cx| {
                 if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
@@ -182,6 +315,7 @@ impl BackboardAgentWorkspacePage {
 
     fn close_detail(&mut self, cx: &mut Context<Self>) {
         self.selected_thread_id = None;
+        self.draft_drawer_open = false;
         cx.notify();
     }
 
@@ -285,126 +419,10 @@ impl BackboardAgentWorkspacePage {
     fn render_header(
         &self,
         summaries: &[BackboardAgentRunSummary],
+        right_panel_open: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let running = summaries
-            .iter()
-            .filter(|summary| summary.status == BackboardAgentRunStatus::Running)
-            .count();
-        let done = summaries
-            .iter()
-            .filter(|summary| summary.status == BackboardAgentRunStatus::Done)
-            .count();
-        let blocked = summaries
-            .iter()
-            .filter(|summary| summary.status == BackboardAgentRunStatus::Blocked)
-            .count();
-        let ready = summaries.iter().filter(|summary| summary.can_apply).count();
-        let colors = cx.theme().colors();
-        let header_background = colors
-            .tab_bar_background
-            .blend(colors.panel_background.opacity(0.32));
-
-        h_flex()
-            .h(rems_from_px(40.))
-            .px_3()
-            .gap_3()
-            .justify_between()
-            .border_b_1()
-            .border_color(colors.border_variant.opacity(0.58))
-            .bg(header_background)
-            .child(
-                h_flex()
-                    .gap_3()
-                    .items_center()
-                    .child(
-                        h_flex()
-                            .gap_1p5()
-                            .child(
-                                Vector::square(VectorName::ZedLogo, rems_from_px(14.))
-                                    .color(Color::Accent),
-                            )
-                            .child(
-                                Label::new("Agent Workspace")
-                                    .size(LabelSize::Small)
-                                    .weight(FontWeight::BOLD)
-                                    .color(Color::Default),
-                            )
-                            .child(
-                                Label::new("Parallel chats")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_3()
-                            .child(self.render_header_stat(
-                                summaries.len().to_string(),
-                                "of 20",
-                                Color::Muted,
-                            ))
-                            .child(self.render_header_stat(
-                                running.to_string(),
-                                "running",
-                                Color::Accent,
-                            ))
-                            .child(self.render_header_stat(
-                                done.to_string(),
-                                "done",
-                                if done > 0 {
-                                    Color::Success
-                                } else {
-                                    Color::Muted
-                                },
-                            ))
-                            .child(self.render_header_stat(
-                                ready.to_string(),
-                                "ready",
-                                if ready > 0 {
-                                    Color::Success
-                                } else {
-                                    Color::Muted
-                                },
-                            ))
-                            .child(self.render_header_stat(
-                                blocked.to_string(),
-                                "blocked",
-                                if blocked > 0 {
-                                    Color::Warning
-                                } else {
-                                    Color::Muted
-                                },
-                            ))
-                            .child(
-                                Button::new(
-                                    "toggle-token-context-cards",
-                                    if self.show_token_context {
-                                        "Hide context"
-                                    } else {
-                                        "Show context"
-                                    },
-                                )
-                                .size(ButtonSize::Compact)
-                                .style(ButtonStyle::Subtle)
-                                .on_click(cx.listener(
-                                    |this, _, _, cx| {
-                                        this.show_token_context = !this.show_token_context;
-                                        cx.notify();
-                                    },
-                                )),
-                            ),
-                    ),
-            )
-            .child(
-                Button::new("new-agent-chat", "New Chat")
-                    .start_icon(Icon::new(IconName::Plus))
-                    .style(ButtonStyle::Subtle)
-                    .size(ButtonSize::Compact)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.create_chat(window, cx);
-                    })),
-            )
+    ) -> AnyElement {
+        BackboardAgentWorkspaceHeader::new(summaries, right_panel_open).render(cx)
     }
 
     fn render_header_stat(
@@ -475,103 +493,116 @@ impl BackboardAgentWorkspacePage {
     fn render_dashboard(
         &self,
         summaries: Vec<BackboardAgentRunSummary>,
+        right_panel_open: bool,
+        draft_composer_open: bool,
+        agent_panel: Option<Entity<AgentPanel>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        if summaries.is_empty() {
+        let colors = cx.theme().colors();
+        let card_width = if right_panel_open {
+            relative(0.48)
+        } else {
+            relative(0.315)
+        };
+        let card_min_width = if right_panel_open { px(320.) } else { px(360.) };
+
+        if summaries.is_empty() && !draft_composer_open {
             return v_flex()
                 .size_full()
                 .id("backboard-agent-workspace-empty")
                 .overflow_hidden()
-                .gap_3()
-                .p_4()
+                .bg(colors.editor_background)
                 .child(
                     v_flex()
                         .flex_1()
                         .items_center()
                         .justify_center()
-                        .gap_2()
-                        .pb(rems_from_px(96.))
+                        .gap_3()
+                        .px_6()
                         .child(
                             div()
-                                .size(rems_from_px(56.))
-                                .rounded_lg()
+                                .size(px(56.))
+                                .rounded(px(8.))
                                 .border_1()
-                                .border_color(cx.theme().colors().border_variant)
-                                .bg(cx.theme().colors().element_background)
-                                .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
+                                .border_color(colors.border_variant.opacity(0.58))
+                                .bg(colors.elevated_surface_background)
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .child(
-                                    Vector::square(VectorName::ZedLogo, rems_from_px(30.))
-                                        .color(Color::Accent),
+                                    Icon::new(IconName::Sparkle)
+                                        .size(IconSize::XLarge)
+                                        .color(Color::Custom(colors.text_accent)),
                                 ),
                         )
                         .child(
-                            Headline::new("No active Backboard agents")
-                                .size(HeadlineSize::XSmall)
-                                .color(Color::Accent),
+                            Label::new("No agents in workspace")
+                                .size(LabelSize::Default)
+                                .weight(FontWeight::BOLD)
+                                .color(Color::Default),
                         )
                         .child(
-                            Label::new("Use New Chat to start a shared-workspace coding chat.")
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
+                            Label::new(
+                                "Create an agent to track parallel tasks, reviews, and completed work here.",
+                            )
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(
+                                    Button::new("empty-new-agent-chat", "Create agent")
+                                        .start_icon(Icon::new(IconName::Plus))
+                                        .style(ButtonStyle::Filled)
+                                        .size(ButtonSize::Compact)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.create_chat(window, cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new("empty-open-chat-history", "Open chat history")
+                                        .style(ButtonStyle::Subtle)
+                                        .size(ButtonSize::Compact)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.create_chat(window, cx);
+                                        })),
+                                ),
                         ),
                 )
                 .into_any_element();
         }
-
-        let blocked_summaries = summaries
-            .iter()
-            .filter(|summary| summary.status == BackboardAgentRunStatus::Blocked)
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut summary_groups = Vec::<(Option<String>, Vec<BackboardAgentRunSummary>)>::new();
-        for summary in summaries.iter().cloned() {
-            let key = summary
-                .batch_id
-                .as_ref()
-                .filter(|_| summary.batch_size > 1)
-                .map(|batch_id| batch_id.as_ref().to_string());
-            if let Some((_, group_summaries)) = summary_groups
-                .iter_mut()
-                .find(|(existing_key, _)| *existing_key == key)
-            {
-                group_summaries.push(summary);
-            } else {
-                summary_groups.push((key, vec![summary]));
-            }
-        }
-        let group_elements = summary_groups
-            .into_iter()
-            .map(|(batch_id, summaries)| match batch_id {
-                Some(batch_id) if summaries.len() > 1 => {
-                    self.render_batch_group(batch_id, summaries, cx)
-                }
-                _ => h_flex()
-                    .items_start()
-                    .flex_wrap()
-                    .gap_2()
-                    .children(
-                        summaries
-                            .into_iter()
-                            .map(|summary| self.render_agent_card(summary, cx).into_any_element()),
-                    )
-                    .into_any_element(),
-            })
-            .collect::<Vec<_>>();
 
         v_flex()
             .size_full()
             .id("backboard-agent-workspace-scroll")
             .track_scroll(&self.dashboard_scroll_handle)
             .overflow_y_scroll()
-            .pb_4()
-            .when(!blocked_summaries.is_empty(), |this| {
-                this.child(self.render_blocked_overview(blocked_summaries, cx))
-            })
-            .child(v_flex().gap_3().p_4().children(group_elements))
+            .bg(colors.editor_background)
+            .child(
+                h_flex()
+                    .items_start()
+                    .content_start()
+                    .flex_wrap()
+                    .gap(px(16.))
+                    .p(px(16.))
+                    .when(draft_composer_open, |this| {
+                        this.child(
+                            self.render_new_agent_tile(
+                                agent_panel.clone(),
+                                card_width,
+                                card_min_width,
+                                cx,
+                            )
+                            .into_any_element(),
+                        )
+                    })
+                    .children(summaries.into_iter().map(|summary| {
+                        self.render_agent_workspace_card(summary, card_width, card_min_width, cx)
+                            .into_any_element()
+                    })),
+            )
             .vertical_scrollbar_for(&self.dashboard_scroll_handle, window, cx)
             .into_any_element()
     }
@@ -691,6 +722,555 @@ impl BackboardAgentWorkspacePage {
                     .size(LabelSize::XSmall)
                     .color(Color::Warning),
             )
+    }
+
+    fn render_agent_workspace_card(
+        &self,
+        summary: BackboardAgentRunSummary,
+        card_width: DefiniteLength,
+        card_min_width: Pixels,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let thread_id = summary.thread_id;
+        let thread_key = thread_id.to_key_string();
+        let selected = self.selected_thread_id == Some(thread_id);
+        let (
+            text_accent,
+            text,
+            border_variant,
+            elevated_surface_background,
+            panel_background,
+            hover_border,
+        ) = {
+            let colors = cx.theme().colors();
+            (
+                colors.text_accent,
+                colors.text,
+                colors.border_variant,
+                colors.elevated_surface_background,
+                colors.panel_background,
+                colors.border,
+            )
+        };
+        let border_color = if selected {
+            text_accent
+        } else {
+            border_variant.opacity(0.72)
+        };
+        let background = if selected {
+            elevated_surface_background.blend(text_accent.opacity(0.025))
+        } else {
+            elevated_surface_background
+        };
+        let command = Self::clean_command_label(summary.command.as_ref());
+        let command_kind = summary
+            .kind_label
+            .as_ref()
+            .map(|label| label.as_ref().to_lowercase())
+            .unwrap_or_else(|| "build".to_string());
+
+        v_flex()
+            .id(format!("backboard-agent-card-{thread_key}"))
+            .w(card_width)
+            .min_w(card_min_width)
+            .max_w(relative(1.))
+            .h(px(430.))
+            .flex_none()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(border_color)
+            .bg(background)
+            .overflow_hidden()
+            .cursor_pointer()
+            .hover(move |style| style.border_color(hover_border))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_run(thread_id, window, cx);
+            }))
+            .child(
+                h_flex()
+                    .h(px(56.))
+                    .px_4()
+                    .gap_2()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(border_variant.opacity(0.42))
+                    .child(self.render_status_dot(summary.status, cx))
+                    .child(
+                        Label::new(summary.title.clone())
+                            .size(LabelSize::Default)
+                            .weight(FontWeight::BOLD)
+                            .color(Color::Custom(text))
+                            .truncate()
+                            .flex_1(),
+                    )
+                    .child(self.render_status_badge(summary.status, cx))
+                    .child(
+                        IconButton::new(
+                            format!("open-agent-detail-{thread_key}"),
+                            if selected {
+                                IconName::ThreadsSidebarRightOpen
+                            } else {
+                                IconName::ThreadsSidebarRightClosed
+                            },
+                        )
+                        .icon_size(IconSize::XSmall)
+                        .icon_color(Color::Muted)
+                        .tooltip(Tooltip::text("Open chat"))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.open_run(thread_id, window, cx);
+                            },
+                        )),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .min_h(px(58.))
+                    .px_4()
+                    .py_1p5()
+                    .gap_0p5()
+                    .border_b_1()
+                    .border_color(border_variant.opacity(0.34))
+                    .bg(panel_background.opacity(0.22))
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(Label::new("$").size(LabelSize::Small).color(Color::Muted))
+                            .child(
+                                Label::new(command_kind)
+                                    .size(LabelSize::Small)
+                                    .weight(FontWeight::MEDIUM)
+                                    .color(Color::Muted),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .text_ui_sm(cx)
+                            .line_height(relative(1.28))
+                            .text_color(text)
+                            .line_clamp(1)
+                            .child(command),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(self.render_card_activity(&summary, cx)),
+            )
+            .child(self.render_card_file_chips(&summary, cx))
+            .child(self.render_card_footer(&summary, thread_key, cx))
+    }
+
+    fn render_card_activity(
+        &self,
+        summary: &BackboardAgentRunSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if summary.status == BackboardAgentRunStatus::Blocked {
+            let reason = summary
+                .blocked_reason
+                .clone()
+                .unwrap_or_else(|| "Waiting for input before this agent can continue.".into());
+            let blocked_color = Color::Custom(cx.theme().status().error);
+            return v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .px_6()
+                .child(
+                    Icon::new(IconName::Warning)
+                        .size(IconSize::Small)
+                        .color(blocked_color),
+                )
+                .child(
+                    Label::new("Waiting on dependency")
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::BOLD)
+                        .color(blocked_color),
+                )
+                .child(
+                    div()
+                        .max_w(px(420.))
+                        .text_center()
+                        .text_ui_sm(cx)
+                        .line_height(relative(1.32))
+                        .text_color(cx.theme().colors().text_muted)
+                        .line_clamp(3)
+                        .child(reason),
+                )
+                .into_any_element();
+        }
+
+        if summary.status == BackboardAgentRunStatus::Queued {
+            return v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .px_5()
+                .child(
+                    Icon::new(IconName::Info)
+                        .size(IconSize::XSmall)
+                        .color(Color::Custom(cx.theme().status().info)),
+                )
+                .child(
+                    Label::new("Queued - waiting for next step")
+                        .size(LabelSize::Small)
+                        .line_height_style(LineHeightStyle::UiLabel)
+                        .color(Color::Muted),
+                )
+                .into_any_element();
+        }
+
+        let rows = summary
+            .latest_events
+            .iter()
+            .take(6)
+            .map(|event| Self::render_workspace_activity_row(event.text.clone(), event.state, cx))
+            .collect::<Vec<_>>();
+
+        if rows.is_empty() {
+            return v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_1()
+                .child(
+                    Icon::new(IconName::Circle)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .child(
+                    Label::new("No activity yet")
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+                .into_any_element();
+        }
+
+        v_flex()
+            .size_full()
+            .gap_1p5()
+            .px_4()
+            .py_2()
+            .children(rows)
+            .into_any_element()
+    }
+
+    fn render_card_file_chips(
+        &self,
+        summary: &BackboardAgentRunSummary,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let total_touched_paths = summary.touched_paths.len();
+        let mut labels = summary
+            .touched_paths
+            .iter()
+            .take(3)
+            .map(|path| Self::file_chip_label(path))
+            .collect::<Vec<_>>();
+
+        if labels.is_empty() && summary.files_changed > 0 {
+            labels.push(format!(
+                "{} {}",
+                summary.files_changed,
+                if summary.files_changed == 1 {
+                    "file"
+                } else {
+                    "files"
+                }
+            ));
+        }
+        if total_touched_paths > 3 {
+            labels.push(format!("+{} more", total_touched_paths - 3));
+        }
+
+        if labels.is_empty() {
+            return h_flex()
+                .min_h(px(44.))
+                .px_4()
+                .py_1p5()
+                .items_center()
+                .border_t_1()
+                .border_color(cx.theme().colors().border_variant.opacity(0.28))
+                .child(
+                    Label::new("No files touched")
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .into_any_element();
+        }
+
+        h_flex()
+            .min_h(px(44.))
+            .px_4()
+            .py_1p5()
+            .gap_1p5()
+            .items_center()
+            .flex_wrap()
+            .border_t_1()
+            .border_color(cx.theme().colors().border_variant.opacity(0.28))
+            .children(labels.into_iter().map(|label| {
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .px_2()
+                    .py_0p5()
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(cx.theme().colors().border_variant.opacity(0.36))
+                    .bg(cx.theme().colors().panel_background.opacity(0.28))
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size(IconSize::XSmall)
+                            .color(Color::Custom(cx.theme().status().info)),
+                    )
+                    .child(
+                        Label::new(label)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Default)
+                            .truncate(),
+                    )
+            }))
+            .into_any_element()
+    }
+
+    fn render_card_footer(
+        &self,
+        summary: &BackboardAgentRunSummary,
+        thread_key: String,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let thread_id = summary.thread_id;
+        let border_variant = cx.theme().colors().border_variant;
+        let success = cx.theme().status().success;
+        let warning = cx.theme().status().warning;
+        let error = cx.theme().status().error;
+
+        h_flex()
+            .h(px(42.))
+            .px_4()
+            .gap_1p5()
+            .items_center()
+            .border_t_1()
+            .border_color(border_variant.opacity(0.42))
+            .child(
+                IconButton::new(format!("open-worktree-{thread_key}"), IconName::FolderOpen)
+                    .icon_size(IconSize::XSmall)
+                    .icon_color(Color::Muted)
+                    .tooltip(Tooltip::text(if summary.working_directory_is_worktree {
+                        "Open agent worktree"
+                    } else {
+                        "Open agent working directory"
+                    }))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.open_worktree(thread_id, window, cx);
+                    })),
+            )
+            .when(summary.can_review, |this| {
+                this.child(
+                    IconButton::new(format!("review-agent-{thread_key}"), IconName::GitBranch)
+                        .icon_size(IconSize::XSmall)
+                        .icon_color(Color::Muted)
+                        .tooltip(Tooltip::text("Review changes"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.review_run(thread_id, window, cx);
+                        })),
+                )
+            })
+            .when(summary.can_apply, |this| {
+                this.child(
+                    IconButton::new(format!("apply-agent-{thread_key}"), IconName::Check)
+                        .icon_size(IconSize::XSmall)
+                        .icon_color(Color::Custom(success))
+                        .tooltip(Tooltip::text("Apply changes"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.apply_run(thread_id, cx);
+                        })),
+                )
+            })
+            .child(div().flex_1())
+            .children(summary.cost.clone().map(|cost| {
+                Label::new(cost)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .alpha(0.85)
+            }))
+            .child(
+                Label::new(Self::footer_model_label(summary))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .alpha(0.85),
+            )
+            .child(
+                IconButton::new(
+                    format!("open-agent-chat-{thread_key}"),
+                    IconName::ThreadsSidebarRightClosed,
+                )
+                .icon_size(IconSize::XSmall)
+                .icon_color(Color::Muted)
+                .tooltip(Tooltip::text("Open chat"))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.open_run(thread_id, window, cx);
+                })),
+            )
+            .when(
+                matches!(
+                    summary.status,
+                    BackboardAgentRunStatus::Running | BackboardAgentRunStatus::Queued
+                ),
+                |this| {
+                    this.child(
+                        IconButton::new(format!("stop-agent-{thread_key}"), IconName::Stop)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .tooltip(Tooltip::text("Stop agent"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.stop_run(thread_id, cx);
+                            })),
+                    )
+                },
+            )
+            .when(summary.status == BackboardAgentRunStatus::Blocked, |this| {
+                this.child(
+                    IconButton::new(format!("revise-agent-{thread_key}"), IconName::Pencil)
+                        .icon_size(IconSize::XSmall)
+                        .icon_color(Color::Custom(warning))
+                        .tooltip(Tooltip::text("Revise blocked agent"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.revise_run(thread_id, window, cx);
+                        })),
+                )
+            })
+            .when(
+                matches!(
+                    summary.status,
+                    BackboardAgentRunStatus::Error | BackboardAgentRunStatus::Canceled
+                ),
+                |this| {
+                    this.child(
+                        IconButton::new(format!("retry-agent-{thread_key}"), IconName::Rerun)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Custom(error))
+                            .tooltip(Tooltip::text("Retry agent"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.retry_run(thread_id, cx);
+                            })),
+                    )
+                },
+            )
+            .when(
+                matches!(
+                    summary.status,
+                    BackboardAgentRunStatus::Done
+                        | BackboardAgentRunStatus::Error
+                        | BackboardAgentRunStatus::Canceled
+                ),
+                |this| {
+                    this.child(
+                        IconButton::new(format!("dismiss-agent-{thread_key}"), IconName::Check)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .tooltip(Tooltip::text("Dismiss card"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.dismiss_run(thread_id, window, cx);
+                            })),
+                    )
+                },
+            )
+    }
+
+    fn render_workspace_activity_row(
+        text: SharedString,
+        state: BackboardAgentRunEventState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (icon, icon_color, text_color) = match state {
+            BackboardAgentRunEventState::Active => (
+                IconName::LoadCircle,
+                Color::Custom(cx.theme().status().info),
+                Color::Default,
+            ),
+            BackboardAgentRunEventState::Done => {
+                let color = Color::Custom(cx.theme().status().success);
+                (IconName::Check, color, color)
+            }
+            BackboardAgentRunEventState::Waiting => (
+                IconName::Info,
+                Color::Custom(cx.theme().status().info),
+                Color::Muted,
+            ),
+            BackboardAgentRunEventState::Failed => {
+                let color = Color::Custom(cx.theme().status().error);
+                (IconName::Warning, color, color)
+            }
+            BackboardAgentRunEventState::Muted => (IconName::Info, Color::Muted, Color::Default),
+        };
+
+        h_flex()
+            .items_start()
+            .min_w_0()
+            .gap_2()
+            .py_0p5()
+            .child(
+                div()
+                    .w(px(16.))
+                    .h(px(18.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .flex_none()
+                    .child(Icon::new(icon).size(IconSize::XSmall).color(icon_color)),
+            )
+            .child(
+                Label::new(text)
+                    .size(LabelSize::Small)
+                    .line_height_style(LineHeightStyle::UiLabel)
+                    .color(text_color)
+                    .truncate()
+                    .flex_1(),
+            )
+            .into_any_element()
+    }
+
+    fn clean_command_label(command: &str) -> SharedString {
+        command
+            .trim()
+            .trim_start_matches('$')
+            .trim()
+            .to_string()
+            .into()
+    }
+
+    fn file_chip_label(path: &str) -> String {
+        path.rsplit(['/', '\\'])
+            .next()
+            .filter(|name| !name.is_empty())
+            .unwrap_or(path)
+            .to_string()
+    }
+
+    fn footer_model_label(summary: &BackboardAgentRunSummary) -> SharedString {
+        summary
+            .speed_metrics
+            .as_ref()
+            .and_then(|metrics| metrics.model.clone().map(SharedString::from))
+            .or_else(|| summary.kind_label.clone())
+            .unwrap_or_else(|| "Agent".into())
     }
 
     fn render_agent_card(
@@ -1304,15 +1884,14 @@ impl BackboardAgentWorkspacePage {
         status: BackboardAgentRunStatus,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let color = match status {
+        let color: Hsla = match status {
             BackboardAgentRunStatus::Done => cx.theme().status().success,
-            BackboardAgentRunStatus::Blocked => cx.theme().status().warning,
+            BackboardAgentRunStatus::Blocked => cx.theme().status().error,
             BackboardAgentRunStatus::Error | BackboardAgentRunStatus::Canceled => {
                 cx.theme().status().error
             }
-            BackboardAgentRunStatus::Queued | BackboardAgentRunStatus::Running => {
-                cx.theme().colors().text_accent
-            }
+            BackboardAgentRunStatus::Queued => cx.theme().colors().icon_muted,
+            BackboardAgentRunStatus::Running => cx.theme().status().info,
         };
 
         div().size(px(7.)).rounded_full().bg(color)
@@ -1323,42 +1902,66 @@ impl BackboardAgentWorkspacePage {
         status: BackboardAgentRunStatus,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let (color, border, background) = match status {
+        let (label, color, border, background) = match status {
             BackboardAgentRunStatus::Done => (
-                Color::Success,
+                "DONE",
+                Color::Custom(cx.theme().status().success),
                 cx.theme().status().success_border.opacity(0.72),
                 cx.theme().status().success_background.opacity(0.16),
             ),
             BackboardAgentRunStatus::Blocked => (
-                Color::Warning,
-                cx.theme().status().warning_border.opacity(0.72),
-                cx.theme().status().warning_background.opacity(0.16),
+                "BLOCKED",
+                Color::Custom(cx.theme().status().error),
+                cx.theme().status().error_border.opacity(0.72),
+                cx.theme().status().error_background.opacity(0.13),
             ),
             BackboardAgentRunStatus::Error | BackboardAgentRunStatus::Canceled => (
-                Color::Error,
+                if status == BackboardAgentRunStatus::Canceled {
+                    "STOPPED"
+                } else {
+                    "ERROR"
+                },
+                Color::Custom(cx.theme().status().error),
                 cx.theme().status().error_border.opacity(0.72),
                 cx.theme().status().error_background.opacity(0.13),
             ),
             BackboardAgentRunStatus::Queued | BackboardAgentRunStatus::Running => (
-                Color::Accent,
-                cx.theme().colors().text_accent.opacity(0.45),
-                cx.theme().colors().element_active.opacity(0.24),
+                if status == BackboardAgentRunStatus::Queued {
+                    "QUEUED"
+                } else {
+                    "LIVE"
+                },
+                if status == BackboardAgentRunStatus::Queued {
+                    Color::Custom(cx.theme().colors().text_muted)
+                } else {
+                    Color::Custom(cx.theme().status().info)
+                },
+                if status == BackboardAgentRunStatus::Queued {
+                    cx.theme().colors().border_variant.opacity(0.72)
+                } else {
+                    cx.theme().status().info_border.opacity(0.72)
+                },
+                if status == BackboardAgentRunStatus::Queued {
+                    cx.theme().colors().element_background.opacity(0.2)
+                } else {
+                    cx.theme().status().info_background.opacity(0.16)
+                },
             ),
         };
 
         div()
-            .h(rems_from_px(22.))
+            .h(rems_from_px(20.))
             .px_2()
-            .rounded_full()
+            .rounded(px(4.))
             .border_1()
             .border_color(border)
             .bg(background)
             .flex()
             .items_center()
             .child(
-                Label::new(status.label())
-                    .size(LabelSize::Small)
-                    .weight(FontWeight::MEDIUM)
+                Label::new(label)
+                    .size(LabelSize::XSmall)
+                    .weight(FontWeight::BOLD)
                     .color(color),
             )
     }
@@ -1681,43 +2284,26 @@ impl BackboardAgentWorkspacePage {
         v_flex()
             .id(format!("backboard-agent-detail-{thread_key}"))
             .w_full()
+            .h_full()
             .flex_1()
             .min_h_0()
-            .rounded_lg()
-            .border_1()
-            .border_color(cx.theme().colors().border_variant)
             .bg(cx.theme().colors().editor_background)
-            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
             .overflow_hidden()
             .child(
                 h_flex()
-                    .min_h(rems_from_px(62.))
-                    .px_3()
-                    .py_2()
+                    .h(px(48.))
+                    .px_4()
+                    .gap_2()
+                    .items_center()
                     .justify_between()
                     .border_b_1()
-                    .border_color(cx.theme().colors().border_variant)
-                    .bg(cx.theme().colors().elevated_surface_background)
+                    .border_color(cx.theme().colors().border_variant.opacity(0.42))
+                    .bg(cx.theme().colors().editor_background)
                     .child(
                         h_flex()
                             .min_w_0()
                             .gap_2()
                             .items_center()
-                            .child(
-                                div()
-                                    .size(rems_from_px(30.))
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(cx.theme().colors().border_variant)
-                                    .bg(cx.theme().colors().element_background)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(
-                                        Vector::square(VectorName::ZedLogo, rems_from_px(16.))
-                                            .color(Self::status_label_color(summary.status)),
-                                    ),
-                            )
                             .child(self.render_status_dot(summary.status, cx))
                             .child(
                                 v_flex()
@@ -1730,22 +2316,31 @@ impl BackboardAgentWorkspacePage {
                                             .color(Color::Default),
                                     )
                                     .child(
-                                        Label::new(summary.status.label())
+                                        Label::new(summary.command.clone())
                                             .size(LabelSize::Small)
-                                            .color(Color::Muted),
+                                            .color(Color::Muted)
+                                            .truncate(),
                                     ),
                             ),
                     )
                     .child(
-                        IconButton::new(
-                            format!("close-agent-detail-{thread_key}"),
-                            IconName::Close,
-                        )
-                        .icon_size(IconSize::Small)
-                        .tooltip(Tooltip::text("Close detail"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.close_detail(cx);
-                        })),
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(self.render_status_badge(summary.status, cx))
+                            .child(
+                                IconButton::new(
+                                    format!("close-agent-detail-{thread_key}"),
+                                    IconName::ThreadsSidebarRightOpen,
+                                )
+                                .icon_size(IconSize::Small)
+                                .tooltip(Tooltip::text("Close right panel"))
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.close_detail(cx);
+                                    },
+                                )),
+                            ),
                     ),
             )
             .child(
@@ -1764,8 +2359,8 @@ impl BackboardAgentWorkspacePage {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         v_flex()
-            .w(rems_from_px(560.))
-            .min_w(rems_from_px(420.))
+            .w(rems_from_px(480.))
+            .min_w(rems_from_px(360.))
             .h_full()
             .flex_shrink_0()
             .border_l_1()
@@ -1773,7 +2368,8 @@ impl BackboardAgentWorkspacePage {
             .bg(cx.theme().colors().editor_background)
             .child(match agent_panel {
                 Some(panel) => div()
-                    .size_full()
+                    .flex_1()
+                    .min_h_0()
                     .overflow_hidden()
                     .child(panel)
                     .into_any_element(),
@@ -1817,26 +2413,127 @@ impl BackboardAgentWorkspacePage {
                     .into_any_element(),
             })
     }
+
+    fn render_chat_panel_frame(
+        &self,
+        content: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .w(rems_from_px(480.))
+            .min_w(rems_from_px(360.))
+            .h_full()
+            .flex_shrink_0()
+            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
+            .child(content)
+    }
+
+    fn render_new_agent_tile(
+        &self,
+        agent_panel: Option<Entity<AgentPanel>>,
+        card_width: DefiniteLength,
+        card_min_width: Pixels,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let panel_to_focus = agent_panel.clone();
+
+        v_flex()
+            .id("backboard-agent-composer-card")
+            .w(card_width)
+            .min_w(card_min_width)
+            .max_w(relative(1.))
+            .h(px(430.))
+            .flex_none()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(colors.border_variant.opacity(0.72))
+            .bg(colors.editor_background)
+            .overflow_hidden()
+            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
+            .child(match agent_panel {
+                Some(panel) => div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(panel)
+                    .into_any_element(),
+                None => v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .items_center()
+                    .justify_center()
+                    .gap_3()
+                    .px_5()
+                    .child(
+                        Label::new("Start a new agent")
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::BOLD)
+                            .color(Color::Default),
+                    )
+                    .child(
+                        Button::new("composer-card-new-agent-chat", "New Agent")
+                            .start_icon(Icon::new(IconName::Plus))
+                            .style(ButtonStyle::Tinted(TintColor::Accent))
+                            .size(ButtonSize::Compact)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.create_chat(window, cx);
+                            })),
+                    )
+                    .into_any_element(),
+            })
+            .on_action(cx.listener(|this, _: &Chat, window, cx| {
+                this.submit_chat_action(window, cx);
+            }))
+            .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                cx.stop_propagation();
+                if let Some(panel) = panel_to_focus.as_ref() {
+                    panel.focus_handle(cx).focus(window, cx);
+                }
+            })
+            .on_click(cx.listener(|_, _, _, cx| {
+                cx.stop_propagation();
+            }))
+    }
 }
 
 impl Render for BackboardAgentWorkspacePage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let summaries = self.summaries(cx);
-        let selected_detail_exists = self.selected_thread_id.and_then(|thread_id| {
+        let selected_summary = self.selected_thread_id.and_then(|thread_id| {
             summaries
                 .iter()
-                .find(|summary| summary.thread_id == thread_id)?;
-            self.conversation_for_thread(thread_id, cx)?;
-            Some(())
+                .find(|summary| summary.thread_id == thread_id)
+                .cloned()
         });
-        if self.selected_thread_id.is_some() && selected_detail_exists.is_none() {
+        if self.selected_thread_id.is_some() && selected_summary.is_none() {
             self.selected_thread_id = None;
         }
         let agent_panel = self.ensure_agent_panel(window, cx);
+        let draft_drawer_open = self.draft_drawer_open
+            && selected_summary.is_none()
+            && agent_panel.as_ref().is_some_and(|panel| {
+                panel
+                    .read(cx)
+                    .active_backboard_workspace_draft_thread_id(cx)
+                    .is_some()
+            });
+        if self.draft_drawer_open && !draft_drawer_open && selected_summary.is_none() {
+            self.draft_drawer_open = false;
+        }
+        let selected_conversation = selected_summary
+            .as_ref()
+            .and_then(|summary| self.conversation_for_thread(summary.thread_id, cx));
+        let right_panel_open = selected_summary.is_some();
         let colors = cx.theme().colors();
-        let workspace_background = colors
+        let workspace_background = colors.editor_background;
+        let workspace_body_background = colors
             .panel_background
             .blend(colors.editor_background.opacity(0.42));
+        let workspace_body_panel_background = colors
+            .element_background
+            .blend(colors.panel_background.opacity(0.34));
+        let workspace_body_border = colors.border_variant.opacity(0.5);
 
         v_flex()
             .size_full()
@@ -1845,22 +2542,60 @@ impl Render for BackboardAgentWorkspacePage {
             .on_action(cx.listener(|this, _: &Chat, window, cx| {
                 this.submit_chat_action(window, cx);
             }))
-            .child(self.render_header(&summaries, cx))
+            .child(self.render_header(&summaries, right_panel_open, cx))
             .child(
-                h_flex()
+                div()
                     .flex_1()
                     .min_h_0()
+                    .p_1()
                     .overflow_hidden()
-                    .bg(workspace_background)
+                    .bg(workspace_body_background)
                     .child(
-                        div().flex_1().min_w_0().h_full().overflow_hidden().child(
-                            self.render_dashboard(summaries.clone(), window, cx)
-                                .into_any_element(),
-                        ),
-                    )
-                    .child(self.render_right_panel(agent_panel, window, cx)),
+                        h_flex()
+                            .size_full()
+                            .rounded_xl()
+                            .border_1()
+                            .border_color(workspace_body_border)
+                            .overflow_hidden()
+                            .bg(workspace_body_panel_background)
+                            .child(
+                                div().flex_1().min_w_0().h_full().overflow_hidden().child(
+                                    self.render_dashboard(
+                                        summaries.clone(),
+                                        right_panel_open,
+                                        draft_drawer_open,
+                                        agent_panel.clone(),
+                                        window,
+                                        cx,
+                                    )
+                                    .into_any_element(),
+                                ),
+                            )
+                            .when_some(selected_summary.clone(), |this, summary| {
+                                if let Some(conversation) = selected_conversation.clone() {
+                                    this.child(
+                                        self.render_chat_panel_frame(
+                                            self.render_detail_drawer(summary, conversation, cx)
+                                                .into_any_element(),
+                                            cx,
+                                        ),
+                                    )
+                                } else {
+                                    this.child(
+                                        self.render_chat_panel_frame(
+                                            self.render_right_panel(
+                                                agent_panel.clone(),
+                                                window,
+                                                cx,
+                                            )
+                                            .into_any_element(),
+                                            cx,
+                                        ),
+                                    )
+                                }
+                            }),
+                    ),
             )
-            .child(self.render_bottom_bar(&summaries, cx))
     }
 }
 
@@ -2027,7 +2762,7 @@ mod tests {
     async fn test_workspace_agent_page_new_chat_focuses_draft_without_card(
         cx: &mut TestAppContext,
     ) {
-        let (_workspace, panel, page, mut cx) = setup_workspace_page(cx, true).await;
+        let (workspace, panel, page, mut cx) = setup_workspace_page(cx, true).await;
 
         page.update_in(&mut cx, |page, window, cx| {
             page.create_chat(window, cx);
@@ -2038,6 +2773,19 @@ mod tests {
                 page.selected_thread_id.is_none(),
                 "draft-only workspace chat should not select a run card"
             );
+            assert!(
+                page.draft_drawer_open,
+                "New Agent should open the inline composer tile"
+            );
+        });
+        workspace.read_with(&cx, |workspace, cx| {
+            assert!(
+                !workspace
+                    .dock_at_position(DockPosition::Right)
+                    .read(cx)
+                    .is_open(),
+                "New Agent should not open the docked right panel"
+            );
         });
 
         panel.read_with(&cx, |panel, cx| {
@@ -2046,6 +2794,17 @@ mod tests {
                 .expect("New Chat should focus a Backboard workspace draft");
             assert!(!panel.is_retained_thread(&draft_thread_id));
             assert!(panel.backboard_agent_run_summaries(cx).is_empty());
+        });
+
+        page.update(&mut cx, |page, cx| {
+            page.close_detail(cx);
+        });
+        page.read_with(&cx, |page, _cx| {
+            assert!(
+                !page.draft_drawer_open,
+                "closing detail should hide the inline composer tile"
+            );
+            assert!(page.selected_thread_id.is_none());
         });
     }
 
@@ -2103,6 +2862,19 @@ mod tests {
             assert!(
                 page.selected_thread_id.is_none(),
                 "new chat should be a draft, not a selected run"
+            );
+            assert!(
+                page.draft_drawer_open,
+                "new chat should use the inline composer tile"
+            );
+        });
+        workspace.read_with(&cx, |workspace, cx| {
+            assert!(
+                !workspace
+                    .dock_at_position(DockPosition::Right)
+                    .read(cx)
+                    .is_open(),
+                "new chat should not open the docked right panel"
             );
         });
         let panel = workspace.read_with(&cx, |workspace, cx| {
@@ -2168,6 +2940,21 @@ mod tests {
             assert_eq!(summaries.len(), 1);
             assert_eq!(summaries[0].thread_id, sent_thread_id);
             assert_eq!(summaries[0].command.as_ref(), "build the dashboard");
+        });
+
+        page.update_in(&mut cx, |page, window, cx| {
+            page.open_run(sent_thread_id, window, cx);
+        });
+        page.read_with(&cx, |page, cx| {
+            assert_eq!(page.selected_thread_id, Some(sent_thread_id));
+            assert!(
+                !page.draft_drawer_open,
+                "opening a tile should switch from draft drawer to run chat drawer"
+            );
+            assert!(
+                page.conversation_for_thread(sent_thread_id, cx).is_some(),
+                "opening a tile should expose the selected run chat"
+            );
         });
     }
 }

@@ -18,7 +18,7 @@ use std::{
     time::Instant,
 };
 
-use ::backboard::{BackboardClient, BackboardConfig};
+use ::backboard::{BackboardClient, BackboardConfig, BackboardModel};
 use acp_thread::{
     AcpThread, AgentConnection, AgentModelInfo, AgentModelList, AgentSessionConfigOptions,
     AgentSessionInfo, AgentSessionList, AgentSessionListRequest, AgentSessionListResponse,
@@ -42,6 +42,22 @@ const DEFAULT_MODEL: &str = "gpt-4o";
 const DEFAULT_INTENSITY: &str = "fast";
 const DEFAULT_CONTEXT_WINDOW: u64 = 258_000;
 const HISTORY_REPLAY_MAX_MESSAGES: usize = 80;
+const MODEL_CATALOG_PROVIDERS: &[&str] = &[
+    "anthropic",
+    "openai",
+    "google",
+    "xai",
+    "deepseek",
+    "openrouter",
+    "aws-bedrock",
+    "cohere",
+    "cerebras",
+    "mistral",
+    "groq",
+    "together",
+    "fireworks",
+    "perplexity",
+];
 pub(crate) const DEFAULT_IMAGE_PROVIDER: &str = "openrouter";
 pub(crate) const DEFAULT_IMAGE_MODEL: &str = "google/gemini-3.1-flash-image-preview";
 pub(crate) const DEFAULT_TTS_PROVIDER: &str = "openai";
@@ -1079,11 +1095,11 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
             let models = match state.client() {
                 Ok((_config, client)) => {
                     log::info!(
-                        "Backboard native endpoint call: GET /models?model_type=llm&limit=15000 agent_id={}",
+                        "Backboard native endpoint call: GET /models?model_type=llm&limit=15000 plus provider-scoped model catalogs agent_id={}",
                         state.agent_id
                     );
                     let models = gpui_tokio::Tokio::spawn_result(cx, async move {
-                        client.list_models(None, Some("llm"), Some(15_000)).await
+                        list_backboard_model_catalog(client).await
                     })
                     .await?;
                     models
@@ -1377,6 +1393,53 @@ fn group_models(
             .push(model);
     }
     groups
+}
+
+async fn list_backboard_model_catalog(client: BackboardClient) -> Result<Vec<BackboardModel>> {
+    let mut models = client.list_models(None, Some("llm"), Some(15_000)).await?;
+    let mut providers = MODEL_CATALOG_PROVIDERS
+        .iter()
+        .map(|provider| provider.to_string())
+        .collect::<Vec<_>>();
+
+    match client.list_providers().await {
+        Ok(listed_providers) => {
+            for provider in listed_providers {
+                if !providers.iter().any(|known| known == &provider) {
+                    providers.push(provider);
+                }
+            }
+        }
+        Err(error) => {
+            log::debug!("Backboard model provider catalog request failed: {error:#}");
+        }
+    }
+
+    let scoped_results = futures::future::join_all(providers.into_iter().map(|provider| {
+        let client = client.clone();
+        async move {
+            let result = client
+                .list_models(Some(provider.as_str()), Some("llm"), Some(15_000))
+                .await;
+            (provider, result)
+        }
+    }))
+    .await;
+
+    for (provider, result) in scoped_results {
+        match result {
+            Ok(mut provider_models) => models.append(&mut provider_models),
+            Err(error) => {
+                log::debug!(
+                    "Backboard provider-scoped model catalog request failed provider={provider}: {error:#}"
+                );
+            }
+        }
+    }
+
+    let mut seen = BTreeSet::new();
+    models.retain(|model| seen.insert(format!("{}\0{}", model.provider, model.name)));
+    Ok(models)
 }
 
 fn split_model_id(model_id: &str) -> (String, String) {

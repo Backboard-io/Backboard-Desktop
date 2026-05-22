@@ -775,16 +775,18 @@ fn provider_id(model: &AgentModelInfo) -> String {
     let name = model.name.to_lowercase();
 
     if let Some((provider, _)) = id.split_once('/') {
-        if let Some(family) = canonical_model_family(&format!("{id} {name}")) {
-            return family;
+        if let Some(provider) = canonical_provider_id(provider) {
+            return provider;
         }
-        return canonical_provider_id(provider).unwrap_or_else(|| provider.to_string());
+        return canonical_model_family(&format!("{id} {name}"))
+            .unwrap_or_else(|| provider.to_string());
     }
     if let Some((provider, _)) = id.split_once(':') {
-        if let Some(family) = canonical_model_family(&format!("{id} {name}")) {
-            return family;
+        if let Some(provider) = canonical_provider_id(provider) {
+            return provider;
         }
-        return canonical_provider_id(provider).unwrap_or_else(|| provider.to_string());
+        return canonical_model_family(&format!("{id} {name}"))
+            .unwrap_or_else(|| provider.to_string());
     }
 
     canonical_model_family(&format!("{id} {name}"))
@@ -892,9 +894,13 @@ fn canonical_model_family(text: &str) -> Option<String> {
 fn provider_id_for_group(group_name: &str, model: &AgentModelInfo) -> String {
     let id = model.id.0.as_ref();
     let name = model.name.as_ref();
-    canonical_model_family(&format!("{id} {name}"))
-        .or_else(|| canonical_provider_from_text(group_name))
-        .unwrap_or_else(|| provider_id(model))
+    let provider = provider_id(model);
+    if provider_display_name(&provider) != "Other" {
+        return provider;
+    }
+    canonical_provider_from_text(group_name)
+        .or_else(|| canonical_model_family(&format!("{id} {name}")))
+        .unwrap_or(provider)
 }
 
 fn is_featherless_model(model: &AgentModelInfo) -> bool {
@@ -1166,7 +1172,7 @@ mod tests {
     }
 
     #[test]
-    fn test_provider_id_prefers_real_provider_prefix() {
+    fn test_provider_id_prefers_known_provider_prefix() {
         assert_eq!(
             provider_id(&create_model("openai/gpt-5", "GPT-5")),
             "openai"
@@ -1180,14 +1186,14 @@ mod tests {
                 "bedrock/openai.gpt-oss-120b-1:0",
                 "GPT OSS 120B"
             )),
-            "openai"
+            "bedrock"
         );
         assert_eq!(
             provider_id(&create_model(
                 "openrouter/google/gemini-3-flash",
                 "Gemini 3 Flash"
             )),
-            "gemini"
+            "openrouter"
         );
     }
 

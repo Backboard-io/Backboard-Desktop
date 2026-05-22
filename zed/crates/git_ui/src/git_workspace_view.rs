@@ -3,7 +3,7 @@ use gpui::{
     Action, ClickEvent, Entity, EntityId, FocusHandle, Focusable, MouseButton, Subscription,
 };
 use project::Project;
-use ui::{Icon, IconName, IconSize, Tooltip, prelude::*};
+use ui::{Icon, IconName, IconSize, LabelSize, Tooltip, prelude::*};
 use workspace::Workspace;
 
 pub struct GitWorkspaceView {
@@ -51,20 +51,64 @@ impl GitWorkspaceView {
             .unwrap_or_else(|| "No branch".into());
         let changes_count = panel.changes_count();
         let toolbar_bg = colors
+            .tab_bar_background
+            .blend(colors.editor_background.opacity(0.28));
+        let muted_panel_bg = colors
             .panel_background
-            .blend(colors.editor_background.opacity(0.18));
+            .blend(colors.editor_background.opacity(0.38));
 
         h_flex()
-            .h(px(64.))
+            .h(px(56.))
             .w_full()
             .flex_shrink_0()
+            .items_center()
+            .gap_2()
+            .px_3()
             .border_b_1()
-            .border_color(colors.border_variant)
+            .border_color(colors.border_variant.opacity(0.55))
             .bg(toolbar_bg)
-            .child(self.render_toolbar_tile(
+            .child(
+                h_flex()
+                    .min_w(px(180.))
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .size(px(28.))
+                            .rounded_md()
+                            .border_1()
+                            .border_color(colors.border_variant.opacity(0.5))
+                            .bg(muted_panel_bg)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::GitBranch)
+                                    .size(IconSize::Small)
+                                    .color(Color::Accent),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_0()
+                            .min_w_0()
+                            .child(
+                                Label::new("Git workspace")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Default),
+                            )
+                            .child(
+                                Label::new(format!("{changes_count} changed files"))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            ),
+                    ),
+            )
+            .child(div().flex_1())
+            .child(self.render_toolbar_chip(
                 "git-workspace-repository",
                 IconName::LockOutlined,
-                "Current Repository",
+                "Repository",
                 repo_name,
                 Some("Select repository"),
                 move |_, window, cx| {
@@ -72,10 +116,10 @@ impl GitWorkspaceView {
                 },
                 cx,
             ))
-            .child(self.render_toolbar_tile(
+            .child(self.render_toolbar_chip(
                 "git-workspace-branch",
                 IconName::GitBranch,
-                "Current Branch",
+                "Branch",
                 branch_name,
                 Some("Switch branch"),
                 move |_, window, cx| {
@@ -83,24 +127,23 @@ impl GitWorkspaceView {
                 },
                 cx,
             ))
-            .child(self.render_toolbar_tile(
+            .child(self.render_toolbar_chip(
                 "git-workspace-fetch",
                 IconName::RotateCw,
+                "Remote",
                 "Fetch origin",
-                format!("{changes_count} changed files"),
                 Some("Fetch updates from remote"),
                 move |_, window, cx| {
                     window.dispatch_action(git::Fetch.boxed_clone(), cx);
                 },
                 cx,
             ))
-            .child(div().flex_1().h_full())
             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                 cx.stop_propagation();
             })
     }
 
-    fn render_toolbar_tile(
+    fn render_toolbar_chip(
         &self,
         id: &'static str,
         icon: IconName,
@@ -116,27 +159,36 @@ impl GitWorkspaceView {
 
         h_flex()
             .id(id)
-            .h_full()
-            .w(px(310.))
-            .px_4()
-            .gap_3()
+            .h(px(34.))
+            .max_w(px(240.))
+            .min_w(px(148.))
+            .px_2()
+            .gap_2()
             .items_center()
-            .border_r_1()
-            .border_color(colors.border_variant)
+            .rounded_md()
+            .border_1()
+            .border_color(colors.border_variant.opacity(0.5))
+            .bg(colors
+                .panel_background
+                .blend(colors.editor_background.opacity(0.28)))
             .cursor_pointer()
-            .hover(|style| style.bg(colors.element_hover.opacity(0.45)))
+            .hover(|style| style.bg(colors.element_hover.opacity(0.35)))
             .on_click(on_click)
             .when_some(tooltip, |this, tooltip| {
                 this.tooltip(Tooltip::text(tooltip))
             })
-            .child(Icon::new(icon).size(IconSize::Medium).color(Color::Muted))
+            .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
             .child(
                 v_flex()
                     .min_w_0()
-                    .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+                    .child(
+                        Label::new(label)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    )
                     .child(
                         Label::new(value)
-                            .size(LabelSize::Default)
+                            .size(LabelSize::Small)
                             .color(Color::Default)
                             .truncate(),
                     ),
@@ -153,30 +205,32 @@ impl GitWorkspaceView {
     fn render_left_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors();
         let changes_count = self.git_panel.read(cx).changes_count();
+        let sidebar_bg = colors
+            .panel_background
+            .blend(colors.editor_background.opacity(0.2));
 
         v_flex()
-            .w(px(390.))
+            .w(px(360.))
             .h_full()
             .flex_shrink_0()
             .border_r_1()
-            .border_color(colors.border_variant)
-            .bg(colors.panel_background)
+            .border_color(colors.border_variant.opacity(0.5))
+            .bg(sidebar_bg)
             .child(
                 h_flex()
-                    .h(px(44.))
+                    .h(px(48.))
                     .flex_shrink_0()
+                    .items_center()
+                    .justify_between()
+                    .px_3()
                     .border_b_1()
-                    .border_color(colors.border_variant)
+                    .border_color(colors.border_variant.opacity(0.5))
                     .child(
                         h_flex()
                             .id("git-workspace-changes-tab")
-                            .h_full()
-                            .flex_1()
-                            .items_center()
-                            .justify_center()
                             .gap_2()
-                            .border_b_2()
-                            .border_color(colors.border_selected)
+                            .items_center()
+                            .child(Icon::new(IconName::FileGit).size(IconSize::Small))
                             .child(Label::new("Changes"))
                             .child(
                                 Label::new(changes_count.to_string())
@@ -187,11 +241,20 @@ impl GitWorkspaceView {
                     .child(
                         h_flex()
                             .id("git-workspace-history-tab")
-                            .h_full()
-                            .flex_1()
+                            .h(px(26.))
+                            .px_2()
+                            .gap_1()
                             .items_center()
-                            .justify_center()
-                            .child(Label::new("History").color(Color::Muted)),
+                            .rounded_md()
+                            .border_1()
+                            .border_color(colors.border_variant.opacity(0.36))
+                            .bg(colors.element_background.opacity(0.45))
+                            .child(Icon::new(IconName::GitGraph).size(IconSize::XSmall))
+                            .child(
+                                Label::new("History")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            ),
                     ),
             )
             .child(div().flex_1().min_h_0().child(self.git_panel.clone()))
@@ -206,7 +269,10 @@ impl Focusable for GitWorkspaceView {
 
 impl Render for GitWorkspaceView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors();
+        let editor_background = cx.theme().colors().editor_background;
+        let diff_background =
+            editor_background.blend(cx.theme().colors().panel_background.opacity(0.12));
+        let diff_border = cx.theme().colors().border_variant.opacity(0.45);
 
         v_flex()
             .id("git-workspace-view")
@@ -214,7 +280,7 @@ impl Render for GitWorkspaceView {
             .key_context("GitWorkspaceView")
             .size_full()
             .overflow_hidden()
-            .bg(colors.editor_background)
+            .bg(editor_background)
             .child(self.render_top_bar(window, cx))
             .child(
                 h_flex()
@@ -226,7 +292,18 @@ impl Render for GitWorkspaceView {
                             .flex_1()
                             .min_w_0()
                             .h_full()
-                            .child(self.project_diff.clone()),
+                            .p_2()
+                            .bg(diff_background)
+                            .child(
+                                div()
+                                    .size_full()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(diff_border)
+                                    .overflow_hidden()
+                                    .bg(editor_background)
+                                    .child(self.project_diff.clone()),
+                            ),
                     ),
             )
     }

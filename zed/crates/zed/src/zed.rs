@@ -879,11 +879,49 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
             add_panel_when_ready(terminal_panel, workspace_handle.clone(), cx.clone()),
             add_git_panel_when_ready(git_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(debug_panel, workspace_handle.clone(), cx.clone()),
-            initialize_agent_panel(workspace_handle, cx.clone()).map(|r| r.log_err()),
+            initialize_agent_panel(workspace_handle.clone(), cx.clone()).map(|r| r.log_err()),
         );
+
+        workspace_handle
+            .update_in(cx, |workspace, window, cx| {
+                open_default_code_editor_layout(workspace, window, cx);
+            })
+            .log_err();
 
         anyhow::Ok(())
     })
+}
+
+fn open_default_code_editor_layout(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    if cfg!(test) {
+        return;
+    }
+
+    workspace.open_panel::<ProjectPanel>(window, cx);
+
+    if let Some(agent_panel) = workspace.panel::<agent_ui::AgentPanel>(cx) {
+        agent_panel.update(cx, |panel, cx| {
+            panel.ensure_thread_initialized(window, cx);
+        });
+        workspace.open_panel::<agent_ui::AgentPanel>(window, cx);
+    }
+
+    let center_is_empty = workspace
+        .panes()
+        .iter()
+        .all(|pane| pane.read(cx).items_len() == 0);
+
+    if center_is_empty && workspace.panel::<TerminalPanel>(cx).is_some() {
+        let working_directory = terminal_view::default_working_directory(workspace, cx);
+        TerminalPanel::add_center_terminal(workspace, window, cx, move |project, cx| {
+            project.create_terminal_shell(working_directory, cx)
+        })
+        .detach_and_log_err(cx);
+    }
 }
 
 fn setup_or_teardown_ai_panel<P: Panel>(

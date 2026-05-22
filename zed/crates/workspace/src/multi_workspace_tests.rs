@@ -129,41 +129,6 @@ async fn test_multi_workspace_collapses_when_agent_is_disabled(cx: &mut TestAppC
 }
 
 #[gpui::test]
-async fn test_jarvis_tab_renders_directory_visualizer(cx: &mut TestAppContext) {
-    init_test(cx);
-    let fs = FakeFs::new(cx.executor());
-    fs.insert_tree(
-        "/root_a",
-        json!({
-            "src": {
-                "main.rs": "",
-                "lib.rs": ""
-            },
-            "README.md": ""
-        }),
-    )
-    .await;
-    let project = Project::test(fs, ["/root_a".as_ref()], cx).await;
-
-    let (multi_workspace, cx) =
-        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
-    cx.run_until_parked();
-
-    multi_workspace.update_in(cx, |multi_workspace, _window, cx| {
-        multi_workspace.test_select_jarvis_tab(cx);
-    });
-    cx.run_until_parked();
-
-    multi_workspace.read_with(cx, |multi_workspace, cx| {
-        assert!(multi_workspace.jarvis_placeholder_expanded);
-        assert!(
-            multi_workspace.test_jarvis_visualizer_node_count(cx) > 1,
-            "Jarvis should render the directory visualizer instead of the old placeholder"
-        );
-    });
-}
-
-#[gpui::test]
 async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
     cx: &mut TestAppContext,
 ) {
@@ -203,16 +168,6 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
         assert!(!multi_workspace.tasks_expanded);
         assert!(multi_workspace.git_expanded);
         assert!(!multi_workspace.jarvis_placeholder_expanded);
-    });
-
-    multi_workspace.update_in(cx, |multi_workspace, _window, cx| {
-        multi_workspace.test_select_jarvis_tab(cx);
-    });
-    multi_workspace.read_with(cx, |multi_workspace, _cx| {
-        assert!(!multi_workspace.multi_agent_expanded);
-        assert!(!multi_workspace.tasks_expanded);
-        assert!(!multi_workspace.git_expanded);
-        assert!(multi_workspace.jarvis_placeholder_expanded);
     });
 
     multi_workspace.update_in(cx, |multi_workspace, _window, cx| {

@@ -1886,6 +1886,29 @@ impl AgentPanel {
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) {
+        let agent_workspace =
+            window
+                .root::<MultiWorkspace>()
+                .flatten()
+                .and_then(|multi_workspace| {
+                    let multi_workspace = multi_workspace.read(cx);
+                    multi_workspace.multi_agent_expanded.then(|| {
+                        multi_workspace
+                            .agent_workspace_view
+                            .as_ref()?
+                            .clone()
+                            .downcast::<crate::agent_workspace_ui::BackboardAgentWorkspacePage>()
+                            .ok()
+                    })?
+                });
+
+        if let Some(agent_workspace) = agent_workspace {
+            agent_workspace.update(cx, |agent_workspace, cx| {
+                agent_workspace.create_chat(window, cx);
+            });
+            return;
+        }
+
         if workspace
             .panel::<Self>(cx)
             .is_some_and(|panel| panel.read(cx).enabled(cx))
