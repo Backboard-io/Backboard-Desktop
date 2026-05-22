@@ -20,7 +20,7 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     path::Path,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex, atomic::{AtomicBool, Ordering}},
     time::{Duration, Instant},
 };
 use zeta_prompt::ZetaPromptInput;
@@ -34,8 +34,6 @@ const COMPLETION_CHUNK_LINE_THRESHOLD: usize = 14;
 const COMPLETION_CHUNK_COMPLEXITY_THRESHOLD: usize = 6;
 const COMPLETION_TARGET_CHUNK_LINES: usize = 8;
 const COMPLETION_MIN_CHUNK_LINES: usize = 3;
-const THREAD_CACHE_TTL_SECS: u64 = 120;
-
 pub const BACKBOARD_CREDENTIALS_URL: SharedString =
     SharedString::new_static("https://app.backboard.io/api");
 
@@ -43,16 +41,11 @@ pub static BACKBOARD_TOKEN_ENV_VAR: std::sync::LazyLock<EnvVar> = env_var!("BACK
 
 static BACKBOARD_MODEL_CACHE: LazyLock<Mutex<HashMap<String, BackboardModel>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+// Prevents multiple concurrent requests from all triggering a registry fetch simultaneously.
+// The first request to see a cache miss sets this flag and does the fetch; all others fall
+// back to DEBUG_BACKBOARD_MODEL immediately and will benefit from the cache on their next try.
+static BACKBOARD_REGISTRY_FETCH_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static BACKBOARD_ASSISTANT_CACHE: LazyLock<Mutex<HashMap<String, String>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-struct CachedThread {
-    assistant_id: String,
-    thread_id: String,
-    created_at: Instant,
-}
-
-static BACKBOARD_THREAD_CACHE: LazyLock<Mutex<HashMap<String, CachedThread>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 const DEBUG_BACKBOARD_MODEL: &str = "claude-haiku-4-5-20251001";
@@ -110,36 +103,6 @@ fn store_cached_backboard_assistant(base_url: &str, assistant_id: &str) {
     }
 }
 
-fn load_cached_backboard_thread(base_url: &str, assistant_id: &str) -> Option<String> {
-    let cache_key = base_url.trim_end_matches('/');
-    BACKBOARD_THREAD_CACHE
-        .lock()
-        .ok()?
-        .get(cache_key)
-        .and_then(|thread| {
-            if thread.assistant_id == assistant_id
-                && thread.created_at.elapsed() < Duration::from_secs(THREAD_CACHE_TTL_SECS)
-            {
-                Some(thread.thread_id.clone())
-            } else {
-                None
-            }
-        })
-}
-
-fn store_cached_backboard_thread(base_url: &str, assistant_id: &str, thread_id: &str) {
-    let cache_key = base_url.trim_end_matches('/');
-    if let Ok(mut cache) = BACKBOARD_THREAD_CACHE.lock() {
-        cache.insert(
-            cache_key.to_string(),
-            CachedThread {
-                assistant_id: assistant_id.to_string(),
-                thread_id: thread_id.to_string(),
-                created_at: Instant::now(),
-            },
-        );
-    }
-}
 
 pub struct BackboardCompletions {
     pub api_token: Entity<ApiKeyState>,
@@ -147,8 +110,6 @@ pub struct BackboardCompletions {
     pub completions_used: u32,
     /// Cached assistant_id so creation is only done once per process lifetime.
     cached_assistant: Option<String>,
-    /// Cached thread_id reused across completions within the TTL window.
-    cached_thread: Option<String>,
     /// Cached Backboard model name so registry discovery is only done once.
     cached_model: Option<BackboardModel>,
 }
@@ -160,7 +121,6 @@ impl BackboardCompletions {
             quota_exceeded: false,
             completions_used: 0,
             cached_assistant: None,
-            cached_thread: None,
             cached_model: None,
         }
     }
@@ -241,15 +201,6 @@ impl BackboardCompletions {
             self.cached_assistant = cached_assistant.clone();
         } else {
             log::info!("backboard: assistant cache miss");
-        }
-
-        let cached_thread_id =
-            load_cached_backboard_thread(&base_url, cached_assistant.as_deref().unwrap_or(""));
-        if let Some(thread_id) = cached_thread_id.as_ref() {
-            log::info!("backboard: thread cache hit thread_id={}", thread_id);
-            self.cached_thread = Some(thread_id.clone());
-        } else {
-            log::info!("backboard: thread cache miss");
         }
 
         let full_path: Arc<Path> = snapshot
@@ -343,13 +294,12 @@ impl BackboardCompletions {
 
             let request_phase_started = Instant::now();
             log::info!("backboard: completion run started");
-            let (response_text, new_thread_id) = backboard_completion(
+            let response_text = backboard_completion(
                 &api_key,
                 &base_url,
                 &selected_model,
                 &prompt,
                 cached_assistant.as_deref(),
-                cached_thread_id.as_deref(),
                 &http_client,
             )
             .await
@@ -374,7 +324,6 @@ impl BackboardCompletions {
             anyhow::Ok(Some((
                 selected_model,
                 response_text,
-                new_thread_id,
                 snapshot,
                 inputs,
                 language_name,
@@ -391,7 +340,6 @@ impl BackboardCompletions {
                 Option<(
                     BackboardModel,
                     String,
-                    Option<String>,
                     language::BufferSnapshot,
                     ZetaPromptInput,
                     Option<String>,
@@ -419,7 +367,6 @@ impl BackboardCompletions {
             let Some((
                 selected_model,
                 response_text,
-                new_thread_id,
                 old_snapshot,
                 inputs,
                 language_name,
@@ -435,9 +382,6 @@ impl BackboardCompletions {
                     store.backboard.cached_assistant =
                         load_cached_backboard_assistant(&base_url_for_spawn);
                 }
-                if let Some(thread_id) = new_thread_id {
-                    store.backboard.cached_thread = Some(thread_id);
-                }
             })?;
 
             let response_str = strip_code_fences(&response_text);
@@ -447,11 +391,17 @@ impl BackboardCompletions {
                 response_str.chars().take(200).collect::<String>()
             );
 
-            let Some(chunks) = filtered_function_completion_chunks(
-                response_str,
-                &inputs,
-                language_name.as_deref(),
-            ) else {
+            let completion_text = strip_typed_prefix_from_completion(response_str, &inputs);
+            if completion_text.len() != response_str.len() {
+                log::info!(
+                    "backboard: reason=duplicate_prefix stripped {} chars",
+                    response_str.len().saturating_sub(completion_text.len())
+                );
+            }
+
+            let Some(chunks) =
+                filtered_function_completion_chunks(&completion_text, &inputs, language_name.as_deref())
+            else {
                 return anyhow::Ok(None);
             };
             log::info!(
@@ -471,11 +421,8 @@ impl BackboardCompletions {
             );
 
             let insertion_anchor = old_snapshot.anchor_after(insertion_offset);
-            let edits: Arc<[(std::ops::Range<language::Anchor>, Arc<str>)]> = vec![(
-                insertion_anchor.clone()..insertion_anchor,
-                Arc::from(response_str),
-            )]
-            .into();
+            let edits: Arc<[(std::ops::Range<language::Anchor>, Arc<str>)]> =
+                vec![(insertion_anchor.clone()..insertion_anchor, Arc::from(completion_text.as_str()))].into();
             let e2e_latency = cx.background_executor().now() - request_start;
             let result = EditPredictionResult::new(
                 EditPredictionId(uuid::Uuid::new_v4().to_string().into()),
@@ -586,20 +533,19 @@ fn is_quota_exceeded_error(error: &anyhow::Error) -> bool {
 
 // ── Core HTTP call ────────────────────────────────────────────────────────────
 
-/// Sends a message to a Backboard thread and streams the response.
+/// Sends a single message to a fresh Backboard thread and streams the response.
 ///
-/// The assistant and thread are reused across calls within the TTL window to
-/// avoid creation round-trips. Returns the response text and an optional new
-/// thread_id that should be stored in the cache when a fresh thread was created.
+/// A new thread is created for every call so there is no accumulated conversation
+/// history between completions. The assistant is reused from the cache to avoid its
+/// creation round-trip. The ephemeral thread_id is never stored after the request.
 async fn backboard_completion(
     api_key: &str,
     base_url: &str,
     selected_model: &BackboardModel,
     prompt: &str,
     cached_assistant_id: Option<&str>,
-    cached_thread_id: Option<&str>,
     http_client: &Arc<dyn HttpClient>,
-) -> Result<(String, Option<String>)> {
+) -> Result<String> {
     let base_url = base_url.trim_end_matches('/');
 
     let assistant_id = if let Some(aid) = cached_assistant_id {
@@ -640,34 +586,30 @@ async fn backboard_completion(
         assistant_id
     };
 
-    let (thread_id, created_new_thread) = if let Some(tid) = cached_thread_id {
-        log::info!("backboard: thread cache hit thread_id={}", tid);
-        (tid.to_string(), false)
-    } else {
-        let thread_started = Instant::now();
-        log::info!("backboard: thread cache miss → creating fresh thread");
-        let thread = backboard_post_json(
-            http_client,
-            api_key,
-            &format!("{base_url}/assistants/{assistant_id}/threads"),
-            serde_json::to_vec(&serde_json::json!({}))?,
-        )
-        .await
-        .context("Backboard: create_thread failed")?;
-        log::info!(
-            "backboard: create thread finished elapsed_ms={}",
-            thread_started.elapsed().as_millis()
-        );
-        let response: CreateThreadResponse = serde_json::from_value(thread)
-            .context("Backboard: failed to parse create_thread response")?;
-        let thread_id = response.thread_id;
-        if thread_id.is_empty() {
-            anyhow::bail!("Backboard: create_thread response missing thread_id");
-        }
-        log::info!("backboard: created thread_id={}", thread_id);
-        store_cached_backboard_thread(base_url, &assistant_id, &thread_id);
-        (thread_id, true)
-    };
+    let thread_started = Instant::now();
+    log::info!(
+        "backboard: autocomplete run creating ephemeral thread assistant_id={}",
+        assistant_id
+    );
+    let thread = backboard_post_json(
+        http_client,
+        api_key,
+        &format!("{base_url}/assistants/{assistant_id}/threads"),
+        serde_json::to_vec(&serde_json::json!({}))?,
+    )
+    .await
+    .context("Backboard: create_thread failed")?;
+    log::info!(
+        "backboard: create thread finished elapsed_ms={}",
+        thread_started.elapsed().as_millis()
+    );
+    let response: CreateThreadResponse = serde_json::from_value(thread)
+        .context("Backboard: failed to parse create_thread response")?;
+    let thread_id = response.thread_id;
+    if thread_id.is_empty() {
+        anyhow::bail!("Backboard: create_thread response missing thread_id");
+    }
+    log::debug!("backboard: ephemeral thread_id={} (not cached)", thread_id);
 
     let completion_started = Instant::now();
     log::info!(
@@ -767,8 +709,7 @@ async fn backboard_completion(
                             "backboard: completion request finished in {}ms",
                             completion_started.elapsed().as_millis()
                         );
-                        let new_thread = created_new_thread.then(|| thread_id.clone());
-                        return Ok((accumulated, new_thread));
+                        return Ok(accumulated);
                     }
                 }
             }
@@ -807,8 +748,7 @@ async fn backboard_completion(
         "backboard: completion run finished elapsed_ms={}",
         run_started.elapsed().as_millis()
     );
-    let new_thread = created_new_thread.then(|| thread_id.clone());
-    Ok((accumulated, new_thread))
+    Ok(accumulated)
 }
 
 fn is_model_not_supported_message(error: &str) -> bool {
@@ -861,22 +801,51 @@ async fn resolve_backboard_model(
         return Ok(cached_model.clone());
     }
 
-    log::info!("backboard: model cache miss");
-    log::info!(
-        "backboard: model registry discovery bypassed during debugging; using {}",
-        DEBUG_BACKBOARD_MODEL
-    );
-    let _ = (api_key, base_url, http_client);
-    let model = BackboardModel {
-        provider: "anthropic".to_string(),
-        name: DEBUG_BACKBOARD_MODEL.to_string(),
-        ..Default::default()
-    };
-    log::info!("backboard: selected model={:?}", model);
+    // Only one concurrent request should fetch the registry. If another is already in flight,
+    // use the hardcoded fallback immediately — the cache will be populated by the time that
+    // request finishes and the next keypress will get the real model.
+    if BACKBOARD_REGISTRY_FETCH_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        log::info!(
+            "backboard: registry fetch already in progress, using fallback model={}",
+            DEBUG_BACKBOARD_MODEL
+        );
+        return Ok(BackboardModel {
+            provider: "anthropic".to_string(),
+            name: DEBUG_BACKBOARD_MODEL.to_string(),
+            ..Default::default()
+        });
+    }
+
+    log::info!("backboard: model cache miss, fetching registry");
+    let models = fetch_backboard_models(api_key, base_url, http_client)
+        .await
+        .unwrap_or_else(|err| {
+            log::warn!(
+                "backboard: model registry fetch failed: {err:#}, falling back to {}",
+                DEBUG_BACKBOARD_MODEL
+            );
+            vec![]
+        });
+    BACKBOARD_REGISTRY_FETCH_IN_PROGRESS.store(false, Ordering::SeqCst);
+
+    let model = select_preferred_backboard_model(models).unwrap_or_else(|| {
+        log::warn!(
+            "backboard: no suitable model in registry, falling back to {}",
+            DEBUG_BACKBOARD_MODEL
+        );
+        BackboardModel {
+            provider: "anthropic".to_string(),
+            name: DEBUG_BACKBOARD_MODEL.to_string(),
+            ..Default::default()
+        }
+    });
+    log::info!("backboard: selected model={} provider={}", model.name, model.provider);
     Ok(model)
 }
 
-#[allow(dead_code)]
 async fn fetch_backboard_models(
     api_key: &str,
     base_url: &str,
@@ -886,7 +855,7 @@ async fn fetch_backboard_models(
     let response = backboard_get_json(
         http_client,
         api_key,
-        &format!("{base_url}/models?model_type=llm&limit=15000"),
+        &format!("{base_url}/models?model_type=llm&limit=200"),
     )
     .await
     .context("Backboard: list_models failed")?;
@@ -909,8 +878,23 @@ async fn fetch_backboard_models(
         .map_err(Into::into)
 }
 
-#[allow(dead_code)]
+// Providers known to serve reliable, code-capable models suitable for autocomplete.
+// Models from any other provider are excluded regardless of price.
+const AUTOCOMPLETE_TRUSTED_PROVIDERS: &[&str] = &["anthropic", "openai", "deepseek"];
+
 fn select_preferred_backboard_model(models: Vec<BackboardModel>) -> Option<BackboardModel> {
+    // Only consider models from trusted providers. This prevents the cost-only ranking from
+    // selecting unrelated models (e.g. story generators, image models) that happen to be cheap.
+    let trusted: Vec<BackboardModel> = models
+        .into_iter()
+        .filter(|m| {
+            let provider_lower = m.provider.to_ascii_lowercase();
+            AUTOCOMPLETE_TRUSTED_PROVIDERS
+                .iter()
+                .any(|p| provider_lower.contains(p))
+        })
+        .collect();
+
     fn score(model: &BackboardModel) -> (f64, u64, &str, &str) {
         let cost = model.input_cost_per_1m_tokens.unwrap_or(f64::INFINITY)
             + model.output_cost_per_1m_tokens.unwrap_or(f64::INFINITY);
@@ -923,9 +907,9 @@ fn select_preferred_backboard_model(models: Vec<BackboardModel>) -> Option<Backb
         )
     }
 
-    models.into_iter().min_by(|left, right| {
-        let left_score = score(&left);
-        let right_score = score(&right);
+    trusted.into_iter().min_by(|left, right| {
+        let left_score = score(left);
+        let right_score = score(right);
         left_score
             .0
             .partial_cmp(&right_score.0)
@@ -1101,6 +1085,30 @@ fn strip_code_fences(response: &str) -> &str {
     text.trim_end_matches("```").trim_end_matches("\n```")
 }
 
+// Remove any leading portion of `completion` that duplicates what the user has already typed
+// on the current line. This handles models that echo back the prefix when completing mid-token
+// (e.g. cursor after `user.` and model returns `user.name;` instead of just `name;`).
+fn strip_typed_prefix_from_completion(completion: &str, inputs: &ZetaPromptInput) -> String {
+    let cursor_offset = inputs.cursor_offset_in_excerpt.min(inputs.cursor_excerpt.len());
+    let code_before = &inputs.cursor_excerpt[..cursor_offset];
+    // Use rfind to get the actual current line — .lines().last() skips trailing newlines
+    // and would return the previous line when the cursor is at the start of a new line.
+    let current_line = if let Some(newline_pos) = code_before.rfind('\n') {
+        &code_before[newline_pos + 1..]
+    } else {
+        code_before
+    };
+    let typed = current_line.trim_start();
+    if typed.is_empty() {
+        return completion.to_string();
+    }
+    let completion_trimmed = completion.trim_start_matches(|c: char| c == ' ' || c == '\t');
+    if let Some(rest) = completion_trimmed.strip_prefix(typed) {
+        return rest.to_string();
+    }
+    completion.to_string()
+}
+
 fn is_non_completion(response: &str) -> bool {
     if response.is_empty() || response == "None" {
         return true;
@@ -1126,7 +1134,7 @@ fn is_non_completion(response: &str) -> bool {
         || first_line.contains("<prefix>")
         || first_line.contains("<suffix>")
     {
-        log::info!("backboard: filtered — prompt_echo");
+        log::info!("backboard: rejected reason=prompt_echo");
         return true;
     }
 
@@ -1179,11 +1187,8 @@ fn is_non_completion(response: &str) -> bool {
         "please note",
         "please provide",
     ];
-    if assistant_prefixes
-        .iter()
-        .any(|p| lower_first.starts_with(p))
-    {
-        log::info!("backboard: filtered — natural_language_prefix");
+    if assistant_prefixes.iter().any(|p| lower_first.starts_with(p)) {
+        log::info!("backboard: rejected reason=assistant_preamble");
         return true;
     }
 
@@ -1205,7 +1210,7 @@ fn is_non_completion(response: &str) -> bool {
         "as a language model",
     ];
     if meta_phrases.iter().any(|p| lower_full.contains(p)) {
-        log::info!("backboard: filtered — mentions_prompt_or_role");
+        log::info!("backboard: rejected reason=meta_phrases");
         return true;
     }
 
@@ -1223,13 +1228,14 @@ fn is_non_completion(response: &str) -> bool {
             .chars()
             .any(|c| matches!(c, '{' | '}' | '(' | ')' | ';' | '=' | ':' | ','));
         if !has_code {
+            log::info!("backboard: rejected reason=all_comments");
             return true;
         }
     }
 
     // Reject completions where any non-comment line looks like prose
     if contains_prose_like_line(trimmed) {
-        log::info!("backboard: filtered — prose_not_code");
+        log::info!("backboard: rejected reason=prose_not_code");
         return true;
     }
 
@@ -1313,34 +1319,53 @@ fn is_prose_like_line(line: &str) -> bool {
 fn filtered_function_completion_chunks(
     response: &str,
     inputs: &ZetaPromptInput,
-    _language_name: Option<&str>,
+    language_name: Option<&str>,
 ) -> Option<Vec<String>> {
     let completion = normalize_completion_text(response);
     if is_non_completion(&completion) {
-        log::info!("backboard: filtered — is_non_completion");
         return None;
     }
 
     if completion.trim().is_empty() {
-        log::info!("backboard: filtered — empty completion");
+        log::info!("backboard: rejected reason=empty_completion");
         return None;
     }
 
-    if completion.lines().count() > 30 {
-        log::info!("backboard: filtered — completion too long (>30 lines)");
+    let cursor_offset = inputs.cursor_offset_in_excerpt.min(inputs.cursor_excerpt.len());
+    let code_before = &inputs.cursor_excerpt[..cursor_offset];
+    // Use rfind to find what has actually been typed on the current line. .lines().last()
+    // does not yield a trailing empty line, so it would return the comment when the cursor
+    // is on a fresh empty line below one — causing the midline limit to fire incorrectly.
+    let current_line = if let Some(newline_pos) = code_before.rfind('\n') {
+        &code_before[newline_pos + 1..]
+    } else {
+        code_before
+    };
+    let is_midline = !current_line.trim().is_empty();
+    let max_lines: usize = if is_midline { 4 } else { 15 };
+    let line_count = completion.lines().count();
+    if line_count > max_lines {
+        log::info!(
+            "backboard: rejected reason=too_long lines={} max={}",
+            line_count,
+            max_lines
+        );
         return None;
     }
 
-    let cursor_offset = inputs
-        .cursor_offset_in_excerpt
-        .min(inputs.cursor_excerpt.len());
     let code_after = &inputs.cursor_excerpt[cursor_offset..];
     if completion_duplicates_existing_code(&completion, code_after) {
-        log::info!("backboard: filtered — duplicates existing code");
+        log::info!("backboard: rejected reason=duplicates_existing_code");
         return None;
     }
 
-    log::info!("backboard: accepted completion");
+    let language = detect_language(language_name, &inputs.cursor_path);
+    if let Some(reason) = validate_completion_syntax(&completion, inputs, language) {
+        log::info!("backboard: rejected reason={}", reason);
+        return None;
+    }
+
+    log::info!("backboard: accepted reason=accepted");
     Some(split_completion_into_chunks(&completion))
 }
 
@@ -1477,16 +1502,213 @@ fn completion_complexity(completion: &str) -> usize {
         .count()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Language {
+    Python,
+    TypeScriptJs,
+    Unknown,
+}
+
+fn detect_language(name: Option<&str>, path: &std::path::Path) -> Language {
+    let name_hint = name.unwrap_or("").to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    if name_hint.contains("python") || ext == "py" {
+        Language::Python
+    } else if name_hint.contains("typescript")
+        || name_hint.contains("javascript")
+        || matches!(ext.as_str(), "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs")
+    {
+        Language::TypeScriptJs
+    } else {
+        Language::Unknown
+    }
+}
+
+// Returns a rejection reason code if the completion fails syntax/formatting validation,
+// or None if it is acceptable. Checks are fast and local — no full-file parsing.
+fn validate_completion_syntax(
+    completion: &str,
+    inputs: &ZetaPromptInput,
+    language: Language,
+) -> Option<&'static str> {
+    let cursor_offset = inputs.cursor_offset_in_excerpt.min(inputs.cursor_excerpt.len());
+    let code_before = &inputs.cursor_excerpt[..cursor_offset];
+    let code_after = &inputs.cursor_excerpt[cursor_offset..];
+
+    let current_line_before = if let Some(pos) = code_before.rfind('\n') {
+        &code_before[pos + 1..]
+    } else {
+        code_before
+    };
+    let current_line_after = code_after.lines().next().unwrap_or("");
+
+    // Find the most recent non-empty line before the cursor, skipping whitespace-only lines.
+    let prev_nonempty_line = code_before
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("");
+
+    let is_midline = !current_line_before.trim().is_empty();
+    let current_indent = current_line_before.len() - current_line_before.trim_start().len();
+
+    let first_line = completion.lines().next().unwrap_or("");
+    let first_trimmed = first_line.trim_start();
+
+    // --- Python-specific ---
+    if language == Language::Python {
+        // Reject C-style block delimiters that have no place in Python.
+        for line in completion.lines() {
+            let t = line.trim();
+            if t == "{"
+                || t.ends_with(" {")
+                || t == "}"
+                || t.starts_with("} ")
+                || t == "};"
+            {
+                return Some("python_c_style_braces");
+            }
+        }
+
+        // After a line ending in ':', the completion must land at a deeper indent level.
+        // The effective indentation in the document is cursor column + completion-line indent,
+        // because the cursor is already positioned after any auto-inserted whitespace.
+        if !is_midline && prev_nonempty_line.trim_end().ends_with(':') {
+            let prev_indent =
+                prev_nonempty_line.len() - prev_nonempty_line.trim_start().len();
+            let first_content = completion
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("");
+            let completion_indent = first_content.len() - first_content.trim_start().len();
+            let effective_indent = current_indent + completion_indent;
+            if effective_indent <= prev_indent {
+                return Some("python_needs_indent_after_colon");
+            }
+        }
+
+        // Inside an indented block, reject completions whose lines jump to column 0
+        // with a top-level declaration keyword.
+        if !is_midline && current_indent > 0 {
+            for line in completion.lines() {
+                let line_trimmed = line.trim_start();
+                let line_indent = line.len() - line_trimmed.len();
+                if line_indent == 0 && !line_trimmed.is_empty() {
+                    if line_trimmed.starts_with("def ")
+                        || line_trimmed.starts_with("class ")
+                        || line_trimmed.starts_with("import ")
+                        || line_trimmed.starts_with("from ")
+                        || line_trimmed.starts_with('@')
+                    {
+                        return Some("python_top_level_decl_in_block");
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Mid-line content validation (language-independent) ---
+    if is_midline {
+        let is_decl = first_trimmed.starts_with("import ")
+            || first_trimmed.starts_with("from ")
+            || first_trimmed.starts_with("function ")
+            || first_trimmed.starts_with("async function ")
+            || first_trimmed.starts_with("class ")
+            || first_trimmed.starts_with("def ");
+        if is_decl {
+            return Some("midline_starts_with_declaration");
+        }
+
+        if language == Language::TypeScriptJs {
+            let is_ts_export_decl = first_trimmed.starts_with("export function ")
+                || first_trimmed.starts_with("export default ")
+                || first_trimmed.starts_with("export class ")
+                || first_trimmed.starts_with("export const ");
+            if is_ts_export_decl {
+                return Some("midline_starts_with_declaration");
+            }
+        }
+    }
+
+    // --- Bracket safety at the insertion point ---
+    // If completion ends with a closing bracket and code_after begins with the same one,
+    // and completion has more closes than opens for that bracket type, it is duplicating
+    // a bracket already present in the document.
+    let last_char = completion.trim_end().chars().last();
+    let first_after_char = current_line_after.trim_start().chars().next();
+    if let (Some(last), Some(first)) = (last_char, first_after_char) {
+        if last == first && matches!(last, ')' | '}' | ']') {
+            let (opens, closes) = match last {
+                ')' => (
+                    completion.chars().filter(|&c| c == '(').count(),
+                    completion.chars().filter(|&c| c == ')').count(),
+                ),
+                '}' => (
+                    completion.chars().filter(|&c| c == '{').count(),
+                    completion.chars().filter(|&c| c == '}').count(),
+                ),
+                ']' => (
+                    completion.chars().filter(|&c| c == '[').count(),
+                    completion.chars().filter(|&c| c == ']').count(),
+                ),
+                _ => (0, 0),
+            };
+            if closes > opens {
+                return Some("duplicate_closing_bracket");
+            }
+        }
+    }
+
+    // --- TypeScript/JavaScript: imports outside the import section ---
+    if language == Language::TypeScriptJs && !is_midline {
+        let is_import_line = first_trimmed.starts_with("import ")
+            || first_trimmed.starts_with("import{")
+            || first_trimmed.starts_with("import type ");
+        if is_import_line {
+            let past_imports = code_before.lines().filter(|l| !l.trim().is_empty()).any(|l| {
+                let t = l.trim_start();
+                !t.starts_with("import ")
+                    && !t.starts_with("import{")
+                    && !t.starts_with("import type ")
+                    && !t.starts_with("//")
+                    && !t.starts_with("/*")
+                    && !t.starts_with('*')
+                    && !t.starts_with("\"use ")
+                    && !t.starts_with("'use ")
+            });
+            if past_imports {
+                return Some("ts_import_outside_import_section");
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     fn input(cursor_excerpt: &str, cursor_offset_in_excerpt: usize) -> ZetaPromptInput {
+        input_with_lang(cursor_excerpt, cursor_offset_in_excerpt, "test.rs")
+    }
+
+    fn input_with_lang(
+        cursor_excerpt: &str,
+        cursor_offset_in_excerpt: usize,
+        path: &str,
+    ) -> ZetaPromptInput {
         ZetaPromptInput {
             events: vec![],
             related_files: Some(vec![]),
             cursor_offset_in_excerpt,
-            cursor_path: Arc::from(Path::new("test.rs")),
+            cursor_path: Arc::from(Path::new(path)),
             cursor_excerpt: cursor_excerpt.into(),
             excerpt_start_row: None,
             excerpt_ranges: Default::default(),
@@ -1588,5 +1810,473 @@ mod tests {
         assert!(!is_non_completion(
             "    value = compute(x)\n    return value"
         ));
+    }
+
+    #[test]
+    fn strips_typed_prefix_mid_token() {
+        // Cursor is after `user.` — model echoes back the full typed prefix
+        let context = "const userName = user.";
+        let inputs = input(context, context.len());
+        let result = strip_typed_prefix_from_completion("const userName = user.name;", &inputs);
+        assert_eq!(result, "name;");
+    }
+
+    #[test]
+    fn strips_typed_prefix_with_leading_indent() {
+        // Completion carries indentation from the line; trim_start normalises before matching
+        let context = "fn foo() {\n    let x = user.";
+        let inputs = input(context, context.len());
+        let result = strip_typed_prefix_from_completion("    let x = user.name;", &inputs);
+        assert_eq!(result, "name;");
+    }
+
+    #[test]
+    fn does_not_strip_prefix_when_cursor_at_line_start() {
+        // Line before cursor is empty — nothing to strip
+        let context = "fn foo() {\n";
+        let inputs = input(context, context.len());
+        let result = strip_typed_prefix_from_completion("    let x = 1;", &inputs);
+        assert_eq!(result, "    let x = 1;");
+    }
+
+    #[test]
+    fn does_not_strip_prefix_when_completion_does_not_match() {
+        // Completion doesn't start with the typed text — return unchanged
+        let context = "const foo = bar.";
+        let inputs = input(context, context.len());
+        let result = strip_typed_prefix_from_completion("baz;", &inputs);
+        assert_eq!(result, "baz;");
+    }
+
+    #[test]
+    fn prefix_strip_is_case_sensitive() {
+        let context = "const value = myObj.";
+        let inputs = input(context, context.len());
+        // Exact case match — strip succeeds
+        let result = strip_typed_prefix_from_completion("const value = myObj.prop;", &inputs);
+        assert_eq!(result, "prop;");
+        // Different case — no strip
+        let result2 = strip_typed_prefix_from_completion("const Value = myObj.prop;", &inputs);
+        assert_eq!(result2, "const Value = myObj.prop;");
+    }
+
+    #[test]
+    fn rejects_stripped_completion_that_becomes_empty() {
+        // Model echoes back exactly what was typed — nothing useful remains after strip
+        let context = "const x = myObj.";
+        let inputs = input(context, context.len());
+        let stripped = strip_typed_prefix_from_completion("const x = myObj.", &inputs);
+        assert_eq!(stripped, "");
+        assert!(filtered_function_completion_chunks(&stripped, &inputs, None).is_none());
+    }
+
+    #[test]
+    fn rejects_midline_completion_exceeding_four_lines() {
+        // Cursor is mid-line → max_lines = 4; five-line completion must be rejected
+        let context = "const x = ";
+        let inputs = input(context, context.len());
+        let completion = "foo()\n    .bar()\n    .baz()\n    .qux()\n    .quux()";
+        assert!(filtered_function_completion_chunks(completion, &inputs, None).is_none());
+    }
+
+    #[test]
+    fn accepts_midline_completion_within_four_lines() {
+        // Cursor is mid-line → max_lines = 4; exactly four lines must be accepted
+        let context = "const x = ";
+        let inputs = input(context, context.len());
+        let completion = "foo()\n    .bar()\n    .baz()\n    .qux()";
+        assert!(filtered_function_completion_chunks(completion, &inputs, None).is_some());
+    }
+
+    #[test]
+    fn accepts_block_level_completion_up_to_fifteen_lines() {
+        // Cursor at start of empty excerpt → block-level → max_lines = 15
+        let top_level = input("", 0);
+        let completion = "fn a() { a(); }\nfn b() { b(); }\nfn c() { c(); }\nfn d() { d(); }\n\
+            fn e() { e(); }\nfn f() { f(); }\nfn g() { g(); }\nfn h() { h(); }\n\
+            fn i() { i(); }\nfn j() { j(); }\nfn k() { k(); }\nfn l() { l(); }\n\
+            fn m() { m(); }\nfn n() { n(); }\nfn o() { o(); }";
+        assert_eq!(completion.lines().count(), 15);
+        assert!(filtered_function_completion_chunks(completion, &top_level, None).is_some());
+    }
+
+    #[test]
+    fn rejects_block_level_completion_exceeding_fifteen_lines() {
+        // Same as above but one extra line — must be rejected
+        let top_level = input("", 0);
+        let completion = "fn a() { a(); }\nfn b() { b(); }\nfn c() { c(); }\nfn d() { d(); }\n\
+            fn e() { e(); }\nfn f() { f(); }\nfn g() { g(); }\nfn h() { h(); }\n\
+            fn i() { i(); }\nfn j() { j(); }\nfn k() { k(); }\nfn l() { l(); }\n\
+            fn m() { m(); }\nfn n() { n(); }\nfn o() { o(); }\nfn p() { p(); }";
+        assert_eq!(completion.lines().count(), 16);
+        assert!(filtered_function_completion_chunks(completion, &top_level, None).is_none());
+    }
+
+    #[test]
+    fn accepts_block_level_after_comment_line() {
+        // Cursor on the empty line immediately below a comment — must be treated as block-level
+        // (max 15 lines), not midline. The bug: .lines().last() returned the comment text,
+        // making is_midline=true and capping at 4 lines.
+        let context = "    // fetch user data\n    ";
+        let inputs = input(context, context.len());
+        let completion = "let a = 1;\nlet b = 2;\nlet c = 3;\nlet d = 4;\nlet e = 5;";
+        assert!(filtered_function_completion_chunks(completion, &inputs, None).is_some());
+    }
+
+    #[test]
+    fn does_not_strip_prefix_when_cursor_is_below_comment() {
+        // Cursor on empty line after a comment — nothing typed, so nothing should be stripped
+        let context = "// some comment\n";
+        let inputs = input(context, context.len());
+        let result = strip_typed_prefix_from_completion("let x = 1;", &inputs);
+        assert_eq!(result, "let x = 1;");
+    }
+
+    // ── Syntax validation tests ───────────────────────────────────────────────
+
+    #[test]
+    fn rejects_python_c_style_braces() {
+        let context = "def foo():\n    ";
+        let inputs = input_with_lang(context, context.len(), "test.py");
+        // C-style block opener is invalid Python syntax
+        assert!(filtered_function_completion_chunks(
+            "if x {\n    return 1\n}",
+            &inputs,
+            Some("Python")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn rejects_python_unindented_completion_after_colon() {
+        // Cursor on new line after ':', current auto-indent is 0, completion also at col 0
+        let context = "def foo():\n";
+        let inputs = input_with_lang(context, context.len(), "test.py");
+        // 'pass' at column 0 with prev_indent 0 → effective_indent 0 <= prev_indent 0 → reject
+        assert!(
+            filtered_function_completion_chunks("pass", &inputs, Some("Python")).is_none()
+        );
+    }
+
+    #[test]
+    fn accepts_python_indented_completion_after_colon() {
+        // Cursor on new line after ':', auto-indent = 4 spaces
+        let context = "def foo():\n    ";
+        let inputs = input_with_lang(context, context.len(), "test.py");
+        // effective_indent = 4 (current) + 0 (completion) = 4 > prev_indent 0 → accept
+        assert!(
+            filtered_function_completion_chunks("return 42", &inputs, Some("Python")).is_some()
+        );
+    }
+
+    #[test]
+    fn rejects_python_top_level_decl_inside_block() {
+        // Cursor is inside an indented block; completion jumps to column 0 with a def
+        let context = "def foo():\n    ";
+        let inputs = input_with_lang(context, context.len(), "test.py");
+        let completion = "\ndef bar():\n    pass";
+        assert!(
+            filtered_function_completion_chunks(completion, &inputs, Some("Python")).is_none()
+        );
+    }
+
+    #[test]
+    fn rejects_midline_import_statement() {
+        let context = "const result = ";
+        let inputs = input_with_lang(context, context.len(), "test.ts");
+        assert!(filtered_function_completion_chunks(
+            "import { foo } from './foo';",
+            &inputs,
+            Some("TypeScript")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn rejects_midline_named_function_declaration() {
+        let context = "const handler = ";
+        let inputs = input_with_lang(context, context.len(), "test.ts");
+        assert!(filtered_function_completion_chunks(
+            "function processData() { return data; }",
+            &inputs,
+            Some("TypeScript")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn rejects_midline_class_declaration() {
+        let context = "const obj = ";
+        let inputs = input_with_lang(context, context.len(), "test.ts");
+        assert!(filtered_function_completion_chunks(
+            "class MyClass { constructor() {} }",
+            &inputs,
+            Some("TypeScript")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn rejects_duplicate_close_paren() {
+        // code_after starts with ')'; completion ends with ')' and has more closes than opens
+        let inputs = input_with_lang("foo()", 4, "test.ts");
+        // completion "x)" has 0 opens, 1 close; after starts with ')' → duplicate
+        assert!(
+            filtered_function_completion_chunks("x)", &inputs, Some("TypeScript")).is_none()
+        );
+    }
+
+    #[test]
+    fn accepts_balanced_completion_before_close_paren() {
+        // Completion is internally balanced even though code_after starts with ')'
+        let inputs = input_with_lang("foo()", 4, "test.ts");
+        // "bar(x)" has 1 open, 1 close → closes == opens → not a duplicate
+        assert!(
+            filtered_function_completion_chunks("bar(x)", &inputs, Some("TypeScript")).is_some()
+        );
+    }
+
+    #[test]
+    fn rejects_ts_import_outside_import_section() {
+        // code_before contains non-import code, so completing an import here is wrong
+        let code_before = "import React from 'react';\nconst x = 1;\n";
+        let inputs = input_with_lang(code_before, code_before.len(), "test.ts");
+        assert!(filtered_function_completion_chunks(
+            "import { useState } from 'react';",
+            &inputs,
+            Some("TypeScript")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn accepts_ts_import_at_file_top() {
+        // code_before contains only import lines — completing another import is valid
+        let code_before = "import React from 'react';\n";
+        let inputs = input_with_lang(code_before, code_before.len(), "test.ts");
+        assert!(filtered_function_completion_chunks(
+            "import { useState } from 'react';",
+            &inputs,
+            Some("TypeScript")
+        )
+        .is_some());
+    }
+
+    // ── Stateless autocomplete HTTP tests ────────────────────────────────────
+
+    #[derive(Default)]
+    struct BackboardCallLog {
+        assistants_created: usize,
+        threads_created: usize,
+        messages_sent: usize,
+        thread_ids_used: Vec<String>,
+        last_message_body: String,
+    }
+
+    fn make_backboard_fake_http_client(
+        completion_text: &'static str,
+    ) -> (Arc<dyn HttpClient>, Arc<Mutex<BackboardCallLog>>) {
+        let log = Arc::new(Mutex::new(BackboardCallLog::default()));
+        let log_for_client = log.clone();
+        let client = gpui::http_client::FakeHttpClient::create(move |req| {
+            let log = log_for_client.clone();
+            let method = req.method().clone();
+            let path = req.uri().path().to_string();
+            let mut body_stream = req.into_body();
+            async move {
+                use futures::AsyncReadExt as _;
+                let mut body_bytes = Vec::new();
+                body_stream.read_to_end(&mut body_bytes).await.ok();
+                let body_str = String::from_utf8_lossy(&body_bytes).to_string();
+
+                if method == Method::POST && path.ends_with("/assistants") {
+                    log.lock().unwrap().assistants_created += 1;
+                    Ok(http_client::Response::builder()
+                        .status(200)
+                        .body(r#"{"assistant_id":"test-assistant"}"#.into())
+                        .unwrap())
+                } else if method == Method::POST && path.ends_with("/threads") {
+                    let thread_num = {
+                        let mut l = log.lock().unwrap();
+                        l.threads_created += 1;
+                        l.threads_created
+                    };
+                    let tid = format!("thread-{thread_num}");
+                    Ok(http_client::Response::builder()
+                        .status(200)
+                        .body(format!(r#"{{"thread_id":"{tid}"}}"#).into())
+                        .unwrap())
+                } else if method == Method::POST && path.ends_with("/messages") {
+                    let thread_id = path
+                        .strip_prefix("/threads/")
+                        .and_then(|s| s.strip_suffix("/messages"))
+                        .unwrap_or("unknown")
+                        .to_string();
+                    {
+                        let mut l = log.lock().unwrap();
+                        l.messages_sent += 1;
+                        l.thread_ids_used.push(thread_id);
+                        l.last_message_body = body_str;
+                    }
+                    let sse = format!(
+                        "data: {{\"type\":\"run_ended\",\"content\":\"{completion_text}\"}}\n\n"
+                    );
+                    Ok(http_client::Response::builder()
+                        .status(200)
+                        .body(sse.into())
+                        .unwrap())
+                } else {
+                    Ok(http_client::Response::builder()
+                        .status(404)
+                        .body("Not Found".into())
+                        .unwrap())
+                }
+            }
+        });
+        (client, log)
+    }
+
+    fn test_model() -> BackboardModel {
+        BackboardModel {
+            provider: "anthropic".to_string(),
+            name: "claude-haiku-4-5-20251001".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[gpui::test]
+    async fn test_backboard_creates_fresh_thread_per_request(cx: &mut gpui::TestAppContext) {
+        let (http_client, log) = make_backboard_fake_http_client("return x;");
+        let model = test_model();
+
+        cx.background_executor
+            .spawn(async move {
+                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
+                    .await
+                    .unwrap();
+                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
+                    .await
+                    .unwrap();
+            })
+            .await;
+
+        let log = log.lock().unwrap();
+        assert_eq!(log.threads_created, 2, "each request must create its own thread");
+        assert_eq!(log.messages_sent, 2);
+        assert_ne!(
+            log.thread_ids_used[0], log.thread_ids_used[1],
+            "second request must not reuse the first thread_id"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_backboard_reuses_assistant_across_requests(cx: &mut gpui::TestAppContext) {
+        let (http_client, log) = make_backboard_fake_http_client("return x;");
+        let model = test_model();
+
+        cx.background_executor
+            .spawn(async move {
+                // First call — no cached assistant, creates one
+                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
+                    .await
+                    .unwrap();
+                // Second call — pass the cached assistant_id so it is reused
+                backboard_completion(
+                    "test-key",
+                    "http://fake",
+                    &model,
+                    "prompt",
+                    Some("test-assistant"),
+                    &http_client,
+                )
+                .await
+                .unwrap();
+            })
+            .await;
+
+        let log = log.lock().unwrap();
+        assert_eq!(log.assistants_created, 1, "assistant must be created only once");
+        assert_eq!(log.threads_created, 2);
+    }
+
+    #[gpui::test]
+    async fn test_backboard_request_has_memory_off(cx: &mut gpui::TestAppContext) {
+        let (http_client, log) = make_backboard_fake_http_client("return x;");
+        let model = test_model();
+
+        cx.background_executor
+            .spawn(async move {
+                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
+                    .await
+                    .unwrap();
+            })
+            .await;
+
+        let body = log.lock().unwrap().last_message_body.clone();
+        assert!(
+            body.contains("memory=off"),
+            "request body must contain memory=off, got: {body}"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_backboard_request_has_web_search_off(cx: &mut gpui::TestAppContext) {
+        let (http_client, log) = make_backboard_fake_http_client("return x;");
+        let model = test_model();
+
+        cx.background_executor
+            .spawn(async move {
+                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
+                    .await
+                    .unwrap();
+            })
+            .await;
+
+        let body = log.lock().unwrap().last_message_body.clone();
+        assert!(
+            body.contains("web_search=off"),
+            "request body must contain web_search=off, got: {body}"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_backboard_thread_id_not_cached_after_request(cx: &mut gpui::TestAppContext) {
+        let (http_client, log) = make_backboard_fake_http_client("return x;");
+        let model = test_model();
+        let model2 = model.clone();
+
+        cx.background_executor
+            .spawn(async move {
+                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
+                    .await
+                    .unwrap();
+            })
+            .await;
+
+        // The BACKBOARD_THREAD_CACHE no longer exists — thread_id is ephemeral.
+        // Verify by checking threads_created: a second call with no cached thread must
+        // create another thread rather than finding one in the (removed) cache.
+        let (http_client2, log2) = make_backboard_fake_http_client("return x;");
+        cx.background_executor
+            .spawn(async move {
+                backboard_completion(
+                    "test-key",
+                    "http://fake",
+                    &model2,
+                    "prompt",
+                    Some("test-assistant"),
+                    &http_client2,
+                )
+                .await
+                .unwrap();
+            })
+            .await;
+
+        drop(log.lock().unwrap());
+        assert_eq!(
+            log2.lock().unwrap().threads_created,
+            1,
+            "second isolated call must create its own thread — no cross-call thread cache"
+        );
     }
 }

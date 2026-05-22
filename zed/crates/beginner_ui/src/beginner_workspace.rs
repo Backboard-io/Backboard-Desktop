@@ -317,13 +317,12 @@ impl EventEmitter<BeginnerWorkspaceEvent> for BeginnerWorkspace {}
 
 enum BeginnerState {
     Landing,
-    ActiveProject { project_name: SharedString },
+    ActiveProject,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum LeftTab {
     Files,
-    Changes,
 }
 
 enum RightPanel {
@@ -495,7 +494,7 @@ impl BeginnerWorkspace {
 
     fn current_tab_title(&self) -> SharedString {
         match &self.state {
-            BeginnerState::ActiveProject { .. } => self.tab_name.clone(),
+            BeginnerState::ActiveProject => self.tab_name.clone(),
             BeginnerState::Landing => SharedString::from("Home"),
         }
     }
@@ -506,17 +505,17 @@ impl BeginnerWorkspace {
             .enumerate()
             .filter_map(|(ix, session)| match &session.state {
                 BeginnerState::Landing => None,
-                BeginnerState::ActiveProject { .. } => Some((ix, session.tab_name.clone())),
+                BeginnerState::ActiveProject => Some((ix, session.tab_name.clone())),
             })
             .collect()
     }
 
     fn project_tab_count(&self) -> usize {
-        usize::from(matches!(self.state, BeginnerState::ActiveProject { .. }))
+        usize::from(matches!(self.state, BeginnerState::ActiveProject))
             + self
                 .background_sessions
                 .iter()
-                .filter(|session| matches!(session.state, BeginnerState::ActiveProject { .. }))
+                .filter(|session| matches!(session.state, BeginnerState::ActiveProject))
                 .count()
     }
 
@@ -611,7 +610,7 @@ impl BeginnerWorkspace {
         // render() will recreate it from preview_url for the new active session.
         self.web_preview = None;
         std::mem::swap(&mut self.session_subscriptions, &mut session.subscriptions);
-        let placeholder = if matches!(self.state, BeginnerState::ActiveProject { .. }) {
+        let placeholder = if matches!(self.state, BeginnerState::ActiveProject) {
             self.chat_mode.follow_up_placeholder()
         } else {
             self.chat_mode.placeholder()
@@ -717,7 +716,7 @@ impl BeginnerWorkspace {
         // is added (e.g. agent workspace creating a git linked worktree).
         match (&self.state, &new_folder) {
             (BeginnerState::Landing, Some(_)) => {}
-            (BeginnerState::ActiveProject { .. }, None) => {
+            (BeginnerState::ActiveProject, None) => {
                 // All folders removed — return to landing.
                 self.selected_folder = None;
                 self.state = BeginnerState::Landing;
@@ -903,16 +902,9 @@ impl BeginnerWorkspace {
             }
         };
 
-        let project_name = folder
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Project".to_string());
-
         let chat_name = generate_chat_name(&text);
         self.tab_name = SharedString::from(chat_name.clone());
-        self.state = BeginnerState::ActiveProject {
-            project_name: SharedString::from(project_name),
-        };
+        self.state = BeginnerState::ActiveProject;
         // Save the chat to history before starting, so it appears on the home page
         // even if the user immediately closes without waiting for the agent.
         let record_id = self.add_chat_record(chat_name, &folder, cx);
@@ -1105,7 +1097,7 @@ impl BeginnerWorkspace {
         let Some(next_ix) = self
             .background_sessions
             .iter()
-            .position(|session| matches!(session.state, BeginnerState::ActiveProject { .. }))
+            .position(|session| matches!(session.state, BeginnerState::ActiveProject))
         else {
             // Last tab — reset to landing rather than closing the window.
             self.new_project(window, cx);
@@ -1176,7 +1168,7 @@ impl BeginnerWorkspace {
             return;
         }
         self.chat_mode = mode;
-        let placeholder = if matches!(self.state, BeginnerState::ActiveProject { .. }) {
+        let placeholder = if matches!(self.state, BeginnerState::ActiveProject) {
             mode.follow_up_placeholder()
         } else {
             mode.placeholder()
@@ -1204,13 +1196,6 @@ impl BeginnerWorkspace {
     pub fn switch_to_editor(&mut self, cx: &mut Context<Self>) {
         persist_experience_level(ExperienceLevel::Developer, cx);
         cx.emit(BeginnerWorkspaceEvent::SwitchToEditor);
-    }
-
-    fn open_project_in_finder(&self, cx: &mut App) {
-        if let Some(folder) = &self.selected_folder {
-            let url = format!("file://{}", folder.display());
-            cx.open_url(&url);
-        }
     }
 
     fn open_web_app_if_present(&mut self, cx: &mut Context<Self>) {
@@ -1462,9 +1447,7 @@ impl BeginnerWorkspace {
         self.active_chat_record_id = Some(record.id.clone());
         self.selected_folder = Some(path.clone());
         self.tab_name = chat_name.clone();
-        self.state = BeginnerState::ActiveProject {
-            project_name: record.folder_name(),
-        };
+        self.state = BeginnerState::ActiveProject;
         self.chat_mode = ChatMode::Build;
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
@@ -1732,9 +1715,7 @@ impl BeginnerWorkspace {
         let folder = record.folder();
         ProjectSession {
             chat_record_id: Some(record.id.clone()),
-            state: BeginnerState::ActiveProject {
-                project_name: record.folder_name(),
-            },
+            state: BeginnerState::ActiveProject,
             tab_name: SharedString::from(record.name.clone()),
             chat_mode: ChatMode::Build,
             chat_editor,
@@ -1911,45 +1892,6 @@ fn persist_experience_level(level: ExperienceLevel, cx: &mut App) {
     });
 }
 
-fn project_file_sections(folder: &PathBuf) -> Vec<(String, PathBuf, bool)> {
-    let Ok(entries) = std::fs::read_dir(folder) else {
-        return Vec::new();
-    };
-
-    let mut dirs: Vec<(String, PathBuf)> = Vec::new();
-    let mut files: Vec<(String, PathBuf)> = Vec::new();
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        if name.starts_with('.') || name == "node_modules" || name == "target" {
-            continue;
-        }
-        if path.is_dir() {
-            dirs.push((name, path));
-        } else {
-            files.push((name, path));
-        }
-    }
-    dirs.sort_by(|a, b| a.0.cmp(&b.0));
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let mut entries: Vec<(String, PathBuf, bool)> = Vec::new();
-
-    for (name, path) in dirs {
-        entries.push((name, path, true));
-    }
-
-    for (name, path) in files {
-        entries.push((name, path, false));
-    }
-
-    entries
-}
-
 impl Focusable for BeginnerWorkspace {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -1981,7 +1923,7 @@ impl Render for BeginnerWorkspace {
 
         match &self.state {
             BeginnerState::Landing => self.render_landing(window, cx).into_any_element(),
-            BeginnerState::ActiveProject { .. } => {
+            BeginnerState::ActiveProject => {
                 self.render_active_project(window, cx).into_any_element()
             }
         }
@@ -2001,7 +1943,7 @@ impl BeginnerWorkspace {
         let can_add = total_tabs < 3;
         // Only show a close button on the active tab when it can be meaningfully closed.
         let show_active_close = !background_tabs.is_empty()
-            || matches!(self.state, BeginnerState::ActiveProject { .. });
+            || matches!(self.state, BeginnerState::ActiveProject);
 
         let is_on_landing = matches!(self.state, BeginnerState::Landing);
         let chats_open = self.chats_sidebar_open;
@@ -2740,331 +2682,6 @@ impl BeginnerWorkspace {
                             cx,
                         ))
                     }),
-            )
-    }
-
-    fn render_left_panel(
-        &mut self,
-        active_tab: LeftTab,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let has_project = self.selected_folder.is_some();
-
-        // Collect user messages from the thread for the conversation history section.
-        let conversation_history: Vec<String> = self
-            .thread
-            .as_ref()
-            .map(|thread| {
-                thread
-                    .read(cx)
-                    .entries()
-                    .iter()
-                    .filter_map(|entry| {
-                        if let AgentThreadEntry::UserMessage(msg) = entry {
-                            if msg.indented {
-                                return None;
-                            }
-                            let text = msg.content.to_markdown(cx).to_string();
-                            let text = text.trim().to_string();
-                            if text.is_empty() { None } else { Some(text) }
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        v_flex()
-            .w(px(220.))
-            .h_full()
-            .flex_shrink_0()
-            .bg(cx.theme().colors().surface_background)
-            // Search bar
-            .child(
-                h_flex()
-                    .px_2()
-                    .py_1p5()
-                    .border_b_1()
-                    .border_color(cx.theme().colors().border)
-                    .gap_1p5()
-                    .items_center()
-                    .child(
-                        Icon::new(IconName::MagnifyingGlass)
-                            .size(IconSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .child(
-                        Label::new("Search")
-                            .size(LabelSize::Small)
-                            .color(Color::Disabled),
-                    ),
-            )
-            // Scrollable body
-            .child(
-                v_flex()
-                    .id("left-panel-body")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    // Conversation history section
-                    .when(!conversation_history.is_empty(), |el| {
-                        el.child(
-                            v_flex()
-                                .p_2()
-                                .gap_0p5()
-                                .child(
-                                    h_flex().px_1().py_0p5().child(
-                                        Label::new("Conversation")
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted),
-                                    ),
-                                )
-                                .children(conversation_history.into_iter().enumerate().map(
-                                    |(ix, text)| {
-                                        let truncated = if text.len() > 40 {
-                                            format!("{}…", &text[..40])
-                                        } else {
-                                            text
-                                        };
-                                        h_flex()
-                                            .id(SharedString::from(format!("history-{ix}")))
-                                            .px_2()
-                                            .py_1()
-                                            .gap_1p5()
-                                            .rounded_md()
-                                            .cursor_pointer()
-                                            .hover(|el| el.bg(cx.theme().colors().element_hover))
-                                            .child(
-                                                Icon::new(IconName::MagnifyingGlass)
-                                                    .size(IconSize::XSmall)
-                                                    .color(Color::Disabled),
-                                            )
-                                            .child(
-                                                Label::new(SharedString::from(truncated))
-                                                    .size(LabelSize::XSmall)
-                                                    .color(Color::Muted)
-                                                    .truncate(),
-                                            )
-                                    },
-                                )),
-                        )
-                        .child(div().mx_2().h_px().bg(cx.theme().colors().border))
-                    })
-                    // Project section
-                    .child(
-                        v_flex()
-                            .p_2()
-                            .gap_0p5()
-                            .child(
-                                h_flex()
-                                    .px_1()
-                                    .py_0p5()
-                                    .justify_between()
-                                    .items_center()
-                                    .child(
-                                        Label::new("Project")
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted),
-                                    )
-                                    .child(
-                                        Button::new(
-                                            "toggle-raw-files",
-                                            if self.show_raw_files { "Simple" } else { "Raw" },
-                                        )
-                                        .style(ButtonStyle::Subtle)
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| {
-                                                this.show_raw_files = !this.show_raw_files;
-                                                cx.notify();
-                                            }),
-                                        ),
-                                    ),
-                            )
-                            .when(!has_project, |el| {
-                                el.child(
-                                    div().px_2().py_4().child(
-                                        Label::new("No project open")
-                                            .size(LabelSize::Small)
-                                            .color(Color::Disabled),
-                                    ),
-                                )
-                            })
-                            .when_some(self.selected_folder.as_ref(), |el, root_folder| {
-                                if self.show_raw_files {
-                                    let browse_root =
-                                        self.raw_browse_path.as_ref().unwrap_or(root_folder);
-                                    let in_subdir = self.raw_browse_path.is_some();
-                                    let browse_root = browse_root.clone();
-                                    let root_folder = root_folder.clone();
-                                    el.when(in_subdir, |el| {
-                                        let parent = browse_root
-                                            .parent()
-                                            .map(|p| p.to_path_buf())
-                                            .filter(|p| p.starts_with(&root_folder));
-                                        el.child(
-                                            h_flex()
-                                                .id("raw-back")
-                                                .px_2()
-                                                .py_1()
-                                                .gap_1p5()
-                                                .rounded_md()
-                                                .cursor_pointer()
-                                                .hover(|row| {
-                                                    row.bg(cx.theme().colors().element_hover)
-                                                })
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.raw_browse_path = parent.clone();
-                                                    cx.notify();
-                                                }))
-                                                .child(
-                                                    Icon::new(IconName::ArrowLeft)
-                                                        .size(IconSize::XSmall)
-                                                        .color(Color::Muted),
-                                                )
-                                                .child(
-                                                    Label::new(
-                                                        browse_root
-                                                            .file_name()
-                                                            .map(|n| {
-                                                                n.to_string_lossy().into_owned()
-                                                            })
-                                                            .unwrap_or_default(),
-                                                    )
-                                                    .size(LabelSize::Small)
-                                                    .color(Color::Muted),
-                                                ),
-                                        )
-                                    })
-                                    .children(
-                                        project_file_sections(&browse_root).into_iter().map(
-                                            |(name, path, is_dir)| {
-                                                h_flex()
-                                                    .id(SharedString::from(format!(
-                                                        "raw-file-{}",
-                                                        path.to_string_lossy()
-                                                    )))
-                                                    .px_2()
-                                                    .py_1()
-                                                    .gap_1p5()
-                                                    .rounded_md()
-                                                    .cursor_pointer()
-                                                    .hover(|row| {
-                                                        row.bg(cx.theme().colors().element_hover)
-                                                    })
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        if is_dir {
-                                                            this.raw_browse_path =
-                                                                Some(path.clone());
-                                                            cx.notify();
-                                                        } else {
-                                                            this.open_file_read_only(
-                                                                path.as_path(),
-                                                            );
-                                                            cx.notify();
-                                                        }
-                                                    }))
-                                                    .child(
-                                                        Icon::new(if is_dir {
-                                                            IconName::Folder
-                                                        } else {
-                                                            IconName::File
-                                                        })
-                                                        .size(IconSize::XSmall)
-                                                        .color(Color::Muted),
-                                                    )
-                                                    .child(
-                                                        Label::new(SharedString::from(name))
-                                                            .size(LabelSize::Small)
-                                                            .color(if is_dir {
-                                                                Color::Default
-                                                            } else {
-                                                                Color::Muted
-                                                            }),
-                                                    )
-                                            },
-                                        ),
-                                    )
-                                } else {
-                                    let categories = [
-                                        "Pages",
-                                        "Components",
-                                        "Styles",
-                                        "Assets",
-                                        "Forms",
-                                        "Settings",
-                                    ];
-                                    el.children(categories.into_iter().map(|category| {
-                                        h_flex()
-                                            .px_2()
-                                            .py_1()
-                                            .gap_1p5()
-                                            .rounded_md()
-                                            .child(
-                                                Icon::new(IconName::Folder)
-                                                    .size(IconSize::XSmall)
-                                                    .color(Color::Muted),
-                                            )
-                                            .child(Label::new(category).size(LabelSize::Small))
-                                    }))
-                                }
-                            }),
-                    )
-                    // Changes section
-                    .child(
-                        v_flex()
-                            .p_2()
-                            .gap_0p5()
-                            .child(
-                                h_flex()
-                                    .px_1()
-                                    .py_0p5()
-                                    .justify_between()
-                                    .items_center()
-                                    .child(
-                                        Label::new("Changes")
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted),
-                                    )
-                                    .child(
-                                        div()
-                                            .id("toggle-changes-tab")
-                                            .cursor_pointer()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.left_tab = match this.left_tab {
-                                                    LeftTab::Changes => LeftTab::Files,
-                                                    LeftTab::Files => LeftTab::Changes,
-                                                };
-                                                cx.notify();
-                                            }))
-                                            .child(
-                                                Label::new(if active_tab == LeftTab::Changes {
-                                                    "Hide"
-                                                } else {
-                                                    "Show"
-                                                })
-                                                .size(LabelSize::XSmall)
-                                                .color(Color::Accent),
-                                            ),
-                                    ),
-                            )
-                            .when(active_tab == LeftTab::Changes, |el| {
-                                el.when_some(self.file_changes_panel.as_ref(), |el, panel| {
-                                    el.child(panel.clone())
-                                })
-                                .when(
-                                    self.file_changes_panel.is_none(),
-                                    |el| {
-                                        el.child(
-                                            div().px_2().py_2().child(
-                                                Label::new("No changes yet")
-                                                    .size(LabelSize::Small)
-                                                    .color(Color::Disabled),
-                                            ),
-                                        )
-                                    },
-                                )
-                            }),
-                    ),
             )
     }
 
