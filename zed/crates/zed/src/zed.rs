@@ -496,6 +496,11 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                     agent_ui::BackboardTasksPage::new(workspace, multi_weak, window, cx)
                 });
                 this.tasks_view = Some(tasks_view.into());
+                let skills_multi_weak = cx.weak_entity();
+                let skills_view = active_workspace.update(cx, |workspace, cx| {
+                    agent_ui::BackboardSkillsPage::new(workspace, skills_multi_weak, window, cx)
+                });
+                this.skills_view = Some(skills_view.into());
                 this.git_view = git_workspace_view_for_workspace(&active_workspace, window, cx);
 
                 active_workspace.update(cx, |workspace, cx| {
@@ -551,6 +556,11 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                 agent_ui::BackboardTasksPage::new(workspace, tasks_multi_weak, window, cx)
             });
             _multi_workspace.tasks_view = Some(tasks_view.into());
+            let skills_multi_weak = cx.weak_entity();
+            let skills_view = _multi_workspace.workspace().update(cx, |workspace, cx| {
+                agent_ui::BackboardSkillsPage::new(workspace, skills_multi_weak, window, cx)
+            });
+            _multi_workspace.skills_view = Some(skills_view.into());
             let (chat_view, thread_summaries) =
                 jarvis_code_editor_context(_multi_workspace.workspace(), window, cx);
             _multi_workspace.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);

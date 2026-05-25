@@ -97,7 +97,6 @@ use workspace::{
     dock::{DockPosition, Panel, PanelEvent},
     item::ItemEvent,
 };
-use zed_actions::agents_sidebar::ToggleThreadSwitcher;
 
 const AGENT_PANEL_KEY: &str = "agent_panel";
 const MIN_PANEL_WIDTH: Pixels = px(300.);
@@ -1512,6 +1511,7 @@ pub struct AgentPanel {
     terminals: HashMap<TerminalId, AgentTerminal>,
     new_thread_menu_handle: PopoverMenuHandle<ContextMenu>,
     agent_panel_menu_handle: PopoverMenuHandle<ContextMenu>,
+    thread_history_menu_handle: PopoverMenuHandle<ContextMenu>,
     _extension_subscription: Option<Subscription>,
     _project_subscription: Subscription,
     zoomed: bool,
@@ -1855,6 +1855,7 @@ impl AgentPanel {
             terminals: HashMap::default(),
             new_thread_menu_handle: PopoverMenuHandle::default(),
             agent_panel_menu_handle: PopoverMenuHandle::default(),
+            thread_history_menu_handle: PopoverMenuHandle::default(),
 
             _extension_subscription: extension_subscription,
             _project_subscription,
@@ -5767,6 +5768,32 @@ impl AgentPanel {
         })
     }
 
+    pub fn persist_active_prompt(&mut self, cx: &mut Context<Self>) {
+        let draft = self.active_thread_view(cx).and_then(|thread_view| {
+            let thread_view = thread_view.read(cx);
+            thread_view
+                .thread
+                .read(cx)
+                .draft_prompt()
+                .map(|blocks| blocks.to_vec())
+                .filter(|blocks| !blocks.is_empty())
+                .or_else(|| {
+                    let blocks = thread_view
+                        .message_editor
+                        .read(cx)
+                        .draft_content_blocks_snapshot(cx);
+                    (!blocks.is_empty()).then_some(blocks)
+                })
+        });
+
+        if let Some(thread) = self.active_agent_thread(cx) {
+            thread.update(cx, |thread, cx| {
+                thread.set_draft_prompt(draft, cx);
+            });
+        }
+        self.serialize(cx);
+    }
+
     fn source_panel_initialization(
         source_workspace: &WeakEntity<Workspace>,
         cx: &App,
@@ -6087,12 +6114,105 @@ impl AgentPanel {
             })
     }
 
-    fn render_thread_history_button(&self) -> impl IntoElement {
-        IconButton::new("agent-history", IconName::HistoryRerun)
-            .icon_size(IconSize::Small)
-            .tooltip(Tooltip::text("Thread History"))
-            .on_click(|_, window, cx| {
-                window.dispatch_action(Box::new(ToggleThreadSwitcher { select_last: false }), cx);
+    fn render_thread_history_menu(
+        &self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let focus_handle = self.focus_handle(cx);
+        let workspace = self.workspace.clone();
+        let current_thread_id = self.active_thread_id(cx);
+        let entries = ThreadMetadataStore::try_global(cx)
+            .map(|store| {
+                store
+                    .read(cx)
+                    .entries()
+                    .filter(|metadata| !metadata.archived && !metadata.is_draft())
+                    .cloned()
+                    .take(24)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let has_entries = !entries.is_empty();
+
+        PopoverMenu::new("agent-history-menu")
+            .trigger_with_tooltip(
+                IconButton::new("agent-history", IconName::HistoryRerun)
+                    .icon_size(IconSize::Small)
+                    .disabled(!has_entries),
+                Tooltip::text("Thread History"),
+            )
+            .anchor(Anchor::TopRight)
+            .with_handle(self.thread_history_menu_handle.clone())
+            .menu(move |window, cx| {
+                let entries = entries.clone();
+                let workspace = workspace.clone();
+                let focus_handle = focus_handle.clone();
+                Some(ContextMenu::build(
+                    window,
+                    cx,
+                    move |mut menu, _window, _cx| {
+                        menu = menu.context(focus_handle.clone()).header("Thread History");
+
+                        if entries.is_empty() {
+                            return menu.label("No saved threads");
+                        }
+
+                        for metadata in entries {
+                            let thread_id = metadata.thread_id;
+                            let agent_id = metadata.agent_id.clone();
+                            let title = metadata.title.clone();
+                            let work_dirs = metadata.folder_paths().clone();
+                            let timestamp =
+                                crate::threads_archive_view::format_history_entry_timestamp(
+                                    metadata.interacted_at.unwrap_or(metadata.updated_at),
+                                );
+                            let mut entry = ContextMenuEntry::new(format!(
+                                "{}  {}",
+                                metadata.display_title().as_ref(),
+                                timestamp
+                            ))
+                            .icon(IconName::HistoryRerun)
+                            .icon_color(Color::Muted);
+
+                            if current_thread_id == Some(thread_id) {
+                                entry = entry.disabled(true);
+                            }
+
+                            menu = menu.item(entry.handler({
+                                let workspace = workspace.clone();
+                                move |window, cx| {
+                                    if let Some(workspace) = workspace.upgrade() {
+                                        workspace.update(cx, |workspace, cx| {
+                                            let agent =
+                                                if workspace.project().read(cx).is_via_collab() {
+                                                    Agent::NativeAgent
+                                                } else {
+                                                    Agent::from(agent_id.clone())
+                                                };
+                                            if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                                                panel.update(cx, |panel, cx| {
+                                                    panel.load_agent_thread(
+                                                        agent,
+                                                        thread_id,
+                                                        Some(work_dirs.clone()),
+                                                        title.clone(),
+                                                        true,
+                                                        "agent_history_menu",
+                                                        window,
+                                                        cx,
+                                                    );
+                                                });
+                                            }
+                                        });
+                                    }
+                                }
+                            }));
+                        }
+
+                        menu
+                    },
+                ))
             })
     }
 
@@ -6503,7 +6623,7 @@ impl AgentPanel {
                         .pl_1()
                         .pr_1()
                         .child(full_screen_button)
-                        .child(self.render_thread_history_button())
+                        .child(self.render_thread_history_menu(window, cx))
                         .child(self.render_panel_options_menu(window, cx)),
                 )
                 .into_any_element()
@@ -6549,7 +6669,7 @@ impl AgentPanel {
                         .pr_1()
                         .child(new_thread_menu)
                         .child(full_screen_button)
-                        .child(self.render_thread_history_button())
+                        .child(self.render_thread_history_menu(window, cx))
                         .child(self.render_panel_options_menu(window, cx)),
                 )
                 .into_any_element()

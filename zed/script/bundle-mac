@@ -131,6 +131,19 @@ if [[ -n "${MACOS_CERTIFICATE:-}" && -n "${MACOS_CERTIFICATE_PASSWORD:-}" && -n 
     echo "$MACOS_CERTIFICATE" | base64 --decode > /tmp/zed-certificate.p12
     security import /tmp/zed-certificate.p12 -k zed.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
     rm /tmp/zed-certificate.p12
+
+    echo "Importing Apple Developer ID intermediate certificates..."
+    intermediate_certs_dir=$(mktemp -d)
+    curl --fail --silent --show-error --location \
+        "https://www.apple.com/certificateauthority/DeveloperIDCA.cer" \
+        --output "${intermediate_certs_dir}/DeveloperIDCA.cer"
+    curl --fail --silent --show-error --location \
+        "https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer" \
+        --output "${intermediate_certs_dir}/DeveloperIDG2CA.cer"
+    security import "${intermediate_certs_dir}/DeveloperIDCA.cer" -k zed.keychain -T /usr/bin/codesign
+    security import "${intermediate_certs_dir}/DeveloperIDG2CA.cer" -k zed.keychain -T /usr/bin/codesign
+    rm -rf "${intermediate_certs_dir}"
+
     security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CERTIFICATE_PASSWORD" zed.keychain
 
     function cleanup() {

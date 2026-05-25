@@ -58,6 +58,16 @@ pub async fn run_prompt(
         )?;
         return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
     }
+    let message_for_model = if let Some(history) =
+        state.take_rewound_history_context(&params.session_id)
+        && !history.trim().is_empty()
+    {
+        format!(
+            "Previous conversation context before the edited prompt:\n\n{history}\n\nEdited prompt:\n\n{message}"
+        )
+    } else {
+        message.clone()
+    };
 
     emit_progress(&state, &runtime, "Preparing workspace context.", cx)?;
 
@@ -113,8 +123,11 @@ pub async fn run_prompt(
         )?;
     }
     let context_pack_started = Instant::now();
-    let augmented =
-        workspace::augment_prompt(&message, &runtime.workspace, &runtime.mode.to_string());
+    let augmented = workspace::augment_prompt(
+        &message_for_model,
+        &runtime.workspace,
+        &runtime.mode.to_string(),
+    );
     state.record_turn_timing(&params.session_id, "context_pack_ms", context_pack_started);
     state.set_estimated_used_tokens(&params.session_id, estimate_tokens(&augmented));
     emit_speed_update(&state, &runtime, cx).ok();
@@ -202,22 +215,99 @@ pub async fn replay_history(
         if text.is_empty() {
             continue;
         }
-        let update = match role {
-            "user" => acp::SessionUpdate::UserMessageChunk(acp::ContentChunk::new(
-                acp::ContentBlock::from(strip_ide_context(text)),
-            )),
-            "assistant" => acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
-                acp::ContentBlock::from(strip_ide_context(text)),
-            )),
+        let text = strip_ide_context(text);
+        let updates = match role {
+            "user" => vec![acp::SessionUpdate::UserMessageChunk(replay_content_chunk(
+                text, true,
+            ))],
+            "assistant" => replay_assistant_updates(&text),
             _ => continue,
         };
-        thread
-            .update(cx, |thread, cx| thread.handle_session_update(update, cx))
-            .map_err(|err| anyhow!(err))?
-            .map_err(|err| anyhow!("{err:?}"))?;
+        for update in updates {
+            thread
+                .update(cx, |thread, cx| thread.handle_session_update(update, cx))
+                .map_err(|err| anyhow!(err))?
+                .map_err(|err| anyhow!("{err:?}"))?;
+        }
     }
 
     Ok(())
+}
+
+enum ReplayAssistantSegment {
+    Message(String),
+    Thought(String),
+}
+
+fn replay_content_chunk(text: impl Into<String>, message_start: bool) -> acp::ContentChunk {
+    let mut chunk = acp::ContentChunk::new(acp::ContentBlock::from(text.into()));
+    if message_start {
+        let mut meta = acp::Meta::new();
+        meta.insert("historyReplayMessageStart".to_string(), true.into());
+        chunk = chunk.meta(meta);
+    }
+    chunk
+}
+
+fn replay_assistant_updates(text: &str) -> Vec<acp::SessionUpdate> {
+    split_replayed_assistant_content(text)
+        .into_iter()
+        .enumerate()
+        .map(|(ix, segment)| {
+            let message_start = ix == 0;
+            match segment {
+                ReplayAssistantSegment::Message(text) => {
+                    acp::SessionUpdate::AgentMessageChunk(replay_content_chunk(text, message_start))
+                }
+                ReplayAssistantSegment::Thought(text) => {
+                    acp::SessionUpdate::AgentThoughtChunk(replay_content_chunk(text, message_start))
+                }
+            }
+        })
+        .collect()
+}
+
+fn split_replayed_assistant_content(text: &str) -> Vec<ReplayAssistantSegment> {
+    const THINKING_OPEN: &str = "<thinking>";
+    const THINKING_CLOSE: &str = "</thinking>";
+
+    let mut remaining = text;
+    let mut segments = Vec::new();
+
+    while let Some(open_ix) = remaining.find(THINKING_OPEN) {
+        let before = &remaining[..open_ix];
+        if !before.trim().is_empty() {
+            segments.push(ReplayAssistantSegment::Message(before.to_string()));
+        }
+
+        let thought_start = open_ix + THINKING_OPEN.len();
+        let after_open = &remaining[thought_start..];
+        if let Some(close_ix) = after_open.find(THINKING_CLOSE) {
+            let thought = &after_open[..close_ix];
+            if !thought.trim().is_empty() {
+                segments.push(ReplayAssistantSegment::Thought(thought.trim().to_string()));
+            }
+            remaining = &after_open[close_ix + THINKING_CLOSE.len()..];
+        } else {
+            if !after_open.trim().is_empty() {
+                segments.push(ReplayAssistantSegment::Thought(
+                    after_open.trim().to_string(),
+                ));
+            }
+            remaining = "";
+            break;
+        }
+    }
+
+    if !remaining.trim().is_empty() {
+        segments.push(ReplayAssistantSegment::Message(remaining.to_string()));
+    }
+
+    if segments.is_empty() && !text.is_empty() {
+        segments.push(ReplayAssistantSegment::Message(text.to_string()));
+    }
+
+    segments
 }
 
 async fn consume_stream(

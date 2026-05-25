@@ -1,4 +1,5 @@
-use collections::HashSet;
+use collections::{HashMap, HashSet};
+use editor::Editor;
 use gpui::{
     AnyElement, App, Context, DefiniteLength, Entity, FocusHandle, Focusable, FontWeight, Hsla,
     InteractiveElement, MouseButton, ParentElement, Pixels, Render, ScrollHandle, SharedString,
@@ -25,6 +26,7 @@ pub struct BackboardAgentWorkspacePage {
     draft_drawer_open: bool,
     dashboard_scroll_handle: ScrollHandle,
     dismissed_threads: HashSet<ThreadId>,
+    card_chat_inputs: HashMap<ThreadId, Entity<Editor>>,
     show_token_context: bool,
     observing_agent_panel: bool,
     _subscriptions: Vec<Subscription>,
@@ -54,10 +56,10 @@ impl BackboardAgentWorkspaceHeader {
         let header_background = colors
             .tab_bar_background
             .blend(colors.panel_background.opacity(0.28));
-        let divider_color = colors.border_variant.opacity(0.52);
+        let divider_color = colors.border_variant.opacity(0.44);
 
         h_flex()
-            .h(px(32.))
+            .h(px(30.))
             .p_1()
             .gap_2()
             .items_center()
@@ -69,8 +71,9 @@ impl BackboardAgentWorkspaceHeader {
                 h_flex()
                     .h_full()
                     .px_1p5()
-                    .gap_2()
+                    .gap_1p5()
                     .items_center()
+                    .child(div().size(px(7.)).rounded_full().bg(colors.text_accent))
                     .child(
                         Label::new("Agent Workspace")
                             .size(LabelSize::Small)
@@ -162,6 +165,7 @@ impl BackboardAgentWorkspacePage {
                 draft_drawer_open: false,
                 dashboard_scroll_handle: ScrollHandle::new(),
                 dismissed_threads: HashSet::default(),
+                card_chat_inputs: HashMap::default(),
                 show_token_context: false,
                 observing_agent_panel,
                 _subscriptions: subscriptions,
@@ -314,6 +318,15 @@ impl BackboardAgentWorkspacePage {
     }
 
     fn close_detail(&mut self, cx: &mut Context<Self>) {
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                    panel.update(cx, |panel, cx| {
+                        panel.persist_active_prompt(cx);
+                    });
+                }
+            });
+        }
         self.selected_thread_id = None;
         self.draft_drawer_open = false;
         cx.notify();
@@ -332,6 +345,65 @@ impl BackboardAgentWorkspacePage {
                     .read(cx)
                     .backboard_workspace_conversation_view(thread_id, cx)
             })
+    }
+
+    fn card_chat_input(
+        &mut self,
+        thread_id: ThreadId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<Editor> {
+        self.card_chat_inputs
+            .entry(thread_id)
+            .or_insert_with(|| {
+                cx.new(|cx| {
+                    let mut editor = Editor::single_line(window, cx);
+                    editor.set_placeholder_text("Message agent...", window, cx);
+                    editor
+                })
+            })
+            .clone()
+    }
+
+    fn send_card_chat(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(input) = self.card_chat_inputs.get(&thread_id).cloned() else {
+            return;
+        };
+        let text = input.read(cx).text(cx);
+        let message = text.trim();
+        if message.is_empty() {
+            input.focus_handle(cx).focus(window, cx);
+            return;
+        }
+        let message = message.to_string();
+
+        input.update(cx, |editor, cx| {
+            editor.clear(window, cx);
+        });
+
+        let Some(conversation) = self.conversation_for_thread(thread_id, cx) else {
+            input.update(cx, |editor, cx| {
+                editor.set_text(text.as_str(), window, cx);
+            });
+            self.open_run(thread_id, window, cx);
+            return;
+        };
+        let Some(thread_view) = conversation.read(cx).root_thread_view() else {
+            input.update(cx, |editor, cx| {
+                editor.set_text(text.as_str(), window, cx);
+            });
+            self.open_run(thread_id, window, cx);
+            return;
+        };
+
+        thread_view.update(cx, |thread_view, cx| {
+            thread_view.message_editor.update(cx, |message_editor, cx| {
+                message_editor.clear(window, cx);
+                message_editor.insert_text(&message, window, cx);
+            });
+            thread_view.send(window, cx);
+        });
+        cx.notify();
     }
 
     fn stop_run(&mut self, thread_id: ThreadId, cx: &mut Context<Self>) {
@@ -401,6 +473,7 @@ impl BackboardAgentWorkspacePage {
 
     fn dismiss_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
         self.dismissed_threads.insert(thread_id);
+        self.card_chat_inputs.remove(&thread_id);
         if self.selected_thread_id == Some(thread_id) {
             self.selected_thread_id = None;
         }
@@ -491,15 +564,13 @@ impl BackboardAgentWorkspacePage {
     }
 
     fn render_dashboard(
-        &self,
+        &mut self,
         summaries: Vec<BackboardAgentRunSummary>,
         right_panel_open: bool,
-        draft_composer_open: bool,
-        agent_panel: Option<Entity<AgentPanel>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let colors = cx.theme().colors();
+        let editor_background = cx.theme().colors().editor_background;
         let card_width = if right_panel_open {
             relative(0.48)
         } else {
@@ -507,12 +578,12 @@ impl BackboardAgentWorkspacePage {
         };
         let card_min_width = if right_panel_open { px(320.) } else { px(260.) };
 
-        if summaries.is_empty() && !draft_composer_open {
+        if summaries.is_empty() {
             return v_flex()
                 .size_full()
                 .id("backboard-agent-workspace-empty")
                 .overflow_hidden()
-                .bg(colors.editor_background)
+                .bg(editor_background)
                 .child(
                     v_flex()
                         .flex_1()
@@ -525,15 +596,15 @@ impl BackboardAgentWorkspacePage {
                                 .size(px(56.))
                                 .rounded(px(8.))
                                 .border_1()
-                                .border_color(colors.border_variant.opacity(0.58))
-                                .bg(colors.elevated_surface_background)
+                                .border_color(cx.theme().colors().border_variant.opacity(0.58))
+                                .bg(cx.theme().colors().elevated_surface_background)
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .child(
                                     Icon::new(IconName::Sparkle)
                                         .size(IconSize::XLarge)
-                                        .color(Color::Custom(colors.text_accent)),
+                                        .color(Color::Custom(cx.theme().colors().text_accent)),
                                 ),
                         )
                         .child(
@@ -574,12 +645,20 @@ impl BackboardAgentWorkspacePage {
                 .into_any_element();
         }
 
+        let cards = summaries
+            .into_iter()
+            .map(|summary| {
+                self.render_agent_workspace_card(summary, card_width, card_min_width, window, cx)
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+
         v_flex()
             .size_full()
             .id("backboard-agent-workspace-scroll")
             .track_scroll(&self.dashboard_scroll_handle)
             .overflow_y_scroll()
-            .bg(colors.editor_background)
+            .bg(editor_background)
             .child(
                 h_flex()
                     .items_start()
@@ -587,21 +666,7 @@ impl BackboardAgentWorkspacePage {
                     .flex_wrap()
                     .gap(px(12.))
                     .p(px(12.))
-                    .when(draft_composer_open, |this| {
-                        this.child(
-                            self.render_new_agent_tile(
-                                agent_panel.clone(),
-                                card_width,
-                                card_min_width,
-                                cx,
-                            )
-                            .into_any_element(),
-                        )
-                    })
-                    .children(summaries.into_iter().map(|summary| {
-                        self.render_agent_workspace_card(summary, card_width, card_min_width, cx)
-                            .into_any_element()
-                    })),
+                    .children(cards),
             )
             .vertical_scrollbar_for(&self.dashboard_scroll_handle, window, cx)
             .into_any_element()
@@ -725,10 +790,11 @@ impl BackboardAgentWorkspacePage {
     }
 
     fn render_agent_workspace_card(
-        &self,
+        &mut self,
         summary: BackboardAgentRunSummary,
         card_width: DefiniteLength,
         card_min_width: Pixels,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let thread_id = summary.thread_id;
@@ -755,10 +821,10 @@ impl BackboardAgentWorkspacePage {
         let border_color = if selected {
             text_accent
         } else {
-            border_variant.opacity(0.72)
+            border_variant.opacity(0.58)
         };
         let background = if selected {
-            elevated_surface_background.blend(text_accent.opacity(0.025))
+            elevated_surface_background.blend(text_accent.opacity(0.035))
         } else {
             elevated_surface_background
         };
@@ -768,13 +834,14 @@ impl BackboardAgentWorkspacePage {
             .as_ref()
             .map(|label| label.as_ref().to_lowercase())
             .unwrap_or_else(|| "build".to_string());
+        let chat_input = self.card_chat_input(thread_id, window, cx);
 
         v_flex()
             .id(format!("backboard-agent-card-{thread_key}"))
             .w(card_width)
             .min_w(card_min_width)
             .max_w(relative(1.))
-            .h(px(430.))
+            .h(px(420.))
             .flex_none()
             .rounded(px(8.))
             .border_1()
@@ -789,11 +856,11 @@ impl BackboardAgentWorkspacePage {
             .child(
                 h_flex()
                     .h(px(56.))
-                    .px_4()
+                    .px_3()
                     .gap_2()
                     .items_center()
                     .border_b_1()
-                    .border_color(border_variant.opacity(0.42))
+                    .border_color(border_variant.opacity(0.36))
                     .child(self.render_status_dot(summary.status, cx))
                     .child(
                         Label::new(summary.title.clone())
@@ -827,12 +894,12 @@ impl BackboardAgentWorkspacePage {
             .child(
                 v_flex()
                     .min_h(px(58.))
-                    .px_4()
+                    .px_3()
                     .py_1p5()
                     .gap_0p5()
                     .border_b_1()
-                    .border_color(border_variant.opacity(0.34))
-                    .bg(panel_background.opacity(0.22))
+                    .border_color(border_variant.opacity(0.28))
+                    .bg(panel_background.opacity(0.18))
                     .child(
                         h_flex()
                             .gap_1()
@@ -864,6 +931,7 @@ impl BackboardAgentWorkspacePage {
             )
             .child(self.render_card_file_chips(&summary, cx))
             .child(self.render_card_footer(&summary, thread_key, cx))
+            .child(self.render_card_chat_bar(thread_id, chat_input, window, cx))
     }
 
     fn render_card_activity(
@@ -956,8 +1024,8 @@ impl BackboardAgentWorkspacePage {
 
         v_flex()
             .size_full()
-            .gap_1p5()
-            .px_4()
+            .gap_1()
+            .px_3()
             .py_2()
             .children(rows)
             .into_any_element()
@@ -993,8 +1061,8 @@ impl BackboardAgentWorkspacePage {
 
         if labels.is_empty() {
             return h_flex()
-                .min_h(px(44.))
-                .px_4()
+                .min_h(px(38.))
+                .px_3()
                 .py_1p5()
                 .items_center()
                 .border_t_1()
@@ -1008,8 +1076,8 @@ impl BackboardAgentWorkspacePage {
         }
 
         h_flex()
-            .min_h(px(44.))
-            .px_4()
+            .min_h(px(38.))
+            .px_3()
             .py_1p5()
             .gap_1p5()
             .items_center()
@@ -1022,7 +1090,7 @@ impl BackboardAgentWorkspacePage {
                     .items_center()
                     .px_2()
                     .py_0p5()
-                    .rounded(px(6.))
+                    .rounded(px(4.))
                     .border_1()
                     .border_color(cx.theme().colors().border_variant.opacity(0.36))
                     .bg(cx.theme().colors().panel_background.opacity(0.28))
@@ -1054,8 +1122,8 @@ impl BackboardAgentWorkspacePage {
         let error = cx.theme().status().error;
 
         h_flex()
-            .h(px(42.))
-            .px_4()
+            .h(px(38.))
+            .px_3()
             .gap_1p5()
             .items_center()
             .border_t_1()
@@ -1194,6 +1262,79 @@ impl BackboardAgentWorkspacePage {
             )
     }
 
+    fn render_card_chat_bar(
+        &self,
+        thread_id: ThreadId,
+        editor: Entity<Editor>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let thread_key = thread_id.to_key_string();
+        let colors = cx.theme().colors();
+        let focus_handle = editor.focus_handle(cx);
+        let focused = focus_handle.is_focused(window);
+        let input_border = if focused {
+            colors.border_focused
+        } else {
+            colors.border_variant.opacity(0.46)
+        };
+        let input_background = colors
+            .editor_background
+            .blend(colors.element_background.opacity(0.06));
+
+        h_flex()
+            .id(format!("agent-card-chat-bar-{thread_key}"))
+            .h(px(50.))
+            .px_2()
+            .gap_1p5()
+            .items_center()
+            .border_t_1()
+            .border_color(colors.border_variant.opacity(0.32))
+            .bg(colors.panel_background.opacity(0.16))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_click(cx.listener(|_, _, _, cx| {
+                cx.stop_propagation();
+            }))
+            .on_action(cx.listener(move |this, _: &Chat, window, cx| {
+                this.send_card_chat(thread_id, window, cx);
+            }))
+            .child(
+                Icon::new(IconName::Chat)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(34.))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(input_border)
+                    .bg(input_background)
+                    .track_focus(&focus_handle)
+                    .child(editor),
+            )
+            .child(
+                IconButton::new(
+                    format!("send-agent-card-message-{thread_key}"),
+                    IconName::Send,
+                )
+                .icon_size(IconSize::XSmall)
+                .icon_color(Color::Muted)
+                .tooltip(Tooltip::text("Send message"))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.send_card_chat(thread_id, window, cx);
+                })),
+            )
+    }
+
     fn render_workspace_activity_row(
         text: SharedString,
         state: BackboardAgentRunEventState,
@@ -1224,8 +1365,13 @@ impl BackboardAgentWorkspacePage {
         h_flex()
             .items_start()
             .min_w_0()
-            .gap_2()
-            .py_0p5()
+            .gap_1p5()
+            .px_1p5()
+            .py_1()
+            .rounded(px(5.))
+            .border_1()
+            .border_color(cx.theme().colors().border_variant.opacity(0.22))
+            .bg(cx.theme().colors().panel_background.opacity(0.16))
             .child(
                 div()
                     .w(px(16.))
@@ -2373,102 +2519,6 @@ impl BackboardAgentWorkspacePage {
             .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
             .child(content)
     }
-
-    fn render_new_agent_tile(
-        &self,
-        agent_panel: Option<Entity<AgentPanel>>,
-        card_width: DefiniteLength,
-        card_min_width: Pixels,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let colors = cx.theme().colors();
-        let panel_to_focus = agent_panel.clone();
-
-        v_flex()
-            .id("backboard-agent-composer-card")
-            .w(card_width)
-            .min_w(card_min_width)
-            .max_w(relative(1.))
-            .h(px(430.))
-            .flex_none()
-            .rounded(px(8.))
-            .border_1()
-            .border_color(colors.border_variant.opacity(0.72))
-            .bg(colors.editor_background)
-            .overflow_hidden()
-            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_hidden()
-                    .child(match agent_panel {
-                        Some(panel) => div()
-                            .size_full()
-                            .overflow_hidden()
-                            .child(panel)
-                            .into_any_element(),
-                        None => v_flex()
-                            .size_full()
-                            .items_center()
-                            .justify_center()
-                            .gap_3()
-                            .px_5()
-                            .child(
-                                Label::new("Start a new agent")
-                                    .size(LabelSize::Small)
-                                    .weight(FontWeight::BOLD)
-                                    .color(Color::Default),
-                            )
-                            .child(
-                                Button::new("composer-card-new-agent-chat", "New Agent")
-                                    .start_icon(Icon::new(IconName::Plus))
-                                    .style(ButtonStyle::Tinted(TintColor::Accent))
-                                    .size(ButtonSize::Compact)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.create_chat(window, cx);
-                                    })),
-                            )
-                            .into_any_element(),
-                    })
-                    .child(
-                        div()
-                            .absolute()
-                            .top_1()
-                            .left_1()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(colors.border_variant.opacity(0.52))
-                            .bg(colors.element_background.opacity(0.92))
-                            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                                cx.stop_propagation();
-                            })
-                            .child(
-                                IconButton::new("close-new-agent-composer", IconName::ArrowLeft)
-                                    .icon_size(IconSize::XSmall)
-                                    .icon_color(Color::Muted)
-                                    .tooltip(Tooltip::text("Close agent composer"))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.close_detail(cx);
-                                    })),
-                            ),
-                    ),
-            )
-            .on_action(cx.listener(|this, _: &Chat, window, cx| {
-                this.submit_chat_action(window, cx);
-            }))
-            .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
-                cx.stop_propagation();
-                if let Some(panel) = panel_to_focus.as_ref() {
-                    panel.focus_handle(cx).focus(window, cx);
-                }
-            })
-            .on_click(cx.listener(|_, _, _, cx| {
-                cx.stop_propagation();
-            }))
-    }
 }
 
 impl Render for BackboardAgentWorkspacePage {
@@ -2498,7 +2548,7 @@ impl Render for BackboardAgentWorkspacePage {
         let selected_conversation = selected_summary
             .as_ref()
             .and_then(|summary| self.conversation_for_thread(summary.thread_id, cx));
-        let right_panel_open = selected_summary.is_some();
+        let right_panel_open = selected_summary.is_some() || draft_drawer_open;
         let colors = cx.theme().colors();
         let workspace_background = colors.editor_background;
         let workspace_body_background = colors
@@ -2537,16 +2587,16 @@ impl Render for BackboardAgentWorkspacePage {
                                     self.render_dashboard(
                                         summaries.clone(),
                                         right_panel_open,
-                                        draft_drawer_open,
-                                        agent_panel.clone(),
                                         window,
                                         cx,
                                     )
                                     .into_any_element(),
                                 ),
                             )
-                            .when_some(selected_summary.clone(), |this, summary| {
-                                if let Some(conversation) = selected_conversation.clone() {
+                            .when(right_panel_open, |this| {
+                                if let Some(summary) = selected_summary.clone()
+                                    && let Some(conversation) = selected_conversation.clone()
+                                {
                                     this.child(
                                         self.render_chat_panel_frame(
                                             self.render_detail_drawer(summary, conversation, cx)
@@ -2733,7 +2783,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_workspace_agent_page_new_chat_focuses_draft_without_card(
+    async fn test_workspace_agent_page_new_chat_focuses_draft_in_right_panel(
         cx: &mut TestAppContext,
     ) {
         let (workspace, panel, page, mut cx) = setup_workspace_page(cx, true).await;
@@ -2749,7 +2799,7 @@ mod tests {
             );
             assert!(
                 page.draft_drawer_open,
-                "New Agent should open the inline composer tile"
+                "New Agent should open the right-panel composer"
             );
         });
         workspace.read_with(&cx, |workspace, cx| {
@@ -2776,7 +2826,7 @@ mod tests {
         page.read_with(&cx, |page, _cx| {
             assert!(
                 !page.draft_drawer_open,
-                "closing detail should hide the inline composer tile"
+                "closing detail should hide the right-panel composer"
             );
             assert!(page.selected_thread_id.is_none());
         });
@@ -2839,7 +2889,7 @@ mod tests {
             );
             assert!(
                 page.draft_drawer_open,
-                "new chat should use the inline composer tile"
+                "new chat should use the right-panel composer"
             );
         });
         workspace.read_with(&cx, |workspace, cx| {

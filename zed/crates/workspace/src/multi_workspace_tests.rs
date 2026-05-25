@@ -145,6 +145,18 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
     });
     multi_workspace.read_with(cx, |multi_workspace, _cx| {
         assert!(multi_workspace.multi_agent_expanded);
+        assert!(!multi_workspace.skills_expanded);
+        assert!(!multi_workspace.tasks_expanded);
+        assert!(!multi_workspace.git_expanded);
+        assert!(!multi_workspace.jarvis_placeholder_expanded);
+    });
+
+    multi_workspace.update_in(cx, |multi_workspace, _window, cx| {
+        multi_workspace.test_select_skills_tab(cx);
+    });
+    multi_workspace.read_with(cx, |multi_workspace, _cx| {
+        assert!(!multi_workspace.multi_agent_expanded);
+        assert!(multi_workspace.skills_expanded);
         assert!(!multi_workspace.tasks_expanded);
         assert!(!multi_workspace.git_expanded);
         assert!(!multi_workspace.jarvis_placeholder_expanded);
@@ -155,6 +167,7 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
     });
     multi_workspace.read_with(cx, |multi_workspace, _cx| {
         assert!(!multi_workspace.multi_agent_expanded);
+        assert!(!multi_workspace.skills_expanded);
         assert!(multi_workspace.tasks_expanded);
         assert!(!multi_workspace.git_expanded);
         assert!(!multi_workspace.jarvis_placeholder_expanded);
@@ -165,6 +178,7 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
     });
     multi_workspace.read_with(cx, |multi_workspace, _cx| {
         assert!(!multi_workspace.multi_agent_expanded);
+        assert!(!multi_workspace.skills_expanded);
         assert!(!multi_workspace.tasks_expanded);
         assert!(multi_workspace.git_expanded);
         assert!(!multi_workspace.jarvis_placeholder_expanded);
@@ -175,6 +189,7 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
     });
     multi_workspace.read_with(cx, |multi_workspace, _cx| {
         assert!(!multi_workspace.multi_agent_expanded);
+        assert!(!multi_workspace.skills_expanded);
         assert!(!multi_workspace.tasks_expanded);
         assert!(!multi_workspace.git_expanded);
         assert!(!multi_workspace.jarvis_placeholder_expanded);

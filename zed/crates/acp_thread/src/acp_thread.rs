@@ -1565,27 +1565,46 @@ impl AcpThread {
         cx: &mut Context<Self>,
     ) -> Result<(), acp::Error> {
         match update {
-            acp::SessionUpdate::UserMessageChunk(acp::ContentChunk { content, .. }) => {
+            acp::SessionUpdate::UserMessageChunk(acp::ContentChunk { content, meta, .. }) => {
                 // We optimistically add the full user prompt before calling `prompt`.
                 // Some ACP servers echo user chunks back over updates. Skip the chunk if
                 // it's already present in the current user message to avoid duplicating content.
+                let force_new_entry = Self::is_history_replay_message_start(meta.as_ref());
                 let already_in_user_message = self
                     .entries
                     .last()
                     .and_then(|entry| entry.user_message())
                     .is_some_and(|message| message.chunks.contains(&content));
                 if !already_in_user_message {
-                    self.push_user_content_block(None, content, cx);
+                    self.push_user_content_block_with_options(
+                        None,
+                        content,
+                        false,
+                        force_new_entry,
+                        cx,
+                    );
                 }
             }
-            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk { content, .. }) => {
-                self.push_assistant_content_block(content, false, cx);
+            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk { content, meta, .. }) => {
+                self.push_assistant_content_block_with_options(
+                    content,
+                    false,
+                    false,
+                    Self::is_history_replay_message_start(meta.as_ref()),
+                    cx,
+                );
             }
             acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk { content, meta, .. }) => {
                 if Self::is_backboard_progress_update(&content, meta.as_ref()) {
                     self.push_backboard_progress_content_block(content, cx);
                 } else {
-                    self.push_assistant_content_block(content, true, cx);
+                    self.push_assistant_content_block_with_options(
+                        content,
+                        true,
+                        false,
+                        Self::is_history_replay_message_start(meta.as_ref()),
+                        cx,
+                    );
                 }
             }
             acp::SessionUpdate::ToolCall(tool_call) => {
@@ -1685,11 +1704,23 @@ impl AcpThread {
         indented: bool,
         cx: &mut Context<Self>,
     ) {
+        self.push_user_content_block_with_options(message_id, chunk, indented, false, cx)
+    }
+
+    fn push_user_content_block_with_options(
+        &mut self,
+        message_id: Option<UserMessageId>,
+        chunk: acp::ContentBlock,
+        indented: bool,
+        force_new_entry: bool,
+        cx: &mut Context<Self>,
+    ) {
         let language_registry = self.project.read(cx).languages().clone();
         let path_style = self.project.read(cx).path_style(cx);
         let entries_len = self.entries.len();
 
-        if let Some(last_entry) = self.entries.last_mut()
+        if !force_new_entry
+            && let Some(last_entry) = self.entries.last_mut()
             && let AgentThreadEntry::UserMessage(UserMessage {
                 id,
                 content,
@@ -1761,11 +1792,22 @@ impl AcpThread {
         indented: bool,
         cx: &mut Context<Self>,
     ) {
+        self.push_assistant_content_block_with_options(chunk, is_thought, indented, false, cx)
+    }
+
+    fn push_assistant_content_block_with_options(
+        &mut self,
+        chunk: acp::ContentBlock,
+        is_thought: bool,
+        indented: bool,
+        force_new_entry: bool,
+        cx: &mut Context<Self>,
+    ) {
         let path_style = self.project.read(cx).path_style(cx);
 
         // For text chunks going to an existing Markdown block, buffer for smooth
         // streaming instead of appending all at once which may feel more choppy.
-        if let acp::ContentBlock::Text(text_content) = &chunk {
+        if !force_new_entry && let acp::ContentBlock::Text(text_content) = &chunk {
             if let Some(markdown) = self.streaming_markdown_target(is_thought, indented, cx) {
                 let entries_len = self.entries.len();
                 cx.emit(AcpThreadEvent::EntryUpdated(entries_len - 1));
@@ -1776,7 +1818,8 @@ impl AcpThread {
 
         let language_registry = self.project.read(cx).languages().clone();
         let entries_len = self.entries.len();
-        if let Some(last_entry) = self.entries.last_mut()
+        if !force_new_entry
+            && let Some(last_entry) = self.entries.last_mut()
             && let AgentThreadEntry::AssistantMessage(AssistantMessage {
                 chunks,
                 indented: existing_indented,
@@ -1822,6 +1865,12 @@ impl AcpThread {
                 cx,
             );
         }
+    }
+
+    fn is_history_replay_message_start(meta: Option<&serde_json::Map<String, Value>>) -> bool {
+        meta.and_then(|meta| meta.get("historyReplayMessageStart"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
     }
 
     fn streaming_markdown_target(
@@ -3741,6 +3790,59 @@ mod tests {
             <thinking>
             Thinking hard!
             </thinking>
+
+            "#}
+        );
+    }
+
+    #[gpui::test]
+    async fn test_history_replay_message_start_keeps_assistant_messages_separate(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let connection = Rc::new(FakeAgentConnection::new());
+        let thread = cx
+            .update(|cx| {
+                connection.new_session(project, PathList::new(&[Path::new(path!("/test"))]), cx)
+            })
+            .await
+            .unwrap();
+
+        let replay_chunk = |text: &str| {
+            let mut meta = acp::Meta::new();
+            meta.insert("historyReplayMessageStart".to_string(), true.into());
+            acp::ContentChunk::new(acp::ContentBlock::from(text.to_string())).meta(meta)
+        };
+
+        thread.update(cx, |thread, cx| {
+            thread
+                .handle_session_update(
+                    acp::SessionUpdate::AgentMessageChunk(replay_chunk("First response")),
+                    cx,
+                )
+                .unwrap();
+            thread
+                .handle_session_update(
+                    acp::SessionUpdate::AgentMessageChunk(replay_chunk("Second response")),
+                    cx,
+                )
+                .unwrap();
+        });
+
+        let output = thread.read_with(cx, |thread, cx| thread.to_markdown(cx));
+        assert_eq!(
+            output,
+            indoc! {r#"
+            ## Assistant
+
+            First response
+
+            ## Assistant
+
+            Second response
 
             "#}
         );

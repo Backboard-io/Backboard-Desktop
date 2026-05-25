@@ -12,7 +12,7 @@ use agent::{
 use agent_client_protocol::schema as acp;
 #[cfg(test)]
 use agent_servers::AgentServerDelegate;
-use agent_servers::{AgentServer, GEMINI_TERMINAL_AUTH_METHOD_ID};
+use agent_servers::{AgentServer, GEMINI_TERMINAL_AUTH_METHOD_ID, backboard::BACKBOARD_AGENT_ID};
 use agent_settings::{AgentProfileId, AgentSettings};
 use anyhow::{Result, anyhow};
 #[cfg(feature = "audio")]
@@ -2654,7 +2654,17 @@ impl ConversationView {
         let root_title = root_thread.title();
 
         // TODO: Change this once we have title summarization for external agents.
-        let title = self.agent.agent_id().0;
+        let agent_id = self.agent.agent_id();
+        let title = if agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref()
+            || agent_id.as_ref() == BACKBOARD_AGENT_ID
+        {
+            SharedString::from("Backboard")
+        } else {
+            self.agent_server_store
+                .read(cx)
+                .agent_display_name(&agent_id)
+                .unwrap_or_else(|| agent_id.0)
+        };
 
         match settings.notify_when_agent_waiting {
             NotifyWhenAgentWaiting::PrimaryScreen => {

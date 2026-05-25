@@ -22,7 +22,7 @@ use zed_actions::agents_sidebar::ToggleThreadSwitcher;
 
 use agent_settings::AgentSettings;
 use settings::SidebarDockPosition;
-use ui::{ContextMenu, right_click_menu};
+use ui::{ButtonSize, ContextMenu, DropdownMenu, DropdownStyle, IconPosition, right_click_menu};
 
 const SIDEBAR_RESIZE_HANDLE_SIZE: Pixels = px(6.0);
 
@@ -70,6 +70,7 @@ pub struct SidebarRenderState {
 enum WorkspaceModeTab {
     CodeEditor,
     AgentWorkspace,
+    Skills,
     Tasks,
     Git,
 }
@@ -316,11 +317,13 @@ pub struct MultiWorkspace {
     previous_focus_handle: Option<FocusHandle>,
     pub interface_mode: InterfaceMode,
     pub multi_agent_expanded: bool,
+    pub skills_expanded: bool,
     pub tasks_expanded: bool,
     pub git_expanded: bool,
     pub jarvis_placeholder_expanded: bool,
     pub beginner_view: Option<AnyView>,
     pub agent_workspace_view: Option<AnyView>,
+    pub skills_view: Option<AnyView>,
     pub tasks_view: Option<AnyView>,
     pub git_view: Option<AnyView>,
     jarvis_visualizer: Entity<JarvisDirectoryVisualizer>,
@@ -391,11 +394,13 @@ impl MultiWorkspace {
             previous_focus_handle: None,
             interface_mode: InterfaceMode::Expert,
             multi_agent_expanded: false,
+            skills_expanded: false,
             tasks_expanded: false,
             git_expanded: false,
             jarvis_placeholder_expanded: false,
             beginner_view: None,
             agent_workspace_view: None,
+            skills_view: None,
             tasks_view: None,
             git_view: None,
             jarvis_visualizer,
@@ -435,6 +440,8 @@ impl MultiWorkspace {
             WorkspaceModeTab::Git
         } else if self.tasks_expanded {
             WorkspaceModeTab::Tasks
+        } else if self.skills_expanded {
+            WorkspaceModeTab::Skills
         } else if self.multi_agent_expanded {
             WorkspaceModeTab::AgentWorkspace
         } else {
@@ -448,6 +455,7 @@ impl MultiWorkspace {
         }
 
         self.multi_agent_expanded = tab == WorkspaceModeTab::AgentWorkspace;
+        self.skills_expanded = tab == WorkspaceModeTab::Skills;
         self.tasks_expanded = tab == WorkspaceModeTab::Tasks;
         self.git_expanded = tab == WorkspaceModeTab::Git;
         self.jarvis_placeholder_expanded = false;
@@ -1873,6 +1881,11 @@ impl MultiWorkspace {
     }
 
     #[cfg(any(test, feature = "test-support"))]
+    pub fn test_select_skills_tab(&mut self, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::Skills, cx);
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
     pub fn test_select_tasks_tab(&mut self, cx: &mut Context<Self>) {
         self.set_workspace_mode_tab(WorkspaceModeTab::Tasks, cx);
     }
@@ -2161,8 +2174,60 @@ impl MultiWorkspace {
         }
     }
 
-    fn render_workspace_mode_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn workspace_mode_tab_label(tab: WorkspaceModeTab) -> &'static str {
+        match tab {
+            WorkspaceModeTab::CodeEditor => "Code Editor",
+            WorkspaceModeTab::AgentWorkspace => "Agent Workspace",
+            WorkspaceModeTab::Skills => "Skills",
+            WorkspaceModeTab::Tasks => "Tasks",
+            WorkspaceModeTab::Git => "Git Terminal",
+        }
+    }
+
+    fn workspace_mode_menu(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<ContextMenu> {
         let selected_tab = self.selected_workspace_mode_tab();
+        let multi_workspace = cx.entity().downgrade();
+
+        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            let tabs = [
+                WorkspaceModeTab::CodeEditor,
+                WorkspaceModeTab::AgentWorkspace,
+                WorkspaceModeTab::Skills,
+                WorkspaceModeTab::Git,
+            ];
+
+            for tab in tabs {
+                let multi_workspace = multi_workspace.clone();
+                menu = menu.toggleable_entry(
+                    Self::workspace_mode_tab_label(tab),
+                    selected_tab == tab,
+                    IconPosition::Start,
+                    None,
+                    move |_window, cx| {
+                        multi_workspace
+                            .update(cx, |this, cx| {
+                                this.set_workspace_mode_tab(tab, cx);
+                            })
+                            .ok();
+                    },
+                );
+            }
+
+            menu
+        })
+    }
+
+    fn render_workspace_mode_switcher(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected_tab = self.selected_workspace_mode_tab();
+        let selected_label = Self::workspace_mode_tab_label(selected_tab);
         let colors = cx.theme().colors();
         let switcher_bg = colors.tab_bar_background;
 
@@ -2171,83 +2236,21 @@ impl MultiWorkspace {
             .w_full()
             .flex_shrink_0()
             .items_center()
-            .gap_1()
-            .pl(px(104.))
+            .justify_end()
+            .pl_2()
             .pr_2()
             .border_b_1()
             .border_color(colors.border_variant.opacity(0.5))
             .bg(switcher_bg)
             .child(
-                h_flex()
-                    .h_full()
-                    .gap_0()
-                    .items_end()
-                    .child(self.render_workspace_mode_tab(
-                        "multi-workspace-code-editor-tab",
-                        "Code Editor",
-                        selected_tab == WorkspaceModeTab::CodeEditor,
-                        WorkspaceModeTab::CodeEditor,
-                        cx,
-                    ))
-                    .child(self.render_workspace_mode_tab(
-                        "multi-workspace-agent-tab",
-                        "Agent Workspace",
-                        selected_tab == WorkspaceModeTab::AgentWorkspace,
-                        WorkspaceModeTab::AgentWorkspace,
-                        cx,
-                    ))
-                    .child(self.render_workspace_mode_tab(
-                        "multi-workspace-git-tab",
-                        "Git Terminal",
-                        selected_tab == WorkspaceModeTab::Git,
-                        WorkspaceModeTab::Git,
-                        cx,
-                    )),
+                DropdownMenu::new(
+                    "multi-workspace-mode-menu",
+                    selected_label,
+                    self.workspace_mode_menu(window, cx),
+                )
+                .style(DropdownStyle::Subtle)
+                .trigger_size(ButtonSize::Default),
             )
-            .into_any_element()
-    }
-
-    fn render_workspace_mode_tab(
-        &self,
-        id: &'static str,
-        label: &'static str,
-        selected: bool,
-        target_tab: WorkspaceModeTab,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let colors = cx.theme().colors();
-        let selected_bg = colors.element_selected.opacity(0.42);
-        let hover_bg = colors.element_hover.opacity(0.5);
-
-        v_flex()
-            .id(id)
-            .h_full()
-            .min_w(px(116.))
-            .px(px(14.))
-            .items_center()
-            .justify_between()
-            .bg(if selected {
-                selected_bg
-            } else {
-                colors.border_transparent
-            })
-            .cursor_pointer()
-            .when(!selected, |style| style.hover(|style| style.bg(hover_bg)))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.set_workspace_mode_tab(target_tab, cx);
-            }))
-            .child(div().flex_1().flex().items_center().justify_center().child(
-                Label::new(label).size(LabelSize::Small).color(if selected {
-                    Color::Accent
-                } else {
-                    Color::Muted
-                }),
-            ))
-            .child(div().h(px(2.)).w_full().bg(if selected {
-                colors.text_accent
-            } else {
-                colors.border_transparent
-            }))
             .into_any_element()
     }
 }
@@ -2384,7 +2387,7 @@ impl Render for MultiWorkspace {
                             this.set_multi_agent_expanded(false, cx);
                         }))
                         .children(titlebar)
-                        .child(self.render_workspace_mode_switcher(cx))
+                        .child(self.render_workspace_mode_switcher(window, cx))
                         .child(
                             div()
                                 .flex()
@@ -2436,7 +2439,33 @@ impl Render for MultiWorkspace {
                             this.set_multi_agent_expanded(false, cx);
                         }))
                         .children(titlebar)
-                        .child(self.render_workspace_mode_switcher(cx))
+                        .child(self.render_workspace_mode_switcher(window, cx))
+                        .child(div().flex_1().min_h_0().child(view.clone())),
+                    window,
+                    cx,
+                    Tiling::default(),
+                );
+            }
+        }
+
+        if self.skills_expanded {
+            if let Some(view) = self.skills_view.as_ref() {
+                let titlebar = self.workspace().read(cx).titlebar_item();
+                return client_side_decorations(
+                    div()
+                        .key_context("BackboardSkillsView")
+                        .relative()
+                        .flex()
+                        .flex_col()
+                        .size_full()
+                        .font(ui_font)
+                        .text_color(text_color)
+                        .on_action(cx.listener(Self::close_window))
+                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
+                            this.set_multi_agent_expanded(false, cx);
+                        }))
+                        .children(titlebar)
+                        .child(self.render_workspace_mode_switcher(window, cx))
                         .child(div().flex_1().min_h_0().child(view.clone())),
                     window,
                     cx,
@@ -2461,7 +2490,7 @@ impl Render for MultiWorkspace {
                         this.set_multi_agent_expanded(false, cx);
                     }))
                     .children(titlebar)
-                    .child(self.render_workspace_mode_switcher(cx))
+                    .child(self.render_workspace_mode_switcher(window, cx))
                     .child(
                         div()
                             .flex_1()
@@ -2498,7 +2527,7 @@ impl Render for MultiWorkspace {
                 .size_full()
                 .font(ui_font)
                 .text_color(text_color)
-                .child(self.render_workspace_mode_switcher(cx))
+                .child(self.render_workspace_mode_switcher(window, cx))
                 .child(
                     root.key_context(workspace_key_context)
                         .relative()

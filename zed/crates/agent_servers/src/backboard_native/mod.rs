@@ -22,7 +22,7 @@ use ::backboard::{BackboardClient, BackboardConfig, BackboardModel};
 use acp_thread::{
     AcpThread, AgentConnection, AgentModelInfo, AgentModelList, AgentSessionConfigOptions,
     AgentSessionInfo, AgentSessionList, AgentSessionListRequest, AgentSessionListResponse,
-    AgentSessionModes, UserMessageId,
+    AgentSessionModes, AgentSessionTruncate, UserMessageId,
 };
 use action_log::ActionLog;
 use agent_client_protocol::schema as acp;
@@ -97,6 +97,7 @@ pub(crate) struct NativeSession {
     mode: acp::SessionModeId,
     intensity: String,
     feature_settings: FeatureSettings,
+    rewound_history_context: Option<String>,
     config_tx: watch::Sender<()>,
     config_rx: watch::Receiver<()>,
     cancel_flag: Arc<AtomicBool>,
@@ -350,6 +351,16 @@ impl BackboardNativeState {
         })
     }
 
+    pub(crate) fn take_rewound_history_context(
+        &self,
+        session_id: &acp::SessionId,
+    ) -> Option<String> {
+        self.sessions
+            .borrow_mut()
+            .get_mut(session_id)
+            .and_then(|session| session.rewound_history_context.take())
+    }
+
     pub(crate) fn session_thread_id(&self, session_id: &acp::SessionId) -> Option<String> {
         self.sessions
             .borrow()
@@ -361,6 +372,78 @@ impl BackboardNativeState {
         if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
             session.current_run_id = run_id;
         }
+    }
+
+    fn prepare_truncate(
+        &self,
+        session_id: &acp::SessionId,
+        message_id: &UserMessageId,
+        cx: &App,
+    ) -> Result<()> {
+        let thread = self
+            .sessions
+            .borrow()
+            .get(session_id)
+            .with_context(|| format!("unknown Backboard session: {session_id}"))?
+            .thread
+            .clone();
+
+        let rewound_history_context = thread.upgrade().and_then(|thread| {
+            let thread = thread.read(cx);
+            let target_index = thread.entries().iter().position(|entry| {
+                matches!(
+                    entry,
+                    acp_thread::AgentThreadEntry::UserMessage(message)
+                        if message.id.as_ref() == Some(message_id)
+                )
+            })?;
+            let context = thread.entries()[..target_index]
+                .iter()
+                .filter(|entry| {
+                    matches!(
+                        entry,
+                        acp_thread::AgentThreadEntry::UserMessage(_)
+                            | acp_thread::AgentThreadEntry::AssistantMessage(_)
+                    )
+                })
+                .map(|entry| entry.to_markdown(cx))
+                .collect::<String>();
+            (!context.trim().is_empty()).then_some(context)
+        });
+
+        let record = {
+            let mut sessions = self.sessions.borrow_mut();
+            let session = sessions
+                .get_mut(session_id)
+                .with_context(|| format!("unknown Backboard session: {session_id}"))?;
+            session.thread_id = None;
+            session.current_run_id = None;
+            session.cancel_flag.store(true, Ordering::SeqCst);
+            session.estimated_used_tokens = 0;
+            session.rewound_history_context = rewound_history_context;
+
+            session_store::SessionRecord {
+                workspace: session.workspace.to_string_lossy().to_string(),
+                assistant_id: None,
+                thread_id: None,
+                provider: session.provider.clone(),
+                model: session.model.clone(),
+                title: session
+                    .workspace
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("Backboard")
+                    .to_string(),
+                session_id: session_id.to_string(),
+                updated_at: Utc::now().to_rfc3339(),
+            }
+        };
+
+        session_store::write_session_record(&session_id.to_string(), &record).ok();
+        session_store::write_workspace_record(PathBuf::from(&record.workspace).as_path(), &record)
+            .ok();
+
+        Ok(())
     }
 
     pub(crate) fn reset_turn_metrics(&self, session_id: &acp::SessionId) {
@@ -668,6 +751,7 @@ impl AgentConnection for BackboardNativeConnection {
                 mode,
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
+                rewound_history_context: None,
                 config_tx,
                 config_rx,
                 cancel_flag,
@@ -775,6 +859,23 @@ impl AgentConnection for BackboardNativeConnection {
         }
     }
 
+    fn truncate(
+        &self,
+        session_id: &acp::SessionId,
+        _cx: &App,
+    ) -> Option<Rc<dyn AgentSessionTruncate>> {
+        self.state
+            .sessions
+            .borrow()
+            .contains_key(session_id)
+            .then(|| {
+                Rc::new(BackboardSessionTruncate {
+                    state: self.state.clone(),
+                    session_id: session_id.clone(),
+                }) as Rc<dyn AgentSessionTruncate>
+            })
+    }
+
     fn model_selector(
         &self,
         session_id: &acp::SessionId,
@@ -874,6 +975,7 @@ impl BackboardNativeConnection {
                 mode: self.state.default_mode.clone(),
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
+                rewound_history_context: None,
                 config_tx,
                 config_rx,
                 cancel_flag: Arc::new(AtomicBool::new(false)),
@@ -896,6 +998,20 @@ impl BackboardNativeConnection {
         }
 
         Task::ready(Ok(thread))
+    }
+}
+
+struct BackboardSessionTruncate {
+    state: Rc<BackboardNativeState>,
+    session_id: acp::SessionId,
+}
+
+impl AgentSessionTruncate for BackboardSessionTruncate {
+    fn run(&self, message_id: UserMessageId, cx: &mut App) -> Task<Result<()>> {
+        Task::ready(
+            self.state
+                .prepare_truncate(&self.session_id, &message_id, cx),
+        )
     }
 }
 

@@ -17,7 +17,9 @@ use gpui::{DismissEvent, List};
 use heapless::Vec as ArrayVec;
 use language_model::{LanguageModelEffortLevel, Speed};
 use settings::{SidebarSide, update_settings_file};
-use ui::{ButtonLike, SpinnerLabel, SpinnerVariant, SplitButton, SplitButtonStyle, Tab};
+use ui::{
+    ButtonLike, ElevationIndex, SpinnerLabel, SpinnerVariant, SplitButton, SplitButtonStyle, Tab,
+};
 use workspace::SERIALIZATION_THROTTLE_TIME;
 
 use super::*;
@@ -2662,15 +2664,14 @@ impl ThreadView {
         let changed_buffers = action_log.read(cx).changed_buffers(cx);
         let plan = thread.plan();
         let queue_is_empty = !self.has_queued_messages();
+        let is_generating = matches!(thread.status(), ThreadStatus::Generating);
+        let show_static_edits =
+            is_generating && !changed_buffers.is_empty() && thread.parent_session_id().is_none();
 
         let subagents_awaiting_permission = self.render_subagents_awaiting_permission(cx);
         let has_subagents_awaiting = subagents_awaiting_permission.is_some();
 
-        if changed_buffers.is_empty()
-            && plan.is_empty()
-            && queue_is_empty
-            && !has_subagents_awaiting
-        {
+        if !show_static_edits && plan.is_empty() && queue_is_empty && !has_subagents_awaiting {
             return None;
         }
 
@@ -2714,7 +2715,7 @@ impl ThreadView {
                     })
                     .when(
                         has_subagents_awaiting
-                            && (!plan.is_empty() || !changed_buffers.is_empty() || !queue_is_empty),
+                            && (!plan.is_empty() || show_static_edits || !queue_is_empty),
                         |this| this.child(Divider::horizontal().color(DividerColor::Border)),
                     )
                     .when(!plan.is_empty(), |this| {
@@ -2723,31 +2724,28 @@ impl ThreadView {
                                 parent.child(self.render_plan_entries(plan, window, cx))
                             })
                     })
-                    .when(!plan.is_empty() && !changed_buffers.is_empty(), |this| {
+                    .when(!plan.is_empty() && show_static_edits, |this| {
                         this.child(Divider::horizontal().color(DividerColor::Border))
                     })
-                    .when(
-                        !changed_buffers.is_empty() && thread.parent_session_id().is_none(),
-                        |this| {
-                            this.child(self.render_edits_summary(
+                    .when(show_static_edits, |this| {
+                        this.child(self.render_edits_summary(
+                            &changed_buffers,
+                            edits_expanded,
+                            pending_edits,
+                            cx,
+                        ))
+                        .when(edits_expanded, |parent| {
+                            parent.child(self.render_edited_files(
+                                action_log,
+                                telemetry.clone(),
                                 &changed_buffers,
-                                edits_expanded,
                                 pending_edits,
                                 cx,
                             ))
-                            .when(edits_expanded, |parent| {
-                                parent.child(self.render_edited_files(
-                                    action_log,
-                                    telemetry.clone(),
-                                    &changed_buffers,
-                                    pending_edits,
-                                    cx,
-                                ))
-                            })
-                        },
-                    )
+                        })
+                    })
                     .when(!queue_is_empty, |this| {
-                        this.when(!plan.is_empty() || !changed_buffers.is_empty(), |this| {
+                        this.when(!plan.is_empty() || show_static_edits, |this| {
                             this.child(Divider::horizontal().color(DividerColor::Border))
                         })
                         .child(self.render_message_queue_summary(window, cx))
@@ -2758,6 +2756,58 @@ impl ThreadView {
             )
             .into_any()
             .into()
+    }
+
+    fn render_final_edits_section(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let thread = self.thread.read(cx);
+        if matches!(thread.status(), ThreadStatus::Generating)
+            || thread.parent_session_id().is_some()
+        {
+            return None;
+        }
+
+        let action_log = thread.action_log();
+        let telemetry = ActionLogTelemetry::from(thread);
+        let changed_buffers = action_log.read(cx).changed_buffers(cx);
+        if changed_buffers.is_empty() {
+            return None;
+        }
+
+        // Keep ACP edit controls enabled, matching the static activity bar behavior.
+        let pending_edits = false;
+        let edits_expanded = self.edits_expanded;
+
+        Some(
+            v_flex()
+                .px_5()
+                .pt_1()
+                .pb_3()
+                .child(
+                    v_flex()
+                        .w_full()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().colors().border_variant.opacity(0.68))
+                        .bg(self.activity_bar_bg(cx))
+                        .overflow_hidden()
+                        .child(self.render_edits_summary(
+                            &changed_buffers,
+                            edits_expanded,
+                            pending_edits,
+                            cx,
+                        ))
+                        .when(edits_expanded, |parent| {
+                            parent.child(self.render_edited_files(
+                                action_log,
+                                telemetry,
+                                &changed_buffers,
+                                pending_edits,
+                                cx,
+                            ))
+                        }),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_edited_files(
@@ -3671,12 +3721,18 @@ impl ThreadView {
 
         let focus_handle = self.message_editor.focus_handle(cx);
         let colors = cx.theme().colors();
+        let editor_focused = focus_handle.is_focused(window);
         let editor_bg_color = colors
             .panel_background
-            .blend(colors.editor_background.opacity(0.32));
+            .blend(colors.editor_background.opacity(0.18));
         let composer_surface_bg = colors
             .editor_background
-            .blend(colors.element_background.opacity(0.14));
+            .blend(colors.element_background.opacity(0.08));
+        let composer_border = if editor_focused {
+            colors.border_focused
+        } else {
+            colors.border_variant.opacity(0.5)
+        };
 
         let editor_expanded = self.editor_expanded;
         let (expand_icon, expand_tooltip) = if editor_expanded {
@@ -3690,8 +3746,8 @@ impl ThreadView {
 
         h_flex()
             .px_2()
-            .pt_1p5()
-            .pb_2()
+            .pt_1()
+            .pb_1p5()
             .bg(editor_bg_color)
             .justify_center()
             .map(|this| {
@@ -3714,16 +3770,18 @@ impl ThreadView {
                         v_flex()
                             .relative()
                             .w_full()
-                            .min_h(px(116.))
+                            .min_h(px(92.))
                             .when(fills_container, |this| this.flex_1())
                             .px_3()
                             .pt_2()
                             .pb_1p5()
                             .rounded_lg()
                             .border_1()
-                            .border_color(colors.border_variant.opacity(0.24))
-                            .hover(|style| style.border_color(colors.border_variant.opacity(0.36)))
+                            .border_color(composer_border)
+                            .hover(|style| style.border_color(colors.border_variant.opacity(0.62)))
                             .bg(composer_surface_bg)
+                            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
+                            .track_focus(&focus_handle)
                             .child(self.message_editor.clone())
                             .when(has_messages, |this| {
                                 this.child(
@@ -3765,10 +3823,10 @@ impl ThreadView {
                                     .justify_between()
                                     .flex_wrap()
                                     .gap_1()
-                                    .mt_1()
+                                    .mt_0p5()
                                     .pt_1()
                                     .border_t_1()
-                                    .border_color(colors.border_variant.opacity(0.18))
+                                    .border_color(colors.border_variant.opacity(0.22))
                                     .child(
                                         h_flex()
                                             .min_w_0()
@@ -5326,6 +5384,12 @@ impl ThreadView {
             }
         }
 
+        if end == total_entries
+            && ((is_expanded && index + 1 == end) || (!is_expanded && index == start))
+        {
+            row = row.children(self.render_final_edits_section(cx));
+        }
+
         row.into_any_element()
     }
 
@@ -5904,14 +5968,14 @@ impl ThreadView {
                             .relative()
                             .child(
                                 div()
-                                    .py_3()
-                                    .px_2()
+                                    .py_2p5()
+                                    .px_3()
                                     .rounded_md()
                                     .bg(
                                         cx.theme()
                                             .colors()
                                             .editor_background
-                                            .blend(cx.theme().colors().element_background.opacity(0.06)),
+                                            .blend(cx.theme().colors().element_background.opacity(0.08)),
                                     )
                                     .border_1()
                                     .when(is_indented, |this| {
@@ -6222,6 +6286,7 @@ impl ThreadView {
                 .when_some(comments_editor, |this, editor| {
                     this.child(Self::render_feedback_feedback_editor(editor, cx))
                 })
+                .children(self.render_final_edits_section(cx))
                 .into_any_element()
         } else {
             primary
@@ -7778,6 +7843,15 @@ impl ThreadView {
             .unwrap_or_else(|| (false, false, focus_handle.clone()));
 
         let use_card_layout = needs_confirmation || is_edit || is_terminal_tool;
+        let use_card_layout = use_card_layout
+            || matches!(
+                tool_call.status,
+                ToolCallStatus::Pending
+                    | ToolCallStatus::InProgress
+                    | ToolCallStatus::Completed
+                    | ToolCallStatus::Failed
+                    | ToolCallStatus::Canceled
+            );
 
         let has_image_content = tool_call.content.iter().any(|c| c.image().is_some());
         let is_collapsible = !tool_call.content.is_empty() && !needs_confirmation;
@@ -7969,11 +8043,16 @@ impl ThreadView {
                     this
                 } else if use_card_layout {
                     this.my_0p5()
-                        .rounded(rems_from_px(5.))
+                        .rounded(rems_from_px(6.))
                         .border_1()
                         .when(failed_or_canceled, |this| this.border_dashed())
                         .border_color(self.tool_card_border_color(cx))
-                        .bg(cx.theme().colors().editor_background)
+                        .bg(
+                            cx.theme()
+                                .colors()
+                                .editor_background
+                                .blend(cx.theme().colors().element_background.opacity(0.04)),
+                        )
                         .overflow_hidden()
                 } else {
                     this.my_0p5()
@@ -8067,7 +8146,7 @@ impl ThreadView {
                             .justify_between()
                             .when(use_card_layout, |this| {
                                 this.p_0p5()
-                                    .rounded_t(rems_from_px(5.))
+                                    .rounded_t(rems_from_px(6.))
                                     .bg(self.tool_card_header_bg(cx))
                             })
                             .child(self.render_tool_call_label(
@@ -8725,6 +8804,7 @@ impl ThreadView {
                         )
                     })
                     .label_size(LabelSize::Small)
+                    .style(ButtonStyle::Outlined)
                     .on_click(cx.listener({
                         let tool_call_id = tool_call_id.clone();
                         let option_id = option.option_id.clone();
@@ -9827,11 +9907,11 @@ impl ThreadView {
         cx.theme()
             .colors()
             .editor_background
-            .blend(cx.theme().colors().element_background.opacity(0.08))
+            .blend(cx.theme().colors().element_background.opacity(0.14))
     }
 
     fn tool_card_border_color(&self, cx: &Context<Self>) -> Hsla {
-        cx.theme().colors().border_variant.opacity(0.34)
+        cx.theme().colors().border_variant.opacity(0.46)
     }
 
     fn tool_name_font_size(&self) -> Rems {
