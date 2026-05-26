@@ -20,7 +20,8 @@ use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
 use project::Project;
 use ui::{
-    Button, ButtonStyle, Color, Icon, IconButton, IconName, IconSize, Label, LabelSize, Tooltip,
+    Button, ButtonSize, ButtonStyle, Color, Icon, IconButton, IconName, IconSize, Label, LabelSize,
+    Tooltip,
     prelude::*,
     utils::{ensure_minimum_contrast, platform_title_bar_height},
 };
@@ -31,6 +32,7 @@ use acp_thread::AgentThreadEntry;
 
 use crate::beginner_chat_feed::{BeginnerChatFeed, BeginnerChatFeedEvent, PreviewCardState};
 use crate::file_changes_panel::{FileChangesPanel, FileChangesPanelEvent};
+use crate::simple_design as ds;
 
 /// Provider/model ID prefixes for the curated simple-mode model list.
 /// Matched against ACP model IDs of the form "provider/model-name".
@@ -183,24 +185,6 @@ impl AgentModelSelector for CuratedModelSelector {
 const BEGINNER_CHATS_KVP_KEY: &str = "beginner_chats_v1";
 const BEGINNER_OPEN_TABS_KVP_KEY: &str = "beginner_open_tabs_v1";
 const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
-
-fn render_simple_project_mark(size: f32, cx: &App) -> impl IntoElement {
-    let colors = cx.theme().colors().clone();
-    div()
-        .size(px(size))
-        .rounded_sm()
-        .border_1()
-        .border_color(colors.border_variant)
-        .bg(colors.element_background)
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(
-            Icon::new(IconName::Sparkle)
-                .size(IconSize::Indicator)
-                .color(Color::Custom(colors.icon_accent)),
-        )
-}
 
 fn render_simple_home_icon(color: Hsla) -> impl IntoElement {
     canvas(
@@ -1969,32 +1953,24 @@ impl BeginnerWorkspace {
         let colors = cx.theme().colors().clone();
 
         h_flex()
-            .h(px(32.))
+            .h(px(ds::TAB_BAR_HEIGHT))
             .w_full()
             .flex_shrink_0()
             .items_end()
             .px_2()
             .gap_0p5()
-            .border_b_1()
-            .border_color(colors.border)
-            .bg(colors.tab_bar_background)
+            .bg(ds::app_background(cx))
             // Chats toggle
             .child(
                 div()
                     .id("tab-chats")
-                    .h(px(28.))
-                    .w(px(28.))
+                    .h(px(ds::INPUT_HEIGHT))
+                    .w(px(ds::INPUT_HEIGHT))
                     .mb_px()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(if chats_open {
-                        colors.border_selected
-                    } else {
-                        colors.border_transparent
-                    })
+                    .rounded_full()
                     .bg(if chats_open {
                         colors.element_selected
                     } else {
@@ -2033,19 +2009,13 @@ impl BeginnerWorkspace {
             .child(
                 div()
                     .id("tab-home")
-                    .h(px(28.))
-                    .w(px(28.))
+                    .h(px(ds::INPUT_HEIGHT))
+                    .w(px(ds::INPUT_HEIGHT))
                     .mb_px()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(if is_on_landing {
-                        colors.border_selected
-                    } else {
-                        colors.border_transparent
-                    })
+                    .rounded_full()
                     .bg(if is_on_landing {
                         colors.element_selected
                     } else {
@@ -2070,16 +2040,13 @@ impl BeginnerWorkspace {
                 this.child(
                     h_flex()
                         .id("tab-active")
-                        .h(px(28.))
+                        .h(px(ds::INPUT_HEIGHT))
                         .pl_3()
                         .pr_1p5()
                         .gap_1p5()
                         .items_center()
-                        .rounded_t_md()
-                        .border_1()
-                        .border_b_0()
-                        .border_color(colors.border)
-                        .bg(colors.tab_active_background)
+                        .rounded_full()
+                        .bg(ds::card_background(cx))
                         .child(
                             Label::new(active_title)
                                 .size(LabelSize::Small)
@@ -2093,7 +2060,7 @@ impl BeginnerWorkspace {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .rounded_sm()
+                                    .rounded_full()
                                     .cursor_pointer()
                                     .hover(|el| el.bg(cx.theme().colors().element_hover))
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -2112,14 +2079,14 @@ impl BeginnerWorkspace {
             .children(background_tabs.into_iter().map(|(ix, title)| {
                 h_flex()
                     .id(SharedString::from(format!("tab-bg-{ix}")))
-                    .h(px(26.))
+                    .h(px(ds::BUTTON_HEIGHT))
                     .pl_3()
                     .pr_1p5()
                     .gap_1p5()
                     .items_center()
-                    .rounded_t_md()
+                    .rounded_full()
                     .cursor_pointer()
-                    .hover(|el| el.bg(colors.tab_inactive_background))
+                    .hover(|el| el.bg(colors.ghost_element_hover))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.switch_to_session(ix, window, cx);
                     }))
@@ -2131,7 +2098,7 @@ impl BeginnerWorkspace {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .rounded_sm()
+                            .rounded_full()
                             .cursor_pointer()
                             .hover(|el| el.bg(colors.element_hover))
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -2182,7 +2149,7 @@ impl BeginnerWorkspace {
             .items_center()
             .bg(cx.theme().colors().surface_background)
             .border_b_1()
-            .border_color(cx.theme().colors().border)
+            .border_color(ds::separator(cx))
             .child(
                 Icon::new(IconName::Warning)
                     .size(IconSize::XSmall)
@@ -2211,12 +2178,12 @@ impl BeginnerWorkspace {
         let colors = cx.theme().colors().clone();
 
         v_flex()
-            .w(px(240.))
+            .w(px(ds::SIDEBAR_WIDTH))
             .h_full()
             .flex_shrink_0()
             .border_r_1()
-            .border_color(colors.border)
-            .bg(colors.panel_background)
+            .border_color(ds::separator(cx))
+            .bg(ds::panel_background(cx))
             .child(
                 v_flex()
                     .id("chat-history-list")
@@ -2254,10 +2221,11 @@ impl BeginnerWorkspace {
                         let folder_label = record.folder_name();
                         let record_for_click = record.clone();
                         let record_id_for_delete = record.id.clone();
-                        let hover_bg = cx.theme().colors().element_hover;
+                        let hover_bg = ds::hover_background(cx);
                         h_flex()
                             .id(SharedString::from(format!("chat-{}", record.id)))
                             .group("chat-entry")
+                            .min_h(px(ds::PROJECT_ROW_HEIGHT))
                             .px_2()
                             .py_1()
                             .gap_1p5()
@@ -2314,21 +2282,24 @@ impl BeginnerWorkspace {
             )
     }
 
-    fn render_simple_header(&self, is_running: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_simple_header(
+        &self,
+        title: SharedString,
+        is_running: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let colors = cx.theme().colors().clone();
         h_flex()
-            .h(px(44.))
+            .h(px(ds::TOP_BAR_HEIGHT))
             .w_full()
             .flex_shrink_0()
             .px_4()
             .gap_2()
             .items_center()
-            .bg(colors.panel_background)
-            .border_b_1()
-            .border_color(colors.border)
-            .child(render_simple_project_mark(16., cx))
+            .bg(ds::app_background(cx))
+            .child(ds::render_project_mark(ds::UTILITY_ICON_SIZE, cx))
             .child(
-                Label::new("Simple Page Builder")
+                Label::new(title)
                     .size(LabelSize::Small)
                     .color(Color::Custom(colors.text)),
             )
@@ -2389,7 +2360,7 @@ impl BeginnerWorkspace {
             )
             .child(
                 h_flex()
-                    .max_w(px(448.))
+                    .max_w(px(ds::CHAT_MAX_WIDTH))
                     .justify_center()
                     .gap_2()
                     .flex_wrap()
@@ -2428,16 +2399,15 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors().clone();
+        let focus_border = ds::focus_border(cx);
         h_flex()
             .id(SharedString::from(format!("simple-chip-{label}")))
             .px_3()
             .py_1p5()
-            .rounded_lg()
-            .border_1()
-            .border_color(colors.border_variant)
-            .bg(colors.element_background)
+            .rounded_full()
+            .bg(ds::card_background(cx))
             .cursor_pointer()
-            .hover(|el| el.border_color(colors.border))
+            .hover(move |el| el.bg(focus_border.opacity(0.10)))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.set_chat_mode(mode, window, cx);
                 this.apply_suggested_prompt(prompt, window, cx);
@@ -2458,6 +2428,7 @@ impl BeginnerWorkspace {
     ) -> impl IntoElement {
         let selected = self.chat_mode == mode;
         let colors = cx.theme().colors().clone();
+        let hover_border = ds::soft_border(cx);
         h_flex()
             .id(SharedString::from(format!(
                 "simple-mode-{}",
@@ -2465,23 +2436,17 @@ impl BeginnerWorkspace {
             )))
             .gap_1p5()
             .items_center()
+            .h(px(ds::SEGMENTED_HEIGHT))
             .px_2()
-            .py_1()
-            .rounded_sm()
+            .rounded_full()
             .bg(if selected {
-                colors.element_selected
+                ds::selected_background(cx)
             } else {
                 colors.ghost_element_background
             })
-            .border_1()
-            .border_color(if selected {
-                colors.border_selected
-            } else {
-                colors.border_transparent
-            })
             .when(!is_running && !is_connecting, |el| {
                 el.cursor_pointer()
-                    .hover(|el| el.border_color(colors.border_variant))
+                    .hover(move |el| el.bg(hover_border.opacity(0.14)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.set_chat_mode(mode, window, cx);
                     }))
@@ -2518,8 +2483,8 @@ impl BeginnerWorkspace {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::handle_enter_submit))
             .size_full()
-            .font_family("Inter")
-            .bg(colors.editor_background)
+            .font_family(ds::FONT_FAMILY)
+            .bg(ds::app_background(cx))
             // Title bar drag strip
             .child(
                 h_flex()
@@ -2531,7 +2496,7 @@ impl BeginnerWorkspace {
                         this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
                     })
                     .border_b_1()
-                    .border_color(colors.border)
+                    .border_color(ds::separator(cx))
                     .bg(colors.title_bar_background),
             )
             .child(self.render_tab_bar(SharedString::from("Home"), background_tabs, cx))
@@ -2553,7 +2518,7 @@ impl BeginnerWorkspace {
                             .min_h_0()
                             .h_full()
                             .overflow_hidden()
-                            .bg(colors.editor_background)
+                            .bg(ds::app_background(cx))
                             .child(self.render_empty_conversation(cx))
                             .child(self.render_input_bar(false, false, draft_is_empty, window, cx)),
                     ),
@@ -2583,9 +2548,9 @@ impl BeginnerWorkspace {
 
         v_flex()
             .size_full()
-            .font_family("Inter")
+            .font_family(ds::FONT_FAMILY)
             .on_action(cx.listener(Self::handle_enter_submit))
-            .bg(colors.editor_background)
+            .bg(ds::app_background(cx))
             // Title bar
             .child(
                 h_flex()
@@ -2593,14 +2558,14 @@ impl BeginnerWorkspace {
                     .w_full()
                     .flex_shrink_0()
                     .border_b_1()
-                    .border_color(colors.border)
+                    .border_color(ds::separator(cx))
                     .bg(colors.title_bar_background)
                     .window_control_area(WindowControlArea::Drag)
                     .when(traffic_lights, |this| {
                         this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
                     }),
             )
-            .child(self.render_tab_bar(active_title, background_tabs, cx))
+            .child(self.render_tab_bar(active_title.clone(), background_tabs, cx))
             .when(self.show_tab_limit_notice, |el| {
                 el.child(self.render_tab_limit_notice(cx))
             })
@@ -2615,15 +2580,23 @@ impl BeginnerWorkspace {
                     })
                     .child(
                         v_flex()
-                            .when(preview_dominant, |el| el.w(px(480.)).flex_shrink_0())
-                            .when(!preview_dominant, |el| el.flex_1().min_w(px(480.)))
+                            .when(preview_dominant, |el| {
+                                el.w(px(ds::PREVIEW_DOMINANT_CHAT_WIDTH)).flex_shrink_0()
+                            })
+                            .when(!preview_dominant, |el| {
+                                el.flex_1().min_w(px(ds::PREVIEW_DOMINANT_CHAT_WIDTH))
+                            })
                             .min_h_0()
                             .h_full()
                             .overflow_hidden()
                             .border_r_1()
-                            .border_color(colors.border)
-                            .bg(colors.editor_background)
-                            .child(self.render_simple_header(is_running || is_connecting, cx))
+                            .border_color(ds::separator(cx))
+                            .bg(ds::app_background(cx))
+                            .child(self.render_simple_header(
+                                active_title.clone(),
+                                is_running || is_connecting,
+                                cx,
+                            ))
                             .when_some(self.chat_feed.as_ref(), |el, feed| {
                                 feed.update(cx, |feed, cx| {
                                     feed.set_preview_state(preview_card_state, cx);
@@ -2730,24 +2703,24 @@ impl BeginnerWorkspace {
     ) -> AnyElement {
         let is_code_view = matches!(self.right_panel, RightPanel::CodeView { .. });
         let colors = cx.theme().colors().clone();
-        let border = colors.border;
-        let tab_active_bg = colors.editor_background;
-        let tab_hover = colors.element_hover;
+        let border = ds::separator(cx);
+        let tab_active_bg = ds::app_background(cx);
+        let tab_hover = ds::hover_background(cx);
         let has_webview = self.web_preview.is_some();
         let workspace = cx.entity().downgrade();
 
         v_flex()
             .when(preview_dominant, |el| el.flex_1())
-            .when(!preview_dominant, |el| el.w(px(320.)).flex_shrink_0())
+            .when(!preview_dominant, |el| {
+                el.w(px(ds::RIGHT_PANEL_WIDTH)).flex_shrink_0()
+            })
             .h_full()
-            .bg(cx.theme().colors().surface_background)
+            .bg(ds::field_background(cx))
             // Tab bar: Preview | Code
             .child(
                 h_flex()
-                    .h(px(36.))
-                    .border_b_1()
-                    .border_color(border)
-                    .bg(cx.theme().colors().panel_background)
+                    .h(px(ds::TOP_BAR_HEIGHT))
+                    .bg(ds::panel_background(cx))
                     // Preview tab
                     .child(
                         h_flex()
@@ -2759,8 +2732,7 @@ impl BeginnerWorkspace {
                             .cursor_pointer()
                             .border_b_2()
                             .when(!is_code_view, |el| {
-                                el.border_color(cx.theme().colors().text_accent)
-                                    .bg(tab_active_bg)
+                                el.border_color(ds::accent(cx)).bg(tab_active_bg)
                             })
                             .when(is_code_view, |el| {
                                 el.border_color(colors.border_transparent)
@@ -2796,7 +2768,7 @@ impl BeginnerWorkspace {
                                 .items_center()
                                 .cursor_pointer()
                                 .border_b_2()
-                                .border_color(cx.theme().colors().text_accent)
+                                .border_color(ds::accent(cx))
                                 .bg(tab_active_bg)
                                 .child(
                                     Icon::new(IconName::FileCode)
@@ -2819,6 +2791,7 @@ impl BeginnerWorkspace {
                                 IconButton::new("open-preview", IconName::ArrowUpRight)
                                     .icon_size(IconSize::XSmall)
                                     .icon_color(Color::Muted)
+                                    .size(ButtonSize::Default)
                                     .tooltip(Tooltip::text("Open in browser"))
                                     .on_click(cx.listener(move |_, _, _, cx| {
                                         cx.open_url(&url);
@@ -2846,10 +2819,8 @@ impl BeginnerWorkspace {
                         .child(
                             div()
                                 .flex_1()
-                                .rounded_md()
+                                .rounded_full()
                                 .bg(tab_active_bg)
-                                .border_1()
-                                .border_color(border)
                                 .px_2()
                                 .py_0p5()
                                 .child(
@@ -2948,6 +2919,7 @@ impl BeginnerWorkspace {
                     .child(
                         Button::new("open-in-browser", "Open in Browser")
                             .style(ButtonStyle::Filled)
+                            .size(ButtonSize::Medium)
                             .end_icon(Icon::new(IconName::ArrowUpRight))
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 cx.open_url(&url);
@@ -2968,7 +2940,7 @@ impl BeginnerWorkspace {
                     .justify_center()
                     .gap_2()
                     .p_4()
-                    .child(render_simple_project_mark(32., cx))
+                    .child(ds::render_project_mark(32., cx))
                     .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
                     .into_any_element()
             } else {
@@ -3008,12 +2980,11 @@ impl BeginnerWorkspace {
     ) -> impl IntoElement {
         let is_disabled = is_running || is_connecting || draft_is_empty;
         let colors = cx.theme().colors().clone();
-        let send_icon_color = ensure_minimum_contrast(colors.text, colors.text_accent, 75.);
+        let send_icon_color = ensure_minimum_contrast(colors.text, ds::accent(cx), 75.);
+        let icon_hover_bg = ds::hover_background(cx);
         v_flex()
             .flex_shrink_0()
-            .bg(colors.panel_background)
-            .border_t_1()
-            .border_color(colors.border)
+            .bg(ds::panel_background(cx))
             .px_3()
             .pt_1()
             .pb_2()
@@ -3021,10 +2992,9 @@ impl BeginnerWorkspace {
             .child(
                 v_flex()
                     .w_full()
-                    .rounded_xl()
-                    .border_1()
-                    .border_color(colors.border_variant)
-                    .bg(colors.element_background)
+                    .rounded_lg()
+                    .bg(ds::card_background(cx))
+                    .shadow(ds::card_shadow(cx))
                     .p_2()
                     .gap_2()
                     .child(self.chat_editor.clone())
@@ -3035,13 +3005,13 @@ impl BeginnerWorkspace {
                             .child(
                                 div()
                                     .id("simple-add-folder")
-                                    .size(px(24.))
+                                    .size(px(ds::ICON_BUTTON_SIZE))
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .rounded_sm()
+                                    .rounded_full()
                                     .cursor_pointer()
-                                    .hover(|el| el.bg(colors.element_hover))
+                                    .hover(move |el| el.bg(icon_hover_bg))
                                     .tooltip(Tooltip::text("Attach project root directory"))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.pick_folder(window, cx);
@@ -3083,10 +3053,8 @@ impl BeginnerWorkspace {
                                 h_flex()
                                     .gap_0p5()
                                     .items_center()
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(colors.border_variant)
-                                    .bg(colors.editor_background)
+                                    .rounded_full()
+                                    .bg(ds::field_background(cx))
                                     .p(px(2.))
                                     .child(self.render_mode_button(
                                         ChatMode::Ask,
@@ -3104,15 +3072,15 @@ impl BeginnerWorkspace {
                             .child(
                                 div()
                                     .id("simple-send")
-                                    .size(px(26.))
+                                    .size(px(ds::BUTTON_HEIGHT))
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .rounded_md()
+                                    .rounded_full()
                                     .bg(if is_disabled {
                                         colors.element_disabled
                                     } else {
-                                        colors.text_accent
+                                        ds::accent(cx)
                                     })
                                     .when(!is_disabled, |el| {
                                         el.cursor_pointer().on_click(cx.listener(
@@ -3136,6 +3104,7 @@ impl BeginnerWorkspace {
                     h_flex().justify_end().child(
                         Button::new("cancel-task", "Cancel")
                             .style(ButtonStyle::Subtle)
+                            .size(ButtonSize::Medium)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.cancel_running_task(cx);
                             })),
@@ -3151,6 +3120,7 @@ impl BeginnerWorkspace {
                         .child(
                             Button::new("approve-changes", "Approve Changes")
                                 .style(ButtonStyle::Filled)
+                                .size(ButtonSize::Medium)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.approve_changes(cx);
                                 })),
@@ -3158,6 +3128,7 @@ impl BeginnerWorkspace {
                         .child(
                             Button::new("revert-changes", "Revert Changes")
                                 .style(ButtonStyle::Subtle)
+                                .size(ButtonSize::Medium)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.revert_changes(cx);
                                 })),

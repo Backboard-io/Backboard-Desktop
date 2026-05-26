@@ -27,7 +27,7 @@ use gpui_platform;
 
 use gpui_tokio::Tokio;
 use language::LanguageRegistry;
-use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel, FIRST_OPEN, show_onboarding_view};
+use onboarding::{FIRST_OPEN, show_onboarding_view};
 use project_panel::ProjectPanel;
 use prompt_store::PromptBuilder;
 use remote::RemoteConnectionOptions;
@@ -58,7 +58,7 @@ use theme_settings::load_user_theme;
 use util::ResultExt;
 use uuid::Uuid;
 use workspace::{
-    AppState, MultiWorkspace, SerializedWorkspaceLocation, SessionWorkspace, Toast,
+    AppState, InterfaceMode, MultiWorkspace, SerializedWorkspaceLocation, SessionWorkspace, Toast,
     WorkspaceSettings, WorkspaceStore, notifications::NotificationId, restore_multiworkspace,
 };
 use zed::{
@@ -1529,7 +1529,6 @@ fn open_new_workspace_callback(
     window: &mut gpui::Window,
     cx: &mut gpui::Context<workspace::Workspace>,
 ) {
-    use db::kvp::KeyValueStore;
     let restore_on_startup = WorkspaceSettings::get_global(cx).restore_on_startup;
     if matches!(
         restore_on_startup,
@@ -1538,30 +1537,20 @@ fn open_new_workspace_callback(
         return;
     }
 
-    let level = KeyValueStore::global(cx)
-        .read_kvp(EXPERIENCE_LEVEL_KVP_KEY)
-        .ok()
-        .flatten()
-        .as_deref()
-        .and_then(ExperienceLevel::from_str);
     let preferred_mode = WorkspaceSettings::get_global(cx).preferred_interface_mode;
 
     match preferred_mode {
         settings::PreferredInterfaceMode::Simple => {
             // Simple mode — the BeginnerWorkspace UI is shown; no pane item needed.
+            workspace.set_initial_interface_mode(InterfaceMode::Simple);
         }
-        settings::PreferredInterfaceMode::Editor => match level {
-            Some(ExperienceLevel::Beginner) => {
-                // Backward compatibility: honor legacy first-run preference when present.
-            }
-            _ => {
-                // Editor mode — show the welcome / recents page.
-                let welcome = cx.new(|cx| {
-                    workspace::welcome::WelcomePage::new(workspace.weak_handle(), false, window, cx)
-                });
-                workspace.add_item_to_active_pane(Box::new(welcome), None, true, window, cx);
-            }
-        },
+        settings::PreferredInterfaceMode::Editor => {
+            // Editor mode — show the welcome / recents page.
+            let welcome = cx.new(|cx| {
+                workspace::welcome::WelcomePage::new(workspace.weak_handle(), false, window, cx)
+            });
+            workspace.add_item_to_active_pane(Box::new(welcome), None, true, window, cx);
+        }
     }
 }
 

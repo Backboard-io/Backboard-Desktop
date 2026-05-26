@@ -26,7 +26,7 @@ use workspace::{
     notifications::NotifyResultExt as _,
     open_new, register_serializable_item, with_active_or_new_workspace,
 };
-use zed_actions::{OpenOnboarding, ResetOnboarding};
+use zed_actions::{OpenAccountSettings, OpenOnboarding, ResetOnboarding};
 
 mod base_keymap_picker;
 mod basics_page;
@@ -104,6 +104,10 @@ actions!(
         Finish,
         /// Resets the welcome screen hints to their initial state.
         ResetHints,
+        /// Opens the Backboard sign-in/dashboard page.
+        SignIn,
+        /// Opens account settings.
+        OpenAccount,
         /// Re-open the experience level picker to switch modes.
         SwitchMode
     ]
@@ -131,6 +135,16 @@ pub fn init(cx: &mut App) {
         });
 
         open_onboarding(true, cx);
+    });
+
+    cx.on_action(|_: &SignIn, cx| {
+        cx.open_url(BACKBOARD_DASHBOARD_URL);
+    });
+
+    cx.on_action(|_: &OpenAccount, cx| {
+        with_active_or_new_workspace(cx, |_, window, cx| {
+            window.dispatch_action(OpenAccountSettings.boxed_clone(), cx);
+        });
     });
 
     cx.on_action(|_: &SwitchMode, cx| {

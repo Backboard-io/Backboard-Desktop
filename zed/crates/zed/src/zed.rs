@@ -564,8 +564,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             let (chat_view, thread_summaries) =
                 jarvis_code_editor_context(_multi_workspace.workspace(), window, cx);
             _multi_workspace.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);
-
-            _multi_workspace.interface_mode = InterfaceMode::Expert;
         }
 
         cx.defer(move |cx| {
