@@ -31,7 +31,7 @@ pub struct BackboardConfig {
 }
 
 fn default_env() -> String {
-    "dev".into()
+    "prod".into()
 }
 
 impl BackboardConfig {
@@ -39,8 +39,10 @@ impl BackboardConfig {
         let path = config_path()?;
         let contents = std::fs::read_to_string(&path)
             .with_context(|| format!("reading Backboard config at {}", path.display()))?;
-        serde_json::from_str(&contents)
-            .with_context(|| format!("parsing Backboard config at {}", path.display()))
+        let mut config: Self = serde_json::from_str(&contents)
+            .with_context(|| format!("parsing Backboard config at {}", path.display()))?;
+        config.promote_legacy_default_env();
+        Ok(config)
     }
 
     pub fn load_or_default() -> Self {
@@ -49,11 +51,24 @@ impl BackboardConfig {
 
     pub fn save_api_key_for_current_env(api_key: impl Into<String>) -> Result<Self> {
         let mut config = Self::load_or_default();
-        let api_key = api_key.into();
+        config.promote_legacy_default_env();
+        let api_key = api_key.into().trim().to_string();
         let env = config.env.to_lowercase();
 
         config.env_keys.insert(env, api_key.clone());
         config.api_key = Some(api_key);
+        config.save()?;
+
+        Ok(config)
+    }
+
+    pub fn clear_api_key_for_current_env() -> Result<Self> {
+        let mut config = Self::load_or_default();
+        config.promote_legacy_default_env();
+        let env = config.env.to_lowercase();
+
+        config.api_key = None;
+        config.env_keys.remove(&env);
         config.save()?;
 
         Ok(config)
@@ -115,13 +130,34 @@ impl BackboardConfig {
     }
 
     pub fn api_key(&self) -> Option<String> {
-        self.api_key.clone().or_else(|| {
-            self.env_keys
-                .get(&self.env.to_lowercase())
-                .filter(|key| !key.is_empty())
-                .cloned()
-        })
+        self.api_key
+            .as_deref()
+            .and_then(non_empty_api_key)
+            .or_else(|| {
+                self.env_keys
+                    .get(&self.env.to_lowercase())
+                    .and_then(|key| non_empty_api_key(key))
+            })
+            .or_else(|| {
+                std::env::var("BACKBOARD_API_KEY")
+                    .ok()
+                    .and_then(|key| non_empty_api_key(&key))
+            })
     }
+
+    fn promote_legacy_default_env(&mut self) {
+        if self.api_url.is_none() && self.env.eq_ignore_ascii_case("dev") {
+            if let Some(api_key) = self.env_keys.get("dev").cloned() {
+                self.env_keys.entry("prod".to_string()).or_insert(api_key);
+            }
+            self.env = default_env();
+        }
+    }
+}
+
+fn non_empty_api_key(key: &str) -> Option<String> {
+    let key = key.trim();
+    (!key.is_empty()).then(|| key.to_string())
 }
 
 impl Default for BackboardConfig {

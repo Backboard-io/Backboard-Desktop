@@ -103,7 +103,7 @@ pub struct BackboardConfig {
 }
 
 fn default_env() -> String {
-    "dev".into()
+    "prod".into()
 }
 
 impl BackboardConfig {
@@ -111,8 +111,10 @@ impl BackboardConfig {
         let path = config_path()?;
         let contents = std::fs::read_to_string(&path)
             .with_context(|| format!("reading Backboard config at {}", path.display()))?;
-        serde_json::from_str(&contents)
-            .with_context(|| format!("parsing Backboard config at {}", path.display()))
+        let mut config: Self = serde_json::from_str(&contents)
+            .with_context(|| format!("parsing Backboard config at {}", path.display()))?;
+        config.promote_legacy_default_env();
+        Ok(config)
     }
 
     pub fn load_or_default() -> Self {
@@ -121,11 +123,24 @@ impl BackboardConfig {
 
     pub fn save_api_key_for_current_env(api_key: impl Into<String>) -> Result<Self> {
         let mut config = Self::load_or_default();
-        let api_key = api_key.into();
+        config.promote_legacy_default_env();
+        let api_key = api_key.into().trim().to_string();
         let env = config.env.to_lowercase();
 
         config.env_keys.insert(env, api_key.clone());
         config.api_key = Some(api_key);
+        config.save()?;
+
+        Ok(config)
+    }
+
+    pub fn clear_api_key_for_current_env() -> Result<Self> {
+        let mut config = Self::load_or_default();
+        config.promote_legacy_default_env();
+        let env = config.env.to_lowercase();
+
+        config.api_key = None;
+        config.env_keys.remove(&env);
         config.save()?;
 
         Ok(config)
@@ -187,13 +202,34 @@ impl BackboardConfig {
     }
 
     pub fn api_key(&self) -> Option<String> {
-        self.api_key.clone().or_else(|| {
-            self.env_keys
-                .get(&self.env.to_lowercase())
-                .filter(|key| !key.is_empty())
-                .cloned()
-        })
+        self.api_key
+            .as_deref()
+            .and_then(non_empty_api_key)
+            .or_else(|| {
+                self.env_keys
+                    .get(&self.env.to_lowercase())
+                    .and_then(|key| non_empty_api_key(key))
+            })
+            .or_else(|| {
+                std::env::var("BACKBOARD_API_KEY")
+                    .ok()
+                    .and_then(|key| non_empty_api_key(&key))
+            })
     }
+
+    fn promote_legacy_default_env(&mut self) {
+        if self.api_url.is_none() && self.env.eq_ignore_ascii_case("dev") {
+            if let Some(api_key) = self.env_keys.get("dev").cloned() {
+                self.env_keys.entry("prod".to_string()).or_insert(api_key);
+            }
+            self.env = default_env();
+        }
+    }
+}
+
+fn non_empty_api_key(key: &str) -> Option<String> {
+    let key = key.trim();
+    (!key.is_empty()).then(|| key.to_string())
 }
 
 impl Default for BackboardConfig {
@@ -984,6 +1020,51 @@ fn is_transient_reqwest_error(error: &reqwest::Error) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn default_config_uses_production_api() {
+        let config = BackboardConfig::default();
+
+        assert_eq!(config.env, "prod");
+        assert_eq!(config.base_url(), PROD_API_URL);
+    }
+
+    #[test]
+    fn legacy_dev_config_without_custom_url_promotes_to_production() {
+        let mut config = BackboardConfig {
+            env: "dev".to_string(),
+            api_key: Some("bb-prod-key".to_string()),
+            env_keys: HashMap::from([("dev".to_string(), "bb-prod-key".to_string())]),
+            ..BackboardConfig::default()
+        };
+
+        config.promote_legacy_default_env();
+
+        assert_eq!(config.env, "prod");
+        assert_eq!(config.base_url(), PROD_API_URL);
+        assert_eq!(
+            config.env_keys.get("prod").map(String::as_str),
+            Some("bb-prod-key")
+        );
+    }
+
+    #[test]
+    fn api_key_trims_saved_values_and_ignores_blank_keys() {
+        let mut config = BackboardConfig {
+            env: "prod".to_string(),
+            api_key: Some("  bb-top-level-key  ".to_string()),
+            ..BackboardConfig::default()
+        };
+
+        assert_eq!(config.api_key().as_deref(), Some("bb-top-level-key"));
+
+        config.api_key = Some("  ".to_string());
+        config
+            .env_keys
+            .insert("prod".to_string(), "  bb-env-key  ".to_string());
+
+        assert_eq!(config.api_key().as_deref(), Some("bb-env-key"));
+    }
 
     #[test]
     fn message_form_serializes_media_voice_and_search_fields() {

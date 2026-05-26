@@ -1613,6 +1613,14 @@ impl Pane {
 
             return Task::ready(Ok(()));
         }
+
+        if self
+            .active_item()
+            .is_some_and(|item| item.is_fullscreen_onboarding(cx))
+        {
+            return Task::ready(Ok(()));
+        }
+
         if self.is_tab_pinned(self.active_item_index) && !action.close_pinned {
             // Activate any non-pinned tab in same pane
             let non_pinned_tab_index = self
@@ -4303,7 +4311,10 @@ impl Render for Pane {
             .contribute_context(&mut key_context, cx);
 
         let should_display_tab_bar = self.should_display_tab_bar.clone();
-        let display_tab_bar = should_display_tab_bar(window, cx);
+        let display_tab_bar = should_display_tab_bar(window, cx)
+            && !self
+                .active_item()
+                .is_some_and(|item| item.is_fullscreen_onboarding(cx));
         let Some(project) = self.project.upgrade() else {
             return div().track_focus(&self.focus_handle(cx));
         };

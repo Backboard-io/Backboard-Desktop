@@ -73,6 +73,8 @@ actions!(
         OpenPerformanceProfiler,
         /// Opens the onboarding view.
         OpenOnboarding,
+        /// Resets the onboarding state and opens onboarding from the beginning.
+        ResetOnboarding,
         /// Re-opens the mode picker so the user can switch between Simple and Expert.
         SwitchInterfaceMode,
         /// Shows the auto-update notification for testing.

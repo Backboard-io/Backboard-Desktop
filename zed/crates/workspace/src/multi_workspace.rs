@@ -17,8 +17,8 @@ use std::path::PathBuf;
 use ui::prelude::*;
 use util::ResultExt;
 use util::path_list::PathList;
-use zed_actions::SwitchInterfaceMode;
 use zed_actions::agents_sidebar::ToggleThreadSwitcher;
+use zed_actions::{ResetOnboarding, SwitchInterfaceMode};
 
 use agent_settings::AgentSettings;
 use settings::SidebarDockPosition;
@@ -460,6 +460,15 @@ impl MultiWorkspace {
         self.git_expanded = tab == WorkspaceModeTab::Git;
         self.jarvis_placeholder_expanded = false;
         cx.notify();
+    }
+
+    fn active_item_is_fullscreen_onboarding(&self, cx: &App) -> bool {
+        self.workspace()
+            .read(cx)
+            .active_pane()
+            .read(cx)
+            .active_item()
+            .is_some_and(|item| item.is_fullscreen_onboarding(cx))
     }
 
     fn update_jarvis_visualizer(&self, cx: &mut Context<Self>) {
@@ -2190,6 +2199,7 @@ impl MultiWorkspace {
         cx: &mut Context<Self>,
     ) -> Entity<ContextMenu> {
         let selected_tab = self.selected_workspace_mode_tab();
+        let simple_mode_selected = self.interface_mode == InterfaceMode::Simple;
         let multi_workspace = cx.entity().downgrade();
 
         ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
@@ -2204,18 +2214,38 @@ impl MultiWorkspace {
                 let multi_workspace = multi_workspace.clone();
                 menu = menu.toggleable_entry(
                     Self::workspace_mode_tab_label(tab),
-                    selected_tab == tab,
+                    !simple_mode_selected && selected_tab == tab,
                     IconPosition::Start,
                     None,
-                    move |_window, cx| {
+                    move |window, cx| {
                         multi_workspace
                             .update(cx, |this, cx| {
+                                this.set_interface_mode(InterfaceMode::Expert, window, cx);
                                 this.set_workspace_mode_tab(tab, cx);
                             })
                             .ok();
                     },
                 );
             }
+
+            let multi_workspace = multi_workspace.clone();
+            menu = menu.separator().toggleable_entry(
+                "Simple Mode",
+                simple_mode_selected,
+                IconPosition::Start,
+                Some(Box::new(SwitchInterfaceMode)),
+                move |window, cx| {
+                    multi_workspace
+                        .update(cx, |this, cx| {
+                            this.set_interface_mode(InterfaceMode::Simple, window, cx);
+                        })
+                        .ok();
+                },
+            );
+
+            menu = menu
+                .separator()
+                .action("Reset Onboarding", Box::new(ResetOnboarding));
 
             menu
         })
@@ -2226,8 +2256,6 @@ impl MultiWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected_tab = self.selected_workspace_mode_tab();
-        let selected_label = Self::workspace_mode_tab_label(selected_tab);
         let colors = cx.theme().colors();
         let switcher_bg = colors.tab_bar_background;
 
@@ -2243,13 +2271,17 @@ impl MultiWorkspace {
             .border_color(colors.border_variant.opacity(0.5))
             .bg(switcher_bg)
             .child(
-                DropdownMenu::new(
+                DropdownMenu::new_with_element(
                     "multi-workspace-mode-menu",
-                    selected_label,
+                    Icon::new(IconName::Menu)
+                        .size(IconSize::Small)
+                        .color(Color::Muted)
+                        .into_any_element(),
                     self.workspace_mode_menu(window, cx),
                 )
-                .style(DropdownStyle::Subtle)
-                .trigger_size(ButtonSize::Default),
+                .style(DropdownStyle::Ghost)
+                .trigger_size(ButtonSize::Compact)
+                .no_chevron(),
             )
             .into_any_element()
     }
@@ -2274,7 +2306,8 @@ impl Render for MultiWorkspace {
                         .on_action(cx.listener(|this, _: &SwitchInterfaceMode, window, cx| {
                             this.set_interface_mode(InterfaceMode::Expert, window, cx);
                         }))
-                        .child(view.clone()),
+                        .child(self.render_workspace_mode_switcher(window, cx))
+                        .child(div().flex_1().min_h_0().child(view.clone())),
                     window,
                     cx,
                     Tiling::default(),
@@ -2282,7 +2315,8 @@ impl Render for MultiWorkspace {
             }
         }
 
-        let multi_workspace_enabled = self.multi_workspace_enabled(cx);
+        let fullscreen_onboarding = self.active_item_is_fullscreen_onboarding(cx);
+        let multi_workspace_enabled = self.multi_workspace_enabled(cx) && !fullscreen_onboarding;
         let sidebar_side = self.sidebar_side(cx);
         let sidebar_on_right = sidebar_side == SidebarSide::Right;
 
@@ -2527,7 +2561,9 @@ impl Render for MultiWorkspace {
                 .size_full()
                 .font(ui_font)
                 .text_color(text_color)
-                .child(self.render_workspace_mode_switcher(window, cx))
+                .when(!fullscreen_onboarding, |this| {
+                    this.child(self.render_workspace_mode_switcher(window, cx))
+                })
                 .child(
                     root.key_context(workspace_key_context)
                         .relative()

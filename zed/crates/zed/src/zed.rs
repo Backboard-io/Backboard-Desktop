@@ -683,7 +683,9 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             cx.new(|_| line_ending_selector::LineEndingIndicator::default());
         let merge_conflict_indicator =
             cx.new(|cx| git_ui::MergeConflictIndicator::new(workspace, cx));
+        let branch_status_button = cx.new(|cx| git_ui::BranchStatusButton::new(workspace, cx));
         workspace.status_bar().update(cx, |status_bar, cx| {
+            status_bar.add_left_item(branch_status_button, window, cx);
             status_bar.add_left_item(search_button, window, cx);
             status_bar.add_left_item(lsp_button, window, cx);
             status_bar.add_left_item(diagnostic_summary, window, cx);
@@ -908,6 +910,16 @@ fn open_default_code_editor_layout(
     cx: &mut Context<Workspace>,
 ) {
     if cfg!(test) {
+        return;
+    }
+
+    let has_project_folder = workspace
+        .project()
+        .read(cx)
+        .visible_worktrees(cx)
+        .next()
+        .is_some();
+    if !has_project_folder {
         return;
     }
 
@@ -6879,6 +6891,73 @@ mod tests {
                 assert_eq!(mw.workspaces().count(), 1);
             })
             .unwrap();
+    }
+
+    #[gpui::test]
+    async fn test_last_session_restore_falls_back_to_last_workspace(cx: &mut TestAppContext) {
+        use session::Session;
+        use workspace::{OpenMode, Workspace};
+
+        let app_state = init_test(cx);
+        let project_path = path!("/last-project");
+        app_state
+            .fs
+            .as_fake()
+            .insert_tree(project_path, json!({ "file.txt": "" }))
+            .await;
+
+        let workspace::OpenResult { window, .. } = cx
+            .update(|cx| {
+                Workspace::new_local(
+                    vec![project_path.into()],
+                    app_state.clone(),
+                    None,
+                    None,
+                    None,
+                    OpenMode::Activate,
+                    cx,
+                )
+            })
+            .await
+            .expect("failed to open workspace");
+
+        flush_workspace_serialization(&window, cx).await;
+        window
+            .update(cx, |_, window, _| window.remove_window())
+            .unwrap();
+        cx.run_until_parked();
+
+        cx.update(|cx| {
+            app_state.session.update(cx, |app_session, _cx| {
+                app_session.replace_session_for_test(Session::test_with_old_session(
+                    "empty-session".into(),
+                ));
+            });
+        });
+
+        let mut async_cx = cx.to_async();
+        crate::restore_or_create_workspace(app_state.clone(), &mut async_cx)
+            .await
+            .expect("failed to restore workspace");
+        cx.run_until_parked();
+
+        let restored_window = cx
+            .read(|cx| {
+                cx.windows()
+                    .into_iter()
+                    .find_map(|window| window.downcast::<MultiWorkspace>())
+            })
+            .expect("expected restored workspace window");
+
+        let restored_paths = restored_window
+            .read_with(cx, |mw, cx| mw.workspace().read(cx).root_paths(cx))
+            .unwrap();
+        assert!(
+            restored_paths
+                .iter()
+                .any(|path| path.as_ref() == Path::new(project_path)),
+            "expected last workspace path to be restored, got {restored_paths:?}"
+        );
     }
 
     #[gpui::test]

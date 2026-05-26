@@ -17,8 +17,8 @@
     "custom": 1.6923077
   },
   "theme": {
-    "mode": "system",
-    "light": "One Light",
-    "dark": "One Dark",
+    "mode": "light",
+    "light": "Lofi White",
+    "dark": "Lofi White",
   },
 }

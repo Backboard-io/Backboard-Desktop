@@ -8391,6 +8391,11 @@ impl Render for Workspace {
             log::info!("Rendered first frame");
         }
 
+        let fullscreen_onboarding = self
+            .active_pane
+            .read(cx)
+            .active_item()
+            .is_some_and(|item| item.is_fullscreen_onboarding(cx));
         let centered_layout = self.centered_layout
             && self.center.panes().len() == 1
             && self.active_item(cx).is_some();
@@ -8447,7 +8452,9 @@ impl Render for Workspace {
             .items_start()
             .text_color(colors.text)
             .overflow_hidden()
-            .children(self.titlebar_item.clone())
+            .when(!fullscreen_onboarding, |this| {
+                this.children(self.titlebar_item.clone())
+            })
             .on_modifiers_changed(move |_, _, cx| {
                 for &id in &notification_entities {
                     cx.notify(id);
@@ -8554,7 +8561,15 @@ impl Render for Workspace {
                                 ))
                             })
                             .child({
-                                match bottom_dock_layout {
+                                if fullscreen_onboarding {
+                                    div().flex().h_full().w_full().child(self.center.render(
+                                        self.zoomed.as_ref(),
+                                        &pane_render_context,
+                                        window,
+                                        cx,
+                                    ))
+                                } else {
+                                    match bottom_dock_layout {
                                     BottomDockLayout::Full => div()
                                         .flex()
                                         .flex_col()
@@ -8792,6 +8807,7 @@ impl Render for Workspace {
                                             window,
                                             cx,
                                         )),
+                                    }
                                 }
                             })
                             .children(self.zoomed.as_ref().and_then(|view| {
@@ -8819,9 +8835,10 @@ impl Render for Workspace {
                             }))
                             .children(self.render_notifications(window, cx)),
                     )
-                    .when(self.status_bar_visible(cx), |parent| {
-                        parent.child(self.status_bar.clone())
-                    })
+                    .when(
+                        !fullscreen_onboarding && self.status_bar_visible(cx),
+                        |parent| parent.child(self.status_bar.clone()),
+                    )
                     .child(self.toast_layer.clone()),
             )
     }

@@ -242,6 +242,10 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
     fn can_split(&self) -> bool {
         false
     }
+
+    fn is_fullscreen_onboarding(&self) -> bool {
+        false
+    }
     fn clone_on_split(
         &self,
         workspace_id: Option<WorkspaceId>,
@@ -486,6 +490,7 @@ pub trait ItemHandle: 'static + Send {
     fn buffer_kind(&self, cx: &App) -> ItemBufferKind;
     fn boxed_clone(&self) -> Box<dyn ItemHandle>;
     fn can_split(&self, cx: &App) -> bool;
+    fn is_fullscreen_onboarding(&self, cx: &App) -> bool;
     fn clone_on_split(
         &self,
         workspace_id: Option<WorkspaceId>,
@@ -716,6 +721,10 @@ impl<T: Item> ItemHandle for Entity<T> {
 
     fn can_split(&self, cx: &App) -> bool {
         self.read(cx).can_split()
+    }
+
+    fn is_fullscreen_onboarding(&self, cx: &App) -> bool {
+        self.read(cx).is_fullscreen_onboarding()
     }
 
     fn clone_on_split(

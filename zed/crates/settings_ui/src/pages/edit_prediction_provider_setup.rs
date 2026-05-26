@@ -1,3 +1,4 @@
+use backboard::BackboardConfig;
 use edit_prediction::{
     ApiKeyState,
     backboard::{BACKBOARD_CREDENTIALS_URL, backboard_api_token},
@@ -86,13 +87,14 @@ fn render_api_key_provider(
 
     let (has_key, env_var_name, is_from_env_var) = api_key_state.read_with(cx, |state, _| {
         (
-            state.has_key(),
+            state.has_key() || backboard_config_has_key(),
             Some(state.env_var_name().clone()),
             state.is_from_env_var(),
         )
     });
 
     let write_key = move |api_key: Option<String>, cx: &mut App| {
+        sync_backboard_config_api_key(api_key.clone());
         let credentials_provider = zed_credentials_provider::global(cx);
         api_key_state
             .update(cx, |key_state, cx| {
@@ -205,4 +207,18 @@ fn render_api_key_provider(
                 .child(additional_fields),
         )
     })
+}
+
+fn backboard_config_has_key() -> bool {
+    BackboardConfig::load_or_default().api_key().is_some()
+}
+
+fn sync_backboard_config_api_key(api_key: Option<String>) {
+    let result = match api_key {
+        Some(api_key) => BackboardConfig::save_api_key_for_current_env(api_key),
+        None => BackboardConfig::clear_api_key_for_current_env(),
+    };
+    if let Err(error) = result {
+        log::warn!("failed to sync Backboard API key config: {error:#}");
+    }
 }

@@ -1,35 +1,36 @@
 use crate::multibuffer_hint::MultibufferHint;
-use client::{Client, UserStore, zed_urls};
 use db::kvp::KeyValueStore;
 use fs::Fs;
 use gpui::{
     Action, AnyElement, App, AppContext, AsyncWindowContext, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, Global, IntoElement, KeyContext, Render, ScrollHandle, SharedString,
-    Subscription, Task, WeakEntity, Window, actions,
+    FocusHandle, Focusable, Global, IntoElement, KeyContext, ObjectFit, Render, ScrollHandle,
+    SharedString, Subscription, Task, WeakEntity, Window, actions, img,
 };
 use notifications::status_toast::StatusToast;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use settings::{SettingsStore, VsCodeSettingsSource};
 use std::sync::Arc;
+use std::time::Duration;
 use ui::{
     Divider, IconName, IconSize, KeyBinding, ParentElement as _, StatefulInteractiveElement,
     Vector, VectorName, WithScrollbar as _, prelude::*, rems_from_px,
 };
+use ui_input::InputField;
 
 pub use workspace::welcome::ShowWelcome;
 use workspace::welcome::WelcomePage;
 use workspace::{
-    AppState, InterfaceMode, MultiWorkspace, Workspace, WorkspaceId,
-    dock::DockPosition,
+    AppState, InterfaceMode, MultiWorkspace, Workspace,
     item::{Item, ItemEvent},
     notifications::NotifyResultExt as _,
     open_new, register_serializable_item, with_active_or_new_workspace,
 };
-use zed_actions::OpenOnboarding;
+use zed_actions::{OpenOnboarding, ResetOnboarding};
 
 mod base_keymap_picker;
 mod basics_page;
+mod import_settings_page;
 pub mod multibuffer_hint;
 mod theme_preview;
 
@@ -54,6 +55,8 @@ pub struct ImportCursorSettings {
 pub const FIRST_OPEN: &str = "first_open";
 pub const DOCS_URL: &str = "https://zed.dev/docs/";
 pub const EXPERIENCE_LEVEL_KVP_KEY: &str = "backboard_experience_level";
+const BACKBOARD_DASHBOARD_URL: &str = "https://app.backboard.io/dashboard";
+const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ExperienceLevel {
@@ -86,8 +89,12 @@ impl ExperienceLevel {
 
 #[derive(Clone, Copy)]
 enum OnboardingStep {
+    Splash,
+    Welcome,
     ExperiencePicker,
     Setup(ExperienceLevel),
+    ImportSettings(ExperienceLevel),
+    ApiKeySetup(ExperienceLevel),
 }
 
 actions!(
@@ -95,10 +102,6 @@ actions!(
     [
         /// Finish the onboarding process.
         Finish,
-        /// Sign in while in the onboarding flow.
-        SignIn,
-        /// Open the user account in zed.dev while in the onboarding flow.
-        OpenAccount,
         /// Resets the welcome screen hints to their initial state.
         ResetHints,
         /// Re-open the experience level picker to switch modes.
@@ -114,81 +117,29 @@ pub fn init(cx: &mut App) {
     .detach();
 
     cx.on_action(|_: &OpenOnboarding, cx| {
-        with_active_or_new_workspace(cx, |workspace, window, cx| {
-            workspace
-                .with_local_workspace(window, cx, |workspace, window, cx| {
-                    let existing = workspace
-                        .active_pane()
-                        .read(cx)
-                        .items()
-                        .find_map(|item| item.downcast::<Onboarding>());
+        open_onboarding(true, cx);
+    });
 
-                    if let Some(existing) = existing {
-                        workspace.activate_item(&existing, true, true, window, cx);
-                    } else {
-                        let settings_page = Onboarding::new(workspace, cx);
-                        workspace.add_item_to_active_pane(
-                            Box::new(settings_page),
-                            None,
-                            true,
-                            window,
-                            cx,
-                        )
-                    }
-                })
-                .detach();
+    cx.on_action(|_: &ResetOnboarding, cx| {
+        let kvp = KeyValueStore::global(cx);
+        db::write_and_log(cx, move || async move {
+            kvp.delete_kvp(FIRST_OPEN.to_string()).await?;
+            kvp.delete_kvp(EXPERIENCE_LEVEL_KVP_KEY.to_string()).await?;
+            kvp.delete_kvp(FIRST_RUN_NAV_TIPS_STATE_KEY.to_string())
+                .await?;
+            Ok::<(), anyhow::Error>(())
         });
+
+        open_onboarding(true, cx);
     });
 
     cx.on_action(|_: &SwitchMode, cx| {
-        with_active_or_new_workspace(cx, |workspace, window, cx| {
-            workspace
-                .with_local_workspace(window, cx, |workspace, window, cx| {
-                    let existing = workspace
-                        .active_pane()
-                        .read(cx)
-                        .items()
-                        .find_map(|item| item.downcast::<Onboarding>());
-
-                    if let Some(existing) = existing {
-                        workspace.activate_item(&existing, true, true, window, cx);
-                    } else {
-                        let page = Onboarding::new(workspace, cx);
-                        workspace.add_item_to_active_pane(Box::new(page), None, true, window, cx)
-                    }
-                })
-                .detach();
-        });
+        open_onboarding(true, cx);
     });
 
     cx.on_action(|_: &ShowWelcome, cx| {
-        with_active_or_new_workspace(cx, |workspace, window, cx| {
-            workspace
-                .with_local_workspace(window, cx, |workspace, window, cx| {
-                    let existing = workspace
-                        .active_pane()
-                        .read(cx)
-                        .items()
-                        .find_map(|item| item.downcast::<WelcomePage>());
-
-                    if let Some(existing) = existing {
-                        workspace.activate_item(&existing, true, true, window, cx);
-                    } else {
-                        let settings_page = cx
-                            .new(|cx| WelcomePage::new(workspace.weak_handle(), false, window, cx));
-                        workspace.add_item_to_active_pane(
-                            Box::new(settings_page),
-                            None,
-                            true,
-                            window,
-                            cx,
-                        )
-                    }
-                })
-                .detach();
-        });
+        show_welcome(cx);
     });
-
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(|_workspace, action: &ImportVsCodeSettings, window, cx| {
             let fs = <dyn Fs>::global(cx);
@@ -238,6 +189,64 @@ pub fn init(cx: &mut App) {
     register_serializable_item::<WelcomePage>(cx);
 }
 
+fn open_onboarding(reset_to_start: bool, cx: &mut App) {
+    with_active_or_new_workspace(cx, move |workspace, window, cx| {
+        workspace
+            .with_local_workspace(window, cx, move |workspace, window, cx| {
+                window.dispatch_action(workspace::CloseAllDocks.boxed_clone(), cx);
+                window.dispatch_action(workspace::CloseWorkspaceSidebar.boxed_clone(), cx);
+
+                let existing = workspace
+                    .active_pane()
+                    .read(cx)
+                    .items()
+                    .find_map(|item| item.downcast::<Onboarding>());
+
+                if let Some(existing) = existing {
+                    if reset_to_start {
+                        existing.update(cx, |existing, cx| {
+                            existing.restart_splash(cx);
+                            cx.notify();
+                        });
+                    }
+                    workspace.activate_item(&existing, true, true, window, cx);
+                } else {
+                    let page = Onboarding::new(workspace, window, cx);
+                    workspace.add_item_to_active_pane(Box::new(page), None, true, window, cx)
+                }
+            })
+            .detach();
+    });
+}
+
+fn show_welcome(cx: &mut App) {
+    with_active_or_new_workspace(cx, |workspace, window, cx| {
+        workspace
+            .with_local_workspace(window, cx, |workspace, window, cx| {
+                let existing = workspace
+                    .active_pane()
+                    .read(cx)
+                    .items()
+                    .find_map(|item| item.downcast::<WelcomePage>());
+
+                if let Some(existing) = existing {
+                    workspace.activate_item(&existing, true, true, window, cx);
+                } else {
+                    let settings_page =
+                        cx.new(|cx| WelcomePage::new(workspace.weak_handle(), false, window, cx));
+                    workspace.add_item_to_active_pane(
+                        Box::new(settings_page),
+                        None,
+                        true,
+                        window,
+                        cx,
+                    )
+                }
+            })
+            .detach();
+    });
+}
+
 pub fn show_onboarding_view(app_state: Arc<AppState>, cx: &mut App) -> Task<anyhow::Result<()>> {
     telemetry::event!("Onboarding Page Opened");
     open_new(
@@ -246,8 +255,8 @@ pub fn show_onboarding_view(app_state: Arc<AppState>, cx: &mut App) -> Task<anyh
         cx,
         |workspace, window, cx| {
             {
-                workspace.toggle_dock(DockPosition::Left, window, cx);
-                let onboarding_page = Onboarding::new(workspace, cx);
+                workspace.close_all_docks(window, cx);
+                let onboarding_page = Onboarding::new(workspace, window, cx);
                 workspace.add_item_to_center(Box::new(onboarding_page.clone()), window, cx);
 
                 window.focus(&onboarding_page.focus_handle(cx), cx);
@@ -266,19 +275,44 @@ pub fn show_onboarding_view(app_state: Arc<AppState>, cx: &mut App) -> Task<anyh
 struct Onboarding {
     workspace: WeakEntity<Workspace>,
     focus_handle: FocusHandle,
-    user_store: Entity<UserStore>,
     scroll_handle: ScrollHandle,
     step: OnboardingStep,
+    splash_frame: usize,
+    api_key_field: Entity<InputField>,
+    api_key_status: Option<SharedString>,
+    _splash_task: Option<Task<()>>,
     _settings_subscription: Subscription,
 }
 
 impl Onboarding {
-    fn new(workspace: &Workspace, cx: &mut App) -> Entity<Self> {
+    const SPLASH_LINES: [&'static str; 11] = [
+        "                 ████",
+        "                 ████",
+        "            ███  ████",
+        "            ███  ████",
+        "       ███  ███  ████",
+        "       ███  ███  ████",
+        "  ███  ███  ███  ████     ███  ███",
+        "  ███  ███  ███  ████     ███  ███",
+        "                 ████     ███  ███",
+        "                 ████     ███",
+        "                 ████",
+    ];
+
+    fn new(workspace: &Workspace, window: &mut Window, cx: &mut App) -> Entity<Self> {
         let font_family_cache = theme::FontFamilyCache::global(cx);
 
         telemetry::event!("Welcome Agent Setup Viewed");
+        Self::preload_onboarding_assets(cx);
 
         cx.new(|cx| {
+            let splash_task = Self::spawn_splash_task(cx);
+            let api_key_field = cx.new(|cx| {
+                InputField::new(window, cx, "Paste your Backboard API key")
+                    .masked(true)
+                    .start_icon(IconName::LockOutlined)
+            });
+
             cx.spawn(async move |this, cx| {
                 font_family_cache.prefetch(cx).await;
                 this.update(cx, |_, cx| {
@@ -291,20 +325,92 @@ impl Onboarding {
                 workspace: workspace.weak_handle(),
                 focus_handle: cx.focus_handle(),
                 scroll_handle: ScrollHandle::new(),
-                user_store: workspace.user_store().clone(),
-                step: OnboardingStep::ExperiencePicker,
+                step: OnboardingStep::Splash,
+                splash_frame: 0,
+                api_key_field,
+                api_key_status: None,
+                _splash_task: Some(splash_task),
                 _settings_subscription: cx
                     .observe_global::<SettingsStore>(move |_, cx| cx.notify()),
             }
         })
     }
 
+    fn preload_onboarding_assets(cx: &App) {
+        for path in [
+            "onboarding/simple.png",
+            "onboarding/simple_dark.png",
+            "onboarding/dev.png",
+            "onboarding/dev_dark.png",
+            "onboarding/Visual_Studio_Code_1.35_icon.svg.png",
+            "onboarding/cursor-logo-png_seeklogo-611587.png",
+        ] {
+            if let Err(error) = cx.asset_source().load(path) {
+                zlog::debug!("failed to preload onboarding asset {path}: {error:#}");
+            }
+        }
+    }
+
+    fn spawn_splash_task(cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn(async move |this, cx| {
+            for frame in 1..=Self::SPLASH_LINES.len() {
+                cx.background_executor()
+                    .timer(Duration::from_millis(150))
+                    .await;
+                this.update(cx, |this, cx| {
+                    this.splash_frame = frame;
+                    cx.notify();
+                })
+                .ok();
+            }
+
+            cx.background_executor()
+                .timer(Duration::from_millis(850))
+                .await;
+            this.update(cx, |this, cx| {
+                if matches!(this.step, OnboardingStep::Splash) {
+                    this.step = OnboardingStep::Welcome;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+    }
+
+    fn restart_splash(&mut self, cx: &mut Context<Self>) {
+        self.step = OnboardingStep::Splash;
+        self.splash_frame = 0;
+        self._splash_task = Some(Self::spawn_splash_task(cx));
+    }
+
     fn on_finish(&mut self, _: &Finish, window: &mut Window, cx: &mut Context<Self>) {
         let level = match self.step {
+            OnboardingStep::Setup(level) if Self::shows_import_settings_step(level) => {
+                self.step = OnboardingStep::ImportSettings(level);
+                cx.notify();
+                return;
+            }
+            OnboardingStep::ImportSettings(level) => {
+                self.step = OnboardingStep::ApiKeySetup(level);
+                cx.notify();
+                return;
+            }
             OnboardingStep::Setup(level) => level,
-            OnboardingStep::ExperiencePicker => return,
+            OnboardingStep::ApiKeySetup(level) => level,
+            OnboardingStep::Splash | OnboardingStep::Welcome | OnboardingStep::ExperiencePicker => {
+                return;
+            }
         };
 
+        self.finish_setup(level, window, cx);
+    }
+
+    fn finish_setup(
+        &mut self,
+        level: ExperienceLevel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let kvp = KeyValueStore::global(cx);
         let level_str = level.to_str().to_string();
         db::write_and_log(cx, move || async move {
@@ -336,31 +442,128 @@ impl Onboarding {
         }
     }
 
-    fn handle_sign_in(&mut self, _: &SignIn, window: &mut Window, cx: &mut Context<Self>) {
-        let client = Client::global(cx);
-        let workspace = self.workspace.clone();
-
-        window
-            .spawn(cx, async move |mut cx| {
-                client
-                    .sign_in_with_optional_connect(true, &cx)
-                    .await
-                    .notify_workspace_async_err(workspace, &mut cx);
-            })
-            .detach();
+    fn shows_import_settings_step(level: ExperienceLevel) -> bool {
+        matches!(level, ExperienceLevel::Developer | ExperienceLevel::Power)
     }
 
-    fn handle_open_account(_: &OpenAccount, _: &mut Window, cx: &mut App) {
-        cx.open_url(&zed_urls::account_url(cx))
+    fn primary_setup_action_label(&self) -> &'static str {
+        match self.step {
+            OnboardingStep::Setup(level) if Self::shows_import_settings_step(level) => "Continue",
+            OnboardingStep::ImportSettings(_) => "Continue",
+            OnboardingStep::Setup(_) | OnboardingStep::ApiKeySetup(_) => "Finish Setup",
+            OnboardingStep::Splash | OnboardingStep::Welcome | OnboardingStep::ExperiencePicker => {
+                "Finish Setup"
+            }
+        }
+    }
+
+    fn go_back_from_setup(&mut self, cx: &mut Context<Self>) {
+        self.step = match self.step {
+            OnboardingStep::ApiKeySetup(level) => OnboardingStep::ImportSettings(level),
+            OnboardingStep::ImportSettings(level) => OnboardingStep::Setup(level),
+            OnboardingStep::Setup(_) => OnboardingStep::ExperiencePicker,
+            step => step,
+        };
+        cx.notify();
+    }
+
+    fn save_api_key_and_finish(
+        &mut self,
+        level: ExperienceLevel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let api_key = self.api_key_field.read(cx).text(cx).trim().to_string();
+
+        if api_key.is_empty() {
+            self.api_key_status = Some("Paste an API key or skip for now.".into());
+            self.api_key_field
+                .read(cx)
+                .focus_handle(cx)
+                .focus(window, cx);
+            cx.notify();
+            return;
+        }
+
+        match backboard::BackboardConfig::save_api_key_for_current_env(api_key) {
+            Ok(_) => {
+                self.api_key_status = Some("API key saved.".into());
+                self.finish_setup(level, window, cx);
+            }
+            Err(error) => {
+                self.api_key_status = Some(format!("Could not save API key: {error:#}").into());
+                cx.notify();
+            }
+        }
     }
 
     fn render_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
         match self.step {
+            OnboardingStep::Splash => self.render_splash(cx),
+            OnboardingStep::Welcome => self.render_welcome(cx),
             OnboardingStep::ExperiencePicker => self.render_experience_picker(cx),
             OnboardingStep::Setup(level) => {
                 crate::basics_page::render_basics_page(level, cx).into_any_element()
             }
+            OnboardingStep::ImportSettings(_) => {
+                crate::import_settings_page::render_import_settings_page(cx).into_any_element()
+            }
+            OnboardingStep::ApiKeySetup(level) => self.render_api_key_setup(level, cx),
         }
+    }
+
+    fn render_startup_logo(&self) -> impl IntoElement {
+        Vector::new(VectorName::ZedLogo, rems_from_px(132.), rems_from_px(210.))
+            .color(Color::Accent)
+    }
+
+    fn render_splash(&mut self, _cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(v_flex().items_center().child(self.render_startup_logo()))
+            .into_any_element()
+    }
+
+    fn render_welcome(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .w_full()
+            .min_h(rems_from_px(620.))
+            .justify_center()
+            .items_center()
+            .gap_7()
+            .child(
+                div().w_full().flex().justify_center().child(
+                    Vector::new(VectorName::ZedLogo, rems_from_px(124.), rems_from_px(198.))
+                        .color(Color::Accent),
+                ),
+            )
+            .child(
+                v_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(Headline::new("Backboard Studio").size(HeadlineSize::XLarge))
+                    .child(
+                        Label::new("AI-native development, set up in a minute.")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    ),
+            )
+            .child(
+                div().rounded_full().overflow_hidden().child(
+                    Button::new("continue-from-welcome", "Get Started")
+                        .style(ButtonStyle::Filled)
+                        .size(ButtonSize::Large)
+                        .width(rems_from_px(180.))
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            this.step = OnboardingStep::ExperiencePicker;
+                            cx.notify();
+                        })),
+                ),
+            )
+            .into_any_element()
     }
 
     fn render_experience_picker(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -382,19 +585,21 @@ impl Onboarding {
             )
             .child(
                 h_flex()
-                    .gap_4()
+                    .gap_8()
+                    .justify_center()
+                    .flex_wrap()
                     .child(self.render_level_card(
                         ExperienceLevel::Beginner,
                         true,
                         "Simple",
-                        "Prompt-first, preview-first. Chat in plain language and iterate on visible results.",
+                        "Chat first. Preview fast.",
                         cx,
                     ))
                     .child(self.render_level_card(
                         ExperienceLevel::Developer,
                         false,
-                        "Expert",
-                        "Full editor with AI agents, files, and tools for implementation and shipping.",
+                        "Developer",
+                        "Editor, agents, terminal.",
                         cx,
                     )),
             )
@@ -409,280 +614,220 @@ impl Onboarding {
         description: &'static str,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let colors = cx.theme().colors();
         div()
             .id(SharedString::from(title))
-            .w(rems_from_px(460.))
-            .p_6()
+            .w(rems_from_px(560.))
             .flex()
             .flex_col()
             .gap_4()
-            .border_1()
-            .border_color(colors.border)
-            .rounded_lg()
-            .hover(|s| {
-                s.border_color(colors.border_focused)
-                    .bg(colors.element_hover)
-            })
             .on_click(cx.listener(move |this, _, _window, cx| {
                 this.step = OnboardingStep::Setup(level);
                 cx.notify();
             }))
             .child(
-                h_flex()
+                v_flex()
                     .items_center()
-                    .gap_2()
+                    .gap_0p5()
+                    .child(Headline::new(title).size(HeadlineSize::Small))
                     .child(
-                        div()
-                            .p_1p5()
-                            .rounded_md()
-                            .bg(colors.element_background)
-                            .child(
-                                Vector::new(
-                                    VectorName::BackboardLogo,
-                                    rems_from_px(13.),
-                                    rems_from_px(18.),
-                                )
-                                .color(Color::Accent),
-                            ),
-                    )
-                    .child(Headline::new(title).size(HeadlineSize::Small)),
+                        h_flex().justify_center().child(
+                            Label::new(description)
+                                .color(Color::Muted)
+                                .size(LabelSize::Small),
+                        ),
+                    ),
             )
             .child(
+                self.render_mode_screenshot(Self::mode_screenshot_path(is_simple, cx), cx)
+                    .into_any_element(),
+            )
+            .child(
+                div().rounded_full().overflow_hidden().child(
+                    Button::new(
+                        SharedString::from(format!("continue-{title}")),
+                        format!("Continue with {title}"),
+                    )
+                    .style(ButtonStyle::Filled)
+                    .full_width()
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.step = OnboardingStep::Setup(level);
+                        cx.notify();
+                    })),
+                ),
+            )
+    }
+
+    fn render_mode_screenshot(&self, path: &'static str, _cx: &Context<Self>) -> impl IntoElement {
+        img(path)
+            .w_full()
+            .h(rems_from_px(340.))
+            .object_fit(ObjectFit::Contain)
+            .with_fallback(|| div().size_full().into_any_element())
+    }
+
+    fn mode_screenshot_path(is_simple: bool, cx: &Context<Self>) -> &'static str {
+        match (is_simple, cx.theme().appearance()) {
+            (true, theme::Appearance::Dark) => "onboarding/simple_dark.png",
+            (false, theme::Appearance::Dark) => "onboarding/dev_dark.png",
+            (true, _) => "onboarding/simple.png",
+            (false, _) => "onboarding/dev.png",
+        }
+    }
+
+    fn render_api_key_setup(
+        &mut self,
+        level: ExperienceLevel,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let has_key = backboard::BackboardConfig::load_or_default()
+            .api_key()
+            .is_some();
+        let status = self.api_key_status.clone();
+
+        v_flex()
+            .id("api-key-setup-page")
+            .w_full()
+            .py_12()
+            .items_center()
+            .gap_7()
+            .child(
                 v_flex()
-                    .gap_1()
+                    .items_center()
+                    .gap_2()
+                    .child(Headline::new("Connect Backboard").size(HeadlineSize::Large))
                     .child(
-                        Label::new(description)
+                        Label::new("Add your API key now, or skip it for later.")
                             .color(Color::Muted)
                             .size(LabelSize::Small),
                     ),
             )
-            .child(if is_simple {
-                self.render_simple_mode_mockup(cx).into_any_element()
-            } else {
-                self.render_expert_mode_mockup(cx).into_any_element()
-            })
             .child(
-                h_flex()
-                    .w_full()
-                    .gap_4()
+                v_flex()
+                    .w(rems_from_px(520.))
+                    .gap_5()
                     .child(
                         h_flex()
-                            .gap_1()
-                            .items_center()
-                            .child(Icon::new(IconName::Check).size(IconSize::XSmall))
+                            .justify_center()
+                            .gap_2()
                             .child(
-                                Label::new(if is_simple {
-                                    "Natural conversation"
+                                Icon::new(if has_key {
+                                    IconName::Check
                                 } else {
-                                    "Full code editor"
+                                    IconName::LockOutlined
                                 })
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .child(Icon::new(IconName::Check).size(IconSize::XSmall))
-                            .child(
-                                Label::new(if is_simple {
-                                    "Instant preview"
+                                .size(IconSize::Small)
+                                .color(if has_key {
+                                    Color::Success
                                 } else {
-                                    "Multi-agent workspace"
-                                })
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .child(Icon::new(IconName::Check).size(IconSize::XSmall))
-                            .child(
-                                Label::new(if is_simple {
-                                    "No setup required"
-                                } else {
-                                    "Terminal and tools"
-                                })
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                            ),
-                    ),
-            )
-            .child(
-                Button::new(
-                    SharedString::from(format!("continue-{title}")),
-                    format!("Continue with {title}"),
-                )
-                .style(ButtonStyle::Filled)
-                .full_width()
-                .on_click(cx.listener(move |this, _, _window, cx| {
-                    this.step = OnboardingStep::Setup(level);
-                    cx.notify();
-                })),
-            )
-    }
-
-    fn render_simple_mode_mockup(&self, cx: &Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors();
-        v_flex()
-            .w_full()
-            .gap_1p5()
-            .p_2()
-            .rounded_md()
-            .bg(colors.element_background)
-            .border_1()
-            .border_color(colors.border_variant)
-            .child(
-                h_flex()
-                    .gap_1p5()
-                    .child(
-                        v_flex()
-                            .w(rems_from_px(115.))
-                            .h(rems_from_px(126.))
-                            .rounded_sm()
-                            .bg(colors.editor_background)
-                            .border_1()
-                            .border_color(colors.border_variant)
-                            .p_1()
-                            .gap_1()
-                            .child(Label::new("Threads").size(LabelSize::XSmall).color(Color::Muted))
-                            .child(div().h(rems_from_px(18.)).rounded_sm().bg(colors.element_background))
-                            .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background))
-                            .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background))
-                            .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background)),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .h(rems_from_px(126.))
-                            .gap_1p5()
-                            .child(
-                                v_flex()
-                                    .h(rems_from_px(64.))
-                                    .rounded_sm()
-                                    .bg(colors.editor_background)
-                                    .border_1()
-                                    .border_color(colors.border_variant)
-                                    .p_1()
-                                    .gap_1()
-                                    .child(Label::new("Chat").size(LabelSize::XSmall).color(Color::Muted))
-                                    .child(
-                                        div()
-                                            .h(rems_from_px(32.))
-                                            .rounded_sm()
-                                            .bg(colors.element_background)
-                                            .child(
-                                                Label::new("Create a dashboard for active users.")
-                                                    .size(LabelSize::XSmall)
-                                                    .color(Color::Muted),
-                                            ),
-                                    ),
+                                    Color::Accent
+                                }),
                             )
+                            .child(Label::new(if has_key {
+                                "API key configured"
+                            } else {
+                                "Paste your Backboard API key"
+                            })),
+                    )
+                    .when(!has_key, |this| this.child(self.api_key_field.clone()))
+                    .when_some(status, |this, status| {
+                        this.child(
+                            Label::new(status)
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        )
+                    })
+                    .child(
+                        div().rounded_full().overflow_hidden().child(
+                            Button::new("open-backboard-dashboard", "Open Backboard Dashboard")
+                                .style(ButtonStyle::OutlinedGhost)
+                                .full_width()
+                                .on_click(|_, _, cx| {
+                                    cx.open_url(BACKBOARD_DASHBOARD_URL);
+                                }),
+                        ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .when(!has_key, |this| {
+                                this.child(
+                                    div().rounded_full().overflow_hidden().flex_1().child(
+                                        Button::new("skip-api-key", "Skip for now")
+                                            .style(ButtonStyle::Subtle)
+                                            .full_width()
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.finish_setup(level, window, cx);
+                                            })),
+                                    ),
+                                )
+                            })
                             .child(
-                                v_flex()
-                                    .flex_1()
-                                    .rounded_sm()
-                                    .bg(colors.editor_background)
-                                    .border_1()
-                                    .border_color(colors.border_variant)
-                                    .p_1()
-                                    .gap_1()
-                                    .child(Label::new("Preview").size(LabelSize::XSmall).color(Color::Muted))
-                                    .child(
-                                        h_flex()
-                                            .gap_1()
-                                            .child(div().h(rems_from_px(14.)).flex_1().rounded_sm().bg(colors.element_background))
-                                            .child(div().h(rems_from_px(14.)).flex_1().rounded_sm().bg(colors.element_background))
-                                            .child(div().h(rems_from_px(14.)).flex_1().rounded_sm().bg(colors.element_background)),
+                                div().rounded_full().overflow_hidden().flex_1().child(
+                                    Button::new(
+                                        "save-api-key-and-finish",
+                                        if has_key {
+                                            "Finish Setup"
+                                        } else {
+                                            "Save and Finish"
+                                        },
                                     )
-                                    .child(div().h(rems_from_px(28.)).rounded_sm().bg(colors.element_background))
-                                    .child(div().h(rems_from_px(18.)).rounded_sm().bg(colors.element_background)),
+                                    .style(ButtonStyle::Filled)
+                                    .full_width()
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            if has_key {
+                                                this.finish_setup(level, window, cx);
+                                            } else {
+                                                this.save_api_key_and_finish(level, window, cx);
+                                            }
+                                        },
+                                    )),
+                                ),
                             ),
                     ),
             )
-            .child(
-                div()
-                    .h(rems_from_px(24.))
-                    .rounded_sm()
-                    .bg(colors.editor_background)
-                    .border_1()
-                    .border_color(colors.border_variant)
-                    .child(
-                        Label::new("Ask anything...")
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    ),
-            )
+            .into_any_element()
     }
 
-    fn render_expert_mode_mockup(&self, cx: &Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors();
-        h_flex()
-            .w_full()
-            .gap_1p5()
-            .p_2()
-            .rounded_md()
-            .bg(colors.element_background)
-            .border_1()
-            .border_color(colors.border_variant)
-            .child(
-                v_flex()
-                    .w(rems_from_px(90.))
-                    .h(rems_from_px(126.))
-                    .rounded_sm()
-                    .bg(colors.editor_background)
-                    .border_1()
-                    .border_color(colors.border_variant)
-                    .p_1()
-                    .gap_1()
-                    .child(Label::new("Explorer").size(LabelSize::XSmall).color(Color::Muted))
-                    .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background))
-                    .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background))
-                    .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background))
-                    .child(div().h(rems_from_px(16.)).rounded_sm().bg(colors.element_background)),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .h(rems_from_px(126.))
-                    .rounded_sm()
-                    .bg(colors.editor_background)
-                    .border_1()
-                    .border_color(colors.border_variant)
-                    .p_1()
-                    .gap_1()
-                    .child(Label::new("app.tsx").size(LabelSize::XSmall).color(Color::Muted))
-                    .child(div().h(rems_from_px(12.)).w(rems_from_px(140.)).rounded_sm().bg(colors.element_background))
-                    .child(div().h(rems_from_px(12.)).w(rems_from_px(110.)).rounded_sm().bg(colors.element_background))
-                    .child(div().h(rems_from_px(12.)).w(rems_from_px(132.)).rounded_sm().bg(colors.element_background))
-                    .child(div().h(rems_from_px(12.)).w(rems_from_px(96.)).rounded_sm().bg(colors.element_background))
-                    .child(div().h(rems_from_px(12.)).w(rems_from_px(120.)).rounded_sm().bg(colors.element_background)),
-            )
-            .child(
-                v_flex()
-                    .w(rems_from_px(108.))
-                    .h(rems_from_px(126.))
-                    .rounded_sm()
-                    .bg(colors.editor_background)
-                    .border_1()
-                    .border_color(colors.border_variant)
-                    .p_1()
-                    .gap_1()
-                    .child(Label::new("Agents").size(LabelSize::XSmall).color(Color::Muted))
-                    .child(div().h(rems_from_px(22.)).rounded_sm().bg(colors.element_background))
-                    .child(div().h(rems_from_px(22.)).rounded_sm().bg(colors.element_background))
-                    .child(div().h(rems_from_px(22.)).rounded_sm().bg(colors.element_background)),
+    fn render_asset_preloads(&self) -> impl IntoElement {
+        div()
+            .id("onboarding-asset-preloads")
+            .absolute()
+            .top(px(-10000.))
+            .left(px(-10000.))
+            .size(px(1.))
+            .overflow_hidden()
+            .opacity(0.)
+            .children(
+                [
+                    "onboarding/simple.png",
+                    "onboarding/simple_dark.png",
+                    "onboarding/dev.png",
+                    "onboarding/dev_dark.png",
+                    "onboarding/Visual_Studio_Code_1.35_icon.svg.png",
+                    "onboarding/cursor-logo-png_seeklogo-611587.png",
+                ]
+                .map(|path| {
+                    img(path)
+                        .size(rems_from_px(320.))
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element()
+                }),
             )
     }
 }
 
 impl Render for Onboarding {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_setup = matches!(self.step, OnboardingStep::Setup(_));
+        let is_setup = matches!(
+            self.step,
+            OnboardingStep::Setup(_)
+                | OnboardingStep::ImportSettings(_)
+                | OnboardingStep::ApiKeySetup(_)
+        );
+        let is_intro = matches!(self.step, OnboardingStep::Splash | OnboardingStep::Welcome);
+        let is_experience_picker = matches!(self.step, OnboardingStep::ExperiencePicker);
+        let primary_setup_action_label = self.primary_setup_action_label();
 
         div()
             .image_cache(gpui::retain_all("onboarding-page"))
@@ -695,9 +840,8 @@ impl Render for Onboarding {
             .track_focus(&self.focus_handle)
             .size_full()
             .bg(cx.theme().colors().editor_background)
+            .child(self.render_asset_preloads())
             .on_action(cx.listener(Self::on_finish))
-            .on_action(cx.listener(Self::handle_sign_in))
-            .on_action(Self::handle_open_account)
             .on_action(cx.listener(|_, _: &menu::SelectNext, window, cx| {
                 window.focus_next(cx);
                 cx.notify();
@@ -715,52 +859,63 @@ impl Render for Onboarding {
                     .child(
                         v_flex()
                             .min_w_0()
-                            .max_w(rems_from_px(780.))
+                            .max_w(rems_from_px(if is_experience_picker {
+                                1280.
+                            } else if is_intro {
+                                960.
+                            } else {
+                                920.
+                            }))
                             .w_full()
                             .mx_auto()
                             .p_12()
                             .gap_6()
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .gap_4()
-                                    .justify_between()
-                                    .child(
-                                        h_flex()
-                                            .gap_4()
-                                            .child(Vector::square(VectorName::ZedLogo, rems(2.5)))
-                                            .child(
-                                                v_flex()
-                                                    .child(
-                                                        Headline::new(
-                                                            "Welcome to Backboard Studio",
+                            .when(!is_intro, |this| {
+                                this.child(
+                                    h_flex()
+                                        .w_full()
+                                        .gap_4()
+                                        .justify_between()
+                                        .child(
+                                            h_flex()
+                                                .gap_4()
+                                                .child(Vector::square(
+                                                    VectorName::ZedLogo,
+                                                    rems(2.5),
+                                                ))
+                                                .child(
+                                                    v_flex()
+                                                        .child(
+                                                            Headline::new("Backboard Studio")
+                                                                .size(HeadlineSize::Small),
                                                         )
-                                                        .size(HeadlineSize::Small),
+                                                        .child(
+                                                            Label::new("Focused setup")
+                                                                .color(Color::Muted)
+                                                                .size(LabelSize::Small)
+                                                                .italic(),
+                                                        ),
+                                                ),
+                                        )
+                                        .when(is_setup, |this| {
+                                            this.child(
+                                                h_flex()
+                                                    .gap_3()
+                                                    .child(
+                                                        Button::new("back", "← Back")
+                                                            .style(ButtonStyle::Subtle)
+                                                            .size(ButtonSize::Medium)
+                                                            .on_click(cx.listener(
+                                                                |this, _, _, cx| {
+                                                                    this.go_back_from_setup(cx);
+                                                                },
+                                                            )),
                                                     )
                                                     .child(
-                                                        Label::new("The editor for what's next")
-                                                            .color(Color::Muted)
-                                                            .size(LabelSize::Small)
-                                                            .italic(),
-                                                    ),
-                                            ),
-                                    )
-                                    .when(is_setup, |this| {
-                                        this.child(
-                                            h_flex()
-                                                .gap_3()
-                                                .child(
-                                                    Button::new("back", "← Back")
-                                                        .style(ButtonStyle::Subtle)
-                                                        .size(ButtonSize::Medium)
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.step =
-                                                                OnboardingStep::ExperiencePicker;
-                                                            cx.notify();
-                                                        })),
-                                                )
-                                                .child(
-                                                    Button::new("finish_setup", "Finish Setup")
+                                                        Button::new(
+                                                            "finish_setup",
+                                                            primary_setup_action_label,
+                                                        )
                                                         .style(ButtonStyle::Filled)
                                                         .size(ButtonSize::Medium)
                                                         .width(rems_from_px(160.))
@@ -775,11 +930,16 @@ impl Render for Onboarding {
                                                                 cx,
                                                             );
                                                         }),
-                                                ),
-                                        )
-                                    }),
-                            )
-                            .child(Divider::horizontal().color(ui::DividerColor::BorderVariant))
+                                                    ),
+                                            )
+                                        }),
+                                )
+                            })
+                            .when(!is_intro, |this| {
+                                this.child(
+                                    Divider::horizontal().color(ui::DividerColor::BorderVariant),
+                                )
+                            })
                             .child(self.render_page(cx)),
                     )
                     .track_scroll(&self.scroll_handle),
@@ -811,24 +971,11 @@ impl Item for Onboarding {
     }
 
     fn can_split(&self) -> bool {
-        true
+        false
     }
 
-    fn clone_on_split(
-        &self,
-        _workspace_id: Option<WorkspaceId>,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Task<Option<Entity<Self>>> {
-        let step = self.step;
-        Task::ready(Some(cx.new(|cx| Onboarding {
-            workspace: self.workspace.clone(),
-            user_store: self.user_store.clone(),
-            scroll_handle: ScrollHandle::new(),
-            focus_handle: cx.focus_handle(),
-            step,
-            _settings_subscription: cx.observe_global::<SettingsStore>(move |_, cx| cx.notify()),
-        })))
+    fn is_fullscreen_onboarding(&self) -> bool {
+        true
     }
 
     fn to_item_events(event: &Self::Event, f: &mut dyn FnMut(workspace::item::ItemEvent)) {
@@ -1037,7 +1184,9 @@ impl workspace::SerializableItem for Onboarding {
         let db = persistence::OnboardingPagesDb::global(cx);
         window.spawn(cx, async move |cx| {
             if let Some(_) = db.get_onboarding_page(item_id, workspace_id)? {
-                workspace.update(cx, |workspace, cx| Onboarding::new(workspace, cx))
+                workspace.update_in(cx, |workspace, window, cx| {
+                    Onboarding::new(workspace, window, cx)
+                })
             } else {
                 Err(anyhow::anyhow!("No onboarding page to deserialize"))
             }

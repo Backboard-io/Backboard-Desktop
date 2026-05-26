@@ -4,7 +4,7 @@ use crate::{
     prediction::{EditPredictionId, EditPredictionResult},
 };
 use anyhow::{Context as _, Result};
-use backboard_api::BackboardModel;
+use backboard_api::{BackboardConfig, BackboardModel};
 use credentials_provider::CredentialsProvider;
 use futures::{
     AsyncBufReadExt as _, AsyncReadExt as _, FutureExt as _, StreamExt as _, io::BufReader,
@@ -126,11 +126,14 @@ impl BackboardCompletions {
     }
 
     pub fn has_personal_key(&self, cx: &App) -> bool {
-        self.api_token.read(cx).has_key()
+        self.api_token.read(cx).has_key() || saved_backboard_api_key().is_some()
     }
 
     pub fn resolve_api_key(&self, cx: &App) -> Option<Arc<str>> {
-        self.api_token.read(cx).key(&BACKBOARD_CREDENTIALS_URL)
+        self.api_token
+            .read(cx)
+            .key(&BACKBOARD_CREDENTIALS_URL)
+            .or_else(saved_backboard_api_key)
     }
 
     pub(crate) fn request_prediction(
@@ -440,6 +443,12 @@ impl BackboardCompletions {
             anyhow::Ok(Some(result))
         })
     }
+}
+
+fn saved_backboard_api_key() -> Option<Arc<str>> {
+    BackboardConfig::load_or_default()
+        .api_key()
+        .map(Arc::<str>::from)
 }
 
 /// Pre-filter based purely on the typed text: skip insertion points where a

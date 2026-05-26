@@ -475,7 +475,7 @@ fn main() {
         if let Some(app_state) = AppState::try_global(cx) {
             cx.spawn({
                 async move |cx| {
-                    if let Err(e) = restore_or_create_workspace(app_state, cx).await {
+                    if let Err(e) = restore_or_create_last_workspace(app_state, cx).await {
                         fail_to_open_window_async(e, cx)
                     }
                 }
@@ -1355,8 +1355,39 @@ pub(crate) async fn restore_or_create_workspace(
     app_state: Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> Result<()> {
+    let multi_workspaces = restorable_workspaces(cx, &app_state).await;
+    restore_or_create_workspaces(app_state, cx, multi_workspaces).await
+}
+
+pub(crate) async fn restore_or_create_last_workspace(
+    app_state: Arc<AppState>,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let db = cx.update(|cx| workspace::WorkspaceDb::global(cx));
+    let locations = workspace::last_opened_workspace_location(&db, app_state.fs.as_ref())
+        .await
+        .map(|(workspace_id, location, paths)| {
+            vec![SessionWorkspace {
+                workspace_id,
+                location,
+                paths,
+                window_id: None,
+            }]
+        });
+    let multi_workspaces = locations.map(|locations| {
+        cx.update(|cx| workspace::read_serialized_multi_workspaces(locations, cx))
+    });
+
+    restore_or_create_workspaces(app_state, cx, multi_workspaces).await
+}
+
+async fn restore_or_create_workspaces(
+    app_state: Arc<AppState>,
+    cx: &mut AsyncApp,
+    multi_workspaces: Option<Vec<workspace::SerializedMultiWorkspace>>,
+) -> Result<()> {
     let kvp = cx.update(|cx| KeyValueStore::global(cx));
-    if let Some(multi_workspaces) = restorable_workspaces(cx, &app_state).await {
+    if let Some(multi_workspaces) = multi_workspaces {
         let mut error_count = 0;
         for multi_workspace in multi_workspaces {
             let result = match &multi_workspace.active_workspace.location {
@@ -1604,7 +1635,20 @@ pub(crate) async fn restorable_workspace_locations(
                     locations.reverse();
                 }
 
-                locations
+                if locations.is_some() {
+                    locations
+                } else {
+                    workspace::last_opened_workspace_location(&db, app_state.fs.as_ref())
+                        .await
+                        .map(|(workspace_id, location, paths)| {
+                            vec![SessionWorkspace {
+                                workspace_id,
+                                location,
+                                paths,
+                                window_id: None,
+                            }]
+                        })
+                }
             } else {
                 None
             }

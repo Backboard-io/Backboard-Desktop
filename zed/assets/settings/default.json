@@ -7,9 +7,9 @@
   // - "light": Use the theme indicated by the "light" field
   // - "dark": Use the theme indicated by the "dark" field
   "theme": {
-    "mode": "system",
-    "light": "One Light",
-    "dark": "One Dark",
+    "mode": "light",
+    "light": "Lofi White",
+    "dark": "Lofi White",
   },
   "icon_theme": "Zed (Default)",
   // The name of a base set of key bindings to use.

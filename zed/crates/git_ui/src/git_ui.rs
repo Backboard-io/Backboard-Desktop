@@ -31,6 +31,7 @@ use crate::{commit_view::CommitView, git_panel::GitPanel, text_diff_view::TextDi
 
 mod askpass_modal;
 pub mod branch_picker;
+mod branch_status_button;
 mod commit_modal;
 pub mod commit_tooltip;
 pub mod commit_view;
@@ -51,6 +52,7 @@ pub mod worktree_names;
 pub mod worktree_picker;
 pub mod worktree_service;
 
+pub use branch_status_button::BranchStatusButton;
 pub use conflict_view::MergeConflictIndicator;
 pub use git_workspace_view::GitWorkspaceView;
 
