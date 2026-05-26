@@ -4828,13 +4828,20 @@ impl AgentPanel {
                     });
                 }
                 acp_thread::AgentThreadEntry::AssistantMessage(message) => {
-                    if let Some(text) = message.chunks.iter().rev().find_map(|chunk| match chunk {
-                        acp_thread::AssistantMessageChunk::Message { block }
-                        | acp_thread::AssistantMessageChunk::Thought { block } => {
-                            let text = block.to_markdown(cx).trim();
-                            (!text.is_empty()).then(|| truncate_workspace_event(text))
-                        }
-                    }) {
+                    if status == BackboardAgentRunStatus::Running {
+                        latest_events.push(BackboardAgentRunEvent {
+                            text: "Streaming response".into(),
+                            state: BackboardAgentRunEventState::Active,
+                        });
+                    } else if let Some(text) =
+                        message.chunks.iter().rev().find_map(|chunk| match chunk {
+                            acp_thread::AssistantMessageChunk::Message { block }
+                            | acp_thread::AssistantMessageChunk::Thought { block } => {
+                                let text = block.to_markdown(cx).trim();
+                                (!text.is_empty()).then(|| truncate_workspace_event(text))
+                            }
+                        })
+                    {
                         latest_events.push(BackboardAgentRunEvent {
                             text,
                             state: BackboardAgentRunEventState::Muted,

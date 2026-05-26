@@ -149,6 +149,7 @@ pub async fn run_prompt(
             .then(|| super::DEFAULT_IMAGE_MODEL.to_string()),
         voice,
         send_to_llm: send_to_llm_for_voice(&runtime.feature_settings),
+        mcp_calls: mcp_calls_payload(&runtime.feature_settings),
         max_tokens: None,
         audio_file,
     };
@@ -1092,6 +1093,15 @@ fn send_to_llm_for_voice(feature_settings: &super::FeatureSettings) -> Option<bo
     }
 }
 
+fn mcp_calls_payload(feature_settings: &super::FeatureSettings) -> Option<Value> {
+    let mut enabled = Vec::new();
+    if feature_settings.mcp_figma == "on" {
+        enabled.push("figma");
+    }
+
+    (!enabled.is_empty()).then(|| json!(enabled))
+}
+
 fn chunk_text(chunk: &Value) -> Option<String> {
     chunk
         .get("content")
@@ -1237,6 +1247,16 @@ mod tests {
             }))
         );
         assert_eq!(send_to_llm_for_voice(&settings), Some(true));
+    }
+
+    #[test]
+    fn mcp_calls_payload_includes_enabled_figma() {
+        let settings = super::super::FeatureSettings {
+            mcp_figma: "on".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(mcp_calls_payload(&settings), Some(json!(["figma"])));
     }
 
     #[test]

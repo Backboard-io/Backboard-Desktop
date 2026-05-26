@@ -257,12 +257,23 @@ impl Render for AgentOptionsMenu {
                 )
                 .into_any_element()
         } else {
-            let option_rows: Vec<_> = option_summaries
+            let (mcp_options, session_options): (Vec<_>, Vec<_>) = option_summaries
                 .into_iter()
-                .map(|option| self.render_option_row(option, cx).into_any_element())
-                .collect();
+                .partition(|option| option.id.to_string().starts_with("backboard_mcp_"));
 
-            v_flex().gap_0p5().children(option_rows).into_any_element()
+            let mut list = v_flex().gap_1();
+
+            if !session_options.is_empty() {
+                list = list.child(self.render_option_group(session_options, cx));
+            }
+
+            if !mcp_options.is_empty() {
+                list = list
+                    .child(self.render_section_label("MCP Calls", cx))
+                    .child(self.render_option_group(mcp_options, cx));
+            }
+
+            list.into_any_element()
         };
 
         let colors = cx.theme().colors();
@@ -319,6 +330,41 @@ impl Render for AgentOptionsMenu {
 }
 
 impl AgentOptionsMenu {
+    fn render_section_label(&self, label: &'static str, cx: &mut Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors();
+        v_flex()
+            .gap_1()
+            .pt_1()
+            .child(
+                div()
+                    .h(px(1.))
+                    .w_full()
+                    .bg(colors.border_variant.opacity(0.32)),
+            )
+            .child(
+                Label::new(label)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .mx_1(),
+            )
+            .into_any_element()
+    }
+
+    fn render_option_group(
+        &self,
+        options: Vec<ConfigOptionSummary>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        v_flex()
+            .gap_0p5()
+            .children(
+                options
+                    .into_iter()
+                    .map(|option| self.render_option_row(option, cx).into_any_element()),
+            )
+            .into_any_element()
+    }
+
     fn render_option_row(
         &self,
         option: ConfigOptionSummary,

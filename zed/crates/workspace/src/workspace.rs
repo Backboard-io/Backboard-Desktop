@@ -3769,8 +3769,41 @@ impl Workspace {
                 }
             }
 
+            this.update_in(cx, |workspace, window, cx| {
+                workspace.dismiss_welcome_pages_if_project_open(window, cx);
+            })
+            .ok();
+
             results
         })
+    }
+
+    fn dismiss_welcome_pages_if_project_open(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let has_project_folder = self.project.read(cx).visible_worktrees(cx).next().is_some();
+        if !has_project_folder {
+            return;
+        }
+
+        for pane in &self.panes {
+            let welcome_item_ids = pane
+                .read(cx)
+                .items()
+                .filter_map(|item| {
+                    item.downcast::<crate::welcome::WelcomePage>()?;
+                    Some(item.item_id())
+                })
+                .collect::<Vec<_>>();
+
+            pane.update(cx, |pane, cx| {
+                for item_id in welcome_item_ids {
+                    pane.remove_item(item_id, false, false, window, cx);
+                }
+            });
+        }
     }
 
     pub fn open_resolved_path(

@@ -3,8 +3,8 @@ use db::kvp::KeyValueStore;
 use fs::Fs;
 use gpui::{
     Action, AnyElement, App, AppContext, AsyncWindowContext, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, Global, IntoElement, KeyContext, ObjectFit, Render, ScrollHandle,
-    SharedString, Subscription, Task, WeakEntity, Window, actions, img,
+    FocusHandle, Focusable, Global, IntoElement, KeyContext, ObjectFit, PromptLevel, Render,
+    ScrollHandle, SharedString, Subscription, Task, WeakEntity, Window, actions, img,
 };
 use notifications::status_toast::StatusToast;
 use schemars::JsonSchema;
@@ -23,7 +23,6 @@ use workspace::welcome::WelcomePage;
 use workspace::{
     AppState, InterfaceMode, MultiWorkspace, Workspace,
     item::{Item, ItemEvent},
-    notifications::NotifyResultExt as _,
     open_new, register_serializable_item, with_active_or_new_workspace,
 };
 use zed_actions::{OpenOnboarding, ResetOnboarding};
@@ -273,7 +272,6 @@ pub fn show_onboarding_view(app_state: Arc<AppState>, cx: &mut App) -> Task<anyh
 }
 
 struct Onboarding {
-    workspace: WeakEntity<Workspace>,
     focus_handle: FocusHandle,
     scroll_handle: ScrollHandle,
     step: OnboardingStep,
@@ -299,7 +297,7 @@ impl Onboarding {
         "                 ████",
     ];
 
-    fn new(workspace: &Workspace, window: &mut Window, cx: &mut App) -> Entity<Self> {
+    fn new(_workspace: &Workspace, window: &mut Window, cx: &mut App) -> Entity<Self> {
         let font_family_cache = theme::FontFamilyCache::global(cx);
 
         telemetry::event!("Welcome Agent Setup Viewed");
@@ -322,7 +320,6 @@ impl Onboarding {
             .detach();
 
             Self {
-                workspace: workspace.weak_handle(),
                 focus_handle: cx.focus_handle(),
                 scroll_handle: ScrollHandle::new(),
                 step: OnboardingStep::Splash,
@@ -432,6 +429,8 @@ impl Onboarding {
             });
         }
 
+        Self::show_take_tour_prompt(window, cx);
+
         match level {
             ExperienceLevel::Beginner => {
                 close_onboarding_tab(cx);
@@ -440,6 +439,38 @@ impl Onboarding {
                 go_to_welcome_page(cx);
             }
         }
+    }
+
+    fn show_take_tour_prompt(window: &mut Window, cx: &mut Context<Self>) {
+        let prompt = window.prompt(
+            PromptLevel::Info,
+            "Take a tour?",
+            Some("Get a quick in-app walkthrough of the main areas."),
+            &["Take a Tour", "Maybe Later"],
+            cx,
+        );
+
+        window
+            .spawn(cx, async move |cx| {
+                if prompt.await.ok() == Some(0) {
+                    let first_step = cx.update(|window, cx| {
+                        window.prompt(
+                            PromptLevel::Info,
+                            "Tour: Command center",
+                            Some(
+                                "Start in the sidebar. This is where chats, projects, tools, and agent workspaces live.",
+                            ),
+                            &["Got it"],
+                            cx,
+                        )
+                    })?;
+
+                    let _ = first_step.await;
+                }
+
+                anyhow::Ok(())
+            })
+            .detach();
     }
 
     fn shows_import_settings_step(level: ExperienceLevel) -> bool {
@@ -1000,36 +1031,16 @@ fn close_onboarding_tab(cx: &mut App) {
 
 fn go_to_welcome_page(cx: &mut App) {
     with_active_or_new_workspace(cx, |workspace, window, cx| {
-        let Some((onboarding_id, onboarding_idx)) = workspace
-            .active_pane()
-            .read(cx)
-            .items()
-            .enumerate()
-            .find_map(|(idx, item)| {
-                let _ = item.downcast::<Onboarding>()?;
-                Some((item.item_id(), idx))
-            })
-        else {
+        let Some(onboarding_id) = workspace.active_pane().read(cx).items().find_map(|item| {
+            let _ = item.downcast::<Onboarding>()?;
+            Some(item.item_id())
+        }) else {
             return;
         };
 
         workspace.active_pane().update(cx, |pane, cx| {
-            // Get the index here to get around the borrow checker
-            let idx = pane.items().enumerate().find_map(|(idx, item)| {
-                let _ = item.downcast::<WelcomePage>()?;
-                Some(idx)
-            });
-
-            if let Some(idx) = idx {
-                pane.activate_item(idx, true, true, window, cx);
-            } else {
-                let item = Box::new(
-                    cx.new(|cx| WelcomePage::new(workspace.weak_handle(), false, window, cx)),
-                );
-                pane.add_item(item, true, true, Some(onboarding_idx), window, cx);
-            }
-
             pane.remove_item(onboarding_id, false, false, window, cx);
+            window.focus(&pane.focus_handle(cx), cx);
         });
     });
 }

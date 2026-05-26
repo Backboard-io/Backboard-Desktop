@@ -2294,9 +2294,15 @@ impl Render for MultiWorkspace {
 
         if self.interface_mode == InterfaceMode::Simple {
             if let Some(view) = self.beginner_view.as_ref() {
+                let workspace = self.workspace().clone();
+                let mut workspace_key_context =
+                    workspace.update(cx, |workspace, cx| workspace.key_context(cx));
+                workspace_key_context.add("SimpleMode");
+                let root =
+                    workspace.update(cx, |workspace, cx| workspace.actions(div(), window, cx));
+
                 return client_side_decorations(
-                    div()
-                        .key_context("SimpleMode")
+                    root.key_context(workspace_key_context)
                         .flex()
                         .flex_col()
                         .size_full()
@@ -2458,10 +2464,15 @@ impl Render for MultiWorkspace {
 
         if self.tasks_expanded {
             if let Some(view) = self.tasks_view.as_ref() {
+                let workspace = self.workspace().clone();
+                let mut workspace_key_context =
+                    workspace.update(cx, |workspace, cx| workspace.key_context(cx));
+                workspace_key_context.add("BackboardTasksView");
+                let root =
+                    workspace.update(cx, |workspace, cx| workspace.actions(div(), window, cx));
                 let titlebar = self.workspace().read(cx).titlebar_item();
                 return client_side_decorations(
-                    div()
-                        .key_context("BackboardTasksView")
+                    root.key_context(workspace_key_context)
                         .relative()
                         .flex()
                         .flex_col()
@@ -2484,10 +2495,15 @@ impl Render for MultiWorkspace {
 
         if self.skills_expanded {
             if let Some(view) = self.skills_view.as_ref() {
+                let workspace = self.workspace().clone();
+                let mut workspace_key_context =
+                    workspace.update(cx, |workspace, cx| workspace.key_context(cx));
+                workspace_key_context.add("BackboardSkillsView");
+                let root =
+                    workspace.update(cx, |workspace, cx| workspace.actions(div(), window, cx));
                 let titlebar = self.workspace().read(cx).titlebar_item();
                 return client_side_decorations(
-                    div()
-                        .key_context("BackboardSkillsView")
+                    root.key_context(workspace_key_context)
                         .relative()
                         .flex()
                         .flex_col()
@@ -2509,10 +2525,14 @@ impl Render for MultiWorkspace {
         }
 
         if self.git_expanded {
+            let workspace = self.workspace().clone();
+            let mut workspace_key_context =
+                workspace.update(cx, |workspace, cx| workspace.key_context(cx));
+            workspace_key_context.add("GitView");
+            let root = workspace.update(cx, |workspace, cx| workspace.actions(div(), window, cx));
             let titlebar = self.workspace().read(cx).titlebar_item();
             return client_side_decorations(
-                div()
-                    .key_context("GitView")
+                root.key_context(workspace_key_context)
                     .relative()
                     .flex()
                     .flex_col()

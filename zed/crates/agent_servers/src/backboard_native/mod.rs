@@ -125,6 +125,7 @@ pub(crate) struct FeatureSettings {
     pub image_generation: String,
     pub voice_mode: String,
     pub live_voice: String,
+    pub mcp_figma: String,
 }
 
 impl Default for FeatureSettings {
@@ -134,6 +135,7 @@ impl Default for FeatureSettings {
             image_generation: "off".to_string(),
             voice_mode: "off".to_string(),
             live_voice: "off".to_string(),
+            mcp_figma: "off".to_string(),
         }
     }
 }
@@ -1151,6 +1153,11 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
                             if value == "on" { "on" } else { "off" }.to_string();
                         changed = true;
                     }
+                    "backboard_mcp_figma" => {
+                        session.feature_settings.mcp_figma =
+                            if value == "on" { "on" } else { "off" }.to_string();
+                        changed = true;
+                    }
                     _ => {}
                 }
                 if changed {
@@ -1491,6 +1498,19 @@ fn config_options(
         )
         .description("Controls Backboard realtime voice WebSocket mode.")
         .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::select(
+            "backboard_mcp_figma",
+            "Figma",
+            feature_settings.mcp_figma.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new("off", "Off")
+                    .description("Do not enable Figma MCP calls for this session."),
+                acp::SessionConfigSelectOption::new("on", "On")
+                    .description("Allow Backboard to use Figma MCP calls when useful."),
+            ],
+        )
+        .description("Controls Backboard Figma MCP calls.")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel),
     ]
 }
 
@@ -1603,6 +1623,7 @@ mod tests {
             image_generation: "auto".to_string(),
             voice_mode: "tts".to_string(),
             live_voice: "on".to_string(),
+            mcp_figma: "on".to_string(),
         };
         let options = config_options("free", "fast", &settings);
         let ids = options
@@ -1615,6 +1636,7 @@ mod tests {
         assert!(ids.contains(&"backboard_image_generation".to_string()));
         assert!(ids.contains(&"backboard_voice_mode".to_string()));
         assert!(ids.contains(&"backboard_live_voice".to_string()));
+        assert!(ids.contains(&"backboard_mcp_figma".to_string()));
     }
 
     #[gpui::test]
@@ -1692,6 +1714,21 @@ mod tests {
         assert_eq!(
             option_current_value(&voice_options, "backboard_voice_mode").as_ref(),
             Some(&acp::SessionConfigValueId::new("tts"))
+        );
+
+        let figma_options = cx
+            .update(|cx| {
+                config_options.set_config_option(
+                    acp::SessionConfigId::new("backboard_mcp_figma"),
+                    acp::SessionConfigValueId::new("on"),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            option_current_value(&figma_options, "backboard_mcp_figma").as_ref(),
+            Some(&acp::SessionConfigValueId::new("on"))
         );
     }
 }

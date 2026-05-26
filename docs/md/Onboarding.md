@@ -132,7 +132,21 @@ Keep it short and optional. The user should never feel stuck on this page.
 
 ---
 
-# 6. First Magic Moment
+# 6. Take a Tour
+
+After onboarding completes, show a simple prompt:
+
+> Take a tour?
+
+Actions:
+- Take a Tour
+- Maybe Later
+
+Keep this lightweight. Do not open an external link for the tour. Keep it in-app with small highlight-style prompts.
+
+---
+
+# 7. First Magic Moment
 
 The user should immediately see the AI do something useful after setup.
 
@@ -147,7 +161,7 @@ The onboarding is not complete until the user sees real value.
 
 ---
 
-# 7. Lightweight Feature Hints
+# 8. Lightweight Feature Hints
 
 Avoid long tutorials.
 
@@ -160,7 +174,7 @@ Hints should appear naturally inside the editor.
 
 ---
 
-# 8. Advanced Setup
+# 9. Advanced Setup
 
 Never force advanced setup upfront.
 

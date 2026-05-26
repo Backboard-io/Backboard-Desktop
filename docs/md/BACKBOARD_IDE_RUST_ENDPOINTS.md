@@ -91,6 +91,7 @@ Native Rust currently uses the broad `limit=15000` model catalog request. The hi
 | `image_model_name` | No | Image model name. IDE default: `google/gemini-3.1-flash-image-preview`. |
 | `voice` | No | JSON-encoded REST voice config with `stt`, `tts`, or both. |
 | `send_to_llm` | No | `"false"` for STT-only, `"true"` for TTS/conversation voice modes. |
+| `mcp_calls` | No | JSON-encoded list of enabled MCP call groups, e.g. `["figma"]`. |
 | `audio_file` | No | Multipart audio file for REST STT/conversation mode. |
 | `thinking` | No | JSON-encoded reasoning controls. |
 | `tools` | No | JSON-encoded tool definitions for this turn. |

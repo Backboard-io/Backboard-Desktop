@@ -322,6 +322,8 @@ pub struct SendMessageRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub send_to_llm: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_calls: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing)]
     pub audio_file: Option<AudioAttachment>,
@@ -350,6 +352,7 @@ impl Default for SendMessageRequest {
             image_model_name: None,
             voice: None,
             send_to_llm: None,
+            mcp_calls: None,
             max_tokens: None,
             audio_file: None,
         }
@@ -782,6 +785,9 @@ fn message_form(request: &SendMessageRequest, stream: bool) -> Result<Vec<(Strin
     if let Some(send_to_llm) = request.send_to_llm {
         form.push(("send_to_llm".to_string(), send_to_llm.to_string()));
     }
+    if let Some(mcp_calls) = request.mcp_calls.clone() {
+        form.push(("mcp_calls".to_string(), serde_json::to_string(&mcp_calls)?));
+    }
     if let Some(max_tokens) = request.max_tokens {
         form.push(("max_tokens".to_string(), max_tokens.to_string()));
     }
@@ -1084,6 +1090,7 @@ mod tests {
                 }
             })),
             send_to_llm: Some(true),
+            mcp_calls: Some(json!(["figma"])),
             ..SendMessageRequest::default()
         };
 
@@ -1099,6 +1106,7 @@ mod tests {
             key == "voice" && value.contains("gpt-4o-mini-tts") && value.contains("alloy")
         }));
         assert!(form.contains(&("send_to_llm".to_string(), "true".to_string())));
+        assert!(form.contains(&("mcp_calls".to_string(), "[\"figma\"]".to_string())));
     }
 
     #[test]

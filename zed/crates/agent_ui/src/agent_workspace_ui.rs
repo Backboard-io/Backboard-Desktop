@@ -3,8 +3,9 @@ use editor::Editor;
 use gpui::{
     AnyElement, App, Context, DefiniteLength, Entity, FocusHandle, Focusable, FontWeight, Hsla,
     InteractiveElement, MouseButton, ParentElement, Pixels, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, prelude::*,
+    StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, prelude::*,
 };
+use std::time::Duration;
 use ui::{
     Button, ButtonSize, ButtonStyle, ElevationIndex, Icon, IconButton, IconSize, Label, LabelSize,
     TintColor, Tooltip, Vector, VectorName, WithScrollbar, prelude::*,
@@ -19,6 +20,9 @@ use crate::agent_panel::{
 use crate::thread_metadata_store::ThreadId;
 use zed_actions::agent::Chat;
 
+const SHADOW_AGENT_PREVIEW_CARD_COUNT: usize = 6;
+const WORKSPACE_STREAM_UPDATE_INTERVAL: Duration = Duration::from_millis(80);
+
 pub struct BackboardAgentWorkspacePage {
     workspace: WeakEntity<Workspace>,
     focus_handle: FocusHandle,
@@ -29,6 +33,8 @@ pub struct BackboardAgentWorkspacePage {
     card_chat_inputs: HashMap<ThreadId, Entity<Editor>>,
     show_token_context: bool,
     observing_agent_panel: bool,
+    pending_workspace_update: bool,
+    workspace_update_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -154,7 +160,9 @@ impl BackboardAgentWorkspacePage {
             let mut subscriptions = Vec::new();
             let observing_agent_panel = panel.is_some();
             if let Some(panel) = panel {
-                subscriptions.push(cx.observe(&panel, |_, _, cx| cx.notify()));
+                subscriptions.push(cx.observe(&panel, |this: &mut Self, _, cx| {
+                    this.schedule_workspace_update(cx);
+                }));
                 subscriptions.push(cx.subscribe_in(&panel, window, Self::handle_agent_panel_event));
             }
 
@@ -168,6 +176,8 @@ impl BackboardAgentWorkspacePage {
                 card_chat_inputs: HashMap::default(),
                 show_token_context: false,
                 observing_agent_panel,
+                pending_workspace_update: false,
+                workspace_update_task: None,
                 _subscriptions: subscriptions,
             }
         })
@@ -226,6 +236,25 @@ impl BackboardAgentWorkspacePage {
             .unwrap_or_default()
     }
 
+    fn schedule_workspace_update(&mut self, cx: &mut Context<Self>) {
+        if self.pending_workspace_update {
+            return;
+        }
+
+        self.pending_workspace_update = true;
+        self.workspace_update_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(WORKSPACE_STREAM_UPDATE_INTERVAL)
+                .await;
+            this.update(cx, |this, cx| {
+                this.pending_workspace_update = false;
+                this.workspace_update_task = None;
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
     fn ensure_agent_panel(
         &mut self,
         window: &mut Window,
@@ -242,7 +271,9 @@ impl BackboardAgentWorkspacePage {
 
         if !self.observing_agent_panel {
             self._subscriptions
-                .push(cx.observe(&panel, |_, _, cx| cx.notify()));
+                .push(cx.observe(&panel, |this: &mut Self, _, cx| {
+                    this.schedule_workspace_update(cx);
+                }));
             self._subscriptions.push(cx.subscribe_in(
                 &panel,
                 window,
@@ -574,9 +605,9 @@ impl BackboardAgentWorkspacePage {
         let card_width = if right_panel_open {
             relative(0.48)
         } else {
-            relative(0.235)
+            relative(0.315)
         };
-        let card_min_width = if right_panel_open { px(320.) } else { px(260.) };
+        let card_min_width = if right_panel_open { px(320.) } else { px(300.) };
 
         if summaries.is_empty() {
             return v_flex()
@@ -645,13 +676,27 @@ impl BackboardAgentWorkspacePage {
                 .into_any_element();
         }
 
-        let cards = summaries
+        let selected_thread_id = self.selected_thread_id;
+        self.card_chat_inputs.retain(|thread_id, _| {
+            Some(*thread_id) == selected_thread_id
+                && summaries
+                    .iter()
+                    .any(|summary| summary.thread_id == *thread_id)
+        });
+
+        let mut cards = summaries
             .into_iter()
             .map(|summary| {
                 self.render_agent_workspace_card(summary, card_width, card_min_width, window, cx)
                     .into_any_element()
             })
             .collect::<Vec<_>>();
+        for index in 0..SHADOW_AGENT_PREVIEW_CARD_COUNT {
+            cards.push(
+                self.render_shadow_agent_preview_card(index, card_width, card_min_width, cx)
+                    .into_any_element(),
+            );
+        }
 
         v_flex()
             .size_full()
@@ -834,14 +879,21 @@ impl BackboardAgentWorkspacePage {
             .as_ref()
             .map(|label| label.as_ref().to_lowercase())
             .unwrap_or_else(|| "build".to_string());
-        let chat_input = self.card_chat_input(thread_id, window, cx);
+        let chat_bar = if selected {
+            let chat_input = self.card_chat_input(thread_id, window, cx);
+            self.render_card_chat_bar(thread_id, chat_input, window, cx)
+                .into_any_element()
+        } else {
+            self.render_card_chat_preview(thread_id, thread_key.clone(), cx)
+                .into_any_element()
+        };
 
         v_flex()
             .id(format!("backboard-agent-card-{thread_key}"))
             .w(card_width)
             .min_w(card_min_width)
             .max_w(relative(1.))
-            .h(px(420.))
+            .h(px(440.))
             .flex_none()
             .rounded(px(8.))
             .border_1()
@@ -931,7 +983,149 @@ impl BackboardAgentWorkspacePage {
             )
             .child(self.render_card_file_chips(&summary, cx))
             .child(self.render_card_footer(&summary, thread_key, cx))
-            .child(self.render_card_chat_bar(thread_id, chat_input, window, cx))
+            .child(chat_bar)
+    }
+
+    fn render_shadow_agent_preview_card(
+        &self,
+        index: usize,
+        card_width: DefiniteLength,
+        card_min_width: Pixels,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let border_color = colors.border_variant.opacity(0.32);
+        let background = colors
+            .elevated_surface_background
+            .blend(colors.editor_background.opacity(0.32));
+        let panel_background = colors.panel_background.opacity(0.14);
+        let muted_fill = colors.element_background.opacity(0.46);
+        let accent_fill = colors.text_accent.opacity(0.2);
+        let row_widths = [0.9, 0.66, 0.78];
+
+        v_flex()
+            .id(format!("backboard-agent-shadow-preview-card-{index}"))
+            .w(card_width)
+            .min_w(card_min_width)
+            .max_w(relative(1.))
+            .h(px(440.))
+            .flex_none()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(border_color)
+            .bg(background)
+            .overflow_hidden()
+            .opacity(0.38)
+            .child(
+                h_flex()
+                    .h(px(56.))
+                    .px_3()
+                    .gap_2()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(colors.border_variant.opacity(0.28))
+                    .child(div().size(px(8.)).rounded_full().bg(accent_fill))
+                    .child(
+                        div()
+                            .h(px(14.))
+                            .w(relative(0.34))
+                            .rounded(px(3.))
+                            .bg(muted_fill),
+                    )
+                    .child(div().flex_1())
+                    .child(div().h(px(22.)).w(px(60.)).rounded(px(4.)).bg(muted_fill)),
+            )
+            .child(
+                v_flex()
+                    .min_h(px(58.))
+                    .px_3()
+                    .py_1p5()
+                    .gap_1()
+                    .border_b_1()
+                    .border_color(colors.border_variant.opacity(0.22))
+                    .bg(panel_background)
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(Label::new("$").size(LabelSize::Small).color(Color::Muted))
+                            .child(div().h(px(12.)).w(px(44.)).rounded(px(3.)).bg(muted_fill)),
+                    )
+                    .child(
+                        div()
+                            .h(px(13.))
+                            .w(relative(0.48))
+                            .rounded(px(3.))
+                            .bg(muted_fill),
+                    ),
+            )
+            .child(v_flex().flex_1().min_h_0().gap_2().px_3().py_3().children(
+                row_widths.into_iter().map(|width| {
+                    div()
+                        .h(px(28.))
+                        .w(relative(1.))
+                        .rounded(px(5.))
+                        .border_1()
+                        .border_color(colors.border_variant.opacity(0.18))
+                        .bg(colors.panel_background.opacity(0.12))
+                        .px_2()
+                        .flex()
+                        .items_center()
+                        .child(
+                            div()
+                                .h(px(10.))
+                                .w(relative(width))
+                                .rounded(px(3.))
+                                .bg(muted_fill),
+                        )
+                }),
+            ))
+            .child(
+                h_flex()
+                    .min_h(px(38.))
+                    .px_3()
+                    .py_1p5()
+                    .items_center()
+                    .border_t_1()
+                    .border_color(colors.border_variant.opacity(0.22))
+                    .child(div().h(px(12.)).w(px(94.)).rounded(px(3.)).bg(muted_fill)),
+            )
+            .child(
+                h_flex()
+                    .h(px(38.))
+                    .px_3()
+                    .gap_2()
+                    .items_center()
+                    .border_t_1()
+                    .border_color(colors.border_variant.opacity(0.28))
+                    .child(
+                        div()
+                            .h(px(12.))
+                            .w(relative(0.48))
+                            .rounded(px(3.))
+                            .bg(muted_fill),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .h(px(50.))
+                    .px_2()
+                    .gap_1p5()
+                    .items_center()
+                    .border_t_1()
+                    .border_color(colors.border_variant.opacity(0.24))
+                    .bg(panel_background)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(34.))
+                            .rounded(px(6.))
+                            .border_1()
+                            .border_color(colors.border_variant.opacity(0.28))
+                            .bg(colors.editor_background.opacity(0.62)),
+                    ),
+            )
     }
 
     fn render_card_activity(
@@ -1259,6 +1453,60 @@ impl BackboardAgentWorkspacePage {
                             })),
                     )
                 },
+            )
+    }
+
+    fn render_card_chat_preview(
+        &self,
+        thread_id: ThreadId,
+        thread_key: String,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let input_background = colors
+            .editor_background
+            .blend(colors.element_background.opacity(0.06));
+
+        h_flex()
+            .id(format!("agent-card-chat-preview-{thread_key}"))
+            .h(px(50.))
+            .px_2()
+            .gap_1p5()
+            .items_center()
+            .border_t_1()
+            .border_color(colors.border_variant.opacity(0.32))
+            .bg(colors.panel_background.opacity(0.16))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.open_run(thread_id, window, cx);
+            }))
+            .child(
+                Icon::new(IconName::Chat)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(34.))
+                    .px_2()
+                    .items_center()
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(colors.border_variant.opacity(0.36))
+                    .bg(input_background)
+                    .child(
+                        Label::new("Message agent...")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted)
+                            .truncate(),
+                    ),
+            )
+            .child(
+                Icon::new(IconName::Send)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
             )
     }
 
