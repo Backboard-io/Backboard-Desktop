@@ -1,10 +1,16 @@
-use crate::{git_panel::GitPanel, project_diff::ProjectDiff};
+use crate::{
+    git_panel::{GitPanel, GitPanelChangeSummary},
+    project_diff::ProjectDiff,
+};
 use gpui::{
     Action, ClickEvent, Entity, EntityId, FocusHandle, Focusable, FontWeight, MouseButton, Pixels,
     Subscription,
 };
 use project::Project;
-use ui::{Icon, IconName, IconSize, LabelSize, Tooltip, prelude::*};
+use ui::{
+    Button, ButtonSize, ButtonStyle, Icon, IconName, IconSize, LabelSize, TintColor, Tooltip,
+    prelude::*,
+};
 use workspace::Workspace;
 
 pub struct GitWorkspaceView {
@@ -42,32 +48,75 @@ impl GitWorkspaceView {
     }
 
     fn render_top_bar(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors();
-        let panel = self.git_panel.read(cx);
-        let repo_name = panel
-            .active_repository_name(cx)
-            .unwrap_or_else(|| "No repository".into());
-        let branch_name = panel
-            .active_branch_name(cx)
-            .unwrap_or_else(|| "No branch".into());
-        let changes_count = panel.changes_count();
-        let toolbar_bg = colors
-            .panel_background
-            .blend(colors.tab_bar_background.opacity(0.56));
+        let (border_variant, toolbar_bg) = {
+            let colors = cx.theme().colors();
+            (
+                colors.border_variant,
+                colors
+                    .panel_background
+                    .blend(colors.tab_bar_background.opacity(0.56)),
+            )
+        };
+        let remote_button = self
+            .git_panel
+            .update(cx, |panel, cx| panel.render_remote_button(cx));
+        let (
+            repo_name,
+            has_repository,
+            branch_name,
+            has_branch,
+            remote_summary,
+            change_summary,
+            can_stage_all,
+            can_unstage_all,
+            can_commit,
+        ) = {
+            let panel = self.git_panel.read(cx);
+            let repo_name = panel.active_repository_name(cx);
+            let branch_name = panel.active_branch_name(cx);
+
+            (
+                repo_name.clone().unwrap_or_else(|| "No repository".into()),
+                repo_name.is_some(),
+                branch_name.clone().unwrap_or_else(|| "No branch".into()),
+                branch_name.is_some(),
+                panel
+                    .active_remote_summary(cx)
+                    .unwrap_or_else(|| "No remote".into()),
+                panel.change_summary(cx),
+                panel.can_stage_all(),
+                panel.can_unstage_all(),
+                panel.can_commit(),
+            )
+        };
+
+        let stage_all = can_stage_all || !can_unstage_all;
+        let stage_button_label = if stage_all {
+            "Stage All"
+        } else {
+            "Unstage All"
+        };
+        let stage_button_disabled = if stage_all {
+            !can_stage_all
+        } else {
+            !can_unstage_all
+        };
 
         h_flex()
-            .h(px(74.))
+            .h(px(86.))
             .w_full()
             .flex_shrink_0()
+            .gap_2()
+            .px_3()
             .border_b_1()
-            .border_color(colors.border_variant)
+            .border_color(border_variant)
             .bg(toolbar_bg)
             .child(self.render_toolbar_tile(
                 "git-workspace-repository",
                 IconName::LockOutlined,
                 "Current Repository",
                 repo_name,
-                px(390.),
+                px(260.),
                 true,
                 Some("Select repository"),
                 move |_, window, cx| {
@@ -80,7 +129,7 @@ impl GitWorkspaceView {
                 IconName::GitBranch,
                 "Current Branch",
                 branch_name,
-                px(350.),
+                px(220.),
                 true,
                 Some("Switch branch"),
                 move |_, window, cx| {
@@ -89,11 +138,11 @@ impl GitWorkspaceView {
                 cx,
             ))
             .child(self.render_toolbar_tile(
-                "git-workspace-fetch",
+                "git-workspace-remote",
                 IconName::RotateCw,
-                "Fetch origin",
-                format!("{changes_count} changed files"),
-                px(350.),
+                "Remote",
+                remote_summary,
+                px(220.),
                 false,
                 Some("Fetch updates from remote"),
                 move |_, window, cx| {
@@ -101,10 +150,108 @@ impl GitWorkspaceView {
                 },
                 cx,
             ))
+            .child(self.render_toolbar_tile(
+                "git-workspace-working-tree",
+                IconName::FileGit,
+                "Working Tree",
+                Self::format_change_summary(change_summary),
+                px(250.),
+                false,
+                Some("Open diff"),
+                move |_, _, cx| {
+                    cx.defer(|cx| {
+                        cx.dispatch_action(&crate::project_diff::Diff);
+                    })
+                },
+                cx,
+            ))
             .child(div().flex_1().h_full())
+            .child(
+                h_flex()
+                    .flex_shrink_0()
+                    .items_center()
+                    .gap_1p5()
+                    .child(remote_button.unwrap_or_else(|| {
+                        Button::new("git-workspace-fetch-button", "Fetch")
+                            .size(ButtonSize::Compact)
+                            .style(ButtonStyle::Outlined)
+                            .start_icon(Icon::new(IconName::RotateCw))
+                            .disabled(!has_repository)
+                            .tooltip(Tooltip::text("Fetch updates from remote"))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(git::Fetch.boxed_clone(), cx);
+                            })
+                            .into_any_element()
+                    }))
+                    .child(
+                        Button::new("git-workspace-create-pr", "Pull Request")
+                            .size(ButtonSize::Compact)
+                            .style(ButtonStyle::Outlined)
+                            .start_icon(Icon::new(IconName::PullRequest))
+                            .disabled(!has_branch)
+                            .tooltip(Tooltip::text("Create pull request"))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(
+                                    zed_actions::git::CreatePullRequest.boxed_clone(),
+                                    cx,
+                                );
+                            }),
+                    )
+                    .child(
+                        Button::new("git-workspace-stage-all", stage_button_label)
+                            .size(ButtonSize::Compact)
+                            .style(ButtonStyle::Outlined)
+                            .start_icon(Icon::new(IconName::Check))
+                            .disabled(stage_button_disabled)
+                            .tooltip(Tooltip::text(if stage_all {
+                                "Stage all unstaged changes"
+                            } else {
+                                "Unstage all staged changes"
+                            }))
+                            .on_click(move |_, window, cx| {
+                                if stage_all {
+                                    window.dispatch_action(git::StageAll.boxed_clone(), cx);
+                                } else {
+                                    window.dispatch_action(git::UnstageAll.boxed_clone(), cx);
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new("git-workspace-commit", "Commit")
+                            .size(ButtonSize::Compact)
+                            .style(ButtonStyle::Tinted(TintColor::Accent))
+                            .start_icon(Icon::new(IconName::GitCommit))
+                            .disabled(!can_commit)
+                            .tooltip(Tooltip::text("Commit changes"))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(git::Commit.boxed_clone(), cx);
+                            }),
+                    ),
+            )
             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                 cx.stop_propagation();
             })
+    }
+
+    fn format_change_summary(summary: GitPanelChangeSummary) -> SharedString {
+        if summary.changed == 0 {
+            return "Clean".into();
+        }
+
+        let changed = match summary.changed {
+            1 => "1 changed file".to_string(),
+            count => format!("{count} changed files"),
+        };
+
+        if summary.conflicts > 0 {
+            return format!("{changed}, {} conflicted", summary.conflicts).into();
+        }
+
+        match (summary.staged, summary.unstaged) {
+            (0, unstaged) => format!("{changed}, {unstaged} unstaged").into(),
+            (staged, 0) => format!("{changed}, {staged} staged").into(),
+            (staged, unstaged) => format!("{changed}, {staged} staged, {unstaged} unstaged").into(),
+        }
     }
 
     fn render_toolbar_tile(
@@ -127,6 +274,8 @@ impl GitWorkspaceView {
             .id(id)
             .h_full()
             .w(width)
+            .min_w(px(160.))
+            .flex_shrink()
             .px_4()
             .gap_3()
             .items_center()

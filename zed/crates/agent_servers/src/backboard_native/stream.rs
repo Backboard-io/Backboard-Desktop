@@ -75,6 +75,18 @@ pub async fn run_prompt(
     } else {
         message.clone()
     };
+    let message_for_model = match prompt_with_selected_skills(&runtime, &message_for_model) {
+        Ok(message) => message,
+        Err(error) => {
+            emit_agent_text(
+                &state,
+                &runtime,
+                &format!("Could not load selected skill: {error:#}"),
+                cx,
+            )?;
+            return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
+        }
+    };
 
     emit_progress(&state, &runtime, "Preparing workspace context.", cx)?;
 
@@ -1221,10 +1233,45 @@ fn send_to_llm_for_voice(feature_settings: &super::FeatureSettings) -> Option<bo
     }
 }
 
+fn prompt_with_selected_skills(runtime: &SessionRuntime, message: &str) -> Result<String> {
+    if runtime.feature_settings.selected_skills.is_empty() {
+        return Ok(message.to_string());
+    }
+
+    let available_skills = super::discover_file_system_skills(&runtime.workspace);
+    let mut skill_blocks = Vec::new();
+    for selected_skill in &runtime.feature_settings.selected_skills {
+        let skill = available_skills
+            .iter()
+            .find(|skill| &skill.relative_path == selected_skill)
+            .with_context(|| format!("{selected_skill} is no longer available"))?;
+        let content = std::fs::read_to_string(&skill.path)
+            .with_context(|| format!("reading {}", skill.path.display()))?;
+        skill_blocks.push(format!(
+            "<skill>\nName: {}\nPath: {}\n\n{}\n</skill>",
+            skill.name,
+            skill.path.display(),
+            content
+        ));
+    }
+
+    Ok(format!(
+        "Use these selected skills as additional operating instructions for this task.\n\n<selected_skills>\n{}\n</selected_skills>\n\nUser request:\n\n{}",
+        skill_blocks.join("\n\n"),
+        message
+    ))
+}
+
 fn mcp_calls_payload(feature_settings: &super::FeatureSettings) -> Option<Value> {
     let mut enabled = Vec::new();
     if feature_settings.mcp_figma == "on" {
         enabled.push("figma");
+    }
+    if feature_settings.mcp_notion == "on" {
+        enabled.push("notion");
+    }
+    if feature_settings.mcp_google == "on" {
+        enabled.push("google");
     }
 
     (!enabled.is_empty()).then(|| json!(enabled))
@@ -1378,13 +1425,64 @@ mod tests {
     }
 
     #[test]
-    fn mcp_calls_payload_includes_enabled_figma() {
+    fn mcp_calls_payload_includes_enabled_servers() {
         let settings = super::super::FeatureSettings {
             mcp_figma: "on".to_string(),
+            mcp_notion: "on".to_string(),
+            mcp_google: "on".to_string(),
             ..Default::default()
         };
 
-        assert_eq!(mcp_calls_payload(&settings), Some(json!(["figma"])));
+        assert_eq!(
+            mcp_calls_payload(&settings),
+            Some(json!(["figma", "notion", "google"]))
+        );
+    }
+
+    #[test]
+    fn selected_skills_are_added_to_prompt() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let skill_dir = temp_dir
+            .path()
+            .join("assets")
+            .join("skills")
+            .join("web")
+            .join("modern");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: modern
+description: Modern design guidance.
+---
+
+Use quiet typography.
+"#,
+        )
+        .expect("write skill");
+
+        let runtime = SessionRuntime {
+            session_id: acp::SessionId::new("test-session"),
+            thread: WeakEntity::new_invalid(),
+            workspace: temp_dir.path().to_path_buf(),
+            provider: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            mode: acp::SessionModeId::new("free"),
+            intensity: "fast".to_string(),
+            feature_settings: super::super::FeatureSettings {
+                selected_skills: vec!["web/modern".to_string()],
+                ..Default::default()
+            },
+            cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+
+        let prompt = prompt_with_selected_skills(&runtime, "Build a settings page.")
+            .expect("selected skill should load");
+
+        assert!(prompt.contains("<selected_skills>"));
+        assert!(prompt.contains("Name: Modern"));
+        assert!(prompt.contains("Use quiet typography."));
+        assert!(prompt.contains("User request:\n\nBuild a settings page."));
     }
 
     #[test]

@@ -735,6 +735,16 @@ pub struct GitPanel {
     git_access: GitAccess,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct GitPanelChangeSummary {
+    pub changed: usize,
+    pub staged: usize,
+    pub unstaged: usize,
+    pub conflicts: usize,
+    pub new_files: usize,
+    pub tracked: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct BulkStaging {
     repo_id: RepositoryId,
@@ -6169,6 +6179,43 @@ impl GitPanel {
         self.changes_count
     }
 
+    pub(crate) fn change_summary(&self, cx: &App) -> GitPanelChangeSummary {
+        let Some(repo) = self.active_repository.as_ref() else {
+            return GitPanelChangeSummary {
+                changed: self.changes_count,
+                staged: self.total_staged_count(),
+                unstaged: self.changes_count.saturating_sub(self.total_staged_count()),
+                conflicts: self.conflicted_count,
+                new_files: self.new_count,
+                tracked: self.tracked_count,
+            };
+        };
+        let repo = repo.read(cx);
+        let mut summary = GitPanelChangeSummary::default();
+
+        for entry in self.entries.iter().filter_map(|entry| entry.status_entry()) {
+            summary.changed += 1;
+
+            let staging = Self::stage_status_for_entry(entry, repo);
+            if staging.has_staged() {
+                summary.staged += 1;
+            }
+            if staging.has_unstaged() {
+                summary.unstaged += 1;
+            }
+
+            if repo.had_conflict_on_last_merge_head_change(&entry.repo_path) {
+                summary.conflicts += 1;
+            } else if entry.status.is_created() {
+                summary.new_files += 1;
+            } else {
+                summary.tracked += 1;
+            }
+        }
+
+        summary
+    }
+
     pub(crate) fn active_repository_name(&self, cx: &App) -> Option<SharedString> {
         self.active_repository
             .as_ref()
@@ -6182,6 +6229,26 @@ impl GitPanel {
             .branch
             .as_ref()
             .map(|branch| branch.name().to_owned().into())
+    }
+
+    pub(crate) fn active_remote_summary(&self, cx: &App) -> Option<SharedString> {
+        let branch = self.active_repository.as_ref()?.read(cx).branch.clone()?;
+        Some(match branch.upstream.as_ref() {
+            Some(Upstream {
+                tracking: UpstreamTracking::Tracked(UpstreamTrackingStatus { ahead, behind }),
+                ..
+            }) => match (*ahead, *behind) {
+                (0, 0) => "Up to date".into(),
+                (ahead, 0) => format!("{ahead} ahead").into(),
+                (0, behind) => format!("{behind} behind").into(),
+                (ahead, behind) => format!("{ahead} ahead, {behind} behind").into(),
+            },
+            Some(Upstream {
+                tracking: UpstreamTracking::Gone,
+                ..
+            }) => "Upstream gone".into(),
+            None => "Publish branch".into(),
+        })
     }
 
     pub fn selected_file_history_target(&self) -> Option<(Entity<Repository>, RepoPath)> {

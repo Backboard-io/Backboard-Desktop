@@ -69,7 +69,8 @@ use workspace::{MultiWorkspace, Workspace};
 use crate::agent_configuration::{ConfigureContextServerModal, ManageProfilesModal};
 pub use crate::agent_connection_store::{ActiveAcpConnection, AgentConnectionStore};
 pub use crate::agent_panel::{
-    AgentPanel, AgentPanelEvent, AgentPanelTerminalInfo, MaxIdleRetainedThreads, TerminalId,
+    AgentPanel, AgentPanelEvent, AgentPanelTerminalInfo, BackboardAgentWorkspaceKind,
+    BackboardAgentWorkspaceMode, BackboardAgentWorkspaceScope, MaxIdleRetainedThreads, TerminalId,
 };
 use crate::agent_registry_ui::AgentRegistryPage;
 pub use crate::agent_skills_page::BackboardSkillsPage;
@@ -89,7 +90,6 @@ pub use thread_import::{
     channels_with_threads, import_threads_from_other_channels,
 };
 use zed_actions;
-use zed_actions::agents_sidebar::ToggleThreadSwitcher;
 pub use zed_actions::{CreateWorktree, NewWorktreeBranchTarget, SwitchWorktree};
 
 pub const DEFAULT_THREAD_TITLE: &str = "Backboard Thread";
@@ -522,19 +522,15 @@ pub fn init(
                   cx: &mut Context<Workspace>| {
                 if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
                     multi_workspace.update(cx, |multi_workspace, cx| {
-                        multi_workspace.open_sidebar(cx);
+                        multi_workspace.set_multi_agent_expanded(true, window, cx);
                     });
-                    window
-                        .dispatch_action(Box::new(ToggleThreadSwitcher { select_last: false }), cx);
                 } else if let Some(multi_workspace) = workspace
                     .multi_workspace()
                     .and_then(|handle| handle.upgrade())
                 {
                     multi_workspace.update(cx, |multi_workspace, cx| {
-                        multi_workspace.open_sidebar(cx);
+                        multi_workspace.set_multi_agent_expanded(true, window, cx);
                     });
-                    window
-                        .dispatch_action(Box::new(ToggleThreadSwitcher { select_last: false }), cx);
                 }
             },
         );

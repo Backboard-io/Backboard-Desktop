@@ -1,17 +1,24 @@
 use crate::multibuffer_hint::MultibufferHint;
+use agent_ui::{
+    AgentPanel, BackboardAgentWorkspaceKind, BackboardAgentWorkspaceMode,
+    BackboardAgentWorkspaceScope,
+};
 use db::kvp::KeyValueStore;
 use fs::Fs;
 use gpui::{
     Action, AnyElement, App, AppContext, AsyncWindowContext, Context, Entity, EventEmitter,
     FocusHandle, Focusable, Global, IntoElement, KeyContext, ObjectFit, PromptLevel, Render,
-    ScrollHandle, SharedString, Subscription, Task, WeakEntity, Window, actions, img,
+    ScrollHandle, SharedString, Subscription, Task, TaskExt, WeakEntity, Window, actions, img,
 };
 use notifications::status_toast::StatusToast;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use settings::{SettingsStore, VsCodeSettingsSource};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use ui::{
     Divider, IconName, IconSize, KeyBinding, ParentElement as _, StatefulInteractiveElement,
     Vector, VectorName, WithScrollbar as _, prelude::*, rems_from_px,
@@ -21,7 +28,7 @@ use ui_input::InputField;
 pub use workspace::welcome::ShowWelcome;
 use workspace::welcome::WelcomePage;
 use workspace::{
-    AppState, InterfaceMode, MultiWorkspace, Workspace,
+    AppState, InterfaceMode, MultiWorkspace, OpenOptions, OpenVisible, Workspace,
     item::{Item, ItemEvent},
     open_new, register_serializable_item, with_active_or_new_workspace,
 };
@@ -82,6 +89,93 @@ impl ExperienceLevel {
             Self::Beginner => "beginner",
             Self::Developer => "developer",
             Self::Power => "power",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum FirstRepoTourWorkflow {
+    FixBug,
+    UnderstandCodebase,
+    GenerateTest,
+    RefactorFile,
+    ShipFeature,
+}
+
+impl FirstRepoTourWorkflow {
+    const ALL: [Self; 5] = [
+        Self::FixBug,
+        Self::UnderstandCodebase,
+        Self::GenerateTest,
+        Self::RefactorFile,
+        Self::ShipFeature,
+    ];
+
+    fn from_prompt_answer(answer: usize) -> Self {
+        Self::ALL.get(answer).copied().unwrap_or(Self::FixBug)
+    }
+
+    fn button_label(self) -> &'static str {
+        match self {
+            Self::FixBug => "Fix a Bug",
+            Self::UnderstandCodebase => "Understand This Codebase",
+            Self::GenerateTest => "Generate a Test",
+            Self::RefactorFile => "Refactor a File",
+            Self::ShipFeature => "Ship a Small Feature",
+        }
+    }
+
+    fn detail_label(self) -> &'static str {
+        match self {
+            Self::FixBug => "Draft fix",
+            Self::UnderstandCodebase => "Codepath explanation",
+            Self::GenerateTest => "Test generated",
+            Self::RefactorFile => "Safe edit plan",
+            Self::ShipFeature => "Small feature shipped",
+        }
+    }
+
+    fn focus_file(self) -> &'static str {
+        match self {
+            Self::GenerateTest => "test/cart.test.js",
+            _ => "src/cart.js",
+        }
+    }
+
+    fn task(self) -> &'static str {
+        match self {
+            Self::FixBug => {
+                "Fix the cart subtotal bug in the sample repo. `calculateSubtotal` in `src/cart.js` should multiply each item's price by its quantity, keep `npm test` passing, and return a short draft fix summary."
+            }
+            Self::UnderstandCodebase => {
+                "Explain the checkout codepath in this sample repo. Start from `src/cart.js`, connect it to `test/cart.test.js`, point out the existing subtotal bug, and return a concise codepath explanation."
+            }
+            Self::GenerateTest => {
+                "Add a focused test that proves cart subtotals account for item quantity. Run `npm test` and summarize the generated test."
+            }
+            Self::RefactorFile => {
+                "Refactor `src/cart.js` for clearer cart total calculations while keeping changes scoped. Start with a safe edit plan, make the smallest useful change, run `npm test`, and summarize the result."
+            }
+            Self::ShipFeature => {
+                "Add support for percentage discount codes in `src/cart.js` and cover it with `node:test`. Keep the API small, run `npm test`, and summarize the shipped change."
+            }
+        }
+    }
+
+    fn kind(self) -> BackboardAgentWorkspaceKind {
+        match self {
+            Self::UnderstandCodebase => BackboardAgentWorkspaceKind::Review,
+            Self::GenerateTest => BackboardAgentWorkspaceKind::Test,
+            Self::FixBug | Self::RefactorFile | Self::ShipFeature => {
+                BackboardAgentWorkspaceKind::Build
+            }
+        }
+    }
+
+    fn scope(self) -> BackboardAgentWorkspaceScope {
+        match self {
+            Self::GenerateTest => BackboardAgentWorkspaceScope::TestsOnly,
+            _ => BackboardAgentWorkspaceScope::WholeProject,
         }
     }
 }
@@ -443,7 +537,7 @@ impl Onboarding {
             });
         }
 
-        Self::show_take_tour_prompt(window, cx);
+        Self::show_first_repo_tour_prompt(window, cx);
 
         match level {
             ExperienceLevel::Beginner => {
@@ -455,36 +549,251 @@ impl Onboarding {
         }
     }
 
-    fn show_take_tour_prompt(window: &mut Window, cx: &mut Context<Self>) {
+    fn show_first_repo_tour_prompt(window: &mut Window, cx: &mut Context<Self>) {
+        let answers = [
+            FirstRepoTourWorkflow::FixBug.button_label(),
+            FirstRepoTourWorkflow::UnderstandCodebase.button_label(),
+            FirstRepoTourWorkflow::GenerateTest.button_label(),
+            FirstRepoTourWorkflow::RefactorFile.button_label(),
+            FirstRepoTourWorkflow::ShipFeature.button_label(),
+        ];
         let prompt = window.prompt(
             PromptLevel::Info,
-            "Take a tour?",
-            Some("Get a quick in-app walkthrough of the main areas."),
-            &["Take a Tour", "Maybe Later"],
+            "Start here: fix a bug",
+            Some(
+                "A sample repo will open now. Pick a focused first task; the recommended path is a draft bug fix.",
+            ),
+            &answers,
             cx,
         );
 
         window
             .spawn(cx, async move |cx| {
-                if prompt.await.ok() == Some(0) {
-                    let first_step = cx.update(|window, cx| {
-                        window.prompt(
-                            PromptLevel::Info,
-                            "Tour: Command center",
-                            Some(
-                                "Start in the sidebar. This is where chats, projects, tools, and agent workspaces live.",
-                            ),
-                            &["Got it"],
-                            cx,
-                        )
-                    })?;
+                let workflow = match prompt.await {
+                    Ok(answer) => FirstRepoTourWorkflow::from_prompt_answer(answer),
+                    Err(error) => {
+                        zlog::error!("first repo tour prompt closed before selection: {error}");
+                        return anyhow::Ok(());
+                    }
+                };
 
-                    let _ = first_step.await;
+                let repo_path = Self::create_first_repo_tour_repo(cx).await?;
+
+                cx.update(|window, cx| {
+                    Self::start_first_repo_tour(workflow, repo_path, window, cx);
+                })?;
+
+                let milestone_detail = format!(
+                    "Success milestones:\nRepo connected: backboard-tour-repo\nFirst task started: {}\nExpected output: {}",
+                    workflow.button_label(),
+                    workflow.detail_label(),
+                );
+                let milestone_prompt = cx.update(|window, cx| {
+                    window.prompt(
+                        PromptLevel::Info,
+                        "Repo tour started",
+                        Some(&milestone_detail),
+                        &["Open Agent Workspace"],
+                        cx,
+                    )
+                })?;
+
+                if milestone_prompt.await.is_ok() {
+                    cx.update(|window, cx| {
+                        if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
+                            multi_workspace.update(cx, |multi_workspace, cx| {
+                                multi_workspace.set_multi_agent_expanded(true, window, cx);
+                            });
+                        }
+                    })?;
                 }
 
                 anyhow::Ok(())
             })
+            .detach_and_log_err(cx);
+    }
+
+    async fn create_first_repo_tour_repo(cx: &mut AsyncWindowContext) -> anyhow::Result<PathBuf> {
+        let fs = cx.update(|_, cx| <dyn Fs>::global(cx))?;
+        let repo_path = Self::first_repo_tour_path();
+        fs.create_dir(&repo_path).await?;
+
+        for (relative_path, contents) in Self::first_repo_tour_files() {
+            fs.write(&repo_path.join(relative_path), contents.as_bytes())
+                .await?;
+        }
+
+        Ok(repo_path)
+    }
+
+    fn first_repo_tour_path() -> PathBuf {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis());
+        std::env::temp_dir().join(format!("backboard-tour-repo-{timestamp_ms}"))
+    }
+
+    fn first_repo_tour_files() -> [(&'static Path, &'static str); 5] {
+        [
+            (
+                Path::new("package.json"),
+                r#"{
+  "name": "backboard-tour-repo",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}
+"#,
+            ),
+            (
+                Path::new("README.md"),
+                r#"# Backboard Tour Repo
+
+This tiny checkout service is intentionally small so the first Agent task can produce useful output quickly.
+
+Try one focused workflow:
+
+- Fix the cart subtotal bug
+- Explain the checkout codepath
+- Generate a focused regression test
+- Refactor the cart file safely
+- Ship percentage discount support
+"#,
+            ),
+            (
+                Path::new("src/cart.js"),
+                r#"export function calculateSubtotal(items) {
+  return items.reduce((total, item) => total + item.price, 0);
+}
+
+export function calculateTax(subtotal, taxRate) {
+  return Number((subtotal * taxRate).toFixed(2));
+}
+
+export function formatReceipt(items, taxRate = 0.08) {
+  const subtotal = calculateSubtotal(items);
+  const tax = calculateTax(subtotal, taxRate);
+  const total = subtotal + tax;
+
+  return {
+    itemCount: items.reduce((count, item) => count + item.quantity, 0),
+    subtotal,
+    tax,
+    total,
+  };
+}
+"#,
+            ),
+            (
+                Path::new("test/cart.test.js"),
+                r#"import assert from "node:assert/strict";
+import test from "node:test";
+
+import { calculateSubtotal, formatReceipt } from "../src/cart.js";
+
+test("calculateSubtotal includes each item's quantity", () => {
+  const items = [
+    { name: "Notebook", price: 8, quantity: 2 },
+    { name: "Pen", price: 3, quantity: 4 },
+  ];
+
+  assert.equal(calculateSubtotal(items), 28);
+});
+
+test("formatReceipt returns item count, tax, and total", () => {
+  const receipt = formatReceipt([{ name: "Mug", price: 10, quantity: 2 }], 0.1);
+
+  assert.deepEqual(receipt, {
+    itemCount: 2,
+    subtotal: 20,
+    tax: 2,
+    total: 22,
+  });
+});
+"#,
+            ),
+            (Path::new(".gitignore"), "node_modules\n.DS_Store\n"),
+        ]
+    }
+
+    fn start_first_repo_tour(
+        workflow: FirstRepoTourWorkflow,
+        repo_path: PathBuf,
+        _window: &mut Window,
+        cx: &mut App,
+    ) {
+        with_active_or_new_workspace(cx, move |workspace, window, cx| {
+            let focus_path = repo_path.join(workflow.focus_file());
+            let open_task = workspace.open_paths(
+                vec![repo_path.clone(), focus_path],
+                OpenOptions {
+                    visible: Some(OpenVisible::All),
+                    focus: Some(true),
+                    ..Default::default()
+                },
+                None,
+                window,
+                cx,
+            );
+            cx.spawn(async move |_, _| {
+                for result in open_task.await.into_iter().flatten() {
+                    if let Err(error) = result {
+                        zlog::error!("failed to open first repo tour path: {error:#}");
+                    }
+                }
+            })
             .detach();
+
+            window.defer(cx, |window, cx| {
+                if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
+                    multi_workspace.update(cx, |multi_workspace, cx| {
+                        multi_workspace.set_multi_agent_expanded(true, window, cx);
+                    });
+                }
+            });
+
+            let workspace_handle = cx.weak_entity();
+            cx.spawn_in(window, async move |_, cx| {
+                let panel = match workspace_handle
+                    .read_with(cx, |workspace, cx| workspace.panel::<AgentPanel>(cx))
+                {
+                    Ok(Some(panel)) => panel,
+                    Ok(None) => {
+                        let panel = AgentPanel::load(workspace_handle.clone(), cx.clone()).await?;
+                        workspace_handle.update_in(&mut cx.clone(), |workspace, window, cx| {
+                            if let Some(existing_panel) = workspace.panel::<AgentPanel>(cx) {
+                                existing_panel
+                            } else {
+                                workspace.add_panel(panel.clone(), window, cx);
+                                panel
+                            }
+                        })?
+                    }
+                    Err(error) => {
+                        zlog::error!("failed to read workspace for first repo tour: {error:#}");
+                        return anyhow::Ok(());
+                    }
+                };
+
+                panel.update_in(&mut cx.clone(), |panel, window, cx| {
+                    panel.spawn_backboard_workspace_tour_agent(
+                        workflow.task().to_string(),
+                        repo_path,
+                        workflow.scope(),
+                        workflow.kind(),
+                        BackboardAgentWorkspaceMode::Free,
+                        window,
+                        cx,
+                    );
+                })?;
+
+                anyhow::Ok(())
+            })
+            .detach_and_log_err(cx);
+        });
     }
 
     fn shows_import_settings_step(level: ExperienceLevel) -> bool {
@@ -573,78 +882,162 @@ impl Onboarding {
     }
 
     fn render_welcome(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
+        h_flex()
             .w_full()
             .min_h(rems_from_px(620.))
-            .justify_center()
             .items_center()
-            .gap_7()
-            .child(
-                div().w_full().flex().justify_center().child(
-                    Vector::new(VectorName::ZedLogo, rems_from_px(124.), rems_from_px(198.))
-                        .color(Color::Accent),
-                ),
-            )
+            .justify_center()
+            .gap_10()
+            .flex_wrap()
             .child(
                 v_flex()
+                    .w(rems_from_px(400.))
                     .items_center()
-                    .gap_2()
-                    .child(Headline::new("Backboard Studio").size(HeadlineSize::XLarge))
+                    .gap_6()
+                    .child(Vector::square(VectorName::ZedLogo, rems_from_px(56.)))
                     .child(
-                        Label::new("AI-native development, set up in a minute.")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
+                        v_flex()
+                            .items_center()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .text_center()
+                                    .child(Headline::new("Backboard Studio").size(HeadlineSize::Large)),
+                            )
+                            .child(
+                                div().w_full().text_center().child(
+                                    Label::new("Your AI-native workspace")
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                ),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                div().w_full().text_center().child(
+                                    Headline::new("Make yourself at home")
+                                        .size(HeadlineSize::XLarge),
+                                ),
+                            )
+                            .child(
+                                div().w_full().text_center().child(
+                                    Label::new(
+                                        "Start with a space that feels familiar, then shape it around the way you like to build.",
+                                    )
+                                    .size(LabelSize::Large)
+                                    .color(Color::Muted),
+                                )
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .justify_center()
+                            .flex_wrap()
+                            .child(Self::render_welcome_pill(
+                                IconName::Sparkle,
+                                "Pick your flow",
+                                Color::Accent,
+                                cx,
+                            ))
+                            .child(Self::render_welcome_pill(
+                                IconName::Settings,
+                                "Bring your setup",
+                                Color::Created,
+                                cx,
+                            ))
+                            .child(Self::render_welcome_pill(
+                                IconName::Code,
+                                "Keep your tools close",
+                                Color::Modified,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div().rounded_full().overflow_hidden().child(
+                            Button::new("continue-from-welcome", "Get Started")
+                                .style(ButtonStyle::Filled)
+                                .size(ButtonSize::Large)
+                                .width(rems_from_px(180.))
+                                .end_icon(Icon::new(IconName::ArrowRight).size(IconSize::Small))
+                                .on_click(cx.listener(|this, _, _window, cx| {
+                                    this.step = OnboardingStep::ExperiencePicker;
+                                    cx.notify();
+                                })),
+                        ),
                     ),
             )
-            .child(
-                div().rounded_full().overflow_hidden().child(
-                    Button::new("continue-from-welcome", "Get Started")
-                        .style(ButtonStyle::Filled)
-                        .size(ButtonSize::Large)
-                        .width(rems_from_px(180.))
-                        .on_click(cx.listener(|this, _, _window, cx| {
-                            this.step = OnboardingStep::ExperiencePicker;
-                            cx.notify();
-                        })),
-                ),
-            )
             .into_any_element()
+    }
+
+    fn render_welcome_pill(
+        icon: IconName,
+        label: &'static str,
+        color: Color,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .items_center()
+            .gap_1p5()
+            .rounded_full()
+            .border_1()
+            .border_color(cx.theme().colors().border_variant)
+            .bg(cx.theme().colors().element_background.opacity(0.55))
+            .px_2p5()
+            .py_1()
+            .child(Icon::new(icon).size(IconSize::Small).color(color))
+            .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
     }
 
     fn render_experience_picker(&mut self, cx: &mut Context<Self>) -> AnyElement {
         v_flex()
             .w_full()
-            .py_12()
+            .py_10()
             .items_center()
             .gap_8()
             .child(
                 v_flex()
                     .items_center()
                     .gap_2()
-                    .child(Headline::new("How do you want to work?").size(HeadlineSize::Large))
                     .child(
-                        Label::new("You can switch modes any time in Settings.")
+                        div().w_full().text_center().child(
+                            Headline::new("Choose your front door").size(HeadlineSize::Large),
+                        ),
+                    )
+                    .child(
+                        div().w_full().text_center().child(
+                            Label::new(
+                                "Start where you feel most at home. You can switch modes any time.",
+                            )
                             .color(Color::Muted)
                             .size(LabelSize::Small),
+                        ),
                     ),
             )
             .child(
                 h_flex()
-                    .gap_8()
+                    .gap_6()
+                    .items_stretch()
                     .justify_center()
                     .flex_wrap()
                     .child(self.render_level_card(
                         ExperienceLevel::Beginner,
                         true,
                         "Simple",
-                        "Chat first. Preview fast.",
+                        "Chat first",
+                        "A streamlined workspace for prompting, previewing, and iterating.",
                         cx,
                     ))
                     .child(self.render_level_card(
                         ExperienceLevel::Developer,
                         false,
                         "Developer",
-                        "Editor, agents, terminal.",
+                        "Editor first",
+                        "The full workspace with files, terminal, editor, and agents visible.",
                         cx,
                     )),
             )
@@ -656,56 +1049,84 @@ impl Onboarding {
         level: ExperienceLevel,
         is_simple: bool,
         title: &'static str,
+        eyebrow: &'static str,
         description: &'static str,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let colors = cx.theme().colors();
+
         div()
             .id(SharedString::from(title))
-            .w(rems_from_px(560.))
+            .w(rems_from_px(520.))
             .flex()
             .flex_col()
             .gap_4()
+            .cursor_pointer()
+            .hover(|style| style.opacity(0.92))
             .on_click(cx.listener(move |this, _, _window, cx| {
                 this.step = OnboardingStep::Setup(level);
                 cx.notify();
             }))
             .child(
-                v_flex()
-                    .items_center()
-                    .gap_0p5()
-                    .child(Headline::new(title).size(HeadlineSize::Small))
+                div()
+                    .w_full()
+                    .h(rems_from_px(312.))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(colors.border_variant)
+                    .bg(colors.editor_background)
+                    .overflow_hidden()
                     .child(
-                        h_flex().justify_center().child(
-                            Label::new(description)
-                                .color(Color::Muted)
-                                .size(LabelSize::Small),
-                        ),
+                        self.render_mode_screenshot(Self::mode_screenshot_path(is_simple, cx), cx)
+                            .into_any_element(),
                     ),
             )
             .child(
-                self.render_mode_screenshot(Self::mode_screenshot_path(is_simple, cx), cx)
-                    .into_any_element(),
-            )
-            .child(
-                div().rounded_full().overflow_hidden().child(
-                    Button::new(
-                        SharedString::from(format!("continue-{title}")),
-                        format!("Continue with {title}"),
+                h_flex()
+                    .w_full()
+                    .items_start()
+                    .justify_between()
+                    .gap_4()
+                    .child(
+                        v_flex()
+                            .min_w_0()
+                            .flex_1()
+                            .gap_1()
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .child(Headline::new(title).size(HeadlineSize::Large))
+                                    .child(
+                                        Label::new(eyebrow)
+                                            .size(LabelSize::Small)
+                                            .color(Color::Accent),
+                                    ),
+                            )
+                            .child(
+                                Label::new(description)
+                                    .color(Color::Muted)
+                                    .size(LabelSize::Small),
+                            ),
                     )
-                    .style(ButtonStyle::Filled)
-                    .full_width()
-                    .on_click(cx.listener(move |this, _, _window, cx| {
-                        this.step = OnboardingStep::Setup(level);
-                        cx.notify();
-                    })),
-                ),
+                    .child(
+                        div().rounded_full().overflow_hidden().child(
+                            Button::new(SharedString::from(format!("continue-{title}")), "Start")
+                                .style(ButtonStyle::Subtle)
+                                .width(rems_from_px(112.))
+                                .end_icon(Icon::new(IconName::ArrowRight).size(IconSize::Small))
+                                .on_click(cx.listener(move |this, _, _window, cx| {
+                                    this.step = OnboardingStep::Setup(level);
+                                    cx.notify();
+                                })),
+                        ),
+                    ),
             )
     }
 
     fn render_mode_screenshot(&self, path: &'static str, _cx: &Context<Self>) -> impl IntoElement {
         img(path)
-            .w_full()
-            .h(rems_from_px(340.))
+            .size_full()
             .object_fit(ObjectFit::Contain)
             .with_fallback(|| div().size_full().into_any_element())
     }
@@ -749,29 +1170,54 @@ impl Onboarding {
             .child(
                 v_flex()
                     .w(rems_from_px(520.))
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .bg(cx.theme().colors().element_background.opacity(0.35))
+                    .p_5()
                     .gap_5()
                     .child(
                         h_flex()
-                            .justify_center()
+                            .items_center()
                             .gap_2()
                             .child(
-                                Icon::new(if has_key {
-                                    IconName::Check
-                                } else {
-                                    IconName::LockOutlined
-                                })
-                                .size(IconSize::Small)
-                                .color(if has_key {
-                                    Color::Success
-                                } else {
-                                    Color::Accent
-                                }),
+                                div()
+                                    .size(rems_from_px(34.))
+                                    .rounded_md()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(cx.theme().colors().text_accent.opacity(0.12))
+                                    .child(
+                                        Icon::new(if has_key {
+                                            IconName::Check
+                                        } else {
+                                            IconName::LockOutlined
+                                        })
+                                        .size(IconSize::Small)
+                                        .color(if has_key {
+                                            Color::Success
+                                        } else {
+                                            Color::Accent
+                                        }),
+                                    ),
                             )
-                            .child(Label::new(if has_key {
-                                "API key configured"
-                            } else {
-                                "Paste your Backboard API key"
-                            })),
+                            .child(
+                                v_flex()
+                                    .gap_0p5()
+                                    .child(Label::new(if has_key {
+                                        "API key configured"
+                                    } else {
+                                        "Paste your Backboard API key"
+                                    }))
+                                    .child(
+                                        Label::new(
+                                            "No key handy? Skip this and connect later from Settings.",
+                                        )
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                    ),
+                            ),
                     )
                     .when(!has_key, |this| this.child(self.api_key_field.clone()))
                     .when_some(status, |this, status| {

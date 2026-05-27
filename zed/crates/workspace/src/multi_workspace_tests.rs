@@ -140,8 +140,8 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
     let (multi_workspace, cx) =
         cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
 
-    multi_workspace.update_in(cx, |multi_workspace, _window, cx| {
-        multi_workspace.test_select_agent_workspace_tab(cx);
+    multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+        multi_workspace.test_select_agent_workspace_tab(window, cx);
     });
     multi_workspace.read_with(cx, |multi_workspace, _cx| {
         assert!(multi_workspace.multi_agent_expanded);
@@ -151,8 +151,8 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
         assert!(!multi_workspace.jarvis_placeholder_expanded);
     });
 
-    multi_workspace.update_in(cx, |multi_workspace, _window, cx| {
-        multi_workspace.test_select_skills_tab(cx);
+    multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+        multi_workspace.test_select_skills_tab(window, cx);
     });
     multi_workspace.read_with(cx, |multi_workspace, _cx| {
         assert!(!multi_workspace.multi_agent_expanded);
@@ -162,8 +162,8 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
         assert!(!multi_workspace.jarvis_placeholder_expanded);
     });
 
-    multi_workspace.update_in(cx, |multi_workspace, _window, cx| {
-        multi_workspace.test_select_tasks_tab(cx);
+    multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+        multi_workspace.test_select_tasks_tab(window, cx);
     });
     multi_workspace.read_with(cx, |multi_workspace, _cx| {
         assert!(!multi_workspace.multi_agent_expanded);
@@ -173,8 +173,8 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
         assert!(!multi_workspace.jarvis_placeholder_expanded);
     });
 
-    multi_workspace.update_in(cx, |multi_workspace, _window, cx| {
-        multi_workspace.test_select_git_tab(cx);
+    multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+        multi_workspace.test_select_git_tab(window, cx);
     });
     multi_workspace.read_with(cx, |multi_workspace, _cx| {
         assert!(!multi_workspace.multi_agent_expanded);
@@ -184,8 +184,8 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
         assert!(!multi_workspace.jarvis_placeholder_expanded);
     });
 
-    multi_workspace.update_in(cx, |multi_workspace, _window, cx| {
-        multi_workspace.test_select_code_editor_tab(cx);
+    multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+        multi_workspace.test_select_code_editor_tab(window, cx);
     });
     multi_workspace.read_with(cx, |multi_workspace, _cx| {
         assert!(!multi_workspace.multi_agent_expanded);
@@ -193,6 +193,50 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
         assert!(!multi_workspace.tasks_expanded);
         assert!(!multi_workspace.git_expanded);
         assert!(!multi_workspace.jarvis_placeholder_expanded);
+    });
+}
+
+#[gpui::test]
+async fn test_agent_workspace_tab_closes_side_docks(cx: &mut TestAppContext) {
+    init_test(cx);
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree("/root_a", json!({ "file.txt": "" })).await;
+    let project = Project::test(fs, ["/root_a".as_ref()], cx).await;
+
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+    let workspace = multi_workspace.read_with(cx, |multi_workspace, _cx| {
+        multi_workspace.workspace().clone()
+    });
+
+    multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            for position in [DockPosition::Left, DockPosition::Right] {
+                let dock = workspace.dock_at_position(position).clone();
+                dock.update(cx, |dock, cx| {
+                    dock.set_open(true, window, cx);
+                });
+            }
+        });
+
+        multi_workspace.test_select_agent_workspace_tab(window, cx);
+    });
+
+    workspace.read_with(cx, |workspace, cx| {
+        assert!(
+            !workspace
+                .dock_at_position(DockPosition::Left)
+                .read(cx)
+                .is_open(),
+            "left dock should close when Agent Workspace opens"
+        );
+        assert!(
+            !workspace
+                .dock_at_position(DockPosition::Right)
+                .read(cx)
+                .is_open(),
+            "right dock should close when Agent Workspace opens"
+        );
     });
 }
 

@@ -339,8 +339,9 @@ impl MultiWorkspace {
     }
 
     pub fn sidebar_render_state(&self, cx: &App) -> SidebarRenderState {
+        let sidebar_available = self.sidebar.is_some();
         SidebarRenderState {
-            open: self.sidebar_open() && self.multi_workspace_enabled(cx),
+            open: sidebar_available && self.sidebar_open() && self.multi_workspace_enabled(cx),
             side: self.sidebar_side(cx),
         }
     }
@@ -421,22 +422,32 @@ impl MultiWorkspace {
         cx.notify();
     }
 
-    pub fn set_multi_agent_expanded(&mut self, expanded: bool, cx: &mut Context<Self>) {
+    pub fn set_multi_agent_expanded(
+        &mut self,
+        expanded: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let next_tab = if expanded {
             WorkspaceModeTab::AgentWorkspace
         } else {
             WorkspaceModeTab::CodeEditor
         };
-        self.set_workspace_mode_tab(next_tab, cx);
+        self.set_workspace_mode_tab(next_tab, window, cx);
     }
 
-    pub fn set_tasks_expanded(&mut self, expanded: bool, cx: &mut Context<Self>) {
+    pub fn set_tasks_expanded(
+        &mut self,
+        expanded: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let next_tab = if expanded {
             WorkspaceModeTab::Tasks
         } else {
             WorkspaceModeTab::CodeEditor
         };
-        self.set_workspace_mode_tab(next_tab, cx);
+        self.set_workspace_mode_tab(next_tab, window, cx);
     }
 
     fn selected_workspace_mode_tab(&self) -> WorkspaceModeTab {
@@ -453,7 +464,16 @@ impl MultiWorkspace {
         }
     }
 
-    fn set_workspace_mode_tab(&mut self, tab: WorkspaceModeTab, cx: &mut Context<Self>) {
+    fn set_workspace_mode_tab(
+        &mut self,
+        tab: WorkspaceModeTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if tab == WorkspaceModeTab::AgentWorkspace {
+            self.close_side_docks(window, cx);
+        }
+
         if self.selected_workspace_mode_tab() == tab {
             return;
         }
@@ -464,6 +484,18 @@ impl MultiWorkspace {
         self.git_expanded = tab == WorkspaceModeTab::Git;
         self.jarvis_placeholder_expanded = false;
         cx.notify();
+    }
+
+    fn close_side_docks(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let workspace = self.workspace().clone();
+        workspace.update(cx, |workspace, cx| {
+            for position in [DockPosition::Left, DockPosition::Right] {
+                let dock = workspace.dock_at_position(position).clone();
+                dock.update(cx, |dock, cx| {
+                    dock.set_open(false, window, cx);
+                });
+            }
+        });
     }
 
     fn active_item_is_fullscreen_onboarding(&self, cx: &App) -> bool {
@@ -1884,28 +1916,28 @@ impl MultiWorkspace {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn test_select_git_tab(&mut self, cx: &mut Context<Self>) {
-        self.set_workspace_mode_tab(WorkspaceModeTab::Git, cx);
+    pub fn test_select_git_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::Git, window, cx);
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn test_select_agent_workspace_tab(&mut self, cx: &mut Context<Self>) {
-        self.set_workspace_mode_tab(WorkspaceModeTab::AgentWorkspace, cx);
+    pub fn test_select_agent_workspace_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::AgentWorkspace, window, cx);
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn test_select_skills_tab(&mut self, cx: &mut Context<Self>) {
-        self.set_workspace_mode_tab(WorkspaceModeTab::Skills, cx);
+    pub fn test_select_skills_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::Skills, window, cx);
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn test_select_tasks_tab(&mut self, cx: &mut Context<Self>) {
-        self.set_workspace_mode_tab(WorkspaceModeTab::Tasks, cx);
+    pub fn test_select_tasks_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::Tasks, window, cx);
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn test_select_code_editor_tab(&mut self, cx: &mut Context<Self>) {
-        self.set_workspace_mode_tab(WorkspaceModeTab::CodeEditor, cx);
+    pub fn test_select_code_editor_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_workspace_mode_tab(WorkspaceModeTab::CodeEditor, window, cx);
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -2225,7 +2257,7 @@ impl MultiWorkspace {
                         multi_workspace
                             .update(cx, |this, cx| {
                                 this.set_interface_mode(InterfaceMode::Expert, window, cx);
-                                this.set_workspace_mode_tab(tab, cx);
+                                this.set_workspace_mode_tab(tab, window, cx);
                             })
                             .ok();
                     },
@@ -2329,8 +2361,10 @@ impl Render for MultiWorkspace {
         let multi_workspace_enabled = self.multi_workspace_enabled(cx) && !fullscreen_onboarding;
         let sidebar_side = self.sidebar_side(cx);
         let sidebar_on_right = sidebar_side == SidebarSide::Right;
+        let sidebar_visible =
+            self.sidebar.is_some() && multi_workspace_enabled && self.sidebar_open();
 
-        let sidebar: Option<AnyElement> = if multi_workspace_enabled && self.sidebar_open() {
+        let sidebar: Option<AnyElement> = if sidebar_visible {
             self.sidebar.as_ref().map(|sidebar_handle| {
                 let weak = cx.weak_entity();
 
@@ -2427,8 +2461,8 @@ impl Render for MultiWorkspace {
                         .font(ui_font)
                         .text_color(text_color)
                         .on_action(cx.listener(Self::close_window))
-                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
-                            this.set_multi_agent_expanded(false, cx);
+                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, window, cx| {
+                            this.set_multi_agent_expanded(false, window, cx);
                         }))
                         .children(titlebar)
                         .child(self.render_workspace_mode_switcher(window, cx))
@@ -2484,8 +2518,8 @@ impl Render for MultiWorkspace {
                         .font(ui_font)
                         .text_color(text_color)
                         .on_action(cx.listener(Self::close_window))
-                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
-                            this.set_multi_agent_expanded(false, cx);
+                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, window, cx| {
+                            this.set_multi_agent_expanded(false, window, cx);
                         }))
                         .children(titlebar)
                         .child(self.render_workspace_mode_switcher(window, cx))
@@ -2515,8 +2549,8 @@ impl Render for MultiWorkspace {
                         .font(ui_font)
                         .text_color(text_color)
                         .on_action(cx.listener(Self::close_window))
-                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
-                            this.set_multi_agent_expanded(false, cx);
+                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, window, cx| {
+                            this.set_multi_agent_expanded(false, window, cx);
                         }))
                         .children(titlebar)
                         .child(self.render_workspace_mode_switcher(window, cx))
@@ -2544,8 +2578,8 @@ impl Render for MultiWorkspace {
                     .font(ui_font)
                     .text_color(text_color)
                     .on_action(cx.listener(Self::close_window))
-                    .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
-                        this.set_multi_agent_expanded(false, cx);
+                    .on_action(cx.listener(|this, _: &ToggleMultiAgentView, window, cx| {
+                        this.set_multi_agent_expanded(false, window, cx);
                     }))
                     .children(titlebar)
                     .child(self.render_workspace_mode_switcher(window, cx))
@@ -2595,8 +2629,8 @@ impl Render for MultiWorkspace {
                         .flex_1()
                         .min_h_0()
                         .on_action(cx.listener(Self::close_window))
-                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, _window, cx| {
-                            this.set_multi_agent_expanded(!this.multi_agent_expanded, cx);
+                        .on_action(cx.listener(|this, _: &ToggleMultiAgentView, window, cx| {
+                            this.set_multi_agent_expanded(!this.multi_agent_expanded, window, cx);
                         }))
                         .when(self.multi_workspace_enabled(cx), |this| {
                             this.on_action(cx.listener(
@@ -2720,8 +2754,8 @@ impl Render for MultiWorkspace {
             window,
             cx,
             Tiling {
-                left: !sidebar_on_right && multi_workspace_enabled && self.sidebar_open(),
-                right: sidebar_on_right && multi_workspace_enabled && self.sidebar_open(),
+                left: !sidebar_on_right && sidebar_visible,
+                right: sidebar_on_right && sidebar_visible,
                 ..Tiling::default()
             },
         )

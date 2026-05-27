@@ -9,7 +9,8 @@ use std::{
     any::Any,
     cell::RefCell,
     collections::BTreeSet,
-    path::PathBuf,
+    io::Read as _,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::{
         Arc,
@@ -42,6 +43,7 @@ const DEFAULT_MODEL: &str = "gpt-4o";
 const DEFAULT_INTENSITY: &str = "fast";
 const DEFAULT_CONTEXT_WINDOW: u64 = 258_000;
 const HISTORY_REPLAY_MAX_MESSAGES: usize = 80;
+const BACKBOARD_SKILL_CONFIG_PREFIX: &str = "backboard_skill:";
 const MODEL_CATALOG_PROVIDERS: &[&str] = &[
     "anthropic",
     "openai",
@@ -126,6 +128,9 @@ pub(crate) struct FeatureSettings {
     pub voice_mode: String,
     pub live_voice: String,
     pub mcp_figma: String,
+    pub mcp_notion: String,
+    pub mcp_google: String,
+    pub selected_skills: Vec<String>,
 }
 
 impl Default for FeatureSettings {
@@ -136,8 +141,19 @@ impl Default for FeatureSettings {
             voice_mode: "off".to_string(),
             live_voice: "off".to_string(),
             mcp_figma: "off".to_string(),
+            mcp_notion: "off".to_string(),
+            mcp_google: "off".to_string(),
+            selected_skills: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct FileSystemSkill {
+    pub relative_path: String,
+    pub path: PathBuf,
+    pub name: String,
+    pub description: Option<String>,
 }
 
 #[derive(Default)]
@@ -1065,7 +1081,7 @@ struct BackboardConfigOptions {
 }
 
 impl BackboardConfigOptions {
-    fn current_config(&self) -> (String, String, FeatureSettings) {
+    fn current_config(&self) -> (String, String, FeatureSettings, Option<PathBuf>) {
         self.state
             .sessions
             .borrow()
@@ -1075,6 +1091,7 @@ impl BackboardConfigOptions {
                     session.mode.to_string(),
                     session.intensity.clone(),
                     session.feature_settings.clone(),
+                    Some(session.workspace.clone()),
                 )
             })
             .unwrap_or_else(|| {
@@ -1082,6 +1099,7 @@ impl BackboardConfigOptions {
                     "free".to_string(),
                     DEFAULT_INTENSITY.to_string(),
                     FeatureSettings::default(),
+                    None,
                 )
             })
     }
@@ -1089,8 +1107,8 @@ impl BackboardConfigOptions {
 
 impl AgentSessionConfigOptions for BackboardConfigOptions {
     fn config_options(&self) -> Vec<acp::SessionConfigOption> {
-        let (mode, intensity, feature_settings) = self.current_config();
-        config_options(&mode, &intensity, &feature_settings)
+        let (mode, intensity, feature_settings, workspace) = self.current_config();
+        config_options(&mode, &intensity, &feature_settings, workspace.as_deref())
     }
 
     fn set_config_option(
@@ -1157,6 +1175,35 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
                         session.feature_settings.mcp_figma =
                             if value == "on" { "on" } else { "off" }.to_string();
                         changed = true;
+                    }
+                    "backboard_mcp_notion" => {
+                        session.feature_settings.mcp_notion =
+                            if value == "on" { "on" } else { "off" }.to_string();
+                        changed = true;
+                    }
+                    "backboard_mcp_google" => {
+                        session.feature_settings.mcp_google =
+                            if value == "on" { "on" } else { "off" }.to_string();
+                        changed = true;
+                    }
+                    _ if config_id_string.starts_with(BACKBOARD_SKILL_CONFIG_PREFIX) => {
+                        let skill_path =
+                            config_id_string.trim_start_matches(BACKBOARD_SKILL_CONFIG_PREFIX);
+                        let available_skills = discover_file_system_skills(&session.workspace);
+                        if available_skills
+                            .iter()
+                            .any(|skill| skill.relative_path == skill_path)
+                        {
+                            let selected = &mut session.feature_settings.selected_skills;
+                            if value == "on" {
+                                if !selected.iter().any(|selected| selected == skill_path) {
+                                    selected.push(skill_path.to_string());
+                                }
+                            } else {
+                                selected.retain(|selected| selected != skill_path);
+                            }
+                            changed = true;
+                        }
                     }
                     _ => {}
                 }
@@ -1422,8 +1469,9 @@ fn config_options(
     mode: &str,
     intensity: &str,
     feature_settings: &FeatureSettings,
+    workspace: Option<&Path>,
 ) -> Vec<acp::SessionConfigOption> {
-    vec![
+    let mut options = vec![
         acp::SessionConfigOption::select(
             "backboard_mode",
             "Mode",
@@ -1530,7 +1578,236 @@ fn config_options(
         )
         .description("Controls Backboard Figma MCP calls.")
         .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::select(
+            "backboard_mcp_notion",
+            "Notion",
+            feature_settings.mcp_notion.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new("off", "Off")
+                    .description("Do not enable Notion MCP calls for this session."),
+                acp::SessionConfigSelectOption::new("on", "On")
+                    .description("Allow Backboard to use Notion MCP calls when useful."),
+            ],
+        )
+        .description("Controls Backboard Notion MCP calls.")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::select(
+            "backboard_mcp_google",
+            "Google",
+            feature_settings.mcp_google.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new("off", "Off")
+                    .description("Do not enable Google MCP calls for this session."),
+                acp::SessionConfigSelectOption::new("on", "On")
+                    .description("Allow Backboard to use Google MCP calls when useful."),
+            ],
+        )
+        .description("Controls Backboard Google MCP calls.")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+    ];
+
+    if let Some(workspace) = workspace {
+        options.extend(
+            discover_file_system_skills(workspace)
+                .into_iter()
+                .map(|skill| {
+                    let current_value = if feature_settings
+                        .selected_skills
+                        .iter()
+                        .any(|selected_skill| selected_skill == &skill.relative_path)
+                    {
+                        "on"
+                    } else {
+                        "off"
+                    };
+                    let config_id =
+                        format!("{}{}", BACKBOARD_SKILL_CONFIG_PREFIX, skill.relative_path);
+                    let description = skill.description.unwrap_or_else(|| {
+                        format!("Use instructions from {}.", skill.path.display())
+                    });
+                    acp::SessionConfigOption::select(
+                        config_id,
+                        skill.name,
+                        current_value.to_string(),
+                        vec![
+                            acp::SessionConfigSelectOption::new("off", "Off").description(
+                                "Do not include this skill in the next Backboard turn.",
+                            ),
+                            acp::SessionConfigSelectOption::new("on", "On")
+                                .description("Include this skill in the next Backboard turn."),
+                        ],
+                    )
+                    .description(description)
+                    .category(acp::SessionConfigOptionCategory::ThoughtLevel)
+                }),
+        );
+    }
+
+    options
+}
+
+pub(crate) fn discover_file_system_skills(workspace: &Path) -> Vec<FileSystemSkill> {
+    let Some(skills_root) = skills_root_for_workspace(workspace) else {
+        return Vec::new();
+    };
+
+    let mut skills = walkdir::WalkDir::new(&skills_root)
+        .max_depth(4)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file() && entry.file_name() == "SKILL.md")
+        .filter_map(|entry| file_system_skill_from_path(&skills_root, entry.path()))
+        .collect::<Vec<_>>();
+
+    skills.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.relative_path.cmp(&right.relative_path))
+    });
+    skills
+}
+
+pub(crate) fn skills_root_for_workspace(workspace: &Path) -> Option<PathBuf> {
+    for ancestor in workspace.ancestors() {
+        if ancestor
+            .file_name()
+            .is_some_and(|name| name == std::ffi::OsStr::new("skills"))
+            && ancestor.is_dir()
+        {
+            return Some(ancestor.to_path_buf());
+        }
+
+        for candidate in skill_root_candidates(ancestor) {
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+fn skill_root_candidates(ancestor: &Path) -> [PathBuf; 3] {
+    [
+        ancestor.join("assets").join("skills"),
+        ancestor.join("zed").join("assets").join("skills"),
+        ancestor
+            .join("ide")
+            .join("zed")
+            .join("assets")
+            .join("skills"),
     ]
+}
+
+fn file_system_skill_from_path(
+    skills_root: &Path,
+    skill_file_path: &Path,
+) -> Option<FileSystemSkill> {
+    let skill_dir = skill_file_path.parent()?;
+    let relative_path = skill_dir
+        .strip_prefix(skills_root)
+        .ok()?
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    if relative_path.is_empty() {
+        return None;
+    }
+
+    let fallback_name = skill_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(display_name_from_slug)
+        .unwrap_or_else(|| relative_path.clone());
+    let metadata = read_skill_metadata(skill_file_path);
+    Some(FileSystemSkill {
+        relative_path,
+        path: skill_file_path.to_path_buf(),
+        name: metadata
+            .name
+            .map(|name| display_name_from_slug(&name))
+            .unwrap_or(fallback_name),
+        description: metadata.description,
+    })
+}
+
+#[derive(Default)]
+struct SkillMetadata {
+    name: Option<String>,
+    description: Option<String>,
+}
+
+fn read_skill_metadata(path: &Path) -> SkillMetadata {
+    let Ok(file) = std::fs::File::open(path) else {
+        return SkillMetadata::default();
+    };
+    let mut preview = String::new();
+    let mut limited_file = file.take(8192);
+    if limited_file.read_to_string(&mut preview).is_err() {
+        return SkillMetadata::default();
+    }
+
+    parse_skill_metadata(&preview)
+}
+
+fn parse_skill_metadata(contents: &str) -> SkillMetadata {
+    let mut in_frontmatter = false;
+    let mut metadata = SkillMetadata::default();
+
+    for line in contents.lines() {
+        if line.trim() == "---" {
+            if in_frontmatter {
+                break;
+            }
+            in_frontmatter = true;
+            continue;
+        }
+
+        if !in_frontmatter {
+            continue;
+        }
+
+        if let Some((key, value)) = line.split_once(':') {
+            let value = normalize_frontmatter_value(value);
+            match key.trim() {
+                "name" => metadata.name = Some(value),
+                "description" => metadata.description = Some(value),
+                _ => {}
+            }
+        }
+    }
+
+    metadata
+}
+
+fn normalize_frontmatter_value(value: &str) -> String {
+    let value = value.trim();
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value)
+        .to_string()
+}
+
+fn display_name_from_slug(value: &str) -> String {
+    value
+        .split(|character: char| character == '-' || character == '_' || character == '/')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            let Some(first) = chars.next() else {
+                return String::new();
+            };
+            let mut titleized = first.to_uppercase().collect::<String>();
+            titleized.push_str(chars.as_str());
+            titleized
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn group_models(
@@ -1667,8 +1944,11 @@ mod tests {
             voice_mode: "tts".to_string(),
             live_voice: "on".to_string(),
             mcp_figma: "on".to_string(),
+            mcp_notion: "on".to_string(),
+            mcp_google: "on".to_string(),
+            selected_skills: Vec::new(),
         };
-        let options = config_options("free", "fast", &settings);
+        let options = config_options("free", "fast", &settings, None);
         let ids = options
             .iter()
             .map(|option| option.id.to_string())
@@ -1680,6 +1960,108 @@ mod tests {
         assert!(ids.contains(&"backboard_voice_mode".to_string()));
         assert!(ids.contains(&"backboard_live_voice".to_string()));
         assert!(ids.contains(&"backboard_mcp_figma".to_string()));
+        assert!(ids.contains(&"backboard_mcp_notion".to_string()));
+        assert!(ids.contains(&"backboard_mcp_google".to_string()));
+    }
+
+    #[test]
+    fn discovers_skills_from_workspace_assets_directory() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let skill_dir = temp_dir
+            .path()
+            .join("assets")
+            .join("skills")
+            .join("shopify")
+            .join("shopify-admin");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"<!-- generated -->
+---
+name: shopify-admin
+description: "Build against the Shopify Admin API."
+---
+
+# Instructions
+"#,
+        )
+        .expect("write skill");
+
+        let workspace = temp_dir.path().join("crates").join("agent");
+        let skills = discover_file_system_skills(&workspace);
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].relative_path, "shopify/shopify-admin");
+        assert_eq!(skills[0].name, "Shopify Admin");
+        assert_eq!(
+            skills[0].description.as_deref(),
+            Some("Build against the Shopify Admin API.")
+        );
+    }
+
+    #[test]
+    fn discovers_skills_from_sibling_zed_assets_directory() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let ide_dir = temp_dir.path().join("ide");
+        let skill_dir = ide_dir
+            .join("zed")
+            .join("assets")
+            .join("skills")
+            .join("shopify")
+            .join("shopify-admin");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: shopify-admin
+description: "Build against the Shopify Admin API."
+---
+"#,
+        )
+        .expect("write skill");
+
+        let workspace = ide_dir.join("web");
+        let skills = discover_file_system_skills(&workspace);
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].relative_path, "shopify/shopify-admin");
+        assert_eq!(
+            skills[0].path,
+            skill_dir.join("SKILL.md"),
+            "skills should be loaded from ide/zed/assets/skills"
+        );
+    }
+
+    #[test]
+    fn config_options_include_file_system_skills() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let skill_dir = temp_dir
+            .path()
+            .join("assets")
+            .join("skills")
+            .join("web")
+            .join("modern");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: modern
+description: Modern design guidance.
+---
+"#,
+        )
+        .expect("write skill");
+
+        let settings = FeatureSettings {
+            selected_skills: vec!["web/modern".to_string()],
+            ..Default::default()
+        };
+        let options = config_options("free", "fast", &settings, Some(temp_dir.path()));
+
+        assert_eq!(
+            option_current_value(&options, "backboard_skill:web/modern").as_ref(),
+            Some(&acp::SessionConfigValueId::new("on"))
+        );
     }
 
     #[gpui::test]
@@ -1772,6 +2154,36 @@ mod tests {
             .unwrap();
         assert_eq!(
             option_current_value(&figma_options, "backboard_mcp_figma").as_ref(),
+            Some(&acp::SessionConfigValueId::new("on"))
+        );
+
+        let notion_options = cx
+            .update(|cx| {
+                config_options.set_config_option(
+                    acp::SessionConfigId::new("backboard_mcp_notion"),
+                    acp::SessionConfigValueId::new("on"),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            option_current_value(&notion_options, "backboard_mcp_notion").as_ref(),
+            Some(&acp::SessionConfigValueId::new("on"))
+        );
+
+        let google_options = cx
+            .update(|cx| {
+                config_options.set_config_option(
+                    acp::SessionConfigId::new("backboard_mcp_google"),
+                    acp::SessionConfigValueId::new("on"),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            option_current_value(&google_options, "backboard_mcp_google").as_ref(),
             Some(&acp::SessionConfigValueId::new("on"))
         );
     }

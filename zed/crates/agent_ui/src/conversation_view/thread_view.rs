@@ -223,6 +223,14 @@ impl RenderOnce for GeneratingSpinnerElement {
 struct AgentOptionsMenu {
     focus_handle: FocusHandle,
     config_options_view: Entity<ConfigOptionsView>,
+    scroll_handle: ScrollHandle,
+    mode: AgentOptionsMenuMode,
+}
+
+#[derive(Clone, Copy)]
+enum AgentOptionsMenuMode {
+    All,
+    Skills,
 }
 
 impl AgentOptionsMenu {
@@ -230,6 +238,17 @@ impl AgentOptionsMenu {
         Self {
             focus_handle: cx.focus_handle(),
             config_options_view,
+            scroll_handle: ScrollHandle::new(),
+            mode: AgentOptionsMenuMode::All,
+        }
+    }
+
+    fn skills(config_options_view: Entity<ConfigOptionsView>, cx: &mut Context<Self>) -> Self {
+        Self {
+            focus_handle: cx.focus_handle(),
+            config_options_view,
+            scroll_handle: ScrollHandle::new(),
+            mode: AgentOptionsMenuMode::Skills,
         }
     }
 }
@@ -243,37 +262,64 @@ impl Focusable for AgentOptionsMenu {
 impl EventEmitter<DismissEvent> for AgentOptionsMenu {}
 
 impl Render for AgentOptionsMenu {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let option_summaries = self.config_options_view.read(cx).option_summaries();
+        let (title, icon, footer, options_list) = match self.mode {
+            AgentOptionsMenuMode::All => {
+                let options_list = if option_summaries.is_empty() {
+                    self.render_empty_options("No agent options available.")
+                } else {
+                    let (mcp_options, remaining_options): (Vec<_>, Vec<_>) = option_summaries
+                        .into_iter()
+                        .partition(|option| option.id.to_string().starts_with("backboard_mcp_"));
+                    let (skill_options, session_options): (Vec<_>, Vec<_>) = remaining_options
+                        .into_iter()
+                        .partition(|option| option.id.to_string().starts_with("backboard_skill:"));
 
-        let options_list = if option_summaries.is_empty() {
-            div()
-                .px_2()
-                .py_1()
-                .child(
-                    Label::new("No agent options available.")
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
+                    let mut list = v_flex().gap_1();
+
+                    if !session_options.is_empty() {
+                        list = list.child(self.render_option_group(session_options, cx));
+                    }
+
+                    if !mcp_options.is_empty() {
+                        list = list
+                            .child(self.render_section_label("MCP Calls", cx))
+                            .child(self.render_option_group(mcp_options, cx));
+                    }
+
+                    if !skill_options.is_empty() {
+                        list = list
+                            .child(self.render_section_label("Skills", cx))
+                            .child(self.render_option_group(skill_options, cx));
+                    }
+
+                    list.into_any_element()
+                };
+                (
+                    "Agent Options",
+                    IconName::Sliders,
+                    "Click an option to cycle values.",
+                    options_list,
                 )
-                .into_any_element()
-        } else {
-            let (mcp_options, session_options): (Vec<_>, Vec<_>) = option_summaries
-                .into_iter()
-                .partition(|option| option.id.to_string().starts_with("backboard_mcp_"));
-
-            let mut list = v_flex().gap_1();
-
-            if !session_options.is_empty() {
-                list = list.child(self.render_option_group(session_options, cx));
             }
-
-            if !mcp_options.is_empty() {
-                list = list
-                    .child(self.render_section_label("MCP Calls", cx))
-                    .child(self.render_option_group(mcp_options, cx));
+            AgentOptionsMenuMode::Skills => {
+                let skill_options = option_summaries
+                    .into_iter()
+                    .filter(|option| option.id.to_string().starts_with("backboard_skill:"))
+                    .collect::<Vec<_>>();
+                let options_list = if skill_options.is_empty() {
+                    self.render_empty_options("No skills available.")
+                } else {
+                    self.render_option_group(skill_options, cx)
+                };
+                (
+                    "Skills",
+                    IconName::Book,
+                    "Click a skill to toggle it.",
+                    options_list,
+                )
             }
-
-            list.into_any_element()
         };
 
         let colors = cx.theme().colors();
@@ -300,15 +346,11 @@ impl Render for AgentOptionsMenu {
                             .px_1()
                             .py_0p5()
                             .child(
-                                Label::new("Agent Options")
+                                Label::new(title)
                                     .size(LabelSize::Small)
                                     .color(Color::Default),
                             )
-                            .child(
-                                Icon::new(IconName::Sliders)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            ),
+                            .child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted)),
                     )
                     .child(
                         div()
@@ -316,9 +358,16 @@ impl Render for AgentOptionsMenu {
                             .w_full()
                             .bg(colors.border_variant.opacity(0.48)),
                     )
-                    .child(options_list)
                     .child(
-                        Label::new("Click an option to cycle values.")
+                        v_flex()
+                            .id("agent-options-menu-options")
+                            .max_h_96()
+                            .overflow_y_scroll()
+                            .child(options_list)
+                            .vertical_scrollbar_for(&self.scroll_handle, window, cx),
+                    )
+                    .child(
+                        Label::new(footer)
                             .size(LabelSize::XSmall)
                             .color(Color::Muted)
                             .mx_1()
@@ -330,6 +379,14 @@ impl Render for AgentOptionsMenu {
 }
 
 impl AgentOptionsMenu {
+    fn render_empty_options(&self, label: &'static str) -> AnyElement {
+        div()
+            .px_2()
+            .py_1()
+            .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+            .into_any_element()
+    }
+
     fn render_section_label(&self, label: &'static str, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors();
         v_flex()
@@ -554,6 +611,7 @@ pub struct ThreadView {
     pub message_editor: Entity<MessageEditor>,
     pub add_context_menu_handle: PopoverMenuHandle<ContextMenu>,
     agent_options_menu_handle: PopoverMenuHandle<AgentOptionsMenu>,
+    skills_options_menu_handle: PopoverMenuHandle<AgentOptionsMenu>,
     pub thinking_effort_menu_handle: PopoverMenuHandle<ContextMenu>,
     pub project: WeakEntity<Project>,
     pub show_external_source_prompt_warning: bool,
@@ -784,6 +842,7 @@ impl ThreadView {
             message_editor,
             add_context_menu_handle: PopoverMenuHandle::default(),
             agent_options_menu_handle: PopoverMenuHandle::default(),
+            skills_options_menu_handle: PopoverMenuHandle::default(),
             thinking_effort_menu_handle: PopoverMenuHandle::default(),
             project,
             show_external_source_prompt_warning,
@@ -1185,6 +1244,41 @@ impl ThreadView {
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.toggle_session_options(window, cx);
                 }))
+                .into_any_element(),
+        )
+    }
+
+    fn render_skills_options_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let config_options_view = self.config_options_view.clone()?;
+        let has_skills = config_options_view
+            .read(cx)
+            .option_summaries()
+            .iter()
+            .any(|option| option.id.to_string().starts_with("backboard_skill:"));
+        if !has_skills {
+            return None;
+        }
+
+        let menu_handle = self.skills_options_menu_handle.clone();
+        Some(
+            PopoverMenu::new("thread-skills-options-menu")
+                .trigger_with_tooltip(
+                    IconButton::new("thread-skills-options", IconName::Book)
+                        .icon_size(IconSize::Small)
+                        .icon_color(Color::Muted)
+                        .style(ButtonStyle::Transparent)
+                        .shape(ui::IconButtonShape::Square),
+                    |_, cx| Tooltip::simple("Skills", cx),
+                )
+                .anchor(gpui::Anchor::BottomRight)
+                .offset(gpui::Point {
+                    x: px(0.0),
+                    y: px(-2.0),
+                })
+                .with_handle(menu_handle)
+                .menu(move |_window, cx| {
+                    Some(cx.new(|cx| AgentOptionsMenu::skills(config_options_view.clone(), cx)))
+                })
                 .into_any_element(),
         )
     }
@@ -3909,6 +4003,7 @@ impl ThreadView {
                                             .children(self.render_fast_mode_control(cx))
                                             .children(self.render_thinking_control(cx))
                                             .children(self.render_token_usage(cx))
+                                            .children(self.render_skills_options_button(cx))
                                             .children(self.render_session_options_button(cx))
                                             .child(self.render_send_button(cx)),
                                     ),

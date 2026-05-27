@@ -39,7 +39,9 @@ use crate::ExpandMessageEditor;
 use crate::ManageProfiles;
 use crate::agent_connection_store::AgentConnectionStore;
 use crate::completion_provider::AgentContextSource;
-use crate::thread_metadata_store::{ThreadId, ThreadMetadataStore, ThreadMetadataStoreEvent};
+use crate::thread_metadata_store::{
+    ThreadId, ThreadMetadata, ThreadMetadataStore, ThreadMetadataStoreEvent,
+};
 use crate::{
     AddContextServer, AgentDiffPane, ConversationView, CopyThreadToClipboard, Follow,
     InlineAssistant, LoadThreadFromClipboard, NewThread, OpenActiveThreadAsMarkdown, OpenAgentDiff,
@@ -93,7 +95,7 @@ use ui::{
 use util::ResultExt as _;
 use workspace::{
     CollaboratorId, DraggedSelection, DraggedTab, MultiWorkspace, PathList, SerializedPathList,
-    ToggleWorkspaceSidebar, ToggleZoom, Workspace, WorkspaceId,
+    ToggleZoom, Workspace, WorkspaceId,
     dock::{DockPosition, Panel, PanelEvent},
     item::ItemEvent,
 };
@@ -101,6 +103,7 @@ use workspace::{
 const AGENT_PANEL_KEY: &str = "agent_panel";
 const MIN_PANEL_WIDTH: Pixels = px(300.);
 const LAST_USED_AGENT_KEY: &str = "agent_panel__last_used_external_agent";
+const THREAD_HISTORY_MENU_ENTRY_LIMIT: usize = 24;
 
 /// Maximum number of idle threads kept in the agent panel's retained list.
 /// Set as a GPUI global to override; otherwise defaults to 5.
@@ -3609,15 +3612,87 @@ impl AgentPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> ThreadId {
-        let title = workspace_agent_title(kind, &task);
         let workspace_path = current_workspace_agent_path(self.project.read(cx), cx);
+        self.spawn_current_workspace_backboard_workspace_agent_with_context(
+            task,
+            scope,
+            kind,
+            mode,
+            batch_id,
+            batch_index,
+            batch_size,
+            workspace_path,
+            None,
+            window,
+            cx,
+        )
+    }
+
+    pub fn spawn_backboard_workspace_tour_agent(
+        &mut self,
+        task: String,
+        workspace_path: PathBuf,
+        scope: BackboardAgentWorkspaceScope,
+        kind: BackboardAgentWorkspaceKind,
+        mode: BackboardAgentWorkspaceMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<ThreadId> {
+        let task = task.trim().to_string();
+        if task.is_empty() {
+            return None;
+        }
+
+        if self.backboard_workspace_runs.len() >= MAX_BACKBOARD_WORKSPACE_AGENT_TASKS {
+            Self::show_deferred_toast(
+                &self.workspace,
+                "Backboard workspace is limited to 20 chats.",
+                cx,
+            );
+            return None;
+        }
+
+        let batch_id = workspace_agent_batch_id();
+        let work_dirs = PathList::new(&[workspace_path.clone()]);
+        Some(
+            self.spawn_current_workspace_backboard_workspace_agent_with_context(
+                task,
+                scope,
+                kind,
+                mode,
+                batch_id,
+                0,
+                1,
+                workspace_path,
+                Some(work_dirs),
+                window,
+                cx,
+            ),
+        )
+    }
+
+    fn spawn_current_workspace_backboard_workspace_agent_with_context(
+        &mut self,
+        task: String,
+        scope: BackboardAgentWorkspaceScope,
+        kind: BackboardAgentWorkspaceKind,
+        mode: BackboardAgentWorkspaceMode,
+        batch_id: String,
+        batch_index: usize,
+        batch_size: usize,
+        workspace_path: PathBuf,
+        work_dirs: Option<PathList>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> ThreadId {
+        let title = workspace_agent_title(kind, &task);
         let prompt = workspace_agent_prompt(kind, scope, mode, &task, true);
         let event_batch_id = batch_id.clone();
         let thread_id = self.create_backboard_workspace_agent_thread(
             title.clone(),
             prompt,
             mode,
-            None,
+            work_dirs,
             window,
             cx,
         );
@@ -6106,10 +6181,6 @@ impl AgentPanel {
                                 .separator();
                         }
 
-                        menu = menu
-                            .separator()
-                            .action("Toggle Threads Sidebar", Box::new(ToggleWorkspaceSidebar));
-
                         if has_auth_methods {
                             menu = menu.action("Reauthenticate", Box::new(ReauthenticateAgent))
                         }
@@ -6145,13 +6216,8 @@ impl AgentPanel {
         let current_thread_id = self.active_thread_id(cx);
         let entries = ThreadMetadataStore::try_global(cx)
             .map(|store| {
-                store
-                    .read(cx)
-                    .entries()
-                    .filter(|metadata| !metadata.archived && !metadata.is_draft())
-                    .cloned()
-                    .take(24)
-                    .collect::<Vec<_>>()
+                let store = store.read(cx);
+                Self::sorted_thread_history_entries(store.entries())
             })
             .unwrap_or_default();
         let has_entries = !entries.is_empty();
@@ -6186,7 +6252,7 @@ impl AgentPanel {
                             let work_dirs = metadata.folder_paths().clone();
                             let timestamp =
                                 crate::threads_archive_view::format_history_entry_timestamp(
-                                    metadata.interacted_at.unwrap_or(metadata.updated_at),
+                                    AgentPanel::thread_history_entry_time(&metadata),
                                 );
                             let mut entry = ContextMenuEntry::new(format!(
                                 "{}  {}",
@@ -6237,12 +6303,28 @@ impl AgentPanel {
             })
     }
 
+    fn sorted_thread_history_entries<'a>(
+        entries: impl IntoIterator<Item = &'a ThreadMetadata>,
+    ) -> Vec<ThreadMetadata> {
+        entries
+            .into_iter()
+            .filter(|metadata| !metadata.archived && !metadata.is_draft())
+            .sorted_by(|left, right| {
+                Self::thread_history_entry_time(right).cmp(&Self::thread_history_entry_time(left))
+            })
+            .take(THREAD_HISTORY_MENU_ENTRY_LIMIT)
+            .cloned()
+            .collect()
+    }
+
+    fn thread_history_entry_time(metadata: &ThreadMetadata) -> DateTime<Utc> {
+        metadata.interacted_at.unwrap_or(metadata.updated_at)
+    }
+
     fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let agent_server_store = self.project.read(cx).agent_server_store().clone();
 
         let focus_handle = self.focus_handle(cx);
-        let supports_terminal = self.supports_terminal(cx);
-
         let showing_terminal = matches!(self.visible_surface(), VisibleSurface::Terminal(_));
         let (selected_agent_custom_icon, selected_agent_label) = if showing_terminal {
             (None, SharedString::from("Terminal"))
@@ -6279,14 +6361,8 @@ impl AgentPanel {
             let is_agent_selected = move |agent: Agent| selected_agent == agent;
 
             let workspace = self.workspace.clone();
-            let is_via_collab = workspace
-                .update(cx, |workspace, cx| {
-                    workspace.project().read(cx).is_via_collab()
-                })
-                .unwrap_or_default();
 
             let focus_handle = focus_handle.clone();
-            let agent_server_store = agent_server_store;
 
             Rc::new(move |window, cx| {
                 let active_thread = active_thread.clone();
@@ -6344,135 +6420,6 @@ impl AgentPanel {
                                                 }
                                             });
                                         }
-                                    }
-                                }),
-                        )
-                        .when(supports_terminal, |menu| {
-                            menu.item(
-                                ContextMenuEntry::new("Terminal")
-                                    .when(showing_terminal, |this| this.action(Box::new(NewThread)))
-                                    .icon(IconName::Terminal)
-                                    .icon_color(Color::Muted)
-                                    .handler({
-                                        let workspace = workspace.clone();
-                                        move |window, cx| {
-                                            if let Some(workspace) = workspace.upgrade() {
-                                                workspace.update(cx, |workspace, cx| {
-                                                    if let Some(panel) =
-                                                        workspace.panel::<AgentPanel>(cx)
-                                                    {
-                                                        panel.update(cx, |panel, cx| {
-                                                            panel.new_terminal(
-                                                                Some(workspace),
-                                                                window,
-                                                                cx,
-                                                            );
-                                                        });
-                                                    }
-                                                });
-                                            }
-                                        }
-                                    }),
-                            )
-                        })
-                        .map(|mut menu| {
-                            let agent_server_store = agent_server_store.read(cx);
-                            let registry_store = project::AgentRegistryStore::try_global(cx);
-                            let registry_store_ref = registry_store.as_ref().map(|s| s.read(cx));
-
-                            struct AgentMenuItem {
-                                id: AgentId,
-                                display_name: SharedString,
-                            }
-
-                            let agent_items = agent_server_store
-                                .external_agents()
-                                .map(|agent_id| {
-                                    let display_name = agent_server_store
-                                        .agent_display_name(agent_id)
-                                        .or_else(|| {
-                                            registry_store_ref
-                                                .as_ref()
-                                                .and_then(|store| store.agent(agent_id))
-                                                .map(|a| a.name().clone())
-                                        })
-                                        .unwrap_or_else(|| agent_id.0.clone());
-                                    AgentMenuItem {
-                                        id: agent_id.clone(),
-                                        display_name,
-                                    }
-                                })
-                                .sorted_unstable_by_key(|e| e.display_name.to_lowercase())
-                                .collect::<Vec<_>>();
-
-                            if !agent_items.is_empty() {
-                                menu = menu.separator().header("External Agents");
-                            }
-                            for item in &agent_items {
-                                let mut entry = ContextMenuEntry::new(item.display_name.clone());
-
-                                let icon_path =
-                                    agent_server_store.agent_icon(&item.id).or_else(|| {
-                                        registry_store_ref
-                                            .as_ref()
-                                            .and_then(|store| store.agent(&item.id))
-                                            .and_then(|a| a.icon_path().cloned())
-                                    });
-
-                                if let Some(icon_path) = icon_path {
-                                    entry = entry.custom_icon_svg(icon_path);
-                                } else {
-                                    entry = entry.icon(IconName::Sparkle);
-                                }
-
-                                entry = entry
-                                    .when(
-                                        !showing_terminal
-                                            && is_agent_selected(Agent::Custom {
-                                                id: item.id.clone(),
-                                            }),
-                                        |this| this.action(Box::new(NewThread)),
-                                    )
-                                    .icon_color(Color::Muted)
-                                    .disabled(is_via_collab)
-                                    .handler({
-                                        let workspace = workspace.clone();
-                                        let agent_id = item.id.clone();
-                                        move |window, cx| {
-                                            if let Some(workspace) = workspace.upgrade() {
-                                                workspace.update(cx, |workspace, cx| {
-                                                    if let Some(panel) =
-                                                        workspace.panel::<AgentPanel>(cx)
-                                                    {
-                                                        panel.update(cx, |panel, cx| {
-                                                            panel.new_external_agent_thread(
-                                                                &NewExternalAgentThread {
-                                                                    agent: agent_id.clone(),
-                                                                },
-                                                                window,
-                                                                cx,
-                                                            );
-                                                        });
-                                                    }
-                                                });
-                                            }
-                                        }
-                                    });
-
-                                menu = menu.item(entry);
-                            }
-
-                            menu
-                        })
-                        .separator()
-                        .item(
-                            ContextMenuEntry::new("Add More Agents")
-                                .icon(IconName::Plus)
-                                .icon_color(Color::Muted)
-                                .handler({
-                                    move |window, cx| {
-                                        window
-                                            .dispatch_action(Box::new(zed_actions::AcpRegistry), cx)
                                     }
                                 }),
                         )
@@ -7245,6 +7192,78 @@ mod tests {
         ]);
 
         assert_eq!(tasks, vec!["build the header", "write tests"]);
+    }
+
+    #[test]
+    fn test_thread_history_entries_are_newest_first() {
+        let base_time = Utc::now();
+        let make_metadata = |title: &'static str,
+                             updated_at: DateTime<Utc>,
+                             interacted_at: Option<DateTime<Utc>>,
+                             archived: bool,
+                             session_id: Option<&'static str>| {
+            ThreadMetadata {
+                thread_id: ThreadId::new(),
+                session_id: session_id.map(acp::SessionId::new),
+                agent_id: agent::ZED_AGENT_ID.clone(),
+                title: Some(title.into()),
+                updated_at,
+                created_at: Some(updated_at),
+                interacted_at,
+                worktree_paths: project::WorktreePaths::from_folder_paths(&PathList::default()),
+                remote_connection: None,
+                archived,
+            }
+        };
+
+        let older = make_metadata(
+            "older",
+            base_time - chrono::Duration::days(2),
+            None,
+            false,
+            Some("older"),
+        );
+        let recently_updated =
+            make_metadata("recently updated", base_time, None, false, Some("updated"));
+        let recently_interacted = make_metadata(
+            "recently interacted",
+            base_time - chrono::Duration::days(10),
+            Some(base_time + chrono::Duration::minutes(1)),
+            false,
+            Some("interacted"),
+        );
+        let archived = make_metadata(
+            "archived",
+            base_time + chrono::Duration::days(1),
+            None,
+            true,
+            Some("archived"),
+        );
+        let draft = make_metadata(
+            "draft",
+            base_time + chrono::Duration::days(2),
+            None,
+            false,
+            None,
+        );
+
+        let entries = vec![
+            older,
+            archived,
+            recently_updated,
+            draft,
+            recently_interacted,
+        ];
+        let sorted_entries = AgentPanel::sorted_thread_history_entries(entries.iter());
+        let titles = sorted_entries
+            .iter()
+            .filter_map(|metadata| metadata.title.as_ref().map(|title| title.as_ref()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            titles,
+            vec!["recently interacted", "recently updated", "older"]
+        );
     }
 
     #[derive(Clone, Default)]

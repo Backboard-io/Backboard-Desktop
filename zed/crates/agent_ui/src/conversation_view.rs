@@ -2658,7 +2658,7 @@ impl ConversationView {
         let title = if agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref()
             || agent_id.as_ref() == BACKBOARD_AGENT_ID
         {
-            SharedString::from("Backboard")
+            SharedString::from("An Agent")
         } else {
             self.agent_server_store
                 .read(cx)
