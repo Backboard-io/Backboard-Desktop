@@ -25,9 +25,11 @@ use crate::thread_metadata_store::ThreadId;
 use zed_actions::agent::Chat;
 
 const SHADOW_AGENT_PREVIEW_CARD_COUNT: usize = 6;
-const SHADOW_AGENT_PREVIEW_CARD_OPACITY: f32 = 0.62;
+const SHADOW_AGENT_PREVIEW_IMAGE_OPACITY: f32 = 0.52;
 const SHADOW_AGENT_PREVIEW_CARD_IMAGE_BYTES: &[u8] =
     include_bytes!("../../../assets/images/agent_workspace_shadow_card.png");
+const AGENT_WORKSPACE_CONTAINER_RADIUS: Pixels = px(12.);
+const AGENT_WORKSPACE_CARD_RADIUS: Pixels = px(12.);
 const WORKSPACE_STREAM_UPDATE_INTERVAL: Duration = Duration::from_millis(80);
 
 static SHADOW_AGENT_PREVIEW_CARD_IMAGE: LazyLock<Arc<Image>> = LazyLock::new(|| {
@@ -45,6 +47,7 @@ pub struct BackboardAgentWorkspacePage {
     dashboard_scroll_handle: ScrollHandle,
     dismissed_threads: HashSet<ThreadId>,
     card_chat_inputs: HashMap<ThreadId, Entity<Editor>>,
+    card_chat_input_focus_subscriptions: HashMap<ThreadId, Subscription>,
     show_token_context: bool,
     observing_agent_panel: bool,
     pending_workspace_update: bool,
@@ -86,7 +89,6 @@ impl BackboardAgentWorkspaceHeader {
             .border_b_1()
             .border_color(divider_color)
             .bg(header_background)
-            .rounded_t(px(8.))
             .child(
                 h_flex()
                     .h_full()
@@ -188,6 +190,7 @@ impl BackboardAgentWorkspacePage {
                 dashboard_scroll_handle: ScrollHandle::new(),
                 dismissed_threads: HashSet::default(),
                 card_chat_inputs: HashMap::default(),
+                card_chat_input_focus_subscriptions: HashMap::default(),
                 show_token_context: false,
                 observing_agent_panel,
                 pending_workspace_update: false,
@@ -345,6 +348,16 @@ impl BackboardAgentWorkspacePage {
     }
 
     fn open_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_run_with_focus(thread_id, true, window, cx);
+    }
+
+    fn open_run_with_focus(
+        &mut self,
+        thread_id: ThreadId,
+        focus_conversation: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.selected_thread_id = Some(thread_id);
         self.draft_drawer_open = false;
         if let Some(workspace) = self.workspace.upgrade() {
@@ -352,13 +365,20 @@ impl BackboardAgentWorkspacePage {
                 if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
                     panel.update(cx, |panel, cx| {
                         if panel.active_thread_id(cx) != Some(thread_id) {
-                            panel.activate_retained_thread(thread_id, true, window, cx);
+                            panel.activate_retained_thread(
+                                thread_id,
+                                focus_conversation,
+                                window,
+                                cx,
+                            );
                         }
                     });
                 }
             });
         }
-        self.focus_selected_conversation(window, cx);
+        if focus_conversation {
+            self.focus_selected_conversation(window, cx);
+        }
         cx.notify();
     }
 
@@ -398,16 +418,23 @@ impl BackboardAgentWorkspacePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<Editor> {
-        self.card_chat_inputs
-            .entry(thread_id)
-            .or_insert_with(|| {
-                cx.new(|cx| {
-                    let mut editor = Editor::single_line(window, cx);
-                    editor.set_placeholder_text("Message agent...", window, cx);
-                    editor
-                })
-            })
-            .clone()
+        if let Some(input) = self.card_chat_inputs.get(&thread_id) {
+            return input.clone();
+        }
+
+        let input = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text("Message agent...", window, cx);
+            editor
+        });
+        let focus_handle = input.focus_handle(cx);
+        let subscription = cx.on_focus_in(&focus_handle, window, move |this, window, cx| {
+            this.open_run_with_focus(thread_id, false, window, cx);
+        });
+        self.card_chat_input_focus_subscriptions
+            .insert(thread_id, subscription);
+        self.card_chat_inputs.insert(thread_id, input.clone());
+        input
     }
 
     fn send_card_chat(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
@@ -421,6 +448,7 @@ impl BackboardAgentWorkspacePage {
             return;
         }
         let message = message.to_string();
+        self.open_run_with_focus(thread_id, false, window, cx);
 
         input.update(cx, |editor, cx| {
             editor.clear(window, cx);
@@ -519,6 +547,7 @@ impl BackboardAgentWorkspacePage {
     fn dismiss_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
         self.dismissed_threads.insert(thread_id);
         self.card_chat_inputs.remove(&thread_id);
+        self.card_chat_input_focus_subscriptions.remove(&thread_id);
         if self.selected_thread_id == Some(thread_id) {
             self.selected_thread_id = None;
         }
@@ -623,6 +652,15 @@ impl BackboardAgentWorkspacePage {
         };
         let card_min_width = if right_panel_open { px(320.) } else { px(300.) };
 
+        let visible_thread_ids = summaries
+            .iter()
+            .map(|summary| summary.thread_id)
+            .collect::<HashSet<_>>();
+        self.card_chat_inputs
+            .retain(|thread_id, _| visible_thread_ids.contains(thread_id));
+        self.card_chat_input_focus_subscriptions
+            .retain(|thread_id, _| visible_thread_ids.contains(thread_id));
+
         if summaries.is_empty() {
             let cards = (0..SHADOW_AGENT_PREVIEW_CARD_COUNT)
                 .map(|index| {
@@ -649,14 +687,6 @@ impl BackboardAgentWorkspacePage {
                 .vertical_scrollbar_for(&self.dashboard_scroll_handle, window, cx)
                 .into_any_element();
         }
-
-        let selected_thread_id = self.selected_thread_id;
-        self.card_chat_inputs.retain(|thread_id, _| {
-            Some(*thread_id) == selected_thread_id
-                && summaries
-                    .iter()
-                    .any(|summary| summary.thread_id == *thread_id)
-        });
 
         let real_card_count = summaries.len();
         let mut cards = summaries
@@ -855,14 +885,10 @@ impl BackboardAgentWorkspacePage {
             .as_ref()
             .map(|label| label.as_ref().to_lowercase())
             .unwrap_or_else(|| "build".to_string());
-        let chat_bar = if selected {
-            let chat_input = self.card_chat_input(thread_id, window, cx);
-            self.render_card_chat_bar(thread_id, chat_input, window, cx)
-                .into_any_element()
-        } else {
-            self.render_card_chat_preview(thread_id, thread_key.clone(), cx)
-                .into_any_element()
-        };
+        let chat_input = self.card_chat_input(thread_id, window, cx);
+        let chat_bar = self
+            .render_card_chat_bar(thread_id, chat_input, window, cx)
+            .into_any_element();
 
         v_flex()
             .id(format!("backboard-agent-card-{thread_key}"))
@@ -871,12 +897,11 @@ impl BackboardAgentWorkspacePage {
             .max_w(relative(1.))
             .h(px(440.))
             .flex_none()
-            .rounded(px(8.))
+            .rounded(AGENT_WORKSPACE_CARD_RADIUS)
             .border_1()
             .border_color(border_color)
             .bg(background)
             .overflow_hidden()
-            .opacity(SHADOW_AGENT_PREVIEW_CARD_OPACITY)
             .cursor_pointer()
             .hover(move |style| style.border_color(hover_border))
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -971,11 +996,9 @@ impl BackboardAgentWorkspacePage {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors();
-        let border_color = colors.border_variant.opacity(0.32);
-        let background = colors
-            .elevated_surface_background
-            .blend(colors.editor_background.opacity(0.32));
-        let hover_border = colors.border_variant.opacity(0.58);
+        let border_color = colors.text_accent.opacity(0.78);
+        let background = colors.elevated_surface_background.opacity(0.18);
+        let hover_border = colors.text_accent;
 
         v_flex()
             .id(format!("backboard-agent-shadow-preview-card-{index}"))
@@ -984,8 +1007,9 @@ impl BackboardAgentWorkspacePage {
             .max_w(relative(1.))
             .h(px(440.))
             .flex_none()
-            .rounded(px(8.))
-            .border_1()
+            .rounded(AGENT_WORKSPACE_CARD_RADIUS)
+            .border_2()
+            .border_dashed()
             .border_color(border_color)
             .bg(background)
             .overflow_hidden()
@@ -998,6 +1022,7 @@ impl BackboardAgentWorkspacePage {
             .child(
                 img(SHADOW_AGENT_PREVIEW_CARD_IMAGE.clone())
                     .size_full()
+                    .opacity(SHADOW_AGENT_PREVIEW_IMAGE_OPACITY)
                     .object_fit(ObjectFit::Fill)
                     .with_fallback(|| div().size_full().into_any_element()),
             )
@@ -1328,60 +1353,6 @@ impl BackboardAgentWorkspacePage {
                             })),
                     )
                 },
-            )
-    }
-
-    fn render_card_chat_preview(
-        &self,
-        thread_id: ThreadId,
-        thread_key: String,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let colors = cx.theme().colors();
-        let input_background = colors
-            .editor_background
-            .blend(colors.element_background.opacity(0.06));
-
-        h_flex()
-            .id(format!("agent-card-chat-preview-{thread_key}"))
-            .h(px(50.))
-            .px_2()
-            .gap_1p5()
-            .items_center()
-            .border_t_1()
-            .border_color(colors.border_variant.opacity(0.32))
-            .bg(colors.panel_background.opacity(0.16))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                this.open_run(thread_id, window, cx);
-            }))
-            .child(
-                Icon::new(IconName::Chat)
-                    .size(IconSize::XSmall)
-                    .color(Color::Muted),
-            )
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(34.))
-                    .px_2()
-                    .items_center()
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(colors.border_variant.opacity(0.36))
-                    .bg(input_background)
-                    .child(
-                        Label::new("Message agent...")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted)
-                            .truncate(),
-                    ),
-            )
-            .child(
-                Icon::new(IconName::Send)
-                    .size(IconSize::XSmall)
-                    .color(Color::Muted),
             )
     }
 
@@ -2639,7 +2610,9 @@ impl BackboardAgentWorkspacePage {
             .min_w(rems_from_px(360.))
             .h_full()
             .flex_shrink_0()
+            .rounded_br(AGENT_WORKSPACE_CONTAINER_RADIUS)
             .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
+            .overflow_hidden()
             .child(content)
     }
 }
@@ -2685,6 +2658,7 @@ impl Render for BackboardAgentWorkspacePage {
         v_flex()
             .size_full()
             .bg(workspace_background)
+            .overflow_hidden()
             .key_context("BackboardAgentWorkspace")
             .on_action(cx.listener(|this, _: &Chat, window, cx| {
                 this.submit_chat_action(window, cx);
@@ -2694,14 +2668,18 @@ impl Render for BackboardAgentWorkspacePage {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .p_1()
+                    .px_1()
+                    .pb_1()
                     .overflow_hidden()
                     .bg(workspace_body_background)
                     .child(
                         h_flex()
                             .size_full()
-                            .rounded_xl()
-                            .border_1()
+                            .rounded_bl(AGENT_WORKSPACE_CONTAINER_RADIUS)
+                            .rounded_br(AGENT_WORKSPACE_CONTAINER_RADIUS)
+                            .border_l_1()
+                            .border_r_1()
+                            .border_b_1()
                             .border_color(workspace_body_border)
                             .overflow_hidden()
                             .bg(workspace_body_panel_background)
@@ -3101,6 +3079,66 @@ mod tests {
             assert!(
                 page.conversation_for_thread(sent_thread_id, cx).is_some(),
                 "opening a tile should expose the selected run chat"
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_workspace_agent_page_card_input_focus_opens_right_panel_without_losing_focus(
+        cx: &mut TestAppContext,
+    ) {
+        let (_workspace, panel, page, mut cx) = setup_workspace_page(cx, false).await;
+
+        page.update_in(&mut cx, |page, window, cx| {
+            page.create_chat(window, cx);
+        });
+
+        let sent_thread_id = panel.read_with(&cx, |panel, cx| {
+            panel
+                .active_backboard_workspace_draft_thread_id(cx)
+                .expect("New Chat should focus a draft")
+        });
+        panel.update(&mut cx, |panel, cx| {
+            assert_eq!(
+                panel.promote_active_backboard_workspace_draft(
+                    "build the dashboard".to_string(),
+                    BackboardAgentWorkspaceScope::WholeProject,
+                    BackboardAgentWorkspaceKind::Build,
+                    BackboardAgentWorkspaceMode::Free,
+                    cx,
+                ),
+                Some(sent_thread_id)
+            );
+        });
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.create_backboard_workspace_chat(window, cx);
+        });
+
+        let input = page.update_in(&mut cx, |page, window, cx| {
+            page.card_chat_input(sent_thread_id, window, cx)
+        });
+        input.update_in(&mut cx, |editor, window, cx| {
+            editor.focus_handle(cx).focus(window, cx);
+        });
+
+        page.read_with(&cx, |page, _cx| {
+            assert_eq!(page.selected_thread_id, Some(sent_thread_id));
+            assert!(
+                !page.draft_drawer_open,
+                "card input focus should open the run chat drawer"
+            );
+        });
+        panel.read_with(&cx, |panel, cx| {
+            assert_eq!(
+                panel.active_thread_id(cx),
+                Some(sent_thread_id),
+                "card input focus should activate the run in the right panel"
+            );
+        });
+        input.update_in(&mut cx, |editor, window, cx| {
+            assert!(
+                editor.focus_handle(cx).is_focused(window),
+                "opening the run drawer should not steal focus from the card input"
             );
         });
     }

@@ -1,5 +1,7 @@
 use serde_json::{Value, json};
 
+const UNAVAILABLE_NATIVE_TOOLS: &[&str] = &["task"];
+
 pub fn tool_definitions(mode: &str) -> Vec<Value> {
     let blocked = blocked_tools(mode);
     all_tool_definitions()
@@ -8,7 +10,9 @@ pub fn tool_definitions(mode: &str) -> Vec<Value> {
             tool.get("function")
                 .and_then(|function| function.get("name"))
                 .and_then(Value::as_str)
-                .is_none_or(|name| !blocked.contains(&name))
+                .is_none_or(|name| {
+                    !blocked.contains(&name) && !UNAVAILABLE_NATIVE_TOOLS.contains(&name)
+                })
         })
         .collect()
 }
@@ -276,9 +280,8 @@ fn function(name: &str, description: &str, properties: Value, required: &[&str])
 mod tests {
     use super::*;
 
-    #[test]
-    fn ask_mode_hides_mutating_tools() {
-        let names = tool_definitions("ask")
+    fn tool_names(mode: &str) -> Vec<String> {
+        tool_definitions(mode)
             .into_iter()
             .filter_map(|tool| {
                 tool.get("function")
@@ -286,7 +289,12 @@ mod tests {
                     .and_then(Value::as_str)
                     .map(str::to_string)
             })
-            .collect::<Vec<_>>();
+            .collect()
+    }
+
+    #[test]
+    fn ask_mode_hides_mutating_tools() {
+        let names = tool_names("ask");
 
         assert!(names.contains(&"read_file".to_string()));
         assert!(!names.contains(&"write".to_string()));
@@ -295,16 +303,18 @@ mod tests {
     }
 
     #[test]
-    fn advertised_tools_match_python_bridge_base_catalog() {
-        let names = tool_definitions("agent")
-            .into_iter()
-            .filter_map(|tool| {
-                tool.get("function")
-                    .and_then(|function| function.get("name"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .collect::<Vec<_>>();
+    fn all_modes_hide_unavailable_task_tool() {
+        for mode in ["agent", "ask", "manual", "free"] {
+            let names = tool_names(mode);
+
+            assert!(names.contains(&"read_file".to_string()));
+            assert!(!names.contains(&"task".to_string()));
+        }
+    }
+
+    #[test]
+    fn full_access_advertises_supported_native_tools() {
+        let names = tool_names("free");
 
         assert_eq!(
             names,
@@ -321,7 +331,6 @@ mod tests {
                 "web_fetch",
                 "todo_write",
                 "read_lints",
-                "task",
                 "enter_plan_mode",
                 "exit_plan_mode",
                 "persistence_decide",

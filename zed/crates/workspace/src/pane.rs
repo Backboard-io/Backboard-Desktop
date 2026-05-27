@@ -53,6 +53,8 @@ use util::{
     ResultExt, debug_panic, maybe, paths::PathStyle, serde::default_true, truncate_and_remove_front,
 };
 
+const PANE_CONTAINER_RADIUS: Pixels = px(12.);
+
 /// A selected entry in e.g. project panel.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SelectedEntry {
@@ -4333,6 +4335,7 @@ impl Render for Pane {
             .track_focus(&self.focus_handle(cx))
             .size_full()
             .flex_none()
+            .rounded(PANE_CONTAINER_RADIUS)
             .bg(pane_background)
             .overflow_hidden()
             .on_action(cx.listener(|pane, split: &SplitLeft, window, cx| {
@@ -4512,7 +4515,7 @@ impl Render for Pane {
                             div.id("pane_placeholder")
                                 .v_flex()
                                 .size_full()
-                                .rounded_xl()
+                                .rounded(PANE_CONTAINER_RADIUS)
                                 .border_1()
                                 .border_color(editor_card_border)
                                 .bg(editor_card_background)
@@ -4524,7 +4527,7 @@ impl Render for Pane {
                                 .id("pane_placeholder")
                                 .h_flex()
                                 .size_full()
-                                .rounded_xl()
+                                .rounded(PANE_CONTAINER_RADIUS)
                                 .border_1()
                                 .border_color(editor_card_border)
                                 .bg(editor_card_background)
