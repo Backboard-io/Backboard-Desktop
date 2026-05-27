@@ -1407,6 +1407,7 @@ pub struct Workspace {
     _panels_task: Option<Task<Result<()>>>,
     sidebar_focus_handle: Option<FocusHandle>,
     multi_workspace: Option<WeakEntity<MultiWorkspace>>,
+    initial_interface_mode: Option<InterfaceMode>,
     active_worktree_creation: ActiveWorktreeCreation,
     deferred_save_items: Vec<Box<dyn WeakItemHandle>>,
 }
@@ -1851,6 +1852,7 @@ impl Workspace {
             removing: false,
             sidebar_focus_handle: None,
             multi_workspace,
+            initial_interface_mode: None,
             active_worktree_creation: ActiveWorktreeCreation::default(),
             open_in_dev_container: false,
             _dev_container_task: None,
@@ -2578,6 +2580,14 @@ impl Workspace {
             status_bar.set_multi_workspace(multi_workspace.clone(), cx);
         });
         self.multi_workspace = Some(multi_workspace);
+    }
+
+    pub fn set_initial_interface_mode(&mut self, mode: InterfaceMode) {
+        self.initial_interface_mode = Some(mode);
+    }
+
+    pub(crate) fn initial_interface_mode(&self) -> Option<InterfaceMode> {
+        self.initial_interface_mode
     }
 
     pub fn app_state(&self) -> &Arc<AppState> {

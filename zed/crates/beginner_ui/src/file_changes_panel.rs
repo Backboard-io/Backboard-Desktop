@@ -5,6 +5,8 @@ use agent_client_protocol::schema as acp;
 use gpui::{App, Context, Entity, EventEmitter, FocusHandle, Focusable, Render, Subscription};
 use ui::{Color, Icon, IconName, IconSize, Label, LabelSize, prelude::*};
 
+use crate::simple_design as ds;
+
 #[derive(Clone, Debug)]
 pub struct FileChangeEntry {
     pub path: Arc<PathBuf>,
@@ -99,23 +101,20 @@ impl Render for FileChangesPanel {
         let entries = self.entries.clone();
         let selected = self.selected_path.clone();
 
+        let hover_bg = ds::hover_background(cx);
+
         v_flex()
-            .w(px(240.))
+            .w(px(ds::SIDEBAR_WIDTH))
             .h_full()
-            .bg(cx.theme().colors().surface_background)
+            .bg(ds::field_background(cx))
             .border_r_1()
-            .border_color(cx.theme().colors().border)
+            .border_color(ds::separator(cx))
             .child(
-                h_flex()
-                    .px_3()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(cx.theme().colors().border)
-                    .child(
-                        Label::new("Changes")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    ),
+                h_flex().h(px(ds::TOP_BAR_HEIGHT)).px_3().child(
+                    Label::new("Changes")
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                ),
             )
             .child(if entries.is_empty() {
                 div()
@@ -157,15 +156,14 @@ impl Render for FileChangesPanel {
                             .id(SharedString::from(
                                 entry.path.to_string_lossy().into_owned(),
                             ))
+                            .min_h(px(ds::PROJECT_ROW_HEIGHT))
                             .px_2()
                             .py_1()
                             .gap_0p5()
                             .rounded_md()
                             .cursor_pointer()
-                            .when(is_selected, |el| {
-                                el.bg(cx.theme().colors().element_selected)
-                            })
-                            .hover(|el| el.bg(cx.theme().colors().element_hover))
+                            .when(is_selected, |el| el.bg(ds::selected_background(cx)))
+                            .hover(move |el| el.bg(hover_bg))
                             .on_click(cx.listener(move |this, _, _window, cx| {
                                 this.select_file(path.clone(), cx);
                             }))

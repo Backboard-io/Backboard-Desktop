@@ -8,6 +8,8 @@ use gpui::{
 };
 use ui::{Color, Icon, IconName, IconSize, Label, LabelSize, prelude::*};
 
+use crate::simple_design as ds;
+
 #[derive(Clone)]
 struct TaskItem {
     label: String,
@@ -61,24 +63,6 @@ pub enum PreviewCardState {
     Generating,
     Ready,
     Unavailable,
-}
-
-fn render_simple_project_mark(size: f32, cx: &App) -> impl IntoElement {
-    let colors = cx.theme().colors().clone();
-    div()
-        .size(px(size))
-        .rounded_sm()
-        .border_1()
-        .border_color(colors.border_variant)
-        .bg(colors.element_background)
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(
-            Icon::new(IconName::Sparkle)
-                .size(IconSize::Indicator)
-                .color(Color::Custom(colors.icon_accent)),
-        )
 }
 
 impl BeginnerChatFeed {
@@ -135,12 +119,12 @@ impl Render for BeginnerChatFeed {
             .min_h_0()
             .w_full()
             .overflow_y_scroll()
-            .font_family("Inter")
+            .font_family(ds::FONT_FAMILY)
             .px_4()
             .pt_4()
             .pb(px(220.))
             .gap_4()
-            .bg(colors.editor_background)
+            .bg(ds::app_background(cx))
             .when(is_empty, |el| {
                 el.child(
                     v_flex()
@@ -148,7 +132,7 @@ impl Render for BeginnerChatFeed {
                         .items_center()
                         .justify_center()
                         .gap_1()
-                        .child(render_simple_project_mark(16., cx))
+                        .child(ds::render_project_mark(ds::UTILITY_ICON_SIZE, cx))
                         .child(
                             Label::new("Thinking…")
                                 .size(LabelSize::Small)
@@ -409,7 +393,7 @@ fn render_item(
                     h_flex()
                         .gap_1()
                         .items_center()
-                        .child(render_simple_project_mark(14., cx))
+                        .child(ds::render_project_mark(14., cx))
                         .child(
                             Label::new("Backboard")
                                 .size(LabelSize::XSmall)
@@ -420,16 +404,14 @@ fn render_item(
                     el.child(
                         v_flex()
                             .w_full()
-                            .max_w(px(640.))
+                            .max_w(px(ds::CHAT_MAX_WIDTH))
                             .min_h(px(96.))
-                            .rounded_xl()
-                            .bg(colors.element_background)
-                            .border_1()
-                            .border_color(if tasks.iter().any(|task| task.failed) {
-                                cx.theme().status().error_border
-                            } else {
-                                colors.border_variant
+                            .rounded_lg()
+                            .bg(ds::card_background(cx))
+                            .when(tasks.iter().any(|task| task.failed), |el| {
+                                el.border_1().border_color(cx.theme().status().error_border)
                             })
+                            .shadow(ds::card_shadow(cx))
                             .p_4()
                             .gap_1p5()
                             .child(
@@ -512,15 +494,11 @@ fn render_message_bubble(
 
     div()
         .w_full()
-        .max_w(px(640.))
+        .max_w(px(ds::CHAT_MAX_WIDTH))
         .rounded_lg()
-        .border_1()
-        .border_color(colors.border_variant)
         .bg(match tone {
-            MessageTone::User => colors.element_background,
-            MessageTone::Assistant => colors
-                .editor_background
-                .blend(colors.element_background.opacity(0.18)),
+            MessageTone::User => ds::card_background(cx),
+            MessageTone::Assistant => ds::subtle_card_background(cx),
         })
         .px_3()
         .py_2()
@@ -726,6 +704,7 @@ fn render_artifact_summary(
 ) -> impl IntoElement {
     let status = artifact_status(tasks, artifact_title, preview_state);
     let colors = cx.theme().colors().clone();
+    let preview_hover_border = ds::accent(cx);
 
     h_flex()
         .flex_1()
@@ -757,12 +736,10 @@ fn render_artifact_summary(
                         .min_w(px(56.))
                         .px_2p5()
                         .py_1()
-                        .rounded_sm()
-                        .border_1()
-                        .border_color(colors.border_variant)
-                        .bg(colors.element_background)
+                        .rounded_full()
+                        .bg(ds::field_background(cx))
                         .cursor_pointer()
-                        .hover(|el| el.border_color(colors.text_accent))
+                        .hover(move |el| el.bg(preview_hover_border.opacity(0.12)))
                         .on_click(cx.listener(|_, _, _, cx| {
                             cx.emit(BeginnerChatFeedEvent::PreviewRequested);
                         }))
@@ -905,9 +882,7 @@ fn render_artifact_tile(cx: &App) -> impl IntoElement {
                 .w(px(48.))
                 .h(px(64.))
                 .rounded_md()
-                .border_1()
-                .border_color(colors.border_variant)
-                .bg(colors.editor_background),
+                .bg(ds::app_background(cx)),
         )
         .child(
             div()
@@ -917,9 +892,7 @@ fn render_artifact_tile(cx: &App) -> impl IntoElement {
                 .w(px(52.))
                 .h(px(68.))
                 .rounded_md()
-                .border_1()
-                .border_color(colors.border_variant)
-                .bg(colors.element_background)
+                .bg(ds::card_background(cx))
                 .flex()
                 .items_center()
                 .justify_center()

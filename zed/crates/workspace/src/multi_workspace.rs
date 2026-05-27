@@ -372,6 +372,10 @@ impl MultiWorkspace {
         workspace.update(cx, |workspace, cx| {
             workspace.set_multi_workspace(weak_self, cx);
         });
+        let interface_mode = workspace
+            .read(cx)
+            .initial_interface_mode()
+            .unwrap_or(InterfaceMode::Expert);
         let jarvis_visualizer = cx.new(|cx| {
             let project = workspace.read(cx).project().clone();
             JarvisDirectoryVisualizer::new(project, cx)
@@ -392,7 +396,7 @@ impl MultiWorkspace {
                 settings_subscription,
             ],
             previous_focus_handle: None,
-            interface_mode: InterfaceMode::Expert,
+            interface_mode,
             multi_agent_expanded: false,
             skills_expanded: false,
             tasks_expanded: false,
