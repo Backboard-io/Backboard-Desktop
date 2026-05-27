@@ -17,22 +17,9 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
         .unwrap_or("Switch Mode");
 
     let mut view_items = vec![
-        MenuItem::action(
-            "Zoom In",
-            zed_actions::IncreaseBufferFontSize { persist: false },
-        ),
-        MenuItem::action(
-            "Zoom Out",
-            zed_actions::DecreaseBufferFontSize { persist: false },
-        ),
-        MenuItem::action(
-            "Reset Zoom",
-            zed_actions::ResetBufferFontSize { persist: false },
-        ),
-        MenuItem::action(
-            "Reset All Zoom",
-            zed_actions::ResetAllZoom { persist: false },
-        ),
+        MenuItem::action("Zoom In", zed_actions::IncreaseAllZoom { persist: false }),
+        MenuItem::action("Zoom Out", zed_actions::DecreaseAllZoom { persist: false }),
+        MenuItem::action("Reset Zoom", zed_actions::ResetAllZoom { persist: false }),
         MenuItem::separator(),
         MenuItem::action("Toggle Left Dock", workspace::ToggleLeftDock),
         MenuItem::action("Toggle Right Dock", workspace::ToggleRightDock),

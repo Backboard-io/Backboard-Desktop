@@ -1340,6 +1340,74 @@ fn register_actions(
         })
         .register_action({
             let fs = app_state.fs.clone();
+            move |_, action: &zed_actions::IncreaseAllZoom, _window, cx| {
+                let delta = px(1.0);
+                if action.persist {
+                    update_settings_file(fs.clone(), cx, move |settings, cx| {
+                        let buffer_font_size = theme_settings::clamp_font_size(
+                            ThemeSettings::get_global(cx).buffer_font_size(cx) + delta,
+                        );
+                        let ui_font_size =
+                            theme_settings::ui_font_size_for_default_text_size(buffer_font_size);
+
+                        let _ = settings
+                            .theme
+                            .ui_font_size
+                            .insert(f32::from(ui_font_size).into());
+                        let _ = settings
+                            .theme
+                            .buffer_font_size
+                            .insert(f32::from(buffer_font_size).into());
+                        let _ = settings
+                            .theme
+                            .agent_ui_font_size
+                            .insert(f32::from(ui_font_size).into());
+                        let _ = settings
+                            .theme
+                            .agent_buffer_font_size
+                            .insert(f32::from(buffer_font_size).into());
+                    });
+                } else {
+                    theme_settings::adjust_all_font_sizes(cx, delta);
+                }
+            }
+        })
+        .register_action({
+            let fs = app_state.fs.clone();
+            move |_, action: &zed_actions::DecreaseAllZoom, _window, cx| {
+                let delta = px(-1.0);
+                if action.persist {
+                    update_settings_file(fs.clone(), cx, move |settings, cx| {
+                        let buffer_font_size = theme_settings::clamp_font_size(
+                            ThemeSettings::get_global(cx).buffer_font_size(cx) + delta,
+                        );
+                        let ui_font_size =
+                            theme_settings::ui_font_size_for_default_text_size(buffer_font_size);
+
+                        let _ = settings
+                            .theme
+                            .ui_font_size
+                            .insert(f32::from(ui_font_size).into());
+                        let _ = settings
+                            .theme
+                            .buffer_font_size
+                            .insert(f32::from(buffer_font_size).into());
+                        let _ = settings
+                            .theme
+                            .agent_ui_font_size
+                            .insert(f32::from(ui_font_size).into());
+                        let _ = settings
+                            .theme
+                            .agent_buffer_font_size
+                            .insert(f32::from(buffer_font_size).into());
+                    });
+                } else {
+                    theme_settings::adjust_all_font_sizes(cx, delta);
+                }
+            }
+        })
+        .register_action({
+            let fs = app_state.fs.clone();
             move |_, action: &zed_actions::ResetBufferFontSize, _window, cx| {
                 if action.persist {
                     update_settings_file(fs.clone(), cx, move |settings, _| {

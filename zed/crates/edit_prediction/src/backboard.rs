@@ -20,7 +20,10 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     path::Path,
-    sync::{Arc, LazyLock, Mutex, atomic::{AtomicBool, Ordering}},
+    sync::{
+        Arc, LazyLock, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 use zeta_prompt::ZetaPromptInput;
@@ -102,7 +105,6 @@ fn store_cached_backboard_assistant(base_url: &str, assistant_id: &str) {
         cache.insert(cache_key.to_string(), assistant_id.to_string());
     }
 }
-
 
 pub struct BackboardCompletions {
     pub api_token: Entity<ApiKeyState>,
@@ -402,9 +404,11 @@ impl BackboardCompletions {
                 );
             }
 
-            let Some(chunks) =
-                filtered_function_completion_chunks(&completion_text, &inputs, language_name.as_deref())
-            else {
+            let Some(chunks) = filtered_function_completion_chunks(
+                &completion_text,
+                &inputs,
+                language_name.as_deref(),
+            ) else {
                 return anyhow::Ok(None);
             };
             log::info!(
@@ -424,8 +428,11 @@ impl BackboardCompletions {
             );
 
             let insertion_anchor = old_snapshot.anchor_after(insertion_offset);
-            let edits: Arc<[(std::ops::Range<language::Anchor>, Arc<str>)]> =
-                vec![(insertion_anchor.clone()..insertion_anchor, Arc::from(completion_text.as_str()))].into();
+            let edits: Arc<[(std::ops::Range<language::Anchor>, Arc<str>)]> = vec![(
+                insertion_anchor.clone()..insertion_anchor,
+                Arc::from(completion_text.as_str()),
+            )]
+            .into();
             let e2e_latency = cx.background_executor().now() - request_start;
             let result = EditPredictionResult::new(
                 EditPredictionId(uuid::Uuid::new_v4().to_string().into()),
@@ -851,7 +858,11 @@ async fn resolve_backboard_model(
             ..Default::default()
         }
     });
-    log::info!("backboard: selected model={} provider={}", model.name, model.provider);
+    log::info!(
+        "backboard: selected model={} provider={}",
+        model.name,
+        model.provider
+    );
     Ok(model)
 }
 
@@ -1098,7 +1109,9 @@ fn strip_code_fences(response: &str) -> &str {
 // on the current line. This handles models that echo back the prefix when completing mid-token
 // (e.g. cursor after `user.` and model returns `user.name;` instead of just `name;`).
 fn strip_typed_prefix_from_completion(completion: &str, inputs: &ZetaPromptInput) -> String {
-    let cursor_offset = inputs.cursor_offset_in_excerpt.min(inputs.cursor_excerpt.len());
+    let cursor_offset = inputs
+        .cursor_offset_in_excerpt
+        .min(inputs.cursor_excerpt.len());
     let code_before = &inputs.cursor_excerpt[..cursor_offset];
     // Use rfind to get the actual current line — .lines().last() skips trailing newlines
     // and would return the previous line when the cursor is at the start of a new line.
@@ -1196,7 +1209,10 @@ fn is_non_completion(response: &str) -> bool {
         "please note",
         "please provide",
     ];
-    if assistant_prefixes.iter().any(|p| lower_first.starts_with(p)) {
+    if assistant_prefixes
+        .iter()
+        .any(|p| lower_first.starts_with(p))
+    {
         log::info!("backboard: rejected reason=assistant_preamble");
         return true;
     }
@@ -1340,7 +1356,9 @@ fn filtered_function_completion_chunks(
         return None;
     }
 
-    let cursor_offset = inputs.cursor_offset_in_excerpt.min(inputs.cursor_excerpt.len());
+    let cursor_offset = inputs
+        .cursor_offset_in_excerpt
+        .min(inputs.cursor_excerpt.len());
     let code_before = &inputs.cursor_excerpt[..cursor_offset];
     // Use rfind to find what has actually been typed on the current line. .lines().last()
     // does not yield a trailing empty line, so it would return the comment when the cursor
@@ -1545,7 +1563,9 @@ fn validate_completion_syntax(
     inputs: &ZetaPromptInput,
     language: Language,
 ) -> Option<&'static str> {
-    let cursor_offset = inputs.cursor_offset_in_excerpt.min(inputs.cursor_excerpt.len());
+    let cursor_offset = inputs
+        .cursor_offset_in_excerpt
+        .min(inputs.cursor_excerpt.len());
     let code_before = &inputs.cursor_excerpt[..cursor_offset];
     let code_after = &inputs.cursor_excerpt[cursor_offset..];
 
@@ -1574,12 +1594,7 @@ fn validate_completion_syntax(
         // Reject C-style block delimiters that have no place in Python.
         for line in completion.lines() {
             let t = line.trim();
-            if t == "{"
-                || t.ends_with(" {")
-                || t == "}"
-                || t.starts_with("} ")
-                || t == "};"
-            {
+            if t == "{" || t.ends_with(" {") || t == "}" || t.starts_with("} ") || t == "};" {
                 return Some("python_c_style_braces");
             }
         }
@@ -1588,8 +1603,7 @@ fn validate_completion_syntax(
         // The effective indentation in the document is cursor column + completion-line indent,
         // because the cursor is already positioned after any auto-inserted whitespace.
         if !is_midline && prev_nonempty_line.trim_end().ends_with(':') {
-            let prev_indent =
-                prev_nonempty_line.len() - prev_nonempty_line.trim_start().len();
+            let prev_indent = prev_nonempty_line.len() - prev_nonempty_line.trim_start().len();
             let first_content = completion
                 .lines()
                 .find(|l| !l.trim().is_empty())
@@ -1679,17 +1693,20 @@ fn validate_completion_syntax(
             || first_trimmed.starts_with("import{")
             || first_trimmed.starts_with("import type ");
         if is_import_line {
-            let past_imports = code_before.lines().filter(|l| !l.trim().is_empty()).any(|l| {
-                let t = l.trim_start();
-                !t.starts_with("import ")
-                    && !t.starts_with("import{")
-                    && !t.starts_with("import type ")
-                    && !t.starts_with("//")
-                    && !t.starts_with("/*")
-                    && !t.starts_with('*')
-                    && !t.starts_with("\"use ")
-                    && !t.starts_with("'use ")
-            });
+            let past_imports = code_before
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .any(|l| {
+                    let t = l.trim_start();
+                    !t.starts_with("import ")
+                        && !t.starts_with("import{")
+                        && !t.starts_with("import type ")
+                        && !t.starts_with("//")
+                        && !t.starts_with("/*")
+                        && !t.starts_with('*')
+                        && !t.starts_with("\"use ")
+                        && !t.starts_with("'use ")
+                });
             if past_imports {
                 return Some("ts_import_outside_import_section");
             }
@@ -1948,12 +1965,10 @@ mod tests {
         let context = "def foo():\n    ";
         let inputs = input_with_lang(context, context.len(), "test.py");
         // C-style block opener is invalid Python syntax
-        assert!(filtered_function_completion_chunks(
-            "if x {\n    return 1\n}",
-            &inputs,
-            Some("Python")
-        )
-        .is_none());
+        assert!(
+            filtered_function_completion_chunks("if x {\n    return 1\n}", &inputs, Some("Python"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -1962,9 +1977,7 @@ mod tests {
         let context = "def foo():\n";
         let inputs = input_with_lang(context, context.len(), "test.py");
         // 'pass' at column 0 with prev_indent 0 → effective_indent 0 <= prev_indent 0 → reject
-        assert!(
-            filtered_function_completion_chunks("pass", &inputs, Some("Python")).is_none()
-        );
+        assert!(filtered_function_completion_chunks("pass", &inputs, Some("Python")).is_none());
     }
 
     #[test]
@@ -1984,45 +1997,49 @@ mod tests {
         let context = "def foo():\n    ";
         let inputs = input_with_lang(context, context.len(), "test.py");
         let completion = "\ndef bar():\n    pass";
-        assert!(
-            filtered_function_completion_chunks(completion, &inputs, Some("Python")).is_none()
-        );
+        assert!(filtered_function_completion_chunks(completion, &inputs, Some("Python")).is_none());
     }
 
     #[test]
     fn rejects_midline_import_statement() {
         let context = "const result = ";
         let inputs = input_with_lang(context, context.len(), "test.ts");
-        assert!(filtered_function_completion_chunks(
-            "import { foo } from './foo';",
-            &inputs,
-            Some("TypeScript")
-        )
-        .is_none());
+        assert!(
+            filtered_function_completion_chunks(
+                "import { foo } from './foo';",
+                &inputs,
+                Some("TypeScript")
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn rejects_midline_named_function_declaration() {
         let context = "const handler = ";
         let inputs = input_with_lang(context, context.len(), "test.ts");
-        assert!(filtered_function_completion_chunks(
-            "function processData() { return data; }",
-            &inputs,
-            Some("TypeScript")
-        )
-        .is_none());
+        assert!(
+            filtered_function_completion_chunks(
+                "function processData() { return data; }",
+                &inputs,
+                Some("TypeScript")
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn rejects_midline_class_declaration() {
         let context = "const obj = ";
         let inputs = input_with_lang(context, context.len(), "test.ts");
-        assert!(filtered_function_completion_chunks(
-            "class MyClass { constructor() {} }",
-            &inputs,
-            Some("TypeScript")
-        )
-        .is_none());
+        assert!(
+            filtered_function_completion_chunks(
+                "class MyClass { constructor() {} }",
+                &inputs,
+                Some("TypeScript")
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -2030,9 +2047,7 @@ mod tests {
         // code_after starts with ')'; completion ends with ')' and has more closes than opens
         let inputs = input_with_lang("foo()", 4, "test.ts");
         // completion "x)" has 0 opens, 1 close; after starts with ')' → duplicate
-        assert!(
-            filtered_function_completion_chunks("x)", &inputs, Some("TypeScript")).is_none()
-        );
+        assert!(filtered_function_completion_chunks("x)", &inputs, Some("TypeScript")).is_none());
     }
 
     #[test]
@@ -2050,12 +2065,14 @@ mod tests {
         // code_before contains non-import code, so completing an import here is wrong
         let code_before = "import React from 'react';\nconst x = 1;\n";
         let inputs = input_with_lang(code_before, code_before.len(), "test.ts");
-        assert!(filtered_function_completion_chunks(
-            "import { useState } from 'react';",
-            &inputs,
-            Some("TypeScript")
-        )
-        .is_none());
+        assert!(
+            filtered_function_completion_chunks(
+                "import { useState } from 'react';",
+                &inputs,
+                Some("TypeScript")
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -2063,12 +2080,14 @@ mod tests {
         // code_before contains only import lines — completing another import is valid
         let code_before = "import React from 'react';\n";
         let inputs = input_with_lang(code_before, code_before.len(), "test.ts");
-        assert!(filtered_function_completion_chunks(
-            "import { useState } from 'react';",
-            &inputs,
-            Some("TypeScript")
-        )
-        .is_some());
+        assert!(
+            filtered_function_completion_chunks(
+                "import { useState } from 'react';",
+                &inputs,
+                Some("TypeScript")
+            )
+            .is_some()
+        );
     }
 
     // ── Stateless autocomplete HTTP tests ────────────────────────────────────
@@ -2160,17 +2179,34 @@ mod tests {
 
         cx.background_executor
             .spawn(async move {
-                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
-                    .await
-                    .unwrap();
-                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
-                    .await
-                    .unwrap();
+                backboard_completion(
+                    "test-key",
+                    "http://fake",
+                    &model,
+                    "prompt",
+                    None,
+                    &http_client,
+                )
+                .await
+                .unwrap();
+                backboard_completion(
+                    "test-key",
+                    "http://fake",
+                    &model,
+                    "prompt",
+                    None,
+                    &http_client,
+                )
+                .await
+                .unwrap();
             })
             .await;
 
         let log = log.lock().unwrap();
-        assert_eq!(log.threads_created, 2, "each request must create its own thread");
+        assert_eq!(
+            log.threads_created, 2,
+            "each request must create its own thread"
+        );
         assert_eq!(log.messages_sent, 2);
         assert_ne!(
             log.thread_ids_used[0], log.thread_ids_used[1],
@@ -2186,9 +2222,16 @@ mod tests {
         cx.background_executor
             .spawn(async move {
                 // First call — no cached assistant, creates one
-                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
-                    .await
-                    .unwrap();
+                backboard_completion(
+                    "test-key",
+                    "http://fake",
+                    &model,
+                    "prompt",
+                    None,
+                    &http_client,
+                )
+                .await
+                .unwrap();
                 // Second call — pass the cached assistant_id so it is reused
                 backboard_completion(
                     "test-key",
@@ -2204,7 +2247,10 @@ mod tests {
             .await;
 
         let log = log.lock().unwrap();
-        assert_eq!(log.assistants_created, 1, "assistant must be created only once");
+        assert_eq!(
+            log.assistants_created, 1,
+            "assistant must be created only once"
+        );
         assert_eq!(log.threads_created, 2);
     }
 
@@ -2215,9 +2261,16 @@ mod tests {
 
         cx.background_executor
             .spawn(async move {
-                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
-                    .await
-                    .unwrap();
+                backboard_completion(
+                    "test-key",
+                    "http://fake",
+                    &model,
+                    "prompt",
+                    None,
+                    &http_client,
+                )
+                .await
+                .unwrap();
             })
             .await;
 
@@ -2235,9 +2288,16 @@ mod tests {
 
         cx.background_executor
             .spawn(async move {
-                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
-                    .await
-                    .unwrap();
+                backboard_completion(
+                    "test-key",
+                    "http://fake",
+                    &model,
+                    "prompt",
+                    None,
+                    &http_client,
+                )
+                .await
+                .unwrap();
             })
             .await;
 
@@ -2256,9 +2316,16 @@ mod tests {
 
         cx.background_executor
             .spawn(async move {
-                backboard_completion("test-key", "http://fake", &model, "prompt", None, &http_client)
-                    .await
-                    .unwrap();
+                backboard_completion(
+                    "test-key",
+                    "http://fake",
+                    &model,
+                    "prompt",
+                    None,
+                    &http_client,
+                )
+                .await
+                .unwrap();
             })
             .await;
 

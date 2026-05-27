@@ -536,6 +536,7 @@ pub fn parse_backboard_workspace_agent_tasks(
 }
 
 const MAX_BACKBOARD_WORKSPACE_AGENT_TASKS: usize = 20;
+const BACKBOARD_AGENT_SUMMARY_ENTRY_SCAN_LIMIT: usize = 25;
 
 fn apply_backboard_agent_worktree_patch(
     base_workspace_path: PathBuf,
@@ -4771,8 +4772,17 @@ impl AgentPanel {
         });
         let token_usage = thread.token_usage().cloned();
         let speed_metrics = thread.speed_metrics().cloned();
-        let files_changed = thread.action_log().read(cx).changed_buffers(cx).len();
-        let mut touched_paths = Vec::<String>::new();
+        let run_changed_paths = self
+            .backboard_workspace_runs
+            .get(&thread_id)
+            .map(|run| run.changed_paths.clone())
+            .unwrap_or_default();
+        let files_changed = if status == BackboardAgentRunStatus::Running {
+            run_changed_paths.len()
+        } else {
+            thread.action_log().read(cx).changed_buffers(cx).len()
+        };
+        let mut touched_paths = run_changed_paths;
         let mut latest_events = Vec::new();
 
         for entry in plan.entries.iter().rev().take(3).rev() {
@@ -4786,7 +4796,11 @@ impl AgentPanel {
             });
         }
 
-        for entry in entries.iter().rev() {
+        for entry in entries
+            .iter()
+            .rev()
+            .take(BACKBOARD_AGENT_SUMMARY_ENTRY_SCAN_LIMIT)
+        {
             if latest_events.len() >= 5 {
                 break;
             }
@@ -8598,6 +8612,27 @@ mod tests {
         })
     }
 
+    fn test_backboard_workspace_run_metadata(task: &str) -> BackboardAgentWorkspaceRunMetadata {
+        BackboardAgentWorkspaceRunMetadata {
+            title: task.to_string(),
+            task: task.to_string(),
+            created_at: Utc::now(),
+            kind: BackboardAgentWorkspaceKind::Build,
+            scope: BackboardAgentWorkspaceScope::WholeProject,
+            mode: BackboardAgentWorkspaceMode::Free,
+            base_workspace_path: PathBuf::from("/project"),
+            worktree_path: PathBuf::from("/worktrees/test-agent"),
+            branch_name: "backboard/test-agent".to_string(),
+            base_commit: "abc123".to_string(),
+            changed_paths: Vec::new(),
+            apply_state: BackboardAgentApplyState::Pending,
+            current_workspace: false,
+            batch_id: String::new(),
+            batch_index: 0,
+            batch_size: 1,
+        }
+    }
+
     #[test]
     fn test_workspace_agent_old_metadata_defaults_batch_fields() {
         let metadata = serde_json::from_str::<BackboardAgentWorkspaceRunMetadata>(
@@ -8619,6 +8654,101 @@ mod tests {
         assert_eq!(metadata.batch_size, 0);
         assert_eq!(metadata.mode, BackboardAgentWorkspaceMode::Free);
         assert!(!metadata.current_workspace);
+    }
+
+    #[gpui::test]
+    async fn test_workspace_run_summary_uses_lightweight_event_while_streaming(
+        cx: &mut TestAppContext,
+    ) {
+        let (panel, mut cx) = setup_panel(cx).await;
+        let connection = StubAgentConnection::new();
+        open_thread_with_connection(&panel, connection.clone(), &mut cx);
+        send_message(&panel, &mut cx);
+
+        let session_id = active_session_id(&panel, &cx);
+        let thread_id = active_thread_id(&panel, &cx);
+        panel.update(&mut cx, |panel, _cx| {
+            panel.backboard_workspace_runs.insert(
+                thread_id,
+                test_backboard_workspace_run_metadata("streaming task"),
+            );
+        });
+
+        cx.update(|_, cx| {
+            connection.send_update(
+                session_id,
+                acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+                    "live assistant markdown that should not appear".into(),
+                )),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        panel.read_with(&cx, |panel, cx| {
+            let summary = panel
+                .backboard_agent_run_summaries(cx)
+                .into_iter()
+                .find(|summary| summary.thread_id == thread_id)
+                .expect("workspace run summary should exist");
+            assert_eq!(summary.status, BackboardAgentRunStatus::Running);
+            assert!(
+                summary
+                    .latest_events
+                    .iter()
+                    .any(|event| event.text.as_ref() == "Streaming response")
+            );
+            assert!(
+                summary
+                    .latest_events
+                    .iter()
+                    .all(|event| !event.text.as_ref().contains("live assistant markdown"))
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_workspace_run_summary_keeps_final_assistant_context(cx: &mut TestAppContext) {
+        let (panel, mut cx) = setup_panel(cx).await;
+        let connection = StubAgentConnection::new();
+        open_thread_with_connection(&panel, connection.clone(), &mut cx);
+        send_message(&panel, &mut cx);
+
+        let session_id = active_session_id(&panel, &cx);
+        let thread_id = active_thread_id(&panel, &cx);
+        panel.update(&mut cx, |panel, _cx| {
+            panel.backboard_workspace_runs.insert(
+                thread_id,
+                test_backboard_workspace_run_metadata("completed task"),
+            );
+        });
+
+        cx.update(|_, cx| {
+            connection.send_update(
+                session_id.clone(),
+                acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+                    "final assistant summary".into(),
+                )),
+                cx,
+            );
+        });
+        connection.end_turn(session_id, acp::StopReason::EndTurn);
+        cx.run_until_parked();
+
+        panel.read_with(&cx, |panel, cx| {
+            let summary = panel
+                .backboard_agent_run_summaries(cx)
+                .into_iter()
+                .find(|summary| summary.thread_id == thread_id)
+                .expect("workspace run summary should exist");
+            assert_eq!(summary.status, BackboardAgentRunStatus::Done);
+            assert!(
+                summary
+                    .latest_events
+                    .iter()
+                    .any(|event| event.text.as_ref().contains("final assistant summary"))
+            );
+        });
     }
 
     #[test]

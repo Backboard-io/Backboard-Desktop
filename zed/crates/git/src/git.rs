@@ -84,6 +84,10 @@ actions!(
         Fetch,
         /// Fetches changes from a specific remote.
         FetchFrom,
+        /// Refreshes git status for the current repository.
+        Refresh,
+        /// Pulls changes from the remote repository, then pushes local commits.
+        Sync,
         /// Creates a new commit with staged changes.
         Commit,
         /// Amends the last commit with staged changes.

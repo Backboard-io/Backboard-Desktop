@@ -1,4 +1,8 @@
-use std::{pin::Pin, rc::Rc, time::Instant};
+use std::{
+    pin::Pin,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use ::backboard::{AudioAttachment, SendMessageRequest, SubmitToolOutputsRequest};
 use acp_thread::{AcpThread, UserMessageId};
@@ -13,6 +17,9 @@ use super::{
     BackboardNativeState, HISTORY_REPLAY_MAX_MESSAGES, SessionRuntime, missing_api_key_message,
 };
 use crate::backboard_native::{tool_schemas, tools, workspace};
+
+const STREAM_TEXT_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
+const STREAM_TEXT_FLUSH_BYTES: usize = 512;
 
 pub async fn run_prompt(
     state: Rc<BackboardNativeState>,
@@ -311,6 +318,65 @@ fn split_replayed_assistant_content(text: &str) -> Vec<ReplayAssistantSegment> {
     segments
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StreamTextKind {
+    Content,
+    Thought,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct CoalescedStreamText {
+    kind: StreamTextKind,
+    text: String,
+}
+
+#[derive(Default)]
+struct StreamTextCoalescer {
+    kind: Option<StreamTextKind>,
+    text: String,
+    first_buffered_at: Option<Instant>,
+}
+
+impl StreamTextCoalescer {
+    fn push(&mut self, kind: StreamTextKind, text: &str, now: Instant) -> Vec<CoalescedStreamText> {
+        if text.is_empty() {
+            return Vec::new();
+        }
+
+        let mut flushed = Vec::new();
+        if self.kind.is_some_and(|current| current != kind)
+            && let Some(chunk) = self.flush()
+        {
+            flushed.push(chunk);
+        }
+
+        if self.text.is_empty() {
+            self.kind = Some(kind);
+            self.first_buffered_at = Some(now);
+        }
+        self.text.push_str(text);
+
+        if self.text.len() >= STREAM_TEXT_FLUSH_BYTES
+            || self
+                .first_buffered_at
+                .is_some_and(|first| now.duration_since(first) >= STREAM_TEXT_FLUSH_INTERVAL)
+        {
+            if let Some(chunk) = self.flush() {
+                flushed.push(chunk);
+            }
+        }
+
+        flushed
+    }
+
+    fn flush(&mut self) -> Option<CoalescedStreamText> {
+        let kind = self.kind.take()?;
+        let text = std::mem::take(&mut self.text);
+        self.first_buffered_at = None;
+        (!text.is_empty()).then_some(CoalescedStreamText { kind, text })
+    }
+}
+
 async fn consume_stream(
     state: Rc<BackboardNativeState>,
     runtime: SessionRuntime,
@@ -318,6 +384,7 @@ async fn consume_stream(
     mut stream: Pin<Box<dyn Stream<Item = Result<Value>> + Send>>,
     cx: &mut AsyncApp,
 ) -> Result<acp::StopReason> {
+    let mut text_coalescer = StreamTextCoalescer::default();
     loop {
         let mut next_stream = None;
 
@@ -327,15 +394,23 @@ async fn consume_stream(
                 .cancel_flag
                 .load(std::sync::atomic::Ordering::SeqCst)
             {
+                flush_stream_text(&state, &runtime, &mut text_coalescer, cx)?;
                 return Ok(acp::StopReason::Cancelled);
             }
 
             let chunk = chunk?;
-            match chunk
+            let chunk_type = chunk
                 .get("type")
                 .and_then(Value::as_str)
-                .unwrap_or_default()
-            {
+                .unwrap_or_default();
+            if !matches!(
+                chunk_type,
+                "content_streaming" | "reasoning_streaming" | "reasoning_delta"
+            ) {
+                flush_stream_text(&state, &runtime, &mut text_coalescer, cx)?;
+            }
+
+            match chunk_type {
                 "run_started" => {
                     let run_id = chunk
                         .get("run_id")
@@ -350,11 +425,12 @@ async fn consume_stream(
                 }
                 "reasoning_streaming" | "reasoning_delta" => {
                     if let Some(text) = chunk_text(&chunk) {
-                        state.emit_update(
+                        emit_stream_text(
+                            &state,
                             &runtime,
-                            acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(
-                                acp::ContentBlock::from(text),
-                            )),
+                            &mut text_coalescer,
+                            StreamTextKind::Thought,
+                            &text,
                             cx,
                         )?;
                     }
@@ -365,7 +441,14 @@ async fn consume_stream(
                         if state.mark_first_token(&runtime.session_id) {
                             emit_speed_update(&state, &runtime, cx).ok();
                         }
-                        emit_agent_text(&state, &runtime, &text, cx)?;
+                        emit_stream_text(
+                            &state,
+                            &runtime,
+                            &mut text_coalescer,
+                            StreamTextKind::Content,
+                            &text,
+                            cx,
+                        )?;
                     }
                 }
                 "media_generated" => {
@@ -488,9 +571,54 @@ async fn consume_stream(
         if let Some(continuation) = next_stream {
             stream = continuation;
         } else {
+            flush_stream_text(&state, &runtime, &mut text_coalescer, cx)?;
             state.set_current_run_id(&runtime.session_id, None);
             return Ok(acp::StopReason::EndTurn);
         }
+    }
+}
+
+fn emit_stream_text(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    coalescer: &mut StreamTextCoalescer,
+    kind: StreamTextKind,
+    text: &str,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    for chunk in coalescer.push(kind, text, Instant::now()) {
+        emit_coalesced_stream_text(state, runtime, chunk, cx)?;
+    }
+    Ok(())
+}
+
+fn flush_stream_text(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    coalescer: &mut StreamTextCoalescer,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    if let Some(chunk) = coalescer.flush() {
+        emit_coalesced_stream_text(state, runtime, chunk, cx)?;
+    }
+    Ok(())
+}
+
+fn emit_coalesced_stream_text(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    chunk: CoalescedStreamText,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    match chunk.kind {
+        StreamTextKind::Content => emit_agent_text(state, runtime, &chunk.text, cx),
+        StreamTextKind::Thought => state.emit_update(
+            runtime,
+            acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(acp::ContentBlock::from(
+                chunk.text,
+            ))),
+            cx,
+        ),
     }
 }
 
@@ -1257,6 +1385,104 @@ mod tests {
         };
 
         assert_eq!(mcp_calls_payload(&settings), Some(json!(["figma"])));
+    }
+
+    #[test]
+    fn stream_text_coalescer_buffers_adjacent_chunks() {
+        let base = Instant::now();
+        let mut coalescer = StreamTextCoalescer::default();
+
+        assert!(
+            coalescer
+                .push(StreamTextKind::Content, "hel", base)
+                .is_empty()
+        );
+        assert!(
+            coalescer
+                .push(
+                    StreamTextKind::Content,
+                    "lo",
+                    base + Duration::from_millis(10)
+                )
+                .is_empty()
+        );
+
+        assert_eq!(
+            coalescer.flush(),
+            Some(CoalescedStreamText {
+                kind: StreamTextKind::Content,
+                text: "hello".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn stream_text_coalescer_flushes_by_size() {
+        let base = Instant::now();
+        let mut coalescer = StreamTextCoalescer::default();
+        let text = "x".repeat(STREAM_TEXT_FLUSH_BYTES);
+
+        assert_eq!(
+            coalescer.push(StreamTextKind::Content, &text, base),
+            vec![CoalescedStreamText {
+                kind: StreamTextKind::Content,
+                text,
+            }]
+        );
+        assert_eq!(coalescer.flush(), None);
+    }
+
+    #[test]
+    fn stream_text_coalescer_flushes_by_elapsed_interval() {
+        let base = Instant::now();
+        let mut coalescer = StreamTextCoalescer::default();
+
+        assert!(
+            coalescer
+                .push(StreamTextKind::Thought, "a", base)
+                .is_empty()
+        );
+        assert_eq!(
+            coalescer.push(
+                StreamTextKind::Thought,
+                "b",
+                base + STREAM_TEXT_FLUSH_INTERVAL
+            ),
+            vec![CoalescedStreamText {
+                kind: StreamTextKind::Thought,
+                text: "ab".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn stream_text_coalescer_flushes_before_kind_change() {
+        let base = Instant::now();
+        let mut coalescer = StreamTextCoalescer::default();
+
+        assert!(
+            coalescer
+                .push(StreamTextKind::Thought, "plan", base)
+                .is_empty()
+        );
+        assert_eq!(
+            coalescer.push(
+                StreamTextKind::Content,
+                "answer",
+                base + Duration::from_millis(10)
+            ),
+            vec![CoalescedStreamText {
+                kind: StreamTextKind::Thought,
+                text: "plan".to_string(),
+            }]
+        );
+        assert_eq!(
+            coalescer.flush(),
+            Some(CoalescedStreamText {
+                kind: StreamTextKind::Content,
+                text: "answer".to_string(),
+            })
+        );
     }
 
     #[test]

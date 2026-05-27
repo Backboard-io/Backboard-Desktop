@@ -75,6 +75,13 @@ pub const DEFAULT_ADDITIONAL_WINDOW_SIZE: Size<Pixels> = Size {
     width: Pixels(900.),
     height: Pixels(750.),
 };
+const WINDOW_NOT_FOUND: &str = "window not found";
+
+fn is_window_not_found(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string() == WINDOW_NOT_FOUND)
+}
 
 /// Represents the two different phases when dispatching events.
 #[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]
@@ -1493,10 +1500,14 @@ impl Window {
         platform_window.on_input({
             let mut cx = cx.to_async();
             Box::new(move |event| {
-                handle
-                    .update(&mut cx, |_, window, cx| window.dispatch_event(event, cx))
-                    .log_err()
-                    .unwrap_or(DispatchEventResult::default())
+                match handle.update(&mut cx, |_, window, cx| window.dispatch_event(event, cx)) {
+                    Ok(result) => result,
+                    Err(error) if is_window_not_found(&error) => DispatchEventResult::default(),
+                    Err(error) => {
+                        Err::<(), _>(error).log_err();
+                        DispatchEventResult::default()
+                    }
+                }
             })
         });
         platform_window.on_hit_test_window_control({

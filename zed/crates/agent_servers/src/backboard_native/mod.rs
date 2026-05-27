@@ -1215,17 +1215,24 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                 return Ok(AgentModelList::Grouped(group_models(models)));
             }
 
-            let models = match state.client() {
+            let (models, should_cache) = match state.client() {
                 Ok((_config, client)) => {
                     log::info!(
                         "Backboard native endpoint call: GET /models?model_type=llm&limit=15000 plus provider-scoped model catalogs agent_id={}",
                         state.agent_id
                     );
-                    let models = gpui_tokio::Tokio::spawn_result(cx, async move {
+                    let catalog_result = gpui_tokio::Tokio::spawn_result(cx, async move {
                         list_backboard_model_catalog(client).await
                     })
-                    .await?;
-                    models
+                    .await;
+                    let models = match catalog_result {
+                        Ok(models) => models,
+                        Err(error) => {
+                            log::warn!("failed to load Backboard model catalog: {error:#}");
+                            Vec::new()
+                        }
+                    };
+                    let models = models
                         .into_iter()
                         .filter(|model| !model.provider.is_empty() && !model.name.is_empty())
                         .map(|model| {
@@ -1257,22 +1264,22 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                             }
                             info
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<Vec<_>>();
+                    if models.is_empty() {
+                        let config = state.load_config();
+                        (vec![fallback_agent_model_info(&config)], false)
+                    } else {
+                        (models, true)
+                    }
                 }
                 Err(_) => {
                     let config = state.load_config();
-                    let (provider, model) = BackboardNativeState::fallback_provider_model(&config);
-                    vec![AgentModelInfo {
-                        id: acp::ModelId::new(format!("{provider}/{model}")),
-                        name: model.into(),
-                        description: Some(provider.into()),
-                        icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
-                        is_latest: false,
-                        cost: None,
-                    }]
+                    (vec![fallback_agent_model_info(&config)], false)
                 }
             };
-            *state.model_cache.borrow_mut() = Some(models.clone());
+            if should_cache {
+                *state.model_cache.borrow_mut() = Some(models.clone());
+            }
             Ok(AgentModelList::Grouped(group_models(models)))
         })
     }
@@ -1339,6 +1346,18 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
             is_latest: false,
             cost: None,
         }))
+    }
+}
+
+fn fallback_agent_model_info(config: &BackboardConfig) -> AgentModelInfo {
+    let (provider, model) = BackboardNativeState::fallback_provider_model(config);
+    AgentModelInfo {
+        id: acp::ModelId::new(format!("{provider}/{model}")),
+        name: model.into(),
+        description: Some(provider.into()),
+        icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
+        is_latest: false,
+        cost: None,
     }
 }
 
@@ -1532,7 +1551,13 @@ fn group_models(
 }
 
 async fn list_backboard_model_catalog(client: BackboardClient) -> Result<Vec<BackboardModel>> {
-    let mut models = client.list_models(None, Some("llm"), Some(15_000)).await?;
+    let mut models = match client.list_models(None, Some("llm"), Some(15_000)).await {
+        Ok(models) => models,
+        Err(error) => {
+            log::debug!("Backboard global model catalog request failed: {error:#}");
+            Vec::new()
+        }
+    };
     let mut providers = MODEL_CATALOG_PROVIDERS
         .iter()
         .map(|provider| provider.to_string())
@@ -1617,6 +1642,24 @@ mod tests {
     }
 
     #[test]
+    fn fallback_agent_model_uses_configured_default() {
+        let config = BackboardConfig {
+            default_provider: Some("anthropic".to_string()),
+            default_model: Some("claude-sonnet-4-5".to_string()),
+            ..BackboardConfig::default()
+        };
+
+        let model = fallback_agent_model_info(&config);
+
+        assert_eq!(model.id, acp::ModelId::new("anthropic/claude-sonnet-4-5"));
+        assert_eq!(model.name, "claude-sonnet-4-5");
+        assert_eq!(
+            model.description.as_ref().map(|value| value.as_ref()),
+            Some("anthropic")
+        );
+    }
+
+    #[test]
     fn config_options_include_media_and_search_chips() {
         let settings = FeatureSettings {
             web_search: "Auto".to_string(),
@@ -1660,6 +1703,7 @@ mod tests {
                 mode: acp::SessionModeId::new("free"),
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
+                rewound_history_context: None,
                 config_tx,
                 config_rx,
                 cancel_flag: Arc::new(AtomicBool::new(false)),

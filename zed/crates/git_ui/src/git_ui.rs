@@ -200,7 +200,23 @@ pub fn init(cx: &mut App) {
                     panel.pull(true, window, cx);
                 });
             });
+            workspace.register_action(|workspace, _: &git::Sync, window, cx| {
+                let Some(panel) = workspace.panel::<git_panel::GitPanel>(cx) else {
+                    return;
+                };
+                panel.update(cx, |panel, cx| {
+                    panel.sync(window, cx);
+                });
+            });
         }
+        workspace.register_action(|workspace, _: &git::Refresh, window, cx| {
+            let Some(panel) = workspace.panel::<git_panel::GitPanel>(cx) else {
+                return;
+            };
+            panel.update(cx, |panel, cx| {
+                panel.refresh(window, cx);
+            });
+        });
         workspace.register_action(|workspace, action: &git::StashAll, window, cx| {
             let Some(panel) = workspace.panel::<git_panel::GitPanel>(cx) else {
                 return;
