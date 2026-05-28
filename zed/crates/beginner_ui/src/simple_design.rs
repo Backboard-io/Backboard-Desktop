@@ -1,4 +1,4 @@
-use gpui::{App, BoxShadow, Hsla, IntoElement, point, px};
+use gpui::{App, BoxShadow, Hsla, IntoElement, px};
 use theme::ActiveTheme;
 use ui::{Color, ElevationIndex, Icon, IconName, IconSize, prelude::*};
 
@@ -9,13 +9,13 @@ pub const INPUT_HEIGHT: f32 = 28.;
 pub const SEGMENTED_HEIGHT: f32 = 23.;
 pub const ICON_BUTTON_SIZE: f32 = 24.;
 pub const UTILITY_ICON_SIZE: f32 = 16.;
-pub const TAB_BAR_HEIGHT: f32 = 32.;
 pub const TOP_BAR_HEIGHT: f32 = 40.;
 pub const SIDEBAR_WIDTH: f32 = 260.;
 pub const RIGHT_PANEL_WIDTH: f32 = 360.;
 pub const PREVIEW_DOMINANT_CHAT_WIDTH: f32 = 480.;
-pub const ROW_HEIGHT: f32 = 30.;
+pub const CHAT_ROW_HEIGHT: f32 = 36.;
 pub const PROJECT_ROW_HEIGHT: f32 = 40.;
+pub const CHAT_COMPOSER_MAX_WIDTH: f32 = 920.;
 pub const CHAT_MAX_WIDTH: f32 = 680.;
 
 pub fn app_background(cx: &App) -> Hsla {
@@ -27,10 +27,7 @@ pub fn panel_background(cx: &App) -> Hsla {
 }
 
 pub fn card_background(cx: &App) -> Hsla {
-    cx.theme()
-        .colors()
-        .surface_background
-        .blend(cx.theme().colors().element_background.opacity(0.38))
+    cx.theme().colors().element_background
 }
 
 pub fn field_background(cx: &App) -> Hsla {
@@ -38,10 +35,7 @@ pub fn field_background(cx: &App) -> Hsla {
 }
 
 pub fn subtle_card_background(cx: &App) -> Hsla {
-    let colors = cx.theme().colors();
-    colors
-        .surface_background
-        .blend(colors.element_background.opacity(0.24))
+    cx.theme().colors().element_background
 }
 
 pub fn selected_background(cx: &App) -> Hsla {
@@ -50,10 +44,6 @@ pub fn selected_background(cx: &App) -> Hsla {
 
 pub fn hover_background(cx: &App) -> Hsla {
     cx.theme().colors().element_hover
-}
-
-pub fn border(cx: &App) -> Hsla {
-    cx.theme().colors().border
 }
 
 pub fn soft_border(cx: &App) -> Hsla {
@@ -69,20 +59,11 @@ pub fn focus_border(cx: &App) -> Hsla {
 }
 
 pub fn separator(cx: &App) -> Hsla {
-    cx.theme().colors().border_variant.opacity(0.38)
+    cx.theme().colors().border_variant.opacity(0.22)
 }
 
 pub fn card_shadow(cx: &App) -> Vec<BoxShadow> {
     ElevationIndex::ElevatedSurface.shadow(cx)
-}
-
-pub fn hairline_shadow(cx: &App) -> Vec<BoxShadow> {
-    vec![BoxShadow {
-        color: cx.theme().colors().border.opacity(0.18),
-        offset: point(px(0.), px(1.)),
-        blur_radius: px(0.),
-        spread_radius: px(0.),
-    }]
 }
 
 pub fn render_project_mark(size: f32, cx: &App) -> impl IntoElement {

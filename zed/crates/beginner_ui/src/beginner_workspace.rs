@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use acp_thread::{
     AcpThread, AcpThreadEvent, AgentModelList, AgentModelSelector, SelectedPermissionOutcome,
@@ -9,21 +10,19 @@ use agent_client_protocol::schema as acp;
 use agent_ui::thread_metadata_store::ThreadMetadataStore;
 use agent_ui::{AgentPanel, ConversationView, ModelSelectorPopover};
 use db::kvp::KeyValueStore;
-use editor::Editor;
 use editor::actions::Newline;
+use editor::{Editor, EditorEvent};
 use gpui::{
-    App, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle, Focusable, Hsla,
-    IntoElement, PathBuilder, PathPromptOptions, Render, SharedString, Subscription, Task,
-    WeakEntity, Window, WindowControlArea, canvas, point,
+    App, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    PathPromptOptions, Render, SharedString, Subscription, Task, WeakEntity, Window,
+    WindowControlArea, canvas,
 };
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
 use project::Project;
 use ui::{
     Button, ButtonSize, ButtonStyle, Color, Icon, IconButton, IconName, IconSize, Label, LabelSize,
-    Tooltip,
-    prelude::*,
-    utils::{ensure_minimum_contrast, platform_title_bar_height},
+    Tooltip, prelude::*, utils::ensure_minimum_contrast,
 };
 use util::ResultExt;
 use workspace::{MultiWorkspace, PathList, Workspace};
@@ -184,66 +183,7 @@ impl AgentModelSelector for CuratedModelSelector {
 
 const BEGINNER_CHATS_KVP_KEY: &str = "beginner_chats_v1";
 const BEGINNER_OPEN_TABS_KVP_KEY: &str = "beginner_open_tabs_v1";
-const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
-
-fn render_simple_home_icon(color: Hsla) -> impl IntoElement {
-    canvas(
-        |_, _, _| {},
-        move |bounds, _, window, _| {
-            let x = bounds.origin.x;
-            let y = bounds.origin.y;
-            let mut builder = PathBuilder::stroke(px(1.5));
-            builder.move_to(point(x + px(3.), y + px(7.)));
-            builder.line_to(point(x + px(8.), y + px(3.)));
-            builder.line_to(point(x + px(13.), y + px(7.)));
-            builder.move_to(point(x + px(4.5), y + px(7.)));
-            builder.line_to(point(x + px(4.5), y + px(13.)));
-            builder.line_to(point(x + px(11.5), y + px(13.)));
-            builder.line_to(point(x + px(11.5), y + px(7.)));
-            if let Ok(path) = builder.build() {
-                window.paint_path(path, color);
-            }
-        },
-    )
-    .size(px(16.))
-    .flex_none()
-}
-
-#[derive(Clone, Copy)]
-struct FirstRunNavTipsState {
-    chats_seen: bool,
-    mode_seen: bool,
-}
-
-impl FirstRunNavTipsState {
-    fn read(cx: &App) -> Option<Self> {
-        let kvp = KeyValueStore::global(cx);
-        let raw = kvp
-            .read_kvp(FIRST_RUN_NAV_TIPS_STATE_KEY)
-            .log_err()
-            .flatten()?;
-        let (chats, mode) = raw.split_once(',')?;
-        Some(Self {
-            chats_seen: chats == "1",
-            mode_seen: mode == "1",
-        })
-    }
-
-    fn write(self, cx: &mut Context<BeginnerWorkspace>) {
-        let kvp = KeyValueStore::global(cx);
-        let raw = format!(
-            "{},{}",
-            if self.chats_seen { "1" } else { "0" },
-            if self.mode_seen { "1" } else { "0" }
-        );
-        cx.spawn(async move |_, _| {
-            kvp.write_kvp(FIRST_RUN_NAV_TIPS_STATE_KEY.to_string(), raw)
-                .await
-                .log_err();
-        })
-        .detach();
-    }
-}
+static SIMPLE_MODE_OPENED_THIS_PROCESS: AtomicBool = AtomicBool::new(false);
 
 /// A saved simple-mode conversation entry shown on the home page.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -283,11 +223,13 @@ impl BeginnerChatRecord {
         PathBuf::from(&self.folder_path)
     }
 
-    fn folder_name(&self) -> SharedString {
-        PathBuf::from(&self.folder_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned().into())
-            .unwrap_or_else(|| SharedString::from(self.folder_path.as_str()))
+    fn display_name(&self) -> SharedString {
+        let name = self.name.trim();
+        if name.is_empty() || name.chars().all(|ch| ch == '.') {
+            SharedString::from("Untitled chat")
+        } else {
+            SharedString::from(name)
+        }
     }
 }
 
@@ -401,6 +343,7 @@ pub struct BeginnerWorkspace {
     tab_name: SharedString,
     chat_mode: ChatMode,
     chat_editor: Entity<Editor>,
+    chat_search_editor: Entity<Editor>,
     selected_folder: Option<PathBuf>,
     thread: Option<Entity<AcpThread>>,
     // Kept alive for the entire session lifetime. The ConversationView owns the
@@ -442,6 +385,7 @@ pub struct BeginnerWorkspace {
     open_tabs_restored: bool,
     _tasks: Vec<Task<()>>,
     _project_subscription: Subscription,
+    _search_subscription: Subscription,
     session_subscriptions: Vec<Subscription>,
 }
 
@@ -474,22 +418,22 @@ impl BeginnerWorkspace {
         (editor, subscription)
     }
 
+    fn make_search_editor(window: &mut Window, cx: &mut Context<Self>) -> Entity<Editor> {
+        cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text("Search chats", window, cx);
+            editor.set_show_gutter(false, cx);
+            editor.set_show_wrap_guides(false, cx);
+            editor.set_show_indent_guides(false, cx);
+            editor
+        })
+    }
+
     fn current_tab_title(&self) -> SharedString {
         match &self.state {
             BeginnerState::ActiveProject => self.tab_name.clone(),
             BeginnerState::Landing => SharedString::from("Home"),
         }
-    }
-
-    fn background_project_tabs(&self) -> Vec<(usize, SharedString)> {
-        self.background_sessions
-            .iter()
-            .enumerate()
-            .filter_map(|(ix, session)| match &session.state {
-                BeginnerState::Landing => None,
-                BeginnerState::ActiveProject => Some((ix, session.tab_name.clone())),
-            })
-            .collect()
     }
 
     fn project_tab_count(&self) -> usize {
@@ -613,6 +557,12 @@ impl BeginnerWorkspace {
     ) -> Self {
         let (chat_editor, chat_enter_sub) =
             Self::make_chat_editor(window, cx, ChatMode::Build.placeholder());
+        let chat_search_editor = Self::make_search_editor(window, cx);
+        let search_sub = cx.subscribe(&chat_search_editor, |_, _, event: &EditorEvent, cx| {
+            if matches!(event, EditorEvent::Edited { .. }) {
+                cx.notify();
+            }
+        });
 
         let load_recent = Self::load_chat_history(workspace.clone(), cx);
 
@@ -648,6 +598,7 @@ impl BeginnerWorkspace {
             tab_name: SharedString::from("Home"),
             chat_mode: ChatMode::Build,
             chat_editor,
+            chat_search_editor,
             selected_folder: initial_folder,
             thread: None,
             pending_conversation_view: None,
@@ -676,6 +627,7 @@ impl BeginnerWorkspace {
             open_tabs_restored: false,
             _tasks: vec![load_recent],
             _project_subscription: project_sub,
+            _search_subscription: search_sub,
             session_subscriptions: vec![chat_enter_sub],
         }
     }
@@ -993,6 +945,9 @@ impl BeginnerWorkspace {
         let Some(thread) = self.thread.clone() else {
             return;
         };
+        if let Some(record_id) = self.active_chat_record_id.clone() {
+            self.touch_chat_record(&record_id, cx);
+        }
 
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
@@ -1389,7 +1344,6 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) {
         if self.active_chat_record_id.as_deref() == Some(record.id.as_str()) {
-            self.touch_chat_record(&record.id, cx);
             self.restore_active_chat_if_needed(window, cx);
             self.save_open_tabs(cx);
             cx.notify();
@@ -1402,7 +1356,6 @@ impl BeginnerWorkspace {
             .position(|session| session.chat_record_id.as_deref() == Some(record.id.as_str()))
         {
             self.switch_to_session(ix, window, cx);
-            self.touch_chat_record(&record.id, cx);
             self.save_open_tabs(cx);
             return;
         }
@@ -1444,7 +1397,6 @@ impl BeginnerWorkspace {
             editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
         });
         self.restore_thread_for_folder(record.clone(), path.clone(), window, cx);
-        self.touch_chat_record(&record.id, cx);
         cx.notify();
 
         // Do not auto-add worktrees on resume; simple mode should stay uncluttered.
@@ -1752,8 +1704,19 @@ impl BeginnerWorkspace {
         let Some(open_tabs) = self.pending_open_tabs.take() else {
             return;
         };
+
+        let simple_mode_was_opened = SIMPLE_MODE_OPENED_THIS_PROCESS.swap(true, Ordering::AcqRel);
         if !matches!(self.state, BeginnerState::Landing) || !self.background_sessions.is_empty() {
             self.save_open_tabs(cx);
+            return;
+        }
+
+        // The first Simple Mode entry in an app session should land on Home.
+        // If the user later closes/reopens Simple Mode in the same session, restore
+        // the chats they explicitly opened.
+        if !simple_mode_was_opened {
+            self.save_open_tabs(cx);
+            cx.notify();
             return;
         }
 
@@ -1932,214 +1895,6 @@ impl Render for BeginnerWorkspace {
 }
 
 impl BeginnerWorkspace {
-    /// Renders a horizontal tab strip with closeable tabs.
-    /// Active tab has a raised border style; background tabs are clickable and closeable.
-    fn render_tab_bar(
-        &self,
-        active_title: SharedString,
-        background_tabs: Vec<(usize, SharedString)>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let total_tabs = self.project_tab_count();
-        let can_add = total_tabs < 3;
-        // Only show a close button on the active tab when it can be meaningfully closed.
-        let show_active_close =
-            !background_tabs.is_empty() || matches!(self.state, BeginnerState::ActiveProject);
-
-        let is_on_landing = matches!(self.state, BeginnerState::Landing);
-        let chats_open = self.chats_sidebar_open;
-        let show_first_run_chats_tip =
-            FirstRunNavTipsState::read(cx).is_some_and(|state| !state.chats_seen);
-        let colors = cx.theme().colors().clone();
-
-        h_flex()
-            .h(px(ds::TAB_BAR_HEIGHT))
-            .w_full()
-            .flex_shrink_0()
-            .items_end()
-            .px_2()
-            .gap_0p5()
-            .bg(ds::app_background(cx))
-            // Chats toggle
-            .child(
-                div()
-                    .id("tab-chats")
-                    .h(px(ds::INPUT_HEIGHT))
-                    .w(px(ds::INPUT_HEIGHT))
-                    .mb_px()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded_full()
-                    .bg(if chats_open {
-                        colors.element_selected
-                    } else {
-                        colors.ghost_element_background
-                    })
-                    .cursor_pointer()
-                    .when(!chats_open, |el| {
-                        el.hover(|el| el.bg(colors.ghost_element_hover))
-                    })
-                    .tooltip(Tooltip::text(if show_first_run_chats_tip {
-                        "Chats: Open your conversation list and start or resume a chat here."
-                    } else {
-                        "Chats"
-                    }))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.chats_sidebar_open = !this.chats_sidebar_open;
-                        if let Some(mut state) = FirstRunNavTipsState::read(cx)
-                            && !state.chats_seen
-                        {
-                            state.chats_seen = true;
-                            state.write(cx);
-                        }
-                        cx.notify();
-                    }))
-                    .child(
-                        Icon::new(IconName::Chat)
-                            .size(IconSize::XSmall)
-                            .color(if chats_open {
-                                Color::Custom(colors.icon)
-                            } else {
-                                Color::Custom(colors.icon_muted)
-                            }),
-                    ),
-            )
-            // Home button
-            .child(
-                div()
-                    .id("tab-home")
-                    .h(px(ds::INPUT_HEIGHT))
-                    .w(px(ds::INPUT_HEIGHT))
-                    .mb_px()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded_full()
-                    .bg(if is_on_landing {
-                        colors.element_selected
-                    } else {
-                        colors.ghost_element_background
-                    })
-                    .cursor_pointer()
-                    .when(!is_on_landing, |el| {
-                        el.hover(|el| el.bg(colors.ghost_element_hover))
-                    })
-                    .tooltip(Tooltip::text("Home"))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.go_home(window, cx);
-                    }))
-                    .child(render_simple_home_icon(if is_on_landing {
-                        colors.icon
-                    } else {
-                        colors.icon_muted
-                    })),
-            )
-            // Active tab (hidden on Home)
-            .when(!is_on_landing, |this| {
-                this.child(
-                    h_flex()
-                        .id("tab-active")
-                        .h(px(ds::INPUT_HEIGHT))
-                        .pl_3()
-                        .pr_1p5()
-                        .gap_1p5()
-                        .items_center()
-                        .rounded_full()
-                        .bg(ds::card_background(cx))
-                        .child(
-                            Label::new(active_title)
-                                .size(LabelSize::Small)
-                                .color(Color::Default),
-                        )
-                        .when(show_active_close, |el| {
-                            el.child(
-                                div()
-                                    .id("tab-active-close")
-                                    .size(px(14.))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded_full()
-                                    .cursor_pointer()
-                                    .hover(|el| el.bg(cx.theme().colors().element_hover))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.close_active_session(window, cx);
-                                    }))
-                                    .child(
-                                        Icon::new(IconName::Close)
-                                            .size(IconSize::XSmall)
-                                            .color(Color::Muted),
-                                    ),
-                            )
-                        }),
-                )
-            })
-            // Background session tabs
-            .children(background_tabs.into_iter().map(|(ix, title)| {
-                h_flex()
-                    .id(SharedString::from(format!("tab-bg-{ix}")))
-                    .h(px(ds::BUTTON_HEIGHT))
-                    .pl_3()
-                    .pr_1p5()
-                    .gap_1p5()
-                    .items_center()
-                    .rounded_full()
-                    .cursor_pointer()
-                    .hover(|el| el.bg(colors.ghost_element_hover))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.switch_to_session(ix, window, cx);
-                    }))
-                    .child(Label::new(title).size(LabelSize::Small).color(Color::Muted))
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("tab-bg-close-{ix}")))
-                            .size(px(14.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .cursor_pointer()
-                            .hover(|el| el.bg(colors.element_hover))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.close_background_session(ix, cx);
-                            }))
-                            .child(
-                                Icon::new(IconName::Close)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            ),
-                    )
-            }))
-            .child(div().flex_1())
-            // "+" always visible; at limit it shows a notice instead of opening
-            .child(
-                h_flex().h_full().items_center().child(
-                    IconButton::new("tab-bar-new", IconName::Plus)
-                        .icon_size(IconSize::XSmall)
-                        .icon_color(if can_add {
-                            Color::Muted
-                        } else {
-                            Color::Disabled
-                        })
-                        .tooltip(Tooltip::text(if can_add {
-                            "Go to Home"
-                        } else {
-                            "3 project limit reached"
-                        }))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            if can_add {
-                                this.show_tab_limit_notice = false;
-                                this.go_home(window, cx);
-                            } else {
-                                this.show_tab_limit_notice = true;
-                                cx.notify();
-                            }
-                        })),
-                ),
-            )
-    }
-
     fn render_tab_limit_notice(&self, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .w_full()
@@ -2172,30 +1927,297 @@ impl BeginnerWorkspace {
             )
     }
 
-    fn render_chats_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let chat_history = self.chat_history.clone();
-        let no_history = chat_history.is_empty();
+    fn render_chats_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors().clone();
+        let action_hover = ds::hover_background(cx);
+        let can_start_new =
+            matches!(self.state, BeginnerState::Landing) || self.project_tab_count() < 3;
+        let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
+        let search_query = self
+            .chat_search_editor
+            .read(cx)
+            .text(cx)
+            .trim()
+            .to_lowercase();
+        let matches_query =
+            |title: &str| search_query.is_empty() || title.to_lowercase().contains(&search_query);
+        let active_project = match &self.state {
+            BeginnerState::ActiveProject => {
+                Some((self.current_tab_title(), self.active_chat_record_id.clone()))
+            }
+            BeginnerState::Landing => None,
+        };
+        let background_projects: Vec<(usize, SharedString, Option<String>)> = self
+            .background_sessions
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, session)| match &session.state {
+                BeginnerState::Landing => None,
+                BeginnerState::ActiveProject => {
+                    Some((ix, session.tab_name.clone(), session.chat_record_id.clone()))
+                }
+            })
+            .collect();
+        let mut open_record_ids = Vec::new();
+        if let Some((_, Some(id))) = active_project.as_ref() {
+            open_record_ids.push(id.clone());
+        }
+        for (_, _, id) in &background_projects {
+            if let Some(id) = id {
+                open_record_ids.push(id.clone());
+            }
+        }
+        let active_project = active_project.filter(|(title, _)| matches_query(title.as_ref()));
+        let background_projects: Vec<_> = background_projects
+            .into_iter()
+            .filter(|(_, title, _)| matches_query(title.as_ref()))
+            .collect();
+        let recent_records: Vec<_> = self
+            .chat_history
+            .clone()
+            .into_iter()
+            .filter(|record| !open_record_ids.iter().any(|id| id == &record.id))
+            .filter(|record| matches_query(record.display_name().as_ref()))
+            .collect();
+        let no_history = recent_records.is_empty();
+        let has_open_projects = active_project.is_some() || !background_projects.is_empty();
+        let empty_recent_title = if search_query.is_empty() {
+            "No chats yet"
+        } else {
+            "No matching chats"
+        };
+        let empty_recent_subtitle = if search_query.is_empty() {
+            "Start a new project to get started."
+        } else {
+            "Try a different search."
+        };
 
         v_flex()
             .w(px(ds::SIDEBAR_WIDTH))
             .h_full()
             .flex_shrink_0()
-            .border_r_1()
-            .border_color(ds::separator(cx))
             .bg(ds::panel_background(cx))
             .child(
                 v_flex()
                     .id("chat-history-list")
                     .flex_1()
                     .overflow_y_scroll()
-                    .p_2()
-                    .gap_0p5()
+                    .px_3()
+                    .pb_3()
+                    .gap_2()
                     .child(
-                        h_flex().px_1().py_0p5().child(
-                            Label::new("Chats")
+                        h_flex()
+                            .h(px(ds::TOP_BAR_HEIGHT))
+                            .items_center()
+                            .gap_1()
+                            .when(traffic_lights, |el| {
+                                el.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
+                            })
+                            .child(
+                                div()
+                                    .h_full()
+                                    .flex_1()
+                                    .window_control_area(WindowControlArea::Drag),
+                            )
+                            .child(
+                                IconButton::new(
+                                    "simple-close-chats-sidebar",
+                                    IconName::ThreadsSidebarLeftOpen,
+                                )
+                                .icon_size(IconSize::XSmall)
+                                .icon_color(Color::Muted)
+                                .tooltip(Tooltip::text("Close sidebar"))
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.chats_sidebar_open = false;
+                                        cx.notify();
+                                    },
+                                )),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .id("simple-sidebar-new-chat")
+                            .min_h(px(ds::PROJECT_ROW_HEIGHT))
+                            .px_2()
+                            .gap_2()
+                            .items_center()
+                            .rounded_lg()
+                            .bg(ds::field_background(cx))
+                            .when(can_start_new, |el| {
+                                el.cursor_pointer()
+                                    .hover(move |el| el.bg(action_hover))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.show_tab_limit_notice = false;
+                                        this.go_home(window, cx);
+                                    }))
+                            })
+                            .when(!can_start_new, |el| {
+                                el.cursor_pointer()
+                                    .tooltip(Tooltip::text("3 project limit reached"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.show_tab_limit_notice = true;
+                                        cx.notify();
+                                    }))
+                            })
+                            .child(Icon::new(IconName::Plus).size(IconSize::XSmall).color(
+                                if can_start_new {
+                                    Color::Custom(colors.icon_muted)
+                                } else {
+                                    Color::Disabled
+                                },
+                            ))
+                            .child(Label::new("New chat").size(LabelSize::Small).color(
+                                if can_start_new {
+                                    Color::Custom(colors.text)
+                                } else {
+                                    Color::Disabled
+                                },
+                            )),
+                    )
+                    .child(
+                        h_flex()
+                            .id("simple-sidebar-chat-search")
+                            .min_h(px(ds::INPUT_HEIGHT))
+                            .px_2()
+                            .gap_2()
+                            .items_center()
+                            .rounded_lg()
+                            .bg(ds::field_background(cx))
+                            .child(
+                                Icon::new(IconName::MagnifyingGlass)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Custom(colors.icon_muted)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(self.chat_search_editor.clone()),
+                            ),
+                    )
+                    .when(has_open_projects, |el| {
+                        el.child(
+                            h_flex().px_1().pt_2().child(
+                                Label::new("Open")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Custom(colors.text_muted)),
+                            ),
+                        )
+                    })
+                    .when_some(active_project, |el, (title, _record_id)| {
+                        let row_group = SharedString::from("chat-open-active");
+                        let hover_bg = ds::hover_background(cx);
+                        el.child(
+                            h_flex()
+                                .id("chat-open-active")
+                                .group(row_group.clone())
+                                .min_h(px(ds::CHAT_ROW_HEIGHT))
+                                .px_2()
+                                .py_1()
+                                .gap_2()
+                                .rounded_lg()
+                                .bg(ds::selected_background(cx))
+                                .child(
+                                    Icon::new(IconName::Chat)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Custom(colors.icon_muted)),
+                                )
+                                .child(
+                                    v_flex().flex_1().min_w_0().child(
+                                        Label::new(title)
+                                            .size(LabelSize::Small)
+                                            .color(Color::Custom(colors.text))
+                                            .truncate(),
+                                    ),
+                                )
+                                .child(
+                                    div()
+                                        .id("chat-open-active-close")
+                                        .size(px(16.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded_full()
+                                        .flex_none()
+                                        .cursor_pointer()
+                                        .visible_on_hover(row_group)
+                                        .hover(move |el| el.bg(hover_bg))
+                                        .on_click(cx.listener(|this, _event, window, cx| {
+                                            cx.stop_propagation();
+                                            this.close_active_session(window, cx);
+                                        }))
+                                        .child(
+                                            Icon::new(IconName::Close)
+                                                .size(IconSize::XSmall)
+                                                .color(Color::Muted),
+                                        ),
+                                ),
+                        )
+                    })
+                    .children(
+                        background_projects
+                            .into_iter()
+                            .map(|(ix, title, _record_id)| {
+                                let row_group = SharedString::from(format!("chat-open-bg-{ix}"));
+                                let hover_bg = ds::hover_background(cx);
+                                h_flex()
+                                    .id(SharedString::from(format!("chat-open-bg-{ix}")))
+                                    .group(row_group.clone())
+                                    .min_h(px(ds::CHAT_ROW_HEIGHT))
+                                    .px_2()
+                                    .py_1()
+                                    .gap_2()
+                                    .rounded_lg()
+                                    .cursor_pointer()
+                                    .hover(move |el| el.bg(hover_bg))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.switch_to_session(ix, window, cx);
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::Chat)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Custom(colors.icon_muted)),
+                                    )
+                                    .child(
+                                        v_flex().flex_1().min_w_0().child(
+                                            Label::new(title)
+                                                .size(LabelSize::Small)
+                                                .color(Color::Custom(colors.text))
+                                                .truncate(),
+                                        ),
+                                    )
+                                    .child(
+                                        div()
+                                            .id(SharedString::from(format!(
+                                                "chat-open-bg-close-{ix}"
+                                            )))
+                                            .size(px(16.))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .rounded_full()
+                                            .flex_none()
+                                            .cursor_pointer()
+                                            .visible_on_hover(row_group)
+                                            .hover(move |el| el.bg(hover_bg))
+                                            .on_click(cx.listener(move |this, _event, _, cx| {
+                                                cx.stop_propagation();
+                                                this.close_background_session(ix, cx);
+                                            }))
+                                            .child(
+                                                Icon::new(IconName::Close)
+                                                    .size(IconSize::XSmall)
+                                                    .color(Color::Muted),
+                                            ),
+                                    )
+                            }),
+                    )
+                    .child(
+                        h_flex().px_1().pt_2().child(
+                            Label::new("Recents")
                                 .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                                .color(Color::Custom(colors.text_muted)),
                         ),
                     )
                     .when(no_history, |el| {
@@ -2205,53 +2227,47 @@ impl BeginnerWorkspace {
                                 .py_2()
                                 .gap_0p5()
                                 .child(
-                                    Label::new("No chats yet")
+                                    Label::new(empty_recent_title)
                                         .size(LabelSize::Small)
                                         .color(Color::Disabled),
                                 )
                                 .child(
-                                    Label::new("Start a new project to get started.")
+                                    Label::new(empty_recent_subtitle)
                                         .size(LabelSize::XSmall)
                                         .color(Color::Disabled),
                                 ),
                         )
                     })
-                    .children(chat_history.into_iter().map(|record| {
-                        let name = SharedString::from(record.name.clone());
-                        let folder_label = record.folder_name();
+                    .children(recent_records.into_iter().map(|record| {
+                        let name = record.display_name();
+                        let row_group =
+                            SharedString::from(format!("chat-entry-{}", record.id.as_str()));
+                        let is_active =
+                            self.active_chat_record_id.as_deref() == Some(record.id.as_str());
                         let record_for_click = record.clone();
                         let record_id_for_delete = record.id.clone();
                         let hover_bg = ds::hover_background(cx);
                         h_flex()
                             .id(SharedString::from(format!("chat-{}", record.id)))
-                            .group("chat-entry")
-                            .min_h(px(ds::PROJECT_ROW_HEIGHT))
+                            .group(row_group.clone())
+                            .min_h(px(ds::CHAT_ROW_HEIGHT))
                             .px_2()
                             .py_1()
-                            .gap_1p5()
-                            .rounded_md()
+                            .gap_2()
+                            .rounded_lg()
                             .cursor_pointer()
+                            .when(is_active, |el| el.bg(ds::selected_background(cx)))
                             .hover(move |el| el.bg(hover_bg))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.open_chat_record(record_for_click.clone(), window, cx);
                             }))
                             .child(
-                                Icon::new(IconName::Chat)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Custom(colors.icon_muted)),
-                            )
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .gap_0p5()
-                                    .child(Label::new(name).size(LabelSize::Small).truncate())
-                                    .child(
-                                        Label::new(folder_label)
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted)
-                                            .truncate(),
-                                    ),
+                                v_flex().flex_1().min_w_0().child(
+                                    Label::new(name)
+                                        .size(LabelSize::Small)
+                                        .color(Color::Custom(colors.text))
+                                        .truncate(),
+                                ),
                             )
                             .child(
                                 div()
@@ -2259,13 +2275,14 @@ impl BeginnerWorkspace {
                                         "chat-del-{}",
                                         record_id_for_delete.clone()
                                     )))
-                                    .size(px(14.))
+                                    .size(px(16.))
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .rounded_sm()
+                                    .rounded_full()
                                     .flex_none()
                                     .cursor_pointer()
+                                    .when(!is_active, |el| el.visible_on_hover(row_group.clone()))
                                     .hover(move |el| el.bg(hover_bg))
                                     .on_click(cx.listener(move |this, _event, _, cx| {
                                         cx.stop_propagation();
@@ -2280,6 +2297,41 @@ impl BeginnerWorkspace {
                             )
                     })),
             )
+    }
+
+    fn render_closed_chats_sidebar(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let _ = window;
+
+        v_flex()
+            .w(px(52.))
+            .h_full()
+            .flex_shrink_0()
+            .bg(ds::panel_background(cx))
+            .child(
+                v_flex()
+                    .h(px(ds::TOP_BAR_HEIGHT))
+                    .items_center()
+                    .justify_center()
+                    .px_2()
+                    .child(
+                        IconButton::new(
+                            "simple-open-chats-sidebar",
+                            IconName::ThreadsSidebarLeftClosed,
+                        )
+                        .icon_size(IconSize::XSmall)
+                        .icon_color(Color::Muted)
+                        .tooltip(Tooltip::text("Open sidebar"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.chats_sidebar_open = true;
+                            cx.notify();
+                        })),
+                    ),
+            )
+            .child(div().flex_1().window_control_area(WindowControlArea::Drag))
     }
 
     fn render_simple_header(
@@ -2303,11 +2355,6 @@ impl BeginnerWorkspace {
                     .size(LabelSize::Small)
                     .color(Color::Custom(colors.text)),
             )
-            .child(
-                Icon::new(IconName::ChevronDown)
-                    .size(IconSize::XSmall)
-                    .color(Color::Custom(colors.icon_muted)),
-            )
             .child(div().flex_1())
             .when(is_running, |el| {
                 el.child(
@@ -2326,9 +2373,7 @@ impl BeginnerWorkspace {
     fn render_empty_conversation(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors().clone();
         v_flex()
-            .flex_1()
             .items_center()
-            .justify_center()
             .gap_4()
             .px_4()
             .child(
@@ -2473,10 +2518,6 @@ impl BeginnerWorkspace {
 
     fn render_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
-        let header_height = platform_title_bar_height(window);
-        let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
-        let background_tabs = self.background_project_tabs();
-        let colors = cx.theme().colors().clone();
 
         v_flex()
             .key_context("BeginnerLanding")
@@ -2485,21 +2526,6 @@ impl BeginnerWorkspace {
             .size_full()
             .font_family(ds::FONT_FAMILY)
             .bg(ds::app_background(cx))
-            // Title bar drag strip
-            .child(
-                h_flex()
-                    .h(header_height)
-                    .w_full()
-                    .flex_shrink_0()
-                    .window_control_area(WindowControlArea::Drag)
-                    .when(traffic_lights, |this| {
-                        this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
-                    })
-                    .border_b_1()
-                    .border_color(ds::separator(cx))
-                    .bg(colors.title_bar_background),
-            )
-            .child(self.render_tab_bar(SharedString::from("Home"), background_tabs, cx))
             .when(self.show_tab_limit_notice, |el| {
                 el.child(self.render_tab_limit_notice(cx))
             })
@@ -2509,8 +2535,11 @@ impl BeginnerWorkspace {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .when(self.chats_sidebar_open, |el| {
-                        el.child(self.render_chats_sidebar(cx))
+                    .child(if self.chats_sidebar_open {
+                        self.render_chats_sidebar(window, cx).into_any_element()
+                    } else {
+                        self.render_closed_chats_sidebar(window, cx)
+                            .into_any_element()
                     })
                     .child(
                         v_flex()
@@ -2519,8 +2548,24 @@ impl BeginnerWorkspace {
                             .h_full()
                             .overflow_hidden()
                             .bg(ds::app_background(cx))
-                            .child(self.render_empty_conversation(cx))
-                            .child(self.render_input_bar(false, false, draft_is_empty, window, cx)),
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .items_center()
+                                    .justify_center()
+                                    .gap_5()
+                                    .px_4()
+                                    .pb(rems_from_px(72.))
+                                    .child(self.render_empty_conversation(cx))
+                                    .child(self.render_input_bar(
+                                        false,
+                                        false,
+                                        draft_is_empty,
+                                        true,
+                                        window,
+                                        cx,
+                                    )),
+                            ),
                     ),
             )
     }
@@ -2533,8 +2578,6 @@ impl BeginnerWorkspace {
         let is_running = self.is_agent_running;
         let is_connecting = self.pending_conversation_view.is_some();
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
-        let header_height = platform_title_bar_height(window);
-        let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
         let preview_url = self.preview_url.clone();
         let active_title = self.current_tab_title();
         let right_panel_visible =
@@ -2543,7 +2586,6 @@ impl BeginnerWorkspace {
         // of the space. When the agent is building, chat takes priority.
         let preview_dominant = right_panel_visible && self.web_preview.is_some() && !is_running;
         let preview_card_state = self.preview_card_state();
-        let background_tabs = self.background_project_tabs();
         let colors = cx.theme().colors().clone();
 
         v_flex()
@@ -2551,21 +2593,6 @@ impl BeginnerWorkspace {
             .font_family(ds::FONT_FAMILY)
             .on_action(cx.listener(Self::handle_enter_submit))
             .bg(ds::app_background(cx))
-            // Title bar
-            .child(
-                h_flex()
-                    .h(header_height)
-                    .w_full()
-                    .flex_shrink_0()
-                    .border_b_1()
-                    .border_color(ds::separator(cx))
-                    .bg(colors.title_bar_background)
-                    .window_control_area(WindowControlArea::Drag)
-                    .when(traffic_lights, |this| {
-                        this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
-                    }),
-            )
-            .child(self.render_tab_bar(active_title.clone(), background_tabs, cx))
             .when(self.show_tab_limit_notice, |el| {
                 el.child(self.render_tab_limit_notice(cx))
             })
@@ -2575,8 +2602,11 @@ impl BeginnerWorkspace {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .when(self.chats_sidebar_open, |el| {
-                        el.child(self.render_chats_sidebar(cx))
+                    .child(if self.chats_sidebar_open {
+                        self.render_chats_sidebar(window, cx).into_any_element()
+                    } else {
+                        self.render_closed_chats_sidebar(window, cx)
+                            .into_any_element()
                     })
                     .child(
                         v_flex()
@@ -2589,8 +2619,6 @@ impl BeginnerWorkspace {
                             .min_h_0()
                             .h_full()
                             .overflow_hidden()
-                            .border_r_1()
-                            .border_color(ds::separator(cx))
                             .bg(ds::app_background(cx))
                             .child(self.render_simple_header(
                                 active_title.clone(),
@@ -2679,6 +2707,7 @@ impl BeginnerWorkspace {
                                 is_running,
                                 is_connecting,
                                 draft_is_empty,
+                                false,
                                 window,
                                 cx,
                             )),
@@ -2703,8 +2732,7 @@ impl BeginnerWorkspace {
     ) -> AnyElement {
         let is_code_view = matches!(self.right_panel, RightPanel::CodeView { .. });
         let colors = cx.theme().colors().clone();
-        let border = ds::separator(cx);
-        let tab_active_bg = ds::app_background(cx);
+        let tab_active_bg = ds::selected_background(cx);
         let tab_hover = ds::hover_background(cx);
         let has_webview = self.web_preview.is_some();
         let workspace = cx.entity().downgrade();
@@ -2716,26 +2744,25 @@ impl BeginnerWorkspace {
             })
             .h_full()
             .bg(ds::field_background(cx))
-            // Tab bar: Preview | Code
             .child(
                 h_flex()
                     .h(px(ds::TOP_BAR_HEIGHT))
                     .bg(ds::panel_background(cx))
-                    // Preview tab
+                    .px_2()
+                    .gap_1()
+                    .items_center()
                     .child(
                         h_flex()
                             .id("right-tab-preview")
-                            .h_full()
+                            .h(px(ds::INPUT_HEIGHT))
                             .px_3()
                             .gap_1p5()
                             .items_center()
+                            .rounded_full()
                             .cursor_pointer()
-                            .border_b_2()
-                            .when(!is_code_view, |el| {
-                                el.border_color(ds::accent(cx)).bg(tab_active_bg)
-                            })
+                            .when(!is_code_view, |el| el.bg(tab_active_bg))
                             .when(is_code_view, |el| {
-                                el.border_color(colors.border_transparent)
+                                el.bg(colors.ghost_element_background)
                                     .hover(move |el| el.bg(tab_hover))
                             })
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -2757,18 +2784,16 @@ impl BeginnerWorkspace {
                                 },
                             )),
                     )
-                    // Code tab — only shown when a file is open
                     .when(is_code_view, |el| {
                         el.child(
                             h_flex()
                                 .id("right-tab-code")
-                                .h_full()
+                                .h(px(ds::INPUT_HEIGHT))
                                 .px_3()
                                 .gap_1p5()
                                 .items_center()
+                                .rounded_full()
                                 .cursor_pointer()
-                                .border_b_2()
-                                .border_color(ds::accent(cx))
                                 .bg(tab_active_bg)
                                 .child(
                                     Icon::new(IconName::FileCode)
@@ -2801,14 +2826,11 @@ impl BeginnerWorkspace {
                         })
                     }),
             )
-            // URL bar — shown in Preview mode when a URL is available
             .when(!is_code_view, |el| {
                 el.child(
                     h_flex()
                         .px_2()
                         .py_1p5()
-                        .border_b_1()
-                        .border_color(border)
                         .gap_1p5()
                         .items_center()
                         .child(
@@ -2851,8 +2873,6 @@ impl BeginnerWorkspace {
                             h_flex()
                                 .px_3()
                                 .py_1p5()
-                                .border_b_1()
-                                .border_color(border)
                                 .gap_1()
                                 .items_center()
                                 .child(
@@ -2975,6 +2995,7 @@ impl BeginnerWorkspace {
         is_running: bool,
         is_connecting: bool,
         draft_is_empty: bool,
+        centered: bool,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -2984,10 +3005,15 @@ impl BeginnerWorkspace {
         let icon_hover_bg = ds::hover_background(cx);
         v_flex()
             .flex_shrink_0()
-            .bg(ds::panel_background(cx))
-            .px_3()
-            .pt_1()
-            .pb_2()
+            .bg(if centered {
+                ds::app_background(cx)
+            } else {
+                ds::panel_background(cx)
+            })
+            .when(centered, |el| {
+                el.w_full().max_w(px(ds::CHAT_COMPOSER_MAX_WIDTH))
+            })
+            .when(!centered, |el| el.px_3().pt_1().pb_2())
             .gap_2()
             .child(
                 v_flex()

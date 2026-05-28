@@ -107,8 +107,6 @@ impl Render for FileChangesPanel {
             .w(px(ds::SIDEBAR_WIDTH))
             .h_full()
             .bg(ds::field_background(cx))
-            .border_r_1()
-            .border_color(ds::separator(cx))
             .child(
                 h_flex().h(px(ds::TOP_BAR_HEIGHT)).px_3().child(
                     Label::new("Changes")
