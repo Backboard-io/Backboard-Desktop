@@ -18,11 +18,14 @@ use ui::prelude::*;
 use util::ResultExt;
 use util::path_list::PathList;
 use zed_actions::agents_sidebar::ToggleThreadSwitcher;
-use zed_actions::{ResetOnboarding, SwitchInterfaceMode};
+use zed_actions::{OpenSettings, OpenSettingsAt, ResetOnboarding, SwitchInterfaceMode};
 
 use agent_settings::AgentSettings;
 use settings::SidebarDockPosition;
-use ui::{ButtonSize, ContextMenu, DropdownMenu, DropdownStyle, IconPosition, right_click_menu};
+use ui::{
+    ButtonSize, ContextMenu, ContextMenuEntry, DropdownMenu, DropdownStyle, IconPosition,
+    right_click_menu,
+};
 
 const SIDEBAR_RESIZE_HANDLE_SIZE: Pixels = px(6.0);
 
@@ -2255,6 +2258,44 @@ impl MultiWorkspace {
         })
     }
 
+    fn backboard_settings_menu(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<ContextMenu> {
+        let workspace = self.workspace().clone();
+        ContextMenu::build(window, cx, move |menu, _window, _cx| {
+            let workspace_for_api_key = workspace.clone();
+            menu.item(
+                ContextMenuEntry::new("Dashboard")
+                    .icon(IconName::ArrowUpRight)
+                    .icon_position(IconPosition::End)
+                    .handler(|_, cx| {
+                        cx.open_url("https://app.backboard.io");
+                    }),
+            )
+            .entry("Settings", Some(Box::new(OpenSettings)), |window, cx| {
+                window.dispatch_action(Box::new(OpenSettings), cx);
+            })
+            .entry(
+                "Configure API Key",
+                Some(Box::new(OpenSettingsAt {
+                    path: "backboard.api_key".to_string(),
+                })),
+                move |window, cx| {
+                    let focus_handle = workspace_for_api_key.read(cx).focus_handle(cx);
+                    focus_handle.dispatch_action(
+                        &OpenSettingsAt {
+                            path: "backboard.api_key".to_string(),
+                        },
+                        window,
+                        cx,
+                    );
+                },
+            )
+        })
+    }
+
     fn render_workspace_mode_switcher(
         &self,
         window: &mut Window,
@@ -2271,6 +2312,7 @@ impl MultiWorkspace {
             .justify_end()
             .pl_2()
             .pr_2()
+            .gap_1()
             .border_b_1()
             .border_color(colors.border_variant.opacity(0.5))
             .bg(switcher_bg)
@@ -2282,6 +2324,19 @@ impl MultiWorkspace {
                         .color(Color::Muted)
                         .into_any_element(),
                     self.workspace_mode_menu(window, cx),
+                )
+                .style(DropdownStyle::Ghost)
+                .trigger_size(ButtonSize::Compact)
+                .no_chevron(),
+            )
+            .child(
+                DropdownMenu::new_with_element(
+                    "backboard-settings-menu",
+                    Icon::new(IconName::Settings)
+                        .size(IconSize::Small)
+                        .color(Color::Muted)
+                        .into_any_element(),
+                    self.backboard_settings_menu(window, cx),
                 )
                 .style(DropdownStyle::Ghost)
                 .trigger_size(ButtonSize::Compact)

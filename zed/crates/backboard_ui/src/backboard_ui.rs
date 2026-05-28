@@ -19,6 +19,7 @@ use workspace::{
     Workspace,
     dock::{DockPosition, Panel, PanelEvent},
 };
+use zed_actions::ConfigureBackboardApiKey;
 
 const BACKBOARD_PANEL_KEY: &str = "backboard_panel";
 const DEFAULT_WIDTH: gpui::Pixels = px(380.);
@@ -139,6 +140,12 @@ pub fn init(cx: &mut App) {
                 panel.update(cx, |panel, cx| panel.save_api_key(window, cx));
             }
         });
+        workspace.register_action(|workspace, _: &ConfigureBackboardApiKey, window, cx| {
+            workspace.open_panel::<BackboardPanel>(window, cx);
+            if let Some(panel) = workspace.panel::<BackboardPanel>(cx) {
+                panel.update(cx, |panel, cx| panel.configure_api_key(window, cx));
+            }
+        });
         workspace.register_action(|workspace, _: &SendPrompt, window, cx| {
             if let Some(panel) = workspace.panel::<BackboardPanel>(cx) {
                 panel.update(cx, |panel, cx| panel.send_prompt(window, cx));
@@ -170,6 +177,7 @@ pub struct BackboardPanel {
     model_picker_open: bool,
     selected_provider: Option<String>,
     selected_model: Option<String>,
+    configuring_api_key: bool,
     is_zoomed: bool,
 }
 
@@ -248,6 +256,7 @@ impl BackboardPanel {
             editor.set_show_gutter(false, cx);
             editor.set_show_wrap_guides(false, cx);
             editor.set_show_indent_guides(false, cx);
+            editor.set_masked(true, cx);
             editor
         });
 
@@ -299,6 +308,7 @@ impl BackboardPanel {
             model_picker_open: api_ready && selected_model.is_none(),
             selected_provider,
             selected_model,
+            configuring_api_key: false,
             is_zoomed: false,
         };
 
@@ -443,6 +453,7 @@ impl BackboardPanel {
         match backboard::BackboardConfig::save_api_key_for_current_env(api_key) {
             Ok(config) => {
                 self.api_ready = true;
+                self.configuring_api_key = false;
                 self.status = format!("Saved API key to ~/.backboard/config.json ({})", config.env);
                 self.api_key_editor
                     .update(cx, |editor, cx| editor.set_text("", window, cx));
@@ -459,6 +470,13 @@ impl BackboardPanel {
             }
         }
 
+        cx.notify();
+    }
+
+    fn configure_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.configuring_api_key = true;
+        self.status = "Paste a Backboard API key to update this device.".to_string();
+        self.api_key_editor.focus_handle(cx).focus(window, cx);
         cx.notify();
     }
 
@@ -1570,7 +1588,7 @@ impl Render for BackboardPanel {
             .when(self.should_show_status(), |this| {
                 this.child(self.render_status(cx))
             })
-            .when(!self.api_ready, |this| {
+            .when(self.configuring_api_key || !self.api_ready, |this| {
                 this.child(self.render_api_key_setup(cx))
             })
             .child(self.render_messages(cx))

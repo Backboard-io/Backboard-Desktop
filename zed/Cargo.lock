@@ -1939,6 +1939,7 @@ dependencies = [
  "tokio",
  "ui",
  "workspace",
+ "zed_actions",
 ]
 
 [[package]]
