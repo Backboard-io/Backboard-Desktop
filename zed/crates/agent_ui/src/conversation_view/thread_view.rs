@@ -318,7 +318,7 @@ impl Render for AgentOptionsMenu {
 
                     if !mcp_options.is_empty() {
                         list = list
-                            .child(self.render_section_label("MCP Calls", cx))
+                            .child(self.render_section_label("MCP Integrations", cx))
                             .child(self.render_option_group(mcp_options, cx));
                     }
 
@@ -2596,8 +2596,9 @@ impl ThreadView {
             //
             // If there are, we keep/accept them since we're not regenerating the prompt that created them.
             //
-            // If editing the prompt that generated the edits, they are auto-rejected
-            // through the `rewind` function in the `acp_thread`.
+            // If editing the prompt that generated the edits, restore the checkpoint
+            // captured before that prompt. This also reverts filesystem changes made
+            // outside the action log, such as shell-created files.
             let has_earlier_edits = thread.read_with(cx, |thread, _| {
                 thread
                     .entries()
@@ -2615,7 +2616,9 @@ impl ThreadView {
             }
 
             thread
-                .update(cx, |thread, cx| thread.rewind(user_message_id, cx))
+                .update(cx, |thread, cx| {
+                    thread.restore_checkpoint(user_message_id, cx)
+                })
                 .await?;
             this.update_in(cx, |thread, window, cx| {
                 cx.emit(AcpThreadViewEvent::Interacted);

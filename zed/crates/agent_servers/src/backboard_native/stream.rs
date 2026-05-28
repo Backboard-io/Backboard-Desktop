@@ -1,4 +1,5 @@
 use std::{
+    io::ErrorKind,
     pin::Pin,
     rc::Rc,
     time::{Duration, Instant},
@@ -16,18 +17,19 @@ use serde_json::{Value, json};
 use super::{
     BackboardNativeState, HISTORY_REPLAY_MAX_MESSAGES, SessionRuntime, missing_api_key_message,
 };
-use crate::backboard_native::{tool_schemas, tools, workspace};
+use crate::backboard_native::{mcp, tool_schemas, tools, workspace};
 
 const STREAM_TEXT_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 const STREAM_TEXT_FLUSH_BYTES: usize = 512;
 
 pub async fn run_prompt(
     state: Rc<BackboardNativeState>,
-    _user_message_id: UserMessageId,
+    user_message_id: UserMessageId,
     params: acp::PromptRequest,
     cx: &mut AsyncApp,
 ) -> Result<acp::PromptResponse> {
     let runtime = state.runtime_for_session(&params.session_id)?;
+    state.begin_turn(&params.session_id, user_message_id);
     state.reset_turn_metrics(&params.session_id);
     log::info!(
         "Backboard native prompt start: session_id={} provider={} model={} mode={} intensity={} path=rust-native",
@@ -100,15 +102,28 @@ pub async fn run_prompt(
     };
     state.record_turn_timing(&params.session_id, "runtime_load_ms", runtime_load_started);
 
+    let mcp_tools = match mcp::load_tools(&runtime, cx).await {
+        Ok(tools) => tools,
+        Err(error) => {
+            log::warn!(
+                "Backboard native failed to load MCP tools for session {}: {error:#}",
+                runtime.session_id
+            );
+            Vec::new()
+        }
+    };
+    state.set_mcp_tools(&params.session_id, mcp_tools.clone());
+    let turn_tools = tool_definitions_for_turn(&runtime, &mcp_tools);
+
     let assistant_started = Instant::now();
     let thread_id = state
         .clone()
-        .ensure_thread_binding(&params.session_id, cx)
+        .ensure_thread_binding(&params.session_id, turn_tools.clone(), cx)
         .await?;
     state.record_turn_timing(&params.session_id, "assistant_create_ms", assistant_started);
     let provider = Some(runtime.provider.clone());
     let model = Some(runtime.model.clone());
-    let tools = Some(tool_schemas::tool_definitions(&runtime.mode.to_string()));
+    let tools = Some(turn_tools);
     let thinking = thinking_payload(&runtime.intensity, &runtime.provider, &runtime.model);
     let voice = voice_payload(&runtime.feature_settings);
     let audio_file = audio_attachment_for_voice(&runtime.feature_settings, &prompt_parts.audio);
@@ -127,7 +142,7 @@ pub async fn run_prompt(
     }
     if runtime.feature_settings.live_voice == "on" {
         let realtime_url = client.realtime_voice_url();
-        let setup = realtime_voice_setup(&thread_id, &runtime.feature_settings);
+        let setup = realtime_voice_setup(&thread_id, &runtime);
         log::info!(
             "Backboard native realtime voice prepared: session_id={} endpoint={} setup={}",
             params.session_id,
@@ -154,7 +169,10 @@ pub async fn run_prompt(
 
     emit_progress(&state, &runtime, "Sending to model.", cx)?;
 
+    let mcp_calls = mcp_calls_payload(&runtime.feature_settings, &message_for_model);
     let request = SendMessageRequest {
+        thread_id: None,
+        assistant_id: None,
         content: augmented,
         provider,
         model,
@@ -162,14 +180,15 @@ pub async fn run_prompt(
         thinking,
         tools,
         web_search: runtime.feature_settings.web_search.clone(),
-        image_generation: Some(runtime.feature_settings.image_generation.clone()),
+        image_generation: (runtime.feature_settings.image_generation == "auto")
+            .then(|| "auto".to_string()),
         image_model_provider: (runtime.feature_settings.image_generation == "auto")
             .then(|| super::DEFAULT_IMAGE_PROVIDER.to_string()),
         image_model_name: (runtime.feature_settings.image_generation == "auto")
             .then(|| super::DEFAULT_IMAGE_MODEL.to_string()),
         voice,
         send_to_llm: send_to_llm_for_voice(&runtime.feature_settings),
-        mcp_calls: mcp_calls_payload(&runtime.feature_settings),
+        mcp_calls,
         max_tokens: None,
         audio_file,
     };
@@ -497,6 +516,10 @@ async fn consume_stream(
                 "tts_audio_delta" => {
                     emit_voice_audio_delta(&state, &runtime, &chunk, cx)?;
                 }
+                "tts_audio_chunk" => {}
+                "tts_stream_end" => {
+                    emit_voice_audio_delta(&state, &runtime, &chunk, cx)?;
+                }
                 "tool_submit_required" => {
                     let run_id = chunk
                         .get("run_id")
@@ -636,6 +659,15 @@ fn emit_coalesced_stream_text(
     }
 }
 
+fn tool_definitions_for_turn(
+    runtime: &SessionRuntime,
+    mcp_tools: &[mcp::NativeMcpTool],
+) -> Vec<Value> {
+    let mut tools = tool_schemas::tool_definitions(&runtime.mode.to_string());
+    tools.extend(mcp::tool_definitions(mcp_tools));
+    tools
+}
+
 async fn submit_tools(
     state: Rc<BackboardNativeState>,
     runtime: &SessionRuntime,
@@ -663,7 +695,10 @@ async fn submit_tools(
     let run_id = run_id.to_string();
     let request = SubmitToolOutputsRequest {
         tool_outputs: outputs,
-        tools: Some(tool_schemas::tool_definitions(&runtime.mode.to_string())),
+        tools: Some(tool_definitions_for_turn(
+            runtime,
+            &state.mcp_tools(&runtime.session_id),
+        )),
     };
     log::info!(
         "Backboard native endpoint call: POST /threads/{{thread_id}}/runs/{{run_id}}/submit-tool-outputs?stream=true session_id={} thread_id={} run_id={} path=rust-native",
@@ -1222,24 +1257,25 @@ fn voice_payload(feature_settings: &super::FeatureSettings) -> Option<Value> {
     }
 }
 
-fn realtime_voice_setup(thread_id: &str, feature_settings: &super::FeatureSettings) -> Value {
+fn realtime_voice_setup(thread_id: &str, runtime: &SessionRuntime) -> Value {
     json!({
         "thread_id": thread_id,
         "voice": {
             "stt": {
-                "provider": super::DEFAULT_REALTIME_STT_PROVIDER,
                 "model": super::DEFAULT_REALTIME_STT_MODEL,
+                "sample_rate": 16000,
                 "audio_format": "pcm_16000",
             },
-            "tts": (feature_settings.voice_mode == "conversation").then(|| json!({
+            "tts": (runtime.feature_settings.voice_mode == "conversation").then(|| json!({
                 "provider": super::DEFAULT_TTS_PROVIDER,
                 "model": super::DEFAULT_TTS_MODEL,
                 "voice": super::DEFAULT_TTS_VOICE,
                 "output_format": super::DEFAULT_TTS_FORMAT,
             })),
         },
-        "llm_provider": "openai",
-        "model_name": "gpt-4o",
+        "send_to_llm": true,
+        "llm_provider": runtime.provider.clone(),
+        "model_name": runtime.model.clone(),
         "memory": "Auto",
     })
 }
@@ -1264,27 +1300,53 @@ fn prompt_with_selected_skills(runtime: &SessionRuntime, message: &str) -> Resul
             .iter()
             .find(|skill| &skill.relative_path == selected_skill)
             .with_context(|| format!("{selected_skill} is no longer available"))?;
-        let content = std::fs::read_to_string(&skill.path)
+        let skill_instructions = std::fs::read_to_string(&skill.path)
             .with_context(|| format!("reading {}", skill.path.display()))?;
-        skill_blocks.push(format!(
-            "<skill>\nName: {}\nPath: {}\n\n{}\n</skill>",
+        let design_path = skill.path.with_file_name("DESIGN.md");
+        let design_spec = match std::fs::read_to_string(&design_path) {
+            Ok(content) => Some(content),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(error).with_context(|| format!("reading {}", design_path.display()));
+            }
+        };
+
+        let mut skill_block = format!(
+            "<skill id=\"{}\" name=\"{}\">\n\
+             <skill_file path=\"{}\" purpose=\"operating instructions\">\n{}\n</skill_file>",
+            selected_skill,
             skill.name,
             skill.path.display(),
-            content
-        ));
+            skill_instructions
+        );
+        if let Some(design_spec) = design_spec {
+            skill_block.push_str(&format!(
+                "\n<skill_file path=\"{}\" purpose=\"design specification and tokens\">\n{}\n</skill_file>",
+                design_path.display(),
+                design_spec
+            ));
+        }
+        skill_block.push_str("\n</skill>");
+        skill_blocks.push(skill_block);
     }
 
     Ok(format!(
-        "Use these selected skills as additional operating instructions for this task.\n\n<selected_skills>\n{}\n</selected_skills>\n\nUser request:\n\n{}",
+        "Use these selected skill files as additional inputs for this task.\n\
+         The files are reference instructions and design specifications, not the requested artifact.\n\
+         Apply SKILL.md as behavior guidance and DESIGN.md as concrete style/tokens when present.\n\
+         Do not output, rewrite, or summarize the skill markdown unless the user explicitly asks for that; produce the actual requested result.\n\n\
+         <selected_skills>\n{}\n</selected_skills>\n\nUser request:\n\n{}",
         skill_blocks.join("\n\n"),
         message
     ))
 }
 
-fn mcp_calls_payload(feature_settings: &super::FeatureSettings) -> Option<Value> {
+fn mcp_calls_payload(feature_settings: &super::FeatureSettings, message: &str) -> Option<Value> {
     let mut enabled = Vec::new();
-    if feature_settings.mcp_figma == "on" {
-        enabled.push("figma");
+    match feature_settings.mcp_figma.as_str() {
+        "on" => enabled.push("figma"),
+        "auto" if contains_figma_url(message) => enabled.push("figma"),
+        _ => {}
     }
     if feature_settings.mcp_notion == "on" {
         enabled.push("notion");
@@ -1294,6 +1356,20 @@ fn mcp_calls_payload(feature_settings: &super::FeatureSettings) -> Option<Value>
     }
 
     (!enabled.is_empty()).then(|| json!(enabled))
+}
+
+fn contains_figma_url(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    let has_figma_host = ["figma.com/", "www.figma.com/"]
+        .iter()
+        .any(|host| text.contains(host));
+    let has_figma_resource_path = [
+        "/file/", "/design/", "/proto/", "/board/", "/figjam/", "/slides/",
+    ]
+    .iter()
+    .any(|path| text.contains(path));
+
+    has_figma_host && has_figma_resource_path
 }
 
 fn chunk_text(chunk: &Value) -> Option<String> {
@@ -1321,17 +1397,38 @@ fn thinking_for_provider(provider: &str, model: &str, effort: &str) -> Value {
     let provider = provider.to_lowercase();
     let model = model.to_lowercase().replace('_', "-");
     match provider.as_str() {
-        "openai" | "xai" => json!({ "effort": effort }),
-        "google" => json!({
-            "effort": effort,
-            "budget_tokens": effort_budget_tokens(effort).min(32768),
-        }),
+        "openai" if is_openai_reasoning_model(&model) => json!({ "effort": effort }),
+        "xai" if is_xai_reasoning_model(&model) => json!({ "effort": effort }),
+        "google" if is_gemini_3_model(&model) => json!({ "effort": effort }),
+        "google" if is_gemini_25_model(&model) => {
+            json!({ "budget_tokens": effort_budget_tokens(effort).min(32768) })
+        }
+        "anthropic" if model.contains("opus-4-7") => json!({ "effort": effort }),
         "anthropic" => json!({ "budget_tokens": anthropic_budget_tokens(effort) }),
         "aws-bedrock" if model.contains("opus-4-7") => json!({ "effort": effort }),
         "aws-bedrock" => json!({ "budget_tokens": anthropic_budget_tokens(effort) }),
         "openrouter" | "cerebras" => json!({ "max_tokens": effort_max_tokens(effort) }),
         _ => json!({}),
     }
+}
+
+fn is_openai_reasoning_model(model: &str) -> bool {
+    model.starts_with("o1")
+        || model.starts_with("o3")
+        || model.starts_with("o4")
+        || model.starts_with("gpt-5")
+}
+
+fn is_xai_reasoning_model(model: &str) -> bool {
+    model.contains("reasoning")
+}
+
+fn is_gemini_25_model(model: &str) -> bool {
+    model.contains("gemini-2.5")
+}
+
+fn is_gemini_3_model(model: &str) -> bool {
+    model.contains("gemini-3")
 }
 
 fn effort_budget_tokens(effort: &str) -> u64 {
@@ -1382,7 +1479,7 @@ mod tests {
 
     #[test]
     fn thinking_payload_uses_provider_schema_without_enabled_key() {
-        let openai = thinking_payload("balanced", "openai", "gpt-4o").unwrap();
+        let openai = thinking_payload("balanced", "openai", "o3").unwrap();
         assert_eq!(openai, json!({"effort": "low"}));
         assert!(openai.get("enabled").is_none());
 
@@ -1391,9 +1488,22 @@ mod tests {
             json!({"budget_tokens": 16384})
         );
         assert_eq!(
+            thinking_payload("deep", "anthropic", "claude-opus-4-7-20250501").unwrap(),
+            json!({"effort": "max"})
+        );
+        assert_eq!(
+            thinking_payload("balanced", "google", "gemini-2.5-pro").unwrap(),
+            json!({"budget_tokens": 2048})
+        );
+        assert_eq!(
+            thinking_payload("balanced", "google", "gemini-3.1-pro-preview").unwrap(),
+            json!({"effort": "low"})
+        );
+        assert_eq!(
             thinking_payload("balanced", "openrouter", "some-reasoning-model").unwrap(),
             json!({"max_tokens": 1024})
         );
+        assert_eq!(thinking_payload("balanced", "openai", "gpt-4o"), None);
     }
 
     #[test]
@@ -1453,8 +1563,41 @@ mod tests {
         };
 
         assert_eq!(
-            mcp_calls_payload(&settings),
+            mcp_calls_payload(&settings, "No links in this prompt."),
             Some(json!(["figma", "notion", "google"]))
+        );
+    }
+
+    #[test]
+    fn mcp_calls_payload_auto_detects_figma_links() {
+        let settings = super::super::FeatureSettings::default();
+
+        assert_eq!(
+            mcp_calls_payload(
+                &settings,
+                "Implement this frame: https://www.figma.com/design/abc123/Checkout?node-id=1-2"
+            ),
+            Some(json!(["figma"]))
+        );
+        assert_eq!(
+            mcp_calls_payload(&settings, "Implement the checkout screen."),
+            None
+        );
+    }
+
+    #[test]
+    fn mcp_calls_payload_respects_figma_off() {
+        let settings = super::super::FeatureSettings {
+            mcp_figma: "off".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            mcp_calls_payload(
+                &settings,
+                "Implement https://www.figma.com/file/abc123/Checkout?node-id=1-2"
+            ),
+            None
         );
     }
 
@@ -1479,6 +1622,18 @@ Use quiet typography.
 "#,
         )
         .expect("write skill");
+        std::fs::write(
+            skill_dir.join("DESIGN.md"),
+            r##"---
+name: Modern
+colors:
+  primary: "#553F83"
+---
+
+Use IBM Plex Serif and the primary color token.
+"##,
+        )
+        .expect("write design spec");
 
         let runtime = SessionRuntime {
             session_id: acp::SessionId::new("test-session"),
@@ -1493,14 +1648,19 @@ Use quiet typography.
                 ..Default::default()
             },
             cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            context_server_store: None,
         };
 
         let prompt = prompt_with_selected_skills(&runtime, "Build a settings page.")
             .expect("selected skill should load");
 
         assert!(prompt.contains("<selected_skills>"));
-        assert!(prompt.contains("Name: Modern"));
+        assert!(prompt.contains("name=\"Modern\""));
+        assert!(prompt.contains("purpose=\"operating instructions\""));
+        assert!(prompt.contains("purpose=\"design specification and tokens\""));
         assert!(prompt.contains("Use quiet typography."));
+        assert!(prompt.contains("Use IBM Plex Serif and the primary color token."));
+        assert!(prompt.contains("not the requested artifact"));
         assert!(prompt.contains("User request:\n\nBuild a settings page."));
 
         let final_prompt = workspace::augment_prompt(
@@ -1511,6 +1671,7 @@ Use quiet typography.
         );
         assert!(final_prompt.contains("<selected_skills>"));
         assert!(final_prompt.contains("Use quiet typography."));
+        assert!(final_prompt.contains("Use IBM Plex Serif and the primary color token."));
         assert!(final_prompt.contains("selected_skills: web/modern"));
         assert!(final_prompt.contains("<backboard_ide_context>"));
     }

@@ -2946,7 +2946,7 @@ mod tests {
         let page = workspace.update_in(&mut cx, |workspace, window, cx| {
             BackboardAgentWorkspacePage::new(workspace, window, cx)
         });
-        multi_workspace.update_in(&mut cx, |multi_workspace, _window, _cx| {
+        let _ = multi_workspace.update(&mut cx, |multi_workspace, _window, _cx| {
             multi_workspace.agent_workspace_view = Some(page.clone().into());
         });
 

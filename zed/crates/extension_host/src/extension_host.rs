@@ -789,28 +789,34 @@ impl ExtensionStore {
     }
 
     pub fn install_latest_extension(&mut self, extension_id: Arc<str>, cx: &mut Context<Self>) {
+        self.install_latest_extension_task(extension_id, cx)
+            .detach_and_log_err(cx);
+    }
+
+    pub fn install_latest_extension_task(
+        &mut self,
+        extension_id: Arc<str>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
         log::info!("installing extension {extension_id} latest version");
 
         let schema_versions = schema_version_range();
         let wasm_api_versions = wasm_api_version_range(ReleaseChannel::global(cx));
 
-        let Some(url) = self
-            .http_client
-            .build_zed_api_url(
-                &format!("/extensions/{extension_id}/download"),
-                &[
-                    ("min_schema_version", &schema_versions.start().to_string()),
-                    ("max_schema_version", &schema_versions.end().to_string()),
-                    (
-                        "min_wasm_api_version",
-                        &wasm_api_versions.start().to_string(),
-                    ),
-                    ("max_wasm_api_version", &wasm_api_versions.end().to_string()),
-                ],
-            )
-            .log_err()
-        else {
-            return;
+        let url = match self.http_client.build_zed_api_url(
+            &format!("/extensions/{extension_id}/download"),
+            &[
+                ("min_schema_version", &schema_versions.start().to_string()),
+                ("max_schema_version", &schema_versions.end().to_string()),
+                (
+                    "min_wasm_api_version",
+                    &wasm_api_versions.start().to_string(),
+                ),
+                ("max_wasm_api_version", &wasm_api_versions.end().to_string()),
+            ],
+        ) {
+            Ok(url) => url,
+            Err(error) => return Task::ready(Err(error.into())),
         };
 
         self.install_or_upgrade_extension_at_endpoint(
@@ -819,7 +825,6 @@ impl ExtensionStore {
             ExtensionOperation::Install,
             cx,
         )
-        .detach_and_log_err(cx);
     }
 
     pub fn upgrade_extension(

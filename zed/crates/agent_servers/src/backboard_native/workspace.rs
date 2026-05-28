@@ -13,7 +13,7 @@ pub fn system_prompt(workspace: &Path) -> String {
          - Be objectively correct. If the user is mistaken or an assumption is weak, say so briefly and investigate.\n\
          - Preserve user work. Never revert unrelated changes or run destructive commands unless explicitly requested.\n\
          - Cite file paths and line numbers when explaining code locations.\n\n\
-         - Apply any instructions included in <selected_skills> before answering or editing.\n\n\
+         - Apply any instructions included in <selected_skills> before answering or editing. Treat skill markdown as input context, not as the requested output, unless the user explicitly asks for markdown.\n\n\
          File and git safety:\n\
          - Read a file before editing it. Prefer editing existing files; create new files only when necessary.\n\
          - Never create README, markdown, or documentation files unless the user explicitly asks.\n\

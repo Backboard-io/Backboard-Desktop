@@ -48,6 +48,8 @@ use ::ui::IconName;
 use agent_client_protocol::schema as acp;
 use agent_settings::{AgentProfileId, AgentSettings};
 use command_palette_hooks::CommandPaletteFilter;
+use context_server::ContextServerId;
+use extension_host::ExtensionStore;
 use feature_flags::FeatureFlagAppExt as _;
 use fs::Fs;
 use gpui::{Action, App, Context, Entity, SharedString, Window, actions};
@@ -64,7 +66,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{LanguageModelSelection, Settings as _, SettingsStore};
 use std::any::TypeId;
-use workspace::{MultiWorkspace, Workspace};
+use workspace::{MultiWorkspace, Toast, Workspace, notifications::NotificationId};
 
 use crate::agent_configuration::{ConfigureContextServerModal, ManageProfilesModal};
 pub use crate::agent_connection_store::{ActiveAcpConnection, AgentConnectionStore};
@@ -94,6 +96,22 @@ pub use zed_actions::{CreateWorktree, NewWorktreeBranchTarget, SwitchWorktree};
 
 pub const DEFAULT_THREAD_TITLE: &str = "Backboard Thread";
 const PARALLEL_AGENT_LAYOUT_BACKFILL_KEY: &str = "parallel_agent_layout_backfilled";
+const RECOMMENDED_MCP_EXTENSION_IDS_RAW: &[&str] = &[
+    "mcp-server-shopify-dev",
+    "mcp-server-slack",
+    "mcp-server-supabase",
+    "mcp-server-figma",
+    "mcp-server-github",
+    "mcp-server-shopify-dev",
+];
+
+fn recommended_mcp_extension_ids() -> Vec<Arc<str>> {
+    let mut seen = std::collections::HashSet::new();
+    RECOMMENDED_MCP_EXTENSION_IDS_RAW
+        .iter()
+        .filter_map(|id| seen.insert(*id).then(|| Arc::<str>::from(*id)))
+        .collect()
+}
 actions!(
     agent,
     [
@@ -115,6 +133,8 @@ actions!(
         ExpandMessageEditor,
         /// Adds a context server to the configuration.
         AddContextServer,
+        /// Installs Backboard's recommended MCP server bundle.
+        InstallRecommendedMcpServers,
         /// Archives the currently selected thread.
         ArchiveSelectedThread,
         /// Removes the currently selected thread.
@@ -478,6 +498,26 @@ pub fn init(
 
     inline_assistant::init(fs.clone(), prompt_builder.clone(), cx);
     terminal_inline_assistant::init(fs.clone(), prompt_builder, cx);
+    cx.observe_new({
+        let language_registry = language_registry.clone();
+        move |workspace: &mut Workspace, _window, _cx| {
+            let language_registry = language_registry.clone();
+            workspace.register_action(
+                move |workspace: &mut Workspace,
+                      _: &InstallRecommendedMcpServers,
+                      window: &mut Window,
+                      cx: &mut Context<Workspace>| {
+                    install_recommended_mcp_servers(
+                        workspace,
+                        language_registry.clone(),
+                        window,
+                        cx,
+                    );
+                },
+            );
+        }
+    })
+    .detach();
     cx.observe_new(move |workspace, window, cx| {
         ConfigureContextServerModal::register(workspace, language_registry.clone(), window, cx)
     })
@@ -565,6 +605,154 @@ pub fn init(
     .detach();
 
     maybe_backfill_editor_layout(fs, is_new_install, cx);
+}
+
+fn install_recommended_mcp_servers(
+    _workspace: &mut Workspace,
+    language_registry: Arc<LanguageRegistry>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let extension_ids = recommended_mcp_extension_ids();
+    let workspace_handle = cx.weak_entity();
+
+    window
+        .spawn(cx, async move |cx| {
+            let mut installed_count = 0usize;
+            let mut skipped_count = 0usize;
+            let mut failures = Vec::new();
+            let mut configuration_server_ids = Vec::new();
+            let mut seen_server_ids = std::collections::HashSet::new();
+
+            for extension_id in extension_ids {
+                let installed_server_ids = cx
+                    .update(|_, cx| {
+                        ExtensionStore::global(cx)
+                            .read(cx)
+                            .installed_extensions()
+                            .get(extension_id.as_ref())
+                            .map(|entry| {
+                                entry
+                                    .manifest
+                                    .context_servers
+                                    .keys()
+                                    .cloned()
+                                    .map(ContextServerId)
+                                    .collect::<Vec<_>>()
+                            })
+                    })
+                    .ok()
+                    .flatten();
+
+                if let Some(installed_server_ids) = installed_server_ids {
+                    skipped_count += 1;
+                    for server_id in installed_server_ids {
+                        if seen_server_ids.insert(server_id.0.clone()) {
+                            configuration_server_ids.push(server_id);
+                        }
+                    }
+                    continue;
+                }
+
+                let install_task = cx
+                    .update(|_, cx| {
+                        ExtensionStore::global(cx).update(cx, |store, cx| {
+                            store.install_latest_extension_task(extension_id.clone(), cx)
+                        })
+                    })
+                    .ok();
+
+                match install_task {
+                    Some(task) => match task.await {
+                        Ok(()) => {
+                            installed_count += 1;
+                            if let Some(installed_server_ids) = cx
+                                .update(|_, cx| {
+                                    ExtensionStore::global(cx)
+                                        .read(cx)
+                                        .installed_extensions()
+                                        .get(extension_id.as_ref())
+                                        .map(|entry| {
+                                            entry
+                                                .manifest
+                                                .context_servers
+                                                .keys()
+                                                .cloned()
+                                                .map(ContextServerId)
+                                                .collect::<Vec<_>>()
+                                        })
+                                })
+                                .ok()
+                                .flatten()
+                            {
+                                for server_id in installed_server_ids {
+                                    if seen_server_ids.insert(server_id.0.clone()) {
+                                        configuration_server_ids.push(server_id);
+                                    }
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            failures.push(format!("{}: {error:#}", extension_id));
+                        }
+                    },
+                    None => {
+                        failures.push(format!("{extension_id}: extension store unavailable"));
+                    }
+                }
+            }
+
+            let message = if failures.is_empty() {
+                format!(
+                    "MCP bundle ready. Installed {installed_count}, skipped {skipped_count} already installed."
+                )
+            } else {
+                format!(
+                    "MCP bundle installed {installed_count}, skipped {skipped_count}, failed {}.",
+                    failures.len()
+                )
+            };
+
+            workspace_handle
+                .update(cx, |workspace, cx| {
+                    struct RecommendedMcpServersToast;
+                    workspace.show_toast(
+                        Toast::new(
+                            NotificationId::unique::<RecommendedMcpServersToast>(),
+                            message,
+                        ),
+                        cx,
+                    );
+                })
+                .ok();
+
+            if !failures.is_empty() {
+                log::error!(
+                    "Failed to install recommended MCP extensions: {}",
+                    failures.join("; ")
+                );
+            }
+
+            for server_id in configuration_server_ids {
+                let task = cx
+                    .update(|window, cx| {
+                        ConfigureContextServerModal::show_modal_for_existing_server(
+                            server_id,
+                            language_registry.clone(),
+                            workspace_handle.clone(),
+                            window,
+                            cx,
+                        )
+                    })
+                    .ok();
+                if let Some(task) = task {
+                    if let Err(error) = task.await {
+                        log::error!("Failed to configure MCP server: {error:#}");
+                    }
+                }
+            }
+        })
+        .detach();
 }
 
 fn maybe_backfill_editor_layout(fs: Arc<dyn Fs>, is_new_install: bool, cx: &mut App) {
@@ -734,6 +922,21 @@ mod tests {
     use settings::{
         DockPosition, NotifyWhenAgentWaiting, PlaySoundWhenAgentDone, Settings, SettingsStore,
     };
+
+    #[test]
+    fn recommended_mcp_extension_ids_are_unique_and_ordered() {
+        let ids = recommended_mcp_extension_ids();
+        assert_eq!(
+            ids.iter().map(|id| id.as_ref()).collect::<Vec<_>>(),
+            vec![
+                "mcp-server-shopify-dev",
+                "mcp-server-slack",
+                "mcp-server-supabase",
+                "mcp-server-figma",
+                "mcp-server-github",
+            ]
+        );
+    }
 
     #[gpui::test]
     fn test_agent_command_palette_visibility(cx: &mut TestAppContext) {

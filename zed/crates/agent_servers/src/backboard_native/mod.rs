@@ -1,4 +1,5 @@
 mod index;
+mod mcp;
 mod session_store;
 mod stream;
 mod tool_schemas;
@@ -9,7 +10,8 @@ use std::{
     any::Any,
     cell::RefCell,
     collections::BTreeSet,
-    io::Read as _,
+    fs,
+    io::{ErrorKind, Read as _},
     path::{Path, PathBuf},
     rc::Rc,
     sync::{
@@ -31,11 +33,12 @@ use anyhow::{Context as _, Result, anyhow};
 use chrono::Utc;
 use collections::{HashMap, IndexMap};
 use gpui::{App, AppContext as _, Entity, SharedString, Task, WeakEntity};
-use project::{AgentId, Project};
+use project::{AgentId, Project, context_server_store::ContextServerStore};
 use serde_json::{Map, Value, json};
 use ui::IconName;
 use util::path_list::PathList;
 use uuid::Uuid;
+use walkdir::WalkDir;
 
 const BACKBOARD_TELEMETRY_ID: &str = "backboard-native";
 const DEFAULT_PROVIDER: &str = "openai";
@@ -69,8 +72,9 @@ pub(crate) const DEFAULT_TTS_FORMAT: &str = "mp3";
 pub(crate) const DEFAULT_STT_PROVIDER: &str = "openai";
 pub(crate) const DEFAULT_STT_MODEL: &str = "gpt-4o-mini-transcribe";
 pub(crate) const DEFAULT_STT_LANGUAGE: &str = "en";
-pub(crate) const DEFAULT_REALTIME_STT_PROVIDER: &str = "elevenlabs";
 pub(crate) const DEFAULT_REALTIME_STT_MODEL: &str = "scribe_v2_realtime";
+const MAX_NATIVE_SNAPSHOT_FILE_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_NATIVE_SNAPSHOT_PATHS: usize = 4096;
 
 static EMPTY_AUTH_METHODS: &[acp::AuthMethod] = &[];
 
@@ -100,12 +104,29 @@ pub(crate) struct NativeSession {
     intensity: String,
     feature_settings: FeatureSettings,
     rewound_history_context: Option<String>,
+    active_user_message_id: Option<UserMessageId>,
+    native_snapshots: Vec<NativeTurnSnapshot>,
+    context_server_store: Option<Entity<ContextServerStore>>,
+    mcp_tools: Vec<mcp::NativeMcpTool>,
     config_tx: watch::Sender<()>,
     config_rx: watch::Receiver<()>,
     cancel_flag: Arc<AtomicBool>,
     metrics: NativeTurnMetrics,
     context_window_tokens: Option<u64>,
     estimated_used_tokens: u64,
+}
+
+#[derive(Clone, Debug)]
+struct NativeTurnSnapshot {
+    user_message_id: UserMessageId,
+    paths: IndexMap<PathBuf, NativePathSnapshot>,
+}
+
+#[derive(Clone, Debug)]
+enum NativePathSnapshot {
+    Missing,
+    Directory,
+    File(Vec<u8>),
 }
 
 #[derive(Clone)]
@@ -119,6 +140,7 @@ pub(crate) struct SessionRuntime {
     pub intensity: String,
     pub feature_settings: FeatureSettings,
     pub cancel_flag: Arc<AtomicBool>,
+    pub context_server_store: Option<Entity<ContextServerStore>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -140,7 +162,7 @@ impl Default for FeatureSettings {
             image_generation: "off".to_string(),
             voice_mode: "off".to_string(),
             live_voice: "off".to_string(),
-            mcp_figma: "off".to_string(),
+            mcp_figma: "auto".to_string(),
             mcp_notion: "off".to_string(),
             mcp_google: "off".to_string(),
             selected_skills: Vec::new(),
@@ -366,7 +388,40 @@ impl BackboardNativeState {
             intensity: session.intensity.clone(),
             feature_settings: session.feature_settings.clone(),
             cancel_flag: session.cancel_flag.clone(),
+            context_server_store: session.context_server_store.clone(),
         })
+    }
+
+    pub(crate) fn set_mcp_tools(
+        &self,
+        session_id: &acp::SessionId,
+        mcp_tools: Vec<mcp::NativeMcpTool>,
+    ) {
+        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+            session.mcp_tools = mcp_tools;
+        }
+    }
+
+    pub(crate) fn mcp_tools(&self, session_id: &acp::SessionId) -> Vec<mcp::NativeMcpTool> {
+        self.sessions
+            .borrow()
+            .get(session_id)
+            .map(|session| session.mcp_tools.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn mcp_tool_for_name(
+        &self,
+        session_id: &acp::SessionId,
+        name: &str,
+    ) -> Option<mcp::NativeMcpTool> {
+        self.sessions
+            .borrow()
+            .get(session_id)?
+            .mcp_tools
+            .iter()
+            .find(|tool| tool.generated_name == name)
+            .cloned()
     }
 
     pub(crate) fn take_rewound_history_context(
@@ -390,6 +445,67 @@ impl BackboardNativeState {
         if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
             session.current_run_id = run_id;
         }
+    }
+
+    pub(crate) fn begin_turn(&self, session_id: &acp::SessionId, user_message_id: UserMessageId) {
+        let mut sessions = self.sessions.borrow_mut();
+        let Some(session) = sessions.get_mut(session_id) else {
+            return;
+        };
+        session.active_user_message_id = Some(user_message_id.clone());
+        if session
+            .native_snapshots
+            .iter()
+            .all(|snapshot| snapshot.user_message_id != user_message_id)
+        {
+            session.native_snapshots.push(NativeTurnSnapshot {
+                user_message_id,
+                paths: IndexMap::default(),
+            });
+        }
+    }
+
+    pub(crate) fn record_path_before_mutation(
+        &self,
+        session_id: &acp::SessionId,
+        path: &Path,
+    ) -> Result<()> {
+        self.record_paths_before_mutation(session_id, path, false)
+    }
+
+    pub(crate) fn record_path_tree_before_mutation(
+        &self,
+        session_id: &acp::SessionId,
+        path: &Path,
+    ) -> Result<()> {
+        self.record_paths_before_mutation(session_id, path, true)
+    }
+
+    fn record_paths_before_mutation(
+        &self,
+        session_id: &acp::SessionId,
+        path: &Path,
+        include_tree: bool,
+    ) -> Result<()> {
+        let mut sessions = self.sessions.borrow_mut();
+        let session = sessions
+            .get_mut(session_id)
+            .with_context(|| format!("unknown Backboard session: {session_id}"))?;
+        let workspace = session.workspace.clone();
+        let Some(snapshot) = active_native_snapshot_mut(session) else {
+            return Ok(());
+        };
+
+        record_missing_parent_dirs(snapshot, &workspace, path)?;
+        if include_tree && path.is_dir() {
+            for entry in WalkDir::new(path).follow_links(false).into_iter() {
+                let entry = entry?;
+                record_native_path_snapshot(snapshot, entry.path())?;
+            }
+        } else {
+            record_native_path_snapshot(snapshot, path)?;
+        }
+        Ok(())
     }
 
     fn prepare_truncate(
@@ -429,7 +545,7 @@ impl BackboardNativeState {
             (!context.trim().is_empty()).then_some(context)
         });
 
-        let record = {
+        let (record, native_restore_paths) = {
             let mut sessions = self.sessions.borrow_mut();
             let session = sessions
                 .get_mut(session_id)
@@ -439,24 +555,30 @@ impl BackboardNativeState {
             session.cancel_flag.store(true, Ordering::SeqCst);
             session.estimated_used_tokens = 0;
             session.rewound_history_context = rewound_history_context;
+            session.active_user_message_id = None;
+            let native_restore_paths = take_native_restore_paths(session, message_id);
 
-            session_store::SessionRecord {
-                workspace: session.workspace.to_string_lossy().to_string(),
-                assistant_id: None,
-                thread_id: None,
-                provider: session.provider.clone(),
-                model: session.model.clone(),
-                title: session
-                    .workspace
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("Backboard")
-                    .to_string(),
-                session_id: session_id.to_string(),
-                updated_at: Utc::now().to_rfc3339(),
-            }
+            (
+                session_store::SessionRecord {
+                    workspace: session.workspace.to_string_lossy().to_string(),
+                    assistant_id: None,
+                    thread_id: None,
+                    provider: session.provider.clone(),
+                    model: session.model.clone(),
+                    title: session
+                        .workspace
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("Backboard")
+                        .to_string(),
+                    session_id: session_id.to_string(),
+                    updated_at: Utc::now().to_rfc3339(),
+                },
+                native_restore_paths,
+            )
         };
 
+        restore_native_paths(native_restore_paths)?;
         session_store::write_session_record(&session_id.to_string(), &record).ok();
         session_store::write_workspace_record(PathBuf::from(&record.workspace).as_path(), &record)
             .ok();
@@ -636,6 +758,7 @@ impl BackboardNativeState {
     async fn ensure_thread_binding(
         self: Rc<Self>,
         session_id: &acp::SessionId,
+        tools: Vec<Value>,
         cx: &mut gpui::AsyncApp,
     ) -> Result<String> {
         if let Some(thread_id) = self.session_thread_id(session_id) {
@@ -644,11 +767,10 @@ impl BackboardNativeState {
 
         let runtime = self.runtime_for_session(session_id)?;
         let (_config, client) = self.client()?;
-        let mode = runtime.mode.to_string();
         let request = ::backboard::CreateAssistantRequest {
             name: "Backboard IDE Agent".to_string(),
             description: workspace::system_prompt(&runtime.workspace),
-            tools: Some(tool_schemas::tool_definitions(&mode)),
+            tools: Some(tools),
             custom_fact_extraction_prompt: None,
             custom_update_memory_prompt: None,
         };
@@ -708,6 +830,166 @@ impl BackboardNativeState {
     }
 }
 
+fn active_native_snapshot_mut(session: &mut NativeSession) -> Option<&mut NativeTurnSnapshot> {
+    let user_message_id = session.active_user_message_id.clone()?;
+    if let Some(ix) = session
+        .native_snapshots
+        .iter()
+        .position(|snapshot| snapshot.user_message_id == user_message_id)
+    {
+        return session.native_snapshots.get_mut(ix);
+    }
+
+    session.native_snapshots.push(NativeTurnSnapshot {
+        user_message_id,
+        paths: IndexMap::default(),
+    });
+    session.native_snapshots.last_mut()
+}
+
+fn record_missing_parent_dirs(
+    snapshot: &mut NativeTurnSnapshot,
+    workspace: &Path,
+    path: &Path,
+) -> Result<()> {
+    let mut parent = path.parent();
+    while let Some(dir) = parent {
+        if dir == workspace {
+            break;
+        }
+        if dir.starts_with(workspace) && !dir.exists() {
+            record_native_path_snapshot(snapshot, dir)?;
+        }
+        parent = dir.parent();
+    }
+    Ok(())
+}
+
+fn record_native_path_snapshot(snapshot: &mut NativeTurnSnapshot, path: &Path) -> Result<()> {
+    let path = path.to_path_buf();
+    if snapshot.paths.contains_key(&path) {
+        return Ok(());
+    }
+    if snapshot.paths.len() >= MAX_NATIVE_SNAPSHOT_PATHS {
+        log::warn!(
+            "Backboard native mutation snapshot path limit reached; skipping {}",
+            path.display()
+        );
+        return Ok(());
+    }
+    let Some(path_snapshot) = native_path_snapshot(&path)? else {
+        return Ok(());
+    };
+    snapshot.paths.insert(path, path_snapshot);
+    Ok(())
+}
+
+fn native_path_snapshot(path: &Path) -> Result<Option<NativePathSnapshot>> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(Some(NativePathSnapshot::Missing));
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("snapshotting {}", path.display()));
+        }
+    };
+
+    if metadata.is_dir() {
+        return Ok(Some(NativePathSnapshot::Directory));
+    }
+    if metadata.is_file() {
+        if metadata.len() > MAX_NATIVE_SNAPSHOT_FILE_BYTES {
+            log::warn!(
+                "Backboard native mutation snapshot skipped large file {} ({} bytes)",
+                path.display(),
+                metadata.len()
+            );
+            return Ok(None);
+        }
+        let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        return Ok(Some(NativePathSnapshot::File(bytes)));
+    }
+
+    Ok(None)
+}
+
+fn take_native_restore_paths(
+    session: &mut NativeSession,
+    message_id: &UserMessageId,
+) -> IndexMap<PathBuf, NativePathSnapshot> {
+    let Some(start_ix) = session
+        .native_snapshots
+        .iter()
+        .position(|snapshot| &snapshot.user_message_id == message_id)
+    else {
+        return IndexMap::default();
+    };
+
+    let snapshots = session
+        .native_snapshots
+        .drain(start_ix..)
+        .collect::<Vec<_>>();
+    let mut paths = IndexMap::default();
+    for snapshot in snapshots {
+        for (path, path_snapshot) in snapshot.paths {
+            if !paths.contains_key(&path) {
+                paths.insert(path, path_snapshot);
+            }
+        }
+    }
+    paths
+}
+
+fn restore_native_paths(paths: IndexMap<PathBuf, NativePathSnapshot>) -> Result<()> {
+    let mut missing_paths = Vec::new();
+
+    for (path, path_snapshot) in paths {
+        match path_snapshot {
+            NativePathSnapshot::File(bytes) => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("creating {}", parent.display()))?;
+                }
+                fs::write(&path, bytes).with_context(|| format!("restoring {}", path.display()))?;
+            }
+            NativePathSnapshot::Directory => {
+                fs::create_dir_all(&path)
+                    .with_context(|| format!("restoring directory {}", path.display()))?;
+            }
+            NativePathSnapshot::Missing => missing_paths.push(path),
+        }
+    }
+
+    missing_paths.sort_by(|left, right| right.components().count().cmp(&left.components().count()));
+    for path in missing_paths {
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error).with_context(|| format!("checking {}", path.display()));
+            }
+        };
+
+        if metadata.is_dir() {
+            match fs::remove_dir(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => {
+                    log::warn!(
+                        "Backboard native restore left non-empty directory {}: {error:#}",
+                        path.display()
+                    );
+                }
+            }
+        } else {
+            fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
+        }
+    }
+
+    Ok(())
+}
+
 fn config_watch_channel() -> (watch::Sender<()>, watch::Receiver<()>) {
     watch::channel(())
 }
@@ -741,6 +1023,7 @@ impl AgentConnection for BackboardNativeConnection {
         let (provider, model) = BackboardNativeState::fallback_provider_model(&config);
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let (config_tx, config_rx) = config_watch_channel();
+        let context_server_store = project.read(cx).context_server_store();
         let action_log = cx.new(|_| ActionLog::new(project.clone()));
         let thread = cx.new(|cx| {
             AcpThread::new(
@@ -770,6 +1053,10 @@ impl AgentConnection for BackboardNativeConnection {
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
                 rewound_history_context: None,
+                active_user_message_id: None,
+                native_snapshots: Vec::new(),
+                context_server_store: Some(context_server_store),
+                mcp_tools: Vec::new(),
                 config_tx,
                 config_rx,
                 cancel_flag,
@@ -957,6 +1244,7 @@ impl BackboardNativeConnection {
         let (default_provider, default_model) =
             BackboardNativeState::fallback_provider_model(&config);
         let (config_tx, config_rx) = config_watch_channel();
+        let context_server_store = project.read(cx).context_server_store();
         let action_log = cx.new(|_| ActionLog::new(project.clone()));
         let thread = cx.new(|cx| {
             AcpThread::new(
@@ -994,6 +1282,10 @@ impl BackboardNativeConnection {
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
                 rewound_history_context: None,
+                active_user_message_id: None,
+                native_snapshots: Vec::new(),
+                context_server_store: Some(context_server_store),
+                mcp_tools: Vec::new(),
                 config_tx,
                 config_rx,
                 cancel_flag: Arc::new(AtomicBool::new(false)),
@@ -1172,7 +1464,11 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
                     }
                     "backboard_mcp_figma" => {
                         session.feature_settings.mcp_figma =
-                            if value == "on" { "on" } else { "off" }.to_string();
+                            if matches!(value.as_str(), "auto" | "on") {
+                                value
+                            } else {
+                                "off".to_string()
+                            };
                         changed = true;
                     }
                     "backboard_mcp_notion" => {
@@ -1566,16 +1862,19 @@ fn config_options(
         .category(acp::SessionConfigOptionCategory::ThoughtLevel),
         acp::SessionConfigOption::select(
             "backboard_mcp_figma",
-            "Figma",
+            "Figma Links",
             feature_settings.mcp_figma.clone(),
             vec![
+                acp::SessionConfigSelectOption::new("auto", "Auto").description(
+                    "Enable Figma MCP calls only when the prompt includes a Figma file, frame, group, or board link.",
+                ),
                 acp::SessionConfigSelectOption::new("off", "Off")
-                    .description("Do not enable Figma MCP calls for this session."),
-                acp::SessionConfigSelectOption::new("on", "On")
-                    .description("Allow Backboard to use Figma MCP calls when useful."),
+                    .description("Do not enable Figma MCP calls automatically."),
+                acp::SessionConfigSelectOption::new("on", "Always")
+                    .description("Send Figma MCP availability on every turn."),
             ],
         )
-        .description("Controls Backboard Figma MCP calls.")
+        .description("Detects pasted Figma links and enables Backboard Figma MCP calls for that turn.")
         .category(acp::SessionConfigOptionCategory::ThoughtLevel),
         acp::SessionConfigOption::select(
             "backboard_mcp_notion",
@@ -1958,6 +2257,81 @@ mod tests {
     }
 
     #[test]
+    fn native_mutation_snapshots_restore_truncated_turn_changes() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let workspace = temp_dir.path().to_path_buf();
+        fs::create_dir_all(workspace.join("src")).expect("create src");
+        fs::write(workspace.join("src/existing.txt"), "old").expect("write existing");
+        fs::write(workspace.join("src/deleted.txt"), "before delete").expect("write deleted");
+
+        let connection =
+            BackboardNativeConnection::new(AgentId::new("backboard"), Some("free".into()));
+        let state = connection.state.clone();
+        let session_id = acp::SessionId::new("test-session");
+        let (config_tx, config_rx) = config_watch_channel();
+
+        state.sessions.borrow_mut().insert(
+            session_id.clone(),
+            NativeSession {
+                thread: WeakEntity::new_invalid(),
+                workspace: workspace.clone(),
+                assistant_id: None,
+                thread_id: None,
+                current_run_id: None,
+                provider: Some(DEFAULT_PROVIDER.to_string()),
+                model: Some(DEFAULT_MODEL.to_string()),
+                mode: acp::SessionModeId::new("free"),
+                intensity: DEFAULT_INTENSITY.to_string(),
+                feature_settings: FeatureSettings::default(),
+                rewound_history_context: None,
+                active_user_message_id: None,
+                native_snapshots: Vec::new(),
+                context_server_store: None,
+                mcp_tools: Vec::new(),
+                config_tx,
+                config_rx,
+                cancel_flag: Arc::new(AtomicBool::new(false)),
+                metrics: NativeTurnMetrics::default(),
+                context_window_tokens: None,
+                estimated_used_tokens: 0,
+            },
+        );
+
+        let message_id = UserMessageId::new();
+        state.begin_turn(&session_id, message_id.clone());
+
+        let existing_path = workspace.join("src/existing.txt");
+        let created_path = workspace.join("generated/nested.txt");
+        let deleted_path = workspace.join("src/deleted.txt");
+        state
+            .record_path_before_mutation(&session_id, &existing_path)
+            .expect("snapshot existing");
+        state
+            .record_path_before_mutation(&session_id, &created_path)
+            .expect("snapshot created");
+        state
+            .record_path_tree_before_mutation(&session_id, &deleted_path)
+            .expect("snapshot deleted");
+
+        fs::write(&existing_path, "new").expect("mutate existing");
+        fs::create_dir_all(created_path.parent().unwrap()).expect("create generated dir");
+        fs::write(&created_path, "created").expect("write created");
+        fs::remove_file(&deleted_path).expect("delete file");
+
+        let paths = {
+            let mut sessions = state.sessions.borrow_mut();
+            let session = sessions.get_mut(&session_id).unwrap();
+            take_native_restore_paths(session, &message_id)
+        };
+        restore_native_paths(paths).expect("restore snapshots");
+
+        assert_eq!(fs::read_to_string(existing_path).unwrap(), "old");
+        assert_eq!(fs::read_to_string(deleted_path).unwrap(), "before delete");
+        assert!(!created_path.exists());
+        assert!(!workspace.join("generated").exists());
+    }
+
+    #[test]
     fn fallback_agent_model_uses_configured_default() {
         let config = BackboardConfig {
             default_provider: Some("anthropic".to_string()),
@@ -1982,7 +2356,7 @@ mod tests {
             image_generation: "auto".to_string(),
             voice_mode: "tts".to_string(),
             live_voice: "on".to_string(),
-            mcp_figma: "on".to_string(),
+            mcp_figma: "auto".to_string(),
             mcp_notion: "on".to_string(),
             mcp_google: "on".to_string(),
             selected_skills: Vec::new(),
@@ -2129,6 +2503,10 @@ description: Modern design guidance.
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
                 rewound_history_context: None,
+                active_user_message_id: None,
+                native_snapshots: Vec::new(),
+                context_server_store: None,
+                mcp_tools: Vec::new(),
                 config_tx,
                 config_rx,
                 cancel_flag: Arc::new(AtomicBool::new(false)),
@@ -2189,7 +2567,7 @@ description: Modern design guidance.
             .update(|cx| {
                 config_options.set_config_option(
                     acp::SessionConfigId::new("backboard_mcp_figma"),
-                    acp::SessionConfigValueId::new("on"),
+                    acp::SessionConfigValueId::new("auto"),
                     cx,
                 )
             })
@@ -2197,7 +2575,7 @@ description: Modern design guidance.
             .unwrap();
         assert_eq!(
             option_current_value(&figma_options, "backboard_mcp_figma").as_ref(),
-            Some(&acp::SessionConfigValueId::new("on"))
+            Some(&acp::SessionConfigValueId::new("auto"))
         );
 
         let notion_options = cx

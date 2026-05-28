@@ -16,7 +16,7 @@ use reqwest::{
     multipart::{Form, Part},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use thiserror::Error;
 
 pub const PROD_API_URL: &str = "https://app.backboard.io/api";
@@ -298,6 +298,10 @@ pub struct AudioAttachment {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SendMessageRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assistant_id: Option<String>,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
@@ -340,6 +344,8 @@ fn default_web_search() -> String {
 impl Default for SendMessageRequest {
     fn default() -> Self {
         Self {
+            thread_id: None,
+            assistant_id: None,
             content: String::new(),
             provider: None,
             model: None,
@@ -496,12 +502,9 @@ impl BackboardClient {
         thread_id: &str,
         request: SendMessageRequest,
     ) -> Result<Value> {
-        self.json(self.message_request_builder(
-            self.url(&format!("/threads/{thread_id}/messages")),
-            request,
-            false,
-        )?)
-        .await
+        let request = request.with_thread_id(thread_id);
+        self.json(self.message_request_builder(self.url("/threads/messages"), request, false)?)
+            .await
     }
 
     pub async fn send_message_stream(
@@ -509,9 +512,10 @@ impl BackboardClient {
         thread_id: &str,
         request: SendMessageRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<Value>> + Send>>> {
+        let request = request.with_thread_id(thread_id);
         validate_message_request(&request, true)?;
         let client = self.client.clone();
-        let url = self.url(&format!("/threads/{thread_id}/messages"));
+        let url = self.url("/threads/messages");
         let api_key = self.api_key_header()?;
         Ok(retrying_sse_json_stream(move || {
             message_request_builder(
@@ -752,6 +756,15 @@ impl BackboardClient {
     }
 }
 
+impl SendMessageRequest {
+    fn with_thread_id(mut self, thread_id: &str) -> Self {
+        if self.thread_id.is_none() {
+            self.thread_id = Some(thread_id.to_string());
+        }
+        self
+    }
+}
+
 async fn parse_json_response<T: serde::de::DeserializeOwned>(response: Response) -> Result<T> {
     let text = response.text().await?;
     Ok(serde_json::from_str(&text)?)
@@ -764,6 +777,12 @@ fn message_form(request: &SendMessageRequest, stream: bool) -> Result<Vec<(Strin
         ("memory".to_string(), request.memory.clone()),
         ("web_search".to_string(), request.web_search.clone()),
     ];
+    if let Some(thread_id) = request.thread_id.clone() {
+        form.push(("thread_id".to_string(), thread_id));
+    }
+    if let Some(assistant_id) = request.assistant_id.clone() {
+        form.push(("assistant_id".to_string(), assistant_id));
+    }
     if let Some(provider) = request.provider.clone() {
         form.push(("llm_provider".to_string(), provider));
     }
@@ -800,6 +819,57 @@ fn message_form(request: &SendMessageRequest, stream: bool) -> Result<Vec<(Strin
     Ok(form)
 }
 
+fn message_json(request: &SendMessageRequest, stream: bool) -> Value {
+    let mut body = Map::new();
+    body.insert("content".to_string(), request.content.clone().into());
+    body.insert("stream".to_string(), stream.into());
+    body.insert("memory".to_string(), request.memory.clone().into());
+    body.insert("web_search".to_string(), request.web_search.clone().into());
+    if let Some(thread_id) = request.thread_id.clone() {
+        body.insert("thread_id".to_string(), thread_id.into());
+    }
+    if let Some(assistant_id) = request.assistant_id.clone() {
+        body.insert("assistant_id".to_string(), assistant_id.into());
+    }
+    if let Some(provider) = request.provider.clone() {
+        body.insert("llm_provider".to_string(), provider.into());
+    }
+    if let Some(model) = request.model.clone() {
+        body.insert("model_name".to_string(), model.into());
+    }
+    if let Some(image_generation) = request.image_generation.clone() {
+        body.insert("image_generation".to_string(), image_generation.into());
+    }
+    if let Some(image_model_provider) = request.image_model_provider.clone() {
+        body.insert(
+            "image_model_provider".to_string(),
+            image_model_provider.into(),
+        );
+    }
+    if let Some(image_model_name) = request.image_model_name.clone() {
+        body.insert("image_model_name".to_string(), image_model_name.into());
+    }
+    if let Some(voice) = request.voice.clone() {
+        body.insert("voice".to_string(), voice);
+    }
+    if let Some(send_to_llm) = request.send_to_llm {
+        body.insert("send_to_llm".to_string(), send_to_llm.to_string().into());
+    }
+    if let Some(mcp_calls) = request.mcp_calls.clone() {
+        body.insert("mcp_calls".to_string(), mcp_calls);
+    }
+    if let Some(max_tokens) = request.max_tokens {
+        body.insert("max_tokens".to_string(), max_tokens.into());
+    }
+    if let Some(thinking) = request.thinking.clone() {
+        body.insert("thinking".to_string(), thinking);
+    }
+    if let Some(tools) = request.tools.clone() {
+        body.insert("tools".to_string(), tools.into());
+    }
+    Value::Object(body)
+}
+
 fn message_multipart_form(request: SendMessageRequest, stream: bool) -> Result<Form> {
     let mut form = Form::new();
     for (key, value) in message_form(&request, stream)? {
@@ -825,7 +895,9 @@ fn message_request_builder(
     if request.audio_file.is_some() {
         builder.multipart(message_multipart_form(request, stream).unwrap_or_else(|_| Form::new()))
     } else {
-        builder.form(&message_form(&request, stream).unwrap_or_default())
+        builder
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(message_json(&request, stream).to_string())
     }
 }
 
@@ -833,7 +905,8 @@ fn validate_message_request(request: &SendMessageRequest, stream: bool) -> Resul
     if request.audio_file.is_some() {
         message_multipart_form(request.clone(), stream).map(|_| ())
     } else {
-        message_form(request, stream).map(|_| ())
+        let _ = message_json(request, stream);
+        Ok(())
     }
 }
 
@@ -1075,6 +1148,7 @@ mod tests {
     #[test]
     fn message_form_serializes_media_voice_and_search_fields() {
         let request = SendMessageRequest {
+            thread_id: Some("thread_123".to_string()),
             content: "make a diagram".to_string(),
             provider: Some("openai".to_string()),
             model: Some("gpt-4o".to_string()),
@@ -1095,6 +1169,7 @@ mod tests {
         };
 
         let form = message_form(&request, true).unwrap();
+        assert!(form.contains(&("thread_id".to_string(), "thread_123".to_string())));
         assert!(form.contains(&("web_search".to_string(), "Auto".to_string())));
         assert!(form.contains(&("image_generation".to_string(), "auto".to_string())));
         assert!(form.contains(&("image_model_provider".to_string(), "openrouter".to_string())));
@@ -1110,8 +1185,41 @@ mod tests {
     }
 
     #[test]
+    fn message_json_serializes_recommended_send_message_payload() {
+        let request = SendMessageRequest {
+            thread_id: Some("thread_123".to_string()),
+            content: "say hello".to_string(),
+            provider: Some("openai".to_string()),
+            model: Some("gpt-4o".to_string()),
+            web_search: "Auto".to_string(),
+            voice: Some(json!({
+                "tts": {
+                    "provider": "openai",
+                    "model": "gpt-4o-mini-tts",
+                    "voice": "alloy",
+                }
+            })),
+            send_to_llm: Some(true),
+            ..SendMessageRequest::default()
+        };
+
+        let body = message_json(&request, true);
+
+        assert_eq!(body["thread_id"], "thread_123");
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["llm_provider"], "openai");
+        assert_eq!(body["model_name"], "gpt-4o");
+        assert_eq!(body["web_search"], "Auto");
+        assert_eq!(body["send_to_llm"], "true");
+        assert_eq!(body["voice"]["tts"]["model"], "gpt-4o-mini-tts");
+        assert!(body.get("provider").is_none());
+        assert!(body.get("model").is_none());
+    }
+
+    #[test]
     fn multipart_message_accepts_audio_file() {
         let request = SendMessageRequest {
+            thread_id: Some("thread_123".to_string()),
             voice: Some(json!({
                 "stt": {
                     "provider": "openai",

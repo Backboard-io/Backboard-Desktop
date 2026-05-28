@@ -44,9 +44,10 @@ use crate::thread_metadata_store::{
 };
 use crate::{
     AddContextServer, AgentDiffPane, ConversationView, CopyThreadToClipboard, Follow,
-    InlineAssistant, LoadThreadFromClipboard, NewThread, OpenActiveThreadAsMarkdown, OpenAgentDiff,
-    OpenBackboardAgentWorkspace, OpenBackboardPortal, ResetTrialEndUpsell, ResetTrialUpsell,
-    ShowAllSidebarThreadMetadata, ShowThreadMetadata, ToggleNewThreadMenu, ToggleOptionsMenu,
+    InlineAssistant, InstallRecommendedMcpServers, LoadThreadFromClipboard, NewThread,
+    OpenActiveThreadAsMarkdown, OpenAgentDiff, OpenBackboardAgentWorkspace, OpenBackboardPortal,
+    ResetTrialEndUpsell, ResetTrialUpsell, ShowAllSidebarThreadMetadata, ShowThreadMetadata,
+    ToggleNewThreadMenu, ToggleOptionsMenu,
     agent_configuration::{AgentConfiguration, AssistantConfigurationEvent},
     conversation_view::{AcpThreadViewEvent, ThreadView},
     ui::{AgentNotification, AgentNotificationEvent, EndTrialUpsell},
@@ -6173,6 +6174,10 @@ impl AgentPanel {
                                         ),
                                         id: None,
                                     }),
+                                )
+                                .action(
+                                    "Install Recommended MCP Servers",
+                                    Box::new(InstallRecommendedMcpServers),
                                 )
                                 .action("Add Custom Server…", Box::new(AddContextServer))
                                 .separator()

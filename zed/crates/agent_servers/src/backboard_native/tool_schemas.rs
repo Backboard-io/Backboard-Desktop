@@ -305,19 +305,27 @@ fn all_tool_definitions() -> Vec<Value> {
     ]
 }
 
-fn function(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+pub fn function_with_parameters(name: &str, description: &str, parameters: Value) -> Value {
     json!({
         "type": "function",
         "function": {
             "name": name,
             "description": description,
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-                "required": required,
-            }
+            "parameters": parameters,
         }
     })
+}
+
+fn function(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+    function_with_parameters(
+        name,
+        description,
+        json!({
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        }),
+    )
 }
 
 #[cfg(test)]
