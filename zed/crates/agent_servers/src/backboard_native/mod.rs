@@ -1647,17 +1647,20 @@ fn config_options(
 }
 
 pub(crate) fn discover_file_system_skills(workspace: &Path) -> Vec<FileSystemSkill> {
-    let Some(skills_root) = skills_root_for_workspace(workspace) else {
-        return Vec::new();
-    };
+    let mut relative_paths = BTreeSet::new();
+    let mut skills = Vec::new();
 
-    let mut skills = walkdir::WalkDir::new(&skills_root)
-        .max_depth(4)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file() && entry.file_name() == "SKILL.md")
-        .filter_map(|entry| file_system_skill_from_path(&skills_root, entry.path()))
-        .collect::<Vec<_>>();
+    for skills_root in skills_roots_for_workspace(workspace) {
+        skills.extend(
+            walkdir::WalkDir::new(&skills_root)
+                .max_depth(4)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_type().is_file() && entry.file_name() == "SKILL.md")
+                .filter_map(|entry| file_system_skill_from_path(&skills_root, entry.path()))
+                .filter(|skill| relative_paths.insert(skill.relative_path.clone())),
+        );
+    }
 
     skills.sort_by(|left, right| {
         left.name
@@ -1667,24 +1670,27 @@ pub(crate) fn discover_file_system_skills(workspace: &Path) -> Vec<FileSystemSki
     skills
 }
 
-pub(crate) fn skills_root_for_workspace(workspace: &Path) -> Option<PathBuf> {
+fn skills_roots_for_workspace(workspace: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
     for ancestor in workspace.ancestors() {
         if ancestor
             .file_name()
             .is_some_and(|name| name == std::ffi::OsStr::new("skills"))
             && ancestor.is_dir()
         {
-            return Some(ancestor.to_path_buf());
+            push_skill_root(&mut roots, ancestor.to_path_buf());
         }
 
         for candidate in skill_root_candidates(ancestor) {
-            if candidate.is_dir() {
-                return Some(candidate);
-            }
+            push_skill_root(&mut roots, candidate);
         }
     }
 
-    None
+    for candidate in default_skill_root_candidates() {
+        push_skill_root(&mut roots, candidate);
+    }
+
+    roots
 }
 
 fn skill_root_candidates(ancestor: &Path) -> [PathBuf; 3] {
@@ -1697,6 +1703,40 @@ fn skill_root_candidates(ancestor: &Path) -> [PathBuf; 3] {
             .join("assets")
             .join("skills"),
     ]
+}
+
+fn default_skill_root_candidates() -> Vec<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut candidates = vec![
+        manifest_dir
+            .join("..")
+            .join("..")
+            .join("assets")
+            .join("skills"),
+    ];
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        for ancestor in current_dir.ancestors() {
+            candidates.extend(skill_root_candidates(ancestor));
+        }
+    }
+
+    candidates
+}
+
+fn push_skill_root(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if !candidate.is_dir() {
+        return;
+    }
+
+    let candidate = match std::fs::canonicalize(&candidate) {
+        Ok(candidate) => candidate,
+        Err(_) => candidate,
+    };
+
+    if !roots.iter().any(|root| root == &candidate) {
+        roots.push(candidate);
+    }
 }
 
 fn file_system_skill_from_path(
@@ -1989,12 +2029,14 @@ description: "Build against the Shopify Admin API."
 
         let workspace = temp_dir.path().join("crates").join("agent");
         let skills = discover_file_system_skills(&workspace);
+        let skill = skills
+            .iter()
+            .find(|skill| skill.relative_path == "shopify/shopify-admin")
+            .expect("shopify admin skill should be discovered");
 
-        assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].relative_path, "shopify/shopify-admin");
-        assert_eq!(skills[0].name, "Shopify Admin");
+        assert_eq!(skill.name, "Shopify Admin");
         assert_eq!(
-            skills[0].description.as_deref(),
+            skill.description.as_deref(),
             Some("Build against the Shopify Admin API.")
         );
     }
@@ -2022,12 +2064,14 @@ description: "Build against the Shopify Admin API."
 
         let workspace = ide_dir.join("web");
         let skills = discover_file_system_skills(&workspace);
+        let skill = skills
+            .iter()
+            .find(|skill| skill.relative_path == "shopify/shopify-admin")
+            .expect("shopify admin skill should be discovered");
 
-        assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].relative_path, "shopify/shopify-admin");
         assert_eq!(
-            skills[0].path,
-            skill_dir.join("SKILL.md"),
+            skill.path,
+            std::fs::canonicalize(skill_dir.join("SKILL.md")).expect("canonicalize skill path"),
             "skills should be loaded from ide/zed/assets/skills"
         );
     }

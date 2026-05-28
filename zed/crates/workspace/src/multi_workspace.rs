@@ -2222,10 +2222,10 @@ impl MultiWorkspace {
     fn workspace_mode_tab_label(tab: WorkspaceModeTab) -> &'static str {
         match tab {
             WorkspaceModeTab::CodeEditor => "Code Editor",
-            WorkspaceModeTab::AgentWorkspace => "Agent Workspace",
+            WorkspaceModeTab::AgentWorkspace => "Agents",
             WorkspaceModeTab::Skills => "Skills",
             WorkspaceModeTab::Tasks => "Tasks",
-            WorkspaceModeTab::Git => "Git Terminal",
+            WorkspaceModeTab::Git => "Git",
         }
     }
 
@@ -2241,9 +2241,8 @@ impl MultiWorkspace {
         ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
             let tabs = [
                 WorkspaceModeTab::CodeEditor,
-                WorkspaceModeTab::AgentWorkspace,
-                WorkspaceModeTab::Skills,
                 WorkspaceModeTab::Git,
+                WorkspaceModeTab::AgentWorkspace,
             ];
 
             for tab in tabs {

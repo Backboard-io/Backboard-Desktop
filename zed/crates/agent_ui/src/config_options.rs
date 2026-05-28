@@ -165,6 +165,23 @@ impl ConfigOptionsView {
         true
     }
 
+    pub fn set_option_value(
+        &mut self,
+        config_id: acp::SessionConfigId,
+        value: acp::SessionConfigValueId,
+        cx: &mut Context<Self>,
+    ) {
+        let task = self.config_options.set_config_option(config_id, value, cx);
+
+        cx.spawn(async move |_, _| {
+            if let Err(err) = task.await {
+                log::error!("Failed to set config option: {:?}", err);
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
     fn first_config_option_id(
         &self,
         category: acp::SessionConfigOptionCategory,

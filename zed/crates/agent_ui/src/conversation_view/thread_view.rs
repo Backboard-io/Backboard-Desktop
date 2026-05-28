@@ -4,8 +4,10 @@ use crate::{
     config_options::ConfigOptionSummary,
 };
 use agent_client_protocol::schema as acp;
-use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::{
+    cell::RefCell,
+    path::{Path, PathBuf},
+};
 
 use crate::message_editor::SharedSessionCapabilities;
 use acp_thread::{ContentBlock, PlanEntry};
@@ -20,7 +22,7 @@ use settings::{SidebarSide, update_settings_file};
 use ui::{
     ButtonLike, ElevationIndex, SpinnerLabel, SpinnerVariant, SplitButton, SplitButtonStyle, Tab,
 };
-use workspace::SERIALIZATION_THROTTLE_TIME;
+use workspace::{OpenOptions, OpenVisible, SERIALIZATION_THROTTLE_TIME};
 
 use super::*;
 
@@ -223,7 +225,9 @@ impl RenderOnce for GeneratingSpinnerElement {
 struct AgentOptionsMenu {
     focus_handle: FocusHandle,
     config_options_view: Entity<ConfigOptionsView>,
+    workspace: WeakEntity<Workspace>,
     scroll_handle: ScrollHandle,
+    collapsed_skill_categories: HashSet<String>,
     mode: AgentOptionsMenuMode,
 }
 
@@ -234,20 +238,32 @@ enum AgentOptionsMenuMode {
 }
 
 impl AgentOptionsMenu {
-    fn new(config_options_view: Entity<ConfigOptionsView>, cx: &mut Context<Self>) -> Self {
+    fn new(
+        config_options_view: Entity<ConfigOptionsView>,
+        workspace: WeakEntity<Workspace>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             config_options_view,
+            workspace,
             scroll_handle: ScrollHandle::new(),
+            collapsed_skill_categories: HashSet::default(),
             mode: AgentOptionsMenuMode::All,
         }
     }
 
-    fn skills(config_options_view: Entity<ConfigOptionsView>, cx: &mut Context<Self>) -> Self {
+    fn skills(
+        config_options_view: Entity<ConfigOptionsView>,
+        workspace: WeakEntity<Workspace>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             config_options_view,
+            workspace,
             scroll_handle: ScrollHandle::new(),
+            collapsed_skill_categories: HashSet::default(),
             mode: AgentOptionsMenuMode::Skills,
         }
     }
@@ -272,9 +288,10 @@ impl Render for AgentOptionsMenu {
                     let (mcp_options, remaining_options): (Vec<_>, Vec<_>) = option_summaries
                         .into_iter()
                         .partition(|option| option.id.to_string().starts_with("backboard_mcp_"));
-                    let (skill_options, session_options): (Vec<_>, Vec<_>) = remaining_options
+                    let session_options = remaining_options
                         .into_iter()
-                        .partition(|option| option.id.to_string().starts_with("backboard_skill:"));
+                        .filter(|option| !option.id.to_string().starts_with("backboard_skill:"))
+                        .collect::<Vec<_>>();
 
                     let mut list = v_flex().gap_1();
 
@@ -286,12 +303,6 @@ impl Render for AgentOptionsMenu {
                         list = list
                             .child(self.render_section_label("MCP Calls", cx))
                             .child(self.render_option_group(mcp_options, cx));
-                    }
-
-                    if !skill_options.is_empty() {
-                        list = list
-                            .child(self.render_section_label("Skills", cx))
-                            .child(self.render_option_group(skill_options, cx));
                     }
 
                     list.into_any_element()
@@ -308,14 +319,10 @@ impl Render for AgentOptionsMenu {
                     .into_iter()
                     .filter(|option| option.id.to_string().starts_with("backboard_skill:"))
                     .collect::<Vec<_>>();
-                let options_list = if skill_options.is_empty() {
-                    self.render_empty_options("No skills available.")
-                } else {
-                    self.render_option_group(skill_options, cx)
-                };
+                let options_list = self.render_skills_list(skill_options, cx);
                 (
                     "Skills",
-                    IconName::Book,
+                    IconName::Box,
                     "Click a skill to toggle it.",
                     options_list,
                 )
@@ -379,6 +386,217 @@ impl Render for AgentOptionsMenu {
 }
 
 impl AgentOptionsMenu {
+    fn render_skills_list(
+        &self,
+        skill_options: Vec<ConfigOptionSummary>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut grouped_options = BTreeMap::new();
+        for option in skill_options {
+            grouped_options
+                .entry(Self::skill_category_label(&option.id))
+                .or_insert_with(Vec::new)
+                .push(option);
+        }
+
+        let mut list = v_flex()
+            .gap_1()
+            .child(self.render_section_label("Create", cx))
+            .child(self.render_create_skill_row(cx));
+
+        if grouped_options.is_empty() {
+            return list
+                .child(self.render_empty_options("No skills available."))
+                .into_any_element();
+        }
+
+        for (category, options) in grouped_options {
+            let collapsed = self.collapsed_skill_categories.contains(&category);
+            let option_count = options.len();
+            list = list.child(self.render_skill_category_header(
+                category.clone(),
+                option_count,
+                collapsed,
+                cx,
+            ));
+            if !collapsed {
+                list = list.child(self.render_option_group(options, cx));
+            }
+        }
+
+        list.into_any_element()
+    }
+
+    fn bundled_skills_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("assets")
+            .join("skills")
+    }
+
+    fn skill_preview_path(option_id: &acp::SessionConfigId) -> Option<PathBuf> {
+        option_id
+            .0
+            .strip_prefix("backboard_skill:")
+            .map(|relative_path| {
+                Self::bundled_skills_root()
+                    .join(relative_path)
+                    .join("preview.png")
+            })
+    }
+
+    fn custom_skill_dir(option_id: &acp::SessionConfigId) -> Option<PathBuf> {
+        let relative_path = option_id.0.strip_prefix("backboard_skill:custom/")?;
+        let relative_path = Path::new(relative_path);
+        if relative_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        }) {
+            return None;
+        }
+
+        Some(
+            Self::bundled_skills_root()
+                .join("custom")
+                .join(relative_path),
+        )
+    }
+
+    fn skill_category_label(option_id: &acp::SessionConfigId) -> String {
+        option_id
+            .0
+            .strip_prefix("backboard_skill:")
+            .and_then(|relative_path| relative_path.split('/').next())
+            .filter(|category| !category.is_empty())
+            .map(Self::display_name_from_slug)
+            .unwrap_or_else(|| "Other".to_string())
+    }
+
+    fn display_name_from_slug(value: &str) -> String {
+        value
+            .split(|character: char| character == '-' || character == '_')
+            .filter(|part| !part.is_empty())
+            .map(|part| {
+                let mut chars = part.chars();
+                let Some(first) = chars.next() else {
+                    return String::new();
+                };
+                let mut titleized = first.to_uppercase().collect::<String>();
+                titleized.push_str(chars.as_str());
+                titleized
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn next_new_skill_path() -> Option<(PathBuf, String)> {
+        let custom_root = Self::bundled_skills_root().join("custom");
+        for index in 1..1000 {
+            let slug = if index == 1 {
+                "new-skill".to_string()
+            } else {
+                format!("new-skill-{index}")
+            };
+            let path = custom_root.join(&slug).join("SKILL.md");
+            if !path.exists() {
+                return Some((path, slug));
+            }
+        }
+        None
+    }
+
+    fn new_skill_template(slug: &str) -> String {
+        format!(
+            "---\nname: {slug}\ndescription: Describe when to use this skill.\n---\n\n# {}\n\nWrite the instructions this skill should add to Backboard when enabled.\n",
+            Self::display_name_from_slug(slug)
+        )
+    }
+
+    fn create_new_skill(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((skill_path, slug)) = Self::next_new_skill_path() else {
+            log::error!("Could not allocate a new Backboard skill path");
+            return;
+        };
+
+        let Some(parent_dir) = skill_path.parent() else {
+            log::error!(
+                "New Backboard skill path has no parent: {}",
+                skill_path.display()
+            );
+            return;
+        };
+
+        if let Err(error) = std::fs::create_dir_all(parent_dir) {
+            log::error!(
+                "Failed to create Backboard skill directory {}: {error:#}",
+                parent_dir.display()
+            );
+            return;
+        }
+
+        if let Err(error) = std::fs::write(&skill_path, Self::new_skill_template(&slug)) {
+            log::error!(
+                "Failed to write Backboard skill file {}: {error:#}",
+                skill_path.display()
+            );
+            return;
+        }
+
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                let open_task = workspace.open_abs_path(
+                    skill_path.clone(),
+                    OpenOptions {
+                        visible: Some(OpenVisible::OnlyFiles),
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+                cx.spawn(async move |_, _| {
+                    if let Err(error) = open_task.await {
+                        log::error!("Failed to open Backboard skill file: {error:#}");
+                    }
+                })
+                .detach();
+            });
+        }
+
+        cx.notify();
+    }
+
+    fn delete_custom_skill(
+        &self,
+        option_id: acp::SessionConfigId,
+        skill_dir: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        self.config_options_view.update(cx, |view, cx| {
+            view.set_option_value(option_id, acp::SessionConfigValueId::new("off"), cx);
+        });
+
+        if let Err(error) = std::fs::remove_dir_all(&skill_dir) {
+            log::error!(
+                "Failed to delete Backboard skill directory {}: {error:#}",
+                skill_dir.display()
+            );
+        }
+
+        cx.notify();
+    }
+
+    fn toggle_skill_category(&mut self, category: String, cx: &mut Context<Self>) {
+        if !self.collapsed_skill_categories.insert(category.clone()) {
+            self.collapsed_skill_categories.remove(&category);
+        }
+        cx.notify();
+    }
+
     fn render_empty_options(&self, label: &'static str) -> AnyElement {
         div()
             .px_2()
@@ -387,7 +605,116 @@ impl AgentOptionsMenu {
             .into_any_element()
     }
 
-    fn render_section_label(&self, label: &'static str, cx: &mut Context<Self>) -> AnyElement {
+    fn render_create_skill_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        ButtonLike::new("agent-option-create-skill")
+            .full_width()
+            .height(px(32.).into())
+            .style(ButtonStyle::Subtle)
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .min_w_0()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                Icon::new(IconName::Plus)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                            .child(
+                                Label::new("New Skill")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Default)
+                                    .truncate(),
+                            ),
+                    )
+                    .child(
+                        Icon::new(IconName::ChevronRight)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    ),
+            )
+            .tooltip(Tooltip::text("Create a filesystem skill"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.create_new_skill(window, cx);
+            }))
+    }
+
+    fn render_skill_category_header(
+        &self,
+        category: String,
+        option_count: usize,
+        collapsed: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = cx.theme().colors();
+        let category_for_click = category.clone();
+        v_flex()
+            .gap_0p5()
+            .pt_1()
+            .child(
+                div()
+                    .h(px(1.))
+                    .w_full()
+                    .bg(colors.border_variant.opacity(0.32)),
+            )
+            .child(
+                ButtonLike::new(format!("skill-category-{category}"))
+                    .full_width()
+                    .height(px(28.).into())
+                    .style(ButtonStyle::Subtle)
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(
+                                h_flex()
+                                    .min_w_0()
+                                    .gap_1()
+                                    .items_center()
+                                    .child(
+                                        Icon::new(if collapsed {
+                                            IconName::ChevronRight
+                                        } else {
+                                            IconName::ChevronDown
+                                        })
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Muted),
+                                    )
+                                    .child(
+                                        Label::new(category)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted)
+                                            .truncate(),
+                                    ),
+                            )
+                            .child(
+                                Label::new(option_count.to_string())
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            ),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_skill_category(category_for_click.clone(), cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    fn render_section_label(
+        &self,
+        label: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = label.into();
         let colors = cx.theme().colors();
         v_flex()
             .gap_1()
@@ -429,6 +756,14 @@ impl AgentOptionsMenu {
     ) -> impl IntoElement {
         let option_id = option.id.clone();
         let description = option.description.clone();
+        let preview_path = matches!(self.mode, AgentOptionsMenuMode::Skills)
+            .then(|| Self::skill_preview_path(&option.id))
+            .flatten();
+        let custom_skill_dir = matches!(self.mode, AgentOptionsMenuMode::Skills)
+            .then(|| Self::custom_skill_dir(&option.id))
+            .flatten();
+        let option_id_for_delete = option.id.clone();
+        let delete_button_id = format!("delete-custom-skill-{}", option_id_for_delete.0);
 
         ButtonLike::new(ElementId::Name(
             format!("agent-option-{}", option.id.0).into(),
@@ -466,11 +801,45 @@ impl AgentOptionsMenu {
                             Icon::new(IconName::ChevronRight)
                                 .size(IconSize::XSmall)
                                 .color(Color::Muted),
-                        ),
+                        )
+                        .when_some(custom_skill_dir, |this, skill_dir| {
+                            this.child(
+                                IconButton::new(delete_button_id, IconName::Trash)
+                                    .icon_size(IconSize::XSmall)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(Tooltip::text("Delete custom skill"))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.delete_custom_skill(
+                                            option_id_for_delete.clone(),
+                                            skill_dir.clone(),
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    })),
+                            )
+                        }),
                 ),
         )
         .tooltip(Tooltip::element(move |_window, _cx| {
             let mut content = v_flex().gap_1();
+            if let Some(preview_path) = preview_path.as_ref()
+                && preview_path.is_file()
+            {
+                content = content.child(
+                    div()
+                        .w(px(280.))
+                        .h(px(160.))
+                        .rounded_sm()
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(_cx.theme().colors().border_variant)
+                        .child(
+                            img(preview_path.clone())
+                                .size_full()
+                                .object_fit(ObjectFit::ScaleDown),
+                        ),
+                );
+            }
             if let Some(description) = description.clone() {
                 content = content.child(
                     Label::new(description)
@@ -1197,6 +1566,7 @@ impl ThreadView {
 
         if let Some(config_options_view) = self.config_options_view.clone() {
             let menu_handle = self.agent_options_menu_handle.clone();
+            let workspace = self.workspace.clone();
             return Some(
                 PopoverMenu::new("thread-agent-options-menu")
                     .trigger_with_tooltip(
@@ -1221,7 +1591,13 @@ impl ThreadView {
                     })
                     .with_handle(menu_handle)
                     .menu(move |_window, cx| {
-                        Some(cx.new(|cx| AgentOptionsMenu::new(config_options_view.clone(), cx)))
+                        Some(cx.new(|cx| {
+                            AgentOptionsMenu::new(
+                                config_options_view.clone(),
+                                workspace.clone(),
+                                cx,
+                            )
+                        }))
                     })
                     .into_any_element(),
             );
@@ -1248,22 +1624,14 @@ impl ThreadView {
         )
     }
 
-    fn render_skills_options_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_skills_options_button(&self, _cx: &mut Context<Self>) -> Option<AnyElement> {
         let config_options_view = self.config_options_view.clone()?;
-        let has_skills = config_options_view
-            .read(cx)
-            .option_summaries()
-            .iter()
-            .any(|option| option.id.to_string().starts_with("backboard_skill:"));
-        if !has_skills {
-            return None;
-        }
-
+        let workspace = self.workspace.clone();
         let menu_handle = self.skills_options_menu_handle.clone();
         Some(
             PopoverMenu::new("thread-skills-options-menu")
                 .trigger_with_tooltip(
-                    IconButton::new("thread-skills-options", IconName::Book)
+                    IconButton::new("thread-skills-options", IconName::Box)
                         .icon_size(IconSize::Small)
                         .icon_color(Color::Muted)
                         .style(ButtonStyle::Transparent)
@@ -1277,7 +1645,9 @@ impl ThreadView {
                 })
                 .with_handle(menu_handle)
                 .menu(move |_window, cx| {
-                    Some(cx.new(|cx| AgentOptionsMenu::skills(config_options_view.clone(), cx)))
+                    Some(cx.new(|cx| {
+                        AgentOptionsMenu::skills(config_options_view.clone(), workspace.clone(), cx)
+                    }))
                 })
                 .into_any_element(),
         )
