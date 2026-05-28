@@ -30,6 +30,7 @@ pub struct ConfigOptionsView {
     agent_server: Rc<dyn AgentServer>,
     fs: Arc<dyn Fs>,
     config_option_ids: Vec<acp::SessionConfigId>,
+    option_summaries: Vec<ConfigOptionSummary>,
     _refresh_task: Task<()>,
 }
 
@@ -41,8 +42,11 @@ impl ConfigOptionsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let selectors = Self::build_selectors(&config_options, &agent_server, &fs, window, cx);
-        let config_option_ids = Self::config_option_ids(&config_options);
+        let options = config_options.config_options();
+        let selectors =
+            Self::build_selectors(&options, &config_options, &agent_server, &fs, window, cx);
+        let config_option_ids = Self::config_option_ids(&options);
+        let option_summaries = Self::option_summaries_from_options(options);
 
         let rx = config_options.watch(cx);
         let refresh_task = cx.spawn_in(window, async move |this, cx| {
@@ -63,6 +67,7 @@ impl ConfigOptionsView {
             agent_server,
             fs,
             config_option_ids,
+            option_summaries,
             _refresh_task: refresh_task,
         }
     }
@@ -119,26 +124,7 @@ impl ConfigOptionsView {
     }
 
     pub(crate) fn option_summaries(&self) -> Vec<ConfigOptionSummary> {
-        self.config_options
-            .config_options()
-            .into_iter()
-            .map(|option| {
-                let current_value_name = match &option.kind {
-                    acp::SessionConfigKind::Select(select) => {
-                        find_option_name(&select.options, &select.current_value)
-                            .unwrap_or_else(|| "Unknown".to_string())
-                    }
-                    _ => "Unknown".to_string(),
-                };
-
-                ConfigOptionSummary {
-                    id: option.id,
-                    name: option.name,
-                    description: option.description,
-                    current_value_name,
-                }
-            })
-            .collect()
+        self.option_summaries.clone()
     }
 
     pub fn cycle_option(
@@ -240,48 +226,76 @@ impl ConfigOptionsView {
         Some(options[next_index].value.clone())
     }
 
-    fn config_option_ids(
-        config_options: &Rc<dyn AgentSessionConfigOptions>,
-    ) -> Vec<acp::SessionConfigId> {
-        config_options
-            .config_options()
+    pub fn refresh_options(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.rebuild_selectors(window, cx);
+    }
+
+    fn config_option_ids(options: &[acp::SessionConfigOption]) -> Vec<acp::SessionConfigId> {
+        options.iter().map(|option| option.id.clone()).collect()
+    }
+
+    fn option_summaries_from_options(
+        options: Vec<acp::SessionConfigOption>,
+    ) -> Vec<ConfigOptionSummary> {
+        options
             .into_iter()
-            .map(|option| option.id)
+            .map(|option| {
+                let current_value_name = match &option.kind {
+                    acp::SessionConfigKind::Select(select) => {
+                        find_option_name(&select.options, &select.current_value)
+                            .unwrap_or_else(|| "Unknown".to_string())
+                    }
+                    _ => "Unknown".to_string(),
+                };
+
+                ConfigOptionSummary {
+                    id: option.id,
+                    name: option.name,
+                    description: option.description,
+                    current_value_name,
+                }
+            })
             .collect()
     }
 
     fn rebuild_selectors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Config option updates can mutate option values for existing IDs (for example,
         // reasoning levels after a model switch). Rebuild to refresh cached picker entries.
-        self.config_option_ids = Self::config_option_ids(&self.config_options);
+        let options = self.config_options.config_options();
+        self.config_option_ids = Self::config_option_ids(&options);
         self.selectors = Self::build_selectors(
+            &options,
             &self.config_options,
             &self.agent_server,
             &self.fs,
             window,
             cx,
         );
+        self.option_summaries = Self::option_summaries_from_options(options);
         cx.notify();
     }
 
     fn build_selectors(
+        options: &[acp::SessionConfigOption],
         config_options: &Rc<dyn AgentSessionConfigOptions>,
         agent_server: &Rc<dyn AgentServer>,
         fs: &Arc<dyn Fs>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<Entity<ConfigOptionSelector>> {
-        config_options
-            .config_options()
-            .into_iter()
+        options
+            .iter()
+            .filter(|option| !is_skill_config_option_id(&option.id))
             .map(|option| {
                 let config_options = config_options.clone();
                 let agent_server = agent_server.clone();
                 let fs = fs.clone();
+                let option_count = count_config_options(option);
                 cx.new(|cx| {
                     ConfigOptionSelector::new(
                         config_options,
                         option.id.clone(),
+                        option_count,
                         agent_server,
                         fs,
                         window,
@@ -291,6 +305,10 @@ impl ConfigOptionsView {
             })
             .collect()
     }
+}
+
+fn is_skill_config_option_id(config_id: &acp::SessionConfigId) -> bool {
+    config_id.to_string().starts_with("backboard_skill:")
 }
 
 impl Render for ConfigOptionsView {
@@ -332,18 +350,12 @@ impl ConfigOptionSelector {
     pub fn new(
         config_options: Rc<dyn AgentSessionConfigOptions>,
         config_id: acp::SessionConfigId,
+        option_count: usize,
         agent_server: Rc<dyn AgentServer>,
         fs: Arc<dyn Fs>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let option_count = config_options
-            .config_options()
-            .iter()
-            .find(|opt| opt.id == config_id)
-            .map(count_config_options)
-            .unwrap_or(0);
-
         let is_searchable = option_count >= PICKER_THRESHOLD;
 
         let picker = {

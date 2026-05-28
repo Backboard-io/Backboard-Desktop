@@ -422,6 +422,11 @@ impl MultiWorkspace {
         cx.notify();
     }
 
+    pub fn open_code_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_interface_mode(InterfaceMode::Expert, window, cx);
+        self.set_workspace_mode_tab(WorkspaceModeTab::CodeEditor, window, cx);
+    }
+
     pub fn set_multi_agent_expanded(
         &mut self,
         expanded: bool,
@@ -475,6 +480,9 @@ impl MultiWorkspace {
         }
 
         if self.selected_workspace_mode_tab() == tab {
+            if tab == WorkspaceModeTab::CodeEditor && self.interface_mode == InterfaceMode::Expert {
+                self.open_side_docks(window, cx);
+            }
             return;
         }
 
@@ -483,6 +491,9 @@ impl MultiWorkspace {
         self.tasks_expanded = tab == WorkspaceModeTab::Tasks;
         self.git_expanded = tab == WorkspaceModeTab::Git;
         self.jarvis_placeholder_expanded = false;
+        if tab == WorkspaceModeTab::CodeEditor && self.interface_mode == InterfaceMode::Expert {
+            self.open_side_docks(window, cx);
+        }
         cx.notify();
     }
 
@@ -493,6 +504,27 @@ impl MultiWorkspace {
                 let dock = workspace.dock_at_position(position).clone();
                 dock.update(cx, |dock, cx| {
                     dock.set_open(false, window, cx);
+                });
+            }
+        });
+    }
+
+    fn open_side_docks(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let workspace = self.workspace().clone();
+        workspace.update(cx, |workspace, cx| {
+            for position in [DockPosition::Left, DockPosition::Right] {
+                let dock = workspace.dock_at_position(position).clone();
+                dock.update(cx, |dock, cx| {
+                    if dock.active_panel().is_none() {
+                        let Some(panel_ix) = dock
+                            .first_enabled_panel_idx(cx)
+                            .log_with_level(log::Level::Info)
+                        else {
+                            return;
+                        };
+                        dock.activate_panel(panel_ix, window, cx);
+                    }
+                    dock.set_open(true, window, cx);
                 });
             }
         });
@@ -2345,7 +2377,7 @@ impl Render for MultiWorkspace {
                         .text_color(text_color)
                         .on_action(cx.listener(Self::close_window))
                         .on_action(cx.listener(|this, _: &SwitchInterfaceMode, window, cx| {
-                            this.set_interface_mode(InterfaceMode::Expert, window, cx);
+                            this.open_code_editor(window, cx);
                         }))
                         .child(self.render_workspace_mode_switcher(window, cx))
                         .child(div().flex_1().min_h_0().child(view.clone())),

@@ -15,12 +15,13 @@ use cloud_api_types::{SubmitAgentThreadFeedbackBody, SubmitAgentThreadFeedbackCo
 use editor::actions::OpenExcerpts;
 
 use gpui::TaskExt;
-use gpui::{DismissEvent, List};
+use gpui::{DismissEvent, List, UniformListScrollHandle, uniform_list};
 use heapless::Vec as ArrayVec;
 use language_model::{LanguageModelEffortLevel, Speed};
 use settings::{SidebarSide, update_settings_file};
 use ui::{
-    ButtonLike, ElevationIndex, SpinnerLabel, SpinnerVariant, SplitButton, SplitButtonStyle, Tab,
+    ButtonLike, ButtonSize, ElevationIndex, SpinnerLabel, SpinnerVariant, SplitButton,
+    SplitButtonStyle, Tab,
 };
 use workspace::{OpenOptions, OpenVisible, SERIALIZATION_THROTTLE_TIME};
 
@@ -227,7 +228,8 @@ struct AgentOptionsMenu {
     config_options_view: Entity<ConfigOptionsView>,
     workspace: WeakEntity<Workspace>,
     scroll_handle: ScrollHandle,
-    collapsed_skill_categories: HashSet<String>,
+    skills_scroll_handle: UniformListScrollHandle,
+    expanded_skill_categories: HashSet<String>,
     mode: AgentOptionsMenuMode,
 }
 
@@ -235,6 +237,19 @@ struct AgentOptionsMenu {
 enum AgentOptionsMenuMode {
     All,
     Skills,
+}
+
+#[derive(Clone)]
+enum SkillListRow {
+    SectionLabel(SharedString),
+    CreateSkill,
+    Empty(&'static str),
+    CategoryHeader {
+        category: String,
+        option_count: usize,
+        collapsed: bool,
+    },
+    Option(ConfigOptionSummary),
 }
 
 impl AgentOptionsMenu {
@@ -248,7 +263,8 @@ impl AgentOptionsMenu {
             config_options_view,
             workspace,
             scroll_handle: ScrollHandle::new(),
-            collapsed_skill_categories: HashSet::default(),
+            skills_scroll_handle: UniformListScrollHandle::new(),
+            expanded_skill_categories: HashSet::default(),
             mode: AgentOptionsMenuMode::All,
         }
     }
@@ -263,7 +279,8 @@ impl AgentOptionsMenu {
             config_options_view,
             workspace,
             scroll_handle: ScrollHandle::new(),
-            collapsed_skill_categories: HashSet::default(),
+            skills_scroll_handle: UniformListScrollHandle::new(),
+            expanded_skill_categories: HashSet::default(),
             mode: AgentOptionsMenuMode::Skills,
         }
     }
@@ -329,14 +346,37 @@ impl Render for AgentOptionsMenu {
             }
         };
 
+        let is_skills_menu = matches!(self.mode, AgentOptionsMenuMode::Skills);
+        let options_container = if is_skills_menu {
+            div()
+                .id("agent-options-menu-options")
+                .max_h_96()
+                .overflow_y_hidden()
+                .child(options_list)
+                .vertical_scrollbar_for(&self.skills_scroll_handle, window, cx)
+                .into_any_element()
+        } else {
+            div()
+                .id("agent-options-menu-options")
+                .max_h(px(280.))
+                .overflow_y_scroll()
+                .child(options_list)
+                .vertical_scrollbar_for(&self.scroll_handle, window, cx)
+                .into_any_element()
+        };
+        let (menu_min_width, menu_max_width) = if is_skills_menu {
+            (px(300.), px(340.))
+        } else {
+            (px(244.), px(280.))
+        };
         let colors = cx.theme().colors();
 
         div()
             .key_context("AgentOptionsMenu")
             .track_focus(&self.focus_handle)
             .p_1()
-            .min_w(px(300.))
-            .max_w(px(340.))
+            .min_w(menu_min_width)
+            .max_w(menu_max_width)
             .rounded_md()
             .border_1()
             .border_color(colors.border_variant.opacity(0.64))
@@ -344,7 +384,7 @@ impl Render for AgentOptionsMenu {
             .elevation_2(cx)
             .child(
                 v_flex()
-                    .gap_1()
+                    .gap_0p5()
                     .child(
                         h_flex()
                             .w_full()
@@ -365,20 +405,13 @@ impl Render for AgentOptionsMenu {
                             .w_full()
                             .bg(colors.border_variant.opacity(0.48)),
                     )
-                    .child(
-                        v_flex()
-                            .id("agent-options-menu-options")
-                            .max_h_96()
-                            .overflow_y_scroll()
-                            .child(options_list)
-                            .vertical_scrollbar_for(&self.scroll_handle, window, cx),
-                    )
+                    .child(options_container)
                     .child(
                         Label::new(footer)
                             .size(LabelSize::XSmall)
                             .color(Color::Muted)
                             .mx_1()
-                            .mt_1()
+                            .mt_0p5()
                             .mb_0p5(),
                     ),
             )
@@ -387,7 +420,7 @@ impl Render for AgentOptionsMenu {
 
 impl AgentOptionsMenu {
     fn render_skills_list(
-        &self,
+        &mut self,
         skill_options: Vec<ConfigOptionSummary>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -399,32 +432,48 @@ impl AgentOptionsMenu {
                 .push(option);
         }
 
-        let mut list = v_flex()
-            .gap_1()
-            .child(self.render_section_label("Create", cx))
-            .child(self.render_create_skill_row(cx));
+        let mut rows = vec![
+            SkillListRow::SectionLabel(SharedString::from("Create")),
+            SkillListRow::CreateSkill,
+        ];
 
         if grouped_options.is_empty() {
-            return list
-                .child(self.render_empty_options("No skills available."))
-                .into_any_element();
-        }
-
-        for (category, options) in grouped_options {
-            let collapsed = self.collapsed_skill_categories.contains(&category);
-            let option_count = options.len();
-            list = list.child(self.render_skill_category_header(
-                category.clone(),
-                option_count,
-                collapsed,
-                cx,
-            ));
-            if !collapsed {
-                list = list.child(self.render_option_group(options, cx));
+            rows.push(SkillListRow::Empty("No skills available."));
+        } else {
+            for (category, options) in grouped_options {
+                let collapsed = !self.expanded_skill_categories.contains(&category);
+                let option_count = options.len();
+                rows.push(SkillListRow::CategoryHeader {
+                    category: category.clone(),
+                    option_count,
+                    collapsed,
+                });
+                if !collapsed {
+                    rows.extend(options.into_iter().map(SkillListRow::Option));
+                }
             }
         }
 
-        list.into_any_element()
+        let row_count = rows.len();
+        let rows = Rc::new(rows);
+
+        uniform_list(
+            "agent-options-skills-list",
+            row_count,
+            cx.processor(
+                move |this, visible_range: std::ops::Range<usize>, _window, cx| {
+                    visible_range
+                        .filter_map(|index| rows.get(index).cloned())
+                        .map(|row| this.render_skill_list_row(row, cx))
+                        .collect()
+                },
+            ),
+        )
+        .w_full()
+        .max_h_96()
+        .with_sizing_behavior(gpui::ListSizingBehavior::Infer)
+        .track_scroll(&self.skills_scroll_handle)
+        .into_any_element()
     }
 
     fn bundled_skills_root() -> PathBuf {
@@ -547,6 +596,9 @@ impl AgentOptionsMenu {
             return;
         }
 
+        self.config_options_view
+            .update(cx, |view, cx| view.refresh_options(window, cx));
+
         if let Some(workspace) = self.workspace.upgrade() {
             workspace.update(cx, |workspace, cx| {
                 let open_task = workspace.open_abs_path(
@@ -574,6 +626,7 @@ impl AgentOptionsMenu {
         &self,
         option_id: acp::SessionConfigId,
         skill_dir: PathBuf,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.config_options_view.update(cx, |view, cx| {
@@ -587,12 +640,14 @@ impl AgentOptionsMenu {
             );
         }
 
+        self.config_options_view
+            .update(cx, |view, cx| view.refresh_options(window, cx));
         cx.notify();
     }
 
     fn toggle_skill_category(&mut self, category: String, cx: &mut Context<Self>) {
-        if !self.collapsed_skill_categories.insert(category.clone()) {
-            self.collapsed_skill_categories.remove(&category);
+        if !self.expanded_skill_categories.insert(category.clone()) {
+            self.expanded_skill_categories.remove(&category);
         }
         cx.notify();
     }
@@ -646,6 +701,58 @@ impl AgentOptionsMenu {
             }))
     }
 
+    fn render_skill_list_row(&self, row: SkillListRow, cx: &mut Context<Self>) -> AnyElement {
+        match row {
+            SkillListRow::SectionLabel(label) => self.render_skill_section_label(label, cx),
+            SkillListRow::CreateSkill => self.render_create_skill_row(cx).into_any_element(),
+            SkillListRow::Empty(label) => self.render_skill_empty_row(label),
+            SkillListRow::CategoryHeader {
+                category,
+                option_count,
+                collapsed,
+            } => self.render_skill_category_header(category, option_count, collapsed, cx),
+            SkillListRow::Option(option) => self.render_option_row(option, cx).into_any_element(),
+        }
+    }
+
+    fn render_skill_section_label(
+        &self,
+        label: SharedString,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = cx.theme().colors();
+        v_flex()
+            .h(px(32.))
+            .w_full()
+            .justify_end()
+            .gap_1()
+            .child(
+                div()
+                    .h(px(1.))
+                    .w_full()
+                    .bg(colors.border_variant.opacity(0.32)),
+            )
+            .child(
+                Label::new(label)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .mx_1()
+                    .mb_0p5(),
+            )
+            .into_any_element()
+    }
+
+    fn render_skill_empty_row(&self, label: &'static str) -> AnyElement {
+        div()
+            .h(px(32.))
+            .w_full()
+            .px_2()
+            .flex()
+            .items_center()
+            .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+            .into_any_element()
+    }
+
     fn render_skill_category_header(
         &self,
         category: String,
@@ -655,19 +762,15 @@ impl AgentOptionsMenu {
     ) -> AnyElement {
         let colors = cx.theme().colors();
         let category_for_click = category.clone();
-        v_flex()
-            .gap_0p5()
-            .pt_1()
-            .child(
-                div()
-                    .h(px(1.))
-                    .w_full()
-                    .bg(colors.border_variant.opacity(0.32)),
-            )
+        div()
+            .h(px(32.))
+            .w_full()
+            .border_t_1()
+            .border_color(colors.border_variant.opacity(0.32))
             .child(
                 ButtonLike::new(format!("skill-category-{category}"))
                     .full_width()
-                    .height(px(28.).into())
+                    .height(px(31.).into())
                     .style(ButtonStyle::Subtle)
                     .child(
                         h_flex()
@@ -717,8 +820,8 @@ impl AgentOptionsMenu {
         let label = label.into();
         let colors = cx.theme().colors();
         v_flex()
-            .gap_1()
-            .pt_1()
+            .gap_0p5()
+            .pt_0p5()
             .child(
                 div()
                     .h(px(1.))
@@ -740,7 +843,6 @@ impl AgentOptionsMenu {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         v_flex()
-            .gap_0p5()
             .children(
                 options
                     .into_iter()
@@ -762,6 +864,11 @@ impl AgentOptionsMenu {
         let custom_skill_dir = matches!(self.mode, AgentOptionsMenuMode::Skills)
             .then(|| Self::custom_skill_dir(&option.id))
             .flatten();
+        let (row_height, label_size) = if matches!(self.mode, AgentOptionsMenuMode::Skills) {
+            (px(32.), LabelSize::Small)
+        } else {
+            (px(26.), LabelSize::XSmall)
+        };
         let option_id_for_delete = option.id.clone();
         let delete_button_id = format!("delete-custom-skill-{}", option_id_for_delete.0);
 
@@ -769,7 +876,7 @@ impl AgentOptionsMenu {
             format!("agent-option-{}", option.id.0).into(),
         ))
         .full_width()
-        .height(px(32.).into())
+        .height(row_height.into())
         .style(ButtonStyle::Subtle)
         .child(
             h_flex()
@@ -781,7 +888,7 @@ impl AgentOptionsMenu {
                 .child(
                     div().min_w_0().flex_1().child(
                         Label::new(option.name)
-                            .size(LabelSize::Small)
+                            .size(label_size)
                             .color(Color::Default)
                             .truncate(),
                     ),
@@ -808,10 +915,11 @@ impl AgentOptionsMenu {
                                     .icon_size(IconSize::XSmall)
                                     .icon_color(Color::Muted)
                                     .tooltip(Tooltip::text("Delete custom skill"))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                    .on_click(cx.listener(move |this, _, window, cx| {
                                         this.delete_custom_skill(
                                             option_id_for_delete.clone(),
                                             skill_dir.clone(),
+                                            window,
                                             cx,
                                         );
                                         cx.stop_propagation();
@@ -1146,6 +1254,12 @@ impl ThreadView {
             }));
         }));
 
+        if let Some(config_options_view) = config_options_view.as_ref() {
+            subscriptions.push(cx.observe(config_options_view, |_, _, cx| {
+                cx.notify();
+            }));
+        }
+
         let mut this = Self {
             session_id,
             parent_session_id,
@@ -1400,9 +1514,11 @@ impl ThreadView {
             )
     }
 
-    fn render_assistant_message_header(&self, cx: &App) -> impl IntoElement {
-        let model_label = self.current_model_label(cx);
-
+    fn render_assistant_message_header(
+        &self,
+        model_label: Option<SharedString>,
+        _cx: &App,
+    ) -> impl IntoElement {
         h_flex()
             .gap_1()
             .items_center()
@@ -1624,19 +1740,44 @@ impl ThreadView {
         )
     }
 
-    fn render_skills_options_button(&self, _cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_skills_options_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let config_options_view = self.config_options_view.clone()?;
         let workspace = self.workspace.clone();
         let menu_handle = self.skills_options_menu_handle.clone();
+        let enabled_skills = self.enabled_skill_summaries(cx);
+        let enabled_skill_count = enabled_skills.len();
+        let tooltip = Self::skills_button_tooltip(&enabled_skills);
+        let badge = (enabled_skill_count > 0)
+            .then(|| Self::render_enabled_skill_count_badge(enabled_skill_count, cx));
+        let icon_color = if enabled_skill_count > 0 {
+            Color::Accent
+        } else {
+            Color::Muted
+        };
+
         Some(
             PopoverMenu::new("thread-skills-options-menu")
                 .trigger_with_tooltip(
-                    IconButton::new("thread-skills-options", IconName::Box)
-                        .icon_size(IconSize::Small)
-                        .icon_color(Color::Muted)
+                    ButtonLike::new("thread-skills-options")
+                        .width(px(24.))
+                        .height(px(22.).into())
+                        .size(ButtonSize::None)
                         .style(ButtonStyle::Transparent)
-                        .shape(ui::IconButtonShape::Square),
-                    |_, cx| Tooltip::simple("Skills", cx),
+                        .child(
+                            div()
+                                .relative()
+                                .size_5()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    Icon::new(IconName::Box)
+                                        .size(IconSize::Small)
+                                        .color(icon_color),
+                                )
+                                .when_some(badge, |this, badge| this.child(badge)),
+                        ),
+                    move |_, cx| Tooltip::simple(tooltip.clone(), cx),
                 )
                 .anchor(gpui::Anchor::BottomRight)
                 .offset(gpui::Point {
@@ -1651,6 +1792,81 @@ impl ThreadView {
                 })
                 .into_any_element(),
         )
+    }
+
+    fn enabled_skill_summaries(&self, cx: &App) -> Vec<ConfigOptionSummary> {
+        self.config_options_view
+            .as_ref()
+            .map(|config_options_view| {
+                config_options_view
+                    .read(cx)
+                    .option_summaries()
+                    .into_iter()
+                    .filter(Self::is_enabled_skill_summary)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn is_enabled_skill_summary(option: &ConfigOptionSummary) -> bool {
+        option.id.0.starts_with("backboard_skill:")
+            && option.current_value_name.eq_ignore_ascii_case("on")
+    }
+
+    fn skills_button_tooltip(enabled_skills: &[ConfigOptionSummary]) -> SharedString {
+        if enabled_skills.is_empty() {
+            return SharedString::from("Skills: none enabled");
+        }
+
+        let mut skill_names = enabled_skills
+            .iter()
+            .take(3)
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let remaining = enabled_skills.len().saturating_sub(3);
+        if remaining > 0 {
+            skill_names.push_str(&format!(" +{remaining} more"));
+        }
+
+        let suffix = if enabled_skills.len() == 1 {
+            "skill"
+        } else {
+            "skills"
+        };
+        SharedString::from(format!(
+            "{} {suffix} enabled: {skill_names}",
+            enabled_skills.len()
+        ))
+    }
+
+    fn render_enabled_skill_count_badge(count: usize, cx: &App) -> AnyElement {
+        let label = if count > 99 {
+            "99+".to_string()
+        } else {
+            count.to_string()
+        };
+
+        div()
+            .absolute()
+            .top_neg_0p5()
+            .right_neg_0p5()
+            .h(rems_from_px(12.))
+            .min_w(rems_from_px(12.))
+            .px(rems_from_px(2.))
+            .rounded_full()
+            .border_1()
+            .border_color(cx.theme().status().info_border)
+            .bg(cx.theme().status().info_background)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                Label::new(label)
+                    .size(LabelSize::Custom(rems_from_px(8.)))
+                    .color(Color::Default),
+            )
+            .into_any_element()
     }
 
     /// Returns the currently active editor, either for a message that is being
@@ -6591,6 +6807,7 @@ impl ThreadView {
                 chunks,
                 indented: _,
                 is_subagent_output,
+                model_label,
             }) => {
                 let mut is_blank = true;
                 let mut rendered_regular_content = false;
@@ -6647,6 +6864,7 @@ impl ThreadView {
                                             entry_ix,
                                             chunk_ix,
                                             md.clone(),
+                                            model_label.clone(),
                                             window,
                                             cx,
                                         )
@@ -6678,7 +6896,9 @@ impl ThreadView {
                         .w_full()
                         .text_ui(cx)
                         .when(show_header, |this| {
-                            this.child(self.render_assistant_message_header(cx))
+                            this.child(
+                                self.render_assistant_message_header(model_label.clone(), cx),
+                            )
                         })
                         .child(self.render_message_context_menu(entry_ix, message_body, cx))
                         .when_some(
@@ -7522,6 +7742,7 @@ impl ThreadView {
         entry_ix: usize,
         chunk_ix: usize,
         chunk: Entity<Markdown>,
+        model_label: Option<SharedString>,
         window: &Window,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -7591,7 +7812,7 @@ impl ThreadView {
                                             .text_color(cx.theme().colors().text_muted)
                                             .child("Backboard thinking"),
                                     )
-                                    .when_some(self.current_model_label(cx), |this, model| {
+                                    .when_some(model_label, |this, model| {
                                         this.child(
                                             Label::new(model)
                                                 .size(LabelSize::XSmall)

@@ -59,6 +59,20 @@ fn all_tool_definitions() -> Vec<Value> {
             &["command"],
         ),
         function(
+            "run_terminal_cmd",
+            "Execute a shell command and render output in an IDE terminal card. Prefer read_file, edit, write, grep, or glob for file operations.",
+            json!({
+                "command": {"type": "string", "description": "The shell command to execute"},
+                "cmd": {"type": "string", "description": "Alias for command"},
+                "description": {"type": "string", "description": "Short description of what this command does"},
+                "timeout": {"type": "integer", "description": "Timeout in milliseconds"},
+                "working_directory": {"type": "string", "description": "Directory to run the command in. Defaults to workspace root."},
+                "cwd": {"type": "string", "description": "Alias for working_directory"},
+                "is_background": {"type": "boolean", "description": "Run as a background process and return startup output"}
+            }),
+            &["command"],
+        ),
+        function(
             "read_file",
             "Read a file. Use target_file or file_path. Supports offset and limit line ranges.",
             json!({
@@ -90,6 +104,18 @@ fn all_tool_definitions() -> Vec<Value> {
             &["file_path", "old_string", "new_string"],
         ),
         function(
+            "search_replace",
+            "Replace text in a file. Use old_string and new_string. Set replace_all=true only when every occurrence should change.",
+            json!({
+                "file_path": {"type": "string", "description": "Path to file"},
+                "target_file": {"type": "string", "description": "Alias for file_path"},
+                "old_string": {"type": "string", "description": "Exact text to replace"},
+                "new_string": {"type": "string", "description": "Replacement text"},
+                "replace_all": {"type": "boolean", "description": "Replace all occurrences"}
+            }),
+            &["file_path", "old_string", "new_string"],
+        ),
+        function(
             "glob",
             "Find files by glob pattern, sorted by modification time.",
             json!({
@@ -113,6 +139,15 @@ fn all_tool_definitions() -> Vec<Value> {
             &["pattern"],
         ),
         function(
+            "codebase_search",
+            "Search the workspace codebase semantically when the native index is available, with lexical fallback.",
+            json!({
+                "query": {"type": "string", "description": "Natural-language or keyword query"},
+                "num_results": {"type": "integer", "description": "Maximum results to return, 1-15"}
+            }),
+            &["query"],
+        ),
+        function(
             "list_dir",
             "List directory contents with file types and sizes.",
             json!({
@@ -128,6 +163,15 @@ fn all_tool_definitions() -> Vec<Value> {
                 "file_path": {"type": "string", "description": "Alias for target_file"}
             }),
             &["target_file"],
+        ),
+        function(
+            "create_directory",
+            "Create a directory and any missing parent directories.",
+            json!({
+                "path": {"type": "string", "description": "Directory path, relative to workspace or absolute"},
+                "target_directory": {"type": "string", "description": "Alias for path"}
+            }),
+            &["path"],
         ),
         function(
             "web_search",
@@ -298,7 +342,10 @@ mod tests {
 
         assert!(names.contains(&"read_file".to_string()));
         assert!(!names.contains(&"write".to_string()));
+        assert!(!names.contains(&"search_replace".to_string()));
+        assert!(!names.contains(&"create_directory".to_string()));
         assert!(!names.contains(&"bash".to_string()));
+        assert!(!names.contains(&"run_terminal_cmd".to_string()));
         assert!(!names.contains(&"task".to_string()));
     }
 
@@ -320,13 +367,17 @@ mod tests {
             names,
             vec![
                 "bash",
+                "run_terminal_cmd",
                 "read_file",
                 "write",
                 "edit",
+                "search_replace",
                 "glob",
                 "grep",
+                "codebase_search",
                 "list_dir",
                 "delete_file",
+                "create_directory",
                 "web_search",
                 "web_fetch",
                 "todo_write",

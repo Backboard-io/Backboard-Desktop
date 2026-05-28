@@ -146,6 +146,7 @@ pub async fn run_prompt(
         &message_for_model,
         &runtime.workspace,
         &runtime.mode.to_string(),
+        &runtime.feature_settings.selected_skills,
     );
     state.record_turn_timing(&params.session_id, "context_pack_ms", context_pack_started);
     state.set_estimated_used_tokens(&params.session_id, estimate_tokens(&augmented));
@@ -626,9 +627,10 @@ fn emit_coalesced_stream_text(
         StreamTextKind::Content => emit_agent_text(state, runtime, &chunk.text, cx),
         StreamTextKind::Thought => state.emit_update(
             runtime,
-            acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(acp::ContentBlock::from(
-                chunk.text,
-            ))),
+            acp::SessionUpdate::AgentThoughtChunk(model_content_chunk(
+                runtime,
+                acp::ContentBlock::from(chunk.text),
+            )),
             cx,
         ),
     }
@@ -704,11 +706,24 @@ fn emit_agent_text(
     }
     state.emit_update(
         runtime,
-        acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(acp::ContentBlock::from(
-            text.to_string(),
-        ))),
+        acp::SessionUpdate::AgentMessageChunk(model_content_chunk(
+            runtime,
+            acp::ContentBlock::from(text.to_string()),
+        )),
         cx,
     )
+}
+
+fn model_content_chunk(runtime: &SessionRuntime, content: acp::ContentBlock) -> acp::ContentChunk {
+    acp::ContentChunk::new(content).meta(model_meta(runtime))
+}
+
+fn model_meta(runtime: &SessionRuntime) -> acp::Meta {
+    let mut meta = acp::Meta::new();
+    meta.insert("model_label".to_string(), runtime.model.clone().into());
+    meta.insert("model".to_string(), runtime.model.clone().into());
+    meta.insert("provider".to_string(), runtime.provider.clone().into());
+    meta
 }
 
 fn emit_progress(
@@ -717,7 +732,7 @@ fn emit_progress(
     text: &str,
     cx: &mut AsyncApp,
 ) -> Result<()> {
-    let mut meta = acp::Meta::new();
+    let mut meta = model_meta(runtime);
     meta.insert("backboardProgress".to_string(), true.into());
     state.emit_update(
         runtime,
@@ -872,7 +887,8 @@ fn emit_media_generated(
     for link in links {
         state.emit_update(
             runtime,
-            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+            acp::SessionUpdate::AgentMessageChunk(model_content_chunk(
+                runtime,
                 acp::ContentBlock::ResourceLink(link),
             )),
             cx,
@@ -890,7 +906,8 @@ fn emit_generated_media_records(
     for link in generated_media_links(chunk) {
         state.emit_update(
             runtime,
-            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+            acp::SessionUpdate::AgentMessageChunk(model_content_chunk(
+                runtime,
                 acp::ContentBlock::ResourceLink(link),
             )),
             cx,
@@ -919,7 +936,8 @@ fn emit_voice_audio_delta(
             .or(Some("audio/mpeg".to_string()));
         state.emit_update(
             runtime,
-            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+            acp::SessionUpdate::AgentMessageChunk(model_content_chunk(
+                runtime,
                 acp::ContentBlock::ResourceLink(link),
             )),
             cx,
@@ -948,7 +966,8 @@ fn emit_voice_records(
     for link in voice_record_links(records) {
         state.emit_update(
             runtime,
-            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
+            acp::SessionUpdate::AgentMessageChunk(model_content_chunk(
+                runtime,
                 acp::ContentBlock::ResourceLink(link),
             )),
             cx,
@@ -1483,6 +1502,17 @@ Use quiet typography.
         assert!(prompt.contains("Name: Modern"));
         assert!(prompt.contains("Use quiet typography."));
         assert!(prompt.contains("User request:\n\nBuild a settings page."));
+
+        let final_prompt = workspace::augment_prompt(
+            &prompt,
+            &runtime.workspace,
+            &runtime.mode.to_string(),
+            &runtime.feature_settings.selected_skills,
+        );
+        assert!(final_prompt.contains("<selected_skills>"));
+        assert!(final_prompt.contains("Use quiet typography."));
+        assert!(final_prompt.contains("selected_skills: web/modern"));
+        assert!(final_prompt.contains("<backboard_ide_context>"));
     }
 
     #[test]

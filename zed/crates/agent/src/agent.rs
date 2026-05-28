@@ -983,6 +983,7 @@ impl NativeAgent {
                         NativeAgentConnection::handle_thread_events(
                             events,
                             acp_thread.downgrade(),
+                            None,
                             cx,
                         )
                     })
@@ -1198,11 +1199,14 @@ impl NativeAgent {
                     thread.resume(cx)
                 }
             })?;
+            let model_label =
+                thread.read_with(cx, |thread, _cx| thread.model().map(|model| model.name().0));
 
             cx.update(|cx| {
                 NativeAgentConnection::handle_thread_events(
                     response_stream,
                     acp_thread.downgrade(),
+                    model_label,
                     cx,
                 )
             })
@@ -1252,16 +1256,18 @@ impl NativeAgentConnection {
         };
         log::debug!("Found session for: {}", session_id);
 
-        let response_stream = match f(thread, cx) {
+        let response_stream = match f(thread.clone(), cx) {
             Ok(stream) => stream,
             Err(err) => return Task::ready(Err(err)),
         };
-        Self::handle_thread_events(response_stream, acp_thread.downgrade(), cx)
+        let model_label = thread.read(cx).model().map(|model| model.name().0);
+        Self::handle_thread_events(response_stream, acp_thread.downgrade(), model_label, cx)
     }
 
     fn handle_thread_events(
         mut events: mpsc::UnboundedReceiver<Result<ThreadEvent>>,
         acp_thread: WeakEntity<AcpThread>,
+        model_label: Option<SharedString>,
         cx: &App,
     ) -> Task<Result<acp::PromptResponse>> {
         cx.spawn(async move |cx| {
@@ -1285,12 +1291,22 @@ impl NativeAgentConnection {
                             }
                             ThreadEvent::AgentText(text) => {
                                 acp_thread.update(cx, |thread, cx| {
-                                    thread.push_assistant_content_block(text.into(), false, cx)
+                                    thread.push_assistant_content_block_with_model_label(
+                                        text.into(),
+                                        false,
+                                        model_label.clone(),
+                                        cx,
+                                    )
                                 })?;
                             }
                             ThreadEvent::AgentThinking(text) => {
                                 acp_thread.update(cx, |thread, cx| {
-                                    thread.push_assistant_content_block(text.into(), true, cx)
+                                    thread.push_assistant_content_block_with_model_label(
+                                        text.into(),
+                                        true,
+                                        model_label.clone(),
+                                        cx,
+                                    )
                                 })?;
                             }
                             ThreadEvent::ToolCallAuthorization(ToolCallAuthorization {

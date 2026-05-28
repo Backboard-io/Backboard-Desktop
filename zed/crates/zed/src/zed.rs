@@ -178,7 +178,12 @@ pub fn init(cx: &mut App) {
                         mw.interface_mode,
                         next
                     );
-                    mw.set_interface_mode(next, window, cx);
+                    match next {
+                        workspace::InterfaceMode::Expert => mw.open_code_editor(window, cx),
+                        workspace::InterfaceMode::Simple => {
+                            mw.set_interface_mode(next, window, cx);
+                        }
+                    }
                 })
                 .log_err();
 
@@ -536,7 +541,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                 use beginner_ui::BeginnerWorkspaceEvent;
                 match event {
                     BeginnerWorkspaceEvent::SwitchToEditor => {
-                        mw.set_interface_mode(InterfaceMode::Expert, window, cx);
+                        mw.open_code_editor(window, cx);
                     }
                 }
             })

@@ -532,8 +532,9 @@ impl Onboarding {
 
         // Switch the running MultiWorkspace immediately so the user sees the change now.
         if let Some(mw) = window.root::<MultiWorkspace>().flatten() {
-            mw.update(cx, |mw, cx| {
-                mw.set_interface_mode(interface_mode, window, cx);
+            mw.update(cx, |mw, cx| match interface_mode {
+                InterfaceMode::Expert => mw.open_code_editor(window, cx),
+                InterfaceMode::Simple => mw.set_interface_mode(interface_mode, window, cx),
             });
         }
 

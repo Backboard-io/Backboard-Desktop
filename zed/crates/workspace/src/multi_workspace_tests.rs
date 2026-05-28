@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
+use crate::dock::test::TestPanel;
 use crate::item::test::TestItem;
 use agent_settings::AgentSettings;
 use client::proto;
@@ -17,6 +18,21 @@ fn init_test(cx: &mut TestAppContext) {
         cx.set_global(settings_store);
         theme_settings::init(theme::LoadThemes::JustBase, cx);
         DisableAiSettings::register(cx);
+    });
+}
+
+fn add_test_panel_to_dock(
+    workspace: &mut Workspace,
+    position: DockPosition,
+    activation_priority: u32,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<Workspace>,
+) {
+    let panel = cx.new(|cx| TestPanel::new(position, activation_priority, cx));
+    let workspace_weak = workspace.weak_handle();
+    let dock = workspace.dock_at_position(position).clone();
+    dock.update(cx, |dock, cx| {
+        dock.add_panel(panel, workspace_weak, window, cx);
     });
 }
 
@@ -236,6 +252,47 @@ async fn test_agent_workspace_tab_closes_side_docks(cx: &mut TestAppContext) {
                 .read(cx)
                 .is_open(),
             "right dock should close when Agent Workspace opens"
+        );
+    });
+}
+
+#[gpui::test]
+async fn test_code_editor_tab_opens_side_docks(cx: &mut TestAppContext) {
+    init_test(cx);
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree("/root_a", json!({ "file.txt": "" })).await;
+    let project = Project::test(fs, ["/root_a".as_ref()], cx).await;
+
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+    let workspace = multi_workspace.read_with(cx, |multi_workspace, _cx| {
+        multi_workspace.workspace().clone()
+    });
+
+    multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            add_test_panel_to_dock(workspace, DockPosition::Left, 100, window, cx);
+            add_test_panel_to_dock(workspace, DockPosition::Right, 101, window, cx);
+        });
+
+        multi_workspace.test_select_agent_workspace_tab(window, cx);
+        multi_workspace.test_select_code_editor_tab(window, cx);
+    });
+
+    workspace.read_with(cx, |workspace, cx| {
+        assert!(
+            workspace
+                .dock_at_position(DockPosition::Left)
+                .read(cx)
+                .is_open(),
+            "left dock should open when Code Editor opens"
+        );
+        assert!(
+            workspace
+                .dock_at_position(DockPosition::Right)
+                .read(cx)
+                .is_open(),
+            "right dock should open when Code Editor opens"
         );
     });
 }

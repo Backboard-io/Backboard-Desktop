@@ -1118,7 +1118,6 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
         cx: &mut App,
     ) -> Task<Result<Vec<acp::SessionConfigOption>>> {
         let value = value.to_string();
-        let mut options = self.config_options();
         let config_id_string = config_id.to_string();
         let mut changed = false;
         let mut changed_mode = None;
@@ -1212,8 +1211,8 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
                 }
             }
         }
+        let options = self.config_options();
         if changed {
-            options = self.config_options();
             let state = self.state.clone();
             let session_id = self.session_id.clone();
             let options_for_update = options.clone();
@@ -1653,7 +1652,7 @@ pub(crate) fn discover_file_system_skills(workspace: &Path) -> Vec<FileSystemSki
     for skills_root in skills_roots_for_workspace(workspace) {
         skills.extend(
             walkdir::WalkDir::new(&skills_root)
-                .max_depth(4)
+                .max_depth(3)
                 .into_iter()
                 .filter_map(Result::ok)
                 .filter(|entry| entry.file_type().is_file() && entry.file_name() == "SKILL.md")
