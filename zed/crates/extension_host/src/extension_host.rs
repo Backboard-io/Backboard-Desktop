@@ -107,6 +107,52 @@ pub fn is_version_compatible(
     true
 }
 
+async fn unpack_extension_archive(
+    tar_gz_bytes: Vec<u8>,
+    extension_dir: PathBuf,
+    staging_dir: PathBuf,
+    fs: Arc<dyn Fs>,
+) -> Result<()> {
+    let decompressed_bytes = GzipDecoder::new(BufReader::new(tar_gz_bytes.as_slice()));
+    let archive = Archive::new(decompressed_bytes);
+
+    let remove_dir = || {
+        fs.remove_dir(
+            &extension_dir,
+            RemoveOptions {
+                recursive: true,
+                ignore_if_not_exists: true,
+            },
+        )
+    };
+
+    let temp_dir = fs
+        .create_dir(&staging_dir)
+        .await
+        .and_then(|()| tempfile::tempdir_in(&staging_dir).map_err(Into::into));
+
+    match temp_dir {
+        Ok(temp_dir) => {
+            archive.unpack(temp_dir.path()).await?;
+            remove_dir().await?;
+            fs.rename(
+                temp_dir.path(),
+                &extension_dir,
+                RenameOptions {
+                    overwrite: true,
+                    ignore_if_exists: true,
+                    create_parents: true,
+                },
+            )
+            .await
+        }
+        Err(_) => {
+            remove_dir().await?;
+            archive.unpack(extension_dir).await.map_err(Into::into)
+        }
+    }
+}
+
 pub struct ExtensionStore {
     pub proxy: Arc<ExtensionHostProxy>,
     pub builder: Arc<ExtensionBuilder>,
@@ -726,44 +772,7 @@ impl ExtensionStore {
                     }
                 }
 
-                let decompressed_bytes = GzipDecoder::new(BufReader::new(tar_gz_bytes.as_slice()));
-                let archive = Archive::new(decompressed_bytes);
-
-                let remove_dir = || {
-                    fs.remove_dir(
-                        &extension_dir,
-                        RemoveOptions {
-                            recursive: true,
-                            ignore_if_not_exists: true,
-                        },
-                    )
-                };
-
-                let temp_dir = fs
-                    .create_dir(&staging_dir)
-                    .await
-                    .and_then(|()| tempfile::tempdir_in(&staging_dir).map_err(Into::into));
-
-                match temp_dir {
-                    Ok(temp_dir) => {
-                        archive.unpack(temp_dir.path()).await?;
-                        remove_dir().await?;
-                        fs.rename(
-                            temp_dir.path(),
-                            &extension_dir,
-                            RenameOptions {
-                                overwrite: true,
-                                ignore_if_exists: true,
-                                create_parents: true,
-                            },
-                        )
-                        .await
-                    }
-                    Err(_) => {
-                        remove_dir().await?;
-                        archive.unpack(extension_dir).await.map_err(Into::into)
-                    }
-                }
+                unpack_extension_archive(tar_gz_bytes, extension_dir, staging_dir, fs).await
             })
             .await?;
 
@@ -783,6 +792,61 @@ impl ExtensionStore {
                 })
                 .ok();
             }
+
+            anyhow::Ok(())
+        })
+    }
+
+    pub fn install_extension_from_archive(
+        &mut self,
+        extension_id: Arc<str>,
+        archive_path: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        let extension_dir = self.installed_dir.join(extension_id.as_ref());
+        let staging_dir = self.staging_dir.clone();
+        let fs = self.fs.clone();
+
+        match self.outstanding_operations.entry(extension_id.clone()) {
+            btree_map::Entry::Occupied(_) => return Task::ready(Ok(())),
+            btree_map::Entry::Vacant(e) => e.insert(ExtensionOperation::Install),
+        };
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let _finish = cx.on_drop(&this, {
+                let extension_id = extension_id.clone();
+                move |this, cx| {
+                    this.outstanding_operations.remove(extension_id.as_ref());
+                    cx.notify();
+                }
+            });
+
+            cx.background_spawn(async move {
+                let tar_gz_bytes = std::fs::read(&archive_path)
+                    .with_context(|| format!("reading {}", archive_path.display()))?;
+                if tar_gz_bytes.is_empty() {
+                    bail!("extension archive {} is empty", archive_path.display());
+                }
+
+                unpack_extension_archive(tar_gz_bytes, extension_dir, staging_dir, fs).await
+            })
+            .await?;
+
+            this.update(cx, |this, cx| this.reload(Some(extension_id.clone()), cx))?
+                .await;
+
+            this.update(cx, |this, cx| {
+                cx.emit(Event::ExtensionInstalled(extension_id.clone()));
+                if let Some(events) = ExtensionEvents::try_global(cx)
+                    && let Some(manifest) = this.extension_manifest_for_id(&extension_id)
+                {
+                    events.update(cx, |this, cx| {
+                        this.emit(extension::Event::ExtensionInstalled(manifest.clone()), cx)
+                    });
+                }
+            })
+            .ok();
 
             anyhow::Ok(())
         })

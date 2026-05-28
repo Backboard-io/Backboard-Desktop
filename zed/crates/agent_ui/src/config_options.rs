@@ -112,10 +112,15 @@ impl ConfigOptionsView {
             .config_options
             .set_config_option(config_id, next_value, cx);
 
-        cx.spawn(async move |_, _| {
-            if let Err(err) = task.await {
-                log::error!("Failed to set config option: {:?}", err);
+        cx.spawn(async move |this, cx| match task.await {
+            Ok(options) => {
+                this.update(cx, |this, cx| {
+                    this.apply_options_snapshot(options);
+                    cx.notify();
+                })
+                .ok();
             }
+            Err(err) => log::error!("Failed to set config option: {:?}", err),
         })
         .detach();
         cx.notify();
@@ -140,10 +145,15 @@ impl ConfigOptionsView {
             .config_options
             .set_config_option(config_id.clone(), next_value, cx);
 
-        cx.spawn(async move |_, _| {
-            if let Err(err) = task.await {
-                log::error!("Failed to set config option: {:?}", err);
+        cx.spawn(async move |this, cx| match task.await {
+            Ok(options) => {
+                this.update(cx, |this, cx| {
+                    this.apply_options_snapshot(options);
+                    cx.notify();
+                })
+                .ok();
             }
+            Err(err) => log::error!("Failed to set config option: {:?}", err),
         })
         .detach();
         cx.notify();
@@ -159,10 +169,15 @@ impl ConfigOptionsView {
     ) {
         let task = self.config_options.set_config_option(config_id, value, cx);
 
-        cx.spawn(async move |_, _| {
-            if let Err(err) = task.await {
-                log::error!("Failed to set config option: {:?}", err);
+        cx.spawn(async move |this, cx| match task.await {
+            Ok(options) => {
+                this.update(cx, |this, cx| {
+                    this.apply_options_snapshot(options);
+                    cx.notify();
+                })
+                .ok();
             }
+            Err(err) => log::error!("Failed to set config option: {:?}", err),
         })
         .detach();
         cx.notify();
@@ -262,7 +277,7 @@ impl ConfigOptionsView {
         // Config option updates can mutate option values for existing IDs (for example,
         // reasoning levels after a model switch). Rebuild to refresh cached picker entries.
         let options = self.config_options.config_options();
-        self.config_option_ids = Self::config_option_ids(&options);
+        self.apply_options_snapshot(options.clone());
         self.selectors = Self::build_selectors(
             &options,
             &self.config_options,
@@ -271,8 +286,12 @@ impl ConfigOptionsView {
             window,
             cx,
         );
-        self.option_summaries = Self::option_summaries_from_options(options);
         cx.notify();
+    }
+
+    fn apply_options_snapshot(&mut self, options: Vec<acp::SessionConfigOption>) {
+        self.config_option_ids = Self::config_option_ids(&options);
+        self.option_summaries = Self::option_summaries_from_options(options);
     }
 
     fn build_selectors(

@@ -41,18 +41,22 @@ pub mod thread_worktree_archive;
 pub mod threads_archive_view;
 mod ui;
 
-use std::rc::Rc;
-use std::sync::Arc;
+use std::{fs as std_fs, rc::Rc, sync::Arc};
 
 use ::ui::IconName;
 use agent_client_protocol::schema as acp;
 use agent_settings::{AgentProfileId, AgentSettings};
+use anyhow::{Context as _, bail};
+use assets::Assets;
 use command_palette_hooks::CommandPaletteFilter;
 use context_server::ContextServerId;
 use extension_host::ExtensionStore;
 use feature_flags::FeatureFlagAppExt as _;
 use fs::Fs;
-use gpui::{Action, App, Context, Entity, SharedString, Window, actions};
+use gpui::{
+    Action, App, AppContext as _, AssetSource as _, AsyncWindowContext, Context, Entity,
+    SharedString, Window, actions,
+};
 use language::{
     LanguageRegistry,
     language_settings::{AllLanguageSettings, EditPredictionProvider},
@@ -96,20 +100,54 @@ pub use zed_actions::{CreateWorktree, NewWorktreeBranchTarget, SwitchWorktree};
 
 pub const DEFAULT_THREAD_TITLE: &str = "Backboard Thread";
 const PARALLEL_AGENT_LAYOUT_BACKFILL_KEY: &str = "parallel_agent_layout_backfilled";
-const RECOMMENDED_MCP_EXTENSION_IDS_RAW: &[&str] = &[
-    "mcp-server-shopify-dev",
-    "mcp-server-slack",
-    "mcp-server-supabase",
-    "mcp-server-figma",
-    "mcp-server-github",
-    "mcp-server-shopify-dev",
+const RECOMMENDED_MCP_BUNDLED_ASSET_DIR: &str = "extensions/recommended-mcp";
+const RECOMMENDED_MCP_INSTALL_DIR: &str = "bundled-recommended-mcp";
+const RECOMMENDED_MCP_ARCHIVE_FILENAME: &str = "archive.tar.gz";
+const RECOMMENDED_MCP_EXTENSIONS_RAW: &[RecommendedMcpExtension] = &[
+    RecommendedMcpExtension {
+        id: "mcp-server-shopify-dev",
+        repository: "https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev",
+    },
+    RecommendedMcpExtension {
+        id: "mcp-server-slack",
+        repository: "https://github.com/semioz/zed-slack-mcp",
+    },
+    RecommendedMcpExtension {
+        id: "mcp-server-supabase",
+        repository: "https://github.com/maximoffua/zed-mcp-server-supabase",
+    },
+    RecommendedMcpExtension {
+        id: "mcp-server-figma",
+        repository: "https://github.com/LoamStudios/zed-mcp-server-figma",
+    },
+    RecommendedMcpExtension {
+        id: "mcp-server-github",
+        repository: "https://github.com/LoamStudios/zed-mcp-server-github",
+    },
+    RecommendedMcpExtension {
+        id: "mcp-server-shopify-dev",
+        repository: "https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev",
+    },
 ];
 
-fn recommended_mcp_extension_ids() -> Vec<Arc<str>> {
+#[derive(Clone, Copy)]
+struct RecommendedMcpExtension {
+    id: &'static str,
+    repository: &'static str,
+}
+
+fn recommended_mcp_extensions() -> Vec<RecommendedMcpExtension> {
     let mut seen = std::collections::HashSet::new();
-    RECOMMENDED_MCP_EXTENSION_IDS_RAW
+    RECOMMENDED_MCP_EXTENSIONS_RAW
         .iter()
-        .filter_map(|id| seen.insert(*id).then(|| Arc::<str>::from(*id)))
+        .filter_map(|extension| seen.insert(extension.id).then_some(*extension))
+        .collect()
+}
+
+fn recommended_mcp_extension_ids() -> Vec<Arc<str>> {
+    recommended_mcp_extensions()
+        .into_iter()
+        .map(|extension| Arc::<str>::from(extension.id))
         .collect()
 }
 actions!(
@@ -613,7 +651,7 @@ fn install_recommended_mcp_servers(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    let extension_ids = recommended_mcp_extension_ids();
+    let extensions = recommended_mcp_extensions();
     let workspace_handle = cx.weak_entity();
 
     window
@@ -624,23 +662,9 @@ fn install_recommended_mcp_servers(
             let mut configuration_server_ids = Vec::new();
             let mut seen_server_ids = std::collections::HashSet::new();
 
-            for extension_id in extension_ids {
+            for extension in extensions {
                 let installed_server_ids = cx
-                    .update(|_, cx| {
-                        ExtensionStore::global(cx)
-                            .read(cx)
-                            .installed_extensions()
-                            .get(extension_id.as_ref())
-                            .map(|entry| {
-                                entry
-                                    .manifest
-                                    .context_servers
-                                    .keys()
-                                    .cloned()
-                                    .map(ContextServerId)
-                                    .collect::<Vec<_>>()
-                            })
-                    })
+                    .update(|_, cx| installed_context_server_ids(extension.id, cx))
                     .ok()
                     .flatten();
 
@@ -654,50 +678,22 @@ fn install_recommended_mcp_servers(
                     continue;
                 }
 
-                let install_task = cx
-                    .update(|_, cx| {
-                        ExtensionStore::global(cx).update(cx, |store, cx| {
-                            store.install_latest_extension_task(extension_id.clone(), cx)
-                        })
-                    })
-                    .ok();
+                match install_recommended_mcp_extension_from_bundle(extension, cx).await {
+                    Ok(()) => installed_count += 1,
+                    Err(error) => {
+                        failures.push(format!("{}: {error:#}", extension.id));
+                    }
+                }
 
-                match install_task {
-                    Some(task) => match task.await {
-                        Ok(()) => {
-                            installed_count += 1;
-                            if let Some(installed_server_ids) = cx
-                                .update(|_, cx| {
-                                    ExtensionStore::global(cx)
-                                        .read(cx)
-                                        .installed_extensions()
-                                        .get(extension_id.as_ref())
-                                        .map(|entry| {
-                                            entry
-                                                .manifest
-                                                .context_servers
-                                                .keys()
-                                                .cloned()
-                                                .map(ContextServerId)
-                                                .collect::<Vec<_>>()
-                                        })
-                                })
-                                .ok()
-                                .flatten()
-                            {
-                                for server_id in installed_server_ids {
-                                    if seen_server_ids.insert(server_id.0.clone()) {
-                                        configuration_server_ids.push(server_id);
-                                    }
-                                }
-                            }
+                if let Some(installed_server_ids) = cx
+                    .update(|_, cx| installed_context_server_ids(extension.id, cx))
+                    .ok()
+                    .flatten()
+                {
+                    for server_id in installed_server_ids {
+                        if seen_server_ids.insert(server_id.0.clone()) {
+                            configuration_server_ids.push(server_id);
                         }
-                        Err(error) => {
-                            failures.push(format!("{}: {error:#}", extension_id));
-                        }
-                    },
-                    None => {
-                        failures.push(format!("{extension_id}: extension store unavailable"));
                     }
                 }
             }
@@ -753,6 +749,73 @@ fn install_recommended_mcp_servers(
             }
         })
         .detach();
+}
+
+fn installed_context_server_ids(extension_id: &str, cx: &App) -> Option<Vec<ContextServerId>> {
+    ExtensionStore::global(cx)
+        .read(cx)
+        .installed_extensions()
+        .get(extension_id)
+        .map(|entry| {
+            entry
+                .manifest
+                .context_servers
+                .keys()
+                .cloned()
+                .map(ContextServerId)
+                .collect::<Vec<_>>()
+        })
+}
+
+async fn install_recommended_mcp_extension_from_bundle(
+    extension: RecommendedMcpExtension,
+    cx: &mut AsyncWindowContext,
+) -> anyhow::Result<()> {
+    let extension_id: Arc<str> = Arc::from(extension.id);
+    let archive_extension_id = extension_id.clone();
+    let archive_path = cx
+        .background_spawn(async move { write_bundled_mcp_extension_archive(&archive_extension_id) })
+        .await?;
+
+    let install_task = cx
+        .update(|_, cx| {
+            ExtensionStore::global(cx).update(cx, |store, cx| {
+                store.install_extension_from_archive(extension_id, archive_path, cx)
+            })
+        })
+        .context("installing bundled MCP extension")?;
+
+    install_task.await
+}
+
+fn bundled_mcp_archive_path(extension_id: &str) -> std::path::PathBuf {
+    paths::extensions_dir()
+        .join(RECOMMENDED_MCP_INSTALL_DIR)
+        .join(extension_id)
+        .join(RECOMMENDED_MCP_ARCHIVE_FILENAME)
+}
+
+fn write_bundled_mcp_extension_archive(extension_id: &str) -> anyhow::Result<std::path::PathBuf> {
+    let asset_path = format!(
+        "{RECOMMENDED_MCP_BUNDLED_ASSET_DIR}/{extension_id}/{RECOMMENDED_MCP_ARCHIVE_FILENAME}"
+    );
+    let bytes = Assets
+        .load(&asset_path)
+        .with_context(|| format!("loading bundled MCP extension archive {asset_path}"))?
+        .with_context(|| format!("missing bundled MCP extension archive {asset_path}"))?;
+
+    if bytes.as_ref().is_empty() {
+        bail!("bundled MCP extension archive is empty for {extension_id}");
+    }
+
+    let output_path = bundled_mcp_archive_path(extension_id);
+    if let Some(parent) = output_path.parent() {
+        std_fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    std_fs::write(&output_path, bytes.as_ref())
+        .with_context(|| format!("writing {}", output_path.display()))?;
+
+    Ok(output_path)
 }
 
 fn maybe_backfill_editor_layout(fs: Arc<dyn Fs>, is_new_install: bool, cx: &mut App) {
@@ -936,6 +999,45 @@ mod tests {
                 "mcp-server-github",
             ]
         );
+
+        let repositories = recommended_mcp_extensions()
+            .into_iter()
+            .map(|extension| extension.repository)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            repositories,
+            vec![
+                "https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev",
+                "https://github.com/semioz/zed-slack-mcp",
+                "https://github.com/maximoffua/zed-mcp-server-supabase",
+                "https://github.com/LoamStudios/zed-mcp-server-figma",
+                "https://github.com/LoamStudios/zed-mcp-server-github",
+            ]
+        );
+
+        for id in ids {
+            let prefix = format!("{RECOMMENDED_MCP_BUNDLED_ASSET_DIR}/{id}/");
+            let assets = Assets.list(&prefix).expect("list bundled MCP assets");
+            assert!(
+                assets
+                    .iter()
+                    .any(|path| path == &format!("{prefix}extension.toml")),
+                "{id} should be bundled with an extension manifest"
+            );
+            let archive_path = format!("{prefix}{RECOMMENDED_MCP_ARCHIVE_FILENAME}");
+            assert!(
+                assets.iter().any(|path| path == &archive_path),
+                "{id} should be bundled with an installable archive"
+            );
+            let archive_bytes = Assets
+                .load(&archive_path)
+                .expect("load bundled MCP archive")
+                .expect("bundled MCP archive is present");
+            assert!(
+                !archive_bytes.as_ref().is_empty(),
+                "{id} archive should not be empty"
+            );
+        }
     }
 
     #[gpui::test]

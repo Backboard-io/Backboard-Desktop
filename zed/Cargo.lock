@@ -355,6 +355,7 @@ dependencies = [
  "agent_settings",
  "ai_onboarding",
  "anyhow",
+ "assets",
  "async-channel 2.5.0",
  "audio",
  "backboard_ui",

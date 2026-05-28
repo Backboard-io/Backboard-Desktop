@@ -417,6 +417,8 @@ async fn consume_stream(
     cx: &mut AsyncApp,
 ) -> Result<acp::StopReason> {
     let mut text_coalescer = StreamTextCoalescer::default();
+    let wait_for_post_run_events = should_wait_for_post_run_events(&runtime.feature_settings);
+    let mut saw_run_end = false;
     loop {
         let mut next_stream = None;
 
@@ -519,6 +521,9 @@ async fn consume_stream(
                 "tts_audio_chunk" => {}
                 "tts_stream_end" => {
                     emit_voice_audio_delta(&state, &runtime, &chunk, cx)?;
+                    if saw_run_end {
+                        return Ok(acp::StopReason::EndTurn);
+                    }
                 }
                 "tool_submit_required" => {
                     let run_id = chunk
@@ -584,6 +589,10 @@ async fn consume_stream(
                     emit_voice_records(&state, &runtime, &chunk, cx).ok();
                     emit_usage(&state, &runtime, &chunk, cx).ok();
                     state.set_current_run_id(&runtime.session_id, None);
+                    if wait_for_post_run_events {
+                        saw_run_end = true;
+                        continue;
+                    }
                     return Ok(acp::StopReason::EndTurn);
                 }
                 "run_failed" | "error" => {
@@ -1288,6 +1297,11 @@ fn send_to_llm_for_voice(feature_settings: &super::FeatureSettings) -> Option<bo
     }
 }
 
+fn should_wait_for_post_run_events(feature_settings: &super::FeatureSettings) -> bool {
+    matches!(feature_settings.voice_mode.as_str(), "tts" | "conversation")
+        || feature_settings.image_generation == "auto"
+}
+
 fn prompt_with_selected_skills(runtime: &SessionRuntime, message: &str) -> Result<String> {
     if runtime.feature_settings.selected_skills.is_empty() {
         return Ok(message.to_string());
@@ -1551,6 +1565,31 @@ mod tests {
             }))
         );
         assert_eq!(send_to_llm_for_voice(&settings), Some(true));
+    }
+
+    #[test]
+    fn post_run_media_and_voice_events_keep_stream_open() {
+        assert!(should_wait_for_post_run_events(
+            &super::super::FeatureSettings {
+                voice_mode: "tts".to_string(),
+                ..Default::default()
+            }
+        ));
+        assert!(should_wait_for_post_run_events(
+            &super::super::FeatureSettings {
+                voice_mode: "conversation".to_string(),
+                ..Default::default()
+            }
+        ));
+        assert!(should_wait_for_post_run_events(
+            &super::super::FeatureSettings {
+                image_generation: "auto".to_string(),
+                ..Default::default()
+            }
+        ));
+        assert!(!should_wait_for_post_run_events(
+            &super::super::FeatureSettings::default()
+        ));
     }
 
     #[test]

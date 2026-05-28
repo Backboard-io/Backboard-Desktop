@@ -13,6 +13,7 @@ use crate::message_editor::SharedSessionCapabilities;
 use acp_thread::{ContentBlock, PlanEntry};
 use cloud_api_types::{SubmitAgentThreadFeedbackBody, SubmitAgentThreadFeedbackCommentsBody};
 use editor::actions::OpenExcerpts;
+use extension_host::ExtensionStore;
 
 use gpui::TaskExt;
 use gpui::{DismissEvent, List, UniformListScrollHandle, uniform_list};
@@ -316,10 +317,12 @@ impl Render for AgentOptionsMenu {
                         list = list.child(self.render_option_group(session_options, cx));
                     }
 
+                    list = list
+                        .child(self.render_section_label("MCP Integrations", cx))
+                        .child(self.render_recommended_mcp_row(cx));
+
                     if !mcp_options.is_empty() {
-                        list = list
-                            .child(self.render_section_label("MCP Integrations", cx))
-                            .child(self.render_option_group(mcp_options, cx));
+                        list = list.child(self.render_option_group(mcp_options, cx));
                     }
 
                     list.into_any_element()
@@ -849,6 +852,95 @@ impl AgentOptionsMenu {
                     .map(|option| self.render_option_row(option, cx).into_any_element()),
             )
             .into_any_element()
+    }
+
+    fn render_recommended_mcp_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let (installed_count, total_count) = Self::recommended_mcp_install_status(cx);
+        let (status_label, status_color, status_icon) = if installed_count == total_count {
+            ("Manage".to_string(), Color::Success, IconName::Check)
+        } else if installed_count == 0 {
+            ("Install".to_string(), Color::Accent, IconName::Download)
+        } else {
+            (
+                format!("{installed_count}/{total_count}"),
+                Color::Accent,
+                IconName::Download,
+            )
+        };
+
+        ButtonLike::new("agent-option-recommended-mcp")
+            .full_width()
+            .height(px(32.).into())
+            .style(ButtonStyle::Subtle)
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .min_w_0()
+                            .gap_1p5()
+                            .items_center()
+                            .child(
+                                Icon::new(status_icon)
+                                    .size(IconSize::XSmall)
+                                    .color(status_color),
+                            )
+                            .child(
+                                Label::new("Bundled MCP Servers")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Default)
+                                    .truncate(),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_none()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                Label::new(status_label)
+                                    .size(LabelSize::XSmall)
+                                    .color(status_color)
+                                    .truncate(),
+                            )
+                            .child(
+                                Icon::new(IconName::ChevronRight)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Muted),
+                            ),
+                    ),
+            )
+            .tooltip(Tooltip::text(
+                "Install or configure GitHub, Slack, Supabase, Figma, and Shopify MCP servers",
+            ))
+            .on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(crate::InstallRecommendedMcpServers), cx);
+                cx.emit(DismissEvent);
+            })
+    }
+
+    fn recommended_mcp_install_status(cx: &App) -> (usize, usize) {
+        let extension_ids = crate::recommended_mcp_extension_ids();
+        let total_count = extension_ids.len();
+        let installed_count = ExtensionStore::try_global(cx)
+            .map(|extension_store| {
+                let extension_store = extension_store.read(cx);
+                extension_ids
+                    .iter()
+                    .filter(|extension_id| {
+                        extension_store
+                            .installed_extensions()
+                            .contains_key(extension_id.as_ref())
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+
+        (installed_count, total_count)
     }
 
     fn render_option_row(

@@ -131,6 +131,18 @@ impl BackboardAgentWorkspaceHeader {
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.create_chat(window, cx);
                             })),
+                    )
+                    .child(
+                        Button::new("install-mcp-servers", "Install MCP Servers")
+                            .start_icon(Icon::new(IconName::Download))
+                            .style(ButtonStyle::Outlined)
+                            .size(ButtonSize::Compact)
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(
+                                    Box::new(crate::InstallRecommendedMcpServers),
+                                    cx,
+                                );
+                            }),
                     ),
             )
             .child(
