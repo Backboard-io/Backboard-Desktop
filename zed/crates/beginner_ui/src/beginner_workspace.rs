@@ -13,9 +13,9 @@ use db::kvp::KeyValueStore;
 use editor::actions::Newline;
 use editor::{Editor, EditorEvent};
 use gpui::{
-    App, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
-    PathPromptOptions, Render, SharedString, Subscription, Task, WeakEntity, Window,
-    WindowControlArea, canvas,
+    AnyElement, App, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    FontWeight, IntoElement, PathPromptOptions, Render, SharedString, Subscription, Task,
+    WeakEntity, Window, WindowControlArea, canvas,
 };
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
@@ -26,6 +26,7 @@ use ui::{
 };
 use util::ResultExt;
 use workspace::{MultiWorkspace, PathList, Workspace};
+use zed_actions::ConfigureBackboardApiKey;
 
 use acp_thread::AgentThreadEntry;
 
@@ -394,6 +395,16 @@ impl BeginnerWorkspace {
         self.submit_follow_up(window, cx);
     }
 
+    fn has_backboard_api_key() -> bool {
+        backboard::BackboardConfig::load_or_default()
+            .api_key()
+            .is_some()
+    }
+
+    fn open_api_key_settings(&self, window: &mut Window, cx: &mut Context<Self>) {
+        window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
+    }
+
     fn make_chat_editor(
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -565,6 +576,12 @@ impl BeginnerWorkspace {
         });
 
         let load_recent = Self::load_chat_history(workspace.clone(), cx);
+        let config_changes = backboard::subscribe_config_changes();
+        let watch_api_key = cx.spawn(async move |this, cx| {
+            while config_changes.recv().await.is_ok() {
+                this.update(cx, |_, cx| cx.notify()).ok();
+            }
+        });
 
         let project = workspace
             .upgrade()
@@ -625,7 +642,7 @@ impl BeginnerWorkspace {
             pending_open_tabs: None,
             open_tabs_loaded: false,
             open_tabs_restored: false,
-            _tasks: vec![load_recent],
+            _tasks: vec![load_recent, watch_api_key],
             _project_subscription: project_sub,
             _search_subscription: search_sub,
             session_subscriptions: vec![chat_enter_sub],
@@ -822,6 +839,11 @@ impl BeginnerWorkspace {
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !Self::has_backboard_api_key() {
+            cx.notify();
+            return;
+        }
+
         let text = self.chat_editor.read(cx).text(cx).trim().to_string();
         if text.is_empty() {
             return;
@@ -930,6 +952,11 @@ impl BeginnerWorkspace {
     }
 
     fn submit_follow_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !Self::has_backboard_api_key() {
+            cx.notify();
+            return;
+        }
+
         // If no agent thread has started yet (e.g. app launched with a project
         // already open), treat this as the initial submission.
         if self.thread.is_none() {
@@ -2469,6 +2496,7 @@ impl BeginnerWorkspace {
         mode: ChatMode,
         is_running: bool,
         is_connecting: bool,
+        api_key_ready: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let selected = self.chat_mode == mode;
@@ -2489,12 +2517,17 @@ impl BeginnerWorkspace {
             } else {
                 colors.ghost_element_background
             })
-            .when(!is_running && !is_connecting, |el| {
+            .when(!is_running && !is_connecting && api_key_ready, |el| {
                 el.cursor_pointer()
                     .hover(move |el| el.bg(hover_border.opacity(0.14)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.set_chat_mode(mode, window, cx);
                     }))
+            })
+            .when(!api_key_ready, |el| {
+                el.tooltip(Tooltip::text(
+                    "Enter a Backboard API key to use AI features.",
+                ))
             })
             .child(
                 Icon::new(mode.icon())
@@ -2518,6 +2551,7 @@ impl BeginnerWorkspace {
 
     fn render_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
+        let api_key_ready = Self::has_backboard_api_key();
 
         v_flex()
             .key_context("BeginnerLanding")
@@ -2548,7 +2582,10 @@ impl BeginnerWorkspace {
                             .h_full()
                             .overflow_hidden()
                             .bg(ds::app_background(cx))
-                            .child(
+                            .when(!api_key_ready, |el| {
+                                el.child(self.render_api_status_banner(cx))
+                            })
+                            .child(if api_key_ready {
                                 v_flex()
                                     .flex_1()
                                     .items_center()
@@ -2562,10 +2599,34 @@ impl BeginnerWorkspace {
                                         false,
                                         draft_is_empty,
                                         true,
+                                        api_key_ready,
                                         window,
                                         cx,
-                                    )),
-                            ),
+                                    ))
+                                    .into_any_element()
+                            } else {
+                                v_flex()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .child(
+                                        v_flex()
+                                            .flex_1()
+                                            .items_center()
+                                            .justify_center()
+                                            .px_4()
+                                            .child(self.render_api_key_required(cx)),
+                                    )
+                                    .child(self.render_input_bar(
+                                        false,
+                                        false,
+                                        draft_is_empty,
+                                        false,
+                                        api_key_ready,
+                                        window,
+                                        cx,
+                                    ))
+                                    .into_any_element()
+                            }),
                     ),
             )
     }
@@ -2578,6 +2639,7 @@ impl BeginnerWorkspace {
         let is_running = self.is_agent_running;
         let is_connecting = self.pending_conversation_view.is_some();
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
+        let api_key_ready = Self::has_backboard_api_key();
         let preview_url = self.preview_url.clone();
         let active_title = self.current_tab_title();
         let right_panel_visible =
@@ -2625,19 +2687,32 @@ impl BeginnerWorkspace {
                                 is_running || is_connecting,
                                 cx,
                             ))
-                            .when_some(self.chat_feed.as_ref(), |el, feed| {
-                                feed.update(cx, |feed, cx| {
-                                    feed.set_preview_state(preview_card_state, cx);
-                                });
-                                el.child(
-                                    div()
+                            .when(!api_key_ready, |el| {
+                                el.child(self.render_api_status_banner(cx)).child(
+                                    v_flex()
                                         .flex_1()
                                         .min_h_0()
-                                        .overflow_hidden()
-                                        .child(feed.clone()),
+                                        .items_center()
+                                        .justify_center()
+                                        .px_4()
+                                        .child(self.render_api_key_required(cx)),
                                 )
                             })
-                            .when(self.chat_feed.is_none(), |el| {
+                            .when(api_key_ready, |el| {
+                                el.when_some(self.chat_feed.as_ref(), |el, feed| {
+                                    feed.update(cx, |feed, cx| {
+                                        feed.set_preview_state(preview_card_state, cx);
+                                    });
+                                    el.child(
+                                        div()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .overflow_hidden()
+                                            .child(feed.clone()),
+                                    )
+                                })
+                            })
+                            .when(api_key_ready && self.chat_feed.is_none(), |el| {
                                 let (headline, subtext) = if is_connecting {
                                     ("Backboard is connecting", "Your agent is starting up.")
                                 } else if self.chat_mode == ChatMode::Ask {
@@ -2671,7 +2746,7 @@ impl BeginnerWorkspace {
                                         ),
                                 )
                             })
-                            .when(is_running || is_connecting, |el| {
+                            .when(api_key_ready && (is_running || is_connecting), |el| {
                                 let status = if is_connecting {
                                     SharedString::from("Thought for 1s")
                                 } else if self.chat_mode == ChatMode::Ask {
@@ -2708,6 +2783,7 @@ impl BeginnerWorkspace {
                                 is_connecting,
                                 draft_is_empty,
                                 false,
+                                api_key_ready,
                                 window,
                                 cx,
                             )),
@@ -2990,16 +3066,116 @@ impl BeginnerWorkspace {
             .into_any_element()
     }
 
+    fn render_api_status_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .h(px(28.))
+            .w_full()
+            .items_center()
+            .justify_center()
+            .gap(px(6.))
+            .bg(cx.theme().colors().element_background)
+            .child(
+                div()
+                    .size(px(6.))
+                    .rounded_full()
+                    .bg(cx.theme().status().warning_border),
+            )
+            .child(
+                Label::new("API not connected")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Disabled),
+            )
+    }
+
+    fn render_api_key_required(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .max_w(px(380.))
+            .w_full()
+            .items_center()
+            .justify_center()
+            .gap(px(14.))
+            .child(
+                Icon::new(IconName::Info)
+                    .size(IconSize::Custom(rems_from_px(24.)))
+                    .color(Color::Muted),
+            )
+            .child(
+                Label::new("API key required")
+                    .size(LabelSize::Custom(rems_from_px(15.)))
+                    .weight(FontWeight::BOLD)
+                    .color(Color::Default),
+            )
+            .child(
+                div()
+                    .max_w(px(360.))
+                    .text_center()
+                    .text_size(rems_from_px(13.))
+                    .text_color(cx.theme().colors().text_muted)
+                    .line_height(relative(1.32))
+                    .child("Connect an API key to chat, generate artifacts, and use Simple Mode actions."),
+            )
+            .child(
+                Button::new("simple-configure-api-key", "Connect API key")
+                    .style(ButtonStyle::Filled)
+                    .size(ButtonSize::Large)
+                    .label_size(LabelSize::XSmall)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_api_key_settings(window, cx);
+                    })),
+            )
+            .child(
+                Label::new("Continue without API")
+                    .size(LabelSize::Small)
+                    .color(Color::Disabled),
+            )
+            .child(
+                div()
+                    .max_w(px(360.))
+                    .text_center()
+                    .text_ui_xs(cx)
+                    .text_color(cx.theme().colors().text_disabled)
+                    .line_height(relative(1.32))
+                    .child("You can still view the project manually."),
+            )
+    }
+
     fn render_input_bar(
         &self,
         is_running: bool,
         is_connecting: bool,
         draft_is_empty: bool,
         centered: bool,
+        api_key_ready: bool,
         _window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let is_disabled = is_running || is_connecting || draft_is_empty;
+    ) -> AnyElement {
+        if !api_key_ready {
+            return v_flex()
+                .flex_shrink_0()
+                .h(px(56.))
+                .w_full()
+                .px_4()
+                .pt_2()
+                .pb_3()
+                .bg(ds::app_background(cx))
+                .child(
+                    h_flex()
+                        .h(px(36.))
+                        .w_full()
+                        .items_center()
+                        .rounded_lg()
+                        .bg(cx.theme().colors().element_background.opacity(0.5))
+                        .px_3()
+                        .child(
+                            Label::new("API key required")
+                                .size(LabelSize::Small)
+                                .color(Color::Disabled),
+                        ),
+                )
+                .into_any_element();
+        }
+
+        let is_disabled = is_running || is_connecting || draft_is_empty || !api_key_ready;
         let colors = cx.theme().colors().clone();
         let send_icon_color = ensure_minimum_contrast(colors.text, ds::accent(cx), 75.);
         let icon_hover_bg = ds::hover_background(cx);
@@ -3086,12 +3262,14 @@ impl BeginnerWorkspace {
                                         ChatMode::Ask,
                                         is_running,
                                         is_connecting,
+                                        api_key_ready,
                                         cx,
                                     ))
                                     .child(self.render_mode_button(
                                         ChatMode::Build,
                                         is_running,
                                         is_connecting,
+                                        api_key_ready,
                                         cx,
                                     )),
                             )
@@ -3113,6 +3291,11 @@ impl BeginnerWorkspace {
                                             |this, _, window, cx| {
                                                 this.submit_follow_up(window, cx);
                                             },
+                                        ))
+                                    })
+                                    .when(!api_key_ready, |el| {
+                                        el.tooltip(Tooltip::text(
+                                            "Enter a Backboard API key to use AI features.",
                                         ))
                                     })
                                     .child(Icon::new(IconName::Send).size(IconSize::Small).color(
@@ -3170,5 +3353,6 @@ impl BeginnerWorkspace {
                     ),
                 )
             })
+            .into_any_element()
     }
 }

@@ -37,6 +37,8 @@ static INLINE_COMPLETION_OUTPUT_BACKLOG: LazyLock<Mutex<VecDeque<InlineCompletio
 static INLINE_COMPLETION_OUTPUT_SUBSCRIBERS: LazyLock<
     Mutex<Vec<async_channel::Sender<InlineCompletionOutput>>>,
 > = LazyLock::new(|| Mutex::new(Vec::new()));
+static CONFIG_CHANGE_SUBSCRIBERS: LazyLock<Mutex<Vec<async_channel::Sender<BackboardConfig>>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
 
 pub fn publish_inline_completion_output(output: InlineCompletionOutput) {
     {
@@ -77,6 +79,24 @@ fn inline_completion_output_backlog() -> MutexGuard<'static, VecDeque<InlineComp
 fn inline_completion_output_subscribers()
 -> MutexGuard<'static, Vec<async_channel::Sender<InlineCompletionOutput>>> {
     match INLINE_COMPLETION_OUTPUT_SUBSCRIBERS.lock() {
+        Ok(subscribers) => subscribers,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+pub fn publish_config_change(config: BackboardConfig) {
+    let mut subscribers = config_change_subscribers();
+    subscribers.retain(|subscriber| subscriber.try_send(config.clone()).is_ok());
+}
+
+pub fn subscribe_config_changes() -> async_channel::Receiver<BackboardConfig> {
+    let (sender, receiver) = async_channel::unbounded();
+    config_change_subscribers().push(sender);
+    receiver
+}
+
+fn config_change_subscribers() -> MutexGuard<'static, Vec<async_channel::Sender<BackboardConfig>>> {
+    match CONFIG_CHANGE_SUBSCRIBERS.lock() {
         Ok(subscribers) => subscribers,
         Err(poisoned) => poisoned.into_inner(),
     }
@@ -130,6 +150,7 @@ impl BackboardConfig {
         config.env_keys.insert(env, api_key.clone());
         config.api_key = Some(api_key);
         config.save()?;
+        publish_config_change(config.clone());
 
         Ok(config)
     }
@@ -142,6 +163,7 @@ impl BackboardConfig {
         config.api_key = None;
         config.env_keys.remove(&env);
         config.save()?;
+        publish_config_change(config.clone());
 
         Ok(config)
     }

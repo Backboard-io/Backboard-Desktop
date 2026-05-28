@@ -7,8 +7,9 @@ use anyhow::{Context as _, Result, anyhow};
 use editor::Editor;
 use futures::StreamExt as _;
 use gpui::{
-    Action, App, AppContext as _, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, ParentElement, Render, Styled, Task, WeakEntity, Window, actions, div, px,
+    Action, AnyElement, App, AppContext as _, AsyncWindowContext, Context, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, ParentElement, Render, Styled, Task, WeakEntity, Window,
+    actions, div, px,
 };
 use serde_json::{Value, json};
 use ui::{
@@ -140,12 +141,6 @@ pub fn init(cx: &mut App) {
                 panel.update(cx, |panel, cx| panel.save_api_key(window, cx));
             }
         });
-        workspace.register_action(|workspace, _: &ConfigureBackboardApiKey, window, cx| {
-            workspace.open_panel::<BackboardPanel>(window, cx);
-            if let Some(panel) = workspace.panel::<BackboardPanel>(cx) {
-                panel.update(cx, |panel, cx| panel.configure_api_key(window, cx));
-            }
-        });
         workspace.register_action(|workspace, _: &SendPrompt, window, cx| {
             if let Some(panel) = workspace.panel::<BackboardPanel>(cx) {
                 panel.update(cx, |panel, cx| panel.send_prompt(window, cx));
@@ -179,6 +174,7 @@ pub struct BackboardPanel {
     selected_model: Option<String>,
     configuring_api_key: bool,
     is_zoomed: bool,
+    _config_task: Task<()>,
 }
 
 struct BackboardMessage {
@@ -279,6 +275,16 @@ impl BackboardPanel {
             "Paste your Backboard API key in the setup card above. It saves to the same ~/.backboard/config.json file used by the CLI."
         };
 
+        let config_changes = backboard::subscribe_config_changes();
+        let config_task = cx.spawn(async move |this, cx| {
+            while config_changes.recv().await.is_ok() {
+                this.update(cx, |this, cx| {
+                    this.refresh_status(cx);
+                })
+                .ok();
+            }
+        });
+
         let mut panel = Self {
             focus_handle: cx.focus_handle(),
             workspace,
@@ -310,6 +316,7 @@ impl BackboardPanel {
             selected_model,
             configuring_api_key: false,
             is_zoomed: false,
+            _config_task: config_task,
         };
 
         if panel.api_ready {
@@ -352,9 +359,18 @@ impl BackboardPanel {
         self.status = Self::status_for_config(&config, self.api_ready);
         self.selected_provider = config.default_provider;
         self.selected_model = config.default_model;
+        if !self.api_ready {
+            self.configuring_api_key = false;
+            self.model_picker_open = false;
+            self.models_loading = false;
+            self.providers.clear();
+            self.models.clear();
+            self.model_status = "Connect Backboard to load models.".into();
+        }
         if self.api_ready && self.models.is_empty() && !self.models_loading {
             self.load_models(cx);
         }
+        cx.notify();
     }
 
     fn load_models(&mut self, cx: &mut Context<Self>) {
@@ -473,11 +489,8 @@ impl BackboardPanel {
         cx.notify();
     }
 
-    fn configure_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.configuring_api_key = true;
-        self.status = "Paste a Backboard API key to update this device.".to_string();
-        self.api_key_editor.focus_handle(cx).focus(window, cx);
-        cx.notify();
+    fn open_api_key_settings(&self, window: &mut Window, cx: &mut Context<Self>) {
+        window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
     }
 
     fn select_model(&mut self, provider: String, model: String, cx: &mut Context<Self>) {
@@ -874,21 +887,48 @@ impl BackboardPanel {
             )
     }
 
-    fn render_status(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_status(&self, cx: &mut Context<Self>) -> AnyElement {
+        if !self.api_ready {
+            return h_flex()
+                .h(px(28.))
+                .w_full()
+                .items_center()
+                .justify_center()
+                .gap(px(6.))
+                .bg(cx.theme().colors().element_background)
+                .child(
+                    div()
+                        .size(px(6.))
+                        .rounded_full()
+                        .bg(cx.theme().status().warning_border),
+                )
+                .child(
+                    Label::new("API not connected")
+                        .size(LabelSize::XSmall)
+                        .color(Color::Disabled),
+                )
+                .into_any_element();
+        }
+
         h_flex()
-            .mx_4()
-            .mt_3()
-            .px_3()
-            .py_2()
-            .gap_2()
-            .rounded_lg()
+            .h(px(28.))
+            .w_full()
+            .items_center()
+            .justify_center()
+            .gap(px(6.))
             .bg(cx.theme().colors().element_background)
-            .child(div().size(px(7.)).rounded_full().bg(if self.api_ready {
-                cx.theme().status().created
-            } else {
-                cx.theme().status().warning
-            }))
-            .child(Label::new(self.status.clone()).size(LabelSize::Small))
+            .child(
+                div()
+                    .size(px(6.))
+                    .rounded_full()
+                    .bg(cx.theme().status().created),
+            )
+            .child(
+                Label::new(self.status.clone())
+                    .size(LabelSize::XSmall)
+                    .color(Color::Disabled),
+            )
+            .into_any_element()
     }
 
     fn render_inline_activity(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1008,6 +1048,64 @@ impl BackboardPanel {
                                 cx.listener(|this, _, window, cx| this.save_api_key(window, cx)),
                             ),
                     ),
+            )
+    }
+
+    fn render_api_unavailable_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .items_center()
+            .justify_center()
+            .gap(px(14.))
+            .px_6()
+            .bg(colors.editor_background)
+            .child(
+                Icon::new(IconName::Info)
+                    .size(IconSize::Custom(rems_from_px(28.)))
+                    .color(Color::Muted),
+            )
+            .child(
+                Label::new("API key required")
+                    .size(LabelSize::Custom(rems_from_px(16.)))
+                    .weight(FontWeight::BOLD)
+                    .color(Color::Default),
+            )
+            .child(
+                div()
+                    .max_w(px(360.))
+                    .text_center()
+                    .text_size(rems_from_px(13.))
+                    .text_color(colors.text_muted)
+                    .line_height(relative(1.32))
+                    .child(
+                        "Connect an API key to run agents, generate outputs, and use workspace actions.",
+                    ),
+            )
+            .child(
+                Button::new("backboard-connect-api-key", "Connect API key")
+                    .style(ButtonStyle::Filled)
+                    .size(ButtonSize::Large)
+                    .label_size(LabelSize::XSmall)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_api_key_settings(window, cx);
+                    })),
+            )
+            .child(
+                Label::new("Continue without API")
+                    .size(LabelSize::Small)
+                    .color(Color::Disabled),
+            )
+            .child(
+                div()
+                    .max_w(px(360.))
+                    .text_center()
+                    .text_ui_xs(cx)
+                    .text_color(colors.text_disabled)
+                    .line_height(relative(1.32))
+                    .child("You can still browse files and inspect the workspace manually."),
             )
     }
 
@@ -1588,12 +1686,15 @@ impl Render for BackboardPanel {
             .when(self.should_show_status(), |this| {
                 this.child(self.render_status(cx))
             })
-            .when(self.configuring_api_key || !self.api_ready, |this| {
+            .when(self.configuring_api_key && self.api_ready, |this| {
                 this.child(self.render_api_key_setup(cx))
             })
-            .child(self.render_messages(cx))
+            .when(!self.api_ready, |this| {
+                this.child(self.render_api_unavailable_state(cx))
+            })
             .when(self.api_ready, |this| {
-                this.child(self.render_model_drawer(cx))
+                this.child(self.render_messages(cx))
+                    .child(self.render_model_drawer(cx))
             })
             .child(self.render_composer(cx))
     }

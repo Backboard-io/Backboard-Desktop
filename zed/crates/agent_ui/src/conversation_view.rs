@@ -30,10 +30,10 @@ use fs::Fs;
 use futures::FutureExt as _;
 use gpui::{
     Action, Animation, AnimationExt, AnyView, App, ClickEvent, ClipboardItem, CursorStyle,
-    ElementId, Empty, Entity, EventEmitter, FocusHandle, Focusable, Hsla, ListOffset, ListState,
-    ObjectFit, PlatformDisplay, ScrollHandle, SharedString, Subscription, Task, TaskExt, TextStyle,
-    WeakEntity, Window, WindowHandle, div, ease_in_out, img, linear_color_stop, linear_gradient,
-    list, point, pulsating_between,
+    ElementId, Empty, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, ListOffset,
+    ListState, ObjectFit, PlatformDisplay, ScrollHandle, SharedString, Subscription, Task, TaskExt,
+    TextStyle, WeakEntity, Window, WindowHandle, div, ease_in_out, img, linear_color_stop,
+    linear_gradient, list, point, pulsating_between,
 };
 use language::Buffer;
 use language_model::{LanguageModelCompletionError, LanguageModelRegistry};
@@ -68,6 +68,7 @@ use workspace::PathList;
 use workspace::{
     CollaboratorId, MultiWorkspace, NewTerminal, Toast, Workspace, notifications::NotificationId,
 };
+use zed_actions::ConfigureBackboardApiKey;
 use zed_actions::agent::{Chat, ToggleModelSelector};
 use zed_actions::assistant::OpenRulesLibrary;
 
@@ -507,6 +508,7 @@ pub struct ConversationView {
     notification_subscriptions: HashMap<WindowHandle<AgentNotification>, Vec<Subscription>>,
     auth_task: Option<Task<()>>,
     draft_prompt_persist_task: Option<Task<()>>,
+    _backboard_config_task: Option<Task<()>>,
     suppress_notifications: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -760,6 +762,17 @@ impl ConversationView {
         .detach();
 
         let thread_id = thread_id.unwrap_or_else(ThreadId::new);
+        let backboard_config_task = (agent.agent_id().as_ref() == BACKBOARD_AGENT_ID).then(|| {
+            let config_changes = backboard::subscribe_config_changes();
+            cx.spawn_in(window, async move |this, cx| {
+                while let Ok(config) = config_changes.recv().await {
+                    this.update_in(cx, |this, window, cx| {
+                        this.handle_backboard_config_change(config.api_key().is_some(), window, cx);
+                    })
+                    .ok();
+                }
+            })
+        });
 
         Self {
             agent: agent.clone(),
@@ -789,6 +802,7 @@ impl ConversationView {
             notification_subscriptions: HashMap::default(),
             auth_task: None,
             draft_prompt_persist_task: None,
+            _backboard_config_task: backboard_config_task,
             suppress_notifications: false,
             _subscriptions: subscriptions,
             focus_handle: cx.focus_handle(),
@@ -859,6 +873,58 @@ impl ConversationView {
                 });
             });
         }
+        cx.notify();
+    }
+
+    fn handle_backboard_config_change(
+        &mut self,
+        api_key_ready: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.agent.agent_id().as_ref() != BACKBOARD_AGENT_ID {
+            return;
+        }
+
+        if api_key_ready {
+            if self
+                .as_connected()
+                .is_some_and(|connected| !connected.auth_state.is_ok())
+            {
+                self.reset(window, cx);
+            }
+            return;
+        }
+
+        let Some(connected) = self.as_connected_mut() else {
+            return;
+        };
+
+        connected.auth_state = AuthState::Unauthenticated {
+            pending_auth_method: None,
+            configuration_view: None,
+            description: Some(cx.new(|cx| {
+                Markdown::new(
+                    "Please enter a Backboard API key to use AI features, including agents and Simple Mode. The editor remains available without AI."
+                        .into(),
+                    None,
+                    None,
+                    cx,
+                )
+            })),
+            _subscription: None,
+        };
+
+        if let Some(view) = connected.active_view()
+            && view
+                .read(cx)
+                .message_editor
+                .focus_handle(cx)
+                .is_focused(window)
+        {
+            self.focus_handle.focus(window, cx);
+        }
+
         cx.notify();
     }
 
@@ -2129,6 +2195,10 @@ impl ConversationView {
         })
     }
 
+    fn open_backboard_api_key_settings(&self, window: &mut Window, cx: &mut Context<Self>) {
+        window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
+    }
+
     fn render_auth_required_state(
         &self,
         connection: &Rc<dyn AgentConnection>,
@@ -2139,8 +2209,8 @@ impl ConversationView {
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let auth_methods = connection.auth_methods();
-
         let agent_id = self.agent.agent_id();
+        let backboard_api_key_required = agent_id.as_ref() == BACKBOARD_AGENT_ID;
         let agent_display_name = if agent_id.as_ref() == agent::ZED_AGENT_ID.as_ref() {
             SharedString::from("Backboard")
         } else {
@@ -2211,6 +2281,63 @@ impl ConversationView {
                 .into_any_element();
         }
 
+        if backboard_api_key_required {
+            let colors = cx.theme().colors();
+            return v_flex()
+                .flex_1()
+                .w_full()
+                .items_center()
+                .justify_center()
+                .gap(px(14.))
+                .px_6()
+                .child(
+                    Icon::new(IconName::Info)
+                        .size(IconSize::Custom(rems_from_px(24.)))
+                        .color(Color::Muted),
+                )
+                .child(
+                    Label::new("API key required")
+                        .size(LabelSize::Custom(rems_from_px(15.)))
+                        .weight(FontWeight::BOLD)
+                        .color(Color::Default),
+                )
+                .child(
+                    div()
+                        .max_w(px(360.))
+                        .text_center()
+                        .text_size(rems_from_px(13.))
+                        .text_color(colors.text_muted)
+                        .line_height(relative(1.32))
+                        .child(
+                            "Connect an API key to chat, run agents, and use Backboard actions.",
+                        ),
+                )
+                .child(
+                    Button::new("backboard-auth-configure-api-key", "Connect API key")
+                        .style(ButtonStyle::Filled)
+                        .size(ButtonSize::Large)
+                        .label_size(LabelSize::XSmall)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_backboard_api_key_settings(window, cx);
+                        })),
+                )
+                .child(
+                    Label::new("Continue without API")
+                        .size(LabelSize::Small)
+                        .color(Color::Disabled),
+                )
+                .child(
+                    div()
+                        .max_w(px(360.))
+                        .text_center()
+                        .text_ui_xs(cx)
+                        .text_color(colors.text_disabled)
+                        .line_height(relative(1.32))
+                        .child("You can still browse files and inspect the workspace manually."),
+                )
+                .into_any_element();
+        }
+
         Callout::new()
             .icon(IconName::Info)
             .title(format!("Authenticate to {}", agent_display_name))
@@ -2240,6 +2367,15 @@ impl ConversationView {
                                 )
                             }))
                         }
+                    })
+                    .when(backboard_api_key_required, |this| {
+                        this.mt_2().child(
+                            Button::new("backboard-auth-configure-api-key", "Connect API key")
+                                .style(ButtonStyle::Filled)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_backboard_api_key_settings(window, cx);
+                                })),
+                        )
                     })
                     .when(auth_methods.len() > 1, |this| {
                         this.gap_1().child(auth_buttons())

@@ -22,7 +22,7 @@ use ::backboard::{BackboardClient, BackboardConfig, BackboardModel};
 use acp_thread::{
     AcpThread, AgentConnection, AgentModelInfo, AgentModelList, AgentSessionConfigOptions,
     AgentSessionInfo, AgentSessionList, AgentSessionListRequest, AgentSessionListResponse,
-    AgentSessionModes, AgentSessionTruncate, UserMessageId,
+    AgentSessionModes, AgentSessionTruncate, AuthRequired, UserMessageId,
 };
 use action_log::ActionLog;
 use agent_client_protocol::schema as acp;
@@ -307,6 +307,10 @@ impl BackboardNativeConnection {
 impl BackboardNativeState {
     pub(crate) fn load_config(&self) -> BackboardConfig {
         BackboardConfig::load_or_default()
+    }
+
+    pub(crate) fn has_api_key(&self) -> bool {
+        self.load_config().api_key().is_some()
     }
 
     pub(crate) fn client(&self) -> Result<(BackboardConfig, BackboardClient)> {
@@ -713,6 +717,10 @@ impl AgentConnection for BackboardNativeConnection {
         work_dirs: PathList,
         cx: &mut App,
     ) -> Task<Result<Entity<AcpThread>>> {
+        if !self.state.has_api_key() {
+            return Task::ready(Err(missing_api_key_auth_required().into()));
+        }
+
         let work_dirs = non_empty_work_dirs_or_project_default(work_dirs, &project, cx);
         let Some(workspace) = work_dirs.ordered_paths().next().cloned() else {
             return Task::ready(Err(anyhow!("Working directory cannot be empty")));
@@ -929,6 +937,10 @@ impl BackboardNativeConnection {
         replay_history: bool,
         cx: &mut App,
     ) -> Task<Result<Entity<AcpThread>>> {
+        if !self.state.has_api_key() {
+            return Task::ready(Err(missing_api_key_auth_required().into()));
+        }
+
         let work_dirs = non_empty_work_dirs_or_project_default(work_dirs, &project, cx);
         let Some(workspace) = work_dirs.ordered_paths().next().cloned() else {
             return Task::ready(Err(anyhow!("Working directory cannot be empty")));
@@ -1208,63 +1220,67 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                 return Ok(AgentModelList::Grouped(group_models(models)));
             }
 
-            let models = match state.client() {
-                Ok((_config, client)) => {
-                    log::info!(
-                        "Backboard native endpoint call: GET /models?model_type=llm&limit=15000 plus provider-scoped model catalogs agent_id={}",
-                        state.agent_id
-                    );
-                    let models = gpui_tokio::Tokio::spawn_result(cx, async move {
-                        list_backboard_model_catalog(client).await
-                    })
-                    .await?;
-                    models
-                        .into_iter()
-                        .filter(|model| !model.provider.is_empty() && !model.name.is_empty())
-                        .map(|model| {
-                            if let Some(context_limit) = model.context_limit {
-                                state.remember_model_context_window(
-                                    &model.provider,
-                                    &model.name,
-                                    context_limit,
-                                );
-                            }
-                            let id = format!("{}/{}", model.provider, model.name);
-                            let mut info = AgentModelInfo {
-                                id: acp::ModelId::new(id),
-                                name: model
-                                    .display_name
-                                    .unwrap_or_else(|| model.name.clone())
-                                    .into(),
-                                description: Some(model.provider.clone().into()),
-                                icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
-                                is_latest: false,
-                                cost: None,
-                            };
-                            if let (Some(input), Some(output)) = (
-                                model.input_cost_per_1m_tokens,
-                                model.output_cost_per_1m_tokens,
-                            ) {
-                                info.cost =
-                                    Some(format!("${input:.2}/M in, ${output:.2}/M out").into());
-                            }
-                            info
-                        })
-                        .collect::<Vec<_>>()
-                }
-                Err(_) => {
-                    let config = state.load_config();
-                    let (provider, model) = BackboardNativeState::fallback_provider_model(&config);
-                    vec![AgentModelInfo {
-                        id: acp::ModelId::new(format!("{provider}/{model}")),
-                        name: model.into(),
-                        description: Some(provider.into()),
+            let Ok((_config, client)) = state.client() else {
+                let config = state.load_config();
+                let (provider, model) = BackboardNativeState::fallback_provider_model(&config);
+                log::warn!(
+                    "Backboard model catalog unavailable; using uncached fallback model {provider}/{model}"
+                );
+                return Ok(AgentModelList::Grouped(group_models(vec![AgentModelInfo {
+                    id: acp::ModelId::new(format!("{provider}/{model}")),
+                    name: model.into(),
+                    description: Some(provider.into()),
+                    icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
+                    is_latest: false,
+                    cost: None,
+                }])));
+            };
+
+            log::info!(
+                "Backboard native endpoint call: GET /models?model_type=llm&limit=15000 plus provider-scoped model catalogs agent_id={}",
+                state.agent_id
+            );
+            let models = gpui_tokio::Tokio::spawn_result(cx, async move {
+                list_backboard_model_catalog(client).await
+            })
+            .await?;
+            let models = models
+                .into_iter()
+                .filter(|model| !model.provider.is_empty() && !model.name.is_empty())
+                .map(|model| {
+                    if let Some(context_limit) = model.context_limit {
+                        state.remember_model_context_window(
+                            &model.provider,
+                            &model.name,
+                            context_limit,
+                        );
+                    }
+                    let id = format!("{}/{}", model.provider, model.name);
+                    let mut info = AgentModelInfo {
+                        id: acp::ModelId::new(id),
+                        name: model
+                            .display_name
+                            .unwrap_or_else(|| model.name.clone())
+                            .into(),
+                        description: Some(model.provider.clone().into()),
                         icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
                         is_latest: false,
                         cost: None,
-                    }]
-                }
-            };
+                    };
+                    if let (Some(input), Some(output)) = (
+                        model.input_cost_per_1m_tokens,
+                        model.output_cost_per_1m_tokens,
+                    ) {
+                        info.cost = Some(format!("${input:.2}/M in, ${output:.2}/M out").into());
+                    }
+                    info
+                })
+                .collect::<Vec<_>>();
+            log::info!(
+                "Backboard model catalog loaded {} usable models agent_id={}",
+                models.len(),
+                state.agent_id
+            );
             *state.model_cache.borrow_mut() = Some(models.clone());
             Ok(AgentModelList::Grouped(group_models(models)))
         })
@@ -1573,7 +1589,11 @@ fn json_string(value: &Value, keys: &[&str]) -> Option<String> {
 }
 
 pub(crate) fn missing_api_key_message() -> String {
-    "Backboard needs an API key before the IDE agent can run. Set it in the shared config with `backboard config set-api-key <key>`.".to_string()
+    "Please enter a Backboard API key to use AI features, including agents and Simple Mode. The editor remains available without AI.".to_string()
+}
+
+fn missing_api_key_auth_required() -> AuthRequired {
+    AuthRequired::new().with_description(missing_api_key_message())
 }
 
 #[cfg(test)]

@@ -44,7 +44,7 @@ use util::{ResultExt as _, paths::PathStyle, rel_path::RelPath};
 use workspace::{
     AppState, MultiWorkspace, OpenOptions, OpenVisible, Workspace, client_side_decorations,
 };
-use zed_actions::{OpenProjectSettings, OpenSettings, OpenSettingsAt};
+use zed_actions::{ConfigureBackboardApiKey, OpenProjectSettings, OpenSettings, OpenSettingsAt};
 
 use crate::components::{
     EnumVariantDropdown, NumberField, NumberFieldMode, NumberFieldType, SettingsInputField,
@@ -395,8 +395,16 @@ pub fn init(cx: &mut App) {
         open_settings_editor(None, None, None, cx);
     });
 
+    cx.on_action(|_: &ConfigureBackboardApiKey, cx| {
+        open_settings_editor(Some("backboard.api_key"), None, None, cx);
+    });
+
     cx.observe_new(|workspace: &mut workspace::Workspace, _, _| {
         workspace
+            .register_action(|_, _: &ConfigureBackboardApiKey, window, cx| {
+                let window_handle = window.window_handle().downcast::<MultiWorkspace>();
+                open_settings_editor(Some("backboard.api_key"), None, window_handle, cx);
+            })
             .register_action(|_, OpenSettingsAt { path }: &OpenSettingsAt, window, cx| {
                 let window_handle = window.window_handle().downcast::<MultiWorkspace>();
                 open_settings_editor(Some(&path), None, window_handle, cx);

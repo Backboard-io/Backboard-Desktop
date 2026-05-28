@@ -18,7 +18,7 @@ use ui::prelude::*;
 use util::ResultExt;
 use util::path_list::PathList;
 use zed_actions::agents_sidebar::ToggleThreadSwitcher;
-use zed_actions::{OpenSettings, OpenSettingsAt, ResetOnboarding, SwitchInterfaceMode};
+use zed_actions::{ConfigureBackboardApiKey, OpenSettings, ResetOnboarding, SwitchInterfaceMode};
 
 use agent_settings::AgentSettings;
 use settings::SidebarDockPosition;
@@ -2263,9 +2263,7 @@ impl MultiWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<ContextMenu> {
-        let workspace = self.workspace().clone();
         ContextMenu::build(window, cx, move |menu, _window, _cx| {
-            let workspace_for_api_key = workspace.clone();
             menu.item(
                 ContextMenuEntry::new("Dashboard")
                     .icon(IconName::ArrowUpRight)
@@ -2279,18 +2277,9 @@ impl MultiWorkspace {
             })
             .entry(
                 "Configure API Key",
-                Some(Box::new(OpenSettingsAt {
-                    path: "backboard.api_key".to_string(),
-                })),
-                move |window, cx| {
-                    let focus_handle = workspace_for_api_key.read(cx).focus_handle(cx);
-                    focus_handle.dispatch_action(
-                        &OpenSettingsAt {
-                            path: "backboard.api_key".to_string(),
-                        },
-                        window,
-                        cx,
-                    );
+                Some(Box::new(ConfigureBackboardApiKey)),
+                |window, cx| {
+                    window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
                 },
             )
         })
