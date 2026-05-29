@@ -123,7 +123,7 @@ mod tests {
         let rendered = template
             .render_with_prompt_variant(&templates, true)
             .unwrap();
-        assert!(rendered.contains("You are the Zed coding agent"));
+        assert!(rendered.contains("You are the Backboard Studio coding agent"));
         assert!(rendered.contains("Today's Date: 2026-01-01"));
         assert!(rendered.contains("test-model"));
     }

@@ -1,6 +1,6 @@
 ---
 title: Channels
-description: "Persistent collaboration rooms in Zed for sharing projects, voice chat, and real-time code editing."
+description: "Persistent collaboration rooms in Backboard Studio for sharing projects, voice chat, and real-time code editing."
 ---
 
 # Channels {#channels}
@@ -24,7 +24,7 @@ You can keep both work and side-project channels in the Collaboration Panel.
 
 Joining a channel adds you to a shared room where you can work on projects together.
 
-_Join [our channel tree](https://zed.dev/channel/zed-283) to get an idea of how you can organize yours._
+_Join [our channel tree](https://app.backboard.io/channel/zed-283) to get an idea of how you can organize yours._
 
 ## Inviting People
 
@@ -40,7 +40,7 @@ Once you have added someone, they can either join your channel by clicking on it
 
 You can mute/unmute your microphone via the microphone icon in the upper right-hand side of the window.
 
-> **Note:** When joining a channel, Zed automatically shares your microphone with other users in the call, if your OS allows it. To start muted, use the [`mute_on_join`](../reference/all-settings.md#calls) setting.
+> **Note:** When joining a channel, Backboard Studio automatically shares your microphone with other users in the call, if your OS allows it. To start muted, use the [`mute_on_join`](../reference/all-settings.md#calls) setting.
 
 ## Sharing Projects
 
@@ -64,7 +64,7 @@ Collaborators that are currently in that project will be disconnected from the p
 
 Each channel has a Markdown notes file associated with it to keep track of current status, new ideas, or to collaborate on building out the design for the feature that you're working on before diving into code.
 
-This works like a shared Markdown document backed by Zed's collaboration service.
+This works like a shared Markdown document backed by Backboard Studio's collaboration service.
 
 Open channel notes by clicking the document icon to the right of the channel name in the Collaboration Panel.
 
@@ -106,7 +106,7 @@ Share your screen with collaborators in the current channel by clicking on the `
 If you have multiple displays, you can choose which one to share via the chevron to the right of the monitor icon.
 
 After you've shared your screen, others can click the `Screen` entry under your name in the Collaboration Panel to open a tab that keeps it visible.
-If they are following you, Zed will automatically switch between following your cursor in their Zed instance and your screen share, depending on whether you are focused on Zed or another application, like a web browser.
+If they are following you, Backboard Studio will automatically switch between following your cursor in their Backboard Studio instance and your screen share, depending on whether you are focused on Backboard Studio or another application, like a web browser.
 
 > **Warning:** Collaborators can see your entire screen when sharing. Stop screen sharing when finished.
 

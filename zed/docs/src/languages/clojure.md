@@ -1,6 +1,6 @@
 ---
 title: Clojure
-description: "Configure Clojure language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Clojure language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Clojure

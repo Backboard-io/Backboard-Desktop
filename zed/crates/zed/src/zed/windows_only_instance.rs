@@ -114,8 +114,8 @@ fn send_args_to_instance(args: &Args) -> anyhow::Result<()> {
         return write_message_to_instance_pipe(url.as_bytes());
     }
 
-    let (server, server_name) =
-        IpcOneShotServer::<IpcHandshake>::new().context("Handshake before Zed spawn")?;
+    let (server, server_name) = IpcOneShotServer::<IpcHandshake>::new()
+        .context("Handshake before Backboard Studio spawn")?;
     let url = format!("backboard-cli://{server_name}");
 
     let request = {
@@ -174,7 +174,9 @@ fn send_args_to_instance(args: &Args) -> anyhow::Result<()> {
         .spawn({
             let exit_status = exit_status.clone();
             move || {
-                let (_, handshake) = server.accept().context("Handshake after Zed spawn")?;
+                let (_, handshake) = server
+                    .accept()
+                    .context("Handshake after Backboard Studio spawn")?;
                 let (tx, rx) = (handshake.requests, handshake.responses);
 
                 tx.send(request)?;

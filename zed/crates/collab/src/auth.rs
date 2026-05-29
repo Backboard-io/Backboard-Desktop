@@ -32,7 +32,8 @@ pub async fn validate_header<B>(mut req: Request<B>, next: Next<B>) -> impl Into
     if first == "dev-server-token" {
         Err(Error::http(
             StatusCode::UNAUTHORIZED,
-            "Dev servers were removed in Zed 0.157 please upgrade to SSH remoting".to_string(),
+            "Dev servers were removed in Backboard Studio 0.157; please upgrade to SSH remoting"
+                .to_string(),
         ))?;
     }
 

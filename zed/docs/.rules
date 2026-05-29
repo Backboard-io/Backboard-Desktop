@@ -1,14 +1,14 @@
-# Zed Documentation Guidelines
+# Backboard Studio Documentation Guidelines
 
 ## Voice and Tone
 
 ### Core Principles
 
-- **Practical over promotional**: Focus on what users can do, not on selling Zed. Avoid marketing language like "powerful," "revolutionary," or "best-in-class."
-- **Honest about limitations**: When Zed lacks a feature or doesn't match another tool's depth, say so directly. Pair limitations with workarounds or alternative workflows.
+- **Practical over promotional**: Focus on what users can do, not on selling Backboard Studio. Avoid marketing language like "powerful," "revolutionary," or "best-in-class."
+- **Honest about limitations**: When Backboard Studio lacks a feature or doesn't match another tool's depth, say so directly. Pair limitations with workarounds or alternative workflows.
 - **Direct and concise**: Use short sentences. Get to the point. Developers are scanning, not reading novels.
 - **Second person**: Address the reader as "you." Avoid "the user" or "one."
-- **Present tense**: "Zed opens the file" not "Zed will open the file."
+- **Present tense**: "Backboard Studio opens the file" not "Backboard Studio will open the file."
 
 ### What to Avoid
 
@@ -75,7 +75,7 @@ For single inline commands in prose, backticks are fine: `zed .`
 
 Use tables for:
 - Keybinding comparisons between editors
-- Settings mappings (e.g., VS Code → Zed)
+- Settings mappings (e.g., VS Code → Backboard Studio)
 - Feature comparisons with clear columns
 
 Format:
@@ -120,7 +120,7 @@ Reserve tips for genuinely useful information, not padding.
 | Use | Instead of |
 | --- | --- |
 | folder | directory (in user-facing text) |
-| project | workspace (Zed doesn't have workspaces) |
+| project | workspace (Backboard Studio doesn't have workspaces) |
 | Settings Editor | settings UI, preferences |
 | command palette | command bar, action search |
 | language server | LSP (spell out first use, then LSP is fine) |
@@ -140,12 +140,12 @@ Or add this to your settings.json:
 
 ### Bad: Wordy and promotional
 ```
-Zed provides a powerful and seamless formatting experience. Simply navigate to the settings and you'll find the format_on_save option which enables Zed's incredible auto-formatting capabilities.
+Backboard Studio provides a powerful and seamless formatting experience. Simply navigate to the settings and you'll find the format_on_save option which enables Backboard Studio's incredible auto-formatting capabilities.
 ```
 
 ### Good: Honest about limitations
 ```
-Zed doesn't index your project like IntelliJ does. You open a folder and start working immediately—no waiting. The trade-off: cross-project analysis relies on language servers, which may not go as deep.
+Backboard Studio doesn't index your project like IntelliJ does. You open a folder and start working immediately—no waiting. The trade-off: cross-project analysis relies on language servers, which may not go as deep.
 
 **How to adapt:**
 - Use `Cmd+Shift+F` for project-wide text search
@@ -154,7 +154,7 @@ Zed doesn't index your project like IntelliJ does. You open a folder and start w
 
 ### Bad: Defensive or dismissive
 ```
-While some users might miss indexing, Zed's approach is actually better because it's faster.
+While some users might miss indexing, Backboard Studio's approach is actually better because it's faster.
 ```
 
 ## Pull request hygiene

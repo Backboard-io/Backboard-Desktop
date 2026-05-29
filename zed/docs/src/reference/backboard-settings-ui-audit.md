@@ -87,7 +87,7 @@ This is the current one-by-one decision list for the AI page. The visible page s
 |---|---|---|---|
 | Command palette | `lsp_tool::*` | Hidden from user view | Backboard edit predictions do not use LSP completions or language-server context. |
 | Keybindings editor | `lsp_tool::*` | Hidden from user view | The keybindings editor now applies the command palette visibility filter before listing mapped or unmapped actions. |
-| Command palette and keybindings editor | `collab::*`, `collab_panel::*`, `channel_modal::*`, `repl::*`, `journal::*`, `notebook::*`, `settings_profile_selector::*`, `feedback::*`, `remote_debug::*`, `dev::*` | Hidden from user view | These are removed, internal, Zed-specific, or non-Backboard product surfaces. |
+| Command palette and keybindings editor | `collab::*`, `collab_panel::*`, `channel_modal::*`, `repl::*`, `journal::*`, `notebook::*`, `settings_profile_selector::*`, `feedback::*`, `remote_debug::*`, `dev::*` | Hidden from user view | These are removed, internal, Backboard Studio-specific, or non-Backboard product surfaces. |
 | Command palette and keybindings editor | `zed::...`, `zed_*::...` display labels | Reworded for Backboard | `command_palette::humanize_action_name` now renders these as Backboard-facing labels while retaining raw action IDs for keymap JSON compatibility. |
 
 ## Pre-Cleanup User-Facing Inventory
@@ -508,4 +508,4 @@ This is the current one-by-one decision list for the AI page. The visible page s
 
 ## Longer-Term Reorganization
 
-Move `Keep advanced editor only` rows behind an “Advanced Editor” grouping or an explicit editor-mode-only filter. This keeps Backboard simple mode clean without breaking editor-mode users who rely on inherited Zed behavior.
+Move `Keep advanced editor only` rows behind an “Advanced Editor” grouping or an explicit editor-mode-only filter. This keeps Backboard simple mode clean without breaking editor-mode users who rely on inherited Backboard Studio behavior.

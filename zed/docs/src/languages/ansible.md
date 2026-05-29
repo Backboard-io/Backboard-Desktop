@@ -1,13 +1,13 @@
 ---
 title: Ansible
-description: "Configure Ansible language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Ansible language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Ansible
 
-Support for Ansible in Zed is provided via a community-maintained [Ansible extension](https://github.com/kartikvashistha/zed-ansible).
+Support for Ansible in Backboard Studio is provided via a community-maintained [Ansible extension](https://github.com/kartikvashistha/zed-ansible).
 
-- Tree-sitter: [zed-industries/tree-sitter-yaml](https://github.com/zed-industries/tree-sitter-yaml)
+- Tree-sitter: [backboard/tree-sitter-yaml](https://github.com/backboard/tree-sitter-yaml)
 - Language Server: [ansible/vscode-ansible](https://github.com/ansible/vscode-ansible/tree/main/packages/ansible-language-server)
 
 ## Setup
@@ -16,7 +16,7 @@ Support for Ansible in Zed is provided via a community-maintained [Ansible exten
 
 To avoid mishandling non-Ansible YAML files, the Ansible Language is not associated with any file extensions by default.
 
-To change this behavior, you can add a `"file_types"` section to Zed settings inside your project (`.zed/settings.json`) or your Zed user settings (`~/.config/zed/settings.json`) to match your folder/naming conventions. For example:
+To change this behavior, you can add a `"file_types"` section to Backboard Studio settings inside your project (`.zed/settings.json`) or your Backboard Studio user settings (`~/.config/zed/settings.json`) to match your folder/naming conventions. For example:
 
 ```json [settings]
 {
@@ -57,7 +57,7 @@ If your inventory file is in the YAML format, you can either:
 # yaml-language-server: $schema=https://raw.githubusercontent.com/ansible/ansible-lint/main/src/ansiblelint/schemas/inventory.json
 ```
 
-- or, configure the YAML language server settings to set this schema for all your inventory files, that match your inventory pattern, under your Zed settings ([ref](https://zed.dev/docs/languages/yaml)):
+- or, configure the YAML language server settings to set this schema for all your inventory files, that match your inventory pattern, under your Backboard Studio settings ([ref](https://app.backboard.io/docs/languages/yaml)):
 
 ```json [settings]
 {
@@ -107,12 +107,12 @@ By default, the following configuration is passed to the Ansible language server
 
 > **Note:** In order for linting to work, ensure that `ansible-lint` is installed and discoverable on your `$PATH`.
 
-When desired, any of the above default settings can be overridden under the `"lsp"` section of your Zed settings file. For example:
+When desired, any of the above default settings can be overridden under the `"lsp"` section of your Backboard Studio settings file. For example:
 
 ```json [settings]
 {
   "lsp": {
-    // The Zed Ansible extension prefixes all settings with `ansible`
+    // The Backboard Studio Ansible extension prefixes all settings with `ansible`
     // so use `ansible.path` instead of `ansible.ansible.path`.
     "ansible-language-server": {
       "settings": {

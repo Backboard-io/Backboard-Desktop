@@ -26,7 +26,7 @@ pub use crate::repl_settings::ReplSettings;
 pub use crate::repl_store::ReplStore;
 pub use crate::session::Session;
 
-pub const KERNEL_DOCS_URL: &str = "https://zed.dev/docs/repl#changing-kernels";
+pub const KERNEL_DOCS_URL: &str = "https://app.backboard.io/docs/repl#changing-kernels";
 
 pub fn init(fs: Arc<dyn Fs>, cx: &mut App) {
     set_dispatcher(zed_dispatcher(cx));

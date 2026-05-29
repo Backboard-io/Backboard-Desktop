@@ -828,7 +828,7 @@ pub(super) struct ConfigureMode {
 impl ConfigureMode {
     pub(super) fn new(window: &mut Window, cx: &mut App) -> Entity<Self> {
         let program = cx.new(|cx| {
-            InputField::new(window, cx, "ENV=Zed ~/bin/program --option")
+            InputField::new(window, cx, "ENV=Backboard Studio ~/bin/program --option")
                 .label("Program")
                 .tab_stop(true)
                 .tab_index(1)

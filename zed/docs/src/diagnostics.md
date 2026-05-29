@@ -1,15 +1,15 @@
 ---
-title: Diagnostics - Errors and Warnings in Zed
-description: View and navigate errors, warnings, and code diagnostics from language servers in Zed.
+title: Diagnostics - Errors and Warnings in Backboard Studio
+description: View and navigate errors, warnings, and code diagnostics from language servers in Backboard Studio.
 ---
 
 # Diagnostics
 
-Zed gets its diagnostics from the language servers and supports both push and pull variants of the LSP which makes it compatible with all existing language servers.
+Backboard Studio gets its diagnostics from the language servers and supports both push and pull variants of the LSP which makes it compatible with all existing language servers.
 
 # Regular diagnostics
 
-By default, Zed displays all diagnostics as underlined text in the editor and the scrollbar.
+By default, Backboard Studio displays all diagnostics as underlined text in the editor and the scrollbar.
 
 Editor diagnostics could be filtered with the
 
@@ -34,7 +34,7 @@ Or, `editor::GoToDiagnostic` and `editor::GoToPreviousDiagnostic` could be used 
 
 # Inline diagnostics (Error lens)
 
-Zed supports showing diagnostic as lens to the right of the code.
+Backboard Studio supports showing diagnostic as lens to the right of the code.
 This is disabled by default, but can either be temporarily turned on (or off) using the editor menu, or permanently, using the
 
 ```json [settings]

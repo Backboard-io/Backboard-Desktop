@@ -1,6 +1,6 @@
 ---
-title: Project Panel - Zed
-description: Navigate workspace files and directories with Zed's project panel. Create, rename, trash and delete file and directories.
+title: Project Panel - Backboard Studio
+description: Navigate workspace files and directories with Backboard Studio's project panel. Create, rename, trash and delete file and directories.
 ---
 
 # Project Panel
@@ -10,7 +10,7 @@ Toggle it with {#action project_panel::ToggleFocus} ({#kb
 project_panel::ToggleFocus}), or click the **Project Panel** button in the
 status bar.
 
-![Project Panel](https://images.zed.dev/docs/project-panel/panel.png)
+![Project Panel](https://images.app.backboard.io/docs/project-panel/panel.png)
 
 ## Navigating
 
@@ -32,9 +32,9 @@ project panel and scroll it into view. This can be disabled with the
 When `project_panel.sticky_scroll` is enabled (the default), ancestor directories pin themselves to the top
 of the panel as you scroll, so you always know which directory you're on.
 
-![Project Panel: Sticky Scroll Enabled](https://images.zed.dev/docs/project-panel/sticky-scroll-true.png)
+![Project Panel: Sticky Scroll Enabled](https://images.app.backboard.io/docs/project-panel/sticky-scroll-true.png)
 
-![Project Panel: Sticky Scroll Disabled](https://images.zed.dev/docs/project-panel/sticky-scroll-false.png)
+![Project Panel: Sticky Scroll Disabled](https://images.app.backboard.io/docs/project-panel/sticky-scroll-false.png)
 
 ### Directory Folding
 
@@ -44,9 +44,9 @@ single child directory are collapsed into one row (for example,
 directory and choose **Unfold Directory** to expand the chain, or **Fold
 Directory** to collapse it again.
 
-![Project Panel: Auto Fold Directories Enabled](https://images.zed.dev/docs/project-panel/auto-fold-dirs-true.png)
+![Project Panel: Auto Fold Directories Enabled](https://images.app.backboard.io/docs/project-panel/auto-fold-dirs-true.png)
 
-![Project Panel: Auto Fold Directories Disabled](https://images.zed.dev/docs/project-panel/auto-fold-dirs-false.png)
+![Project Panel: Auto Fold Directories Disabled](https://images.app.backboard.io/docs/project-panel/auto-fold-dirs-false.png)
 
 ## Selecting Multiple Entries
 
@@ -57,7 +57,7 @@ set of marked entries.
 When exactly two files are marked, {#action project_panel::CompareMarkedFiles}
 ({#kb project_panel::CompareMarkedFiles}) opens a diff view comparing them.
 
-![Project Panel: Compare Marked Files](https://images.zed.dev/docs/project-panel/compare-marked-files.png)
+![Project Panel: Compare Marked Files](https://images.app.backboard.io/docs/project-panel/compare-marked-files.png)
 
 ## File Operations
 
@@ -90,7 +90,7 @@ cancel.
 - {#action project_panel::Paste} ({#kb project_panel::Paste}) places them in the
   selected directory.
 
-When pasting would create a name conflict, Zed appends a "copy" suffix (e.g.,
+When pasting would create a name conflict, Backboard Studio appends a "copy" suffix (e.g.,
 `file copy.txt`, `file copy 2.txt`). If a single file is pasted with a generated
 suffix, the rename editor opens automatically so you can adjust the name.
 
@@ -125,7 +125,7 @@ Setting `project_panel.git_status_indicator` to `true` (disabled by default) add
 to each name: **M** (modified), **A** (added), **D** (deleted), **U**
 (untracked) or **!** (conflict).
 
-![Project Panel: Git Integration](https://images.zed.dev/docs/project-panel/git-status.png)
+![Project Panel: Git Integration](https://images.app.backboard.io/docs/project-panel/git-status.png)
 
 Use {#action project_panel::SelectNextGitEntry} and {#action
 project_panel::SelectPrevGitEntry} to jump between tracked files with

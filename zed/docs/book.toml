@@ -1,9 +1,9 @@
 [book]
-authors = ["The Zed Team"]
+authors = ["The Backboard Studio Team"]
 language = "en"
 multilingual = false
 src = "src"
-title = "Zed"
+title = "Backboard Studio"
 site-url = "/docs/"
 
 [build]
@@ -19,8 +19,8 @@ extra-watch-dirs = ["../crates/docs_preprocessor"]
 command = "cargo run -p docs_preprocessor -- postprocess"
 # Set here instead of above as we only use it replace the `#description#` we set in the template
 # when no front-matter is provided value
-default-description = "Learn how to use and customize Zed, the fast, collaborative code editor. Official docs on features, configuration, AI tools, and workflows."
-default-title = "Zed Code Editor Documentation"
+default-description = "Learn how to use and customize Backboard Studio, the fast, collaborative code editor. Official docs on features, configuration, AI tools, and workflows."
+default-title = "Backboard Studio Code Editor Documentation"
 no-section-label = true
 preferred-dark-theme = "dark"
 additional-css = ["theme/page-toc.css", "theme/plugins.css", "theme/highlight.css", "theme/consent-banner.css"]
@@ -35,9 +35,9 @@ enable = false
 # 1. Not start with `/docs`
 # 2. End in `.html`
 #
-# The destination URLs are interpreted relative to `https://zed.dev`.
+# The destination URLs are interpreted relative to `https://app.backboard.io`.
 # - Redirects to other docs pages should end in `.html`
-# - You can link to pages on the Zed site by omitting the `/docs` in front of it.
+# - You can link to pages on the Backboard Studio site by omitting the `/docs` in front of it.
 [output.zed-html.redirect]
 # AI
 "/ai.html" = "/docs/ai/overview.html"
@@ -89,7 +89,7 @@ enable = false
 "/python.html" = "/docs/languages/python.html"
 "/ruby.html" = "/docs/languages/ruby.html"
 
-# Zed development
+# Backboard Studio development
 "/contribute-to-zed.html" = "/docs/development.html#contributor-links"
 "/contributing.html" = "/docs/development.html#contributor-links"
 "/developing-zed.html" = "/docs/development.html"

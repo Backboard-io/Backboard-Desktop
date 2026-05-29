@@ -8,10 +8,14 @@ pub struct CallSettings {
 
 impl Settings for CallSettings {
     fn from_settings(content: &settings::SettingsContent) -> Self {
-        let call = content.calls.clone().unwrap();
+        let call = content.calls.as_ref();
         CallSettings {
-            mute_on_join: call.mute_on_join.unwrap(),
-            share_on_join: call.share_on_join.unwrap(),
+            mute_on_join: call
+                .and_then(|settings| settings.mute_on_join)
+                .unwrap_or(true),
+            share_on_join: call
+                .and_then(|settings| settings.share_on_join)
+                .unwrap_or(false),
         }
     }
 }

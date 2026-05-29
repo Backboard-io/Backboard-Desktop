@@ -25,7 +25,7 @@ macro_rules! onboarding_event {
 }
 
 /// Introduces user to Zed's Edit Prediction feature
-pub struct ZedPredictModal {
+pub struct BackboardPredictModal {
     onboarding: Entity<EditPredictionOnboarding>,
     focus_handle: FocusHandle,
 }
@@ -42,7 +42,7 @@ pub(crate) fn set_edit_prediction_provider(provider: EditPredictionProvider, cx:
     });
 }
 
-impl ZedPredictModal {
+impl BackboardPredictModal {
     pub fn toggle(
         workspace: &mut Workspace,
         user_store: Entity<UserStore>,
@@ -96,15 +96,15 @@ impl ZedPredictModal {
     }
 }
 
-impl EventEmitter<DismissEvent> for ZedPredictModal {}
+impl EventEmitter<DismissEvent> for BackboardPredictModal {}
 
-impl Focusable for ZedPredictModal {
+impl Focusable for BackboardPredictModal {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl ModalView for ZedPredictModal {
+impl ModalView for BackboardPredictModal {
     fn on_before_dismiss(
         &mut self,
         _window: &mut Window,
@@ -115,7 +115,7 @@ impl ModalView for ZedPredictModal {
     }
 }
 
-impl Render for ZedPredictModal {
+impl Render for BackboardPredictModal {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let window_height = window.viewport_size().height;
         let max_height = window_height - px(200.);
@@ -123,7 +123,7 @@ impl Render for ZedPredictModal {
 
         v_flex()
             .id("edit-prediction-onboarding")
-            .key_context("ZedPredictModal")
+            .key_context("BackboardPredictModal")
             .relative()
             .w(px(550.))
             .h_full()

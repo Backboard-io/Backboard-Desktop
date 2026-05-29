@@ -1,11 +1,11 @@
 ---
 title: Collaboration
-description: "Real-time collaboration in Zed: share projects, edit code together, and communicate with voice chat."
+description: "Real-time collaboration in Backboard Studio: share projects, edit code together, and communicate with voice chat."
 ---
 
 # Collaboration {#collaboration}
 
-Zed supports real-time multiplayer editing. Multiple people can work in the same project simultaneously, seeing each other's cursors and edits as they happen.
+Backboard Studio supports real-time multiplayer editing. Multiple people can work in the same project simultaneously, seeing each other's cursors and edits as they happen.
 
 Open the Collaboration Panel with {#kb collab_panel::ToggleFocus}. You'll need to [sign in](../authentication.md#signing-in) to access collaboration features.
 
@@ -18,7 +18,7 @@ The Collaboration Panel has two sections:
 
 > **Warning:** Sharing a project gives collaborators access to your local file system within that project. Only collaborate with people you trust.
 
-See the [Data and Privacy FAQs](https://zed.dev/faq#data-and-privacy) for more details.
+See the [Data and Privacy FAQs](https://app.backboard.io/faq#data-and-privacy) for more details.
 
 ## Audio Settings {#audio-settings}
 
@@ -26,11 +26,11 @@ See the [Data and Privacy FAQs](https://zed.dev/faq#data-and-privacy) for more d
 
 You can select specific input and output audio devices instead of using system defaults. To configure audio devices:
 
-1. Open {#kb zed::OpenSettings}
+1. Open {#kb backboard::OpenSettings}
 2. Navigate to **Collaboration** > **Experimental**
 3. Use the **Output Audio Device** and **Input Audio Device** dropdowns to select your preferred devices
 
-Changes take effect immediately. If you select a device that becomes unavailable, Zed falls back to system defaults.
+Changes take effect immediately. If you select a device that becomes unavailable, Backboard Studio falls back to system defaults.
 
 To test your audio configuration, click **Test Audio** in the same section. This opens a window where you can verify your microphone and speaker work correctly with the selected devices.
 

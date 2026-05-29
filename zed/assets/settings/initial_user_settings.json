@@ -1,10 +1,10 @@
-// Zed settings
+// Backboard Studio settings
 //
-// For information on how to configure Zed, see the Zed
-// documentation: https://zed.dev/docs/configuring-zed
+// For information on how to configure Backboard Studio, see the Backboard Studio
+// documentation: https://app.backboard.io/docs/configuring-zed
 //
-// To see all of Zed's default settings without changing your
-// custom settings, run `zed: open default settings` from the
+// To see all of Backboard Studio's default settings without changing your
+// custom settings, run the Open Default Settings command from the
 // command palette (cmd-shift-p / ctrl-shift-p)
 {
   "ui_font_family": "Inter",

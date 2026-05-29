@@ -1,14 +1,14 @@
 ---
-title: Business Support - Zed Business
-description: How to contact Zed for business inquiries and support.
+title: Business Support - Backboard Business
+description: How to contact Backboard Studio for business inquiries and support.
 ---
 
 # Business Support
 
-For billing and business support (account setup, invoices, organization questions), email [billing-support@zed.dev](mailto:billing-support@zed.dev). Business support is prioritized relative to other support channels.
+For billing and business support (account setup, invoices, organization questions), email [billing-support@app.backboard.io](mailto:billing-support@app.backboard.io). Business support is prioritized relative to other support channels.
 
-For general questions, email [hi@zed.dev](mailto:hi@zed.dev).
+For general questions, email [hi@app.backboard.io](mailto:hi@app.backboard.io).
 
 ## Open-source issues
 
-Questions and bugs about the Zed editor itself (features, extensions, language support, crashes) go through the main Zed project on [GitHub](https://github.com/zed-industries/zed/issues).
+Questions and bugs about the Backboard Studio editor itself (features, extensions, language support, crashes) go through the main Backboard Studio project on [GitHub](https://github.com/backboard/ide/issues).

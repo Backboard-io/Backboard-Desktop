@@ -118,10 +118,10 @@ impl Component for CollabNotification {
                             Button::new("decline", "Decline"),
                         )
                         .child(Label::new(
-                            "a_very_long_username_that_might_overflow is sharing a project in Zed:",
+                            "a_very_long_username_that_might_overflow is sharing a project in Backboard Studio:",
                         ))
                         .child(
-                            Label::new("zed-cloud, zed, edit-prediction-bench, zed.dev")
+                            Label::new("backboard-cloud, backboard, edit-prediction-bench, app.backboard.io")
                                 .color(Color::Muted),
                         ),
                     )

@@ -209,7 +209,7 @@ impl Render for KeyContextView {
                     .child(
                         Button::new("open_documentation", "Open Documentation")
                             .style(ButtonStyle::Filled)
-                            .on_click(|_, _, cx| cx.open_url("https://zed.dev/docs/key-bindings")),
+                            .on_click(|_, _, cx| cx.open_url("https://app.backboard.io/docs/key-bindings")),
                     )
                     .child(
                         Button::new("view_default_keymap", "View Default Keymap")

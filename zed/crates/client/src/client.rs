@@ -91,9 +91,9 @@ pub const CONNECTION_TIMEOUT: Duration = Duration::from_secs(20);
 actions!(
     client,
     [
-        /// Signs in to Zed account.
+        /// Signs in to Backboard Studio account.
         SignIn,
-        /// Signs out of Zed account.
+        /// Signs out of Backboard Studio account.
         SignOut,
         /// Reconnects to the collaboration server.
         Reconnect
@@ -106,7 +106,7 @@ pub struct ClientSettings {
     /// Overrides the key used to store credentials in the system keychain.
     /// Defaults to `server_url` when unset.
     ///
-    /// Useful when running multiple Zed instances side by side without them
+    /// Useful when running multiple Backboard Studio instances side by side without them
     /// overwriting each other's keychain entries.
     ///
     /// Note: changing this after signing in will require signing in again, as
@@ -985,7 +985,7 @@ impl Client {
 
     /// Performs a sign-in and also (optionally) connects to Collab.
     ///
-    /// Only Zed staff automatically connect to Collab.
+    /// Only Backboard Studio staff automatically connect to Collab.
     pub async fn sign_in_with_optional_connect(
         self: &Arc<Self>,
         try_provider: bool,
@@ -1411,7 +1411,7 @@ impl Client {
                         }
                     }
 
-                    // Start an HTTP server to receive the redirect from Zed's sign-in page.
+                    // Start an HTTP server to receive the redirect from Backboard Studio's sign-in page.
                     let server = tiny_http::Server::http("127.0.0.1:0")
                         .map_err(|e| anyhow!(e).context("failed to bind callback port"))?;
                     let port = server
@@ -1420,8 +1420,8 @@ impl Client {
                         .context("server not bound to a TCP address")?
                         .port();
 
-                    // Open the Zed sign-in page in the user's browser, with query parameters that indicate
-                    // that the user is signing in from a Zed app running on the same device.
+                    // Open the Backboard Studio sign-in page in the user's browser, with query parameters that indicate
+                    // that the user is signing in from a Backboard Studio app running on the same device.
                     let url = http.build_url(&format!(
                         "/native_app_signin?native_app_port={}&native_app_public_key={}",
                         port, public_key_string
@@ -1850,21 +1850,21 @@ impl ProtoClient for Client {
 /// prefix for the zed:// url scheme
 pub const ZED_URL_SCHEME: &str = "zed";
 
-/// A parsed Zed link that can be handled internally by the application.
+/// A parsed Backboard Studio link that can be handled internally by the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZedLink {
-    /// Join a channel: `zed.dev/channel/channel-name-123` or `zed://channel/channel-name-123`
+    /// Join a channel: `app.backboard.io/channel/channel-name-123` or `zed://channel/channel-name-123`
     Channel { channel_id: u64 },
-    /// Open channel notes: `zed.dev/channel/channel-name-123/notes` or with heading `notes#heading`
+    /// Open channel notes: `app.backboard.io/channel/channel-name-123/notes` or with heading `notes#heading`
     ChannelNotes {
         channel_id: u64,
         heading: Option<String>,
     },
 }
 
-/// Parses the given link into a Zed link.
+/// Parses the given link into a Backboard Studio link.
 ///
-/// Returns a [`Some`] containing the parsed link if the link is a recognized Zed link
+/// Returns a [`Some`] containing the parsed link if the link is a recognized Backboard Studio link
 /// that should be handled internally by the application.
 /// Returns [`None`] for links that should be opened in the browser.
 pub fn parse_zed_link(link: &str, cx: &App) -> Option<ZedLink> {

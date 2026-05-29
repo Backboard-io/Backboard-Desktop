@@ -1,23 +1,23 @@
 ---
 title: Agent Server Extensions
-description: "Agent Server Extensions for Zed extensions."
+description: "Agent Server Extensions for Backboard Studio extensions."
 ---
 
 # Agent Server Extensions
 
 <div class="warning">
 
-Note that starting from `v0.221`.x, [the ACP Registry](https://agentclientprotocol.com/registry) is the preferred way to install external agents in Zed.
-You can learn more about it in [the release blog post](https://zed.dev/blog/acp-registry)
+Note that starting from `v0.221`.x, [the ACP Registry](https://agentclientprotocol.com/registry) is the preferred way to install external agents in Backboard Studio.
+You can learn more about it in [the release blog post](https://app.backboard.io/blog/acp-registry)
 
 At some point in the near future, Agent Server extensions will be deprecated.
 
 </div>
 
 Agent Servers are programs that provide AI agent implementations through the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).
-Agent Server Extensions let you package an Agent Server so users can install the extension and use your agent in Zed.
+Agent Server Extensions let you package an Agent Server so users can install the extension and use your agent in Backboard Studio.
 
-You can see the current Agent Server extensions either by opening the Extensions tab in Zed (execute the {#action zed::Extensions} command) and changing the filter from `All` to `Agent Servers`, or by visiting [the Zed website](https://zed.dev/extensions?filter=agent-servers).
+You can see the current Agent Server extensions either by opening the Extensions tab in Backboard Studio (execute the {#action backboard::Extensions} command) and changing the filter from `All` to `Agent Servers`, or by visiting [the Backboard Studio website](https://app.backboard.io/extensions?filter=agent-servers).
 
 ## Defining Agent Server Extensions
 
@@ -112,9 +112,9 @@ AGENT_MEMORY_LIMIT = "2GB"  # Linux-specific override
 
 When a user installs your extension and selects the agent server:
 
-1. Zed downloads the appropriate archive for the user's platform
+1. Backboard Studio downloads the appropriate archive for the user's platform
 2. The archive is extracted to a cache directory
-3. Zed launches the agent using the specified command and arguments
+3. Backboard Studio launches the agent using the specified command and arguments
 4. Environment variables are set as configured
 5. The agent server runs in the background, ready to assist the user
 
@@ -175,9 +175,9 @@ For consistent rendering, follow these guidelines:
 - Keep the SVG markup clean by processing it through [SVGOMG](https://jakearchibald.github.io/svgomg/)
 - Avoid gradients, which often increase SVG complexity and can render inconsistently
 
-Note that we'll automatically convert your icon to monochrome to preserve Zed's design consistency.
+Note that we'll automatically convert your icon to monochrome to preserve Backboard Studio's design consistency.
 (You can still use opacity in different paths of your SVG to add visual layering.)
 
 ## Publishing
 
-Once your extension is ready, see [Publishing your extension](./developing-extensions.md#publishing-your-extension) to learn how to submit it to the Zed extension registry.
+Once your extension is ready, see [Publishing your extension](./developing-extensions.md#publishing-your-extension) to learn how to submit it to the Backboard Studio extension registry.

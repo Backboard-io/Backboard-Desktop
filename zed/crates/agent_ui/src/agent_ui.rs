@@ -622,11 +622,12 @@ fn update_command_palette_filter(cx: &mut App) {
             filter.hide_namespace("agents");
             filter.hide_namespace("assistant");
             filter.hide_namespace("copilot");
-            filter.hide_namespace("zed_predict_onboarding");
+            filter.hide_namespace("backboard_predict_onboarding");
             filter.hide_namespace("edit_prediction");
 
             filter.hide_action_types(&edit_prediction_actions);
-            filter.hide_action_types(&[TypeId::of::<zed_actions::OpenZedPredictOnboarding>()]);
+            filter
+                .hide_action_types(&[TypeId::of::<zed_actions::OpenBackboardPredictOnboarding>()]);
         } else {
             if agent_enabled {
                 filter.show_namespace("agent");
@@ -660,8 +661,9 @@ fn update_command_palette_filter(cx: &mut App) {
                 }
             }
 
-            filter.show_namespace("zed_predict_onboarding");
-            filter.show_action_types(&[TypeId::of::<zed_actions::OpenZedPredictOnboarding>()]);
+            filter.show_namespace("backboard_predict_onboarding");
+            filter
+                .show_action_types(&[TypeId::of::<zed_actions::OpenBackboardPredictOnboarding>()]);
 
             filter.show_namespace("multi_workspace");
         }

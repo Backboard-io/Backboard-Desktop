@@ -1,11 +1,11 @@
 ---
-title: Tasks - Run Commands in Zed
-description: Run and rerun shell commands from Zed with task definitions. Supports variables, templates, and language-specific tasks.
+title: Tasks - Run Commands in Backboard Studio
+description: Run and rerun shell commands from Backboard Studio with task definitions. Supports variables, templates, and language-specific tasks.
 ---
 
 # Tasks
 
-Zed supports ways to spawn (and rerun) commands using its integrated [terminal](./terminal.md) to output the results. These commands can read a limited subset of Zed state (such as a path to the file currently being edited or selected text).
+Backboard Studio supports ways to spawn (and rerun) commands using its integrated [terminal](./terminal.md) to output the results. These commands can read a limited subset of Backboard Studio state (such as a path to the file currently being edited or selected text).
 
 ```json [tasks]
 [
@@ -74,14 +74,14 @@ Keep `"use_new_terminal": false` and set `"allow_concurrent_runs": true` to allo
 
 Tasks can be defined:
 
-- in the global `tasks.json` file; such tasks are available in all Zed projects you work on. This file is usually located in `~/.config/zed/tasks.json`. You can edit them by using the {#action zed::OpenTasks} action.
-- in the worktree-specific (local) `.zed/tasks.json` file; such tasks are available only when working on a project with that worktree included. You can edit worktree-specific tasks by using the {#action zed::OpenProjectTasks} action.
+- in the global `tasks.json` file; such tasks are available in all Backboard Studio projects you work on. This file is usually located in `~/.config/zed/tasks.json`. You can edit them by using the {#action backboard::OpenTasks} action.
+- in the worktree-specific (local) `.zed/tasks.json` file; such tasks are available only when working on a project with that worktree included. You can edit worktree-specific tasks by using the {#action backboard::OpenProjectTasks} action.
 - on the fly with [oneshot tasks](#oneshot-tasks). These tasks are project-specific and do not persist across sessions.
 - by language extension.
 
 ## Variables
 
-Zed tasks act just like your shell; that also means that you can reference environmental variables via sh-esque `$VAR_NAME` syntax. A couple of additional environmental variables are set for your convenience.
+Backboard Studio tasks act just like your shell; that also means that you can reference environmental variables via sh-esque `$VAR_NAME` syntax. A couple of additional environmental variables are set for your convenience.
 These variables allow you to pull information from the current editor and use it in your tasks. The following variables are available:
 
 - `ZED_COLUMN`: current line column
@@ -232,11 +232,11 @@ This could be useful for launching a terminal application that you want to use i
 
 ## Hooks
 
-In addition to being spawned manually, tasks can be configured to run automatically in response to certain Zed events by adding a hook to the `hooks` field on a task template. A task with a matching hook will be resolved and spawned when that event fires.
+In addition to being spawned manually, tasks can be configured to run automatically in response to certain Backboard Studio events by adding a hook to the `hooks` field on a task template. A task with a matching hook will be resolved and spawned when that event fires.
 
 The following hooks are currently supported:
 
-- `create_worktree` — runs after Zed creates a new linked Git worktree, either directly through the CLI or from the [worktree picker](./git.md#git-worktrees). The task is spawned with `ZED_WORKTREE_ROOT` pointing at the newly created worktree and `ZED_MAIN_GIT_WORKTREE` pointing at the original repository's working directory, which makes these hooks well-suited to copying untracked files (such as `.env` files) or running per-worktree setup commands.
+- `create_worktree` — runs after Backboard Studio creates a new linked Git worktree, either directly through the CLI or from the [worktree picker](./git.md#git-worktrees). The task is spawned with `ZED_WORKTREE_ROOT` pointing at the newly created worktree and `ZED_MAIN_GIT_WORKTREE` pointing at the original repository's working directory, which makes these hooks well-suited to copying untracked files (such as `.env` files) or running per-worktree setup commands.
 
 Hook tasks are resolved from the same global and worktree-local `tasks.json` files as manually spawned tasks, and multiple tasks may register for the same hook; they all run when the hook fires. A hook task still benefits from the usual task configuration fields — `cwd`, `env`, `reveal`, `hide`, and so on — so you can control how much of the terminal UI is shown while it runs.
 
@@ -257,7 +257,7 @@ Tasks that define `hooks` are still available from the task modal like any other
 
 ## VS Code Task Format
 
-When importing VS Code tasks from `.vscode/tasks.json`, you can omit the `label` field. Zed automatically generates labels based on the task type:
+When importing VS Code tasks from `.vscode/tasks.json`, you can omit the `label` field. Backboard Studio automatically generates labels based on the task type:
 
 - **npm tasks**: `npm: <script>` (e.g., `npm: start`)
 - **gulp tasks**: `gulp: <task>` (e.g., `gulp: build`)
@@ -286,7 +286,7 @@ These tasks appear in the task picker as "npm: start" and "cargo build --release
 
 ## Binding runnable tags to task templates
 
-Zed supports overriding the default action for inline runnable indicators via workspace-local and global `tasks.json` file with the following precedence hierarchy:
+Backboard Studio supports overriding the default action for inline runnable indicators via workspace-local and global `tasks.json` file with the following precedence hierarchy:
 
 1. Workspace `tasks.json`
 2. Global `tasks.json`
@@ -306,11 +306,11 @@ In doing so, you can change which task is shown in the runnables indicator.
 
 ## Keybindings to run tasks bound to runnables
 
-When you have a task definition that is bound to the runnable, you can quickly run it using [Code Actions](https://zed.dev/docs/configuring-languages?#code-actions) that you can trigger either via {#action editor::ToggleCodeActions} command or by the `cmd-.`/`ctrl-.` shortcut. Your task will be the first in the dropdown. The task will run immediately if there are no additional Code Actions for this line.
+When you have a task definition that is bound to the runnable, you can quickly run it using [Code Actions](https://app.backboard.io/docs/configuring-languages?#code-actions) that you can trigger either via {#action editor::ToggleCodeActions} command or by the `cmd-.`/`ctrl-.` shortcut. Your task will be the first in the dropdown. The task will run immediately if there are no additional Code Actions for this line.
 
 ## Running Bash Scripts
 
-You can run bash scripts directly from Zed. When you open a `.sh` or `.bash` file, Zed automatically detects the script as runnable and makes it available in the task picker.
+You can run bash scripts directly from Backboard Studio. When you open a `.sh` or `.bash` file, Backboard Studio automatically detects the script as runnable and makes it available in the task picker.
 
 To run a bash script:
 
@@ -335,7 +335,7 @@ If you need to pass arguments or customize the execution environment, add a task
 
 ## Shell Initialization
 
-When Zed runs a task, it launches the command in a login shell. This ensures your shell's initialization files (`.bash_profile`, `.zshrc`, etc.) are sourced before the task executes.
+When Backboard Studio runs a task, it launches the command in a login shell. This ensures your shell's initialization files (`.bash_profile`, `.zshrc`, etc.) are sourced before the task executes.
 
 This behavior gives tasks access to the same environment variables, aliases, and PATH modifications you've configured in your shell profile. If a task fails to find a command that works in your terminal, verify your shell configuration files are properly set up.
 

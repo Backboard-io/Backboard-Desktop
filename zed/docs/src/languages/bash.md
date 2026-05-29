@@ -1,11 +1,11 @@
 ---
 title: Bash
-description: "Configure Bash language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Bash language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Bash
 
-Bash support is available natively in Zed.
+Bash support is available natively in Backboard Studio.
 
 - Tree-sitter: [tree-sitter/tree-sitter-bash](https://github.com/tree-sitter/tree-sitter-bash)
 - Language Server: [bash-lsp/bash-language-server](https://github.com/bash-lsp/bash-language-server)
@@ -37,4 +37,4 @@ If you wish to customize the warnings/errors reported you just need to create a 
 
 ### See also:
 
-- [Zed Docs: Language Support: Shell Scripts](./sh.md)
+- [Backboard Studio Docs: Language Support: Shell Scripts](./sh.md)

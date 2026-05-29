@@ -1,11 +1,11 @@
 ---
 title: Language Extensions
-description: "Overview of programming language support in Zed, including built-in and extension-based languages."
+description: "Overview of programming language support in Backboard Studio, including built-in and extension-based languages."
 ---
 
 # Language Extensions
 
-Language support in Zed has several components:
+Language support in Backboard Studio has several components:
 
 - Language metadata and configuration
 - Grammar
@@ -14,7 +14,7 @@ Language support in Zed has several components:
 
 ## Language Metadata
 
-Each language supported by Zed must be defined in a subdirectory inside the `languages` directory of your extension.
+Each language supported by Backboard Studio must be defined in a subdirectory inside the `languages` directory of your extension.
 
 This subdirectory must contain a file called `config.toml` file with the following structure:
 
@@ -31,8 +31,8 @@ line_comments = ["# "]
 - `line_comments` is an array of strings that are used to identify line comments in the language. This is used for the `editor::ToggleComments` keybind: {#kb editor::ToggleComments} for toggling lines of code.
 - `tab_size` defines the indentation/tab size used for this language (default is `4`).
 - `hard_tabs` whether to indent with tabs (`true`) or spaces (`false`, the default).
-- `first_line_pattern` is a regular expression that can be used alongside `path_suffixes` (above) or `file_types` in settings to match files that should use this language. For example, Zed uses this to identify Shell Scripts by matching [shebang lines](https://github.com/zed-industries/zed/blob/main/crates/languages/src/bash/config.toml) in the first line of a script.
-- `debuggers` is an array of strings that are used to identify debuggers in the language. When launching a debugger's `New Process Modal`, Zed will order available debuggers by the order of entries in this array.
+- `first_line_pattern` is a regular expression that can be used alongside `path_suffixes` (above) or `file_types` in settings to match files that should use this language. For example, Backboard Studio uses this to identify Shell Scripts by matching [shebang lines](https://github.com/backboard/ide/blob/main/crates/languages/src/bash/config.toml) in the first line of a script.
+- `debuggers` is an array of strings that are used to identify debuggers in the language. When launching a debugger's `New Process Modal`, Backboard Studio will order available debuggers by the order of entries in this array.
 
 <!--
 TBD: Document `language_name/config.toml` keys
@@ -52,7 +52,7 @@ TBD: Document `language_name/config.toml` keys
 
 ## Grammar
 
-Zed uses the [Tree-sitter](https://tree-sitter.github.io) parsing library to provide built-in language-specific features. There are grammars available for many languages, and you can also [develop your own grammar](https://tree-sitter.github.io/tree-sitter/creating-parsers/3-writing-the-grammar.html). A growing list of Zed features are built using pattern matching over syntax trees with Tree-sitter queries. As mentioned above, every language that is defined in an extension must specify the name of a Tree-sitter grammar that is used for parsing. These grammars are then registered separately in extensions' `extension.toml` file, like this:
+Backboard Studio uses the [Tree-sitter](https://tree-sitter.github.io) parsing library to provide built-in language-specific features. There are grammars available for many languages, and you can also [develop your own grammar](https://tree-sitter.github.io/tree-sitter/creating-parsers/3-writing-the-grammar.html). A growing list of Backboard Studio features are built using pattern matching over syntax trees with Tree-sitter queries. As mentioned above, every language that is defined in an extension must specify the name of a Tree-sitter grammar that is used for parsing. These grammars are then registered separately in extensions' `extension.toml` file, like this:
 
 ```toml
 [grammars.gleam]
@@ -64,7 +64,7 @@ The `repository` field must specify a repository where the Tree-sitter grammar s
 
 ## Tree-sitter Queries
 
-Zed uses the syntax tree produced by the [Tree-sitter](https://tree-sitter.github.io) query language to implement
+Backboard Studio uses the syntax tree produced by the [Tree-sitter](https://tree-sitter.github.io) query language to implement
 several features:
 
 - Syntax highlighting
@@ -78,7 +78,7 @@ several features:
 - Selecting classes, functions, etc.
 
 The following sections elaborate on how [Tree-sitter queries](https://tree-sitter.github.io/tree-sitter/using-parsers/queries/index.html) enable these
-features in Zed, using [JSON syntax](https://www.json.org/json-en.html) as a guiding example.
+features in Backboard Studio, using [JSON syntax](https://www.json.org/json-en.html) as a guiding example.
 
 ### Syntax highlighting
 
@@ -146,7 +146,7 @@ This query marks strings, object keys, and numbers for highlighting. The followi
 #### Fallback captures
 
 A single Tree-sitter pattern can specify multiple captures on the same node to define fallback highlights.
-Zed resolves them right-to-left: It first tries the rightmost capture, and if the current theme has no style for it, falls back to the next capture to the left, and so on.
+Backboard Studio resolves them right-to-left: It first tries the rightmost capture, and if the current theme has no style for it, falls back to the next capture to the left, and so on.
 
 For example:
 
@@ -154,7 +154,7 @@ For example:
 (type_identifier) @type @variable
 ```
 
-Here Zed will first try to resolve `@variable` from the theme. If the theme defines a style for `@variable`, that style is used. Otherwise, Zed falls back to `@type`.
+Here Backboard Studio will first try to resolve `@variable` from the theme. If the theme defines a style for `@variable`, that style is used. Otherwise, Backboard Studio falls back to `@type`.
 
 This is useful when a language wants to provide a preferred highlight that not all themes may support, while still falling back to a more common capture that most themes define.
 
@@ -177,7 +177,7 @@ This query identifies opening and closing brackets, braces, and quotation marks.
 | @open   | Captures opening brackets, braces, and quotes |
 | @close  | Captures closing brackets, braces, and quotes |
 
-Zed uses these to highlight matching brackets: painting each bracket pair with a different color ("rainbow brackets") and highlighting the brackets if the cursor is inside the bracket pair.
+Backboard Studio uses these to highlight matching brackets: painting each bracket pair with a different color ("rainbow brackets") and highlighting the brackets if the cursor is inside the bracket pair.
 
 To opt out of rainbow brackets colorization, add the following to the corresponding `brackets.scm` entry:
 
@@ -296,15 +296,15 @@ For example, in JavaScript, we also disable auto-closing of single quotes within
 
 ### Text objects
 
-The `textobjects.scm` file defines rules for navigating by text objects. This was added in Zed v0.165 and is currently used only in Vim mode.
+The `textobjects.scm` file defines rules for navigating by text objects. This was added in Backboard Studio v0.165 and is currently used only in Vim mode.
 
 Vim provides two levels of granularity for navigating around files. Section-by-section with `[]` etc., and method-by-method with `]m` etc. Even languages that don't support functions and classes can work well by defining similar concepts. For example CSS defines a rule-set as a method, and a media-query as a class.
 
-For languages with closures, these typically should not count as functions in Zed. This is best-effort, however, because languages like JavaScript do not syntactically differentiate between closures and top-level function declarations.
+For languages with closures, these typically should not count as functions in Backboard Studio. This is best-effort, however, because languages like JavaScript do not syntactically differentiate between closures and top-level function declarations.
 
 For languages with declarations like C, provide queries that match `@class.around` or `@function.around`. The `if` and `ic` text objects will default to these if there is no inside.
 
-If you are not sure what to put in textobjects.scm, both [nvim-treesitter-textobjects](https://github.com/nvim-treesitter/nvim-treesitter-textobjects), and the [Helix editor](https://github.com/helix-editor/helix) have queries for many languages. You can refer to the Zed [built-in languages](https://github.com/zed-industries/zed/tree/main/crates/languages/src) to see how to adapt these.
+If you are not sure what to put in textobjects.scm, both [nvim-treesitter-textobjects](https://github.com/nvim-treesitter/nvim-treesitter-textobjects), and the [Helix editor](https://github.com/helix-editor/helix) have queries for many languages. You can refer to the Backboard Studio [built-in languages](https://github.com/backboard/ide/tree/main/crates/languages/src) to see how to adapt these.
 
 | Capture          | Description                                                             | Vim mode                                         |
 | ---------------- | ----------------------------------------------------------------------- | ------------------------------------------------ |
@@ -395,7 +395,7 @@ TBD: `#set! tag`
 
 ## Language Servers
 
-Zed uses the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) to provide advanced language support.
+Backboard Studio uses the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) to provide advanced language support.
 
 An extension may provide any number of language servers. To provide a language server from your extension, add an entry to your `extension.toml` with the name of your language server and the language(s) it applies to. The entry in the list of `languages` has to match the `name` field from the `config.toml` file for that language:
 
@@ -423,11 +423,11 @@ impl zed::Extension for MyExtension {
 }
 ```
 
-You can customize the handling of the language server using several optional methods in the `Extension` trait. For example, you can control how completions are styled using the `label_for_completion` method. For a complete list of methods, see the [API docs for the Zed extension API](https://docs.rs/zed_extension_api).
+You can customize the handling of the language server using several optional methods in the `Extension` trait. For example, you can control how completions are styled using the `label_for_completion` method. For a complete list of methods, see the [API docs for the Backboard Studio extension API](https://docs.rs/zed_extension_api).
 
 ### Syntax Highlighting with Semantic Tokens
 
-Zed supports syntax highlighting using semantic tokens from the attached language servers. This is currently disabled by default, but can be enabled in your settings file:
+Backboard Studio supports syntax highlighting using semantic tokens from the attached language servers. This is currently disabled by default, but can be enabled in your settings file:
 
 ```json [settings]
 {
@@ -481,11 +481,11 @@ The file uses the same format as the `semantic_token_rules` array in user settin
 ]
 ```
 
-This is useful when a language server reports custom (non-standard) semantic token types that aren't covered by Zed's built-in default rules. Extension-provided rules act as sensible defaults for that language — users can always override them via `semantic_token_rules` in their settings file, and built-in default rules are only used when neither user nor extension rules match.
+This is useful when a language server reports custom (non-standard) semantic token types that aren't covered by Backboard Studio's built-in default rules. Extension-provided rules act as sensible defaults for that language — users can always override them via `semantic_token_rules` in their settings file, and built-in default rules are only used when neither user nor extension rules match.
 
 #### Customizing Semantic Token Styles
 
-Zed supports customizing the styles used for semantic tokens. You can define rules in your settings file, which customize how semantic tokens get mapped to styles in your theme.
+Backboard Studio supports customizing the styles used for semantic tokens. You can define rules in your settings file, which customize how semantic tokens get mapped to styles in your theme.
 
 ```json [settings]
 {
@@ -518,7 +518,7 @@ Rules are applied in the following priority order (highest to lowest):
 
 1. **User settings** — rules from `semantic_token_rules` in your settings file.
 2. **Extension rules** — rules from `semantic_token_rules.json` in extension language directories.
-3. **Default rules** — Zed's built-in rules for standard LSP token types.
+3. **Default rules** — Backboard Studio's built-in rules for standard LSP token types.
 
 Each rule in the `semantic_token_rules` array is defined as follows:
 
@@ -534,7 +534,7 @@ Each rule in the `semantic_token_rules` array is defined as follows:
 
 ### Multi-Language Support
 
-If your language server supports additional languages, you can use `language_ids` to map Zed `languages` to the desired [LSP-specific `languageId`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocumentItem) identifiers:
+If your language server supports additional languages, you can use `language_ids` to map Backboard Studio `languages` to the desired [LSP-specific `languageId`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocumentItem) identifiers:
 
 ```toml
 

@@ -62,7 +62,7 @@ impl Dismissable for CrossChannelImportOnboarding {
 
 /// Returns the list of non-Dev, non-current release channels that have
 /// at least one thread in their database.  The result is suitable for
-/// building a user-facing message ("from Zed Preview and Nightly").
+/// building a user-facing message ("from Backboard Studio Preview and Nightly").
 pub fn channels_with_threads(cx: &App) -> Vec<ReleaseChannel> {
     let Some(current_channel) = ReleaseChannel::try_global(cx) else {
         return Vec::new();
@@ -392,7 +392,7 @@ impl Render for ThreadImportModal {
                         ModalHeader::new()
                             .headline("Import External Agent Threads")
                             .description(
-                                "Import threads from agents like Claude Agent, Codex, and more, whether started in Zed or another client. \
+                                "Import threads from agents like Claude Agent, Codex, and more, whether started in Backboard Studio or another client. \
                                 Choose which agents to include, and their threads will appear in your thread history."
                             )
                             .show_dismiss_button(true),

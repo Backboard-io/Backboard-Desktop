@@ -1,16 +1,16 @@
 ---
 title: Backboard Settings Audit
-description: Audit of inherited Zed settings exposed through Backboard Studio defaults and typed settings.
+description: Audit of inherited Backboard Studio settings exposed through Backboard Studio defaults and typed settings.
 ---
 
 # Backboard Settings Audit
 
-This document audits the inherited Zed settings surface as it exists in Backboard Studio. It is documentation-only: no setting is removed or changed by this audit.
+This document audits the inherited Backboard Studio settings surface as it exists in Backboard Studio. It is documentation-only: no setting is removed or changed by this audit.
 
 ## Classification Definitions
 
 - **Directly Useful / Used**: read by Backboard-specific flows, core Backboard agent/editor UX, simple mode, model selection, theme, project/workspace restore, terminal/preview, Git/worktree, or settings UI users actually need.
-- **Not Used**: inherited Zed feature setting with no meaningful Backboard surface, disabled/unreachable feature, or no runtime read path relevant to this fork.
+- **Not Used**: inherited Backboard Studio feature setting with no meaningful Backboard surface, disabled/unreachable feature, or no runtime read path relevant to this fork.
 - **Gray Area**: still used by editor mode or upstream components, but not central to Backboard product. Keep internally for compatibility unless a cleanup explicitly hides it from UI/docs.
 
 ## Evidence Index
@@ -31,7 +31,7 @@ This document audits the inherited Zed settings surface as it exists in Backboar
 - **E14**: Editor settings in `crates/settings_content/src/editor.rs::EditorSettingsContent`; runtime reads in `crates/editor/src/editor_settings.rs::EditorSettings::from_settings` and many `EditorSettings::get_global` sites.
 - **E15**: Language/project settings in `crates/settings_content/src/language.rs` and `project.rs`; runtime reads via `AllLanguageSettings::get_global` and `ProjectSettings::get_global` in `crates/editor/src` and `crates/project/src/lsp_store.rs`.
 - **E16**: Calls/collaboration/audio settings are typed in `SettingsContent` and some upstream UI exists, but these do not map to a current Backboard Studio product surface.
-- **E17**: Settings typed or defaulted for inherited Zed behavior where the feature is disabled, absent from Backboard UX, or not meaningful to expose publicly.
+- **E17**: Settings typed or defaulted for inherited Backboard Studio behavior where the feature is disabled, absent from Backboard UX, or not meaningful to expose publicly.
 
 ## Exhaustive Default Settings Inventory
 
@@ -745,7 +745,7 @@ Source: `assets/settings/default.json`. Object rows and leaf rows are both liste
 | `language_models.vercel_ai_gateway.api_url` | AI / Models | Directly Useful / Used | E05 | Controls model provider defaults, prediction behavior, or Backboard API routing. | Keep public |
 | `language_models.x_ai` | AI / Models | Directly Useful / Used | E05 | Controls model provider defaults, prediction behavior, or Backboard API routing. | Keep public |
 | `language_models.x_ai.api_url` | AI / Models | Directly Useful / Used | E05 | Controls model provider defaults, prediction behavior, or Backboard API routing. | Keep public |
-| `language_models.zed.dev` | AI / Models | Directly Useful / Used | E05 | Controls model provider defaults, prediction behavior, or Backboard API routing. | Keep public |
+| `language_models.app.backboard.io` | AI / Models | Directly Useful / Used | E05 | Controls model provider defaults, prediction behavior, or Backboard API routing. | Keep public |
 | `session` | Projects / Workspaces | Directly Useful / Used | E02 | Affects project restore, panels, tabs, file discovery, and workspace ergonomics. | Keep public |
 | `session.restore_unsaved_buffers` | Projects / Workspaces | Directly Useful / Used | E02 | Affects project restore, panels, tabs, file discovery, and workspace ergonomics. | Keep public |
 | `session.trust_all_worktrees` | Projects / Workspaces | Directly Useful / Used | E02 | Affects project restore, panels, tabs, file discovery, and workspace ergonomics. | Keep public |
@@ -871,7 +871,7 @@ These keys or key patterns are present in typed settings models or flattened use
 
 ## Audit Notes
 
-- The default file intentionally carries many editor-mode and language-specific settings inherited from Zed. Most of these are **Gray Area**, not **Not Used**, because editor mode still reads them through `EditorSettings`, `ProjectSettings`, and `AllLanguageSettings`.
+- The default file intentionally carries many editor-mode and language-specific settings inherited from Backboard Studio. Most of these are **Gray Area**, not **Not Used**, because editor mode still reads them through `EditorSettings`, `ProjectSettings`, and `AllLanguageSettings`.
 - Backboard-specific product weight is concentrated in `preferred_interface_mode`, `server_url`, `agent.*`, `language_models.*`, `edit_predictions.*`, `terminal.*`, `git.*`, project restore/session settings, and visual settings used by both simple mode and editor mode.
 - Collaboration, calls, audio, Jupyter, REPL, journal, and which-key settings are inherited surfaces with little current Backboard value. They should be hidden from Backboard settings UI/docs before any removal is attempted.
 - Release-channel and platform override blocks are compatibility mechanics. They should stay internal because deleting them could break expected settings merges even if they are not user-facing Backboard concepts.

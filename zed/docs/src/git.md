@@ -1,13 +1,13 @@
 ---
-description: Zed is a text editor that supports lots of Git features
-title: Zed Editor Git integration documentation
+description: Backboard Studio is a text editor that supports lots of Git features
+title: Backboard Studio Editor Git integration documentation
 ---
 
 # Git
 
-Zed has built-in Git support that lets you manage version control without leaving the editor. The Git Panel shows your working tree state, staging area, and branch information. Changes you make on the command line are reflected immediately in Zed.
+Backboard Studio has built-in Git support that lets you manage version control without leaving the editor. The Git Panel shows your working tree state, staging area, and branch information. Changes you make on the command line are reflected immediately in Backboard Studio.
 
-For operations that Zed doesn't support natively, you can use the integrated terminal.
+For operations that Backboard Studio doesn't support natively, you can use the integrated terminal.
 
 ## Git Panel
 
@@ -17,7 +17,7 @@ You can open the Git Panel using {#action git_panel::ToggleFocus}, or by clickin
 
 In the panel you can see the state of your project at a glance: which repository and branch are active, what files have changed and the current staging state of each file.
 
-Zed monitors your repository so that changes you make on the command line are instantly reflected.
+Backboard Studio monitors your repository so that changes you make on the command line are instantly reflected.
 
 ### Configuration
 
@@ -36,7 +36,7 @@ The Git Panel shows a flat list of changed files by default. To see files organi
 
 #### Inline Blame
 
-Zed shows Git blame information on the current line. To turn this off or add a delay before it appears, go to **Version Control > Inline Git Blame**.
+Backboard Studio shows Git blame information on the current line. To turn this off or add a delay before it appears, go to **Version Control > Inline Git Blame**.
 
 #### Hiding the Gutter Indicators
 
@@ -44,11 +44,11 @@ The colored bars in the gutter that show added, modified, and deleted lines can 
 
 #### Commit Message Line Length
 
-Zed wraps commit messages at 72 characters (a Git convention). To change this, search for "Git Commit" in Settings and adjust **Preferred Line Length**.
+Backboard Studio wraps commit messages at 72 characters (a Git convention). To change this, search for "Git Commit" in Settings and adjust **Preferred Line Length**.
 
 ## Project Diff
 
-You can see all of the changes captured by Git in Zed by opening the Project Diff ({#kb git::Diff}), accessible via the {#action git::Diff} action in the Command Palette or the Git Panel.
+You can see all of the changes captured by Git in Backboard Studio by opening the Project Diff ({#kb git::Diff}), accessible via the {#action git::Diff} action in the Command Palette or the Git Panel.
 
 All of the changes displayed in the Project Diff behave exactly the same as any other multibuffer: they are all editable excerpts of files.
 
@@ -56,7 +56,7 @@ You can stage or unstage each hunk as well as a whole file by hitting the button
 
 ### Word Diff Highlighting
 
-By default, Zed highlights changed words within modified lines to make it easier to spot exactly what changed. To disable this globally, open the Settings Editor and go to **Languages & Tools > Miscellaneous**, then turn off **Word Diff Enabled**.
+By default, Backboard Studio highlights changed words within modified lines to make it easier to spot exactly what changed. To disable this globally, open the Settings Editor and go to **Languages & Tools > Miscellaneous**, then turn off **Word Diff Enabled**.
 
 To disable word diff for specific languages only, add this to your settings.json:
 
@@ -72,11 +72,11 @@ To disable word diff for specific languages only, add this to your settings.json
 
 ### Diff View Styles
 
-Zed displays diffs in two modes: **split** (side-by-side comparison) or **unified** (inline changes). Split view is the default.
+Backboard Studio displays diffs in two modes: **split** (side-by-side comparison) or **unified** (inline changes). Split view is the default.
 
 #### Changing the diff view
 
-Open the Settings Editor ({#kb zed::OpenSettings}) and search for "diff view style". Select either **Split** or **Unified**.
+Open the Settings Editor ({#kb backboard::OpenSettings}) and search for "diff view style". Select either **Split** or **Unified**.
 
 To change the default, add this to your `settings.json`:
 
@@ -86,7 +86,7 @@ To change the default, add this to your `settings.json`:
 }
 ```
 
-See [Configuring Zed](./configuring-zed.md) for more about the Settings Editor.
+See [Configuring Backboard Studio](./configuring-zed.md) for more about the Settings Editor.
 
 #### Split vs unified
 
@@ -108,25 +108,25 @@ To view File History:
 
 ## Fetch, Push, and Pull
 
-Fetch, push, or pull from your Git repository in Zed via the buttons available on the Git Panel or via the Command Palette by looking at the respective actions: {#action git::Fetch}, {#action git::Push}, and {#action git::Pull}.
+Fetch, push, or pull from your Git repository in Backboard Studio via the buttons available on the Git Panel or via the Command Palette by looking at the respective actions: {#action git::Fetch}, {#action git::Push}, and {#action git::Pull}.
 
 ### Push Configuration
 
-Zed respects Git's push configuration. When pushing, Zed checks the following in order:
+Backboard Studio respects Git's push configuration. When pushing, Backboard Studio checks the following in order:
 
 1. `pushRemote` configured for the current branch
 2. `remote.pushDefault` in your Git config
 3. The branch's tracking remote
 
-This matches Git's standard behavior, so if you've configured `pushRemote` or `pushDefault` in your `.gitconfig` or via `git config`, Zed will use those settings.
+This matches Git's standard behavior, so if you've configured `pushRemote` or `pushDefault` in your `.gitconfig` or via `git config`, Backboard Studio will use those settings.
 
 ## Remotes
 
-When your repository has multiple remotes, Zed shows a remote selector in the Git Panel. Click the remote button next to push/pull to choose which remote to use for that operation.
+When your repository has multiple remotes, Backboard Studio shows a remote selector in the Git Panel. Click the remote button next to push/pull to choose which remote to use for that operation.
 
 ## Staging Workflow
 
-Zed has two primary staging workflows, using either the Project Diff or the panel directly.
+Backboard Studio has two primary staging workflows, using either the Project Diff or the panel directly.
 
 ### Using the Project Diff
 
@@ -146,19 +146,19 @@ Entries can be staged using each individual entry's checkbox. All changes can be
 
 ## Committing
 
-Zed offers two commit textareas:
+Backboard Studio offers two commit textareas:
 
 1. The first one is available right at the bottom of the Git Panel. Hitting {#kb git::Commit} immediately commits all of your staged changes.
 2. The second is available via the action {#action git::ExpandCommitEditor} or via hitting the {#kb git::ExpandCommitEditor} while focused in the Git Panel commit textarea.
 
 ### Undoing a Commit
 
-As soon as you commit in Zed, in the Git Panel, you'll see a bar right under the commit textarea, which will show the recently submitted commit.
+As soon as you commit in Backboard Studio, in the Git Panel, you'll see a bar right under the commit textarea, which will show the recently submitted commit.
 In there, you can use the "Uncommit" button, which performs the `git reset HEADˆ--soft` command.
 
 ### Configuring Commit Line Length
 
-By default, Zed sets the commit line length to `72` but it can be configured in your local `settings.json` file.
+By default, Backboard Studio sets the commit line length to `72` but it can be configured in your local `settings.json` file.
 
 Find more information about setting the `preferred-line-length` in the [Configuration](#configuration) section.
 
@@ -172,7 +172,7 @@ When you are working in a [Git worktree](#git-worktrees), use the branch picker 
 
 ### Deleting Branches
 
-To delete a branch, open the branch switcher with {#action git::Switch}, find the branch you want to delete, and use the delete option. Zed will confirm before deleting to prevent accidental data loss.
+To delete a branch, open the branch switcher with {#action git::Switch}, find the branch you want to delete, and use the delete option. Backboard Studio will confirm before deleting to prevent accidental data loss.
 
 > **Note:** You cannot delete the branch you currently have checked out. Switch to a different branch first.
 
@@ -185,7 +185,7 @@ Open the worktree picker from the title bar, next to the project picker, or by r
 From the picker, you can:
 
 - Create a new linked worktree either from the current branch or default branch
-- Type a name to create a named worktree or let Zed automatically pick one for you
+- Type a name to create a named worktree or let Backboard Studio automatically pick one for you
 - Switch the current workspace to an existing worktree
 - Open an existing worktree in a new window
 - Delete linked worktrees that are not currently open in the project
@@ -194,26 +194,26 @@ From the picker, you can:
 
 New worktrees are created in detached HEAD state.
 After switching to the new worktree, use the branch picker next to the worktree picker to create a new branch or check out an existing, unused branch.
-This keeps Zed from accidentally checking out the same branch in multiple worktrees.
+This keeps Backboard Studio from accidentally checking out the same branch in multiple worktrees.
 
 The directory used for new worktrees is controlled by the `git.worktree_directory` setting.
-By default, Zed creates worktrees under `../worktrees` relative to the repository's working directory.
+By default, Backboard Studio creates worktrees under `../worktrees` relative to the repository's working directory.
 
 See [All Settings](./reference/all-settings.md#git-worktree-directory) for examples.
 
 ### Init Setup
 
-To run setup steps after Zed creates a linked worktree, use the [`create_worktree` task hook](./tasks.md#hooks).
+To run setup steps after Backboard Studio creates a linked worktree, use the [`create_worktree` task hook](./tasks.md#hooks).
 For agent-specific workflows, see [Worktree Isolation](./ai/parallel-agents.md#worktree-isolation).
 
 ### Multi-root Workspaces
 
-If your project contains multiple Git repositories (i.e., multi-root folders), Zed creates a linked worktree for each repository when creating a new worktree from the picker.
+If your project contains multiple Git repositories (i.e., multi-root folders), Backboard Studio creates a linked worktree for each repository when creating a new worktree from the picker.
 Non-Git folders in the same project are included in the new workspace as-is.
 
 ## Merge Conflicts
 
-When you encounter merge conflicts after a merge, rebase, or pull, Zed highlights the conflicting regions in your files and displays resolution buttons above each conflict.
+When you encounter merge conflicts after a merge, rebase, or pull, Backboard Studio highlights the conflicting regions in your files and displays resolution buttons above each conflict.
 
 ### Viewing Conflicts
 
@@ -244,7 +244,7 @@ To stash all your current changes, use the {#action git::StashAll} action. This 
 
 ### Managing Stashes
 
-Zed provides a stash picker accessible via {#action git::ViewStash} or from the Git Panel's overflow menu. From the stash picker, you can:
+Backboard Studio provides a stash picker accessible via {#action git::ViewStash} or from the Git Panel's overflow menu. From the stash picker, you can:
 
 - **View stash list**: Browse all your saved stashes with their descriptions and timestamps
 - **Open diffs**: See exactly what changes are stored in each stash
@@ -254,7 +254,7 @@ Zed provides a stash picker accessible via {#action git::ViewStash} or from the 
 
 ### Quick Stash Operations
 
-For faster workflows, Zed provides direct actions to work with the most recent stash:
+For faster workflows, Backboard Studio provides direct actions to work with the most recent stash:
 
 - **Apply latest stash**: Use {#action git::StashApply} to apply the most recent stash without removing it
 - **Pop latest stash**: Use {#action git::StashPop} to apply and remove the most recent stash
@@ -271,10 +271,10 @@ To view a stash's contents, select it in the stash picker and press {#kb stash_p
 
 ## AI Support in Git
 
-Zed currently supports LLM-powered commit message generation.
+Backboard Studio currently supports LLM-powered commit message generation.
 You can ask AI to generate a commit message by focusing on the message editor within the Git Panel and either clicking on the pencil icon in the bottom left, or reaching for the {#action git::GenerateCommitMessage} ({#kb git::GenerateCommitMessage}) keybinding.
 
-> Note that you need to have an LLM provider configured either via your own API keys or through Zed's hosted AI models.
+> Note that you need to have an LLM provider configured either via your own API keys or through Backboard Studio's hosted AI models.
 > Visit [the AI configuration page](./ai/configuration.md) to learn how to do so.
 
 You can specify your preferred model to use by providing a `commit_message_model` agent setting.
@@ -300,9 +300,9 @@ Any specific instructions for commit messages added to [Rules files](./ai/rules.
 
 ## Git Integrations
 
-Zed integrates with popular Git hosting services to ensure that Git commit hashes and references to Issues, Pull Requests, and Merge Requests become clickable links.
+Backboard Studio integrates with popular Git hosting services to ensure that Git commit hashes and references to Issues, Pull Requests, and Merge Requests become clickable links.
 
-Zed currently supports links to the hosted versions of
+Backboard Studio currently supports links to the hosted versions of
 [GitHub](https://github.com),
 [GitLab](https://gitlab.com),
 [Bitbucket](https://bitbucket.org),
@@ -311,9 +311,9 @@ Zed currently supports links to the hosted versions of
 
 ### Self-Hosted Instances
 
-Zed automatically identifies Git hosting providers by checking for keywords in your Git remote URL. For example, if your self-hosted URL contains `gitlab`, `gitea`, or other recognized provider names, Zed will automatically register that hosting provider without any configuration needed.
+Backboard Studio automatically identifies Git hosting providers by checking for keywords in your Git remote URL. For example, if your self-hosted URL contains `gitlab`, `gitea`, or other recognized provider names, Backboard Studio will automatically register that hosting provider without any configuration needed.
 
-However, if your self-hosted Git instance URL doesn't contain identifying keywords, you can manually configure Zed to create clickable links to your instance by adding a `git_hosting_providers` setting so commit hashes and permalinks resolve to your domain:
+However, if your self-hosted Git instance URL doesn't contain identifying keywords, you can manually configure Backboard Studio to create clickable links to your instance by adding a `git_hosting_providers` setting so commit hashes and permalinks resolve to your domain:
 
 ```json [settings]
 {
@@ -333,7 +333,7 @@ You can configure multiple custom providers if you work with several self-hosted
 
 ### Permalinks
 
-Zed also has a Copy Permalink feature to create a permanent link to a code snippet on your Git hosting service.
+Backboard Studio also has a Copy Permalink feature to create a permanent link to a code snippet on your Git hosting service.
 These links are useful for sharing a specific line or range of lines in a file at a specific commit.
 Trigger this action via the [Command Palette](./getting-started.md#command-palette) (search for `permalink`),
 by creating a [custom key bindings](key-bindings.md#custom-key-bindings) to the
@@ -342,7 +342,7 @@ or by simply right clicking and selecting `Copy Permalink` with line(s) selected
 
 ## Diff Hunk Keyboard Shortcuts
 
-When viewing files with changes, Zed displays diff hunks that can be expanded or collapsed for detailed review:
+When viewing files with changes, Backboard Studio displays diff hunks that can be expanded or collapsed for detailed review:
 
 - **Expand all diff hunks**: {#action editor::ExpandAllDiffHunks} ({#kb editor::ExpandAllDiffHunks})
 - **Collapse all diff hunks**: Press `Escape` (bound to {#action editor::Cancel})
@@ -388,7 +388,7 @@ When viewing files with changes, Zed displays diff hunks that can be expanded or
 
 ## Git CLI Configuration
 
-If you would like to also use Zed for your [git commit message editor](https://git-scm.com/book/en/v2/Customizing-Git-Git-Configuration#_core_editor) when committing from the command line you can use `zed --wait`:
+If you would like to also use Backboard Studio for your [git commit message editor](https://git-scm.com/book/en/v2/Customizing-Git-Git-Configuration#_core_editor) when committing from the command line you can use `zed --wait`:
 
 ```sh
 git config --global core.editor "zed --wait"

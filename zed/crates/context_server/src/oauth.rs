@@ -674,7 +674,7 @@ pub fn token_refresh_params(
 /// exact URI we intend to use.
 pub fn dcr_registration_body(redirect_uri: &str) -> serde_json::Value {
     serde_json::json!({
-        "client_name": "Zed",
+        "client_name": "Backboard Studio",
         "redirect_uris": [redirect_uri],
         "grant_types": ["authorization_code"],
         "response_types": ["code"],
@@ -1108,14 +1108,14 @@ pub async fn start_callback_server() -> Result<(
                 Ok(_) => (
                     200,
                     "<html><body><h1>Authorization successful</h1>\
-                     <p>You can close this tab and return to Zed.</p></body></html>",
+                     <p>You can close this tab and return to Backboard Studio.</p></body></html>",
                 ),
                 Err(err) => {
                     log::error!("OAuth callback error: {}", err);
                     (
                         400,
                         "<html><body><h1>Authorization failed</h1>\
-                         <p>Something went wrong. Please try again from Zed.</p></body></html>",
+                         <p>Something went wrong. Please try again from Backboard Studio.</p></body></html>",
                     )
                 }
             };
@@ -1929,7 +1929,7 @@ mod tests {
     #[test]
     fn test_dcr_registration_body_shape() {
         let body = dcr_registration_body("http://127.0.0.1:12345/callback");
-        assert_eq!(body["client_name"], "Zed");
+        assert_eq!(body["client_name"], "Backboard Studio");
         assert_eq!(body["redirect_uris"][0], "http://127.0.0.1:12345/callback");
         assert_eq!(body["grant_types"][0], "authorization_code");
         assert_eq!(body["response_types"][0], "code");

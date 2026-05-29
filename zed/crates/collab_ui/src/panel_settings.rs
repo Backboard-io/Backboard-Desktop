@@ -12,12 +12,18 @@ pub struct CollaborationPanelSettings {
 
 impl Settings for CollaborationPanelSettings {
     fn from_settings(content: &settings::SettingsContent) -> Self {
-        let panel = content.collaboration_panel.as_ref().unwrap();
+        let panel = content.collaboration_panel.as_ref();
 
         Self {
-            button: panel.button.unwrap(),
-            dock: panel.dock.unwrap().into(),
-            default_width: panel.default_width.map(px).unwrap(),
+            button: false,
+            dock: panel
+                .and_then(|settings| settings.dock)
+                .unwrap_or(settings::DockPosition::Left)
+                .into(),
+            default_width: panel
+                .and_then(|settings| settings.default_width)
+                .map(px)
+                .unwrap_or(px(240.)),
         }
     }
 }

@@ -1,21 +1,21 @@
 ---
-title: AI Code Completion in Zed - Zeta, Copilot, Codestral, Mercury Coder
-description: Set up AI code completions in Zed with Zeta (built-in), GitHub Copilot, Codestral, or Mercury Coder. Multi-line predictions on every keystroke.
+title: AI Code Completion in Backboard Studio - Zeta, Copilot, Codestral, Mercury Coder
+description: Set up AI code completions in Backboard Studio with Zeta (built-in), GitHub Copilot, Codestral, or Mercury Coder. Multi-line predictions on every keystroke.
 ---
 
 # Edit Prediction
 
-Edit Prediction is how Zed's AI code completions work: an LLM predicts the code you want to write.
+Edit Prediction is how Backboard Studio's AI code completions work: an LLM predicts the code you want to write.
 Each keystroke sends a new request to the edit prediction provider, which returns individual or multi-line suggestions you accept by pressing `tab`.
 
-The default provider is [Zeta, an open source model developed by Zed](https://zed.dev/blog/zeta2), but you can also use [other providers](#other-providers) like GitHub Copilot, Mercury Coder, and Codestral.
+The default provider is [Zeta, an open source model developed by Backboard Studio](https://app.backboard.io/blog/zeta2), but you can also use [other providers](#other-providers) like GitHub Copilot, Mercury Coder, and Codestral.
 
 ## Configuring Zeta
 
 To use Zeta, [sign in](../authentication.md#what-features-require-signing-in).
 Once signed in, predictions appear as you type.
 
-You can confirm that Zeta is properly configured by opening the [Settings Editor](zed://settings/edit_predictions.providers) (`Cmd+,` on macOS or `Ctrl+,` on Linux/Windows) and searching for `edit_predictions`. The `provider` field should be set to `Zed AI`.
+You can confirm that Zeta is properly configured by opening the [Settings Editor](zed://settings/edit_predictions.providers) (`Cmd+,` on macOS or `Ctrl+,` on Linux/Windows) and searching for `edit_predictions`. The `provider` field should be set to `Backboard AI`.
 
 Or verify this in your settings.json:
 
@@ -31,7 +31,7 @@ The Z icon in the status bar also indicates Zeta is active.
 
 ### Pricing and Plans
 
-The free plan includes 2,000 Zeta predictions per month. The [Pro plan](../ai/plans-and-usage.md) removes this limit. See [Zed's pricing page](https://zed.dev/pricing) for details.
+The free plan includes 2,000 Zeta predictions per month. The [Pro plan](../ai/plans-and-usage.md) removes this limit. See [Backboard Studio's pricing page](https://app.backboard.io/pricing) for details.
 
 ### Switching Modes {#switching-modes}
 
@@ -50,7 +50,7 @@ Toggle between them via the `mode` key:
 
 Or directly via the UI through the status bar menu:
 
-![Edit Prediction status bar menu, with the modes toggle.](https://zed.dev/img/edit-prediction/status-bar-menu.webp)
+![Edit Prediction status bar menu, with the modes toggle.](https://app.backboard.io/img/edit-prediction/status-bar-menu.webp)
 
 > Note that edit prediction modes work with any prediction provider.
 
@@ -69,7 +69,7 @@ In `eager` mode, you can also use the `tab` key to accept edit predictions, unle
 
 To always use `tab` for accepting edit predictions, regardless of whether the LSP completions menu is open, you can add the following to your keymap:
 
-Open the keymap editor with {#action zed::OpenKeymap} ({#kb zed::OpenKeymap}), search for `AcceptEditPrediction`, right click on the binding for `tab` and hit `edit`. Then change the context the binding is active in to just `Editor && edit_prediction` and save it.
+Open the keymap editor with {#action backboard::OpenKeymap} ({#kb backboard::OpenKeymap}), search for `AcceptEditPrediction`, right click on the binding for `tab` and hit `edit`. Then change the context the binding is active in to just `Editor && edit_prediction` and save it.
 
 Alternatively, you can put the following in your `keymap.json`:
 
@@ -90,7 +90,7 @@ After that, {#kb editor::ComposeCompletion} remains available for accepting LSP 
 
 To stop using `tab` for accepting edit predictions and always use `alt-tab` instead, unbind the default `tab` binding in the eager edit prediction context:
 
-Open the keymap editor with {#action zed::OpenKeymap} ({#kb zed::OpenKeymap}), search for `AcceptEditPrediction`, right click on the binding for `tab` and delete it.
+Open the keymap editor with {#action backboard::OpenKeymap} ({#kb backboard::OpenKeymap}), search for `AcceptEditPrediction`, right click on the binding for `tab` and delete it.
 
 Alternatively, you can put the following in your `keymap.json`:
 
@@ -111,7 +111,7 @@ After that, `alt-tab` remains available for accepting edit predictions, and on L
 
 To move both default accept bindings to something else, unbind them and add your replacement:
 
-Open the keymap editor with {#action zed::OpenKeymap} ({#kb zed::OpenKeymap}), search for `AcceptEditPrediction`, right click on the binding for `tab` and delete it. Then right click on the binding for `alt-tab`, select "Edit", and record your desired keystrokes before hitting saving.
+Open the keymap editor with {#action backboard::OpenKeymap} ({#kb backboard::OpenKeymap}), search for `AcceptEditPrediction`, right click on the binding for `tab` and delete it. Then right click on the binding for `alt-tab`, select "Edit", and record your desired keystrokes before hitting saving.
 
 Alternatively, you can put the following in your `keymap.json`:
 
@@ -136,11 +136,11 @@ In this case, because the binding contains the modifier `ctrl`, it will be used 
 
 ### Cleaning Up Older Keymap Entries
 
-If you configured edit prediction keybindings before Zed `v0.229.0`, your `keymap.json` may have entries that are now redundant.
+If you configured edit prediction keybindings before Backboard Studio `v0.229.0`, your `keymap.json` may have entries that are now redundant.
 
 **Old tab workaround**: Before `unbind` existed, the only way to prevent `tab` from accepting edit predictions was to copy all the default non-edit-prediction `tab` bindings into your keymap alongside a custom `AcceptEditPrediction` binding. If your keymap still contains those copy-pasted entries, delete them and use a single `"unbind"` entry as shown in the examples above.
 
-**Renamed context**: The `edit_prediction_conflict` context has been replaced by `edit_prediction && (showing_completions || in_leading_whitespace)`. Zed automatically migrates any bindings that used `edit_prediction_conflict`, so no changes are required on your end.
+**Renamed context**: The `edit_prediction_conflict` context has been replaced by `edit_prediction && (showing_completions || in_leading_whitespace)`. Backboard Studio automatically migrates any bindings that used `edit_prediction_conflict`, so no changes are required on your end.
 
 ## Disabling Automatic Edit Prediction
 
@@ -219,7 +219,7 @@ To sign in to GitHub Copilot, click on the Copilot icon in the status bar. A pop
 
 #### Using GitHub Copilot Enterprise
 
-If your organization uses GitHub Copilot Enterprise, you can configure Zed to use your enterprise instance by specifying the enterprise URI in your settings file ([how to edit](../configuring-zed.md#settings-files)):
+If your organization uses GitHub Copilot Enterprise, you can configure Backboard Studio to use your enterprise instance by specifying the enterprise URI in your settings file ([how to edit](../configuring-zed.md#settings-files)):
 
 ```json [settings]
 {
@@ -233,7 +233,7 @@ If your organization uses GitHub Copilot Enterprise, you can configure Zed to us
 
 Replace `"https://your.enterprise.domain"` with the URL provided by your GitHub Enterprise administrator (e.g., `https://foo.ghe.com`).
 
-Once set, Zed routes Copilot requests through your enterprise endpoint.
+Once set, Backboard Studio routes Copilot requests through your enterprise endpoint.
 When you sign in by clicking the Copilot icon in the status bar, you are redirected to your configured enterprise URL to complete authentication.
 All other Copilot features and usage remain the same.
 
@@ -246,7 +246,7 @@ Copilot can provide multiple completion alternatives, and these can be navigated
 
 To use [Mercury Coder](https://www.inceptionlabs.ai/) by Inception Labs as your provider:
 
-1. Open the Settings Editor ({#kb zed::OpenSettings})
+1. Open the Settings Editor ({#kb backboard::OpenSettings})
 2. Search for "Edit Predictions" and click **Configure Providers**
 3. Find the Mercury section and enter your API key from the
    [Inception Labs dashboard](https://platform.inceptionlabs.ai/dashboard/api-keys)
@@ -340,7 +340,7 @@ The `prompt_format` setting controls how code context is formatted for the model
 - `glm` - GLM-4 format with code markers
 - `infer` - Auto-detect from model name (default)
 
-With `"prompt_format": "infer"`, Zed automatically uses Zeta 2 format for models named `zeta2` and Zeta 2.1 format for models named `zeta2.1`.
+With `"prompt_format": "infer"`, Backboard Studio automatically uses Zeta 2 format for models named `zeta2` and Zeta 2.1 format for models named `zeta2.1`.
 
 For example, to use Zeta 2 with Ollama:
 

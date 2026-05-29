@@ -1,6 +1,6 @@
 ---
 title: Terraform
-description: "Configure Terraform language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Terraform language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Terraform

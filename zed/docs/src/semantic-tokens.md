@@ -1,6 +1,6 @@
 ---
-title: Semantic Tokens and Syntax Highlighting - Zed
-description: Enable and configure semantic token highlighting in Zed for richer, language-server-aware syntax coloring.
+title: Semantic Tokens and Syntax Highlighting - Backboard Studio
+description: Enable and configure semantic token highlighting in Backboard Studio for richer, language-server-aware syntax coloring.
 ---
 
 # Semantic Tokens
@@ -45,10 +45,10 @@ You can configure this globally or per-language:
 
 ## Customizing Token Colors
 
-Semantic tokens are styled using rules that map LSP token types and modifiers to theme styles or custom colors. Zed provides sensible defaults, but you can customize these in your settings.json: add rules under `global_lsp_settings.semantic_token_rules` key.
+Semantic tokens are styled using rules that map LSP token types and modifiers to theme styles or custom colors. Backboard Studio provides sensible defaults, but you can customize these in your settings.json: add rules under `global_lsp_settings.semantic_token_rules` key.
 
 Rules are matched in order, and the first matching rule wins.
-User-defined rules take highest precedence, followed by extension-provided language rules, then Zed defaults.
+User-defined rules take highest precedence, followed by extension-provided language rules, then Backboard Studio defaults.
 
 ### Rule Structure
 
@@ -143,14 +143,14 @@ Since user rules take highest precedence and the first match wins, this empty ru
 
 ## Default Rules
 
-Zed's default semantic token rules map standard LSP token types to common theme styles. For example:
+Backboard Studio's default semantic token rules map standard LSP token types to common theme styles. For example:
 
 - `function` → `function` style
 - `variable` with `constant` modifier → `constant` style
 - `class` → `type.class`, `class`, or `type` style (first found)
 - `comment` with `documentation` modifier → `comment.documentation` or `comment.doc` style
 
-The full default configuration can be shown in Zed with the {#action zed::ShowDefaultSemanticTokenRules} command.
+The full default configuration can be shown in Backboard Studio with the {#action backboard::ShowDefaultSemanticTokenRules} command.
 
 ## Standard Token Types
 
@@ -201,4 +201,4 @@ Changes to `semantic_tokens` mode may require a language server restart. Use {#a
 
 ### Theme styles not being applied
 
-Ensure the style names in your rules match styles defined in your theme. The `style` array provides fallback options—if the first style isn't found, Zed tries the next one.
+Ensure the style names in your rules match styles defined in your theme. The `style` array provides fallback options—if the first style isn't found, Backboard Studio tries the next one.

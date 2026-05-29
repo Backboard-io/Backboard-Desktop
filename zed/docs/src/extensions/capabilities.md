@@ -1,11 +1,11 @@
 ---
 title: Extension Capabilities
-description: "Extension Capabilities for Zed extensions."
+description: "Extension Capabilities for Backboard Studio extensions."
 ---
 
 # Extension Capabilities
 
-The operations that Zed extensions are able to perform are governed by a capability system.
+The operations that Backboard Studio extensions are able to perform are governed by a capability system.
 
 ## Restricting capabilities
 
@@ -79,7 +79,7 @@ To allow any file to be downloaded from `github.com`:
 To allow any file to be downloaded from a specific GitHub repository:
 
 ```toml
-{ kind = "download_file", host = "github.com", path = ["zed-industries", "zed", "**"] }
+{ kind = "download_file", host = "github.com", path = ["backboard", "zed", "**"] }
 ```
 
 ### `npm:install`

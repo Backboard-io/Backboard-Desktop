@@ -35,17 +35,17 @@
       "cmd-shift-w": "workspace::CloseWindow",
       "shift-escape": "workspace::ToggleZoom",
       "cmd-o": "workspace::Open",
-      "cmd-=": ["zed::IncreaseBufferFontSize", { "persist": false }],
-      "cmd-+": ["zed::IncreaseBufferFontSize", { "persist": false }],
-      "cmd--": ["zed::DecreaseBufferFontSize", { "persist": false }],
-      "cmd-0": ["zed::ResetBufferFontSize", { "persist": false }],
-      "cmd-alt-,": "zed::OpenSettingsFile",
-      "cmd-q": "zed::Quit",
-      "cmd-h": "zed::Hide",
-      "alt-cmd-h": "zed::HideOthers",
-      "cmd-m": "zed::Minimize",
-      "fn-f": "zed::ToggleFullScreen",
-      "ctrl-cmd-f": "zed::ToggleFullScreen",
+      "cmd-=": ["backboard::IncreaseBufferFontSize", { "persist": false }],
+      "cmd-+": ["backboard::IncreaseBufferFontSize", { "persist": false }],
+      "cmd--": ["backboard::DecreaseBufferFontSize", { "persist": false }],
+      "cmd-0": ["backboard::ResetBufferFontSize", { "persist": false }],
+      "cmd-alt-,": "backboard::OpenSettingsFile",
+      "cmd-q": "backboard::Quit",
+      "cmd-h": "backboard::Hide",
+      "alt-cmd-h": "backboard::HideOthers",
+      "cmd-m": "backboard::Minimize",
+      "fn-f": "backboard::ToggleFullScreen",
+      "ctrl-cmd-f": "backboard::ToggleFullScreen",
       "ctrl-cmd-z": "edit_prediction::RatePredictions",
       "ctrl-cmd-i": "edit_prediction::ToggleMenu",
       "ctrl-cmd-l": "lsp_tool::ToggleMenu",
@@ -579,7 +579,7 @@
       "cmd-f2": "editor::SelectAllMatches", // Select all occurrences of current word
       "cmd-k cmd-d": ["editor::SelectNext", { "replace_newest": true }], // editor.action.moveSelectionToNextFindMatch / find_under_expand_skip
       // macOS binds `ctrl-cmd-d` to Show Dictionary which breaks these two binds
-      // To use `ctrl-cmd-d` or `ctrl-k ctrl-cmd-d` in Zed you must execute this command and then restart:
+      // To use `ctrl-cmd-d` or `ctrl-k ctrl-cmd-d` in Backboard Studio you must execute this command and then restart:
       //   defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 70 '<dict><key>enabled</key><false/></dict>'
       "ctrl-cmd-d": ["editor::SelectPrevious", { "replace_newest": false }], // editor.action.addSelectionToPreviousFindMatch
       "cmd-k ctrl-cmd-d": ["editor::SelectPrevious", { "replace_newest": true }], // editor.action.moveSelectionToPreviousFindMatch
@@ -615,7 +615,7 @@
       "cmd-k cmd-9": "editor::FoldAtLevel_9",
       "cmd-k cmd-0": "editor::FoldAll",
       "cmd-k cmd-j": "editor::UnfoldAll",
-      // Using `ctrl-space` / `ctrl-shift-space` in Zed requires disabling the macOS global shortcut.
+      // Using `ctrl-space` / `ctrl-shift-space` in Backboard Studio requires disabling the macOS global shortcut.
       // System Preferences->Keyboard->Keyboard Shortcuts->Input Sources->Select the previous input source (uncheck)
       "ctrl-space": "editor::ShowCompletions",
       "ctrl-shift-space": "editor::ShowWordCompletions",
@@ -715,7 +715,7 @@
       "cmd-shift-f": "pane::DeploySearch",
       "cmd-shift-h": ["pane::DeploySearch", { "replace_enabled": true }],
       "cmd-shift-t": "pane::ReopenClosedItem",
-      "cmd-k cmd-s": "zed::OpenKeymap",
+      "cmd-k cmd-s": "backboard::OpenKeymap",
       "cmd-k cmd-t": "theme_selector::Toggle",
       "cmd-k cmd-shift-t": "theme::ToggleMode",
       "ctrl-alt-cmd-p": "settings_profile_selector::Toggle",
@@ -743,7 +743,7 @@
       "cmd-k shift-right": "workspace::SwapPaneRight",
       "cmd-k shift-up": "workspace::SwapPaneUp",
       "cmd-k shift-down": "workspace::SwapPaneDown",
-      "cmd-shift-x": "zed::Extensions",
+      "cmd-shift-x": "backboard::Extensions",
       "f5": "debugger::Rerun",
       "cmd-w": "workspace::CloseActiveDock",
     },
@@ -919,7 +919,6 @@
   {
     "use_key_equivalents": true,
     "bindings": {
-      "ctrl-alt-cmd-f": "workspace::FollowNextCollaborator",
       // Only available in debug builds: opens an element inspector for development.
       "cmd-alt-i": "dev::ToggleInspector",
     },
@@ -1256,7 +1255,7 @@
       "cmd-home": "terminal::ScrollToTop",
       "shift-end": "terminal::ScrollToBottom",
       "cmd-end": "terminal::ScrollToBottom",
-      // Using `ctrl-shift-space` in Zed requires disabling the macOS global shortcut.
+      // Using `ctrl-shift-space` in Backboard Studio requires disabling the macOS global shortcut.
       // System Preferences->Keyboard->Keyboard Shortcuts->Input Sources->Select the previous input source (uncheck)
       "ctrl-shift-space": "terminal::ToggleViMode",
       "ctrl-alt-up": "pane::SplitUp",
@@ -1296,7 +1295,7 @@
     },
   },
   {
-    "context": "ZedPredictModal",
+    "context": "BackboardPredictModal",
     "use_key_equivalents": true,
     "bindings": {
       "escape": "menu::Cancel",
@@ -1375,7 +1374,7 @@
       "cmd-c": "keymap_editor::CopyAction",
       "cmd-shift-c": "keymap_editor::CopyContext",
       "cmd-t": "keymap_editor::ShowMatchingKeybinds",
-      "cmd-e": "zed::OpenKeymapFile",
+      "cmd-e": "backboard::OpenKeymapFile",
     },
   },
   {
@@ -1407,10 +1406,10 @@
     "context": "Onboarding",
     "use_key_equivalents": true,
     "bindings": {
-      "cmd-=": ["zed::IncreaseUiFontSize", { "persist": false }],
-      "cmd-+": ["zed::IncreaseUiFontSize", { "persist": false }],
-      "cmd--": ["zed::DecreaseUiFontSize", { "persist": false }],
-      "cmd-0": ["zed::ResetUiFontSize", { "persist": false }],
+      "cmd-=": ["backboard::IncreaseUiFontSize", { "persist": false }],
+      "cmd-+": ["backboard::IncreaseUiFontSize", { "persist": false }],
+      "cmd--": ["backboard::DecreaseUiFontSize", { "persist": false }],
+      "cmd-0": ["backboard::ResetUiFontSize", { "persist": false }],
       "cmd-enter": "onboarding::Finish",
       "alt-tab": "onboarding::SignIn",
       "alt-shift-a": "onboarding::OpenAccount",
@@ -1421,10 +1420,10 @@
     "use_key_equivalents": true,
     "bindings": {
       "cmd-n": "workspace::NewFile",
-      "cmd-=": ["zed::IncreaseUiFontSize", { "persist": false }],
-      "cmd-+": ["zed::IncreaseUiFontSize", { "persist": false }],
-      "cmd--": ["zed::DecreaseUiFontSize", { "persist": false }],
-      "cmd-0": ["zed::ResetUiFontSize", { "persist": false }],
+      "cmd-=": ["backboard::IncreaseUiFontSize", { "persist": false }],
+      "cmd-+": ["backboard::IncreaseUiFontSize", { "persist": false }],
+      "cmd--": ["backboard::DecreaseUiFontSize", { "persist": false }],
+      "cmd-0": ["backboard::ResetUiFontSize", { "persist": false }],
       "cmd-1": ["welcome::OpenRecentProject", 0],
       "cmd-2": ["welcome::OpenRecentProject", 1],
       "cmd-3": ["welcome::OpenRecentProject", 2],
@@ -1445,7 +1444,7 @@
     "context": "!SettingsWindow",
     "use_key_equivalents": true,
     "bindings": {
-      "cmd-,": "zed::OpenSettings",
+      "cmd-,": "backboard::OpenSettings",
     },
   },
   {

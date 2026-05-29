@@ -155,7 +155,7 @@ pub struct ThemeSettingsContent {
     /// The theme to use for the markdown preview.
     /// Falls back to the main editor theme if unset.
     pub markdown_preview_theme: Option<ThemeSelection>,
-    /// The name of the Zed theme to use.
+    /// The name of the Backboard Studio theme to use.
     pub theme: Option<ThemeSelection>,
     /// The name of the icon theme to use.
     pub icon_theme: Option<IconThemeSelection>,
@@ -354,7 +354,7 @@ pub enum ThemeAppearanceMode {
 }
 
 /// Specifies the density of the UI.
-/// Note: This setting is still experimental. See [this tracking issue](https://github.com/zed-industries/zed/issues/18078)
+/// Note: This setting is still experimental. See [this tracking issue](https://github.com/backboard/ide/issues/18078)
 #[derive(
     Debug,
     Default,

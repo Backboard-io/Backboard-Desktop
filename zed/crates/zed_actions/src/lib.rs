@@ -14,72 +14,86 @@ pub fn init() {}
 
 /// Opens a URL in the system's default web browser.
 #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::OpenBrowser"])]
 #[serde(deny_unknown_fields)]
 pub struct OpenBrowser {
     pub url: String,
 }
 
-/// Opens a zed:// URL within the application.
+/// Opens an internal Backboard Studio URL within the application.
 #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::OpenZedUrl"])]
 #[serde(deny_unknown_fields)]
-pub struct OpenZedUrl {
+pub struct OpenBackboardUrl {
     pub url: String,
 }
 
 /// Opens the keymap to either add a keybinding or change an existing one
 #[derive(PartialEq, Clone, Default, Action, JsonSchema, Serialize, Deserialize)]
-#[action(namespace = zed, no_json, no_register)]
+#[action(namespace = backboard, no_json, no_register)]
 pub struct ChangeKeybinding {
     pub action: String,
 }
 
 actions!(
-    zed,
+    backboard,
     [
         /// Opens the settings editor.
-        #[action(deprecated_aliases = ["zed_actions::OpenSettingsEditor"])]
+        #[action(deprecated_aliases = ["zed::OpenSettings", "zed_actions::OpenSettingsEditor"])]
         OpenSettings,
         /// Opens the settings JSON file.
-        #[action(deprecated_aliases = ["zed_actions::OpenSettings"])]
+        #[action(deprecated_aliases = ["zed::OpenSettingsFile", "zed_actions::OpenSettings"])]
         OpenSettingsFile,
         /// Opens project-specific settings.
-        #[action(deprecated_aliases = ["zed_actions::OpenProjectSettings"])]
+        #[action(deprecated_aliases = ["zed::OpenProjectSettings", "zed_actions::OpenProjectSettings"])]
         OpenProjectSettings,
         /// Opens the default keymap file.
+        #[action(deprecated_aliases = ["zed::OpenDefaultKeymap"])]
         OpenDefaultKeymap,
         /// Opens the user keymap file.
-        #[action(deprecated_aliases = ["zed_actions::OpenKeymap"])]
+        #[action(deprecated_aliases = ["zed::OpenKeymapFile", "zed_actions::OpenKeymap"])]
         OpenKeymapFile,
         /// Opens the keymap editor.
-        #[action(deprecated_aliases = ["zed_actions::OpenKeymapEditor"])]
+        #[action(deprecated_aliases = ["zed::OpenKeymap", "zed_actions::OpenKeymapEditor"])]
         OpenKeymap,
         /// Opens account settings.
+        #[action(deprecated_aliases = ["zed::OpenAccountSettings"])]
         OpenAccountSettings,
         /// Opens the Backboard API key configuration UI.
+        #[action(deprecated_aliases = ["zed::ConfigureBackboardApiKey"])]
         ConfigureBackboardApiKey,
         /// Opens server settings.
+        #[action(deprecated_aliases = ["zed::OpenServerSettings"])]
         OpenServerSettings,
         /// Quits the application.
+        #[action(deprecated_aliases = ["zed::Quit"])]
         Quit,
-        /// Shows information about Zed.
+        /// Shows information about Backboard Studio.
+        #[action(deprecated_aliases = ["zed::About"])]
         About,
         /// Opens the documentation website.
+        #[action(deprecated_aliases = ["zed::OpenDocs"])]
         OpenDocs,
         /// Views open source licenses.
+        #[action(deprecated_aliases = ["zed::OpenLicenses"])]
         OpenLicenses,
         /// Opens the telemetry log.
+        #[action(deprecated_aliases = ["zed::OpenTelemetryLog"])]
         OpenTelemetryLog,
         /// Opens the performance profiler.
+        #[action(deprecated_aliases = ["zed::OpenPerformanceProfiler"])]
         OpenPerformanceProfiler,
         /// Opens the onboarding view.
+        #[action(deprecated_aliases = ["zed::OpenOnboarding"])]
         OpenOnboarding,
         /// Resets the onboarding state and opens onboarding from the beginning.
+        #[action(deprecated_aliases = ["zed::ResetOnboarding"])]
         ResetOnboarding,
         /// Re-opens the mode picker so the user can switch between Simple and Expert.
+        #[action(deprecated_aliases = ["zed::SwitchInterfaceMode"])]
         SwitchInterfaceMode,
         /// Shows the auto-update notification for testing.
+        #[action(deprecated_aliases = ["zed::ShowUpdateNotification"])]
         ShowUpdateNotification,
     ]
 );
@@ -100,7 +114,7 @@ pub enum ExtensionCategoryFilter {
 
 /// Opens the extensions management interface.
 #[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::Extensions"])]
 #[serde(deny_unknown_fields)]
 pub struct Extensions {
     /// Filters the extensions page down to extensions that are in the specified category.
@@ -113,7 +127,7 @@ pub struct Extensions {
 
 /// Opens the ACP registry.
 #[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::AcpRegistry"])]
 #[serde(deny_unknown_fields)]
 pub struct AcpRegistry;
 
@@ -125,7 +139,7 @@ pub struct ShowCallStats;
 
 /// Decreases the font size in the editor buffer.
 #[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::DecreaseBufferFontSize"])]
 #[serde(deny_unknown_fields)]
 pub struct DecreaseBufferFontSize {
     #[serde(default)]
@@ -134,7 +148,7 @@ pub struct DecreaseBufferFontSize {
 
 /// Increases the font size in the editor buffer.
 #[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::IncreaseBufferFontSize"])]
 #[serde(deny_unknown_fields)]
 pub struct IncreaseBufferFontSize {
     #[serde(default)]
@@ -143,7 +157,7 @@ pub struct IncreaseBufferFontSize {
 
 /// Opens the settings editor at a specific path.
 #[derive(PartialEq, Clone, Debug, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::OpenSettingsAt"])]
 #[serde(deny_unknown_fields)]
 pub struct OpenSettingsAt {
     /// A path to a specific setting (e.g. `theme.mode`)
@@ -152,7 +166,7 @@ pub struct OpenSettingsAt {
 
 /// Resets the buffer font size to the default value.
 #[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::ResetBufferFontSize"])]
 #[serde(deny_unknown_fields)]
 pub struct ResetBufferFontSize {
     #[serde(default)]
@@ -161,7 +175,7 @@ pub struct ResetBufferFontSize {
 
 /// Decreases the font size of the user interface.
 #[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::DecreaseUiFontSize"])]
 #[serde(deny_unknown_fields)]
 pub struct DecreaseUiFontSize {
     #[serde(default)]
@@ -170,7 +184,7 @@ pub struct DecreaseUiFontSize {
 
 /// Increases the font size of the user interface.
 #[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::IncreaseUiFontSize"])]
 #[serde(deny_unknown_fields)]
 pub struct IncreaseUiFontSize {
     #[serde(default)]
@@ -179,7 +193,7 @@ pub struct IncreaseUiFontSize {
 
 /// Resets the UI font size to the default value.
 #[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::ResetUiFontSize"])]
 #[serde(deny_unknown_fields)]
 pub struct ResetUiFontSize {
     #[serde(default)]
@@ -188,7 +202,7 @@ pub struct ResetUiFontSize {
 
 /// Resets all zoom levels (UI and buffer font sizes, including in the agent panel) to their default values.
 #[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::ResetAllZoom"])]
 #[serde(deny_unknown_fields)]
 pub struct ResetAllZoom {
     #[serde(default)]
@@ -707,10 +721,10 @@ pub mod outline {
 }
 
 actions!(
-    zed_predict_onboarding,
+    backboard_predict_onboarding,
     [
-        /// Opens the Zed Predict onboarding modal.
-        OpenZedPredictOnboarding
+        /// Opens the Backboard Predict onboarding modal.
+        OpenBackboardPredictOnboarding
     ]
 );
 actions!(

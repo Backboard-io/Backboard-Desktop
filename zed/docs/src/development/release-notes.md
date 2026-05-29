@@ -1,11 +1,11 @@
 ---
 title: Release Notes
-description: "Guide to release notes for Zed development."
+description: "Guide to release notes for Backboard Studio development."
 ---
 
 # Release Notes
 
-Whenever you open a pull request, the body is automatically populated based on this [pull request template](https://github.com/zed-industries/zed/blob/main/.github/pull_request_template.md).
+Whenever you open a pull request, the body is automatically populated based on this [pull request template](https://github.com/backboard/ide/blob/main/.github/pull_request_template.md).
 
 ```md
 ...
@@ -15,15 +15,15 @@ Release Notes:
 - N/A _or_ Added/Fixed/Improved ...
 ```
 
-On Wednesdays, we run [`get-preview-channel-changes`](https://github.com/zed-industries/zed/blob/main/script/get-preview-channel-changes), which collects `Release Notes` lines from pull requests landing in preview, as described in the [Release](https://zed.dev/docs/development/release-notes) docs.
+On Wednesdays, we run [`get-preview-channel-changes`](https://github.com/backboard/ide/blob/main/script/get-preview-channel-changes), which collects `Release Notes` lines from pull requests landing in preview, as described in the [Release](https://app.backboard.io/docs/development/release-notes) docs.
 
-The script outputs everything below the `Release Notes` line, including metadata such as the pull request author (if they are not a Zed team member) and a link to the pull request.
+The script outputs everything below the `Release Notes` line, including metadata such as the pull request author (if they are not a Backboard Studio team member) and a link to the pull request.
 If you use `N/A`, the script skips your pull request entirely.
 
 ## Guidelines for crafting your `Release Notes` line(s)
 
-- A `Release Notes` line should only be written if the user can see or feel the difference in Zed.
-- A `Release Notes` line should be written such that a Zed user can understand what the change is.
+- A `Release Notes` line should only be written if the user can see or feel the difference in Backboard Studio.
+- A `Release Notes` line should be written such that a Backboard Studio user can understand what the change is.
   Don't assume a user knows technical editor developer lingo; phrase your change in language they understand as a user of a text editor.
 - If you want to include technical details about your pull request for other team members to see, do so above the `Release Notes` line.
 - Changes to docs should be labeled as `N/A`.

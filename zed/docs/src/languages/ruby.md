@@ -1,6 +1,6 @@
 ---
 title: Ruby
-description: "Configure Ruby language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Ruby language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Ruby
@@ -21,16 +21,16 @@ The Ruby extension also provides support for ERB files.
 
 ## Language Servers
 
-There are multiple language servers available for Ruby. Zed supports the two following:
+There are multiple language servers available for Ruby. Backboard Studio supports the two following:
 
 - [solargraph](https://github.com/castwide/solargraph)
 - [ruby-lsp](https://github.com/Shopify/ruby-lsp)
 
 They both have an overlapping feature set of autocomplete, diagnostics, code actions, etc. and it's up to you to decide which one you want to use. Note that you can't use both at the same time.
 
-In addition to these two language servers, Zed also supports:
+In addition to these two language servers, Backboard Studio also supports:
 
-- [rubocop](https://github.com/rubocop/rubocop) which is a static code analyzer and linter for Ruby. Under the hood, it's also used by Zed as a language server, but its functionality is complimentary to that of solargraph and ruby-lsp.
+- [rubocop](https://github.com/rubocop/rubocop) which is a static code analyzer and linter for Ruby. Under the hood, it's also used by Backboard Studio as a language server, but its functionality is complimentary to that of solargraph and ruby-lsp.
 - [sorbet](https://sorbet.org/) which is a static type checker for Ruby with a custom gradual type system.
 - [steep](https://github.com/soutaro/steep) which is a static type checker for Ruby that uses Ruby Signature (RBS).
 - [Herb](https://herb-tools.dev) which is a language server for ERB files.
@@ -69,7 +69,7 @@ You can skip step 1 and force using the system executable by setting `use_bundle
 
 ### Using `ruby-lsp`
 
-Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages > Ruby, or add to your settings file:
+Configure language servers in Settings ({#kb backboard::OpenSettings}) under Languages > Ruby, or add to your settings file:
 
 ```json [settings]
 {
@@ -99,7 +99,7 @@ That disables `solargraph` and `rubocop` and uses `ruby-lsp`.
 
 The Ruby extension also provides support for `rubocop` language server for offense detection and autocorrection.
 
-Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages > Ruby, or add to your settings file:
+Configure language servers in Settings ({#kb backboard::OpenSettings}) under Languages > Ruby, or add to your settings file:
 
 ```json [settings]
 {
@@ -125,7 +125,7 @@ Or, conversely, you can disable `ruby-lsp` and enable `solargraph` and `rubocop`
 
 ## Setting up `solargraph`
 
-Solargraph has formatting and diagnostics disabled by default. We can tell Zed to enable them by adding the following to your `settings.json`:
+Solargraph has formatting and diagnostics disabled by default. We can tell Backboard Studio to enable them by adding the following to your `settings.json`:
 
 ```json [settings]
 {
@@ -186,7 +186,7 @@ LSP `settings` and `initialization_options` can also be project-specific. For ex
 
 ## Setting up `rubocop` LSP
 
-Rubocop has unsafe autocorrection disabled by default. We can tell Zed to enable it by adding the following to your `settings.json`:
+Rubocop has unsafe autocorrection disabled by default. We can tell Backboard Studio to enable it by adding the following to your `settings.json`:
 
 ```json [settings]
 {
@@ -219,7 +219,7 @@ Rubocop has unsafe autocorrection disabled by default. We can tell Zed to enable
 
 To enable Sorbet, add `\"sorbet\"` to the `language_servers` list for Ruby. You may want to disable other language servers if Sorbet is intended to be your primary LSP, or if you plan to use it alongside another LSP for specific features like type checking.
 
-Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages > Ruby, or add to your settings file:
+Configure language servers in Settings ({#kb backboard::OpenSettings}) under Languages > Ruby, or add to your settings file:
 
 ```json [settings]
 {
@@ -245,7 +245,7 @@ For all aspects of installing Sorbet, setting it up in your project, and configu
 
 To enable Steep, add `\"steep\"` to the `language_servers` list for Ruby. You may need to adjust the order or disable other LSPs depending on your desired setup.
 
-Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages > Ruby, or add to your settings file:
+Configure language servers in Settings ({#kb backboard::OpenSettings}) under Languages > Ruby, or add to your settings file:
 
 ```json [settings]
 {
@@ -364,7 +364,7 @@ Similar task syntax can be used for other test frameworks such as `quickdraw` or
 
 ## Debugging
 
-The Ruby extension provides a debug adapter for debugging Ruby code. Zed's name for the adapter (in the UI and `debug.json`) is `rdbg`, and under the hood, it uses the [`debug`](https://github.com/ruby/debug) gem. The extension uses the [same activation logic](#language-server-activation) as the language servers.
+The Ruby extension provides a debug adapter for debugging Ruby code. Backboard Studio's name for the adapter (in the UI and `debug.json`) is `rdbg`, and under the hood, it uses the [`debug`](https://github.com/ruby/debug) gem. The extension uses the [same activation logic](#language-server-activation) as the language servers.
 
 ### Examples
 
@@ -406,7 +406,7 @@ The Ruby extension provides a debug adapter for debugging Ruby code. Zed's name 
 
 To format ERB templates, you can use the `erb-formatter` formatter. This formatter uses the [`erb-formatter`](https://rubygems.org/gems/erb-formatter) gem to format ERB templates.
 
-Configure formatting in Settings ({#kb zed::OpenSettings}) under Languages > HTML+ERB, or add to your settings file:
+Configure formatting in Settings ({#kb backboard::OpenSettings}) under Languages > HTML+ERB, or add to your settings file:
 
 ```json [settings]
 {

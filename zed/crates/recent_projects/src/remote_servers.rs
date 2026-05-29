@@ -2149,7 +2149,7 @@ impl RemoteServerProjects {
                                             )
                                             .on_click(|_, _, cx| {
                                                 cx.open_url(
-                                                    "https://zed.dev/docs/remote-development",
+                                                    "https://app.backboard.io/docs/remote-development",
                                                 );
                                             }),
                                     ),

@@ -14,20 +14,20 @@
 
 ---
 
-title: Configuring Zed - Settings and Preferences
-description: Configure Zed with the Settings Editor, JSON files, and project-specific overrides. Covers all settings options.
+title: Configuring Backboard Studio - Settings and Preferences
+description: Configure Backboard Studio with the Settings Editor, JSON files, and project-specific overrides. Covers all settings options.
 
 ---
 
-# Configuring Zed
+# Configuring Backboard Studio
 
-This guide explains how Zed's settings system works, including the Settings Editor, JSON configuration files, and project-specific settings.
+This guide explains how Backboard Studio's settings system works, including the Settings Editor, JSON configuration files, and project-specific settings.
 
 For visual customization (themes, fonts, icons), see [Appearance](./appearance.md).
 
 ## Settings Editor {#settings-editor}
 
-The **Settings Editor** ({#kb zed::OpenSettings}) is the primary way to configure Zed. It provides a searchable interface where you can browse available settings, see their current values, and make changes.
+The **Settings Editor** ({#kb zed::OpenSettings}) is the primary way to configure Backboard Studio. It provides a searchable interface where you can browse available settings, see their current values, and make changes.
 
 To open it:
 
@@ -48,7 +48,7 @@ The file is located at:
 
 - macOS: `~/.config/zed/settings.json`
 - Linux: `~/.config/zed/settings.json` (or `$XDG_CONFIG_HOME/zed/settings.json`)
-- Windows: `%APPDATA%\Zed\settings.json`
+- Windows: `%APPDATA%\Backboard Studio\settings.json`
 
 The syntax is JSON with support for `//` comments.
 
@@ -79,7 +79,7 @@ You can also add settings files in subdirectories for more granular control.
 
 Settings are applied in layers:
 
-1. **Default settings** — Zed's built-in defaults
+1. **Default settings** — Backboard Studio's built-in defaults
 2. **User settings** — Your global preferences
 3. **Project settings** — Project-specific overrides
 
@@ -113,7 +113,7 @@ Changes made in the Settings Editor apply across all channels.
 
 ## Settings Deep Links {#deep-links}
 
-Zed supports deep links that open specific settings directly:
+Backboard Studio supports deep links that open specific settings directly:
 
 ```
 zed://settings/theme

@@ -1,13 +1,13 @@
 ---
 title: Java
-description: "Configure Java language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Java language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Java
 
-Java language support in Zed is provided by:
+Java language support in Backboard Studio is provided by:
 
-- Zed Java: [zed-extensions/java](https://github.com/zed-extensions/java)
+- Backboard Studio Java: [zed-extensions/java](https://github.com/zed-extensions/java)
 - Tree-sitter: [tree-sitter/tree-sitter-java](https://github.com/tree-sitter/tree-sitter-java)
 - Language Server: [eclipse-jdtls/eclipse.jdt.ls](https://github.com/eclipse-jdtls/eclipse.jdt.ls)
 
@@ -24,13 +24,13 @@ Or manually download and install [OpenJDK 23](https://jdk.java.net/23/).
 
 ## Extension Install
 
-You can install by opening {#action zed::Extensions}({#kb zed::Extensions}) and searching for `java`.
+You can install by opening {#action backboard::Extensions}({#kb backboard::Extensions}) and searching for `java`.
 
 ## Quick start and configuration
 
 For the majority of users, Java support should work out of the box.
 
-- It is generally recommended to open projects with the Zed-project root at the Java project root folder (where you would commonly have your `pom.xml` or `build.gradle` file).
+- It is generally recommended to open projects with the Backboard Studio-project root at the Java project root folder (where you would commonly have your `pom.xml` or `build.gradle` file).
 
 - By default the extension will download and run the latest official version of JDTLS for you, but this requires Java version 21 to be available on your system via either the `$JAVA_HOME` environment variable or as a `java(.exe)` executable on your `$PATH`. If your project requires a lower Java version in the environment, you can specify a different JDK to use for running JDTLS via the `java_home` configuration option.
 
@@ -55,7 +55,7 @@ Here is a common `settings.json` including the above mentioned configurations:
 
 ## Debugging
 
-Debug support is enabled via our [Fork of Java Debug](https://github.com/zed-industries/java-debug), which the extension will automatically download and start for you. Please refer to the [Debugger Documentation](https://zed.dev/docs/debugger#getting-started) for general information about how debugging works in Zed.
+Debug support is enabled via our [Fork of Java Debug](https://github.com/backboard/java-debug), which the extension will automatically download and start for you. Please refer to the [Debugger Documentation](https://app.backboard.io/docs/debugger#getting-started) for general information about how debugging works in Backboard Studio.
 
 To get started with Java, click the `edit debug.json` button in the Debug menu, and replace the contents of the file with the following:
 
@@ -80,9 +80,9 @@ You should then be able to start a new Debug Session with the "Launch Debugger" 
 
 ## Launch Scripts (aka Tasks) in Windows
 
-This extension provides tasks for running your application and tests from within Zed via little play buttons next to tests/entry points. However, due to current limitations of Zed's extension interface, we can not provide scripts that will work across Maven and Gradle on both Windows and Unix-compatible systems, so out of the box the launch scripts only work on Mac and Linux.
+This extension provides tasks for running your application and tests from within Backboard Studio via little play buttons next to tests/entry points. However, due to current limitations of Backboard Studio's extension interface, we can not provide scripts that will work across Maven and Gradle on both Windows and Unix-compatible systems, so out of the box the launch scripts only work on Mac and Linux.
 
-There is a fairly straightforward fix that you can apply to make it work on Windows by supplying your own task scripts. Please see [this Issue](https://github.com/zed-extensions/java/issues/94) for information on how to do that and read the [Tasks section in Zeds documentation](https://zed.dev/docs/tasks) for more information.
+There is a fairly straightforward fix that you can apply to make it work on Windows by supplying your own task scripts. Please see [this Issue](https://github.com/zed-extensions/java/issues/94) for information on how to do that and read the [Tasks section in Zeds documentation](https://app.backboard.io/docs/tasks) for more information.
 
 ## Advanced Configuration/JDTLS initialization Options
 
@@ -168,5 +168,5 @@ JDTLS provides many configuration options that can be passed via the `initialize
 
 ## See also
 
-[Zed Java Repo](https://github.com/zed-extensions/java)
+[Backboard Studio Java Repo](https://github.com/zed-extensions/java)
 [Eclipse JDTLS Repo](https://github.com/eclipse-jdtls/eclipse.jdt.ls)

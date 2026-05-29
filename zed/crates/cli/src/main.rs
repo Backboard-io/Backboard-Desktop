@@ -46,16 +46,16 @@ trait InstalledApp {
 #[command(
     name = "zed",
     disable_version_flag = true,
-    before_help = "The Zed CLI binary.
-This CLI is a separate binary that invokes Zed.
+    before_help = "The Backboard Studio CLI binary.
+This CLI is a separate binary that invokes Backboard Studio.
 
 Examples:
     `zed`
-          Simply opens Zed
+          Simply opens Backboard Studio
     `zed --foreground`
           Runs in foreground (shows all logs)
     `zed path-to-your-project`
-          Open your project in Zed
+          Open your project in Backboard Studio
     `zed -n path-to-file `
           Open file/folder in a new window",
     after_help = "To read from stdin, append '-', e.g. 'ps axf | zed -'"
@@ -75,7 +75,7 @@ struct Args {
     /// Reuse an existing window, replacing its workspace
     #[arg(short, long, overrides_with_all = ["add", "new", "existing", "classic"], hide = true)]
     reuse: bool,
-    /// Open in existing Zed window
+    /// Open in existing Backboard Studio window
     #[arg(short = 'e', long = "existing", overrides_with_all = ["add", "new", "reuse", "classic"])]
     existing: bool,
     /// Use the classic open behavior: new window for directories, reuse for files
@@ -83,32 +83,35 @@ struct Args {
     classic: bool,
     /// Sets a custom directory for all user data (e.g., database, extensions, logs).
     /// This overrides the default platform-specific data directory location:
-    #[cfg_attr(target_os = "macos", doc = "`~/Library/Application Support/Zed`.")]
-    #[cfg_attr(target_os = "windows", doc = "`%LOCALAPPDATA%\\Zed`.")]
+    #[cfg_attr(
+        target_os = "macos",
+        doc = "`~/Library/Application Support/Backboard Studio`."
+    )]
+    #[cfg_attr(target_os = "windows", doc = "`%LOCALAPPDATA%\\Backboard Studio`.")]
     #[cfg_attr(
         not(any(target_os = "windows", target_os = "macos")),
         doc = "`$XDG_DATA_HOME/zed`."
     )]
     #[arg(long, value_name = "DIR")]
     user_data_dir: Option<String>,
-    /// The paths to open in Zed (space-separated).
+    /// The paths to open in Backboard Studio (space-separated).
     ///
     /// Use `path:line:column` syntax to open a file at the given line and column.
     paths_with_position: Vec<String>,
-    /// Print Zed's version and the app path.
+    /// Print Backboard Studio's version and the app path.
     #[arg(short, long)]
     version: bool,
     /// Run zed in the foreground (useful for debugging)
     #[arg(long)]
     foreground: bool,
-    /// Custom path to Zed.app or the zed binary
+    /// Custom path to Backboard Studio.app or the zed binary
     #[arg(long)]
     zed: Option<PathBuf>,
     /// Run zed in dev-server mode
     #[arg(long)]
     dev_server_token: Option<String>,
     /// The username and WSL distribution to use when opening paths. If not specified,
-    /// Zed will attempt to open the paths directly.
+    /// Backboard Studio will attempt to open the paths directly.
     ///
     /// The username is optional, and if not specified, the default user for the distribution
     /// will be used.
@@ -119,7 +122,7 @@ struct Args {
     #[cfg(target_os = "windows")]
     #[arg(long, value_name = "USER@DISTRO")]
     wsl: Option<String>,
-    /// Not supported in Zed CLI, only supported on Zed binary
+    /// Not supported in Backboard Studio CLI, only supported on Backboard Studio binary
     /// Will attempt to give the correct command to run
     #[arg(long)]
     system_specs: bool,
@@ -133,7 +136,7 @@ struct Args {
     /// When directories are provided, recurses into them and shows all changed files in a single multi-diff view.
     #[arg(long, action = clap::ArgAction::Append, num_args = 2, value_names = ["OLD_PATH", "NEW_PATH"])]
     diff: Vec<String>,
-    /// Uninstall Zed from user system
+    /// Uninstall Backboard Studio from user system
     #[cfg(all(
         any(target_os = "linux", target_os = "macos"),
         not(feature = "no-bundled-uninstall")
@@ -142,7 +145,7 @@ struct Args {
     uninstall: bool,
 
     /// Used for SSH/Git password authentication, to remove the need for netcat as a dependency,
-    /// by having Zed act like netcat communicating over a Unix socket.
+    /// by having Backboard Studio act like netcat communicating over a Unix socket.
     #[arg(long, hide = true)]
     askpass: Option<String>,
 }
@@ -544,8 +547,8 @@ fn run() -> Result<()> {
         std::process::exit(status.code().unwrap_or(1));
     }
 
-    let (server, server_name) =
-        IpcOneShotServer::<IpcHandshake>::new().context("Handshake before Zed spawn")?;
+    let (server, server_name) = IpcOneShotServer::<IpcHandshake>::new()
+        .context("Handshake before Backboard Studio spawn")?;
     let url = format!("zed-cli://{server_name}");
 
     let open_behavior = if args.new {
@@ -622,7 +625,7 @@ fn run() -> Result<()> {
     let (expanded_diff_paths, temp_dirs) = expand_directory_diff_pairs(diff_paths)?;
     diff_paths = expanded_diff_paths;
     // Prevent automatic cleanup of temp directories containing empty stub files
-    // for directory diffs. The CLI process may exit before Zed has read these
+    // for directory diffs. The CLI process may exit before Backboard Studio has read these
     // files (e.g., when RPC-ing into an already-running instance). The files
     // live in the OS temp directory and will be cleaned up on reboot.
     for temp_dir in temp_dirs {
@@ -656,7 +659,7 @@ fn run() -> Result<()> {
 
     anyhow::ensure!(
         args.dev_server_token.is_none(),
-        "Dev servers were removed in v0.157.x please upgrade to SSH remoting: https://zed.dev/docs/remote-development"
+        "Dev servers were removed in v0.157.x please upgrade to SSH remoting: https://app.backboard.io/docs/remote-development"
     );
 
     rayon::ThreadPoolBuilder::new()
@@ -672,7 +675,9 @@ fn run() -> Result<()> {
             let exit_status = exit_status.clone();
             let user_data_dir_for_thread = user_data_dir.clone();
             move || {
-                let (_, handshake) = server.accept().context("Handshake after Zed spawn")?;
+                let (_, handshake) = server
+                    .accept()
+                    .context("Handshake after Backboard Studio spawn")?;
                 let (tx, rx) = (handshake.requests, handshake.responses);
 
                 #[cfg(target_os = "windows")]
@@ -804,7 +809,7 @@ fn anonymous_fd(path: &str) -> Option<fs::File> {
 }
 
 /// Shows an interactive prompt asking the user to choose the default open
-/// behavior for `zed <path>`. Returns `None` if the prompt cannot be shown
+/// behavior for opening a path from the Backboard Studio CLI. Returns `None` if the prompt cannot be shown
 /// (e.g. stdin is not a terminal) or the user cancels.
 fn prompt_open_behavior() -> Option<cli::CliBehaviorSetting> {
     if !std::io::stdin().is_terminal() {
@@ -815,14 +820,17 @@ fn prompt_open_behavior() -> Option<cli::CliBehaviorSetting> {
     let items = [
         format!(
             "Add to existing Backboard Studio window ({})",
-            blue.apply_to("zed --existing")
+            blue.apply_to("Backboard Studio CLI --existing")
         ),
-        format!("Open a new window ({})", blue.apply_to("zed --classic")),
+        format!(
+            "Open a new window ({})",
+            blue.apply_to("Backboard Studio CLI --classic")
+        ),
     ];
 
     let prompt = format!(
         "Configure default behavior for {}\n{}",
-        blue.apply_to("zed <path>"),
+        blue.apply_to("Backboard Studio CLI <path>"),
         console::style("You can change this later in Backboard Studio settings"),
     );
 
@@ -1019,7 +1027,9 @@ mod flatpak {
         if let Some(flatpak_dir) = get_flatpak_dir() {
             let mut args = vec!["/usr/bin/flatpak-spawn".into(), "--host".into()];
             args.append(&mut get_xdg_env_args());
-            args.push("--env=ZED_UPDATE_EXPLANATION=Please use flatpak to update zed".into());
+            args.push(
+                "--env=ZED_UPDATE_EXPLANATION=Please use flatpak to update Backboard Studio".into(),
+            );
             args.push(
                 format!(
                     "--env={EXTRA_LIB_ENV_NAME}={}",
@@ -1048,11 +1058,16 @@ mod flatpak {
 
     pub fn set_bin_if_no_escape(mut args: super::Args) -> super::Args {
         if env::var(NO_ESCAPE_ENV_NAME).is_ok()
-            && env::var("FLATPAK_ID").is_ok_and(|id| id.starts_with("dev.zed.Zed"))
+            && env::var("FLATPAK_ID").is_ok_and(|id| id.starts_with("io.backboard.Studio"))
             && args.zed.is_none()
         {
             args.zed = Some("/app/libexec/zed-editor".into());
-            unsafe { env::set_var("ZED_UPDATE_EXPLANATION", "Please use flatpak to update zed") };
+            unsafe {
+                env::set_var(
+                    "ZED_UPDATE_EXPLANATION",
+                    "Please use flatpak to update Backboard Studio",
+                )
+            };
         }
         args
     }
@@ -1063,7 +1078,7 @@ mod flatpak {
         }
 
         if let Ok(flatpak_id) = env::var("FLATPAK_ID") {
-            if !flatpak_id.starts_with("dev.zed.Zed") {
+            if !flatpak_id.starts_with("io.backboard.Studio") {
                 return None;
             }
 
@@ -1207,9 +1222,13 @@ mod windows {
                 let cli = std::env::current_exe()?;
                 let dir = cli.parent().context("no parent path for cli")?;
 
-                // ../Zed.exe is the standard, lib/zed is for MSYS2, ./zed.exe is for the target
+                // ../Backboard Studio.exe is the standard, lib/zed is for MSYS2, ./zed.exe is for the target
                 // directory in development builds.
-                let possible_locations = ["../Zed.exe", "../lib/zed/zed-editor.exe", "./zed.exe"];
+                let possible_locations = [
+                    "../Backboard Studio.exe",
+                    "../lib/zed/zed-editor.exe",
+                    "./zed.exe",
+                ];
                 possible_locations
                     .iter()
                     .find_map(|p| dir.join(p).canonicalize().ok().filter(|path| path != &cli))
@@ -1330,7 +1349,7 @@ mod mac_os {
                             kCFStringEncodingUTF8,
                             ptr::null(),
                         ));
-                        // equivalent to: open zed-cli:... -a /Applications/Zed\ Preview.app
+                        // equivalent to: open Backboard Studio CLI:... -a /Applications/Backboard Studio\ Preview.app
                         let urls_to_open =
                             CFArray::from_copyable(&[url_to_open.as_concrete_TypeRef()]);
                         LSOpenFromURLSpec(

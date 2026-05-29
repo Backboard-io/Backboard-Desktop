@@ -3,8 +3,8 @@
 
 //! Visual Test Runner
 //!
-//! This binary runs visual regression tests for Zed's UI. It captures screenshots
-//! of real Zed windows and compares them against baseline images.
+//! This binary runs visual regression tests for Backboard Studio's UI. It captures screenshots
+//! of real Backboard Studio windows and compares them against baseline images.
 //!
 //! **Note: This tool is macOS-only** because it uses `VisualTestAppContext` which
 //! depends on the macOS Metal renderer for accurate screenshot capture.
@@ -131,7 +131,7 @@ mod constants {
     /// Baseline images are stored relative to this file
     pub const BASELINE_DIR: &str = "crates/zed/test_fixtures/visual_tests";
 
-    /// Embedded test image (Zed app icon) for visual tests.
+    /// Embedded test image (Backboard Studio app icon) for visual tests.
     pub const EMBEDDED_TEST_IMAGE: &[u8] = include_bytes!("../resources/app-icon.png");
 
     /// Threshold for image comparison (0.0 to 1.0)
@@ -160,7 +160,7 @@ fn run_visual_tests(project_path: PathBuf, update_baseline: bool) -> Result<()> 
     });
 
     // Initialize settings store with real default settings (not test settings)
-    // Test settings use Courier font, but we want the real Zed fonts for visual tests
+    // Test settings use Courier font, but we want the real Backboard Studio fonts for visual tests
     cx.update(|cx| {
         settings::init(cx);
     });
@@ -173,7 +173,7 @@ fn run_visual_tests(project_path: PathBuf, update_baseline: bool) -> Result<()> 
         AppState::set_global(app_state.clone(), cx);
     });
 
-    // Initialize all Zed subsystems
+    // Initialize all Backboard Studio subsystems
     cx.update(|cx| {
         gpui_tokio::init(cx);
         theme_settings::init(theme::LoadThemes::JustBase, cx);
@@ -944,7 +944,7 @@ edition = "2021"
     // Create README.md
     let readme = r#"# Test Project
 
-This is a test project for visual testing of Zed.
+This is a test project for visual testing of Backboard Studio.
 
 ## Features
 
@@ -2198,7 +2198,7 @@ fn run_agent_thread_view_test(
 
     // Send the message to trigger the image response
     let send_future = thread.update(cx, |thread, cx| {
-        thread.send(vec!["Show me the Zed logo".into()], cx)
+        thread.send(vec!["Show me the Backboard Studio logo".into()], cx)
     });
 
     cx.background_executor.allow_parking();

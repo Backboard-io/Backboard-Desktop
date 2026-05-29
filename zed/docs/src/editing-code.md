@@ -1,11 +1,11 @@
 ---
-title: Editing Code in Zed
-description: Core code editing features in Zed including multi-cursor, refactoring, code actions, and language server integration.
+title: Editing Code in Backboard Studio
+description: Core code editing features in Backboard Studio including multi-cursor, refactoring, code actions, and language server integration.
 ---
 
 # Editing Code
 
-Zed provides tools to help you write and modify code efficiently. This section covers the core editing features that work alongside your language server.
+Backboard Studio provides tools to help you write and modify code efficiently. This section covers the core editing features that work alongside your language server.
 
 ## What's in This Section
 
@@ -17,7 +17,7 @@ Zed provides tools to help you write and modify code efficiently. This section c
 
 ## How These Features Work Together
 
-When you're editing code, Zed combines input from multiple sources:
+When you're editing code, Backboard Studio combines input from multiple sources:
 
 1. **Language servers** provide completions, diagnostics, and quick fixes based on your project's types and structure
 2. **Edit predictions** suggest multi-character or multi-line changes as you type

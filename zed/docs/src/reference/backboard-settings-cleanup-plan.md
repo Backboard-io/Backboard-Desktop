@@ -1,11 +1,11 @@
 ---
 title: Backboard Settings Cleanup Plan
-description: Cleanup spec for Backboard Studio inherited Zed settings.
+description: Cleanup spec for Backboard Studio inherited Backboard Studio settings.
 ---
 
 # Backboard Settings Cleanup Plan
 
-This cleanup spec recommends how Backboard Studio should present, hide, preserve, or eventually remove inherited Zed settings. The current implementation only removes settings from the user-facing settings UI; it does not remove parser/runtime support from `SettingsContent` or `assets/settings/default.json`.
+This cleanup spec recommends how Backboard Studio should present, hide, preserve, or eventually remove inherited Backboard Studio settings. The current implementation only removes settings from the user-facing settings UI; it does not remove parser/runtime support from `SettingsContent` or `assets/settings/default.json`.
 
 ## Recommended Backboard Taxonomy
 
@@ -24,7 +24,7 @@ This cleanup spec recommends how Backboard Studio should present, hide, preserve
 | Group | Recommended action | Rationale |
 |---|---|---|
 | `preferred_interface_mode` | Keep public | Backboard-specific simple/editor launch mode. Reword as “Startup mode”. |
-| `theme`, `icon_theme`, font settings | Keep public | Required for both simple mode and editor mode. Rename visible copy from “Zed” to “Backboard Studio” where applicable. |
+| `theme`, `icon_theme`, font settings | Keep public | Required for both simple mode and editor mode. Rename visible copy from “Backboard Studio” to “Backboard Studio” where applicable. |
 | `agent_ui_font_size`, `agent_buffer_font_size` | Keep public | Directly affects agent readability; settings UI already supports these paths. |
 | `agent.default_model`, typed `agent.favorite_models`, model effort/speed/thinking fields | Keep public | Core model selector and chat behavior. Present under “AI / Models”. |
 | `disable_ai` | Keep internal only | Global AI kill switch is still read by agent/editor/runtime code, but it is not a normal Backboard user preference. |
@@ -38,7 +38,7 @@ This cleanup spec recommends how Backboard Studio should present, hide, preserve
 | `git.*`, `git_panel.*`, `git_hosting_providers` | Keep public | Git and worktree flows are important to Backboard agent/editor work. |
 | Project restore/session/file scan settings | Keep public | Users need to control restore, trusted worktrees, hidden/private/read-only file behavior. |
 | Project panel, file finder, tab, preview tab, status/title bar settings | Keep public, but reduce prominence | Useful editor-mode settings; not central to simple mode. |
-| Core editor and language settings | Keep internal only in Backboard-first docs | Still used in editor mode, but inherited Zed reference overwhelms Backboard users. Link to advanced editor reference rather than top-level settings UI. |
+| Core editor and language settings | Keep internal only in Backboard-first docs | Still used in editor mode, but inherited Backboard Studio reference overwhelms Backboard users. Link to advanced editor reference rather than top-level settings UI. |
 | LSP/language-server settings | Hide from Backboard settings UI/docs | Backboard edit predictions send local text context directly to the Backboard API; LSP only creates a Tab-key UX conflict when its completion menu is open. |
 | Vim/Helix settings | Keep internal only | Valid for editor mode users, not Backboard-first. Surface only under advanced editor compatibility. |
 | Calls, audio, collaboration panel, journal, Jupyter, REPL, which-key | Hide from Backboard settings UI/docs | No meaningful Backboard product surface today; retain internally until ownership is decided. |
@@ -49,7 +49,7 @@ This cleanup spec recommends how Backboard Studio should present, hide, preserve
 
 | Inherited name | Backboard-facing wording | Recommendation |
 |---|---|---|
-| “Zed” in descriptions | “Backboard Studio” | Reword public docs and settings UI copy. Do not rename JSON keys yet. |
+| “Backboard Studio” in descriptions | “Backboard Studio” | Reword public docs and settings UI copy. Do not rename JSON keys yet. |
 | `preferred_interface_mode` | Startup mode | Keep JSON key, show friendly label. |
 | `agent` | Backboard Agent | Reword section label. |
 | `agent.default_model` | Default chat model | Keep public. |
@@ -57,9 +57,9 @@ This cleanup spec recommends how Backboard Studio should present, hide, preserve
 | `agent.profiles` | Agent modes | “Profiles” is implementation language; “modes” is clearer in product UI. |
 | `tool_permissions` | Tool approvals | Keep detailed JSON docs under advanced safety. |
 | `edit_predictions` | Code suggestions | Use Backboard wording; keep provider internals advanced. |
-| `language_models.zed.dev` | Backboard hosted models | Rename display copy only. The JSON key may require a compatibility migration later. |
+| `language_models.app.backboard.io` | Backboard hosted models | Rename display copy only. The JSON key may require a compatibility migration later. |
 | `server_url` | Backboard API URL | Internal/deployment docs only. |
-| `project_panel` | Files sidebar | Public label should match Backboard UI, not inherited Zed term. |
+| `project_panel` | Files sidebar | Public label should match Backboard UI, not inherited Backboard Studio term. |
 | `git_panel` | Source control panel | Public label can remain “Git” when space is tight. |
 | `collaboration_panel`, `calls`, `audio` | None | Hide until Backboard ships a collaboration/calls product surface. |
 
@@ -80,7 +80,7 @@ Command palette/keybindings status: the command palette and keybindings editor n
 
 - Decide whether Backboard supports collaboration/calls/audio. If not, mark those settings as removal candidates after compatibility telemetry or migration review.
 - Decide whether Jupyter/REPL remain packaged editor features. If retained, move them to advanced editor docs; if absent from the product, mark removal candidates.
-- Decide whether `language_models.zed.dev` should gain a Backboard alias. If renamed, add a migration before changing docs or defaults.
+- Decide whether `language_models.app.backboard.io` should gain a Backboard alias. If renamed, add a migration before changing docs or defaults.
 - Decide whether `server_url` should stay in user settings or move to deployment/channel configuration.
 
 ### Phase 3: Compatibility Cleanup
@@ -103,7 +103,7 @@ These are not immediate removals. They need a product decision and a code-read v
 | `jupyter.*` | Hide | Confirm notebooks/kernels are not a Backboard editor promise. |
 | `repl.*` | Hide | Confirm REPL feature is not exposed. |
 | `which_key.*` | Hide | Confirm key-discovery popup is not exposed. |
-| `auto_update` | Hide | Confirm app update strategy lives outside inherited Zed updater. |
+| `auto_update` | Hide | Confirm app update strategy lives outside inherited Backboard Studio updater. |
 | `telemetry.*` | Hide | Product/legal decision required before exposing. |
 
 ## Validation Plan

@@ -1,11 +1,11 @@
 ---
-title: "Zed Development: Glossary"
-description: "Guide to zed development: glossary for Zed development."
+title: "Backboard Studio Development: Glossary"
+description: "Guide to zed development: glossary for Backboard Studio development."
 ---
 
-# Zed Development: Glossary
+# Backboard Studio Development: Glossary
 
-This page defines terms and structures used throughout the Zed codebase.
+This page defines terms and structures used throughout the Backboard Studio codebase.
 
 It is a best-effort list and a work in progress.
 
@@ -73,9 +73,9 @@ h_flex()
 - `Focus`: The place where keystrokes are handled first
 - `Focus tree`: Path from the place that has the current focus to the UI Root. Example <img> TODO
 
-## Zed UI
+## Backboard Studio UI
 
-- `Window`: A struct representing a Zed window in your desktop environment (see image below). You can have multiple windows open. This is mostly passed around for rendering.
+- `Window`: A struct representing a Backboard Studio window in your desktop environment (see image below). You can have multiple windows open. This is mostly passed around for rendering.
 - `Modal`: A UI element that floats on top of the rest of the UI
 - `Picker`: A struct representing a list of items floating on top of the UI (Modal). You can select an item and confirm. What happens on select or confirm is determined by the picker's delegate. (The 'Modal' in the image below is a picker.)
 - `PickerDelegate`: A trait used to specialize behavior for a `Picker`. The `Picker` stores the `PickerDelegate` in the field delegate.
@@ -91,13 +91,13 @@ h_flex()
 
 <img width="552" height="auto" alt="Screenshot for the Worktree feature" src="https://github.com/user-attachments/assets/da5c58e4-b02e-4038-9736-27e3509fdbfa" />
 
-- [Multibuffer](https://zed.dev/docs/multibuffers): A list of Editors, a multi-buffer allows editing multiple files simultaneously. A multi-buffer opens when an operation in Zed returns multiple locations, examples: _search_ or _go to definition_. See project search in the image below.
+- [Multibuffer](https://app.backboard.io/docs/multibuffers): A list of Editors, a multi-buffer allows editing multiple files simultaneously. A multi-buffer opens when an operation in Backboard Studio returns multiple locations, examples: _search_ or _go to definition_. See project search in the image below.
 
 <img width="800" height="auto" alt="Screenshot for the MultiBuffer feature" src="https://github.com/user-attachments/assets/d59dcecd-8ab6-4172-8fb6-b1fc3c3eaf9d" />
 
 ## Editor
 
-- `Editor`: The text editor type. Most editable surfaces in Zed are an `Editor`, including single-line inputs. Each pane in the image above contains one or more `Editor` instances.
+- `Editor`: The text editor type. Most editable surfaces in Backboard Studio are an `Editor`, including single-line inputs. Each pane in the image above contains one or more `Editor` instances.
 - `Workspace`: The root of the window
 - `Entry`: A file, dir, pending dir or unloaded dir.
 - `Buffer`: The in-memory representation of a 'file' together with relevant data such as syntax trees, git status and diagnostics.
@@ -113,7 +113,7 @@ h_flex()
 
 - `DapStore`: Is an entity that manages debugger sessions
 - `debugger::Session`: An entity that manages the lifecycle of a debug session and communication with DAPs.
-- `BreakpointStore`: Is an entity that manages breakpoints states in local and remote instances of Zed
+- `BreakpointStore`: Is an entity that manages breakpoints states in local and remote instances of Backboard Studio
 - `DebugSession`: Manages a debug session's UI and running state
 - `RunningState`: Directly manages all the views of a debug session
 - `VariableList`: The variable and watch list view of a debug session

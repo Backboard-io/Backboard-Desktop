@@ -92,7 +92,7 @@ fn developer_page() -> SettingsPage {
             SettingsPageItem::SectionHeader("Instrumentation"),
             SettingsPageItem::SettingItem(SettingItem {
                 title: "Performance Profiler",
-                description: "Collect timing data for foreground and background executor tasks so they can be inspected via `zed: open performance profiler`. May lead to increased memory usage.",
+                description: "Collect timing data for foreground and background executor tasks so they can be inspected via the Backboard Studio performance profiler. May lead to increased memory usage.",
                 field: Box::new(SettingField {
                     json_path: Some("instrumentation.performance_profiler.enabled"),
                     pick: |settings_content| {
@@ -269,7 +269,7 @@ fn general_page(cx: &App) -> SettingsPage {
             }),
             SettingsPageItem::SettingItem(SettingItem {
                 title: "CLI Default Open Behavior",
-                description: "How `zed <path>` opens directories when no flag is specified.",
+                description: "How the Backboard Studio CLI opens directories when no flag is specified.",
                 field: Box::new(SettingField {
                     json_path: Some("cli_default_open_behavior"),
                     pick: |settings_content| {

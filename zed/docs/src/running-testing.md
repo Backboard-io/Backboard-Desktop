@@ -1,20 +1,20 @@
 ---
-title: Run and Test Code in Zed
-description: Run and test code in Zed with Terminal, Tasks, REPL, and debugger workflows without leaving the editor.
+title: Run and Test Code in Backboard Studio
+description: Run and test code in Backboard Studio with Terminal, Tasks, REPL, and debugger workflows without leaving the editor.
 ---
 
 # Running & Testing
 
-Use this section to run and test code in Zed, then debug issues without
+Use this section to run and test code in Backboard Studio, then debug issues without
 leaving the editor.
 
 ## What's here
 
-- **[Terminal](./terminal.md)**: Zed's built-in terminal emulator. Open multiple terminals, customize your shell, and integrate with the editor. Tasks and commands run here.
+- **[Terminal](./terminal.md)**: Backboard Studio's built-in terminal emulator. Open multiple terminals, customize your shell, and integrate with the editor. Tasks and commands run here.
 
 - **[Tasks](./tasks.md)**: Define and run shell commands with access to editor context like the current file, selection, or symbol. Use tasks to build, lint, run scripts, or execute any repeatable workflow.
 
-- **[Debugger](./debugger.md)**: Set breakpoints, step through code, and inspect variables using Zed's built-in debugger. Works with C, C++, Go, JavaScript, Python, Rust, TypeScript, and more through the Debug Adapter Protocol.
+- **[Debugger](./debugger.md)**: Set breakpoints, step through code, and inspect variables using Backboard Studio's built-in debugger. Works with C, C++, Go, JavaScript, Python, Rust, TypeScript, and more through the Debug Adapter Protocol.
 
 - **[REPL](./repl.md)**: Run code interactively using Jupyter kernels. Execute selections or cells and see results inline—useful for Python, TypeScript (Deno), R, Julia, and other supported languages.
 

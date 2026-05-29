@@ -24,7 +24,7 @@ We are going to use a `$LANGNAME` variable for all these steps. Make sure it is 
 LANGNAME=your_language_name_here
 
 rm -rf $LANGNAME
-git clone --single-branch --no-tags git@github.com:zed-industries/zed.git $LANGNAME
+git clone --single-branch --no-tags git@github.com:backboard/ide.git $LANGNAME
 cd $LANGNAME
 ```
 
@@ -42,7 +42,7 @@ echo "${LANGNAME}: ==>
 extension: ==>
 chore: ==>
 zed_extension_api: ==>
-"'regex:(?<![\[a-zA-Z0-9])(#[0-9]{3,5})==>zed-industries/zed\1' \
+"'regex:(?<![\[a-zA-Z0-9])(#[0-9]{3,5})==>backboard/ide\1' \
   > ~/projects/${LANGNAME}.txt
 
 # This removes the LICENSE symlink
@@ -112,7 +112,7 @@ OLD_VERSION=$(grep '^version = ' extension.toml | cut -d'"' -f2)
 NEW_VERSION=$(echo "$OLD_VERSION" | awk -F. '{$NF = $NF + 1;} 1' OFS=.)
 echo $OLD_VERSION $NEW_VERSION
 perl -i -pe "s/$OLD_VERSION/$NEW_VERSION/" extension.toml
-perl -i -pe "s#https://github.com/zed-industries/zed#https://github.com/zed-extensions/${LANGNAME}#g" extension.toml
+perl -i -pe "s#https://github.com/backboard/ide#https://github.com/zed-extensions/${LANGNAME}#g" extension.toml
 
 # if there's rust code, update this too.
 test -f Cargo.toml && perl -i -pe "s/$OLD_VERSION/$NEW_VERSION/" Cargo.toml
@@ -178,4 +178,4 @@ git commit -m "Bump ${LANGNAME} to v${NEW_VERSION}"
 git push
 ```
 
-Create PR and reference the Zed PR with removal from tree.
+Create PR and reference the Backboard Studio PR with removal from tree.

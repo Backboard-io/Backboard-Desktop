@@ -1,6 +1,6 @@
 ---
 title: Contacts and Private Calls
-description: "Add contacts and start private collaboration sessions in Zed."
+description: "Add contacts and start private collaboration sessions in Backboard Studio."
 ---
 
 # Contacts and Private Calls {#contacts}
@@ -11,7 +11,7 @@ Private calls provide ad-hoc collaboration sessions outside of channels. Add con
 
 1. In the Collaboration Panel, click the `+` button next to the `Contacts` section
 1. Search for the contact using their GitHub handle.\
-   _Note: Your contact must be an existing Zed user who has completed the GitHub authentication sign-in flow._
+   _Note: Your contact must be an existing Backboard Studio user who has completed the GitHub authentication sign-in flow._
 1. Your contact will receive a notification.
    Once they accept, you'll both appear in each other's contact list.
 

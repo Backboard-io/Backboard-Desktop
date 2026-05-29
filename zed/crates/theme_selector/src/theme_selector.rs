@@ -521,7 +521,7 @@ impl PickerDelegate for ThemeSelectorDelegate {
                                 .color(Color::Muted),
                         )
                         .on_click(cx.listener(|_, _, _, cx| {
-                            cx.open_url("https://zed.dev/docs/themes");
+                            cx.open_url("https://app.backboard.io/docs/themes");
                         })),
                 )
                 .child(

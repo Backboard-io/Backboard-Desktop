@@ -56,7 +56,7 @@ actions!(
 
 const COPILOT_SETTINGS_PATH: &str = "/settings/copilot";
 const COPILOT_SETTINGS_URL: &str = concat!("https://github.com", "/settings/copilot");
-const PRIVACY_DOCS: &str = "https://zed.dev/docs/ai/privacy-and-security";
+const PRIVACY_DOCS: &str = "https://app.backboard.io/docs/ai/privacy-and-security";
 
 struct CopilotErrorToast;
 
@@ -388,7 +388,7 @@ impl Render for EditPredictionButton {
                                     source = "Edit Prediction Status Button"
                                 );
                                 window.dispatch_action(
-                                    zed_actions::OpenZedPredictOnboarding.boxed_clone(),
+                                    zed_actions::OpenBackboardPredictOnboarding.boxed_clone(),
                                     cx,
                                 );
                             })),
@@ -1238,7 +1238,7 @@ impl EditPredictionButton {
                             },
                         )
                         .entry(
-                            "Check your payment status or contact us at billing-support@zed.dev to continue using this feature.",
+                            "Check your payment status or contact us through Backboard support to continue using this feature.",
                             None,
                             |_window, cx| {
                                 cx.open_url(&zed_urls::account_url(cx))

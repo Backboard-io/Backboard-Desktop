@@ -1,11 +1,11 @@
 ---
 title: Nim
-description: "Configure Nim language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Nim language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Nim
 
-Nim language support in Zed is provided by the community-maintained [Nim extension](https://github.com/foxoman/zed-nim).
+Nim language support in Backboard Studio is provided by the community-maintained [Nim extension](https://github.com/foxoman/zed-nim).
 Report issues to: [https://github.com/foxoman/zed-nim/issues](https://github.com/foxoman/zed-nim/issues)
 
 - Tree-sitter: [alaviss/tree-sitter-nim](https://github.com/alaviss/tree-sitter-nim)
@@ -15,7 +15,7 @@ Report issues to: [https://github.com/foxoman/zed-nim/issues](https://github.com
 
 To use [arnetheduck/nph](https://github.com/arnetheduck/nph) as a formatter, follow the [nph installation instructions](https://github.com/arnetheduck/nph?tab=readme-ov-file#installation).
 
-Configure formatting in Settings ({#kb zed::OpenSettings}) under Languages > Nim, or add to your settings file:
+Configure formatting in Settings ({#kb backboard::OpenSettings}) under Languages > Nim, or add to your settings file:
 
 ```json [settings]
   "languages": {

@@ -1,6 +1,6 @@
 ---
 title: OCaml
-description: "Configure OCaml language support in Zed, including language servers, formatting, and debugging."
+description: "Configure OCaml language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # OCaml
@@ -12,7 +12,7 @@ OCaml support is available through the [OCaml extension](https://github.com/zed-
 
 ## Setup Instructions
 
-If you have the development environment already setup, you can skip to [Launching Zed](#launching-zed)
+If you have the development environment already setup, you can skip to [Launching Backboard Studio](#launching-zed)
 
 ### Using Opam
 
@@ -20,7 +20,7 @@ Opam is the official package manager for OCaml and is highly recommended for get
 
 Once you install opam and setup a switch with your development environment as per the instructions, you can proceed.
 
-### Launching Zed
+### Launching Backboard Studio
 
 By now you should have `ocamllsp` installed, you can verify so by running
 
@@ -30,7 +30,7 @@ ocamllsp --help
 
 in your terminal. If you get a help message, you're good to go. If not, please revisit the installation instructions for `ocamllsp` and ensure it's properly installed.
 
-With that aside, we can now launch Zed. Given how the OCaml package manager works, we require you to run Zed from the terminal, so please make sure you install the [Zed cli](https://zed.dev/features#cli) if you haven't already.
+With that aside, we can now launch Backboard Studio. Given how the OCaml package manager works, we require you to run Backboard Studio from the terminal, so please make sure you install the [Backboard Studio cli](https://app.backboard.io/features#cli) if you haven't already.
 
 Once you have the cli, simply from a terminal, navigate to your project and run
 
@@ -38,4 +38,4 @@ Once you have the cli, simply from a terminal, navigate to your project and run
 zed .
 ```
 
-You should now have Zed running with OCaml support, with no additional setup required.
+You should now have Backboard Studio running with OCaml support, with no additional setup required.

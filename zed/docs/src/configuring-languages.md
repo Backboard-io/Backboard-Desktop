@@ -1,11 +1,11 @@
 ---
-title: Language Server and Tree-sitter Config - Zed
-description: Configure language support in Zed with Tree-sitter for syntax highlighting and LSP for diagnostics, completion, and formatting.
+title: Language Server and Tree-sitter Config - Backboard Studio
+description: Configure language support in Backboard Studio with Tree-sitter for syntax highlighting and LSP for diagnostics, completion, and formatting.
 ---
 
 # Configuring Supported Languages
 
-Zed's language support is built on two technologies:
+Backboard Studio's language support is built on two technologies:
 
 1. **Tree-sitter** handles syntax highlighting and structure-based features like the outline panel.
 2. **Language Server Protocol (LSP)** provides semantic features: code completion, diagnostics, go-to-definition, and refactoring.
@@ -16,7 +16,7 @@ For a list of supported languages, see [Supported Languages](./languages.md). To
 
 ## Language-specific Settings
 
-Zed allows you to override global settings for individual languages. These custom configurations are defined in your `settings.json` file under the `languages` key.
+Backboard Studio allows you to override global settings for individual languages. These custom configurations are defined in your `settings.json` file under the `languages` key.
 
 Here's an example of language-specific settings:
 
@@ -56,7 +56,7 @@ These settings allow you to maintain specific coding styles across different lan
 
 ## File Associations
 
-Zed automatically detects file types based on their extensions, but you can customize these associations to fit your workflow.
+Backboard Studio automatically detects file types based on their extensions, but you can customize these associations to fit your workflow.
 
 To set up custom file associations, use the [`file_types`](./reference/all-settings.md#file-types) setting in your `settings.json`:
 
@@ -68,7 +68,7 @@ To set up custom file associations, use the [`file_types`](./reference/all-setti
 }
 ```
 
-This configuration tells Zed to:
+This configuration tells Backboard Studio to:
 
 - Treat `.c` files as C++ instead of C
 - Recognize files named "MyLockFile" as TOML
@@ -78,11 +78,11 @@ You can use glob patterns for more flexible matching, allowing you to handle com
 
 ## Working with Language Servers
 
-Language servers are a crucial part of Zed's intelligent coding features, providing capabilities like auto-completion, go-to-definition, and real-time error checking.
+Language servers are a crucial part of Backboard Studio's intelligent coding features, providing capabilities like auto-completion, go-to-definition, and real-time error checking.
 
 ### What are Language Servers?
 
-Language servers implement the Language Server Protocol (LSP), which standardizes communication between the editor and language-specific tools. This allows Zed to support advanced features for multiple programming languages without implementing each feature separately.
+Language servers implement the Language Server Protocol (LSP), which standardizes communication between the editor and language-specific tools. This allows Backboard Studio to support advanced features for multiple programming languages without implementing each feature separately.
 
 Some key features provided by language servers include:
 
@@ -95,20 +95,20 @@ Some key features provided by language servers include:
 
 ### Managing Language Servers
 
-Zed simplifies language server management for users:
+Backboard Studio simplifies language server management for users:
 
-1. Automatic Download: When you open a file with a matching file type, Zed automatically downloads the appropriate language server. Zed may prompt you to install an extension for known file types.
+1. Automatic Download: When you open a file with a matching file type, Backboard Studio automatically downloads the appropriate language server. Backboard Studio may prompt you to install an extension for known file types.
 
 2. Storage Location:
 
-   - macOS: `~/Library/Application Support/Zed/languages`
+   - macOS: `~/Library/Application Support/Backboard Studio/languages`
    - Linux: `$XDG_DATA_HOME/zed/languages`, `$FLATPAK_XDG_DATA_HOME/zed/languages`, or `$HOME/.local/share/zed/languages`
 
-3. Automatic Updates: Zed keeps your language servers up-to-date, ensuring you always have the latest features and improvements.
+3. Automatic Updates: Backboard Studio keeps your language servers up-to-date, ensuring you always have the latest features and improvements.
 
 ### Choosing Language Servers
 
-Some languages in Zed offer multiple language server options. You might have multiple extensions installed that bundle language servers targeting the same language, potentially leading to overlapping capabilities. To ensure you get the functionality you prefer, Zed allows you to prioritize which language servers are used and in what order.
+Some languages in Backboard Studio offer multiple language server options. You might have multiple extensions installed that bundle language servers targeting the same language, potentially leading to overlapping capabilities. To ensure you get the functionality you prefer, Backboard Studio allows you to prioritize which language servers are used and in what order.
 
 You can specify your preference using the `language_servers` setting:
 
@@ -160,12 +160,12 @@ When you override `language_servers` in your settings, your list **replaces** th
 ### Toolchains
 
 Some language servers need to be configured with a current "toolchain", which is an installation of a specific version of a programming language compiler or/and interpreter, which can possibly include a full set of dependencies of a project.
-An example of what Zed considers a toolchain is a virtual environment in Python.
-Not all languages in Zed support toolchain discovery and selection, but for those that do, you can specify the toolchain from a toolchain picker (via {#action toolchain::Select}). To learn more about toolchains in Zed, see [`toolchains`](./toolchains.md).
+An example of what Backboard Studio considers a toolchain is a virtual environment in Python.
+Not all languages in Backboard Studio support toolchain discovery and selection, but for those that do, you can specify the toolchain from a toolchain picker (via {#action toolchain::Select}). To learn more about toolchains in Backboard Studio, see [`toolchains`](./toolchains.md).
 
 ### Configuring Language Servers
 
-When configuring language servers in your `settings.json`, autocomplete suggestions include all available LSP adapters recognized by Zed, not only those currently active for loaded languages. This helps you discover and configure language servers before opening files that use them.
+When configuring language servers in your `settings.json`, autocomplete suggestions include all available LSP adapters recognized by Backboard Studio, not only those currently active for loaded languages. This helps you discover and configure language servers before opening files that use them.
 
 Many language servers accept custom configuration options. You can set these in the `lsp` section of your `settings.json`:
 
@@ -185,14 +185,14 @@ This example configures the Rust Analyzer to use Clippy for additional linting w
 
 #### Nested objects
 
-When configuring language server options in Zed, it's important to use nested objects rather than dot-delimited strings. This is particularly relevant when working with more complex configurations. Let's look at a real-world example using the TypeScript language server:
+When configuring language server options in Backboard Studio, it's important to use nested objects rather than dot-delimited strings. This is particularly relevant when working with more complex configurations. Let's look at a real-world example using the TypeScript language server:
 
 Suppose you want to configure the following settings for TypeScript:
 
 - Enable strict null checks
 - Set the target ECMAScript version to ES2020
 
-Here's how you would structure these settings in Zed's `settings.json`:
+Here's how you would structure these settings in Backboard Studio's `settings.json`:
 
 ```json [settings]
 "lsp": {
@@ -249,7 +249,7 @@ Most of the servers would rely on this way of configuring only.
 }
 ```
 
-Apart of the LSP-related server configuration options, certain servers in Zed allow configuring the way binary is launched by Zed.
+Apart of the LSP-related server configuration options, certain servers in Backboard Studio allow configuring the way binary is launched by Backboard Studio.
 
 Language servers are automatically downloaded or launched if found in your path, if you wish to specify an explicit alternate binary you can specify that in settings:
 
@@ -285,11 +285,11 @@ This disables the language server for Markdown files, which can be useful for pe
 
 ## Formatting and Linting
 
-Zed provides support for code formatting and linting to maintain consistent code style and catch potential issues early.
+Backboard Studio provides support for code formatting and linting to maintain consistent code style and catch potential issues early.
 
 ### Configuring Formatters
 
-Zed supports both built-in and external formatters. See [`formatter`](./reference/all-settings.md#formatter) docs for more. You can configure formatters globally or per-language in your `settings.json`:
+Backboard Studio supports both built-in and external formatters. See [`formatter`](./reference/all-settings.md#formatter) docs for more. You can configure formatters globally or per-language in your `settings.json`:
 
 ```json [settings]
 "languages": {
@@ -323,7 +323,7 @@ To disable formatting for a specific language:
 
 ### Setting Up Linters
 
-Linting in Zed is typically handled by language servers. Many language servers allow you to configure linting rules:
+Linting in Backboard Studio is typically handled by language servers. Many language servers allow you to configure linting rules:
 
 ```json [settings]
 "lsp": {
@@ -353,7 +353,7 @@ To run linter fixes automatically on save:
 
 ### Formatting Selections
 
-Zed supports formatting only the selected text via {#action editor::FormatSelections} ({#kb editor::FormatSelections}). How
+Backboard Studio supports formatting only the selected text via {#action editor::FormatSelections} ({#kb editor::FormatSelections}). How
 this works depends on the configured formatter:
 
 - The action is only shown when the active formatter can actually format ranges for at least one
@@ -370,7 +370,7 @@ this works depends on the configured formatter:
 
 ### Integrating Formatting and Linting
 
-Zed allows you to run both formatting and linting on save. Here's an example that uses Prettier for formatting and ESLint for linting JavaScript files:
+Backboard Studio allows you to run both formatting and linting on save. Here's an example that uses Prettier for formatting and ESLint for linting JavaScript files:
 
 ```json [settings]
 "languages": {
@@ -395,17 +395,17 @@ Zed allows you to run both formatting and linting on save. Here's an example tha
 
 If you encounter issues with formatting or linting:
 
-1. Check Zed's log file for error messages (Use the command palette: {#action zed::OpenLog})
+1. Check Backboard Studio's log file for error messages (Use the command palette: {#action backboard::OpenLog})
 2. Ensure external tools (formatters, linters) are correctly installed and in your PATH
-3. Verify configurations in both Zed settings and language-specific config files (e.g., `.eslintrc`, `.prettierrc`)
+3. Verify configurations in both Backboard Studio settings and language-specific config files (e.g., `.eslintrc`, `.prettierrc`)
 
 ## Syntax Highlighting and Themes
 
-Zed offers customization options for syntax highlighting and themes, allowing you to tailor the visual appearance of your code.
+Backboard Studio offers customization options for syntax highlighting and themes, allowing you to tailor the visual appearance of your code.
 
 ### Customizing Syntax Highlighting
 
-Zed uses Tree-sitter grammars for syntax highlighting. Override the default highlighting using the `theme_overrides` setting.
+Backboard Studio uses Tree-sitter grammars for syntax highlighting. Override the default highlighting using the `theme_overrides` setting.
 
 This example makes comments italic and changes the color of strings:
 
@@ -439,11 +439,11 @@ Change your theme:
 }
 ```
 
-Create custom themes by creating a JSON file in `~/.config/zed/themes/`. Zed will automatically detect and make available any themes in this directory.
+Create custom themes by creating a JSON file in `~/.config/zed/themes/`. Backboard Studio will automatically detect and make available any themes in this directory.
 
 ### Using Theme Extensions
 
-Zed supports theme extensions. Browse and install theme extensions from the Extensions panel ({#kb zed::Extensions}).
+Backboard Studio supports theme extensions. Browse and install theme extensions from the Extensions panel ({#kb backboard::Extensions}).
 
 To create your own theme extension, refer to the [Developing Theme Extensions](./extensions/themes.md) guide.
 
@@ -502,7 +502,7 @@ To rename a symbol across your project:
 
 These features depend on the capabilities of the language server for each language.
 
-When renaming a symbol that spans multiple files, Zed will open a preview in a multibuffer. This allows you to review all the changes across your project before applying them. To confirm the rename, simply save the multibuffer. If you decide not to proceed with the rename, you can undo the changes or close the multibuffer without saving.
+When renaming a symbol that spans multiple files, Backboard Studio will open a preview in a multibuffer. This allows you to review all the changes across your project before applying them. To confirm the rename, simply save the multibuffer. If you decide not to proceed with the rename, you can undo the changes or close the multibuffer without saving.
 
 ### Hover Information
 
@@ -514,7 +514,7 @@ The {#action project_symbols::Toggle} command allows you to search for symbols (
 
 ### Code Completion
 
-Zed provides intelligent code completion suggestions as you type. You can manually trigger completion with the {#action editor::ShowCompletions} command. Use <kbd>tab|tab</kbd> or <kbd>enter|enter</kbd> to accept suggestions.
+Backboard Studio provides intelligent code completion suggestions as you type. You can manually trigger completion with the {#action editor::ShowCompletions} command. Use <kbd>tab|tab</kbd> or <kbd>enter|enter</kbd> to accept suggestions.
 
 ### Diagnostics
 

@@ -44,7 +44,7 @@ struct ExplorerCommandInjector;
 impl IExplorerCommand_Impl for ExplorerCommandInjector_Impl {
     fn GetTitle(&self, _: Ref<IShellItemArray>) -> Result<windows_core::PWSTR> {
         let command_description =
-            retrieve_command_description().unwrap_or(HSTRING::from("Open with Zed"));
+            retrieve_command_description().unwrap_or(HSTRING::from("Open with Backboard Studio"));
         unsafe { SHStrDupW(&command_description) }
     }
 
@@ -178,21 +178,25 @@ fn get_zed_install_folder() -> Option<PathBuf> {
 
 #[inline]
 fn get_zed_exe_path() -> Option<String> {
-    get_zed_install_folder().map(|path| path.join("Zed.exe").to_string_lossy().into_owned())
+    get_zed_install_folder().map(|path| {
+        path.join("Backboard Studio.exe")
+            .to_string_lossy()
+            .into_owned()
+    })
 }
 
 #[inline]
 fn retrieve_command_description() -> Result<HSTRING> {
     #[cfg(all(feature = "stable", not(feature = "preview"), not(feature = "nightly")))]
-    const REG_PATH: &str = "Software\\Classes\\ZedEditorContextMenu";
+    const REG_PATH: &str = "Software\\Classes\\BackboardStudioContextMenu";
     #[cfg(all(feature = "preview", not(feature = "stable"), not(feature = "nightly")))]
-    const REG_PATH: &str = "Software\\Classes\\ZedEditorPreviewContextMenu";
+    const REG_PATH: &str = "Software\\Classes\\BackboardStudioPreviewContextMenu";
     #[cfg(all(feature = "nightly", not(feature = "stable"), not(feature = "preview")))]
-    const REG_PATH: &str = "Software\\Classes\\ZedEditorNightlyContextMenu";
+    const REG_PATH: &str = "Software\\Classes\\BackboardStudioNightlyContextMenu";
 
     // Make cargo clippy happy
     #[cfg(all(feature = "nightly", feature = "stable", feature = "preview"))]
-    const REG_PATH: &str = "Software\\Classes\\ZedEditorClippyContextMenu";
+    const REG_PATH: &str = "Software\\Classes\\BackboardStudioClippyContextMenu";
 
     let key = windows_registry::CURRENT_USER.open(REG_PATH)?;
     key.get_hstring("Title")

@@ -1,6 +1,6 @@
 ---
 title: PHP
-description: "Configure PHP language support in Zed, including language servers, formatting, and debugging."
+description: "Configure PHP language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # PHP
@@ -38,13 +38,13 @@ where php
 
 ## Choosing a language server
 
-The PHP extension uses [LSP language servers](https://microsoft.github.io/language-server-protocol) with Phpactor as the default. If you want to use other language servers that support Zed (e.g. Intelephense or PHP Tools), make sure to follow the documentation on how to implement it.
+The PHP extension uses [LSP language servers](https://microsoft.github.io/language-server-protocol) with Phpactor as the default. If you want to use other language servers that support Backboard Studio (e.g. Intelephense or PHP Tools), make sure to follow the documentation on how to implement it.
 
 ### Intelephense
 
 [Intelephense](https://intelephense.com/) is a [proprietary](https://github.com/bmewburn/vscode-intelephense/blob/master/LICENSE.txt#L29) language server for PHP operating under a freemium model. Certain features require purchase of a [premium license](https://intelephense.com/buy).
 
-Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages > PHP, or add to your settings file:
+Configure language servers in Settings ({#kb backboard::OpenSettings}) under Languages > PHP, or add to your settings file:
 
 ```json [settings]
 {
@@ -76,7 +76,7 @@ Alternatively, you can pass the licence key or a path to a file containing the l
 
 [PHP Tools](https://www.devsense.com/) is a proprietary language server that offers free and premium features. You need to [purchase a license](https://www.devsense.com/en/purchase) to activate the premium features.
 
-Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages > PHP, or add to your settings file:
+Configure language servers in Settings ({#kb backboard::OpenSettings}) under Languages > PHP, or add to your settings file:
 
 ```json [settings]
 {
@@ -108,11 +108,11 @@ or, set environment variable `DEVSENSE_PHP_LS_LICENSE` on `.env` file in your pr
 DEVSENSE_PHP_LS_LICENSE="your_license_key"
 ```
 
-Check out the documentation of [PHP Tools for Zed](https://docs.devsense.com/other/zed/) for more details.
+Check out the documentation of [PHP Tools for Backboard Studio](https://docs.devsense.com/other/zed/) for more details.
 
 ### Phpactor
 
-Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages > PHP, or add to your settings file:
+Configure language servers in Settings ({#kb backboard::OpenSettings}) under Languages > PHP, or add to your settings file:
 
 ```json [settings]
 {
@@ -126,7 +126,7 @@ Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages
 
 ## PHPDoc
 
-Zed supports syntax highlighting for PHPDoc comments.
+Backboard Studio supports syntax highlighting for PHPDoc comments.
 
 - Tree-sitter: [claytonrcarter/tree-sitter-phpdoc](https://github.com/claytonrcarter/tree-sitter-phpdoc)
 
@@ -157,7 +157,7 @@ These are common troubleshooting tips, in case you run into issues:
 - Ensure that you have Xdebug installed for the version of PHP you're running.
 - Ensure that Xdebug is configured to run in `debug` mode.
 - Ensure that Xdebug is actually starting a debugging session.
-- Ensure that the host and port matches between Xdebug and Zed.
+- Ensure that the host and port matches between Xdebug and Backboard Studio.
 - Look at the diagnostics log by using the `xdebug_info()` function in the page you're trying to debug.
 
 ## Using the Tailwind CSS Language Server with PHP

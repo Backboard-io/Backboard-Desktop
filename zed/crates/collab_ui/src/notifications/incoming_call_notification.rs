@@ -126,7 +126,7 @@ impl Render for IncomingCallNotification {
                 }),
             )
             .child(Label::new(format!(
-                "{} is sharing a project in Zed",
+                "{} is sharing a project in Backboard Studio",
                 self.state.call.calling_user.github_login
             ))),
         )

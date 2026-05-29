@@ -59,7 +59,7 @@ impl Render for BasedPyrightBanner {
                                         .label_size(LabelSize::Small)
                                         .end_icon(Icon::new(IconName::ArrowUpRight).size(IconSize::XSmall).color(Color::Muted))
                                         .on_click(|_, _, cx| {
-                                            cx.open_url("https://zed.dev/docs/languages/python")
+                                            cx.open_url("https://app.backboard.io/docs/languages/python")
                                         }),
                                 )
                                 .child(IconButton::new("dismiss", IconName::Close).icon_size(IconSize::Small).on_click(

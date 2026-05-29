@@ -595,8 +595,8 @@ pub struct GitExcludeOverride {
 }
 
 impl GitExcludeOverride {
-    const START_BLOCK_MARKER: &str = "\n\n#  ====== Auto-added by Zed: =======\n";
-    const END_BLOCK_MARKER: &str = "\n#  ====== End of auto-added by Zed =======\n";
+    const START_BLOCK_MARKER: &str = "\n\n#  ====== Auto-added by Backboard Studio: =======\n";
+    const END_BLOCK_MARKER: &str = "\n#  ====== End of auto-added by Backboard Studio =======\n";
 
     pub async fn new(git_exclude_path: PathBuf) -> Result<Self> {
         let original_excludes =

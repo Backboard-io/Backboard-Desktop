@@ -45,12 +45,6 @@
 - [Git](./git.md)
 - [Modelines](./modelines.md)
 
-# Collaboration
-
-- [Overview](./collaboration/overview.md)
-  - [Channels](./collaboration/channels.md)
-  - [Contacts and Private Calls](./collaboration/contacts-and-private-calls.md)
-
 # Remote Development
 
 - [Overview](./remote-development.md)
@@ -63,7 +57,7 @@
 - [Plans & Pricing](./ai/plans-and-usage.md)
 - [Billing](./ai/billing.md)
 
-# Zed Business
+# Backboard Business
 
 - [Overview](./business/overview.md)
 - [Organizations](./business/organizations.md)
@@ -202,9 +196,9 @@
 - [All Actions](./all-actions.md)
 - [CLI Reference](./reference/cli.md)
 
-# Developing Zed
+# Developing Backboard Studio
 
-- [Developing Zed](./development.md)
+- [Developing Backboard Studio](./development.md)
   - [macOS](./development/macos.md)
   - [Linux](./development/linux.md)
   - [Windows](./development/windows.md)

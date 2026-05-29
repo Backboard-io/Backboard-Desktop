@@ -32,7 +32,7 @@ pub struct OpenRecentProject {
 actions!(
     zed,
     [
-        /// Show the Zed welcome screen
+        /// Show the Backboard Studio welcome screen
         ShowWelcome
     ]
 );
@@ -347,7 +347,7 @@ impl WelcomePage {
                             .color(Color::Muted)
                             .size(IconSize::Small),
                     )
-                    .child(Label::new("Collaborate with Agents")),
+                    .child(Label::new("Work with Agents")),
             )
             .child(
                 Label::new(description)
@@ -473,7 +473,7 @@ impl Render for WelcomePage {
                             .justify_center()
                             .mb_4()
                             .gap_4()
-                            .child(Vector::square(VectorName::ZedLogo, rems_from_px(45.)))
+                            .child(Vector::square(VectorName::BackboardLogo, rems_from_px(45.)))
                             .child(
                                 v_flex().child(Headline::new(welcome_label)).child(
                                     Label::new("The editor for what's next")

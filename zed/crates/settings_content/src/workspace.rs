@@ -45,7 +45,7 @@ pub struct WorkspaceSettingsContent {
     ///
     /// Default: off
     pub autosave: Option<AutosaveSetting>,
-    /// Controls previous session restoration in freshly launched Zed instance.
+    /// Controls previous session restoration in freshly launched Backboard Studio instance.
     /// Values: empty_tab, last_workspace, last_session, launchpad
     /// Default: last_session
     pub restore_on_startup: Option<RestoreOnStartupBehavior>,
@@ -78,13 +78,13 @@ pub struct WorkspaceSettingsContent {
     /// Default: auto ("on" on macOS, "off" otherwise)
     pub when_closing_with_no_tabs: Option<CloseWindowWhenNoItems>,
     /// Whether to use the system provided dialogs for Open and Save As.
-    /// When set to false, Zed will use the built-in keyboard-first pickers.
+    /// When set to false, Backboard Studio will use the built-in keyboard-first pickers.
     ///
     /// Default: true
     pub use_system_path_prompts: Option<bool>,
     /// Whether to use the system provided prompts.
-    /// When set to false, Zed will use the built-in prompts.
-    /// Note that this setting has no effect on Linux, where Zed will always
+    /// When set to false, Backboard Studio will use the built-in prompts.
+    /// Note that this setting has no effect on Linux, where Backboard Studio will always
     /// use the built-in prompts.
     ///
     /// Default: true
@@ -128,7 +128,7 @@ pub struct WorkspaceSettingsContent {
     ///
     /// Default: false
     pub close_panel_on_toggle: Option<bool>,
-    /// What draws window decorations/titlebar, the client application (Zed) or display server
+    /// What draws window decorations/titlebar, the client application (Backboard Studio) or display server
     /// Default: client
     pub window_decorations: Option<WindowDecorations>,
     /// Whether the focused panel follows the mouse location
@@ -368,7 +368,7 @@ pub enum BottomDockLayout {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum WindowDecorations {
-    /// Zed draws its own window decorations/titlebar (client-side decoration)
+    /// Backboard Studio draws its own window decorations/titlebar (client-side decoration)
     #[default]
     Client,
     /// Show system's window titlebar (server-side decoration; not supported by GNOME Wayland)
@@ -425,7 +425,7 @@ impl CloseWindowWhenNoItems {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum CliDefaultOpenBehavior {
-    /// Open directories as a new workspace in the current Zed window's sidebar.
+    /// Open directories as a new workspace in the current Backboard Studio window's sidebar.
     #[default]
     #[strum(serialize = "Add to Existing Window")]
     ExistingWindow,
@@ -456,7 +456,7 @@ pub enum RestoreOnStartupBehavior {
     EmptyTab,
     /// Restore the workspace that was closed last.
     LastWorkspace,
-    /// Restore all workspaces that were open when quitting Zed.
+    /// Restore all workspaces that were open when quitting Backboard Studio.
     #[default]
     LastSession,
     /// Show the launchpad with recent projects (no tabs).

@@ -267,7 +267,7 @@ impl TextExample {
 }
 
 const FONT_FAMILIES: [&str; 5] = [
-    ".ZedMono",
+    "JetBrains Mono",
     ".SystemUIFont",
     "Menlo",
     "Monaco",
@@ -355,9 +355,9 @@ fn run_example() {
         }]);
 
         let fonts = [include_bytes!("../../../assets/fonts/inter/Inter.ttf")]
-        .iter()
-        .map(|b| Cow::Borrowed(&b[..]))
-        .collect();
+            .iter()
+            .map(|b| Cow::Borrowed(&b[..]))
+            .collect();
 
         _ = cx.text_system().add_fonts(fonts);
 
@@ -380,7 +380,7 @@ fn run_example() {
                 |_window, cx| {
                     cx.new(|_cx| TextExample {
                         next_id: 0,
-                        font_family: ".ZedMono".into(),
+                        font_family: "JetBrains Mono".into(),
                     })
                 },
             )

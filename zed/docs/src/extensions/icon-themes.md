@@ -1,11 +1,11 @@
 ---
 title: Icon Themes
-description: "Icon Themes for Zed extensions."
+description: "Icon Themes for Backboard Studio extensions."
 ---
 
 # Icon Themes
 
-Extensions may provide icon themes to change the icons Zed uses for folders and files.
+Extensions may provide icon themes to change the icons Backboard Studio uses for folders and files.
 
 ## Example extension
 
@@ -18,13 +18,13 @@ There are two important directories for an icon theme extension:
 - `icon_themes`: This directory will contain one or more JSON files containing the icon theme definitions.
 - `icons`: This directory contains the icon assets distributed with the extension. You can create subdirectories in this directory as needed.
 
-Each icon theme file should adhere to the JSON schema specified at [`https://zed.dev/schema/icon_themes/v0.3.0.json`](https://zed.dev/schema/icon_themes/v0.3.0.json).
+Each icon theme file should adhere to the JSON schema specified at [`https://app.backboard.io/schema/icon_themes/v0.3.0.json`](https://app.backboard.io/schema/icon_themes/v0.3.0.json).
 
 Here is an example icon theme structure:
 
 ```json [icon-theme]
 {
-  "$schema": "https://zed.dev/schema/icon_themes/v0.3.0.json",
+  "$schema": "https://app.backboard.io/schema/icon_themes/v0.3.0.json",
   "name": "My Icon Theme",
   "author": "Your Name",
   "themes": [

@@ -5,7 +5,7 @@ export default {
 
     const object = await env.OPEN_SOURCE_WEBSITE_ASSETS_BUCKET.get(key);
     if (!object) {
-      return await fetch("https://zed.dev/404");
+      return await fetch("https://app.backboard.io/404");
     }
 
     const headers = new Headers();

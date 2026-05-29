@@ -6525,34 +6525,6 @@ impl ThreadView {
                     );
         }
 
-        if let Some(project) = self.project.upgrade()
-            && let Some(server_view) = self.server_view.upgrade()
-            && cx.has_flag::<AgentSharingFeatureFlag>()
-            && project.read(cx).client().status().borrow().is_connected()
-        {
-            let button = if self.is_imported_thread(cx) {
-                IconButton::new("sync-thread", IconName::ArrowCircle)
-                    .shape(ui::IconButtonShape::Square)
-                    .icon_size(IconSize::Small)
-                    .icon_color(Color::Ignored)
-                    .tooltip(Tooltip::text("Sync with source thread"))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.sync_thread(project.clone(), server_view.clone(), window, cx);
-                    }))
-            } else {
-                IconButton::new("share-thread", IconName::ArrowUpRight)
-                    .shape(ui::IconButtonShape::Square)
-                    .icon_size(IconSize::Small)
-                    .icon_color(Color::Ignored)
-                    .tooltip(Tooltip::text("Share Thread"))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.share_thread(window, cx);
-                    }))
-            };
-
-            container = container.child(button);
-        }
-
         container
             .child(open_as_markdown)
             .child(scroll_to_recent_user_prompt)
@@ -9935,7 +9907,7 @@ impl ThreadView {
             ThreadError::RateLimitExceeded { provider } => self.render_error_callout(
                 "Rate Limit Reached",
                 format!(
-                    "{provider}'s rate limit was reached. Zed will retry automatically. \
+                    "{provider}'s rate limit was reached. Backboard Studio will retry automatically. \
                     You can also wait a moment and try again."
                 )
                 .into(),
@@ -9946,7 +9918,7 @@ impl ThreadView {
             ThreadError::ServerOverloaded { provider } => self.render_error_callout(
                 "Provider Unavailable",
                 format!(
-                    "{provider}'s servers are temporarily unavailable. Zed will retry \
+                    "{provider}'s servers are temporarily unavailable. Backboard Studio will retry \
                     automatically. If the problem persists, check the provider's status page."
                 )
                 .into(),
@@ -9969,7 +9941,7 @@ impl ThreadView {
             ThreadError::StreamError { provider } => self.render_error_callout(
                 "Connection Interrupted",
                 format!(
-                    "The connection to {provider}'s API was interrupted. Zed will retry \
+                    "The connection to {provider}'s API was interrupted. Backboard Studio will retry \
                     automatically. If the problem persists, check your network connection."
                 )
                 .into(),
@@ -10028,7 +10000,7 @@ impl ThreadView {
                 "API Error",
                 format!(
                     "{provider}'s API returned an unexpected error. \
-                    If the problem persists, try switching models or restarting Zed."
+                    If the problem persists, try switching models or restarting Backboard Studio."
                 )
                 .into(),
                 true,

@@ -70,8 +70,8 @@ impl TextSystem {
             font_runs_pool: Mutex::default(),
             fallback_font_stack: smallvec![
                 // TODO: Remove this when Linux have implemented setting fallbacks.
-                font(".ZedMono"),
-                font(".ZedSans"),
+                font("JetBrains Mono"),
+                font("Inter"),
                 font("Helvetica"),
                 font("Segoe UI"),     // Windows
                 font("Ubuntu"),       // Gnome (Ubuntu)
@@ -1165,8 +1165,8 @@ pub fn font_name_with_fallbacks<'a>(name: &'a str, system: &'a str) -> &'a str {
     // in a derived font name. Keep them for backward compatibility with older settings.
     match name {
         ".SystemUIFont" => system,
-        ".ZedSans" | "Zed Plex Sans" => "Inter",
-        ".ZedMono" | "Zed Plex Mono" => "JetBrains Mono",
+        "Inter" | "Zed Plex Sans" => "Inter",
+        "JetBrains Mono" | "Zed Plex Mono" => "JetBrains Mono",
         _ => name,
     }
 }
@@ -1181,8 +1181,8 @@ pub fn font_name_with_fallbacks_shared<'a>(
     // in a derived font name. Keep them for backward compatibility with older settings.
     match name.as_str() {
         ".SystemUIFont" => system,
-        ".ZedSans" | "Zed Plex Sans" => const { &SharedString::new_static("Inter") },
-        ".ZedMono" | "Zed Plex Mono" => const { &SharedString::new_static("JetBrains Mono") },
+        "Inter" | "Zed Plex Sans" => const { &SharedString::new_static("Inter") },
+        "JetBrains Mono" | "Zed Plex Mono" => const { &SharedString::new_static("JetBrains Mono") },
         _ => name,
     }
 }

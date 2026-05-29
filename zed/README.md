@@ -1,31 +1,31 @@
-# Zed
+# Backboard Studio
 
-[![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)
-[![CI](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml/badge.svg)](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml)
+[![Backboard Studio](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/backboard/ide/main/assets/badge/v0.json)](https://app.backboard.io)
+[![CI](https://github.com/backboard/ide/actions/workflows/run_tests.yml/badge.svg)](https://github.com/backboard/ide/actions/workflows/run_tests.yml)
 
-Welcome to Zed, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
+Welcome to Backboard Studio, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
 
 ---
 
 ### Installation
 
-On macOS, Linux, and Windows you can [download Zed directly](https://zed.dev/download) or install Zed via your local package manager ([macOS](https://zed.dev/docs/installation#macos)/[Linux](https://zed.dev/docs/linux#installing-via-a-package-manager)/[Windows](https://zed.dev/docs/windows#package-managers)).
+On macOS, Linux, and Windows you can [download Backboard Studio directly](https://app.backboard.io/download) or install Backboard Studio via your local package manager ([macOS](https://app.backboard.io/docs/installation#macos)/[Linux](https://app.backboard.io/docs/linux#installing-via-a-package-manager)/[Windows](https://app.backboard.io/docs/windows#package-managers)).
 
 Other platforms are not yet available:
 
-- Web ([tracking issue](https://github.com/zed-industries/zed/issues/5396))
+- Web ([tracking issue](https://github.com/backboard/ide/issues/5396))
 
-### Developing Zed
+### Developing Backboard Studio
 
-- [Building Zed for macOS](./docs/src/development/macos.md)
-- [Building Zed for Linux](./docs/src/development/linux.md)
-- [Building Zed for Windows](./docs/src/development/windows.md)
+- [Building Backboard Studio for macOS](./docs/src/development/macos.md)
+- [Building Backboard Studio for Linux](./docs/src/development/linux.md)
+- [Building Backboard Studio for Windows](./docs/src/development/windows.md)
 
 ### Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Backboard Studio.
 
-Also... we're hiring! Check out our [jobs](https://zed.dev/jobs) page for open roles.
+Also... we're hiring! Check out our [jobs](https://app.backboard.io/jobs) page for open roles.
 
 ### Licensing
 
@@ -39,8 +39,8 @@ We use [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to automati
 
 ## Sponsorship
 
-Zed is developed by **Zed Industries, Inc.**, a for-profit company.
+Backboard Studio is developed by **Backboard**, a for-profit company.
 
 If you’d like to financially support the project, you can do so via GitHub Sponsors.
-Sponsorships go directly to Zed Industries and are used as general company revenue.
+Sponsorships go directly to Backboard and are used as general company revenue.
 There are no perks or entitlements associated with sponsorship.

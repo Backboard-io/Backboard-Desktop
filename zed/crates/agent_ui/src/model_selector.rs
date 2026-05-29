@@ -1303,7 +1303,7 @@ mod tests {
     fn test_favorites_are_not_duplicated_when_repeated_in_other_sections(_cx: &mut TestAppContext) {
         let models = create_model_list(vec![
             ("Recommended", vec!["zed/claude", "anthropic/claude"]),
-            ("Zed", vec!["zed/claude", "zed/gpt-5"]),
+            ("Backboard Studio", vec!["zed/claude", "zed/gpt-5"]),
             ("Antropic", vec!["anthropic/claude"]),
             ("OpenAI", vec!["openai/gpt-5"]),
         ]);
@@ -1321,7 +1321,7 @@ mod tests {
                 "Recommended",
                 "zed/claude",
                 "anthropic/claude",
-                "Zed",
+                "Backboard Studio",
                 "zed/claude",
                 "zed/gpt-5",
                 "Antropic",

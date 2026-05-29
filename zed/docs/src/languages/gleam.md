@@ -1,6 +1,6 @@
 ---
 title: Gleam
-description: "Configure Gleam language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Gleam language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Gleam

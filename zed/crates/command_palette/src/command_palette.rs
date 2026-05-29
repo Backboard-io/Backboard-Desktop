@@ -26,7 +26,7 @@ use settings::Settings;
 use ui::{HighlightedLabel, KeyBinding, ListItem, ListItemSpacing, prelude::*};
 use util::ResultExt;
 use workspace::{ModalView, Workspace, WorkspaceSettings};
-use zed_actions::{OpenZedUrl, command_palette::Toggle};
+use zed_actions::{OpenBackboardUrl, command_palette::Toggle};
 
 pub fn init(cx: &mut App) {
     command_palette_hooks::init(cx);
@@ -487,7 +487,7 @@ impl PickerDelegate for CommandPaletteDelegate {
                 let intercept_result = if is_zed_link {
                     CommandInterceptResult {
                         results: vec![CommandInterceptItem {
-                            action: OpenZedUrl {
+                            action: OpenBackboardUrl {
                                 url: query_for_link.clone(),
                             }
                             .boxed_clone(),
@@ -696,8 +696,12 @@ impl PickerDelegate for CommandPaletteDelegate {
 
 pub fn humanize_action_name(name: &str) -> String {
     let name = name
-        .strip_prefix("zed::")
+        .strip_prefix("backboard::")
         .map(|action| format!("backboard::{action}"))
+        .or_else(|| {
+            name.strip_prefix("zed::")
+                .map(|action| format!("backboard::{action}"))
+        })
         .or_else(|| {
             name.strip_prefix("zed_")
                 .map(|rest| format!("backboard_{rest}"))
@@ -762,11 +766,11 @@ mod tests {
             "go to line: deploy"
         );
         assert_eq!(
-            humanize_action_name("zed::OpenSettings"),
+            humanize_action_name("backboard::OpenSettings"),
             "backboard: open settings"
         );
         assert_eq!(
-            humanize_action_name("zed_predict_onboarding::Toggle"),
+            humanize_action_name("backboard_predict_onboarding::Toggle"),
             "backboard predict onboarding: toggle"
         );
     }

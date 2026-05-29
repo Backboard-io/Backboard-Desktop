@@ -1,8 +1,8 @@
-# Zed's Feature Development Process
+# Backboard Studio's Feature Development Process
 
-This is for moderate-to-large features — new UI, behavior changes, or work that cuts across multiple parts of Zed. Small keybindings or settings tweaks don't need all of this.
+This is for moderate-to-large features — new UI, behavior changes, or work that cuts across multiple parts of Backboard Studio. Small keybindings or settings tweaks don't need all of this.
 
-> **Before you start:** If you're an external contributor, make sure the feature is something the team wants before investing significant effort. Please read the [Contributing Guide](../../../CONTRIBUTING.md) and our [Feature Request Guidelines](https://github.com/zed-industries/zed/discussions/51422) — if there isn't already a GitHub issue with clear staff confirmation, start with a GitHub Discussion. Feature request PRs that skip this process have a _very_ low merge rate. Taking the time to follow our process significantly increases the chances your idea gets picked up and built.
+> **Before you start:** If you're an external contributor, make sure the feature is something the team wants before investing significant effort. Please read the [Contributing Guide](../../../CONTRIBUTING.md) and our [Feature Request Guidelines](https://github.com/backboard/ide/discussions/51422) — if there isn't already a GitHub issue with clear staff confirmation, start with a GitHub Discussion. Feature request PRs that skip this process have a _very_ low merge rate. Taking the time to follow our process significantly increases the chances your idea gets picked up and built.
 
 ## 1. Why does this matter?
 
@@ -10,7 +10,7 @@ Every feature starts as an idea. Before writing any code, ground it:
 
 - **What problem does this solve?**
 - **What's the evidence?** GitHub issues, Discord requests, thumbs-up counts, blog posts.
-- **Is there prior art?** If it's in VS Code, JetBrains, Neovim, or a wildly popular plugin, that's a strong signal. If the idea is more novel, name what it's based on — "This is X, adapted for Zed's multi-buffers" is far more useful than "I think this would be cool."
+- **Is there prior art?** If it's in VS Code, JetBrains, Neovim, or a wildly popular plugin, that's a strong signal. If the idea is more novel, name what it's based on — "This is X, adapted for Backboard Studio's multi-buffers" is far more useful than "I think this would be cool."
 
 ## 2. What is it?
 
@@ -31,7 +31,7 @@ This is standard across all major code editors:
 - and has 146 thumbs up on this [github issue](https://github.com).
 
 **Decisions:**
-We have to decide whether to use the git CLI or a git library. Zed uses a git library but its blame implementation is too slow for a code editor, so we should use the CLI's porcelain interface.
+We have to decide whether to use the git CLI or a git library. Backboard Studio uses a git library but its blame implementation is too slow for a code editor, so we should use the CLI's porcelain interface.
 
 ## 3. What else does this affect?
 
@@ -46,7 +46,7 @@ Walk through this list before you start building. Not everything will apply:
 - **Accessibility.** Is it keyboard-navigable? Are focus states clear?
 - **Platform differences.** Does behavior differ on macOS, Linux, or Windows?
 - **Performance.** How does it behave with large files or big projects? Are interactions instant?
-- **Security.** How does this feature interact with Workspace Trust? Does it open new attack surfaces in Zed?
+- **Security.** How does this feature interact with Workspace Trust? Does it open new attack surfaces in Backboard Studio?
 
 If your feature touches the **editor** specifically: the editor has a lot of coexisting features — gutter elements, inline blocks, multiple cursors, folding, edit predictions, code intelligence popovers, the minimap. Test your changes with different combinations of them active. Features that work in a normal buffer might need to be disabled in a multi-buffer.
 

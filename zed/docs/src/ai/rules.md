@@ -1,6 +1,6 @@
 ---
-title: AI Rules in Zed - .rules, .cursorrules, CLAUDE.md
-description: Configure AI behavior in Zed with .rules files, .cursorrules, CLAUDE.md, AGENTS.md, and the Rules Library for project-level instructions.
+title: AI Rules in Backboard Studio - .rules, .cursorrules, CLAUDE.md
+description: Configure AI behavior in Backboard Studio with .rules files, .cursorrules, CLAUDE.md, AGENTS.md, and the Rules Library for project-level instructions.
 ---
 
 # Using Rules {#using-rules}
@@ -9,7 +9,7 @@ Rules are prompts that can be inserted either automatically at the beginning of 
 
 ## `.rules` files
 
-Zed supports including `.rules` files at the root of a project's file tree, and they act as project-level instructions that are auto-included in all of your interactions with the Agent Panel.
+Backboard Studio supports including `.rules` files at the root of a project's file tree, and they act as project-level instructions that are auto-included in all of your interactions with the Agent Panel.
 
 Other names for this file are also supported for compatibility with other agents, but note that the first file which matches in this list will be used:
 

@@ -284,6 +284,7 @@ actions!(
         /// Opens the feedback dialog.
         Feedback,
         /// Follows the next collaborator in the session.
+        #[action(no_register)]
         FollowNextCollaborator,
         /// Moves the focused panel to the next position.
         MoveFocusedPanelToNextPosition,
@@ -9191,39 +9192,48 @@ actions!(
         /// Use `collab_panel::OpenSelectedChannelNotes` to open the channel notes for the selected
         /// channel in the collab panel.
         ///
-        /// If you want to open a specific channel, use `zed::OpenZedUrl` with a channel notes URL -
+        /// If you want to open a specific channel, use `backboard::OpenBackboardUrl` with a channel notes URL -
         /// can be copied via "Copy link to section" in the context menu of the channel notes
-        /// buffer. These URLs look like `https://zed.dev/channel/channel-name-CHANNEL_ID/notes`.
+        /// buffer. These URLs look like `https://app.backboard.io/channel/channel-name-CHANNEL_ID/notes`.
+        #[action(no_register)]
         OpenChannelNotes,
         /// Mutes your microphone.
+        #[action(no_register)]
         Mute,
         /// Deafens yourself (mute both microphone and speakers).
+        #[action(no_register)]
         Deafen,
         /// Leaves the current call.
+        #[action(no_register)]
         LeaveCall,
         /// Shares the current project with collaborators.
+        #[action(no_register)]
         ShareProject,
         /// Shares your screen with collaborators.
+        #[action(no_register)]
         ScreenShare,
         /// Copies the current room name and session id for debugging purposes.
+        #[action(no_register)]
         CopyRoomId,
     ]
 );
 
 /// Opens the channel notes for a specific channel by its ID.
 #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
-#[action(namespace = collab)]
+#[action(namespace = collab, no_register)]
 #[serde(deny_unknown_fields)]
 pub struct OpenChannelNotesById {
     pub channel_id: u64,
 }
 
 actions!(
-    zed,
+    backboard,
     [
-        /// Opens the Zed log file.
+        /// Opens the Backboard Studio log file.
+        #[action(deprecated_aliases = ["zed::OpenLog"])]
         OpenLog,
-        /// Reveals the Zed log file in the system file manager.
+        /// Reveals the Backboard Studio log file in the system file manager.
+        #[action(deprecated_aliases = ["zed::RevealLogInFileManager"])]
         RevealLogInFileManager
     ]
 );
@@ -9494,7 +9504,7 @@ pub async fn get_any_active_multi_workspace(
         })
         .await?;
     }
-    activate_any_workspace_window(&mut cx).context("could not open zed")
+    activate_any_workspace_window(&mut cx).context("could not open Backboard Studio")
 }
 
 fn activate_any_workspace_window(cx: &mut AsyncApp) -> Option<WindowHandle<MultiWorkspace>> {
@@ -11581,7 +11591,7 @@ mod tests {
         assert!(task.await.unwrap());
     }
 
-    // See https://github.com/zed-industries/zed/issues/55726.
+    // See https://github.com/backboard/ide/issues/55726.
     //
     // macOS only: on Linux/Windows, closing the last window sets
     // `save_last_workspace`, which preserves the session (same as `Quit`),
@@ -11660,7 +11670,7 @@ mod tests {
         assert!(task.await.unwrap());
     }
 
-    // See https://github.com/zed-industries/zed/issues/55726.
+    // See https://github.com/backboard/ide/issues/55726.
     #[gpui::test]
     async fn test_replace_window_without_worktrees_prompts(cx: &mut TestAppContext) {
         init_test(cx);

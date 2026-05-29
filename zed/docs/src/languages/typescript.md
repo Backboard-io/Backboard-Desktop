@@ -1,11 +1,11 @@
 ---
 title: TypeScript
-description: "Configure TypeScript language support in Zed, including language servers, formatting, and debugging."
+description: "Configure TypeScript language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # TypeScript
 
-TypeScript and TSX support are available natively in Zed.
+TypeScript and TSX support are available natively in Backboard Studio.
 
 - Tree-sitter: [tree-sitter/tree-sitter-typescript](https://github.com/tree-sitter/tree-sitter-typescript)
 - Language Server: [yioneko/vtsls](https://github.com/yioneko/vtsls)
@@ -18,8 +18,8 @@ TBD: Document the difference between Language servers
 
 ## Language servers
 
-By default Zed uses [vtsls](https://github.com/yioneko/vtsls) for TypeScript, TSX, and JavaScript files.
-Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages > TypeScript/TSX/JavaScript, or add to your settings file:
+By default Backboard Studio uses [vtsls](https://github.com/yioneko/vtsls) for TypeScript, TSX, and JavaScript files.
+Configure language servers in Settings ({#kb backboard::OpenSettings}) under Languages > TypeScript/TSX/JavaScript, or add to your settings file:
 
 ```json [settings]
 {
@@ -37,7 +37,7 @@ Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages
 }
 ```
 
-Prettier will also be used for TypeScript files by default. To disable this, configure in Settings ({#kb zed::OpenSettings}) under Languages > TypeScript, or add to your settings file:
+Prettier will also be used for TypeScript files by default. To disable this, configure in Settings ({#kb backboard::OpenSettings}) under Languages > TypeScript, or add to your settings file:
 
 ```json [settings]
 {
@@ -99,9 +99,9 @@ To get all the features (autocomplete, linting, etc.) from the [Tailwind CSS lan
 
 ## Inlay Hints
 
-Zed sets the following initialization options to make the language server send back inlay hints (that is, when Zed has inlay hints enabled in the settings).
+Backboard Studio sets the following initialization options to make the language server send back inlay hints (that is, when Backboard Studio has inlay hints enabled in the settings).
 
-You can override these settings in your Zed `settings.json` when using `typescript-language-server`:
+You can override these settings in your Backboard Studio `settings.json` when using `typescript-language-server`:
 
 ```json [settings]
 {
@@ -191,7 +191,7 @@ When using `vtsls`:
 
 ## Code Lens
 
-Zed enables references and implementations code lenses for `vtsls` by default. These show reference counts and implementation counts above functions, classes, and interfaces. To use them, enable the `code_lens` setting:
+Backboard Studio enables references and implementations code lenses for `vtsls` by default. These show reference counts and implementation counts above functions, classes, and interfaces. To use them, enable the `code_lens` setting:
 
 ```json [settings]
 {
@@ -236,7 +236,7 @@ You can override the default code lens settings in your `settings.json`:
 
 ## Debugging
 
-Zed supports debugging TypeScript code out of the box with `vscode-js-debug`.
+Backboard Studio supports debugging TypeScript code out of the box with `vscode-js-debug`.
 The following can be debugged without writing additional configuration:
 
 - Tasks from `package.json`
@@ -248,7 +248,7 @@ Run {#action debugger::Start} ({#kb debugger::Start}) to see a contextual list o
 
 > **Note:** Node test is automatically detected when `@types/node` is present in `package.json` (requires Node.js 20+).
 
-As for all languages, configurations from `.vscode/launch.json` are also available for debugging in Zed.
+As for all languages, configurations from `.vscode/launch.json` are also available for debugging in Backboard Studio.
 
 If your use-case isn't covered by any of these, you can take full control by adding debug configurations to `.zed/debug.json`. See below for example configurations.
 
@@ -283,5 +283,5 @@ Given an externally-ran web server (e.g., with `npx serve` or `npx live-server`)
 
 ## See also
 
-- [Zed Yarn documentation](./yarn.md) for a walkthrough of configuring your project to use Yarn.
-- [Zed Deno documentation](./deno.md)
+- [Backboard Studio Yarn documentation](./yarn.md) for a walkthrough of configuring your project to use Yarn.
+- [Backboard Studio Deno documentation](./deno.md)

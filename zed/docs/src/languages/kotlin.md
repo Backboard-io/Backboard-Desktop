@@ -1,11 +1,11 @@
 ---
 title: Kotlin
-description: "Configure Kotlin language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Kotlin language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Kotlin
 
-Kotlin language support in Zed is provided by the community-maintained [Kotlin extension](https://github.com/zed-extensions/kotlin).
+Kotlin language support in Backboard Studio is provided by the community-maintained [Kotlin extension](https://github.com/zed-extensions/kotlin).
 Report issues to: [https://github.com/zed-extensions/kotlin/issues](https://github.com/zed-extensions/kotlin/issues)
 
 - Tree-sitter: [fwcd/tree-sitter-kotlin](https://github.com/fwcd/tree-sitter-kotlin)

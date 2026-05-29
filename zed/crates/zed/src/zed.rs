@@ -98,8 +98,8 @@ use workspace::{
 };
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
-    About, OpenAccountSettings, OpenBrowser, OpenDocs, OpenServerSettings, OpenSettingsFile,
-    OpenZedUrl, Quit, SwitchInterfaceMode,
+    About, OpenAccountSettings, OpenBackboardUrl, OpenBrowser, OpenDocs, OpenServerSettings,
+    OpenSettingsFile, Quit, SwitchInterfaceMode,
 };
 
 pub struct CrashHandler(pub Arc<crashes::Client>);
@@ -107,39 +107,55 @@ pub struct CrashHandler(pub Arc<crashes::Client>);
 impl gpui::Global for CrashHandler {}
 
 actions!(
-    zed,
+    backboard,
     [
         /// Opens the element inspector for debugging UI.
+        #[action(deprecated_aliases = ["zed::DebugElements"])]
         DebugElements,
         /// Hides the application window.
+        #[action(deprecated_aliases = ["zed::Hide"])]
         Hide,
         /// Hides all other application windows.
+        #[action(deprecated_aliases = ["zed::HideOthers"])]
         HideOthers,
         /// Minimizes the current window.
+        #[action(deprecated_aliases = ["zed::Minimize"])]
         Minimize,
         /// Opens the default settings file.
+        #[action(deprecated_aliases = ["zed::OpenDefaultSettings"])]
         OpenDefaultSettings,
         /// Opens project-specific settings file.
+        #[action(deprecated_aliases = ["zed::OpenProjectSettingsFile"])]
         OpenProjectSettingsFile,
         /// Opens the project tasks configuration.
+        #[action(deprecated_aliases = ["zed::OpenProjectTasks"])]
         OpenProjectTasks,
         /// Opens the tasks panel.
+        #[action(deprecated_aliases = ["zed::OpenTasks"])]
         OpenTasks,
         /// Opens debug tasks configuration.
+        #[action(deprecated_aliases = ["zed::OpenDebugTasks"])]
         OpenDebugTasks,
         /// Shows the default semantic token rules (read-only).
+        #[action(deprecated_aliases = ["zed::ShowDefaultSemanticTokenRules"])]
         ShowDefaultSemanticTokenRules,
         /// Resets the application database.
+        #[action(deprecated_aliases = ["zed::ResetDatabase"])]
         ResetDatabase,
         /// Shows all hidden windows.
+        #[action(deprecated_aliases = ["zed::ShowAll"])]
         ShowAll,
         /// Toggles fullscreen mode.
+        #[action(deprecated_aliases = ["zed::ToggleFullScreen"])]
         ToggleFullScreen,
         /// Zooms the window.
+        #[action(deprecated_aliases = ["zed::Zoom"])]
         Zoom,
         /// Triggers a test panic for debugging.
+        #[action(deprecated_aliases = ["zed::TestPanic"])]
         TestPanic,
         /// Triggers a hard crash for debugging.
+        #[action(deprecated_aliases = ["zed::TestCrash"])]
         TestCrash,
     ]
 );
@@ -719,7 +735,7 @@ fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
             db::indoc! {r#"
             inotify_init returned {}
 
-            This may be due to system-wide limits on inotify instances. For troubleshooting see: https://zed.dev/docs/linux
+            This may be due to system-wide limits on inotify instances. For troubleshooting see: https://app.backboard.io/docs/linux
             "#},
             e
         );
@@ -733,7 +749,7 @@ fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
         cx.spawn(async move |_, cx| {
             if prompt.await == Ok(0) {
                 cx.update(|cx| {
-                    cx.open_url("https://zed.dev/docs/linux#could-not-start-inotify");
+                    cx.open_url("https://app.backboard.io/docs/linux#could-not-start-inotify");
                     cx.quit();
                 });
             }
@@ -750,7 +766,7 @@ fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
             db::indoc! {r#"
             ReadDirectoryChangesW initialization failed: {}
 
-            This may occur on network filesystems and WSL paths. For troubleshooting see: https://zed.dev/docs/windows
+            This may occur on network filesystems and WSL paths. For troubleshooting see: https://app.backboard.io/docs/windows
             "#},
             e
         );
@@ -764,7 +780,7 @@ fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
         cx.spawn(async move |_, cx| {
             if prompt.await == Ok(0) {
                 cx.update(|cx| {
-                    cx.open_url("https://zed.dev/docs/windows");
+                    cx.open_url("https://app.backboard.io/docs/windows");
                     cx.quit()
                 });
             }
@@ -782,19 +798,19 @@ fn show_software_emulation_warning_if_needed(
         let (graphics_api, docs_url, open_url) = if cfg!(target_os = "windows") {
             (
                 "DirectX",
-                "https://zed.dev/docs/windows",
-                "https://zed.dev/docs/windows",
+                "https://app.backboard.io/docs/windows",
+                "https://app.backboard.io/docs/windows",
             )
         } else {
             (
                 "Vulkan",
-                "https://zed.dev/docs/linux",
-                "https://zed.dev/docs/linux#zed-fails-to-open-windows",
+                "https://app.backboard.io/docs/linux",
+                "https://app.backboard.io/docs/linux#zed-fails-to-open-windows",
             )
         };
         let message = format!(
             db::indoc! {r#"
-            Zed uses {} for rendering and requires a compatible GPU.
+            Backboard Studio uses {} for rendering and requires a compatible GPU.
 
             Currently you are using a software emulated GPU ({}) which
             will result in awful performance.
@@ -1161,7 +1177,7 @@ fn register_actions(
         .register_action(|_, _: &ToggleFullScreen, window, _| {
             window.toggle_fullscreen();
         })
-        .register_action(|_, action: &OpenZedUrl, _, cx| {
+        .register_action(|_, action: &OpenBackboardUrl, _, cx| {
             OpenListener::global(cx).open(RawOpenRequest {
                 urls: vec![action.url.clone()],
                 ..Default::default()
@@ -1366,15 +1382,15 @@ fn register_actions(
                 }
             }
         })
-        .register_action(|_, _: &install_cli::RegisterZedScheme, window, cx| {
+        .register_action(|_, _: &install_cli::RegisterBackboardScheme, window, cx| {
             cx.spawn_in(window, async move |workspace, cx| {
                 install_cli::register_zed_scheme(cx).await?;
                 workspace.update_in(cx, |workspace, _, cx| {
-                    struct RegisterZedScheme;
+                    struct RegisterBackboardScheme;
 
                     workspace.show_toast(
                         Toast::new(
-                            NotificationId::unique::<RegisterZedScheme>(),
+                            NotificationId::unique::<RegisterBackboardScheme>(),
                             format!(
                                 "zed:// links will now open in {}.",
                                 ReleaseChannel::global(cx).display_name()
@@ -5515,7 +5531,7 @@ mod tests {
                 "worktree_picker",
                 "zed",
                 "zed_actions",
-                "zed_predict_onboarding",
+                "backboard_predict_onboarding",
                 "zeta",
             ];
             assert_eq!(

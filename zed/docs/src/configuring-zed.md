@@ -1,22 +1,22 @@
 ---
-title: Configuring Zed - Settings and Preferences
-description: Configure Zed with the Settings Editor, JSON files, and project-specific overrides. Covers all settings options.
+title: Configuring Backboard Studio - Settings and Preferences
+description: Configure Backboard Studio with the Settings Editor, JSON files, and project-specific overrides. Covers all settings options.
 ---
 
-# Configuring Zed
+# Configuring Backboard Studio
 
-This guide explains how Zed's settings system works, including the Settings Editor, JSON configuration files, and project-specific settings.
+This guide explains how Backboard Studio's settings system works, including the Settings Editor, JSON configuration files, and project-specific settings.
 
 For visual customization (themes, fonts, icons), see [Appearance](./appearance.md).
 
 ## Settings Editor
 
-The **Settings Editor** ({#kb zed::OpenSettings}) is the primary way to configure Zed. It provides a searchable interface where you can browse available settings, see their current values, and make changes.
+The **Settings Editor** ({#kb backboard::OpenSettings}) is the primary way to configure Backboard Studio. It provides a searchable interface where you can browse available settings, see their current values, and make changes.
 
 To open it:
 
-- Press {#kb zed::OpenSettings}
-- Or run {#action zed::OpenSettings} from the command palette
+- Press {#kb backboard::OpenSettings}
+- Or run {#action backboard::OpenSettings} from the command palette
 
 As you type in the search box, matching settings appear with descriptions and controls to modify them. Changes save automatically to your settings file.
 
@@ -26,23 +26,23 @@ As you type in the search box, matching settings appear with descriptions and co
 
 ### User Settings
 
-Your user settings apply globally across all projects. Open the file with {#kb zed::OpenSettingsFile} or run {#action zed::OpenSettingsFile} from the command palette.
+Your user settings apply globally across all projects. Open the file with {#kb backboard::OpenSettingsFile} or run {#action backboard::OpenSettingsFile} from the command palette.
 
 The file is located at:
 
 - macOS: `~/.config/zed/settings.json`
 - Linux: `~/.config/zed/settings.json` (or `$XDG_CONFIG_HOME/zed/settings.json`)
-- Windows: `%APPDATA%\Zed\settings.json`
+- Windows: `%APPDATA%\Backboard Studio\settings.json`
 
 The syntax is JSON with support for `//` comments.
 
 ### Default Settings
 
-To see all available settings with their default values, run {#action zed::OpenDefaultSettings} from the command palette. This opens a read-only reference you can use when editing your own settings.
+To see all available settings with their default values, run {#action backboard::OpenDefaultSettings} from the command palette. This opens a read-only reference you can use when editing your own settings.
 
 ### Project Settings
 
-Override user settings for a specific project by creating a `.zed/settings.json` file in your project root. Run {#action zed::OpenProjectSettings} to create this file.
+Override user settings for a specific project by creating a `.zed/settings.json` file in your project root. Run {#action backboard::OpenProjectSettings} to create this file.
 
 Project settings take precedence over user settings for that project only.
 
@@ -63,7 +63,7 @@ You can also add settings files in subdirectories for more granular control.
 
 Settings are applied in layers:
 
-1. **Default settings** — Zed's built-in defaults
+1. **Default settings** — Backboard Studio's built-in defaults
 2. **User settings** — Your global preferences
 3. **Project settings** — Project-specific overrides
 
@@ -71,7 +71,7 @@ Later layers override earlier ones. For object settings (like `terminal`), prope
 
 ## Per-file Settings
 
-Zed has some compatibility support for Emacs and Vim [modelines](./modelines.md), so you can set some settings per-file.
+Backboard Studio has some compatibility support for Emacs and Vim [modelines](./modelines.md), so you can set some settings per-file.
 
 ## Per-Release Channel Overrides
 
@@ -101,7 +101,7 @@ Changes made in the Settings Editor apply across all channels.
 
 ## Settings Deep Links
 
-Zed supports deep links that open specific settings directly:
+Backboard Studio supports deep links that open specific settings directly:
 
 ```
 zed://settings/theme

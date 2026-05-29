@@ -1,11 +1,11 @@
 ---
 title: Rego
-description: "Configure Rego language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Rego language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Rego
 
-Rego language support in Zed is provided by the community-maintained [Rego extension](https://github.com/StyraInc/zed-rego).
+Rego language support in Backboard Studio is provided by the community-maintained [Rego extension](https://github.com/StyraInc/zed-rego).
 
 - Tree-sitter: [FallenAngel97/tree-sitter-rego](https://github.com/FallenAngel97/tree-sitter-rego)
 - Language Server: [open-policy-agent/regal](https://github.com/open-policy-agent/regal)

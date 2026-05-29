@@ -23,7 +23,7 @@ pub struct AllLanguageModelSettingsContent {
     pub openai_compatible: Option<HashMap<Arc<str>, OpenAiCompatibleSettingsContent>>,
     pub vercel_ai_gateway: Option<VercelAiGatewaySettingsContent>,
     pub x_ai: Option<XAiSettingsContent>,
-    #[serde(rename = "zed.dev")]
+    #[serde(rename = "app.backboard.io")]
     pub zed_dot_dev: Option<ZedDotDevSettingsContent>,
 }
 
@@ -39,7 +39,7 @@ pub struct AnthropicSettingsContent {
 pub struct AnthropicAvailableModel {
     /// The model's name in the Anthropic API. e.g. claude-3-5-sonnet-latest, claude-3-opus-20240229, etc
     pub name: String,
-    /// The model's name in Zed's UI, such as in the model selector dropdown menu in the agent panel.
+    /// The model's name in Backboard Studio's UI, such as in the model selector dropdown menu in the agent panel.
     pub display_name: Option<String>,
     /// The model's context window size.
     pub max_tokens: u64,
@@ -111,7 +111,7 @@ pub struct OllamaSettingsContent {
 pub struct OllamaAvailableModel {
     /// The model name in the Ollama API (e.g. "llama3.2:latest")
     pub name: String,
-    /// The model's name in Zed's UI, such as in the model selector dropdown menu in the agent panel.
+    /// The model's name in Backboard Studio's UI, such as in the model selector dropdown menu in the agent panel.
     pub display_name: Option<String>,
     /// The Context Length parameter to the model (aka num_ctx or n_ctx)
     pub max_tokens: u64,

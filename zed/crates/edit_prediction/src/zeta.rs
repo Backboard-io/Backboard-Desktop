@@ -486,8 +486,10 @@ fn handle_api_response<T>(
                         cx,
                         move |cx| {
                             cx.new(|cx| {
-                                ErrorMessagePrompt::new(error_message.clone(), cx)
-                                    .with_link_button("Update Zed", "https://zed.dev/releases")
+                                ErrorMessagePrompt::new(error_message.clone(), cx).with_link_button(
+                                    "Update Backboard Studio",
+                                    "https://app.backboard.io/releases",
+                                )
                             })
                         },
                     );

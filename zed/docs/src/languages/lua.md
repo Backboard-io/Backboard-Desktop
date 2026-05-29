@@ -1,6 +1,6 @@
 ---
 title: Lua
-description: "Configure Lua language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Lua language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Lua
@@ -23,7 +23,7 @@ To configure LuaLS you can create a `.luarc.json` file in the root of your proje
 }
 ```
 
-See [LuaLS Settings Documentation](https://luals.github.io/wiki/settings/) for all available configuration options, or when editing this file in Zed available settings options will autocomplete, (e.g `runtime.version` will show `"Lua 5.1"`, `"Lua 5.2"`, `"Lua 5.3"`, `"Lua 5.4"` and `"LuaJIT"` as allowed values). Note when importing settings options from VS Code, remove the `Lua.` prefix. (e.g. `runtime.version` instead of `Lua.runtime.version`).
+See [LuaLS Settings Documentation](https://luals.github.io/wiki/settings/) for all available configuration options, or when editing this file in Backboard Studio available settings options will autocomplete, (e.g `runtime.version` will show `"Lua 5.1"`, `"Lua 5.2"`, `"Lua 5.3"`, `"Lua 5.4"` and `"LuaJIT"` as allowed values). Note when importing settings options from VS Code, remove the `Lua.` prefix. (e.g. `runtime.version` instead of `Lua.runtime.version`).
 
 ### LuaCATS Definitions
 
@@ -31,7 +31,7 @@ LuaLS can provide enhanced LSP autocompletion suggestions and type validation wi
 
 ### LÖVE (Love2D) {#love2d}
 
-To use [LÖVE (Love2D)](https://love2d.org/) in Zed, checkout [LuaCATS/love2d](https://github.com/LuaCATS/love2d) into a folder called `love2d-luacats` into the parent folder of your project:
+To use [LÖVE (Love2D)](https://love2d.org/) in Backboard Studio, checkout [LuaCATS/love2d](https://github.com/LuaCATS/love2d) into a folder called `love2d-luacats` into the parent folder of your project:
 
 ```sh
 cd .. && git clone https://github.com/LuaCATS/love2d love2d-luacats
@@ -52,7 +52,7 @@ Then in your `.luarc.json`:
 
 ### PlaydateSDK
 
-To use [Playdate Lua SDK](https://play.date/dev/) in Zed, checkout [playdate-luacats](https://github.com/notpeter/playdate-luacats) into the parent folder of your project:
+To use [Playdate Lua SDK](https://play.date/dev/) in Backboard Studio, checkout [playdate-luacats](https://github.com/notpeter/playdate-luacats) into the parent folder of your project:
 
 ```sh
 cd .. && git clone https://github.com/notpeter/playdate-luacats
@@ -91,9 +91,9 @@ Then in your `.luarc.json`:
 
 ### Inlay Hints
 
-To enable [Inlay Hints](../configuring-languages.md#inlay-hints) for LuaLS in Zed
+To enable [Inlay Hints](../configuring-languages.md#inlay-hints) for LuaLS in Backboard Studio
 
-1. Configure inlay hints in Settings ({#kb zed::OpenSettings}) under Languages > Lua, or add to your settings file:
+1. Configure inlay hints in Settings ({#kb backboard::OpenSettings}) under Languages > Lua, or add to your settings file:
 
 ```json [settings]
 {
@@ -125,7 +125,7 @@ To enable auto-formatting with your LuaLS (provided by [CppCXY/EmmyLuaCodeStyle]
 }
 ```
 
-Configure formatting in Settings ({#kb zed::OpenSettings}) under Languages > Lua, or add to your settings file:
+Configure formatting in Settings ({#kb backboard::OpenSettings}) under Languages > Lua, or add to your settings file:
 
 ```json [settings]
 {
@@ -145,7 +145,7 @@ You can customize various EmmyLuaCodeStyle style options via `.editorconfig`, se
 Alternatively to use [StyLua](https://github.com/JohnnyMorganz/StyLua) for auto-formatting:
 
 1. Install [StyLua](https://github.com/JohnnyMorganz/StyLua): `brew install stylua` or `cargo install stylua --features lua52,lua53,lua54,luau,luajit` (feel free to remove any Lua versions you don't need).
-2. Configure formatting in Settings ({#kb zed::OpenSettings}) under Languages > Lua, or add to your settings file:
+2. Configure formatting in Settings ({#kb backboard::OpenSettings}) under Languages > Lua, or add to your settings file:
 
 ```json [settings]
 {

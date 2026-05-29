@@ -1134,14 +1134,14 @@ impl TitleBar {
                 let auto_updater = auto_update::AutoUpdater::get(cx);
                 let label = match auto_updater.map(|auto_update| auto_update.read(cx).status()) {
                     Some(AutoUpdateStatus::Updated { .. }) => {
-                        "Please restart Backboard Studio to Collaborate"
+                        "Please restart Backboard Studio to continue"
                     }
                     Some(AutoUpdateStatus::Installing { .. })
                     | Some(AutoUpdateStatus::Downloading { .. })
                     | Some(AutoUpdateStatus::Checking) => "Updating...",
                     Some(AutoUpdateStatus::Idle)
                     | Some(AutoUpdateStatus::Errored { .. })
-                    | None => "Please update Backboard Studio to Collaborate",
+                    | None => "Please update Backboard Studio to continue",
                 };
 
                 Some(

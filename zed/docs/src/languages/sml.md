@@ -1,6 +1,6 @@
 ---
 title: Standard ML
-description: "Configure Standard ML language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Standard ML language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Standard ML
@@ -17,7 +17,7 @@ Standard ML support is available through the community-maintained [Standard ML e
 
 ## Project setup
 
-For projects with more than one source file, Millet expects a single root group file. Create a `millet.toml` in the directory you open in Zed:
+For projects with more than one source file, Millet expects a single root group file. Create a `millet.toml` in the directory you open in Backboard Studio:
 
 ```toml
 version = 1

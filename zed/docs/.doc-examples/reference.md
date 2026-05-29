@@ -15,14 +15,14 @@
 
 ---
 
-title: AI Agent Tools - Zed
-description: Built-in tools for Zed's AI agent including file editing, code search, terminal commands, web search, and diagnostics.
+title: AI Agent Tools - Backboard Studio
+description: Built-in tools for Backboard Studio's AI agent including file editing, code search, terminal commands, web search, and diagnostics.
 
 ---
 
 # Tools
 
-Zed's built-in agent has access to these tools for reading, searching, and editing your codebase. These tools are used in the [Agent Panel](./agent-panel.md) during conversations with AI agents.
+Backboard Studio's built-in agent has access to these tools for reading, searching, and editing your codebase. These tools are used in the [Agent Panel](./agent-panel.md) during conversations with AI agents.
 
 You can configure permissions for tool actions, including situations where they are automatically approved, automatically denied, or require your confirmation on a case-by-case basis. See [Tool Permissions](./tool-permissions.md) for the list of permission-gated tools and details.
 

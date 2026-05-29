@@ -1,6 +1,6 @@
 ---
 title: Uiua
-description: "Configure Uiua language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Uiua language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Uiua

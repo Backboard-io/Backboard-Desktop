@@ -8,8 +8,8 @@ function getZedDataDir() {
   const platform = process.platform;
 
   if (platform === "darwin") {
-    // macOS: ~/Library/Application Support/Zed
-    return path.join(os.homedir(), "Library", "Application Support", "Zed");
+    // macOS: ~/Library/Application Support/Backboard Studio
+    return path.join(os.homedir(), "Library", "Application Support", "Backboard Studio");
   } else if (platform === "linux" || platform === "freebsd") {
     // Linux/FreeBSD: $FLATPAK_XDG_DATA_HOME or XDG_DATA_HOME/zed
     if (process.env.FLATPAK_XDG_DATA_HOME) {
@@ -18,9 +18,9 @@ function getZedDataDir() {
     const xdgDataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
     return path.join(xdgDataHome, "zed");
   } else if (platform === "win32") {
-    // Windows: LocalAppData/Zed
+    // Windows: LocalAppData/Backboard Studio
     const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-    return path.join(localAppData, "Zed");
+    return path.join(localAppData, "Backboard Studio");
   } else {
     // Fallback to XDG config dir
     const xdgConfigHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");

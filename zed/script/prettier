@@ -10,14 +10,14 @@ else
 fi
 
 pnpm dlx "prettier@${PRETTIER_VERSION}" assets/settings/default.json --parser=jsonc $MODE || {
-    echo "To fix, run from the root of the Zed repo:"
+    echo "To fix, run from the root of the Backboard Studio repo:"
     echo "  pnpm dlx prettier@${PRETTIER_VERSION} assets/settings/default.json --parser=jsonc --write"
     false
 }
 
 cd docs
 pnpm dlx "prettier@${PRETTIER_VERSION}" . $MODE || {
-    echo "To fix, run from the root of the Zed repo:"
+    echo "To fix, run from the root of the Backboard Studio repo:"
     echo "  cd docs && pnpm dlx prettier@${PRETTIER_VERSION} . --write && cd .."
     false
 }

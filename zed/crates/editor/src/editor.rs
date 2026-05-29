@@ -14027,7 +14027,7 @@ impl Editor {
             if let Some(url) = url {
                 cx.update(|window, cx| {
                     if parse_zed_link(&url, cx).is_some() {
-                        window.dispatch_action(Box::new(zed_actions::OpenZedUrl { url }), cx);
+                        window.dispatch_action(Box::new(zed_actions::OpenBackboardUrl { url }), cx);
                     } else {
                         cx.open_url(&url);
                     }
@@ -14228,8 +14228,10 @@ impl Editor {
                     Some(Either::Left(url)) => {
                         cx.update(|window, cx| {
                             if parse_zed_link(&url, cx).is_some() {
-                                window
-                                    .dispatch_action(Box::new(zed_actions::OpenZedUrl { url }), cx);
+                                window.dispatch_action(
+                                    Box::new(zed_actions::OpenBackboardUrl { url }),
+                                    cx,
+                                );
                             } else {
                                 cx.open_url(&url);
                             }
@@ -19772,7 +19774,7 @@ impl Render for MissingEditPredictionKeybindingTooltip {
                             window.dispatch_action(zed_actions::OpenKeymapFile.boxed_clone(), cx)
                         }))
                         .child(Button::new("see-docs", "See Docs").size(ButtonSize::Compact).on_click(|_ev, _window, cx| {
-                            cx.open_url("https://zed.dev/docs/completions#edit-predictions-missing-keybinding");
+                            cx.open_url("https://app.backboard.io/docs/completions#edit-predictions-missing-keybinding");
                         })),
                 )
         })

@@ -1,24 +1,24 @@
 ---
-title: Privacy for Business - Zed Business
-description: How Zed Business handles data privacy across your organization, including enforced protections for prompts and training data.
+title: Privacy for Business - Backboard Business
+description: How Backboard Business handles data privacy across your organization, including enforced protections for prompts and training data.
 ---
 
 # Privacy for Business
 
-Zed Business removes the per-member data-sharing options that Free and Pro
+Backboard Business removes the per-member data-sharing options that Free and Pro
 expose. These protections are on by default for every Business organization.
 Administrators can adjust them from
 [Admin Controls](./admin-controls.md); individual members can't opt in or out.
 
 ## What's enforced by default
 
-For all members of a Zed Business organization:
+For all members of a Backboard Business organization:
 
-- **No prompt sharing:** Conversations and prompts are never shared with Zed.
+- **No prompt sharing:** Conversations and prompts are never shared with Backboard Studio.
   Members can't opt into
   [AI feedback via ratings](../ai/ai-improvement.md#ai-feedback-with-ratings).
   Administrators can enable Agent Thread Feedback to allow this.
-- **No training data sharing:** Code context is never shared with Zed for
+- **No training data sharing:** Code context is never shared with Backboard Studio for
   [Edit Prediction model training](../ai/ai-improvement.md#edit-predictions).
   Members can't opt in individually. Administrators can enable Edit Prediction
   Feedback to allow this.
@@ -29,23 +29,23 @@ These protections are enforced server-side and apply to all org members.
 
 On Free and Pro, data sharing is opt-in:
 
-- Members can rate AI responses, which shares that conversation with Zed.
+- Members can rate AI responses, which shares that conversation with Backboard Studio.
 - Members can opt into Edit Prediction training data collection for open source projects.
 
-Neither option is available to Zed Business members.
+Neither option is available to Backboard Business members.
 
 ## What data still leaves the organization
 
-These controls cover what Zed stores and trains on. They don't change how AI inference works: when members use Zed's hosted models, prompts and code context are still sent to the relevant provider (Anthropic, OpenAI, Google, etc.) to generate responses. Zed maintains zero-data retention agreements with these providers. See [AI Improvement](../ai/ai-improvement.md#data-retention-and-training) for details.
+These controls cover what Backboard Studio stores and trains on. They don't change how AI inference works: when members use Backboard Studio's hosted models, prompts and code context are still sent to the relevant provider (Anthropic, OpenAI, Google, etc.) to generate responses. Backboard Studio maintains zero-data retention agreements with these providers. See [AI Improvement](../ai/ai-improvement.md#data-retention-and-training) for details.
 
-[Bring-your-own-key](../ai/llm-providers.md) and [external agents](../ai/external-agents.md) are subject to each provider's own terms; Zed has no visibility into how they handle data.
+[Bring-your-own-key](../ai/llm-providers.md) and [external agents](../ai/external-agents.md) are subject to each provider's own terms; Backboard Studio has no visibility into how they handle data.
 
 ## Additional admin controls
 
 Administrators have additional options in [Admin Controls](./admin-controls.md):
 
-- Disable Zed-hosted models entirely via the Zed Model Provider toggle, so no
-  prompts reach Zed's infrastructure
+- Disable Backboard Studio-hosted models entirely via the Backboard Studio Model Provider toggle, so no
+  prompts reach Backboard Studio's infrastructure
 - Disable Edit Predictions org-wide
 - Disable Edit Prediction Feedback
 - Disable Agent Thread Feedback

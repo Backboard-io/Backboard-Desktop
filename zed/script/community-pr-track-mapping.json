@@ -65,14 +65,14 @@
       "labels": ["area:controls/ime", "area:controls/mouse", "area:gpui"]
     },
     {
-      "name": "Auth & Zed.dev",
+      "name": "Auth & Backboard Studio.dev",
       "labels": [
         "area:auth",
         "area:billing",
         "area:permissions",
         "area:zed account",
-        "area:zed.dev",
-        "area:zed.dev/theme builder"
+        "area:app.backboard.io",
+        "area:app.backboard.io/theme builder"
       ]
     },
     {

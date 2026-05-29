@@ -4,8 +4,8 @@ use gpui::{AsyncApp, actions};
 actions!(
     cli,
     [
-        /// Registers the zed:// URL scheme handler.
-        RegisterZedScheme
+        /// Registers the Backboard Studio URL scheme handler.
+        RegisterBackboardScheme
     ]
 );
 

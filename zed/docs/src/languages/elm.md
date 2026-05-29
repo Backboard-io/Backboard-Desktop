@@ -1,6 +1,6 @@
 ---
 title: Elm
-description: "Configure Elm language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Elm language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Elm
@@ -12,7 +12,7 @@ Elm support is available through the [Elm extension](https://github.com/zed-exte
 
 ## Setup
 
-Zed support for Elm requires installation of `elm`, `elm-format`, and `elm-review`.
+Backboard Studio support for Elm requires installation of `elm`, `elm-format`, and `elm-review`.
 
 1. [Install Elm](https://guide.elm-lang.org/install/elm.html) (or run `brew install elm` on macOS).
 2. Install `elm-review` to support code linting:

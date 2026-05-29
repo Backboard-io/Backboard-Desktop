@@ -166,7 +166,7 @@ impl Render for MultibufferHint {
                                     .color(Color::Muted),
                             )
                             .on_click(move |_event, _, cx| {
-                                cx.open_url("https://zed.dev/docs/multibuffers")
+                                cx.open_url("https://app.backboard.io/docs/multibuffers")
                             }),
                     ),
             )

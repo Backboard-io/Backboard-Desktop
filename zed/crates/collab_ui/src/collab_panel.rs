@@ -1399,7 +1399,7 @@ impl CollabPanel {
                             })
                             .detach_and_prompt_err("Failed to grant write access", window, cx, |e, _, _| {
                                 match e.error_code() {
-                                    ErrorCode::NeedsCla => Some("This user has not yet signed the CLA at https://zed.dev/cla.".into()),
+                                    ErrorCode::NeedsCla => Some("This user has not yet signed the CLA at https://app.backboard.io/cla.".into()),
                                     _ => None,
                                 }
                             })

@@ -47,11 +47,11 @@
       "ctrl-r": "agent::NewThread",
       "ctrl-shift-v": "editor::Paste",
       // "escape": "agent::ToggleFocus"
-      ///// Enable when Zed supports multiple thread tabs
+      ///// Enable when Backboard Studio supports multiple thread tabs
       // "ctrl-t": // new thread tab
       // "ctrl-[": // next thread tab
       // "ctrl-]": // next thread tab
-      ///// Enable if Zed adds support for keyboard navigation of thread elements
+      ///// Enable if Backboard Studio adds support for keyboard navigation of thread elements
       // "tab": // cycle to next message
       // "shift-tab": // cycle to previous message
     },

@@ -3,8 +3,8 @@ name = "Proto"
 description = "Protocol Buffers support."
 version = "0.3.2"
 schema_version = 1
-authors = ["Zed Industries <support@zed.dev>"]
-repository = "https://github.com/zed-industries/zed"
+authors = ["Backboard <support@app.backboard.io>"]
+repository = "https://github.com/backboard/ide"
 
 [grammars.proto]
 repository = "https://github.com/coder3101/tree-sitter-proto"

@@ -1604,7 +1604,7 @@ impl BackboardAgentWorkspacePage {
                             .min_w_0()
                             .items_center()
                             .child(
-                                Vector::square(VectorName::ZedLogo, rems_from_px(14.))
+                                Vector::square(VectorName::BackboardLogo, rems_from_px(14.))
                                     .color(Self::status_label_color(summary.status)),
                             )
                             .child(self.render_status_dot(summary.status, cx))
@@ -2592,7 +2592,7 @@ impl BackboardAgentWorkspacePage {
                             .items_center()
                             .justify_center()
                             .child(
-                                Vector::square(VectorName::ZedLogo, rems_from_px(28.))
+                                Vector::square(VectorName::BackboardLogo, rems_from_px(28.))
                                     .color(Color::Muted),
                             ),
                     )

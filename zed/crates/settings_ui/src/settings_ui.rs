@@ -1416,7 +1416,7 @@ fn all_language_names(cx: &App) -> Vec<SharedString> {
         .languages
         .language_names()
         .into_iter()
-        .filter(|name| name.as_ref() != "Zed Keybind Context")
+        .filter(|name| name.as_ref() != "Backboard Studio Keybind Context")
         .map(Into::into)
         .collect()
 }

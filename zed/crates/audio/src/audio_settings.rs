@@ -13,7 +13,7 @@ pub struct AudioSettings {
     /// loud you sound to others.
     ///
     /// Recommended: off (default)
-    /// Microphones are too quite in zed, until everyone is on experimental
+    /// Microphones are too quiet in Backboard Studio, until everyone is on experimental
     /// audio and has auto speaker volume on this will make you very loud
     /// compared to other speakers.
     pub auto_microphone_volume: bool,
@@ -23,18 +23,20 @@ pub struct AudioSettings {
     pub input_audio_device: Option<DeviceId>,
 }
 
-/// Configuration of audio in Zed
+/// Configuration of audio in Backboard Studio.
 impl Settings for AudioSettings {
     fn from_settings(content: &settings::SettingsContent) -> Self {
-        let audio = &content.audio.as_ref().unwrap();
+        let audio = content.audio.as_ref();
         AudioSettings {
-            auto_microphone_volume: audio.auto_microphone_volume.unwrap(),
+            auto_microphone_volume: audio
+                .and_then(|settings| settings.auto_microphone_volume)
+                .unwrap_or(false),
             output_audio_device: audio
-                .output_audio_device
+                .and_then(|settings| settings.output_audio_device.as_ref())
                 .as_ref()
                 .and_then(|x| x.0.as_ref().and_then(|id| DeviceId::from_str(&id).ok())),
             input_audio_device: audio
-                .input_audio_device
+                .and_then(|settings| settings.input_audio_device.as_ref())
                 .as_ref()
                 .and_then(|x| x.0.as_ref().and_then(|id| DeviceId::from_str(&id).ok())),
         }

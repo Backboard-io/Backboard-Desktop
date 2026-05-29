@@ -1,9 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
-# Downloads a tarball from https://zed.dev/releases and unpacks it
+# Downloads a tarball from https://app.backboard.io/releases and unpacks it
 # into ~/.local/. If you'd prefer to do this manually, instructions are at
-# https://zed.dev/docs/linux.
+# https://app.backboard.io/docs/linux.
 
 main() {
     platform="$(uname -s)"
@@ -55,9 +55,9 @@ main() {
     "$platform" "$@"
 
     if [ "$(command -v zed)" = "$HOME/.local/bin/zed" ]; then
-        echo "Zed has been installed. Run with 'zed'"
+        echo "Backboard Studio has been installed. Run with 'zed'"
     else
-        echo "To run Zed from your terminal, you must add ~/.local/bin to your PATH"
+        echo "To run Backboard Studio from your terminal, you must add ~/.local/bin to your PATH"
         echo "Run:"
 
         case "$SHELL" in
@@ -74,7 +74,7 @@ main() {
                 ;;
         esac
 
-        echo "To run Zed now, '~/.local/bin/zed'"
+        echo "To run Backboard Studio now, '~/.local/bin/zed'"
     fi
 }
 
@@ -82,8 +82,8 @@ linux() {
     if [ -n "${ZED_BUNDLE_PATH:-}" ]; then
         cp "$ZED_BUNDLE_PATH" "$temp/zed-linux-$arch.tar.gz"
     else
-        echo "Downloading Zed version: $ZED_VERSION"
-        curl "https://cloud.zed.dev/releases/$channel/$ZED_VERSION/download?asset=zed&arch=$arch&os=linux&source=install.sh" > "$temp/zed-linux-$arch.tar.gz"
+        echo "Downloading Backboard Studio version: $ZED_VERSION"
+        curl "https://cloud.app.backboard.io/releases/$channel/$ZED_VERSION/download?asset=zed&arch=$arch&os=linux&source=install.sh" > "$temp/zed-linux-$arch.tar.gz"
     fi
 
     suffix=""
@@ -94,20 +94,20 @@ linux() {
     appid=""
     case "$channel" in
       stable)
-        appid="dev.zed.Zed"
+        appid="io.backboard.Studio"
         ;;
       nightly)
-        appid="dev.zed.Zed-Nightly"
+        appid="io.backboard.Studio.Nightly"
         ;;
       preview)
-        appid="dev.zed.Zed-Preview"
+        appid="io.backboard.Studio.Preview"
         ;;
       dev)
-        appid="dev.zed.Zed-Dev"
+        appid="io.backboard.Studio.Dev"
         ;;
       *)
         echo "Unknown release channel: ${channel}. Using stable app ID."
-        appid="dev.zed.Zed"
+        appid="io.backboard.Studio"
         ;;
     esac
 
@@ -141,9 +141,9 @@ linux() {
 }
 
 macos() {
-    echo "Downloading Zed version: $ZED_VERSION"
-    curl "https://cloud.zed.dev/releases/$channel/$ZED_VERSION/download?asset=zed&os=macos&arch=$arch&source=install.sh" > "$temp/Zed-$arch.dmg"
-    hdiutil attach -quiet "$temp/Zed-$arch.dmg" -mountpoint "$temp/mount"
+    echo "Downloading Backboard Studio version: $ZED_VERSION"
+    curl "https://cloud.app.backboard.io/releases/$channel/$ZED_VERSION/download?asset=zed&os=macos&arch=$arch&source=install.sh" > "$temp/Backboard Studio-$arch.dmg"
+    hdiutil attach -quiet "$temp/Backboard Studio-$arch.dmg" -mountpoint "$temp/mount"
     app="$(cd "$temp/mount/"; echo *.app)"
     echo "Installing $app"
     if [ -d "/Applications/$app" ]; then

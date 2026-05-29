@@ -1,25 +1,25 @@
 ---
-title: Update Zed
-description: "Zed is designed to keep itself up to date automatically. You can always update this behavior in your settings."
+title: Update Backboard Studio
+description: "Backboard Studio is designed to keep itself up to date automatically. You can always update this behavior in your settings."
 ---
 
-# Update Zed
+# Update Backboard Studio
 
-Zed is designed to keep itself up to date automatically. You can always update this behavior in your settings.
+Backboard Studio is designed to keep itself up to date automatically. You can always update this behavior in your settings.
 
 ## Auto-updates
 
-By default, Zed checks for updates and installs them automatically the next time you restart the app. You’ll always be running the latest version with no extra steps.
+By default, Backboard Studio checks for updates and installs them automatically the next time you restart the app. You’ll always be running the latest version with no extra steps.
 
-If an update is available, Zed will download it in the background and apply it on restart.
+If an update is available, Backboard Studio will download it in the background and apply it on restart.
 
 ## How to check your current version
 
-To check which version of Zed you're using:
+To check which version of Backboard Studio you're using:
 
 Open the Command Palette (Cmd+Shift+P on macOS, Ctrl+Shift+P on Linux/Windows).
 
-Type and select {#action zed::About}. A modal will appear with your version information.
+Type and select {#action backboard::About}. A modal will appear with your version information.
 
 ## How to control update behavior
 

@@ -23,7 +23,6 @@ use workspace::welcome::WelcomePage;
 use workspace::{
     AppState, InterfaceMode, MultiWorkspace, Workspace,
     item::{Item, ItemEvent},
-    notifications::NotifyResultExt as _,
     open_new, register_serializable_item, with_active_or_new_workspace,
 };
 use zed_actions::{OpenAccountSettings, OpenOnboarding, ResetOnboarding};
@@ -36,7 +35,7 @@ mod theme_preview;
 
 /// Imports settings from Visual Studio Code.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::ImportVsCodeSettings"])]
 #[serde(deny_unknown_fields)]
 pub struct ImportVsCodeSettings {
     #[serde(default)]
@@ -45,7 +44,7 @@ pub struct ImportVsCodeSettings {
 
 /// Imports settings from Cursor editor.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Deserialize, JsonSchema, Action)]
-#[action(namespace = zed)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::ImportCursorSettings"])]
 #[serde(deny_unknown_fields)]
 pub struct ImportCursorSettings {
     #[serde(default)]
@@ -53,7 +52,7 @@ pub struct ImportCursorSettings {
 }
 
 pub const FIRST_OPEN: &str = "first_open";
-pub const DOCS_URL: &str = "https://zed.dev/docs/";
+pub const DOCS_URL: &str = "https://app.backboard.io/docs/";
 pub const EXPERIENCE_LEVEL_KVP_KEY: &str = "backboard_experience_level";
 const BACKBOARD_DASHBOARD_URL: &str = "https://app.backboard.io/dashboard";
 const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
@@ -527,8 +526,12 @@ impl Onboarding {
     }
 
     fn render_startup_logo(&self) -> impl IntoElement {
-        Vector::new(VectorName::ZedLogo, rems_from_px(132.), rems_from_px(210.))
-            .color(Color::Accent)
+        Vector::new(
+            VectorName::BackboardLogo,
+            rems_from_px(132.),
+            rems_from_px(210.),
+        )
+        .color(Color::Accent)
     }
 
     fn render_splash(&mut self, _cx: &mut Context<Self>) -> AnyElement {
@@ -550,8 +553,12 @@ impl Onboarding {
             .gap_7()
             .child(
                 div().w_full().flex().justify_center().child(
-                    Vector::new(VectorName::ZedLogo, rems_from_px(124.), rems_from_px(198.))
-                        .color(Color::Accent),
+                    Vector::new(
+                        VectorName::BackboardLogo,
+                        rems_from_px(124.),
+                        rems_from_px(198.),
+                    )
+                    .color(Color::Accent),
                 ),
             )
             .child(
@@ -894,7 +901,7 @@ impl Render for Onboarding {
                                             h_flex()
                                                 .gap_4()
                                                 .child(Vector::square(
-                                                    VectorName::ZedLogo,
+                                                    VectorName::BackboardLogo,
                                                     rems(2.5),
                                                 ))
                                                 .child(

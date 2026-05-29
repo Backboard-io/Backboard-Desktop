@@ -1,12 +1,12 @@
 ---
-title: AI Coding Agent - Zed Agent Panel
-description: Use Zed's AI coding agent to generate, refactor, and debug code with tool calling, checkpoints, and multi-model support.
+title: AI Coding Agent - Backboard Studio Agent Panel
+description: Use Backboard Studio's AI coding agent to generate, refactor, and debug code with tool calling, checkpoints, and multi-model support.
 ---
 
 # Agent Panel
 
 The Agent Panel is where you interact with AI agents that can read, write, and run code in your project.
-It's the core of Zed's AI code editing experience — use it for code generation, refactoring, debugging, documentation, and general questions.
+It's the core of Backboard Studio's AI code editing experience — use it for code generation, refactoring, debugging, documentation, and general questions.
 
 Open it with {#action agent::NewThread} from [the Command Palette](../getting-started.md#command-palette) or click the ✨ icon in the status bar.
 
@@ -15,7 +15,7 @@ Open it with {#action agent::NewThread} from [the Command Palette](../getting-st
 If you're using the Agent Panel for the first time, you need to have at least one LLM provider or external agent configured.
 You can do that by:
 
-1. [subscribing to our Pro plan](https://zed.dev/pricing), so you have access to our hosted models
+1. [subscribing to our Pro plan](https://app.backboard.io/pricing), so you have access to our hosted models
 2. [using your own API keys](./llm-providers.md#use-your-own-keys), either from model providers like Anthropic or model gateways like OpenRouter.
 3. using an [external agent](./external-agents.md) like [Gemini CLI](./external-agents.md#gemini-cli) or [Claude Agent](./external-agents.md#claude-agent)
 
@@ -32,14 +32,14 @@ The sections below cover what you can do from here.
 
 ### Creating New Threads {#new-thread}
 
-By default, the Agent Panel uses Zed's first-party agent.
+By default, the Agent Panel uses Backboard Studio's first-party agent.
 
 Start a new thread with {#kb agent::NewThread}, or open the "New Thread…" menu via the `+` icon in the top-right of the panel toolbar (in the empty state, this menu is exposed as the agent selector button on the left). You can also open that menu with {#kb agent::ToggleNewThreadMenu}.
 
 From the "New Thread…" menu you can:
 
-- Pick **Zed Agent** or any installed [external agent](./external-agents.md) to start a new thread with that agent.
-- Choose **New From Summary** to start a fresh Zed Agent thread seeded with a summary of the current conversation — useful for compacting long threads as you approach the context window limit.
+- Pick **Backboard Studio Agent** or any installed [external agent](./external-agents.md) to start a new thread with that agent.
+- Choose **New From Summary** to start a fresh Backboard Studio Agent thread seeded with a summary of the current conversation — useful for compacting long threads as you approach the context window limit.
 
 {#action agent::NewExternalAgentThread} creates a new thread with the specified external agent id.
 
@@ -64,7 +64,7 @@ You can click on the card that contains your message and re-submit it with an ad
 
 Messages sent while the agent is in the generating state get, by default, queued.
 
-For the Zed agent, queued messages get sent at the next turn boundary, which is usually between a tool call and a response, whereas for external agents, the message gets sent at the end of the generation.
+For the Backboard Studio agent, queued messages get sent at the next turn boundary, which is usually between a tool call and a response, whereas for external agents, the message gets sent at the end of the generation.
 
 You can edit or remove (an individual or all) queued messages.
 You can also still interrupt the agent immediately if you want by either clicking on the stop button or by clicking the "Send Now" (double-enter) on a queued message.
@@ -104,7 +104,7 @@ You can also hold `cmd`/`ctrl` when submitting a message to automatically follow
 
 ### Get Notified {#get-notified}
 
-If you send a prompt to the Agent and then put Zed in the background, you can choose to be notified when its generation wraps up via:
+If you send a prompt to the Agent and then put Backboard Studio in the background, you can choose to be notified when its generation wraps up via:
 
 - a visual notification that appears in the top right of your screen
 - a sound notification
@@ -130,7 +130,7 @@ The agent can search your codebase to find relevant context, but providing it ex
 Add context by typing `@` in the message editor.
 You can mention files, directories, symbols, previous threads, rules files, and diagnostics.
 
-When you paste multi-line code selections copied from a buffer, Zed automatically formats them as @-mentions with the file context.
+When you paste multi-line code selections copied from a buffer, Backboard Studio automatically formats them as @-mentions with the file context.
 To paste content without this automatic formatting, use {#kb agent::PasteRaw} to paste raw text directly.
 
 ### Selection as Context
@@ -147,16 +147,16 @@ Copying an image and pasting it is also supported.
 
 ## Token Usage {#token-usage}
 
-Zed surfaces how many tokens you are consuming for your currently active thread near the profile selector in the panel's message editor.
+Backboard Studio surfaces how many tokens you are consuming for your currently active thread near the profile selector in the panel's message editor.
 
 Once you approach the model's context window, a banner appears above the message editor suggesting to start a new thread with the current one summarized and added as context.
 You can also do this at any time with an ongoing thread via the "Agent Options" menu on the top right, where you'll see a "New from Summary" button, as well as simply @-mentioning a past thread in a new one..
 
 ## Changing Models {#changing-models}
 
-After you've configured your LLM providers—either via [a custom API key](./llm-providers.md) or through [Zed's hosted models](./models.md)—you can switch between their models by clicking on the model selector on the message editor or by using the {#kb agent::ToggleModelSelector} keybinding.
+After you've configured your LLM providers—either via [a custom API key](./llm-providers.md) or through [Backboard Studio's hosted models](./models.md)—you can switch between their models by clicking on the model selector on the message editor or by using the {#kb agent::ToggleModelSelector} keybinding.
 
-> The same model can be offered via multiple providers - for example, Claude Sonnet 4.5 is available via Zed Pro, OpenRouter, Anthropic directly, and more.
+> The same model can be offered via multiple providers - for example, Claude Sonnet 4.5 is available via Backboard Pro, OpenRouter, Anthropic directly, and more.
 > Make sure you've selected the correct model **_provider_** for the model you'd like to use, delineated by the logo to the left of the model in the model selector.
 
 ### Favoriting Models
@@ -168,14 +168,14 @@ Cycle through your favorites with {#kb agent::CycleFavoriteModels} without openi
 ## Using Tools {#using-tools}
 
 The Agent Panel supports tool calling, which enables agentic editing.
-Zed includes several [built-in tools](./tools.md) for searching your codebase, editing files, running terminal commands, and more.
+Backboard Studio includes several [built-in tools](./tools.md) for searching your codebase, editing files, running terminal commands, and more.
 
 You can also extend the set of available tools via [MCP Servers](./mcp.md).
 
 ### Profiles {#profiles}
 
 Profiles act as a way to group tools.
-Zed offers three built-in profiles and you can create as many custom ones as you want.
+Backboard Studio offers three built-in profiles and you can create as many custom ones as you want.
 
 #### Built-in Profiles {#built-in-profiles}
 
@@ -200,7 +200,7 @@ From there, you can choose to `Add New Profile` or fork an existing one with a c
 It's also possible to override built-in profiles.
 In the Agent Profile modal, select a built-in profile, navigate to `Configure Tools`, and rearrange the tools you'd like to keep or remove.
 
-Zed will store this profile in your settings using the same profile name as the default you overrode.
+Backboard Studio will store this profile in your settings using the same profile name as the default you overrode.
 
 All custom profiles can be edited via the UI or by hand under the `agent.profiles` key in your settings file.
 
@@ -208,17 +208,17 @@ To delete a custom profile, open the Agent Profile modal, select the profile you
 
 ### Tool Permissions
 
-> **Note:** In Zed v0.224.0 and above, tool approval is controlled by `agent.tool_permissions.default`.
+> **Note:** In Backboard Studio v0.224.0 and above, tool approval is controlled by `agent.tool_permissions.default`.
 > In earlier versions, it was controlled by the `agent.always_allow_tool_actions` boolean (default `false`).
 
-Zed's Agent Panel provides the `agent.tool_permissions.default` setting to control tool approval behavior:
+Backboard Studio's Agent Panel provides the `agent.tool_permissions.default` setting to control tool approval behavior:
 
 - `"confirm"` (default) — Prompts for approval before running any tool action
 - `"allow"` — Auto-approves tool actions without prompting
 - `"deny"` — Blocks all tool actions
 
 When the agent requests permission for an action, the confirmation menu includes options to allow or deny once, plus "Always for <tool>" choices that set a tool-level default.
-When Zed can extract a safe pattern from the input, it also offers pattern-based "Always for ..." choices that add `always_allow`/`always_deny` rules.
+When Backboard Studio can extract a safe pattern from the input, it also offers pattern-based "Always for ..." choices that add `always_allow`/`always_deny` rules.
 MCP tools only support tool-level defaults.
 
 Even with `"default": "allow"`, per-tool `always_deny` and `always_confirm` patterns are still respected — so you can auto-approve most actions while blocking or gating specific ones.
@@ -231,12 +231,12 @@ Tool calling needs to be individually supported by each model and model provider
 Therefore, despite the presence of built-in tools, some models may not have the ability to pick them up.
 You should see a "No tools" label if you select a model that falls into this case.
 
-All [Zed's hosted models](./models.md) support tool calling out-of-the-box.
+All [Backboard Studio's hosted models](./models.md) support tool calling out-of-the-box.
 
 ### MCP Servers {#mcp-servers}
 
 Similarly to the built-in tools, some models may not support all tools included in a given MCP Server.
-Zed's UI will inform you about this via a warning icon that appears close to the model selector.
+Backboard Studio's UI will inform you about this via a warning icon that appears close to the model selector.
 
 ## Errors and Debugging {#errors-and-debugging}
 
@@ -246,14 +246,14 @@ You can also open threads as Markdown by clicking on the file icon button, to th
 
 ## Feedback {#feedback}
 
-You can rate agent responses to help improve Zed's system prompt and tools.
+You can rate agent responses to help improve Backboard Studio's system prompt and tools.
 
-> Note that rating responses will send your data related to that response to Zed's servers.
-> See [AI Improvement](./ai-improvement.md) and [Privacy and Security](./privacy-and-security.md) for more information about Zed's approach to AI improvement, privacy, and security.
-> **_If you don't want data persisted on Zed's servers, don't rate_**.
+> Note that rating responses will send your data related to that response to Backboard Studio's servers.
+> See [AI Improvement](./ai-improvement.md) and [Privacy and Security](./privacy-and-security.md) for more information about Backboard Studio's approach to AI improvement, privacy, and security.
+> **_If you don't want data persisted on Backboard Studio's servers, don't rate_**.
 > We will not collect data for improving our Agentic offering without you explicitly rating responses.
 
-To help improve Zed's system prompt and tools, rate responses with the thumbs up/down controls at the end of each response.
+To help improve Backboard Studio's system prompt and tools, rate responses with the thumbs up/down controls at the end of each response.
 In case of a thumbs down, a new text area will show up where you can add more specifics about what happened.
 
 You can provide feedback on the thread at any point after the agent responds, and multiple times within the same thread.

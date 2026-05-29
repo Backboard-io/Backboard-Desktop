@@ -248,7 +248,9 @@ impl CopilotCodeVerification {
             .gap_2p5()
             .items_center()
             .text_center()
-            .child(Headline::new("Use GitHub Copilot in Zed").size(HeadlineSize::Large))
+            .child(
+                Headline::new("Use GitHub Copilot in Backboard Studio").size(HeadlineSize::Large),
+            )
             .child(
                 Label::new("Using Copilot requires an active subscription on GitHub.")
                     .color(Color::Muted),
@@ -455,7 +457,7 @@ impl Render for CopilotCodeVerification {
                 window.focus(&this.focus_handle, cx);
             }))
             .child(
-                Vector::new(VectorName::ZedXCopilot, rems(8.), rems(4.))
+                Vector::new(VectorName::BackboardLogo, rems(4.), rems(4.))
                     .color(Color::Custom(cx.theme().colors().icon)),
             )
             .child(prompt)
@@ -664,7 +666,7 @@ impl ConfigurationView {
     }
 
     fn render_for_chat(&self) -> impl IntoElement {
-        let start_label = "To use Zed's agent with GitHub Copilot, you need to be logged in to GitHub. Note that your GitHub account must have an active Copilot Chat subscription.";
+        let start_label = "To use Backboard Studio's agent with GitHub Copilot, you need to be logged in to GitHub. Note that your GitHub account must have an active Copilot Chat subscription.";
         let no_status_label = "Copilot Chat requires an active GitHub Copilot subscription. Please ensure Copilot is configured and try again, or use a different LLM provider.";
 
         if let Some(msg) = self.loading_message() {

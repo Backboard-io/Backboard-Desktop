@@ -23,6 +23,9 @@ pub fn init(cx: &mut App) {
     filter.hide_namespace("remote_debug");
     filter.hide_namespace("repl");
     filter.hide_namespace("settings_profile_selector");
+    filter.hide_namespace("zed");
+    filter.hide_namespace("zed_actions");
+    filter.hide_namespace("zed_predict_onboarding");
     cx.set_global(GlobalCommandPaletteFilter(filter));
 }
 

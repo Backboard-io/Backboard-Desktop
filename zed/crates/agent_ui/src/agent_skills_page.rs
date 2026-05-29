@@ -777,7 +777,7 @@ impl BackboardSkillsPage {
                             .gap_2()
                             .items_center()
                             .child(
-                                Vector::square(VectorName::ZedLogo, rems_from_px(16.))
+                                Vector::square(VectorName::BackboardLogo, rems_from_px(16.))
                                     .color(Color::Accent),
                             )
                             .child(

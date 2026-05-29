@@ -1,6 +1,6 @@
 ---
 title: C#
-description: "Configure C# language support in Zed, including language servers, formatting, and debugging."
+description: "Configure C# language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # C#
@@ -12,7 +12,7 @@ C# support is available through the [C# extension](https://github.com/zed-extens
   - [roslyn-language-server](https://www.nuget.org/packages/roslyn-language-server#readme)
   - [OmniSharp/omnisharp-roslyn](https://github.com/OmniSharp/omnisharp-roslyn)
 
-Roslyn is enabled by default. To switch back to OmniSharp, add the following to your Zed settings file:
+Roslyn is enabled by default. To switch back to OmniSharp, add the following to your Backboard Studio settings file:
 
 ```json [settings]
 {
@@ -114,7 +114,7 @@ Roslyn can be configured with the following language server settings:
 }
 ```
 
-OmniSharp can be configured in a Zed settings file with:
+OmniSharp can be configured in a Backboard Studio settings file with:
 
 ```json [settings]
 {

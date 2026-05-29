@@ -1,6 +1,6 @@
 ---
-title: Snippets - Zed
-description: Create and use code snippets in Zed with tab stops, placeholders, variables, and language-scoped triggers.
+title: Snippets - Backboard Studio
+description: Create and use code snippets in Backboard Studio with tab stops, placeholders, variables, and language-scoped triggers.
 ---
 
 # Snippets

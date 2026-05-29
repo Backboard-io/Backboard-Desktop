@@ -1,6 +1,6 @@
 ---
 title: Zig
-description: "Configure Zig language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Zig language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Zig

@@ -1,6 +1,6 @@
 ---
 title: Scheme
-description: "Configure Scheme language support in Zed, including language servers, formatting, and debugging."
+description: "Configure Scheme language support in Backboard Studio, including language servers, formatting, and debugging."
 ---
 
 # Scheme
