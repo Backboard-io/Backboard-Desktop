@@ -115,11 +115,11 @@ impl Render for BeginnerChatFeed {
 
         v_flex()
             .id("beginner-feed")
+            .h_full()
             .flex_1()
             .min_h_0()
             .w_full()
             .overflow_y_scroll()
-            .font_family(ds::FONT_FAMILY)
             .px_4()
             .pt_4()
             .pb(px(220.))
@@ -306,8 +306,8 @@ fn translate_tool_label(kind: &acp::ToolKind, raw: &str) -> String {
         acp::ToolKind::Think => "Planned next step".to_string(),
         _ => {
             let first_line = raw.lines().next().unwrap_or(raw).trim();
-            if is_agent_progress_line(first_line) {
-                "Worked on your request".to_string()
+            if let Some(progress) = simplified_progress_line(first_line) {
+                progress
             } else {
                 first_line.replace('`', "").to_string()
             }
@@ -365,19 +365,12 @@ fn render_item(
     preview_state: PreviewCardState,
     cx: &mut Context<BeginnerChatFeed>,
 ) -> AnyElement {
-    let colors = cx.theme().colors().clone();
     match item {
         FriendlyItem::UserBubble { index, text } => v_flex()
             .id(index)
             .w_full()
             .items_start()
-            .gap_0p5()
             .py_1()
-            .child(
-                Label::new("You")
-                    .size(LabelSize::XSmall)
-                    .color(Color::Custom(colors.text_muted)),
-            )
             .child(render_message_bubble(text, MessageTone::User, cx))
             .into_any_element(),
 
@@ -387,33 +380,22 @@ fn render_item(
                 .id(index + 10_000)
                 .w_full()
                 .items_start()
-                .gap_1p5()
+                .gap_4()
                 .py_1()
-                .child(
-                    h_flex()
-                        .gap_1()
-                        .items_center()
-                        .child(ds::render_project_mark(14., cx))
-                        .child(
-                            Label::new("Backboard")
-                                .size(LabelSize::XSmall)
-                                .color(Color::Custom(colors.text_muted)),
-                        ),
-                )
                 .when(!tasks.is_empty(), |el| {
                     el.child(
                         v_flex()
                             .w_full()
                             .max_w(px(ds::CHAT_MAX_WIDTH))
                             .min_h(px(96.))
-                            .rounded_lg()
+                            .rounded(px(14.))
                             .bg(ds::card_background(cx))
+                            .border_1()
+                            .border_color(ds::soft_border(cx))
                             .when(tasks.iter().any(|task| task.failed), |el| {
-                                el.border_1().border_color(cx.theme().status().error_border)
+                                el.border_color(cx.theme().status().error_border)
                             })
-                            .shadow(ds::card_shadow(cx))
                             .p_4()
-                            .gap_1p5()
                             .child(
                                 h_flex()
                                     .gap_4()
@@ -425,36 +407,7 @@ fn render_item(
                                         preview_state,
                                         cx,
                                     )),
-                            )
-                            .children(tasks.clone().into_iter().map(|task| {
-                                h_flex()
-                                    .gap_1p5()
-                                    .items_center()
-                                    .child(
-                                        Icon::new(if task.failed {
-                                            IconName::XCircle
-                                        } else if task.done {
-                                            IconName::Check
-                                        } else {
-                                            IconName::Circle
-                                        })
-                                        .size(IconSize::XSmall)
-                                        .color(
-                                            if task.failed {
-                                                Color::Error
-                                            } else if task.done {
-                                                Color::Accent
-                                            } else {
-                                                Color::Muted
-                                            },
-                                        ),
-                                    )
-                                    .child(
-                                        Label::new(SharedString::from(task_row_label(&task)))
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Custom(colors.text_muted)),
-                                    )
-                            })),
+                            ),
                     )
                 })
                 .when_some(cleaned_text, |el, text| {
@@ -477,6 +430,10 @@ fn render_message_bubble(
     cx: &mut Context<BeginnerChatFeed>,
 ) -> impl IntoElement {
     let colors = cx.theme().colors().clone();
+    let speaker = match tone {
+        MessageTone::User => "You",
+        MessageTone::Assistant => "Assistant",
+    };
     let lines = chat_lines(&text)
         .into_iter()
         .map(|line| {
@@ -495,22 +452,27 @@ fn render_message_bubble(
     div()
         .w_full()
         .max_w(px(ds::CHAT_MAX_WIDTH))
-        .rounded_lg()
-        .bg(match tone {
-            MessageTone::User => ds::card_background(cx),
-            MessageTone::Assistant => ds::subtle_card_background(cx),
+        .rounded(px(10.))
+        .when(matches!(tone, MessageTone::User), |el| {
+            el.bg(ds::field_background(cx))
+                .border_1()
+                .border_color(ds::soft_border(cx))
         })
         .px_3()
         .py_2()
-        .child(v_flex().gap_1().children(lines))
+        .child(
+            v_flex()
+                .gap_1p5()
+                .child(
+                    Label::new(speaker)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Custom(colors.text_muted)),
+                )
+                .children(lines),
+        )
 }
 
 fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
-    if looks_like_technical_progress(text) || (!tasks.is_empty() && looks_like_work_narration(text))
-    {
-        return None;
-    }
-
     let mut cleaned = Vec::new();
     let mut in_code_block = false;
     for raw_line in readable_paragraphs(text) {
@@ -519,12 +481,7 @@ fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
             in_code_block = !in_code_block;
             continue;
         }
-        if in_code_block
-            || line.is_empty()
-            || is_shell_noise(line)
-            || is_agent_progress_line(line)
-            || is_work_narration_line(line)
-        {
+        if in_code_block || line.is_empty() || is_shell_noise(line) {
             continue;
         }
 
@@ -539,21 +496,37 @@ fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
             line = rest.trim();
         }
 
+        if let Some(progress) = simplified_progress_line(line) {
+            push_unique_line(&mut cleaned, progress);
+            continue;
+        }
+
         let line = line
             .replace("**", "")
             .replace('`', "")
             .replace("AI", "Backboard");
         let line = line.trim();
         if !line.is_empty() && !is_overly_technical(line) {
-            cleaned.push(line.to_string());
+            push_unique_line(&mut cleaned, line.to_string());
         }
     }
 
     if cleaned.is_empty() {
-        None
+        if tasks.is_empty() {
+            None
+        } else {
+            Some("I'm working through the changes and will keep the preview updated.".to_string())
+        }
     } else {
         Some(cleaned.join("\n"))
     }
+}
+
+fn push_unique_line(lines: &mut Vec<String>, line: String) {
+    if lines.last().is_some_and(|last| last == &line) {
+        return;
+    }
+    lines.push(line);
 }
 
 fn chat_lines(text: &str) -> Vec<String> {
@@ -610,55 +583,56 @@ fn wrap_chat_paragraph(paragraph: &str, max_chars: usize) -> Vec<String> {
     lines
 }
 
-fn looks_like_technical_progress(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("npm ")
-        || lower.contains("pnpm ")
-        || lower.contains("yarn ")
-        || lower.contains("```")
-        || lower.contains("lucide")
-        || lower.contains("responsive:")
-        || lower.contains("inter font")
-        || lower.contains("run dev")
-}
-
-fn is_agent_progress_line(line: &str) -> bool {
+fn simplified_progress_line(line: &str) -> Option<String> {
     let lower = line.to_lowercase();
-    lower.starts_with("now let")
-        || lower.starts_with("let me ")
-        || lower.starts_with("i'll start")
-        || lower.starts_with("i'll create")
-        || lower.starts_with("i’ll start")
-        || lower.starts_with("i’ll create")
-        || lower.starts_with("good!")
-        || lower.starts_with("perfect!")
-        || lower.starts_with("excellent!")
-        || lower.starts_with("the workspace is empty")
-        || lower.starts_with("we need to install")
-        || lower.contains("tool call was not completed")
-}
-
-fn looks_like_work_narration(text: &str) -> bool {
-    readable_paragraphs(text)
-        .iter()
-        .filter(|line| is_work_narration_line(line))
-        .count()
-        >= 2
-}
-
-fn is_work_narration_line(line: &str) -> bool {
-    let lower = line.to_lowercase();
-    lower.contains("setting up the project")
-        || lower.contains("project structure")
+    if lower.contains("tool call was not completed") {
+        return Some("I need to retry one step.".to_string());
+    }
+    if lower.contains("start the dev server") || lower.contains("start the preview server") {
+        return Some("I'm starting the preview.".to_string());
+    }
+    if lower.contains("test the build")
         || lower.contains("checking the project")
-        || lower.contains("check if there's an existing project")
+        || lower.contains("npm run")
+        || lower.contains("run dev")
+    {
+        return Some("I'm checking the result.".to_string());
+    }
+    if lower.contains("update the files")
+        || lower.starts_with("i'll create")
+        || lower.starts_with("i'll update")
+        || lower.starts_with("i’ll create")
+        || lower.starts_with("i’ll update")
+    {
+        return Some("I'm updating the files.".to_string());
+    }
+    if lower.contains("setting up the project")
         || lower.contains("create a new vite")
         || lower.contains("add tailwind")
         || lower.contains("create the config")
-        || lower.contains("update the files")
-        || lower.contains("test the build")
-        || lower.contains("start the dev server")
-        || lower.contains("start the preview server")
+        || lower.contains("we need to install")
+    {
+        return Some("I'm setting up the app.".to_string());
+    }
+    if lower.contains("project structure")
+        || lower.contains("check if there's an existing project")
+        || lower.starts_with("i'll start")
+        || lower.starts_with("i’ll start")
+        || lower.starts_with("let me ")
+        || lower.starts_with("now let")
+    {
+        return Some("I'm checking the project.".to_string());
+    }
+    if lower.starts_with("good!")
+        || lower.starts_with("perfect!")
+        || lower.starts_with("excellent!")
+    {
+        return Some("That step worked.".to_string());
+    }
+    if lower.starts_with("the workspace is empty") {
+        return Some("I'm starting from an empty project.".to_string());
+    }
+    None
 }
 
 fn is_shell_noise(line: &str) -> bool {
@@ -682,18 +656,6 @@ fn is_overly_technical(line: &str) -> bool {
         || lower.contains("brand-")
         || lower.contains("npm run")
         || lower.contains("package.json")
-}
-
-fn task_row_label(task: &TaskItem) -> String {
-    match task.kind {
-        TaskKind::Edit => task.label.clone(),
-        TaskKind::Delete => task.label.clone(),
-        TaskKind::Move => task.label.clone(),
-        TaskKind::Execute => task.label.clone(),
-        TaskKind::Fetch | TaskKind::Read | TaskKind::Search => "Read project context".to_string(),
-        TaskKind::Think => "Planned next step".to_string(),
-        TaskKind::Other => task.label.clone(),
-    }
 }
 
 fn render_artifact_summary(

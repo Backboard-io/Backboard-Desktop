@@ -22,7 +22,7 @@ use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
 use project::Project;
 use ui::{
     Button, ButtonSize, ButtonStyle, Color, Icon, IconButton, IconName, IconSize, Label, LabelSize,
-    Tooltip, prelude::*, utils::ensure_minimum_contrast,
+    Tooltip, prelude::*,
 };
 use util::ResultExt;
 use workspace::{MultiWorkspace, PathList, Workspace};
@@ -1236,6 +1236,39 @@ impl BeginnerWorkspace {
         format!("'{}'", path.replace('\'', "'\\''"))
     }
 
+    fn is_http_preview_ready(port: u16) -> bool {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        let Ok(mut stream) =
+            std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(350))
+        else {
+            return false;
+        };
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(700)));
+        let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(350)));
+        let request =
+            format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+        if std::io::Write::write_all(&mut stream, request.as_bytes()).is_err() {
+            return false;
+        }
+        let mut response = [0u8; 512];
+        let Ok(bytes_read) = std::io::Read::read(&mut stream, &mut response) else {
+            return false;
+        };
+        if bytes_read == 0 {
+            return false;
+        }
+        let response = String::from_utf8_lossy(&response[..bytes_read]);
+        let Some(status) = response
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse::<u16>().ok())
+        else {
+            return false;
+        };
+        (200..400).contains(&status)
+    }
+
     fn start_dev_server(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
         // Reuse the already-claimed port for this session; claim a fresh one if first start.
         let port = self
@@ -1300,18 +1333,22 @@ impl BeginnerWorkspace {
             if !spawned {
                 this.update(cx, |this, cx| {
                     this.is_preview_generating = false;
+                    this.preview_visible = false;
+                    this.preview_url = None;
+                    this.dev_server_port = None;
                     cx.notify();
                 })
                 .ok();
                 return;
             }
 
-            // Poll until the port responds (up to 30 s).
-            for _ in 0..60 {
+            // Poll until the app serves an HTTP page. A bare TCP connection can
+            // open before the dev server is actually ready to render.
+            for _ in 0..180 {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(500))
                     .await;
-                if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                if Self::is_http_preview_ready(port) {
                     let url = format!("http://localhost:{port}");
                     this.update(cx, |this, cx| {
                         this.web_preview = None;
@@ -1326,6 +1363,9 @@ impl BeginnerWorkspace {
             }
             this.update(cx, |this, cx| {
                 this.is_preview_generating = false;
+                this.preview_visible = false;
+                this.preview_url = None;
+                this.dev_server_port = None;
                 cx.notify();
             })
             .ok();
@@ -1545,7 +1585,7 @@ impl BeginnerWorkspace {
         thread: &Entity<AcpThread>,
         cx: &mut Context<Self>,
     ) {
-        if self.preview_url.is_some() || self.is_preview_generating {
+        if self.is_agent_running || self.preview_url.is_some() || self.is_preview_generating {
             return;
         }
 
@@ -2024,19 +2064,21 @@ impl BeginnerWorkspace {
             .h_full()
             .flex_shrink_0()
             .bg(ds::panel_background(cx))
+            .border_r_1()
+            .border_color(ds::separator(cx))
             .child(
                 v_flex()
                     .id("chat-history-list")
                     .flex_1()
                     .overflow_y_scroll()
-                    .px_3()
-                    .pb_3()
-                    .gap_2()
+                    .px_2()
+                    .pb_2()
+                    .gap_0p5()
                     .child(
                         h_flex()
                             .h(px(ds::TOP_BAR_HEIGHT))
                             .items_center()
-                            .gap_1()
+                            .gap_2()
                             .when(traffic_lights, |el| {
                                 el.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
                             })
@@ -2044,7 +2086,14 @@ impl BeginnerWorkspace {
                                 div()
                                     .h_full()
                                     .flex_1()
-                                    .window_control_area(WindowControlArea::Drag),
+                                    .flex()
+                                    .items_center()
+                                    .window_control_area(WindowControlArea::Drag)
+                                    .child(
+                                        Label::new("Simple Chat")
+                                            .size(LabelSize::Small)
+                                            .color(Color::Custom(colors.text)),
+                                    ),
                             )
                             .child(
                                 IconButton::new(
@@ -2065,12 +2114,11 @@ impl BeginnerWorkspace {
                     .child(
                         h_flex()
                             .id("simple-sidebar-new-chat")
-                            .min_h(px(ds::PROJECT_ROW_HEIGHT))
-                            .px_2()
-                            .gap_2()
+                            .h(px(ds::CHAT_ROW_HEIGHT))
+                            .px_3()
+                            .gap_2p5()
                             .items_center()
                             .rounded_lg()
-                            .bg(ds::field_background(cx))
                             .when(can_start_new, |el| {
                                 el.cursor_pointer()
                                     .hover(move |el| el.bg(action_hover))
@@ -2105,12 +2153,12 @@ impl BeginnerWorkspace {
                     .child(
                         h_flex()
                             .id("simple-sidebar-chat-search")
-                            .min_h(px(ds::INPUT_HEIGHT))
-                            .px_2()
-                            .gap_2()
+                            .h(px(ds::CHAT_ROW_HEIGHT))
+                            .px_3()
+                            .gap_2p5()
                             .items_center()
                             .rounded_lg()
-                            .bg(ds::field_background(cx))
+                            .hover(move |el| el.bg(action_hover))
                             .child(
                                 Icon::new(IconName::MagnifyingGlass)
                                     .size(IconSize::XSmall)
@@ -2125,7 +2173,7 @@ impl BeginnerWorkspace {
                     )
                     .when(has_open_projects, |el| {
                         el.child(
-                            h_flex().px_1().pt_2().child(
+                            h_flex().h(px(28.)).px_1().items_center().child(
                                 Label::new("Open")
                                     .size(LabelSize::XSmall)
                                     .color(Color::Custom(colors.text_muted)),
@@ -2139,17 +2187,11 @@ impl BeginnerWorkspace {
                             h_flex()
                                 .id("chat-open-active")
                                 .group(row_group.clone())
-                                .min_h(px(ds::CHAT_ROW_HEIGHT))
-                                .px_2()
-                                .py_1()
+                                .h(px(ds::CHAT_ROW_HEIGHT))
+                                .px_3()
                                 .gap_2()
                                 .rounded_lg()
                                 .bg(ds::selected_background(cx))
-                                .child(
-                                    Icon::new(IconName::Chat)
-                                        .size(IconSize::XSmall)
-                                        .color(Color::Custom(colors.icon_muted)),
-                                )
                                 .child(
                                     v_flex().flex_1().min_w_0().child(
                                         Label::new(title)
@@ -2157,6 +2199,13 @@ impl BeginnerWorkspace {
                                             .color(Color::Custom(colors.text))
                                             .truncate(),
                                     ),
+                                )
+                                .child(
+                                    div()
+                                        .size(px(10.))
+                                        .rounded_full()
+                                        .bg(colors.icon_muted)
+                                        .flex_none(),
                                 )
                                 .child(
                                     div()
@@ -2191,9 +2240,8 @@ impl BeginnerWorkspace {
                                 h_flex()
                                     .id(SharedString::from(format!("chat-open-bg-{ix}")))
                                     .group(row_group.clone())
-                                    .min_h(px(ds::CHAT_ROW_HEIGHT))
-                                    .px_2()
-                                    .py_1()
+                                    .h(px(ds::CHAT_ROW_HEIGHT))
+                                    .px_3()
                                     .gap_2()
                                     .rounded_lg()
                                     .cursor_pointer()
@@ -2202,17 +2250,19 @@ impl BeginnerWorkspace {
                                         this.switch_to_session(ix, window, cx);
                                     }))
                                     .child(
-                                        Icon::new(IconName::Chat)
-                                            .size(IconSize::XSmall)
-                                            .color(Color::Custom(colors.icon_muted)),
-                                    )
-                                    .child(
                                         v_flex().flex_1().min_w_0().child(
                                             Label::new(title)
                                                 .size(LabelSize::Small)
                                                 .color(Color::Custom(colors.text))
                                                 .truncate(),
                                         ),
+                                    )
+                                    .child(
+                                        div()
+                                            .size(px(10.))
+                                            .rounded_full()
+                                            .bg(colors.icon_muted)
+                                            .flex_none(),
                                     )
                                     .child(
                                         div()
@@ -2241,7 +2291,7 @@ impl BeginnerWorkspace {
                             }),
                     )
                     .child(
-                        h_flex().px_1().pt_2().child(
+                        h_flex().h(px(28.)).px_1().items_center().child(
                             Label::new("Recents")
                                 .size(LabelSize::XSmall)
                                 .color(Color::Custom(colors.text_muted)),
@@ -2277,9 +2327,8 @@ impl BeginnerWorkspace {
                         h_flex()
                             .id(SharedString::from(format!("chat-{}", record.id)))
                             .group(row_group.clone())
-                            .min_h(px(ds::CHAT_ROW_HEIGHT))
-                            .px_2()
-                            .py_1()
+                            .h(px(ds::CHAT_ROW_HEIGHT))
+                            .px_3()
                             .gap_2()
                             .rounded_lg()
                             .cursor_pointer()
@@ -2295,6 +2344,13 @@ impl BeginnerWorkspace {
                                         .color(Color::Custom(colors.text))
                                         .truncate(),
                                 ),
+                            )
+                            .child(
+                                div()
+                                    .size(px(10.))
+                                    .rounded_full()
+                                    .bg(colors.icon_muted)
+                                    .flex_none(),
                             )
                             .child(
                                 div()
@@ -2334,10 +2390,12 @@ impl BeginnerWorkspace {
         let _ = window;
 
         v_flex()
-            .w(px(52.))
+            .w(px(48.))
             .h_full()
             .flex_shrink_0()
             .bg(ds::panel_background(cx))
+            .border_r_1()
+            .border_color(ds::separator(cx))
             .child(
                 v_flex()
                     .h(px(ds::TOP_BAR_HEIGHT))
@@ -2372,11 +2430,12 @@ impl BeginnerWorkspace {
             .h(px(ds::TOP_BAR_HEIGHT))
             .w_full()
             .flex_shrink_0()
-            .px_4()
+            .px_3()
             .gap_2()
             .items_center()
             .bg(ds::app_background(cx))
-            .child(ds::render_project_mark(ds::UTILITY_ICON_SIZE, cx))
+            .border_b_1()
+            .border_color(ds::separator(cx))
             .child(
                 Label::new(title)
                     .size(LabelSize::Small)
@@ -2390,74 +2449,95 @@ impl BeginnerWorkspace {
                         .color(Color::Custom(colors.icon_accent)),
                 )
             })
-            .child(
-                Icon::new(IconName::Ellipsis)
-                    .size(IconSize::Medium)
-                    .color(Color::Custom(colors.icon_muted)),
-            )
     }
 
     fn render_empty_conversation(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors().clone();
-        v_flex()
-            .items_center()
-            .gap_4()
-            .px_4()
-            .child(
-                v_flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Label::new("What do you want to build or ask?")
-                            .size(LabelSize::Large)
-                            .color(Color::Custom(colors.text)),
-                    )
-                    .child(
-                        v_flex()
-                            .items_center()
-                            .gap_0p5()
-                            .child(
-                                Label::new("Use Build for changes, or Ask for guidance.")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Custom(colors.text_muted)),
-                            )
-                            .child(
-                                Label::new(
-                                    "Attach a folder when you want Backboard to work in a project.",
-                                )
-                                .size(LabelSize::Small)
-                                .color(Color::Custom(colors.text_muted)),
-                            ),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .max_w(px(ds::CHAT_MAX_WIDTH))
-                    .justify_center()
-                    .gap_2()
-                    .flex_wrap()
-                    .child(self.render_suggestion_chip(
-                        "Make a simple landing page",
-                        "Make a simple landing page",
-                        ChatMode::Build,
-                        cx,
-                    ))
-                    .child(self.render_suggestion_chip(
+        let (headline, subtext, suggestions) = match self.chat_mode {
+            ChatMode::Ask => (
+                "What do you want to ask?",
+                "Ask about this project without changing files.",
+                [
+                    (
                         "Explain this codebase",
                         "Explain the structure of this codebase",
                         ChatMode::Ask,
-                        cx,
-                    ))
-                    .child(self.render_suggestion_chip(
+                    ),
+                    (
+                        "Find risky code",
+                        "Find the riskiest parts of this codebase",
+                        ChatMode::Ask,
+                    ),
+                    (
+                        "Suggest next steps",
+                        "Suggest the next improvements for this project",
+                        ChatMode::Ask,
+                    ),
+                ],
+            ),
+            ChatMode::Build => (
+                "What do you want to build?",
+                "Describe a page, feature, or change.",
+                [
+                    (
+                        "Make a landing page",
+                        "Make a landing page",
+                        ChatMode::Build,
+                    ),
+                    (
+                        "Create a pricing section",
+                        "Create a pricing section",
+                        ChatMode::Build,
+                    ),
+                    (
                         "Build a settings screen",
                         "Build a settings screen",
                         ChatMode::Build,
+                    ),
+                ],
+            ),
+        };
+        v_flex()
+            .items_center()
+            .gap_4()
+            .w_full()
+            .max_w(px(ds::HOME_CONTENT_WIDTH))
+            .child(
+                v_flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        Label::new(headline)
+                            .size(LabelSize::Custom(rems_from_px(18.)))
+                            .weight(FontWeight::BOLD)
+                            .color(Color::Custom(colors.text)),
+                    )
+                    .child(
+                        Label::new(subtext)
+                            .size(LabelSize::Small)
+                            .color(Color::Custom(colors.text_muted)),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .items_center()
+                    .gap_3()
+                    .child(self.render_suggestion_chip(
+                        suggestions[0].0,
+                        suggestions[0].1,
+                        suggestions[0].2,
                         cx,
                     ))
                     .child(self.render_suggestion_chip(
-                        "Generate a contact form",
-                        "Generate a contact form",
-                        ChatMode::Build,
+                        suggestions[1].0,
+                        suggestions[1].1,
+                        suggestions[1].2,
+                        cx,
+                    ))
+                    .child(self.render_suggestion_chip(
+                        suggestions[2].0,
+                        suggestions[2].1,
+                        suggestions[2].2,
                         cx,
                     )),
             )
@@ -2475,9 +2555,9 @@ impl BeginnerWorkspace {
         h_flex()
             .id(SharedString::from(format!("simple-chip-{label}")))
             .px_3()
-            .py_1p5()
-            .rounded_full()
-            .bg(ds::card_background(cx))
+            .py_2()
+            .rounded(px(8.))
+            .bg(ds::field_background(cx))
             .cursor_pointer()
             .hover(move |el| el.bg(focus_border.opacity(0.10)))
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -2558,7 +2638,6 @@ impl BeginnerWorkspace {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::handle_enter_submit))
             .size_full()
-            .font_family(ds::FONT_FAMILY)
             .bg(ds::app_background(cx))
             .when(self.show_tab_limit_notice, |el| {
                 el.child(self.render_tab_limit_notice(cx))
@@ -2582,6 +2661,7 @@ impl BeginnerWorkspace {
                             .h_full()
                             .overflow_hidden()
                             .bg(ds::app_background(cx))
+                            .child(self.render_simple_header(self.current_tab_title(), false, cx))
                             .when(!api_key_ready, |el| {
                                 el.child(self.render_api_status_banner(cx))
                             })
@@ -2652,7 +2732,6 @@ impl BeginnerWorkspace {
 
         v_flex()
             .size_full()
-            .font_family(ds::FONT_FAMILY)
             .on_action(cx.listener(Self::handle_enter_submit))
             .bg(ds::app_background(cx))
             .when(self.show_tab_limit_notice, |el| {
@@ -2675,8 +2754,15 @@ impl BeginnerWorkspace {
                             .when(preview_dominant, |el| {
                                 el.w(px(ds::PREVIEW_DOMINANT_CHAT_WIDTH)).flex_shrink_0()
                             })
+                            .when(right_panel_visible && !preview_dominant, |el| {
+                                el.w(px(ds::PREVIEW_DOMINANT_CHAT_WIDTH)).flex_shrink_0()
+                            })
                             .when(!preview_dominant, |el| {
-                                el.flex_1().min_w(px(ds::PREVIEW_DOMINANT_CHAT_WIDTH))
+                                if right_panel_visible {
+                                    el
+                                } else {
+                                    el.flex_1().min_w(px(ds::PREVIEW_DOMINANT_CHAT_WIDTH))
+                                }
                             })
                             .min_h_0()
                             .h_full()
@@ -2704,7 +2790,8 @@ impl BeginnerWorkspace {
                                         feed.set_preview_state(preview_card_state, cx);
                                     });
                                     el.child(
-                                        div()
+                                        v_flex()
+                                            .h_full()
                                             .flex_1()
                                             .min_h_0()
                                             .overflow_hidden()
@@ -2819,11 +2906,15 @@ impl BeginnerWorkspace {
                 el.w(px(ds::RIGHT_PANEL_WIDTH)).flex_shrink_0()
             })
             .h_full()
-            .bg(ds::field_background(cx))
+            .bg(ds::app_background(cx))
+            .border_l_1()
+            .border_color(ds::separator(cx))
             .child(
                 h_flex()
                     .h(px(ds::TOP_BAR_HEIGHT))
-                    .bg(ds::panel_background(cx))
+                    .bg(ds::app_background(cx))
+                    .border_b_1()
+                    .border_color(ds::separator(cx))
                     .px_2()
                     .gap_1()
                     .items_center()
@@ -3177,7 +3268,6 @@ impl BeginnerWorkspace {
 
         let is_disabled = is_running || is_connecting || draft_is_empty || !api_key_ready;
         let colors = cx.theme().colors().clone();
-        let send_icon_color = ensure_minimum_contrast(colors.text, ds::accent(cx), 75.);
         let icon_hover_bg = ds::hover_background(cx);
         v_flex()
             .flex_shrink_0()
@@ -3189,16 +3279,21 @@ impl BeginnerWorkspace {
             .when(centered, |el| {
                 el.w_full().max_w(px(ds::CHAT_COMPOSER_MAX_WIDTH))
             })
-            .when(!centered, |el| el.px_3().pt_1().pb_2())
+            .when(!centered, |el| el.px_4().pt_1().pb_4())
             .gap_2()
             .child(
                 v_flex()
                     .w_full()
-                    .rounded_lg()
-                    .bg(ds::card_background(cx))
-                    .shadow(ds::card_shadow(cx))
-                    .p_2()
-                    .gap_2()
+                    .rounded(px(14.))
+                    .border_1()
+                    .border_color(if draft_is_empty {
+                        ds::soft_border(cx)
+                    } else {
+                        ds::focus_border(cx)
+                    })
+                    .bg(ds::field_background(cx))
+                    .p_3()
+                    .gap_3()
                     .child(self.chat_editor.clone())
                     .child(
                         h_flex()
@@ -3280,18 +3375,13 @@ impl BeginnerWorkspace {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .rounded_full()
-                                    .bg(if is_disabled {
-                                        colors.element_disabled
-                                    } else {
-                                        ds::accent(cx)
-                                    })
+                                    .rounded_md()
                                     .when(!is_disabled, |el| {
-                                        el.cursor_pointer().on_click(cx.listener(
-                                            |this, _, window, cx| {
+                                        el.cursor_pointer()
+                                            .hover(move |el| el.bg(icon_hover_bg))
+                                            .on_click(cx.listener(|this, _, window, cx| {
                                                 this.submit_follow_up(window, cx);
-                                            },
-                                        ))
+                                            }))
                                     })
                                     .when(!api_key_ready, |el| {
                                         el.tooltip(Tooltip::text(
@@ -3302,7 +3392,7 @@ impl BeginnerWorkspace {
                                         Color::Custom(if is_disabled {
                                             colors.icon_disabled
                                         } else {
-                                            send_icon_color
+                                            ds::accent(cx)
                                         }),
                                     )),
                             ),
