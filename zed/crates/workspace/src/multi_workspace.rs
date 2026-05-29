@@ -2,9 +2,10 @@ use anyhow::Result;
 use fs::Fs;
 
 use gpui::{
-    AnyView, App, Context, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle, Focusable,
-    ManagedView, MouseButton, Pixels, Render, Subscription, Task, TaskExt, Tiling, WeakEntity,
-    Window, WindowId, actions, deferred, px,
+    Animation, AnimationExt, AnyView, App, BoxShadow, Context, DragMoveEvent, Entity, EntityId,
+    EventEmitter, FocusHandle, Focusable, FontWeight, ManagedView, MouseButton, Pixels, Render,
+    Subscription, Task, TaskExt, Tiling, WeakEntity, Window, WindowId, actions, deferred,
+    ease_out_quint, point, px,
 };
 pub use project::ProjectGroupKey;
 use project::{DisableAiSettings, Project};
@@ -14,16 +15,18 @@ pub use settings::SidebarSide;
 use std::future::Future;
 
 use std::path::PathBuf;
+use std::time::Duration;
 use ui::prelude::*;
 use util::ResultExt;
 use util::path_list::PathList;
 use zed_actions::agents_sidebar::ToggleThreadSwitcher;
-use zed_actions::{OpenSettings, ResetOnboarding, SwitchInterfaceMode};
+use zed_actions::{ConfigureBackboardApiKey, OpenSettings, ResetOnboarding, SwitchInterfaceMode};
 
 use agent_settings::AgentSettings;
 use settings::SidebarDockPosition;
 use ui::{
-    ButtonSize, ContextMenu, DropdownMenu, DropdownStyle, IconPosition, Tooltip, right_click_menu,
+    ButtonSize, ContextMenu, ContextMenuEntry, Divider, DividerColor, DropdownMenu, DropdownStyle,
+    IconPosition, Tooltip, right_click_menu,
 };
 
 const SIDEBAR_RESIZE_HANDLE_SIZE: Pixels = px(6.0);
@@ -83,6 +86,13 @@ enum WorkspaceModeTab {
     Skills,
     Tasks,
     Git,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum WorkspaceModeTarget {
+    Simple,
+    CodeEditor,
+    AgentWorkspace,
 }
 
 pub fn sidebar_side_context_menu(
@@ -337,6 +347,7 @@ pub struct MultiWorkspace {
     pub tasks_view: Option<AnyView>,
     pub git_view: Option<AnyView>,
     jarvis_visualizer: Entity<JarvisDirectoryVisualizer>,
+    hovered_workspace_mode_target: Option<WorkspaceModeTarget>,
     workspace_tour_completion: Option<WorkspaceTourCompletion>,
 }
 
@@ -420,6 +431,7 @@ impl MultiWorkspace {
             tasks_view: None,
             git_view: None,
             jarvis_visualizer,
+            hovered_workspace_mode_target: None,
             workspace_tour_completion: None,
         }
     }
@@ -493,7 +505,7 @@ impl MultiWorkspace {
         cx: &mut Context<Self>,
     ) {
         if tab == WorkspaceModeTab::AgentWorkspace {
-            self.close_side_docks(window, cx);
+            self.close_workspace_docks(window, cx);
         }
 
         if self.selected_workspace_mode_tab() == tab {
@@ -514,11 +526,10 @@ impl MultiWorkspace {
         cx.notify();
     }
 
-    fn close_side_docks(&self, window: &mut Window, cx: &mut Context<Self>) {
+    fn close_workspace_docks(&self, window: &mut Window, cx: &mut Context<Self>) {
         let workspace = self.workspace().clone();
         workspace.update(cx, |workspace, cx| {
-            for position in [DockPosition::Left, DockPosition::Right] {
-                let dock = workspace.dock_at_position(position).clone();
+            for dock in workspace.all_docks() {
                 dock.update(cx, |dock, cx| {
                     dock.set_open(false, window, cx);
                 });
@@ -629,6 +640,15 @@ impl MultiWorkspace {
         self.go_to_workspace_tour_step(WorkspaceTourStep::Menu, window, cx);
     }
 
+    pub fn start_workspace_test_repo_tutorial(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.workspace_tour_completion = None;
+        self.go_to_workspace_tour_step(WorkspaceTourStep::TutorialModelSelection, window, cx);
+    }
+
     pub(crate) fn go_to_workspace_tour_step(
         &mut self,
         step: WorkspaceTourStep,
@@ -669,6 +689,10 @@ impl MultiWorkspace {
                 self.open_code_editor(window, cx);
                 self.close_workspace_tour_panels(window, cx);
             }
+            WorkspaceTourStep::SimpleMode => {
+                self.set_interface_mode(InterfaceMode::Simple, window, cx);
+                self.close_workspace_tour_panels(window, cx);
+            }
             WorkspaceTourStep::AgentWorkspace => {
                 self.set_interface_mode(InterfaceMode::Expert, window, cx);
                 self.set_multi_agent_expanded(true, window, cx);
@@ -676,7 +700,14 @@ impl MultiWorkspace {
             }
             WorkspaceTourStep::Composer
             | WorkspaceTourStep::ModelSelection
-            | WorkspaceTourStep::ComposerTools => {
+            | WorkspaceTourStep::AgentOptions
+            | WorkspaceTourStep::VoiceControl
+            | WorkspaceTourStep::Skills
+            | WorkspaceTourStep::McpTools
+            | WorkspaceTourStep::TutorialModelSelection
+            | WorkspaceTourStep::TutorialAgentOptions
+            | WorkspaceTourStep::TutorialSkills
+            | WorkspaceTourStep::TutorialPrompt => {
                 self.open_code_editor(window, cx);
                 self.close_workspace_tour_panels(window, cx);
                 self.open_panel_by_persistent_name("Backboard", DockPosition::Right, window, cx);
@@ -2499,69 +2530,217 @@ impl MultiWorkspace {
         }
     }
 
-    fn workspace_mode_tab_label(tab: WorkspaceModeTab) -> &'static str {
-        match tab {
-            WorkspaceModeTab::CodeEditor => "Code Editor",
-            WorkspaceModeTab::AgentWorkspace => "Agents",
-            WorkspaceModeTab::Skills => "Skills",
-            WorkspaceModeTab::Tasks => "Tasks",
-            WorkspaceModeTab::Git => "Git",
+    fn current_workspace_mode_target(&self) -> WorkspaceModeTarget {
+        if self.interface_mode == InterfaceMode::Simple {
+            WorkspaceModeTarget::Simple
+        } else if self.selected_workspace_mode_tab() == WorkspaceModeTab::AgentWorkspace {
+            WorkspaceModeTarget::AgentWorkspace
+        } else {
+            WorkspaceModeTarget::CodeEditor
         }
     }
 
-    fn workspace_mode_menu(
-        &self,
+    fn available_workspace_mode_targets(&self) -> [WorkspaceModeTarget; 2] {
+        match self.current_workspace_mode_target() {
+            WorkspaceModeTarget::Simple => [
+                WorkspaceModeTarget::CodeEditor,
+                WorkspaceModeTarget::AgentWorkspace,
+            ],
+            WorkspaceModeTarget::CodeEditor => [
+                WorkspaceModeTarget::AgentWorkspace,
+                WorkspaceModeTarget::Simple,
+            ],
+            WorkspaceModeTarget::AgentWorkspace => {
+                [WorkspaceModeTarget::CodeEditor, WorkspaceModeTarget::Simple]
+            }
+        }
+    }
+
+    fn workspace_mode_target_label(target: WorkspaceModeTarget) -> &'static str {
+        match target {
+            WorkspaceModeTarget::Simple => "Simple",
+            WorkspaceModeTarget::CodeEditor => "Code Editor",
+            WorkspaceModeTarget::AgentWorkspace => "Agents",
+        }
+    }
+
+    fn workspace_mode_target_tooltip(target: WorkspaceModeTarget) -> &'static str {
+        match target {
+            WorkspaceModeTarget::Simple => "Open in Simple Mode",
+            WorkspaceModeTarget::CodeEditor => "Open in Code Editor",
+            WorkspaceModeTarget::AgentWorkspace => "Open in Agents Window",
+        }
+    }
+
+    fn workspace_mode_target_icon(target: WorkspaceModeTarget) -> IconName {
+        match target {
+            WorkspaceModeTarget::Simple => IconName::Sparkle,
+            WorkspaceModeTarget::CodeEditor => IconName::FileCode,
+            WorkspaceModeTarget::AgentWorkspace => IconName::ZedAgentTwo,
+        }
+    }
+
+    fn workspace_mode_target_id(target: WorkspaceModeTarget) -> &'static str {
+        match target {
+            WorkspaceModeTarget::Simple => "open-simple-mode",
+            WorkspaceModeTarget::CodeEditor => "open-code-editor-mode",
+            WorkspaceModeTarget::AgentWorkspace => "open-agent-workspace-mode",
+        }
+    }
+
+    fn workspace_mode_target_expanded_width(target: WorkspaceModeTarget) -> Pixels {
+        match target {
+            WorkspaceModeTarget::Simple => px(118.),
+            WorkspaceModeTarget::CodeEditor => px(140.),
+            WorkspaceModeTarget::AgentWorkspace => px(116.),
+        }
+    }
+
+    fn open_workspace_mode_target(
+        &mut self,
+        target: WorkspaceModeTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Entity<ContextMenu> {
-        let selected_tab = self.selected_workspace_mode_tab();
-        let simple_mode_selected = self.interface_mode == InterfaceMode::Simple;
-        let multi_workspace = cx.entity().downgrade();
-
-        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            let tabs = [
-                WorkspaceModeTab::CodeEditor,
-                WorkspaceModeTab::AgentWorkspace,
-            ];
-
-            for tab in tabs {
-                let multi_workspace = multi_workspace.clone();
-                menu = menu.toggleable_entry(
-                    Self::workspace_mode_tab_label(tab),
-                    !simple_mode_selected && selected_tab == tab,
-                    IconPosition::Start,
-                    None,
-                    move |window, cx| {
-                        multi_workspace
-                            .update(cx, |this, cx| {
-                                this.set_interface_mode(InterfaceMode::Expert, window, cx);
-                                this.set_workspace_mode_tab(tab, window, cx);
-                            })
-                            .ok();
-                    },
-                );
+    ) {
+        match target {
+            WorkspaceModeTarget::Simple => {
+                self.set_interface_mode(InterfaceMode::Simple, window, cx);
             }
+            WorkspaceModeTarget::CodeEditor => {
+                self.set_interface_mode(InterfaceMode::Expert, window, cx);
+                self.set_workspace_mode_tab(WorkspaceModeTab::CodeEditor, window, cx);
+            }
+            WorkspaceModeTarget::AgentWorkspace => {
+                self.set_interface_mode(InterfaceMode::Expert, window, cx);
+                self.set_workspace_mode_tab(WorkspaceModeTab::AgentWorkspace, window, cx);
+            }
+        }
+    }
 
-            let multi_workspace = multi_workspace.clone();
-            menu = menu.separator().toggleable_entry(
-                "Simple Mode",
-                simple_mode_selected,
-                IconPosition::Start,
-                Some(Box::new(SwitchInterfaceMode)),
-                move |window, cx| {
-                    multi_workspace
-                        .update(cx, |this, cx| {
-                            this.set_interface_mode(InterfaceMode::Simple, window, cx);
-                        })
-                        .ok();
-                },
-            );
+    fn render_workspace_mode_button(
+        &self,
+        target: WorkspaceModeTarget,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = Self::workspace_mode_target_id(target);
+        let label = Self::workspace_mode_target_label(target);
+        let button_label = format!("Open in {label}");
+        let tooltip = Self::workspace_mode_target_tooltip(target);
+        let hovered = self.hovered_workspace_mode_target == Some(target);
+        let colors = cx.theme().colors();
+        let collapsed_width = px(27.);
+        let expanded_width = Self::workspace_mode_target_expanded_width(target);
+        let width = if hovered {
+            expanded_width
+        } else {
+            collapsed_width
+        };
+        let button_height = px(24.);
+        let icon = Icon::new(Self::workspace_mode_target_icon(target))
+            .size(IconSize::Small)
+            .color(Color::Accent);
+        let icon_chip = h_flex()
+            .flex_none()
+            .size(px(20.))
+            .items_center()
+            .justify_center()
+            .rounded_md()
+            .border_1()
+            .border_color(
+                colors
+                    .text_accent
+                    .opacity(if hovered { 0.42 } else { 0.22 }),
+            )
+            .bg(colors
+                .text_accent
+                .opacity(if hovered { 0.18 } else { 0.09 }))
+            .when(hovered, |this| {
+                this.shadow(vec![BoxShadow {
+                    color: colors.text_accent.opacity(0.20),
+                    offset: point(px(0.), px(1.)),
+                    blur_radius: px(5.),
+                    spread_radius: px(0.),
+                }])
+            })
+            .child(icon);
 
-            menu = menu
-                .separator()
-                .action("Reset Onboarding", Box::new(ResetOnboarding));
+        let button = h_flex()
+            .id(id)
+            .h(button_height)
+            .w(width)
+            .flex_none()
+            .px_1()
+            .overflow_hidden()
+            .items_center()
+            .justify_start()
+            .gap_1()
+            .rounded_md()
+            .cursor_pointer()
+            .tooltip(Tooltip::text(tooltip))
+            .when(hovered, |this| this.bg(colors.element_hover))
+            .hover(|style| style.bg(colors.element_hover))
+            .on_hover(cx.listener(move |this, hovered, _window, cx| {
+                if *hovered {
+                    this.hovered_workspace_mode_target = Some(target);
+                } else if this.hovered_workspace_mode_target == Some(target) {
+                    this.hovered_workspace_mode_target = None;
+                }
+                cx.notify();
+            }))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_workspace_mode_target(target, window, cx);
+            }))
+            .child(icon_chip)
+            .when(hovered, |this| {
+                let label_animation_id = ElementId::Name(format!("{id}-label").into());
+                this.child(
+                    Label::new(button_label)
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::SEMIBOLD)
+                        .italic()
+                        .color(Color::Default)
+                        .single_line()
+                        .truncate()
+                        .with_animation(
+                            label_animation_id,
+                            Animation::new(Duration::from_millis(140))
+                                .with_easing(ease_out_quint()),
+                            |label, delta| label.alpha(delta),
+                        ),
+                )
+            });
 
-            menu
+        if hovered {
+            let expand_animation_id = ElementId::Name(format!("{id}-expand").into());
+            button
+                .with_animation(
+                    expand_animation_id,
+                    Animation::new(Duration::from_millis(180)).with_easing(ease_out_quint()),
+                    move |button, delta| {
+                        let width = collapsed_width.as_f32()
+                            + (expanded_width.as_f32() - collapsed_width.as_f32()) * delta;
+                        button.w(px(width))
+                    },
+                )
+                .into_any_element()
+        } else {
+            button.into_any_element()
+        }
+    }
+
+    fn render_reset_onboarding_button(&self) -> impl IntoElement {
+        IconButton::new(
+            "reset-onboarding-from-workspace-switcher",
+            IconName::RotateCcw,
+        )
+        .style(ButtonStyle::Transparent)
+        .size(ButtonSize::Compact)
+        .icon_size(IconSize::Small)
+        .icon_color(Color::Muted)
+        .tooltip(Tooltip::text("Reset Onboarding"))
+        .on_click(|_, window, cx| {
+            window.dispatch_action(Box::new(ResetOnboarding), cx);
         })
     }
 
@@ -2601,6 +2780,33 @@ impl MultiWorkspace {
         }))
     }
 
+    fn backboard_settings_menu(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<ContextMenu> {
+        ContextMenu::build(window, cx, move |menu, _window, _cx| {
+            menu.item(
+                ContextMenuEntry::new("Dashboard")
+                    .icon(IconName::ArrowUpRight)
+                    .icon_position(IconPosition::End)
+                    .handler(|_, cx| {
+                        cx.open_url("https://app.backboard.io");
+                    }),
+            )
+            .entry("Settings", Some(Box::new(OpenSettings)), |window, cx| {
+                window.dispatch_action(Box::new(OpenSettings), cx);
+            })
+            .entry(
+                "Configure API Key",
+                Some(Box::new(ConfigureBackboardApiKey)),
+                |window, cx| {
+                    window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
+                },
+            )
+        })
+    }
+
     fn render_workspace_mode_switcher(
         &self,
         window: &mut Window,
@@ -2618,9 +2824,21 @@ impl MultiWorkspace {
             .gap_1()
             .pl_2()
             .pr_2()
+            .gap_1()
             .border_b_1()
             .border_color(colors.border_variant.opacity(0.5))
             .bg(switcher_bg)
+            .children(
+                self.available_workspace_mode_targets()
+                    .into_iter()
+                    .map(|target| self.render_workspace_mode_button(target, window, cx)),
+            )
+            .child(
+                div()
+                    .h(px(22.))
+                    .px_1()
+                    .child(Divider::vertical().color(DividerColor::Border)),
+            )
             .child(self.render_toggle_dock_button(
                 DockPosition::Left,
                 "toggle-left-panel-from-workspace-switcher",
@@ -2637,29 +2855,19 @@ impl MultiWorkspace {
             ))
             .child(self.render_toggle_terminal_button(cx))
             .child(
-                IconButton::new("open-settings-from-workspace-switcher", IconName::Settings)
-                    .style(ButtonStyle::Transparent)
-                    .size(ButtonSize::Compact)
-                    .icon_size(IconSize::Small)
-                    .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text("Open Settings"))
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(OpenSettings), cx);
-                    }),
-            )
-            .child(
                 DropdownMenu::new_with_element(
-                    "multi-workspace-mode-menu",
-                    Icon::new(IconName::Menu)
+                    "backboard-settings-menu",
+                    Icon::new(IconName::Settings)
                         .size(IconSize::Small)
                         .color(Color::Muted)
                         .into_any_element(),
-                    self.workspace_mode_menu(window, cx),
+                    self.backboard_settings_menu(window, cx),
                 )
                 .style(DropdownStyle::Ghost)
                 .trigger_size(ButtonSize::Compact)
                 .no_chevron(),
-            );
+            )
+            .child(self.render_reset_onboarding_button());
 
         self.decorate_workspace_tour_target(
             switcher,
@@ -2699,7 +2907,12 @@ impl Render for MultiWorkspace {
                             this.open_code_editor(window, cx);
                         }))
                         .child(self.render_workspace_mode_switcher(window, cx))
-                        .child(div().flex_1().min_h_0().child(view.clone()))
+                        .child(self.decorate_workspace_tour_target(
+                            div().flex_1().min_h_0().child(view.clone()),
+                            WorkspaceTourStep::SimpleMode,
+                            WorkspaceTourPlacement::TopRight,
+                            cx,
+                        ))
                         .when(self.workspace_tour_is_active(cx), |this| {
                             this.child(render_workspace_tour_backdrop(cx))
                         })

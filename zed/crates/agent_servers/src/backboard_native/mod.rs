@@ -25,7 +25,7 @@ use ::backboard::{BackboardClient, BackboardConfig, BackboardModel};
 use acp_thread::{
     AcpThread, AgentConnection, AgentModelInfo, AgentModelList, AgentSessionConfigOptions,
     AgentSessionInfo, AgentSessionList, AgentSessionListRequest, AgentSessionListResponse,
-    AgentSessionModes, AgentSessionTruncate, UserMessageId,
+    AgentSessionModes, AgentSessionTruncate, AuthRequired, UserMessageId,
 };
 use action_log::ActionLog;
 use agent_client_protocol::schema as acp;
@@ -347,6 +347,10 @@ impl BackboardNativeConnection {
 impl BackboardNativeState {
     pub(crate) fn load_config(&self) -> BackboardConfig {
         BackboardConfig::load_or_default()
+    }
+
+    pub(crate) fn has_api_key(&self) -> bool {
+        self.load_config().api_key().is_some()
     }
 
     pub(crate) fn client(&self) -> Result<(BackboardConfig, BackboardClient)> {
@@ -1013,6 +1017,10 @@ impl AgentConnection for BackboardNativeConnection {
         work_dirs: PathList,
         cx: &mut App,
     ) -> Task<Result<Entity<AcpThread>>> {
+        if !self.state.has_api_key() {
+            return Task::ready(Err(missing_api_key_auth_required().into()));
+        }
+
         let work_dirs = non_empty_work_dirs_or_project_default(work_dirs, &project, cx);
         let Some(workspace) = work_dirs.ordered_paths().next().cloned() else {
             return Task::ready(Err(anyhow!("Working directory cannot be empty")));
@@ -1234,6 +1242,10 @@ impl BackboardNativeConnection {
         replay_history: bool,
         cx: &mut App,
     ) -> Task<Result<Entity<AcpThread>>> {
+        if !self.state.has_api_key() {
+            return Task::ready(Err(missing_api_key_auth_required().into()));
+        }
+
         let work_dirs = non_empty_work_dirs_or_project_default(work_dirs, &project, cx);
         let Some(workspace) = work_dirs.ordered_paths().next().cloned() else {
             return Task::ready(Err(anyhow!("Working directory cannot be empty")));
@@ -1609,13 +1621,27 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                         .collect::<Vec<_>>();
                     if models.is_empty() {
                         let config = state.load_config();
+                        let (provider, model) =
+                            BackboardNativeState::fallback_provider_model(&config);
+                        log::warn!(
+                            "Backboard model catalog returned no usable models; using uncached fallback model {provider}/{model}"
+                        );
                         (vec![fallback_agent_model_info(&config)], false)
                     } else {
+                        log::info!(
+                            "Backboard model catalog loaded {} usable models agent_id={}",
+                            models.len(),
+                            state.agent_id
+                        );
                         (models, true)
                     }
                 }
                 Err(_) => {
                     let config = state.load_config();
+                    let (provider, model) = BackboardNativeState::fallback_provider_model(&config);
+                    log::warn!(
+                        "Backboard model catalog unavailable; using uncached fallback model {provider}/{model}"
+                    );
                     (vec![fallback_agent_model_info(&config)], false)
                 }
             };
@@ -2233,7 +2259,11 @@ fn json_string(value: &Value, keys: &[&str]) -> Option<String> {
 }
 
 pub(crate) fn missing_api_key_message() -> String {
-    "Backboard needs an API key before the IDE agent can run. Set it in the shared config with `backboard config set-api-key <key>`.".to_string()
+    "Please enter a Backboard API key to use AI features, including agents and Simple Mode. The editor remains available without AI.".to_string()
+}
+
+fn missing_api_key_auth_required() -> AuthRequired {
+    AuthRequired::new().with_description(missing_api_key_message())
 }
 
 #[cfg(test)]

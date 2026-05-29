@@ -358,6 +358,7 @@ dependencies = [
  "assets",
  "async-channel 2.5.0",
  "audio",
+ "backboard",
  "backboard_ui",
  "base64 0.22.1",
  "buffer_diff",
@@ -1943,6 +1944,7 @@ dependencies = [
  "ui",
  "util",
  "workspace",
+ "zed_actions",
 ]
 
 [[package]]
@@ -2018,7 +2020,7 @@ dependencies = [
  "agent-client-protocol",
  "agent_ui",
  "anyhow",
- "backboard_ui",
+ "backboard",
  "cocoa 0.26.0",
  "db",
  "editor",
@@ -2043,6 +2045,7 @@ dependencies = [
  "watch",
  "workspace",
  "wry",
+ "zed_actions",
 ]
 
 [[package]]

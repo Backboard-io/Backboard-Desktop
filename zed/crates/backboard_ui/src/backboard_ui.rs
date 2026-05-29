@@ -22,6 +22,7 @@ use workspace::{
     dock::{DockPosition, Panel, PanelEvent},
     render_workspace_tour_highlight,
 };
+use zed_actions::ConfigureBackboardApiKey;
 
 const BACKBOARD_PANEL_KEY: &str = "backboard_panel";
 const DEFAULT_WIDTH: gpui::Pixels = px(380.);
@@ -233,7 +234,9 @@ pub struct BackboardPanel {
     model_picker_open: bool,
     selected_provider: Option<String>,
     selected_model: Option<String>,
+    configuring_api_key: bool,
     is_zoomed: bool,
+    _config_task: Task<()>,
 }
 
 struct BackboardMessage {
@@ -939,6 +942,7 @@ impl BackboardPanel {
             editor.set_show_gutter(false, cx);
             editor.set_show_wrap_guides(false, cx);
             editor.set_show_indent_guides(false, cx);
+            editor.set_masked(true, cx);
             editor
         });
 
@@ -960,6 +964,16 @@ impl BackboardPanel {
         } else {
             "Paste your Backboard API key in the setup card above. It saves to the same ~/.backboard/config.json file used by the CLI."
         };
+
+        let config_changes = backboard::subscribe_config_changes();
+        let config_task = cx.spawn(async move |this, cx| {
+            while config_changes.recv().await.is_ok() {
+                this.update(cx, |this, cx| {
+                    this.refresh_status(cx);
+                })
+                .ok();
+            }
+        });
 
         let mut panel = Self {
             focus_handle: cx.focus_handle(),
@@ -990,7 +1004,9 @@ impl BackboardPanel {
             model_picker_open: api_ready && selected_model.is_none(),
             selected_provider,
             selected_model,
+            configuring_api_key: false,
             is_zoomed: false,
+            _config_task: config_task,
         };
 
         if panel.api_ready {
@@ -1033,9 +1049,18 @@ impl BackboardPanel {
         self.status = Self::status_for_config(&config, self.api_ready);
         self.selected_provider = config.default_provider;
         self.selected_model = config.default_model;
+        if !self.api_ready {
+            self.configuring_api_key = false;
+            self.model_picker_open = false;
+            self.models_loading = false;
+            self.providers.clear();
+            self.models.clear();
+            self.model_status = "Connect Backboard to load models.".into();
+        }
         if self.api_ready && self.models.is_empty() && !self.models_loading {
             self.load_models(cx);
         }
+        cx.notify();
     }
 
     fn load_models(&mut self, cx: &mut Context<Self>) {
@@ -1134,6 +1159,7 @@ impl BackboardPanel {
         match backboard::BackboardConfig::save_api_key_for_current_env(api_key) {
             Ok(config) => {
                 self.api_ready = true;
+                self.configuring_api_key = false;
                 self.status = format!("Saved API key to ~/.backboard/config.json ({})", config.env);
                 self.api_key_editor
                     .update(cx, |editor, cx| editor.set_text("", window, cx));
@@ -1151,6 +1177,10 @@ impl BackboardPanel {
         }
 
         cx.notify();
+    }
+
+    fn open_api_key_settings(&self, window: &mut Window, cx: &mut Context<Self>) {
+        window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
     }
 
     fn select_model(&mut self, provider: String, model: String, cx: &mut Context<Self>) {
@@ -1554,21 +1584,48 @@ impl BackboardPanel {
             )
     }
 
-    fn render_status(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_status(&self, cx: &mut Context<Self>) -> AnyElement {
+        if !self.api_ready {
+            return h_flex()
+                .h(px(28.))
+                .w_full()
+                .items_center()
+                .justify_center()
+                .gap(px(6.))
+                .bg(cx.theme().colors().element_background)
+                .child(
+                    div()
+                        .size(px(6.))
+                        .rounded_full()
+                        .bg(cx.theme().status().warning_border),
+                )
+                .child(
+                    Label::new("API not connected")
+                        .size(LabelSize::XSmall)
+                        .color(Color::Disabled),
+                )
+                .into_any_element();
+        }
+
         h_flex()
-            .mx_4()
-            .mt_3()
-            .px_3()
-            .py_2()
-            .gap_2()
-            .rounded_lg()
+            .h(px(28.))
+            .w_full()
+            .items_center()
+            .justify_center()
+            .gap(px(6.))
             .bg(cx.theme().colors().element_background)
-            .child(div().size(px(7.)).rounded_full().bg(if self.api_ready {
-                cx.theme().status().created
-            } else {
-                cx.theme().status().warning
-            }))
-            .child(Label::new(self.status.clone()).size(LabelSize::Small))
+            .child(
+                div()
+                    .size(px(6.))
+                    .rounded_full()
+                    .bg(cx.theme().status().created),
+            )
+            .child(
+                Label::new(self.status.clone())
+                    .size(LabelSize::XSmall)
+                    .color(Color::Disabled),
+            )
+            .into_any_element()
     }
 
     fn render_inline_activity(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1754,18 +1811,90 @@ impl BackboardPanel {
             )
     }
 
+    fn render_api_unavailable_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .items_center()
+            .justify_center()
+            .gap(px(14.))
+            .px_6()
+            .bg(colors.editor_background)
+            .child(
+                Icon::new(IconName::Info)
+                    .size(IconSize::Custom(rems_from_px(28.)))
+                    .color(Color::Muted),
+            )
+            .child(
+                Label::new("API key required")
+                    .size(LabelSize::Custom(rems_from_px(16.)))
+                    .weight(FontWeight::BOLD)
+                    .color(Color::Default),
+            )
+            .child(
+                div()
+                    .max_w(px(360.))
+                    .text_center()
+                    .text_size(rems_from_px(13.))
+                    .text_color(colors.text_muted)
+                    .line_height(relative(1.32))
+                    .child(
+                        "Connect an API key to run agents, generate outputs, and use workspace actions.",
+                    ),
+            )
+            .child(
+                Button::new("backboard-connect-api-key", "Connect API key")
+                    .style(ButtonStyle::Filled)
+                    .size(ButtonSize::Large)
+                    .label_size(LabelSize::XSmall)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_api_key_settings(window, cx);
+                    })),
+            )
+            .child(
+                Label::new("Continue without API")
+                    .size(LabelSize::Small)
+                    .color(Color::Disabled),
+            )
+            .child(
+                div()
+                    .max_w(px(360.))
+                    .text_center()
+                    .text_ui_xs(cx)
+                    .text_color(colors.text_disabled)
+                    .line_height(relative(1.32))
+                    .child("You can still browse files and inspect the workspace manually."),
+            )
+    }
+
     fn render_model_drawer(
         &self,
         workspace_tour_step: Option<WorkspaceTourStep>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let selected = self.selected_model_label();
-        let force_model_picker_open =
-            workspace_tour_step == Some(WorkspaceTourStep::ModelSelection);
+        let force_model_picker_open = matches!(
+            workspace_tour_step,
+            Some(WorkspaceTourStep::ModelSelection | WorkspaceTourStep::TutorialModelSelection)
+        );
         let model_picker_open = self.model_picker_open || force_model_picker_open;
 
         let visible_count = self.visible_model_count.min(self.models.len());
         let hidden_count = self.models.len().saturating_sub(visible_count);
+        let highlighted_model_ix = if force_model_picker_open {
+            self.models
+                .iter()
+                .take(visible_count)
+                .position(|model| {
+                    self.selected_provider.as_ref() == Some(&model.provider)
+                        && self.selected_model.as_ref() == Some(&model.name)
+                })
+                .or_else(|| (visible_count > 0).then_some(0))
+        } else {
+            None
+        };
         let mut rows = Vec::new();
         let mut last_provider = String::new();
         for (ix, model) in self.models.iter().take(visible_count).enumerate() {
@@ -1794,44 +1923,44 @@ impl BackboardPanel {
                 .map(|limit| format!("{} ctx", format_number(limit)))
                 .unwrap_or_else(|| "catalog model".into());
 
-            rows.push(
-                h_flex()
-                    .id(("backboard-model-row", ix))
-                    .w_full()
-                    .justify_between()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .bg(if is_selected {
-                        cx.theme().colors().element_selected
+            let row = h_flex()
+                .id(("backboard-model-row", ix))
+                .w_full()
+                .justify_between()
+                .gap_2()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(if is_selected {
+                    cx.theme().colors().element_selected
+                } else {
+                    cx.theme().colors().editor_background
+                })
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .child(Label::new(display).size(LabelSize::Small))
+                        .child(Label::new(meta).size(LabelSize::Small).color(Color::Muted)),
+                )
+                .child(
+                    Button::new(
+                        ("backboard-use-model", ix),
+                        if is_selected { "Using" } else { "Use" },
+                    )
+                    .style(if is_selected {
+                        ButtonStyle::Subtle
                     } else {
-                        cx.theme().colors().editor_background
+                        ButtonStyle::Tinted(ui::TintColor::Accent)
                     })
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .child(Label::new(display).size(LabelSize::Small))
-                            .child(Label::new(meta).size(LabelSize::Small).color(Color::Muted)),
-                    )
-                    .child(
-                        Button::new(
-                            ("backboard-use-model", ix),
-                            if is_selected { "Using" } else { "Use" },
-                        )
-                        .style(if is_selected {
-                            ButtonStyle::Subtle
-                        } else {
-                            ButtonStyle::Tinted(ui::TintColor::Accent)
-                        })
-                        .on_click(cx.listener(
-                            move |this, _, _window, cx| {
-                                this.select_model(provider.clone(), name.clone(), cx);
-                            },
-                        )),
-                    )
-                    .into_any_element(),
-            );
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.select_model(provider.clone(), name.clone(), cx);
+                    })),
+                );
+            if highlighted_model_ix == Some(ix) {
+                rows.push(render_workspace_tour_highlight(div().child(row), cx).into_any_element());
+            } else {
+                rows.push(row.into_any_element());
+            }
         }
 
         let drawer = v_flex()
@@ -1936,7 +2065,7 @@ impl BackboardPanel {
                 )
             });
 
-        if force_model_picker_open {
+        if force_model_picker_open && highlighted_model_ix.is_none() {
             render_workspace_tour_highlight(drawer, cx)
         } else {
             drawer
@@ -2249,37 +2378,97 @@ impl BackboardPanel {
         workspace_tour_step: Option<WorkspaceTourStep>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let highlight_chat = matches!(
+            workspace_tour_step,
+            Some(WorkspaceTourStep::Composer | WorkspaceTourStep::TutorialPrompt)
+        );
+        let context_tool = div().child(
+            IconButton::new("backboard-context", IconName::AtSign)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Add context")),
+        );
+        let files_tool = div().child(
+            IconButton::new("backboard-files", IconName::FileCode)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Attach files")),
+        );
+        let voice_tool = div().child(
+            IconButton::new("backboard-voice", IconName::Mic)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Voice control")),
+        );
+        let voice_tool = if workspace_tour_step == Some(WorkspaceTourStep::VoiceControl) {
+            render_workspace_tour_highlight(voice_tool, cx)
+        } else {
+            voice_tool
+        };
+        let skills_tool = div().child(
+            IconButton::new("backboard-skills", IconName::Sparkle)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Skills")),
+        );
+        let skills_tool = if matches!(
+            workspace_tour_step,
+            Some(WorkspaceTourStep::Skills | WorkspaceTourStep::TutorialSkills)
+        ) {
+            render_workspace_tour_highlight(skills_tool, cx)
+        } else {
+            skills_tool
+        };
+        let mcp_tool = div().child(
+            IconButton::new("backboard-mcps", IconName::Server)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("MCP tools")),
+        );
+        let mcp_tool = if workspace_tour_step == Some(WorkspaceTourStep::McpTools) {
+            render_workspace_tour_highlight(mcp_tool, cx)
+        } else {
+            mcp_tool
+        };
+        let agent_options_tool = div().child(
+            IconButton::new("backboard-agent-options", IconName::Sliders)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Agent options")),
+        );
+        let agent_options_tool = if matches!(
+            workspace_tour_step,
+            Some(WorkspaceTourStep::AgentOptions | WorkspaceTourStep::TutorialAgentOptions)
+        ) {
+            render_workspace_tour_highlight(agent_options_tool, cx)
+        } else {
+            agent_options_tool
+        };
+
         let tools = h_flex()
             .gap_1()
-            .child(
-                IconButton::new("backboard-context", IconName::AtSign)
-                    .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Add context")),
-            )
-            .child(
-                IconButton::new("backboard-files", IconName::FileCode)
-                    .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Attach files")),
-            )
-            .child(
-                IconButton::new("backboard-voice", IconName::Mic)
-                    .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Voice control")),
-            )
-            .child(
-                IconButton::new("backboard-mcps", IconName::Server)
-                    .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("MCP tools")),
-            )
-            .child(
-                IconButton::new("backboard-agent-options", IconName::Sliders)
-                    .icon_size(IconSize::Small)
-                    .tooltip(Tooltip::text("Agent options")),
-            );
-        let tools = if workspace_tour_step == Some(WorkspaceTourStep::ComposerTools) {
-            render_workspace_tour_highlight(tools, cx)
+            .child(context_tool)
+            .child(files_tool)
+            .child(voice_tool)
+            .child(skills_tool)
+            .child(mcp_tool)
+            .child(agent_options_tool);
+
+        let chat_input = v_flex().flex_1().min_w_0().child(self.composer.clone());
+        let chat_input = if highlight_chat {
+            render_workspace_tour_highlight(chat_input, cx)
         } else {
-            tools
+            chat_input
+        };
+        let send_tool = div().child(
+            IconButton::new("backboard-send", IconName::Send)
+                .icon_size(IconSize::Small)
+                .disabled(!self.api_ready || self.streaming)
+                .tooltip(Tooltip::text(if self.streaming {
+                    "Backboard is running"
+                } else {
+                    "Send to Backboard"
+                }))
+                .on_click(cx.listener(|this, _, window, cx| this.send_prompt(window, cx))),
+        );
+        let send_tool = if highlight_chat {
+            render_workspace_tour_highlight(send_tool, cx)
+        } else {
+            send_tool
         };
 
         let composer = h_flex()
@@ -2292,23 +2481,8 @@ impl BackboardPanel {
             .px_3()
             .py_2()
             .child(tools)
-            .child(v_flex().flex_1().min_w_0().child(self.composer.clone()))
-            .child(
-                IconButton::new("backboard-send", IconName::Send)
-                    .icon_size(IconSize::Small)
-                    .disabled(!self.api_ready || self.streaming)
-                    .tooltip(Tooltip::text(if self.streaming {
-                        "Backboard is running"
-                    } else {
-                        "Send to Backboard"
-                    }))
-                    .on_click(cx.listener(|this, _, window, cx| this.send_prompt(window, cx))),
-            );
-        let composer = if workspace_tour_step == Some(WorkspaceTourStep::Composer) {
-            render_workspace_tour_highlight(composer, cx)
-        } else {
-            composer
-        };
+            .child(chat_input)
+            .child(send_tool);
 
         v_flex()
             .border_t_1()
@@ -2388,8 +2562,14 @@ impl Panel for BackboardPanel {
 
 impl Render for BackboardPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let workspace_tour_step = Workspace::for_window(window, cx)
-            .and_then(|workspace| workspace.read(cx).workspace_tour_step());
+        let workspace_tour_step = self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).workspace_tour_step())
+            .or_else(|| {
+                Workspace::for_window(window, cx)
+                    .and_then(|workspace| workspace.read(cx).workspace_tour_step())
+            });
 
         v_flex()
             .size_full()
@@ -2400,12 +2580,15 @@ impl Render for BackboardPanel {
             .when(self.should_show_status(), |this| {
                 this.child(self.render_status(cx))
             })
-            .when(!self.api_ready, |this| {
+            .when(self.configuring_api_key && self.api_ready, |this| {
                 this.child(self.render_api_key_setup(cx))
             })
-            .child(self.render_messages(cx))
+            .when(!self.api_ready, |this| {
+                this.child(self.render_api_unavailable_state(cx))
+            })
             .when(self.api_ready, |this| {
-                this.child(self.render_model_drawer(workspace_tour_step, cx))
+                this.child(self.render_messages(cx))
+                    .child(self.render_model_drawer(workspace_tour_step, cx))
             })
             .child(self.render_composer(workspace_tour_step, cx))
     }

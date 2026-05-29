@@ -7961,15 +7961,22 @@ impl Workspace {
             (
                 DockPosition::Left,
                 Some(step @ (WorkspaceTourStep::DirectoryPanel | WorkspaceTourStep::GitPanel)),
-            ) => Some((step, WorkspaceTourPlacement::TopRight, true)),
+            ) => Some((step, WorkspaceTourPlacement::InsideTop, true)),
             (
                 DockPosition::Right,
                 Some(
                     step @ (WorkspaceTourStep::Composer
                     | WorkspaceTourStep::ModelSelection
-                    | WorkspaceTourStep::ComposerTools),
+                    | WorkspaceTourStep::AgentOptions
+                    | WorkspaceTourStep::VoiceControl
+                    | WorkspaceTourStep::Skills
+                    | WorkspaceTourStep::McpTools
+                    | WorkspaceTourStep::TutorialModelSelection
+                    | WorkspaceTourStep::TutorialAgentOptions
+                    | WorkspaceTourStep::TutorialSkills
+                    | WorkspaceTourStep::TutorialPrompt),
                 ),
-            ) => Some((step, WorkspaceTourPlacement::TopLeft, false)),
+            ) => Some((step, WorkspaceTourPlacement::BottomLeft, false)),
             _ => None,
         };
         if let Some((tour_step, tour_placement, highlight_dock)) = tour_target {

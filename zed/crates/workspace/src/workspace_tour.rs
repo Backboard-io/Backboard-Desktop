@@ -8,71 +8,108 @@ pub type WorkspaceTourClickHandler = Box<dyn Fn(&mut Window, &mut App) + 'static
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkspaceTourStep {
     Menu,
+    SimpleMode,
     AgentWorkspace,
     CodeEditor,
     Composer,
     ModelSelection,
-    ComposerTools,
+    AgentOptions,
+    VoiceControl,
+    Skills,
+    McpTools,
     DirectoryPanel,
     GitPanel,
     BottomBar,
+    TutorialModelSelection,
+    TutorialAgentOptions,
+    TutorialSkills,
+    TutorialPrompt,
 }
 
 impl WorkspaceTourStep {
-    pub const TOTAL: usize = 9;
+    pub const TOTAL: usize = 13;
+    pub const TUTORIAL_TOTAL: usize = 4;
 
     pub fn index(self) -> usize {
         match self {
             Self::Menu => 1,
-            Self::AgentWorkspace => 2,
-            Self::CodeEditor => 3,
-            Self::Composer => 4,
-            Self::ModelSelection => 5,
-            Self::ComposerTools => 6,
-            Self::DirectoryPanel => 7,
-            Self::GitPanel => 8,
-            Self::BottomBar => 9,
+            Self::SimpleMode => 2,
+            Self::AgentWorkspace => 3,
+            Self::CodeEditor => 4,
+            Self::Composer => 5,
+            Self::ModelSelection => 6,
+            Self::AgentOptions => 7,
+            Self::VoiceControl => 8,
+            Self::Skills => 9,
+            Self::McpTools => 10,
+            Self::DirectoryPanel => 11,
+            Self::GitPanel => 12,
+            Self::BottomBar => 13,
+            Self::TutorialModelSelection => 1,
+            Self::TutorialAgentOptions => 2,
+            Self::TutorialSkills => 3,
+            Self::TutorialPrompt => 4,
         }
     }
 
     pub fn target(self) -> &'static str {
         match self {
             Self::Menu => "Menu",
+            Self::SimpleMode => "Simple Mode",
             Self::AgentWorkspace => "Agent Workspace",
             Self::CodeEditor => "Code Editor",
             Self::Composer => "Composer",
             Self::ModelSelection => "Model Picker",
-            Self::ComposerTools => "Composer Tools",
+            Self::AgentOptions => "Agent Options",
+            Self::VoiceControl => "Voice",
+            Self::Skills => "Skills",
+            Self::McpTools => "MCP Tools",
             Self::DirectoryPanel => "Directory",
             Self::GitPanel => "Git",
             Self::BottomBar => "Bottom Icons",
+            Self::TutorialModelSelection => "Model",
+            Self::TutorialAgentOptions => "Agent Options",
+            Self::TutorialSkills => "Skills",
+            Self::TutorialPrompt => "First Prompt",
         }
     }
 
     pub fn title(self) -> &'static str {
         match self {
             Self::Menu => "Switch views",
+            Self::SimpleMode => "Use Simple Mode",
             Self::AgentWorkspace => "Plan with agents",
             Self::CodeEditor => "Edit code",
-            Self::Composer => "Send prompts",
+            Self::Composer => "Send a chat",
             Self::ModelSelection => "Pick a model",
-            Self::ComposerTools => "Use composer tools",
+            Self::AgentOptions => "Tune agent options",
+            Self::VoiceControl => "Use voice mode",
+            Self::Skills => "Use skills",
+            Self::McpTools => "Use MCP tools",
             Self::DirectoryPanel => "Browse files",
             Self::GitPanel => "Review changes",
             Self::BottomBar => "Open lower panels",
+            Self::TutorialModelSelection => "Select a model",
+            Self::TutorialAgentOptions => "Choose agent options",
+            Self::TutorialSkills => "Review skills",
+            Self::TutorialPrompt => "Send the test prompt",
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
             Self::Menu => "Jump between the editor, agents, Git, and Simple Mode.",
+            Self::SimpleMode => {
+                "Use Simple Mode for focused app-building chats, project previews, and recent work."
+            }
             Self::AgentWorkspace => "Use this for larger AI tasks and repo-wide changes.",
             Self::CodeEditor => "Inspect and edit the files.",
-            Self::Composer => "Use the right composer to send prompts with file context.",
+            Self::Composer => "Type a request in chat, then send it to the agent.",
             Self::ModelSelection => "Choose the model for speed, cost, or deeper reasoning.",
-            Self::ComposerTools => {
-                "Voice dictates prompts, MCPs add tools, and agent options tune how edits run."
-            }
+            Self::AgentOptions => "Open agent options to choose how the agent plans and edits.",
+            Self::VoiceControl => "Use voice mode when you want to dictate the prompt.",
+            Self::Skills => "Skills add reusable workflows to the composer.",
+            Self::McpTools => "MCP tools connect the agent to external capabilities.",
             Self::DirectoryPanel => {
                 "Use the left directory to open, create, rename, and move files."
             }
@@ -80,34 +117,83 @@ impl WorkspaceTourStep {
             Self::BottomBar => {
                 "Click icons to open terminal, diagnostics, Git/search, language, and status menus."
             }
+            Self::TutorialModelSelection => {
+                "Pick the model you want to use for the sample repo task."
+            }
+            Self::TutorialAgentOptions => {
+                "Choose how the agent should plan and apply changes for this run."
+            }
+            Self::TutorialSkills => "Skills can tailor the agent to a specific workflow.",
+            Self::TutorialPrompt => "Send the prefilled prompt to make the first sample change.",
         }
+    }
+
+    pub fn progress_label(self) -> String {
+        let total = if self.is_tutorial_step() {
+            Self::TUTORIAL_TOTAL
+        } else {
+            Self::TOTAL
+        };
+        let prefix = if self.is_tutorial_step() {
+            "Tutorial"
+        } else {
+            "Step"
+        };
+
+        format!("{prefix} {} of {total} - {}", self.index(), self.target())
+    }
+
+    pub fn is_tutorial_step(self) -> bool {
+        matches!(
+            self,
+            Self::TutorialModelSelection
+                | Self::TutorialAgentOptions
+                | Self::TutorialSkills
+                | Self::TutorialPrompt
+        )
     }
 
     pub fn next(self) -> Option<Self> {
         match self {
-            Self::Menu => Some(Self::AgentWorkspace),
+            Self::Menu => Some(Self::SimpleMode),
+            Self::SimpleMode => Some(Self::AgentWorkspace),
             Self::AgentWorkspace => Some(Self::CodeEditor),
             Self::CodeEditor => Some(Self::Composer),
             Self::Composer => Some(Self::ModelSelection),
-            Self::ModelSelection => Some(Self::ComposerTools),
-            Self::ComposerTools => Some(Self::DirectoryPanel),
+            Self::ModelSelection => Some(Self::AgentOptions),
+            Self::AgentOptions => Some(Self::VoiceControl),
+            Self::VoiceControl => Some(Self::Skills),
+            Self::Skills => Some(Self::McpTools),
+            Self::McpTools => Some(Self::DirectoryPanel),
             Self::DirectoryPanel => Some(Self::GitPanel),
             Self::GitPanel => Some(Self::BottomBar),
             Self::BottomBar => None,
+            Self::TutorialModelSelection => Some(Self::TutorialAgentOptions),
+            Self::TutorialAgentOptions => Some(Self::TutorialSkills),
+            Self::TutorialSkills => Some(Self::TutorialPrompt),
+            Self::TutorialPrompt => None,
         }
     }
 
     pub fn previous(self) -> Option<Self> {
         match self {
             Self::Menu => None,
-            Self::AgentWorkspace => Some(Self::Menu),
+            Self::SimpleMode => Some(Self::Menu),
+            Self::AgentWorkspace => Some(Self::SimpleMode),
             Self::CodeEditor => Some(Self::AgentWorkspace),
             Self::Composer => Some(Self::CodeEditor),
             Self::ModelSelection => Some(Self::Composer),
-            Self::ComposerTools => Some(Self::ModelSelection),
-            Self::DirectoryPanel => Some(Self::ComposerTools),
+            Self::AgentOptions => Some(Self::ModelSelection),
+            Self::VoiceControl => Some(Self::AgentOptions),
+            Self::Skills => Some(Self::VoiceControl),
+            Self::McpTools => Some(Self::Skills),
+            Self::DirectoryPanel => Some(Self::McpTools),
             Self::GitPanel => Some(Self::DirectoryPanel),
             Self::BottomBar => Some(Self::GitPanel),
+            Self::TutorialModelSelection => None,
+            Self::TutorialAgentOptions => Some(Self::TutorialModelSelection),
+            Self::TutorialSkills => Some(Self::TutorialAgentOptions),
+            Self::TutorialPrompt => Some(Self::TutorialSkills),
         }
     }
 }
@@ -116,6 +202,8 @@ impl WorkspaceTourStep {
 pub enum WorkspaceTourPlacement {
     BelowRight,
     AboveRight,
+    BottomLeft,
+    InsideTop,
     TopLeft,
     TopRight,
 }
@@ -185,7 +273,7 @@ pub fn render_workspace_tour_highlight(target: Div, cx: &App) -> Div {
                 .border_color(palette.highlight_border)
                 .bg(palette.highlight_fill),
         )
-        .with_priority(3),
+        .with_priority(5),
     )
 }
 
@@ -203,7 +291,7 @@ pub(crate) fn render_workspace_tour_callout(
             palette,
             workspace_tour_handlers(step),
         ))
-        .with_priority(4),
+        .with_priority(6),
     )
 }
 
@@ -270,7 +358,7 @@ pub(crate) fn decorate_workspace_tour_target(
         deferred(render_workspace_tour_card(
             step, placement, palette, handlers,
         ))
-        .with_priority(4),
+        .with_priority(6),
     )
 }
 
@@ -341,7 +429,6 @@ fn render_workspace_tour_card(
         );
 
     let card = v_flex()
-        .w(px(280.))
         .gap_1p5()
         .px_3p5()
         .py_3()
@@ -349,14 +436,9 @@ fn render_workspace_tour_card(
         .bg(palette.card_background)
         .shadow_lg()
         .child(
-            Label::new(format!(
-                "Step {} of {} - {}",
-                step.index(),
-                WorkspaceTourStep::TOTAL,
-                step.target()
-            ))
-            .size(LabelSize::XSmall)
-            .color(Color::Custom(palette.step_text)),
+            Label::new(step.progress_label())
+                .size(LabelSize::XSmall)
+                .color(Color::Custom(palette.step_text)),
         )
         .child(
             Label::new(step.title())
@@ -380,6 +462,14 @@ fn render_workspace_tour_card(
                 .child(skip)
                 .child(next),
         );
+    let card = if matches!(
+        placement,
+        WorkspaceTourPlacement::BottomLeft | WorkspaceTourPlacement::InsideTop
+    ) {
+        card.w_full()
+    } else {
+        card.w(px(280.))
+    };
 
     match placement {
         WorkspaceTourPlacement::BelowRight => div()
@@ -393,6 +483,18 @@ fn render_workspace_tour_card(
             .bottom(relative(1.0))
             .right(px(12.))
             .mb(px(8.))
+            .child(card),
+        WorkspaceTourPlacement::BottomLeft => div()
+            .absolute()
+            .bottom(px(96.))
+            .left(px(12.))
+            .right(px(12.))
+            .child(card),
+        WorkspaceTourPlacement::InsideTop => div()
+            .absolute()
+            .top(px(12.))
+            .left(px(8.))
+            .right(px(8.))
             .child(card),
         WorkspaceTourPlacement::TopLeft => div().absolute().top(px(12.)).left(px(12.)).child(card),
         WorkspaceTourPlacement::TopRight => {

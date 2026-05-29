@@ -213,7 +213,7 @@ async fn test_git_tab_is_mutually_exclusive_with_other_workspace_mode_tabs(
 }
 
 #[gpui::test]
-async fn test_agent_workspace_tab_closes_side_docks(cx: &mut TestAppContext) {
+async fn test_agent_workspace_tab_closes_workspace_docks(cx: &mut TestAppContext) {
     init_test(cx);
     let fs = FakeFs::new(cx.executor());
     fs.insert_tree("/root_a", json!({ "file.txt": "" })).await;
@@ -227,7 +227,11 @@ async fn test_agent_workspace_tab_closes_side_docks(cx: &mut TestAppContext) {
 
     multi_workspace.update_in(cx, |multi_workspace, window, cx| {
         workspace.update(cx, |workspace, cx| {
-            for position in [DockPosition::Left, DockPosition::Right] {
+            for position in [
+                DockPosition::Left,
+                DockPosition::Bottom,
+                DockPosition::Right,
+            ] {
                 let dock = workspace.dock_at_position(position).clone();
                 dock.update(cx, |dock, cx| {
                     dock.set_open(true, window, cx);
@@ -252,6 +256,13 @@ async fn test_agent_workspace_tab_closes_side_docks(cx: &mut TestAppContext) {
                 .read(cx)
                 .is_open(),
             "right dock should close when Agent Workspace opens"
+        );
+        assert!(
+            !workspace
+                .dock_at_position(DockPosition::Bottom)
+                .read(cx)
+                .is_open(),
+            "bottom dock should close when Agent Workspace opens"
         );
     });
 }

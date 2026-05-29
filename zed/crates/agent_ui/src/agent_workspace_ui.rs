@@ -24,7 +24,7 @@ use crate::agent_panel::{
     BackboardAgentRunSummary,
 };
 use crate::thread_metadata_store::ThreadId;
-use zed_actions::agent::Chat;
+use zed_actions::{ConfigureBackboardApiKey, agent::Chat};
 
 const SHADOW_AGENT_PREVIEW_CARD_COUNT: usize = 6;
 const SHADOW_AGENT_PREVIEW_IMAGE_OPACITY: f32 = 0.3;
@@ -72,6 +72,7 @@ pub struct BackboardAgentWorkspacePage {
     observing_agent_panel: bool,
     pending_workspace_update: bool,
     workspace_update_task: Option<Task<()>>,
+    _config_task: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -90,6 +91,7 @@ impl BackboardAgentWorkspaceHeader {
 
     fn render(self, cx: &mut Context<BackboardAgentWorkspacePage>) -> AnyElement {
         let colors = cx.theme().colors();
+        let api_key_ready = BackboardAgentWorkspacePage::has_backboard_api_key();
         let agent_label = if self.agent_count == 1 {
             "agent"
         } else {
@@ -143,6 +145,10 @@ impl BackboardAgentWorkspaceHeader {
                             .start_icon(Icon::new(IconName::Plus))
                             .style(ButtonStyle::Subtle)
                             .size(ButtonSize::None)
+                            .disabled(!api_key_ready)
+                            .when(!api_key_ready, |button| {
+                                button.tooltip(Tooltip::text("Connect an API key to create agents"))
+                            })
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.create_chat(window, cx);
                             })),
@@ -184,6 +190,12 @@ impl BackboardAgentWorkspacePage {
                 }));
                 subscriptions.push(cx.subscribe_in(&panel, window, Self::handle_agent_panel_event));
             }
+            let config_changes = backboard::subscribe_config_changes();
+            let config_task = cx.spawn(async move |this, cx| {
+                while config_changes.recv().await.is_ok() {
+                    this.update(cx, |_, cx| cx.notify()).ok();
+                }
+            });
 
             Self {
                 workspace,
@@ -198,6 +210,7 @@ impl BackboardAgentWorkspacePage {
                 observing_agent_panel,
                 pending_workspace_update: false,
                 workspace_update_task: None,
+                _config_task: config_task,
                 _subscriptions: subscriptions,
             }
         })
@@ -273,6 +286,16 @@ impl BackboardAgentWorkspacePage {
             })
             .ok();
         }));
+    }
+
+    fn has_backboard_api_key() -> bool {
+        backboard::BackboardConfig::load_or_default()
+            .api_key()
+            .is_some()
+    }
+
+    fn open_api_key_settings(&self, window: &mut Window, cx: &mut Context<Self>) {
+        window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
     }
 
     fn ensure_agent_panel(
@@ -732,6 +755,91 @@ impl BackboardAgentWorkspacePage {
             )
             .vertical_scrollbar_for(&self.dashboard_scroll_handle, window, cx)
             .into_any_element()
+    }
+
+    fn render_api_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .h(px(28.))
+            .items_center()
+            .justify_center()
+            .gap(px(6.))
+            .bg(cx.theme().colors().element_background)
+            .child(
+                div()
+                    .size(px(6.))
+                    .rounded_full()
+                    .bg(cx.theme().status().warning_border),
+            )
+            .child(
+                Label::new("API not connected")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Disabled),
+            )
+    }
+
+    fn render_api_unavailable_workspace(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let editor_background = cx.theme().colors().editor_background;
+        let text_muted = cx.theme().colors().text_muted;
+        let text_disabled = cx.theme().colors().text_disabled;
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .bg(editor_background)
+            .child(self.render_api_status_bar(cx))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(14.))
+                    .px_6()
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size(IconSize::Custom(rems_from_px(28.)))
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        Label::new("Agents unavailable")
+                            .size(LabelSize::Custom(rems_from_px(16.)))
+                            .weight(FontWeight::BOLD)
+                            .color(Color::Default),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(360.))
+                            .text_center()
+                            .text_size(rems_from_px(13.))
+                            .text_color(text_muted)
+                            .line_height(relative(1.32))
+                            .child(
+                                "Connect an API key to create agents, run tasks, and generate workspace output.",
+                            ),
+                    )
+                    .child(
+                        Button::new("agent-workspace-connect-api-key", "Connect API key")
+                            .style(ButtonStyle::Filled)
+                            .size(ButtonSize::Large)
+                            .label_size(LabelSize::XSmall)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_api_key_settings(window, cx);
+                            })),
+                    )
+                    .child(
+                        Label::new("Continue without agents")
+                            .size(LabelSize::Small)
+                            .color(Color::Disabled),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(360.))
+                            .text_center()
+                            .text_ui_xs(cx)
+                            .text_color(text_disabled)
+                            .line_height(relative(1.32))
+                            .child("You can still browse files and inspect the workspace manually."),
+                    ),
+            )
     }
 
     fn render_batch_group(
@@ -2765,6 +2873,7 @@ impl BackboardAgentWorkspacePage {
 impl Render for BackboardAgentWorkspacePage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let summaries = self.summaries(cx);
+        let api_key_ready = Self::has_backboard_api_key();
         let selected_summary = self.selected_thread_id.and_then(|thread_id| {
             summaries
                 .iter()
@@ -2774,6 +2883,16 @@ impl Render for BackboardAgentWorkspacePage {
         if self.selected_thread_id.is_some() && selected_summary.is_none() {
             self.selected_thread_id = None;
         }
+
+        if !api_key_ready {
+            return v_flex()
+                .size_full()
+                .bg(cx.theme().colors().editor_background)
+                .key_context("BackboardAgentWorkspace")
+                .child(self.render_header(&summaries, false, cx))
+                .child(self.render_api_unavailable_workspace(cx));
+        }
+
         let agent_panel = self.ensure_agent_panel(window, cx);
         let draft_drawer_open = self.draft_drawer_open
             && selected_summary.is_none()

@@ -7077,9 +7077,20 @@ fn version_control_page() -> SettingsPage {
 }
 
 fn ai_page(cx: &App) -> SettingsPage {
-    fn general_section() -> [SettingsPageItem; 2] {
+    fn general_section() -> [SettingsPageItem; 3] {
         [
             SettingsPageItem::SectionHeader("General"),
+            SettingsPageItem::SubPageLink(SubPageLink {
+                title: "Backboard API Key".into(),
+                r#type: Default::default(),
+                json_path: Some("backboard.api_key"),
+                description: Some(
+                    "Configure the API key used by Backboard agents and edit predictions.".into(),
+                ),
+                in_json: false,
+                files: USER,
+                render: render_edit_prediction_setup_page,
+            }),
             SettingsPageItem::SettingItem(SettingItem {
                 title: "Threads Sidebar Side",
                 description: "Which side of the window the threads sidebar appears on.",

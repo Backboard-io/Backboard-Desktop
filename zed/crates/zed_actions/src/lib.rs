@@ -57,6 +57,8 @@ actions!(
         OpenKeymap,
         /// Opens account settings.
         OpenAccountSettings,
+        /// Opens the Backboard API key configuration UI.
+        ConfigureBackboardApiKey,
         /// Opens server settings.
         OpenServerSettings,
         /// Quits the application.

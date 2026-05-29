@@ -3,9 +3,10 @@ use anyhow::Context as _;
 use db::kvp::KeyValueStore;
 use fs::Fs;
 use gpui::{
-    Action, AnyElement, App, AppContext, AsyncWindowContext, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, Global, IntoElement, KeyContext, ObjectFit, Render, ScrollHandle,
-    SharedString, Subscription, Task, TaskExt as _, WeakEntity, Window, actions, img,
+    Action, Animation, AnimationExt as _, AnyElement, App, AppContext, AsyncWindowContext, Context,
+    DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, Hsla, IntoElement,
+    KeyContext, MouseButton, ObjectFit, Render, ScrollHandle, SharedString, Subscription, Task,
+    TaskExt as _, WeakEntity, Window, actions, img, pulsating_between, rgb,
 };
 use notifications::status_toast::StatusToast;
 use schemars::JsonSchema;
@@ -97,6 +98,125 @@ enum OnboardingStep {
     ExperiencePicker,
     Setup(ExperienceLevel),
     ImportSettings(ExperienceLevel),
+}
+
+const TOUR_PROMPT_OVERLAY: Hsla = Hsla {
+    h: 240. / 360.,
+    s: 0.33,
+    l: 0.03,
+    a: 0.20,
+};
+
+fn tour_prompt_color(hex: u32) -> Hsla {
+    Hsla::from(rgb(hex))
+}
+
+struct WorkspaceTourPromptModal {
+    focus_handle: FocusHandle,
+    start_tour: bool,
+}
+
+impl WorkspaceTourPromptModal {
+    fn new(cx: &mut Context<Self>) -> Self {
+        Self {
+            focus_handle: cx.focus_handle(),
+            start_tour: false,
+        }
+    }
+}
+
+impl Render for WorkspaceTourPromptModal {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .size_full()
+            .occlude()
+            .track_focus(&self.focus_handle)
+            .bg(TOUR_PROMPT_OVERLAY)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                v_flex().size_full().items_center().justify_center().child(
+                    v_flex()
+                        .w(px(420.))
+                        .max_w(px(420.))
+                        .rounded(px(14.))
+                        .border_1()
+                        .border_color(tour_prompt_color(0xeceff4))
+                        .bg(tour_prompt_color(0xfbfcfd))
+                        .shadow_lg()
+                        .px_6()
+                        .py_6()
+                        .gap_4()
+                        .child(
+                            v_flex()
+                                .gap_1()
+                                .child(
+                                    Label::new("Take a quick tour?")
+                                        .size(LabelSize::Default)
+                                        .color(Color::Custom(tour_prompt_color(0x141414))),
+                                )
+                                .child(
+                                    Label::new(
+                                        "Walk through the editor, composer, panels, and a sample repo.",
+                                    )
+                                    .size(LabelSize::Small)
+                                    .color(Color::Custom(tour_prompt_color(0x8f9bad))),
+                                ),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_3()
+                                .justify_end()
+                                .child(
+                                    Button::new("workspace-tour-prompt-skip", "Skip")
+                                        .style(ButtonStyle::Subtle)
+                                        .on_click(cx.listener(|_, _, _, cx| {
+                                            cx.emit(DismissEvent);
+                                        })),
+                                )
+                                .child(
+                                    Button::new("workspace-tour-prompt-start", "Take tour")
+                                        .style(ButtonStyle::Filled)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.start_tour = true;
+                                            cx.emit(DismissEvent);
+                                        })),
+                                ),
+                        ),
+                ),
+            )
+    }
+}
+
+impl Focusable for WorkspaceTourPromptModal {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl EventEmitter<DismissEvent> for WorkspaceTourPromptModal {}
+
+impl workspace::ModalView for WorkspaceTourPromptModal {
+    fn on_before_dismiss(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> workspace::DismissDecision {
+        if self.start_tour {
+            window.defer(cx, |window, cx| {
+                Onboarding::start_workspace_tour(window, cx);
+            });
+        }
+
+        workspace::DismissDecision::Dismiss(true)
+    }
+
+    fn render_bare(&self) -> bool {
+        true
+    }
 }
 
 actions!(
@@ -439,15 +559,17 @@ impl Onboarding {
             }
             ExperienceLevel::Developer | ExperienceLevel::Power => {
                 go_to_welcome_page(cx);
-                window.defer(cx, |_, cx| Self::show_api_key_modal_then_workspace_tour(cx));
+                window.defer(cx, |_, cx| {
+                    Self::show_api_key_modal_then_workspace_tour_prompt(cx)
+                });
             }
         }
     }
 
-    fn show_api_key_modal_then_workspace_tour(cx: &mut App) {
+    fn show_api_key_modal_then_workspace_tour_prompt(cx: &mut App) {
         with_active_or_new_workspace(cx, |workspace, window, cx| {
             if backboard_ui::backboard_api_key_is_connected() {
-                Self::start_workspace_tour(window, cx);
+                Self::show_workspace_tour_prompt(window, cx);
                 return;
             }
 
@@ -457,9 +579,17 @@ impl Onboarding {
                 cx,
                 |_| {},
                 Some(Box::new(|window, cx| {
-                    Self::start_workspace_tour(window, cx);
+                    Self::show_workspace_tour_prompt(window, cx);
                 })),
             );
+        });
+    }
+
+    fn show_workspace_tour_prompt(window: &mut Window, cx: &mut App) {
+        window.defer(cx, |_, cx| {
+            with_active_or_new_workspace(cx, |workspace, window, cx| {
+                workspace.toggle_modal(window, cx, |_, cx| WorkspaceTourPromptModal::new(cx));
+            });
         });
     }
 
@@ -517,6 +647,9 @@ impl Onboarding {
                             TOUR_TEST_PROMPT,
                         );
                     });
+                    if backboard_ui::backboard_api_key_is_connected() {
+                        multi_workspace.start_workspace_test_repo_tutorial(window, cx);
+                    }
                 })?;
 
             anyhow::Ok(())
@@ -659,8 +792,12 @@ console.log("sample app tests passed");
     }
 
     fn render_startup_logo(&self) -> impl IntoElement {
-        Vector::new(VectorName::ZedLogo, rems_from_px(132.), rems_from_px(210.))
-            .color(Color::Accent)
+        Vector::new(
+            VectorName::BackboardLogo,
+            rems_from_px(156.),
+            rems_from_px(210.),
+        )
+        .color(Color::Accent)
     }
 
     fn render_splash(&mut self, _cx: &mut Context<Self>) -> AnyElement {
@@ -669,92 +806,63 @@ console.log("sample app tests passed");
             .flex()
             .items_center()
             .justify_center()
-            .child(v_flex().items_center().child(self.render_startup_logo()))
+            .child(
+                v_flex().items_center().child(
+                    div().child(self.render_startup_logo()).with_animation(
+                        "onboarding-splash-logo-pulse",
+                        Animation::new(Duration::from_millis(1600))
+                            .repeat()
+                            .with_easing(pulsating_between(0.72, 1.)),
+                        |element, opacity| element.opacity(opacity),
+                    ),
+                ),
+            )
             .into_any_element()
     }
 
     fn render_welcome(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        h_flex()
+        v_flex()
             .w_full()
             .min_h(rems_from_px(620.))
             .items_center()
             .justify_center()
-            .gap_10()
-            .flex_wrap()
+            .gap_8()
             .child(
                 v_flex()
-                    .w(rems_from_px(400.))
+                    .w_full()
+                    .max_w(rems_from_px(460.))
                     .items_center()
-                    .gap_6()
-                    .child(Vector::square(VectorName::ZedLogo, rems_from_px(56.)))
+                    .gap_5()
+                    .child(Vector::new(
+                        VectorName::BackboardLogo,
+                        rems_from_px(48.),
+                        rems_from_px(64.),
+                    ))
                     .child(
                         v_flex()
+                            .w_full()
                             .items_center()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .w_full()
-                                    .text_center()
-                                    .child(Headline::new("Backboard Studio").size(HeadlineSize::Large)),
-                            )
+                            .gap_2()
                             .child(
                                 div().w_full().text_center().child(
-                                    Label::new("Your AI-native workspace")
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
-                                ),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div().w_full().text_center().child(
-                                    Headline::new("Make yourself at home")
+                                    Headline::new("Welcome to Backboard Studio")
                                         .size(HeadlineSize::XLarge),
                                 ),
                             )
                             .child(
                                 div().w_full().text_center().child(
-                                    Label::new(
-                                        "Start with a space that feels familiar, then shape it around the way you like to build.",
-                                    )
-                                    .size(LabelSize::Large)
-                                    .color(Color::Muted),
-                                )
+                                    Label::new("Let's get your workspace set up.")
+                                        .size(LabelSize::Large)
+                                        .color(Color::Muted),
+                                ),
                             ),
                     )
                     .child(
-                        h_flex()
-                            .gap_2()
-                            .justify_center()
-                            .flex_wrap()
-                            .child(Self::render_welcome_pill(
-                                IconName::Sparkle,
-                                "Pick your flow",
-                                Color::Accent,
-                                cx,
-                            ))
-                            .child(Self::render_welcome_pill(
-                                IconName::Settings,
-                                "Bring your setup",
-                                Color::Created,
-                                cx,
-                            ))
-                            .child(Self::render_welcome_pill(
-                                IconName::Code,
-                                "Keep your tools close",
-                                Color::Modified,
-                                cx,
-                            )),
-                    )
-                    .child(
                         div().rounded_full().overflow_hidden().child(
-                            Button::new("continue-from-welcome", "Get Started")
+                            Button::new("continue-from-welcome", "Continue")
                                 .style(ButtonStyle::Filled)
                                 .size(ButtonSize::Large)
-                                .width(rems_from_px(180.))
+                                .width(rems_from_px(172.))
                                 .end_icon(Icon::new(IconName::ArrowRight).size(IconSize::Small))
                                 .on_click(cx.listener(|this, _, _window, cx| {
                                     this.step = OnboardingStep::ExperiencePicker;
@@ -764,25 +872,6 @@ console.log("sample app tests passed");
                     ),
             )
             .into_any_element()
-    }
-
-    fn render_welcome_pill(
-        icon: IconName,
-        label: &'static str,
-        color: Color,
-        cx: &Context<Self>,
-    ) -> impl IntoElement {
-        h_flex()
-            .items_center()
-            .gap_1p5()
-            .rounded_full()
-            .border_1()
-            .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().element_background.opacity(0.55))
-            .px_2p5()
-            .py_1()
-            .child(Icon::new(icon).size(IconSize::Small).color(color))
-            .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
     }
 
     fn render_experience_picker(&mut self, cx: &mut Context<Self>) -> AnyElement {
