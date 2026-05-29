@@ -39,6 +39,8 @@ pub struct SendMessageRequest {
     #[serde(default = "default_web_search")]
     pub web_search: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_calls: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
 }
 
@@ -60,6 +62,7 @@ impl Default for SendMessageRequest {
             thinking: None,
             tools: None,
             web_search: default_web_search(),
+            mcp_calls: None,
             max_tokens: None,
         }
     }

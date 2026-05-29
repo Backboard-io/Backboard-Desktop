@@ -1,0 +1,8 @@
+{
+  /// Your Supabase access token <sbp_...>
+  "supabase_access_token": "YOUR_TOKEN",
+  /// Read-only flag to restrict write API access
+  "read_only": false
+  /// Project reference to restrict server access to a specific project
+  // "project_ref": "<project-ref>"
+}

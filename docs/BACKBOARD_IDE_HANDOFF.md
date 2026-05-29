@@ -132,6 +132,7 @@ Current native composer controls are delivered through session config options, s
 - `Image`: `Off`, `Auto`; maps to `image_generation=auto`, `image_model_provider=openrouter`, and `image_model_name=google/gemini-3.1-flash-image-preview`.
 - `Voice`: `Off`, `TTS`, `STT`, `Conversation`; maps to the REST message `voice` JSON and `send_to_llm`.
 - `Live Voice`: `Off`, `On`; prepares the realtime WebSocket URL/setup payload for `wss://.../api/threads/messages?api_key=...`.
+- `MCP Calls / Figma`: `Off`, `On`; maps to `mcp_calls=["figma"]` when enabled.
 
 REST voice defaults:
 
@@ -242,7 +243,7 @@ Recent checks run during the migration/debug pass:
 
 Current native unit coverage includes:
 
-- Backboard message form serialization for Web/Image/Voice fields.
+- Backboard message form serialization for Web/Image/Voice/MCP fields.
 - Multipart voice request building with `audio_file`.
 - Realtime voice URL generation.
 - Native media/search/voice config chip inventory.
@@ -482,7 +483,7 @@ This section captures the commits that were missing from the older handoff audit
   - Added `CLI_VS_IDE_SPEED_NOTES.md` and broader UI polish across agent UI, editor, terminal, panels, dock, tabs, and status bar. The key product note: the IDE feels faster because the native Rust path removes CLI-side client overhead, not because it lowers model/tool quality.
 
 - `5fcbede3` - 2026-05-20 - Voice/media support and UI controls.
-  - Added feature settings for Web/Image/Voice/Live Voice, REST STT/TTS/conversation defaults, realtime voice setup, multipart audio upload, `send_to_llm`, media/STT/TTS stream handling, generated resource links, and compact session control chips.
+  - Added feature settings for Web/Image/Voice/Live Voice/Figma MCP, REST STT/TTS/conversation defaults, realtime voice setup, multipart audio upload, `send_to_llm`, media/STT/TTS stream handling, generated resource links, and compact session control chips.
 
 - `a8fdb493` - 2026-05-20 - Inter, JetBrains Mono, and Backboard Tints.
   - Bundled Inter and JetBrains Mono font files and OFL licenses, added `assets/themes/backboard/backboard_tints.json`, and updated default/initial settings to use Inter for UI and JetBrains Mono for buffers.
@@ -894,7 +895,7 @@ What the user sees:
 - Backboard-branded native agent conversation.
 - Composer placeholder: "Message Backboard - @ to include context".
 - Backboard/model pill opening the ACP model selector.
-- Mode/config controls for Mode, Intensity, Web, Image, Voice, and Live Voice.
+- Mode/config controls for Mode, Intensity, Web, Image, Voice, Live Voice, and Figma MCP calls.
 - Permission prompts for tools/commands.
 - Tool cards, grouped exploration, terminal cards, diff cards, plan state, context-window tokens, cost, and speed metrics.
 
@@ -1235,7 +1236,7 @@ Relevant files:
 
 ### Intensity
 
-The chat composer now exposes native Backboard config chips for `Mode`, `Intensity`, `Web`, `Image`, `Voice`, and `Live Voice`. `Intensity` is separate from model selection and is meant to control speed/cost feel by changing how much extra reasoning/work the native runtime requests when supported.
+The chat composer now exposes native Backboard config chips for `Mode`, `Intensity`, `Web`, `Image`, `Voice`, `Live Voice`, and `Figma` under `MCP Calls`. `Intensity` is separate from model selection and is meant to control speed/cost feel by changing how much extra reasoning/work the native runtime requests when supported.
 
 Relevant files:
 
@@ -1255,7 +1256,7 @@ Current behavior:
 
 - Default runtime mode is `free`.
 - `Fast`, `Balanced`, and `Deep` are carried in the native request/session state instead of the Python `_thinking_payload()` path.
-- Web/Image/Voice/Live Voice feature chips feed native request metadata and stream handling.
+- Web/Image/Voice/Live Voice/Figma MCP feature chips feed native request metadata and stream handling.
 
 Important nuance:
 
@@ -2214,7 +2215,7 @@ The current Backboard IDE work has touched or added these important files. This 
   - Backboard branding is applied through `set_trigger_brand(...)`; do not replace the trigger with a custom clickable `div`, because GPUI popover anchoring depends on the rendered trigger.
 
 - `ide/zed/crates/agent_ui/src/config_options.rs`
-  - Renders ACP config option controls such as Backboard `Mode`, `Intensity`, `Web`, `Image`, `Voice`, and `Live Voice`.
+  - Renders ACP config option controls such as Backboard `Mode`, `Intensity`, `Web`, `Image`, `Voice`, `Live Voice`, and `Figma` under `MCP Calls`.
   - Current dirty work adds Agent Options row cycling and custom picker popover ids so the compact session chips behave consistently.
 
 ### Agent Workspace And Retained Runtime

@@ -1,0 +1,10 @@
+id = "mcp-server-supabase"
+name = "Supabase MCP Server"
+description = "Model Context Protocol Server for Supabase"
+version = "0.0.3"
+schema_version = 1
+authors = ["Sergii Maksymov <ua.maximoff@gmail.com>"]
+repository = "https://github.com/maximoffua/zed-mcp-server-supabase"
+
+[context_servers.mcp-server-supabase]
+name = "Supabase MCP Server"

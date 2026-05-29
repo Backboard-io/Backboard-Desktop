@@ -1321,8 +1321,6 @@
       "ctrl--": ["backboard::DecreaseUiFontSize", { "persist": false }],
       "ctrl-0": ["backboard::ResetUiFontSize", { "persist": false }],
       "ctrl-enter": "onboarding::Finish",
-      "alt-shift-l": "onboarding::SignIn",
-      "alt-shift-a": "onboarding::OpenAccount",
     },
   },
   {

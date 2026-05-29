@@ -69,8 +69,6 @@ use settings::{
     initial_local_debug_tasks_content, initial_project_settings_content, initial_tasks_content,
     update_settings_file,
 };
-use sidebar::Sidebar;
-
 use std::{
     borrow::Cow,
     path::{Path, PathBuf},
@@ -196,7 +194,12 @@ pub fn init(cx: &mut App) {
                         mw.interface_mode,
                         next
                     );
-                    mw.set_interface_mode(next, window, cx);
+                    match next {
+                        workspace::InterfaceMode::Expert => mw.open_code_editor(window, cx),
+                        workspace::InterfaceMode::Simple => {
+                            mw.set_interface_mode(next, window, cx);
+                        }
+                    }
                 })
                 .log_err();
 
@@ -489,7 +492,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                 .unwrap_or(true)
         });
 
-        let window_handle = window.window_handle();
         let multi_workspace_handle = cx.entity();
         cx.subscribe_in(
             &multi_workspace_handle,
@@ -543,8 +545,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         .detach();
 
         {
-            use workspace::InterfaceMode;
-
             // Always create the beginner chat view so it's ready when the user switches to Chat.
             let workspace_weak = _multi_workspace.workspace().downgrade();
             let multi_weak = cx.weak_entity();
@@ -555,7 +555,7 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                 use beginner_ui::BeginnerWorkspaceEvent;
                 match event {
                     BeginnerWorkspaceEvent::SwitchToEditor => {
-                        mw.set_interface_mode(InterfaceMode::Expert, window, cx);
+                        mw.open_code_editor(window, cx);
                     }
                 }
             })
@@ -581,18 +581,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
                 jarvis_code_editor_context(_multi_workspace.workspace(), window, cx);
             _multi_workspace.set_jarvis_code_editor_context(chat_view, thread_summaries, cx);
         }
-
-        cx.defer(move |cx| {
-            window_handle
-                .update(cx, |_, window, cx| {
-                    let sidebar =
-                        cx.new(|cx| Sidebar::new(multi_workspace_handle.clone(), window, cx));
-                    multi_workspace_handle.update(cx, |multi_workspace, cx| {
-                        multi_workspace.register_sidebar(sidebar, cx);
-                    });
-                })
-                .ok();
-        });
     })
     .detach();
 
@@ -664,8 +652,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         });
 
         let search_button = cx.new(|_| search::search_status_button::SearchButton::new());
-        let diagnostic_summary =
-            cx.new(|cx| diagnostics::items::DiagnosticIndicator::new(workspace, cx));
         let active_file_name = cx.new(|_| workspace::active_file_name::ActiveFileName::new());
         let activity_indicator = activity_indicator::ActivityIndicator::new(
             workspace,
@@ -702,7 +688,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_left_item(branch_status_button, window, cx);
             status_bar.add_left_item(search_button, window, cx);
             status_bar.add_left_item(lsp_button, window, cx);
-            status_bar.add_left_item(diagnostic_summary, window, cx);
             status_bar.add_left_item(active_file_name, window, cx);
             status_bar.add_left_item(merge_conflict_indicator, window, cx);
             status_bar.add_left_item(activity_indicator, window, cx);
@@ -1349,6 +1334,74 @@ fn register_actions(
                     });
                 } else {
                     theme_settings::decrease_buffer_font_size(cx);
+                }
+            }
+        })
+        .register_action({
+            let fs = app_state.fs.clone();
+            move |_, action: &zed_actions::IncreaseAllZoom, _window, cx| {
+                let delta = px(1.0);
+                if action.persist {
+                    update_settings_file(fs.clone(), cx, move |settings, cx| {
+                        let buffer_font_size = theme_settings::clamp_font_size(
+                            ThemeSettings::get_global(cx).buffer_font_size(cx) + delta,
+                        );
+                        let ui_font_size =
+                            theme_settings::ui_font_size_for_default_text_size(buffer_font_size);
+
+                        let _ = settings
+                            .theme
+                            .ui_font_size
+                            .insert(f32::from(ui_font_size).into());
+                        let _ = settings
+                            .theme
+                            .buffer_font_size
+                            .insert(f32::from(buffer_font_size).into());
+                        let _ = settings
+                            .theme
+                            .agent_ui_font_size
+                            .insert(f32::from(ui_font_size).into());
+                        let _ = settings
+                            .theme
+                            .agent_buffer_font_size
+                            .insert(f32::from(buffer_font_size).into());
+                    });
+                } else {
+                    theme_settings::adjust_all_font_sizes(cx, delta);
+                }
+            }
+        })
+        .register_action({
+            let fs = app_state.fs.clone();
+            move |_, action: &zed_actions::DecreaseAllZoom, _window, cx| {
+                let delta = px(-1.0);
+                if action.persist {
+                    update_settings_file(fs.clone(), cx, move |settings, cx| {
+                        let buffer_font_size = theme_settings::clamp_font_size(
+                            ThemeSettings::get_global(cx).buffer_font_size(cx) + delta,
+                        );
+                        let ui_font_size =
+                            theme_settings::ui_font_size_for_default_text_size(buffer_font_size);
+
+                        let _ = settings
+                            .theme
+                            .ui_font_size
+                            .insert(f32::from(ui_font_size).into());
+                        let _ = settings
+                            .theme
+                            .buffer_font_size
+                            .insert(f32::from(buffer_font_size).into());
+                        let _ = settings
+                            .theme
+                            .agent_ui_font_size
+                            .insert(f32::from(ui_font_size).into());
+                        let _ = settings
+                            .theme
+                            .agent_buffer_font_size
+                            .insert(f32::from(buffer_font_size).into());
+                    });
+                } else {
+                    theme_settings::adjust_all_font_sizes(cx, delta);
                 }
             }
         })

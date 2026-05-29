@@ -155,6 +155,24 @@ pub struct IncreaseBufferFontSize {
     pub persist: bool,
 }
 
+/// Decreases all zoom levels.
+#[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::DecreaseAllZoom"])]
+#[serde(deny_unknown_fields)]
+pub struct DecreaseAllZoom {
+    #[serde(default)]
+    pub persist: bool,
+}
+
+/// Increases all zoom levels.
+#[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
+#[action(namespace = backboard, deprecated_aliases = ["zed::IncreaseAllZoom"])]
+#[serde(deny_unknown_fields)]
+pub struct IncreaseAllZoom {
+    #[serde(default)]
+    pub persist: bool,
+}
+
 /// Opens the settings editor at a specific path.
 #[derive(PartialEq, Clone, Debug, Deserialize, JsonSchema, Action)]
 #[action(namespace = backboard, deprecated_aliases = ["zed::OpenSettingsAt"])]
@@ -291,7 +309,7 @@ pub enum NewWorktreeBranchTarget {
 #[action(namespace = git)]
 #[serde(deny_unknown_fields)]
 pub struct CreateWorktree {
-    /// When this is None, Zed will randomly generate a worktree name.
+    /// When this is None, Backboard will randomly generate a worktree name.
     pub worktree_name: Option<String>,
     pub branch_target: NewWorktreeBranchTarget,
 }
@@ -387,7 +405,7 @@ pub mod feedback {
     actions!(
         feedback,
         [
-            /// Opens email client to send feedback to Zed support.
+            /// Opens email client to send feedback to Backboard support.
             EmailZed,
             /// Opens the bug report form.
             FileBugReport,

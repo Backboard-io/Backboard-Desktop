@@ -25,7 +25,7 @@ use terminal::TerminalBuilder;
 use terminal::terminal_settings::{AlternateScroll, CursorShape};
 use walkdir::WalkDir;
 
-use super::{BackboardNativeState, SessionRuntime, index, rounded_ms};
+use super::{BackboardNativeState, SessionRuntime, index, mcp, rounded_ms};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_SEARCH_RESULTS: usize = 120;
@@ -237,6 +237,14 @@ async fn execute_tool_call(
         return Ok(output);
     }
 
+    if let Some(mcp_tool) = state.mcp_tool_for_name(&runtime.session_id, &call.name) {
+        let output = mcp::execute_tool(runtime, &mcp_tool, &call.args, cx)
+            .await
+            .unwrap_or_else(|err| json!({"success": false, "error": err.to_string()}));
+        emit_tool_result(state, runtime, &call, &output, cx)?;
+        return Ok(output);
+    }
+
     match call.name.as_str() {
         "read_file" | "list_dir" | "glob" | "glob_file_search" | "grep" | "codebase_search"
         | "read_lints" | "web_search" | "web_fetch" => {
@@ -338,6 +346,9 @@ async fn execute_file_mutation(
 
     let write_started_at = Instant::now();
     if call.name == "delete_file" {
+        state
+            .record_path_tree_before_mutation(&runtime.session_id, &path)
+            .with_context(|| format!("snapshotting {}", path.display()))?;
         let executor = cx.background_executor().clone();
         executor
             .spawn({
@@ -353,6 +364,9 @@ async fn execute_file_mutation(
             })
             .await?;
     } else if old_text.is_some() {
+        state
+            .record_path_before_mutation(&runtime.session_id, &path)
+            .with_context(|| format!("snapshotting {}", path.display()))?;
         runtime
             .thread
             .update(cx, |thread, cx| {
@@ -361,6 +375,9 @@ async fn execute_file_mutation(
             .map_err(|err| anyhow!(err))?
             .await?;
     } else {
+        state
+            .record_path_before_mutation(&runtime.session_id, &path)
+            .with_context(|| format!("snapshotting {}", path.display()))?;
         let executor = cx.background_executor().clone();
         executor
             .spawn({
@@ -412,6 +429,9 @@ async fn execute_create_directory(
         .raw_input(Some(call.args.clone()))
         .meta(meta_with_tool_name(&call.name));
     emit_tool_call(state.clone(), runtime, tool_call, cx)?;
+    state
+        .record_path_before_mutation(&runtime.session_id, &path)
+        .with_context(|| format!("snapshotting {}", path.display()))?;
     let executor = cx.background_executor().clone();
     let write_started_at = Instant::now();
     executor

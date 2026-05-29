@@ -7,18 +7,21 @@ use anyhow::{Context as _, Result, anyhow};
 use editor::Editor;
 use futures::StreamExt as _;
 use gpui::{
-    Action, AnyElement, App, AppContext as _, AsyncWindowContext, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, ParentElement, Render, Styled, Task, WeakEntity, Window,
-    actions, div, px,
+    Action, AnyElement, App, AppContext as _, AsyncWindowContext, Context, DismissEvent, Div,
+    Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, MouseButton, ParentElement,
+    Render, SharedString, Stateful, Styled, Subscription, Task, WeakEntity, Window, actions, div,
+    px, rgb,
 };
 use serde_json::{Value, json};
 use ui::{
     Button, ButtonStyle, Color, CommonAnimationExt, Divider, Icon, IconButton, IconName, Label,
     LabelSize, Tooltip, prelude::*,
 };
+use util::ResultExt;
 use workspace::{
-    Workspace,
+    ModalView, Workspace, WorkspaceTourStep,
     dock::{DockPosition, Panel, PanelEvent},
+    render_workspace_tour_highlight,
 };
 use zed_actions::ConfigureBackboardApiKey;
 
@@ -124,6 +127,66 @@ actions!(
     ]
 );
 
+const API_MODAL_OVERLAY: Hsla = Hsla {
+    h: 240. / 360.,
+    s: 0.33,
+    l: 0.03,
+    a: 0.20,
+};
+
+fn api_modal_color(hex: u32) -> Hsla {
+    Hsla::from(rgb(hex))
+}
+
+pub fn backboard_api_key_is_connected() -> bool {
+    backboard::BackboardConfig::load_or_default()
+        .api_key()
+        .is_some()
+}
+
+pub fn show_backboard_api_key_modal(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut App,
+    on_api_key_state_changed: impl Fn(&mut App) + 'static,
+) {
+    show_backboard_api_key_modal_with_dismiss(
+        workspace,
+        window,
+        cx,
+        on_api_key_state_changed,
+        None,
+    );
+}
+
+pub fn show_backboard_api_key_modal_with_dismiss(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut App,
+    on_api_key_state_changed: impl Fn(&mut App) + 'static,
+    on_dismiss: Option<Box<dyn FnOnce(&mut Window, &mut App) + 'static>>,
+) {
+    let on_api_key_state_changed = Box::new(on_api_key_state_changed);
+    workspace.toggle_modal(window, cx, move |window, cx| {
+        BackboardApiKeyModal::new(window, cx, on_api_key_state_changed, on_dismiss)
+    });
+}
+
+pub fn open_backboard_panel_with_prompt(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+    prompt: impl Into<String>,
+) {
+    workspace.open_panel::<BackboardPanel>(window, cx);
+    if let Some(panel) = workspace.panel::<BackboardPanel>(cx) {
+        let prompt = prompt.into();
+        panel.update(cx, |panel, cx| {
+            panel.set_composer_prompt(prompt, window, cx);
+        });
+    }
+}
+
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
@@ -174,6 +237,7 @@ pub struct BackboardPanel {
     selected_model: Option<String>,
     configuring_api_key: bool,
     is_zoomed: bool,
+    _workspace_subscription: Option<Subscription>,
     _config_task: Task<()>,
 }
 
@@ -205,6 +269,36 @@ enum BackboardUiEvent {
     FileChange(FileChange),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ApiKeyModalState {
+    EnterKey,
+    UseWithoutApi,
+    Verifying,
+    Success,
+    Error,
+}
+
+#[derive(Clone, Copy)]
+enum ApiKeyModalButtonStyle {
+    Primary,
+    DisabledPrimary,
+    Secondary,
+    Text,
+    MutedText,
+}
+
+type ApiKeyStateChangedCallback = Box<dyn Fn(&mut App)>;
+type ApiKeyDismissCallback = Box<dyn FnOnce(&mut Window, &mut App)>;
+
+struct BackboardApiKeyModal {
+    focus_handle: FocusHandle,
+    api_key_editor: Entity<Editor>,
+    state: ApiKeyModalState,
+    verification_error: Option<String>,
+    on_api_key_state_changed: ApiKeyStateChangedCallback,
+    on_dismiss: Option<ApiKeyDismissCallback>,
+}
+
 impl BackboardMessage {
     fn compact(role: MessageRole, body: impl Into<String>) -> Self {
         Self {
@@ -220,6 +314,604 @@ impl BackboardMessage {
             body: body.into(),
             full_body: true,
         }
+    }
+}
+
+impl BackboardApiKeyModal {
+    fn new(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        on_api_key_state_changed: ApiKeyStateChangedCallback,
+        on_dismiss: Option<ApiKeyDismissCallback>,
+    ) -> Self {
+        let api_key_editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text("bbk_****************", window, cx);
+            editor.set_show_gutter(false, cx);
+            editor.set_show_wrap_guides(false, cx);
+            editor.set_show_indent_guides(false, cx);
+            editor
+        });
+
+        Self {
+            focus_handle: cx.focus_handle(),
+            api_key_editor,
+            state: ApiKeyModalState::EnterKey,
+            verification_error: None,
+            on_api_key_state_changed,
+            on_dismiss,
+        }
+    }
+
+    fn set_state(&mut self, state: ApiKeyModalState, cx: &mut Context<Self>) {
+        self.state = state;
+        cx.notify();
+    }
+
+    fn notify_api_key_state_changed(&self, cx: &mut App) {
+        (self.on_api_key_state_changed)(cx);
+    }
+
+    fn verify_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state == ApiKeyModalState::Verifying {
+            return;
+        }
+
+        let api_key = self.api_key_editor.read(cx).text(cx).trim().to_string();
+        if api_key.is_empty() {
+            self.verification_error = Some("Paste your API key first.".to_string());
+            self.api_key_editor.focus_handle(cx).focus(window, cx);
+            self.state = ApiKeyModalState::Error;
+            cx.notify();
+            return;
+        }
+
+        self.state = ApiKeyModalState::Verifying;
+        self.verification_error = None;
+        cx.notify();
+
+        let base_url = backboard::BackboardConfig::load_or_default().base_url();
+        let verification_task = gpui_tokio::Tokio::spawn_result(cx, async move {
+            let client = backboard::BackboardClient::new(base_url, api_key.clone());
+            client
+                .list_providers()
+                .await
+                .context("verifying Backboard API access")?;
+            backboard::BackboardConfig::save_api_key_for_current_env(api_key)
+                .context("saving Backboard API key")?;
+            anyhow::Ok(())
+        });
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = verification_task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.state = ApiKeyModalState::Success;
+                        this.verification_error = None;
+                        this.notify_api_key_state_changed(cx);
+                    }
+                    Err(error) => {
+                        this.state = ApiKeyModalState::Error;
+                        this.verification_error = Some(format!("{error:#}"));
+                    }
+                }
+                cx.notify();
+            })
+            .log_err();
+        })
+        .detach();
+    }
+
+    fn render_header(&self) -> impl IntoElement {
+        let (title, subtitle, title_color) = match self.state {
+            ApiKeyModalState::EnterKey => (
+                "Connect API key",
+                "Add your API key to run agents and generate workspace output.",
+                api_modal_color(0x141414),
+            ),
+            ApiKeyModalState::UseWithoutApi => (
+                "Use without API?",
+                "Some workspace features will be unavailable.",
+                api_modal_color(0x141414),
+            ),
+            ApiKeyModalState::Verifying => (
+                "Verifying API key...",
+                "Checking workspace permissions.",
+                api_modal_color(0x141414),
+            ),
+            ApiKeyModalState::Success => (
+                "API access ready",
+                "Your workspace can now run agents and generate output.",
+                api_modal_color(0x141414),
+            ),
+            ApiKeyModalState::Error => (
+                "Couldn't verify API key",
+                "Check the key and try again.",
+                api_modal_color(0xd83e64),
+            ),
+        };
+
+        v_flex()
+            .px_6()
+            .pt_6()
+            .pb_4()
+            .gap_1()
+            .child(
+                Label::new(title)
+                    .size(LabelSize::Default)
+                    .weight(FontWeight::SEMIBOLD)
+                    .color(Color::Custom(title_color)),
+            )
+            .child(
+                Label::new(subtitle)
+                    .size(LabelSize::Small)
+                    .color(Color::Custom(api_modal_color(0x8f9bad))),
+            )
+    }
+
+    fn render_api_key_field(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .gap_1p5()
+            .child(
+                Label::new("API key")
+                    .size(LabelSize::Small)
+                    .color(Color::Custom(api_modal_color(0x141414))),
+            )
+            .child(
+                div()
+                    .h(px(36.))
+                    .w_full()
+                    .rounded(px(8.))
+                    .border_1()
+                    .border_color(api_modal_color(0xeceff4))
+                    .bg(api_modal_color(0xf5f7fa))
+                    .px_2()
+                    .py_1()
+                    .child(self.api_key_editor.clone()),
+            )
+            .child(
+                h_flex()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        Label::new("Your key is stored locally for this workspace.")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Custom(api_modal_color(0x8f9bad))),
+                    )
+                    .child(
+                        h_flex()
+                            .id("backboard-api-key-help")
+                            .cursor_pointer()
+                            .child(
+                                Label::new("Where do I find my API key?")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Custom(api_modal_color(0x5b8cff))),
+                            )
+                            .on_click(|_, _, cx| {
+                                cx.open_url("https://app.backboard.io/dashboard");
+                            }),
+                    ),
+            )
+    }
+
+    fn render_status_card(
+        title: impl Into<SharedString>,
+        detail: impl Into<SharedString>,
+        dot_color: Hsla,
+        title_color: Hsla,
+    ) -> impl IntoElement {
+        h_flex()
+            .w_full()
+            .gap(px(10.))
+            .items_start()
+            .rounded(px(8.))
+            .bg(api_modal_color(0xf5f7fa))
+            .px_3()
+            .py_3()
+            .child(div().mt(px(5.)).size(px(8.)).rounded_full().bg(dot_color))
+            .child(
+                v_flex()
+                    .gap_0p5()
+                    .child(
+                        Label::new(title)
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD)
+                            .color(Color::Custom(title_color)),
+                    )
+                    .child(
+                        Label::new(detail)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Custom(api_modal_color(0xaeb8c6))),
+                    ),
+            )
+    }
+
+    fn render_access_row(
+        icon: IconName,
+        color: Hsla,
+        label: &'static str,
+        label_color: Hsla,
+    ) -> impl IntoElement {
+        h_flex()
+            .gap_2()
+            .items_center()
+            .child(
+                Icon::new(icon)
+                    .size(IconSize::XSmall)
+                    .color(Color::Custom(color)),
+            )
+            .child(
+                Label::new(label)
+                    .size(LabelSize::Small)
+                    .color(Color::Custom(label_color)),
+            )
+    }
+
+    fn render_button(
+        id: &'static str,
+        label: &'static str,
+        style: ApiKeyModalButtonStyle,
+    ) -> Stateful<Div> {
+        let (background, text_color, disabled) = match style {
+            ApiKeyModalButtonStyle::Primary => {
+                (api_modal_color(0x5b8cff), api_modal_color(0xffffff), false)
+            }
+            ApiKeyModalButtonStyle::DisabledPrimary => (
+                api_modal_color(0x5b8cff).opacity(0.40),
+                api_modal_color(0xffffff),
+                true,
+            ),
+            ApiKeyModalButtonStyle::Secondary => {
+                (api_modal_color(0xeceff4), api_modal_color(0x141414), false)
+            }
+            ApiKeyModalButtonStyle::Text => (
+                api_modal_color(0xffffff).opacity(0.0),
+                api_modal_color(0x8f9bad),
+                false,
+            ),
+            ApiKeyModalButtonStyle::MutedText => (
+                api_modal_color(0xffffff).opacity(0.0),
+                api_modal_color(0xaeb8c6),
+                false,
+            ),
+        };
+
+        h_flex()
+            .id(id)
+            .h(px(36.))
+            .items_center()
+            .justify_center()
+            .px_5()
+            .rounded(px(8.))
+            .bg(background)
+            .when(!disabled, |this| this.cursor_pointer())
+            .child(
+                Label::new(label)
+                    .size(LabelSize::Small)
+                    .weight(FontWeight::SEMIBOLD)
+                    .color(Color::Custom(text_color)),
+            )
+    }
+
+    fn render_enter_key(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex().px_6().pb_4().child(self.render_api_key_field(cx))
+    }
+
+    fn render_use_without_api(&self) -> impl IntoElement {
+        v_flex()
+            .px_6()
+            .pb_4()
+            .gap_3()
+            .child(
+                div()
+                    .text_sm()
+                    .line_height(gpui::relative(1.35))
+                    .text_color(api_modal_color(0x8f9bad))
+                    .child("You can continue without an API key, but agents, generated outputs, and API-powered workspace actions will be disabled until you connect one."),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(Self::render_access_row(
+                        IconName::Dash,
+                        api_modal_color(0xddc300),
+                        "Agents unavailable",
+                        api_modal_color(0x8f9bad),
+                    ))
+                    .child(Self::render_access_row(
+                        IconName::Dash,
+                        api_modal_color(0xddc300),
+                        "Generated artifacts unavailable",
+                        api_modal_color(0x8f9bad),
+                    ))
+                    .child(Self::render_access_row(
+                        IconName::Dash,
+                        api_modal_color(0xddc300),
+                        "API-powered edits unavailable",
+                        api_modal_color(0x8f9bad),
+                    ))
+                    .child(Self::render_access_row(
+                        IconName::Check,
+                        api_modal_color(0x2f9f5b),
+                        "Manual workspace browsing still available",
+                        api_modal_color(0x141414),
+                    )),
+            )
+    }
+
+    fn render_verifying(&self) -> impl IntoElement {
+        v_flex().px_6().pb_4().child(Self::render_status_card(
+            "Confirming access",
+            "Verifying key and workspace permissions.",
+            api_modal_color(0xaeb8c6),
+            api_modal_color(0x141414),
+        ))
+    }
+
+    fn render_success(&self) -> impl IntoElement {
+        v_flex()
+            .px_6()
+            .pb_4()
+            .gap_3()
+            .child(Self::render_status_card(
+                "API access ready",
+                "Agents can now run tasks and generate output.",
+                api_modal_color(0x2f9f5b),
+                api_modal_color(0x2f9f5b),
+            ))
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(Self::render_access_row(
+                        IconName::Check,
+                        api_modal_color(0x2f9f5b),
+                        "API key verified",
+                        api_modal_color(0x141414),
+                    ))
+                    .child(Self::render_access_row(
+                        IconName::Check,
+                        api_modal_color(0x2f9f5b),
+                        "Workspace permissions ready",
+                        api_modal_color(0x141414),
+                    ))
+                    .child(Self::render_access_row(
+                        IconName::Check,
+                        api_modal_color(0x2f9f5b),
+                        "Agents enabled",
+                        api_modal_color(0x141414),
+                    )),
+            )
+    }
+
+    fn render_error(&self) -> impl IntoElement {
+        v_flex().px_6().pb_4().child(Self::render_status_card(
+            "Invalid or expired API key",
+            "Check the key and try again, or generate a new one.",
+            api_modal_color(0xd83e64),
+            api_modal_color(0xd83e64),
+        ))
+    }
+
+    fn render_body(&self, cx: &mut Context<Self>) -> AnyElement {
+        match self.state {
+            ApiKeyModalState::EnterKey => self.render_enter_key(cx).into_any_element(),
+            ApiKeyModalState::UseWithoutApi => self.render_use_without_api().into_any_element(),
+            ApiKeyModalState::Verifying => self.render_verifying().into_any_element(),
+            ApiKeyModalState::Success => self.render_success().into_any_element(),
+            ApiKeyModalState::Error => self.render_error().into_any_element(),
+        }
+    }
+
+    fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let state = self.state;
+        match state {
+            ApiKeyModalState::EnterKey => h_flex()
+                .px_6()
+                .pt_1()
+                .pb_6()
+                .gap_3()
+                .child(
+                    Self::render_button(
+                        "backboard-api-use-without",
+                        "Use without API",
+                        ApiKeyModalButtonStyle::Text,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.set_state(ApiKeyModalState::UseWithoutApi, cx);
+                    })),
+                )
+                .child(div().flex_1())
+                .child(
+                    Self::render_button(
+                        "backboard-api-cancel",
+                        "Cancel",
+                        ApiKeyModalButtonStyle::Secondary,
+                    )
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
+                )
+                .child(
+                    Self::render_button(
+                        "backboard-api-verify",
+                        "Verify key",
+                        ApiKeyModalButtonStyle::Primary,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.verify_api_key(window, cx);
+                    })),
+                )
+                .into_any_element(),
+            ApiKeyModalState::UseWithoutApi => h_flex()
+                .px_6()
+                .pt_1()
+                .pb_6()
+                .gap_3()
+                .child(div().flex_1())
+                .child(
+                    Self::render_button(
+                        "backboard-api-back",
+                        "Back",
+                        ApiKeyModalButtonStyle::Secondary,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.set_state(ApiKeyModalState::EnterKey, cx);
+                    })),
+                )
+                .child(
+                    Self::render_button(
+                        "backboard-api-continue-without",
+                        "Continue without API",
+                        ApiKeyModalButtonStyle::Secondary,
+                    )
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
+                )
+                .into_any_element(),
+            ApiKeyModalState::Verifying => h_flex()
+                .px_6()
+                .pt_1()
+                .pb_6()
+                .gap_3()
+                .child(div().flex_1())
+                .child(
+                    Self::render_button(
+                        "backboard-api-cancel-verifying",
+                        "Cancel",
+                        ApiKeyModalButtonStyle::Secondary,
+                    )
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
+                )
+                .child(Self::render_button(
+                    "backboard-api-verifying",
+                    "Verifying...",
+                    ApiKeyModalButtonStyle::DisabledPrimary,
+                ))
+                .into_any_element(),
+            ApiKeyModalState::Success => h_flex()
+                .px_6()
+                .pt_1()
+                .pb_6()
+                .gap_3()
+                .child(div().flex_1())
+                .child(
+                    Self::render_button(
+                        "backboard-api-success-continue",
+                        "Continue to workspace",
+                        ApiKeyModalButtonStyle::Primary,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.notify_api_key_state_changed(cx);
+                        cx.emit(DismissEvent);
+                    })),
+                )
+                .into_any_element(),
+            ApiKeyModalState::Error => v_flex()
+                .px_6()
+                .pt_1()
+                .pb_6()
+                .gap_3()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(div().flex_1())
+                        .child(
+                            Self::render_button(
+                                "backboard-api-error-cancel",
+                                "Cancel",
+                                ApiKeyModalButtonStyle::Secondary,
+                            )
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
+                        )
+                        .child(
+                            Self::render_button(
+                                "backboard-api-try-again",
+                                "Try again",
+                                ApiKeyModalButtonStyle::Primary,
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    this.state = ApiKeyModalState::EnterKey;
+                                    this.api_key_editor.focus_handle(cx).focus(window, cx);
+                                    cx.notify();
+                                },
+                            )),
+                        ),
+                )
+                .child(
+                    h_flex().justify_center().child(
+                        Self::render_button(
+                            "backboard-api-error-use-without",
+                            "Use without API",
+                            ApiKeyModalButtonStyle::MutedText,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.set_state(ApiKeyModalState::UseWithoutApi, cx);
+                        })),
+                    ),
+                )
+                .into_any_element(),
+        }
+    }
+}
+
+impl Render for BackboardApiKeyModal {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .size_full()
+            .occlude()
+            .track_focus(&self.focus_handle)
+            .bg(API_MODAL_OVERLAY)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                v_flex().size_full().items_center().justify_center().child(
+                    v_flex()
+                        .w(px(480.))
+                        .max_w(px(480.))
+                        .rounded(px(14.))
+                        .border_1()
+                        .border_color(api_modal_color(0xeceff4))
+                        .bg(api_modal_color(0xfbfcfd))
+                        .shadow_lg()
+                        .child(self.render_header())
+                        .child(self.render_body(cx))
+                        .child(self.render_footer(cx)),
+                ),
+            )
+    }
+}
+
+impl Focusable for BackboardApiKeyModal {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        if self.state == ApiKeyModalState::EnterKey || self.state == ApiKeyModalState::Error {
+            self.api_key_editor.focus_handle(cx)
+        } else {
+            self.focus_handle.clone()
+        }
+    }
+}
+
+impl EventEmitter<DismissEvent> for BackboardApiKeyModal {}
+
+impl ModalView for BackboardApiKeyModal {
+    fn on_before_dismiss(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> workspace::DismissDecision {
+        if let Some(on_dismiss) = self.on_dismiss.take() {
+            window.defer(cx, move |window, cx| {
+                on_dismiss(window, cx);
+            });
+        }
+
+        workspace::DismissDecision::Dismiss(true)
+    }
+
+    fn render_bare(&self) -> bool {
+        true
     }
 }
 
@@ -243,8 +935,8 @@ impl BackboardPanel {
         let config = backboard::BackboardConfig::load_or_default();
         let api_ready = config.api_key().is_some();
         let status = Self::status_for_config(&config, api_ready);
-        let selected_provider = config.default_provider.clone();
-        let selected_model = config.default_model.clone();
+        let selected_provider = config.default_provider;
+        let selected_model = config.default_model;
 
         let api_key_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
@@ -285,6 +977,12 @@ impl BackboardPanel {
             }
         });
 
+        let workspace_subscription = workspace.upgrade().map(|workspace| {
+            cx.observe(&workspace, |_, _, cx| {
+                cx.notify();
+            })
+        });
+
         let mut panel = Self {
             focus_handle: cx.focus_handle(),
             workspace,
@@ -316,6 +1014,7 @@ impl BackboardPanel {
             selected_model,
             configuring_api_key: false,
             is_zoomed: false,
+            _workspace_subscription: workspace_subscription,
             _config_task: config_task,
         };
 
@@ -520,6 +1219,13 @@ impl BackboardPanel {
     fn show_more_models(&mut self, cx: &mut Context<Self>) {
         self.visible_model_count = (self.visible_model_count + MODEL_LOAD_INCREMENT)
             .min(self.models.len().max(INITIAL_VISIBLE_MODELS));
+        cx.notify();
+    }
+
+    fn set_composer_prompt(&mut self, prompt: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.composer
+            .update(cx, |editor, cx| editor.set_text(prompt, window, cx));
+        self.composer.focus_handle(cx).focus(window, cx);
         cx.notify();
     }
 
@@ -855,7 +1561,7 @@ impl BackboardPanel {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(Icon::new(IconName::ZedAgentTwo).color(Color::Muted))
+                    .child(Icon::new(IconName::Sparkle).color(Color::Muted))
                     .child(Label::new("Conversation").size(LabelSize::Large)),
             )
             .child(
@@ -983,7 +1689,7 @@ impl BackboardPanel {
             .pl_4()
             .gap_1()
             .border_l_1()
-            .border_color(cx.theme().colors().border)
+            .border_color(cx.theme().colors().border_variant.opacity(0.34))
             .children(self.activity_log.iter().rev().take(6).map(|activity| {
                 h_flex()
                     .gap_2()
@@ -998,6 +1704,69 @@ impl BackboardPanel {
                             .color(Color::Muted),
                     )
             }))
+    }
+
+    fn latest_thinking_activity(&self) -> Option<String> {
+        self.activity_log.iter().rev().find_map(|activity| {
+            let activity = activity.trim();
+            if let Some(thinking) = activity.strip_prefix("Thinking: ") {
+                Some(thinking.trim().to_string())
+            } else if activity.starts_with("Thinking through") {
+                Some("Thinking through the request.".to_string())
+            } else if activity.starts_with("Finished planning") {
+                Some("Finished planning the next step.".to_string())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn render_thinking_preview(&self, thought: String, cx: &mut Context<Self>) -> impl IntoElement {
+        let background = cx
+            .theme()
+            .colors()
+            .editor_background
+            .blend(cx.theme().colors().element_background.opacity(0.06));
+
+        h_flex()
+            .id("backboard-thinking-preview")
+            .w_full()
+            .gap_2()
+            .items_start()
+            .px_3()
+            .py_2()
+            .rounded(rems_from_px(8.))
+            .border_1()
+            .border_color(cx.theme().colors().border_variant.opacity(0.24))
+            .bg(background)
+            .child(if self.streaming {
+                Icon::new(IconName::LoadCircle)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted)
+                    .with_rotate_animation(2)
+                    .into_any_element()
+            } else {
+                Icon::new(IconName::LoadCircle)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted)
+                    .into_any_element()
+            })
+            .child(
+                v_flex()
+                    .gap_0p5()
+                    .flex_1()
+                    .child(
+                        Label::new("Thinking")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
+                    .child(
+                        Label::new(thought)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    ),
+            )
     }
 
     fn render_api_key_setup(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1109,11 +1878,32 @@ impl BackboardPanel {
             )
     }
 
-    fn render_model_drawer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_model_drawer(
+        &self,
+        workspace_tour_step: Option<WorkspaceTourStep>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let selected = self.selected_model_label();
+        let force_model_picker_open = matches!(
+            workspace_tour_step,
+            Some(WorkspaceTourStep::ModelSelection | WorkspaceTourStep::TutorialModelSelection)
+        );
+        let model_picker_open = self.model_picker_open || force_model_picker_open;
 
         let visible_count = self.visible_model_count.min(self.models.len());
         let hidden_count = self.models.len().saturating_sub(visible_count);
+        let highlighted_model_ix = if force_model_picker_open {
+            self.models
+                .iter()
+                .take(visible_count)
+                .position(|model| {
+                    self.selected_provider.as_ref() == Some(&model.provider)
+                        && self.selected_model.as_ref() == Some(&model.name)
+                })
+                .or_else(|| (visible_count > 0).then_some(0))
+        } else {
+            None
+        };
         let mut rows = Vec::new();
         let mut last_provider = String::new();
         for (ix, model) in self.models.iter().take(visible_count).enumerate() {
@@ -1142,47 +1932,47 @@ impl BackboardPanel {
                 .map(|limit| format!("{} ctx", format_number(limit)))
                 .unwrap_or_else(|| "catalog model".into());
 
-            rows.push(
-                h_flex()
-                    .id(("backboard-model-row", ix))
-                    .w_full()
-                    .justify_between()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .bg(if is_selected {
-                        cx.theme().colors().element_selected
+            let row = h_flex()
+                .id(("backboard-model-row", ix))
+                .w_full()
+                .justify_between()
+                .gap_2()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(if is_selected {
+                    cx.theme().colors().element_selected
+                } else {
+                    cx.theme().colors().editor_background
+                })
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .child(Label::new(display).size(LabelSize::Small))
+                        .child(Label::new(meta).size(LabelSize::Small).color(Color::Muted)),
+                )
+                .child(
+                    Button::new(
+                        ("backboard-use-model", ix),
+                        if is_selected { "Using" } else { "Use" },
+                    )
+                    .style(if is_selected {
+                        ButtonStyle::Subtle
                     } else {
-                        cx.theme().colors().editor_background
+                        ButtonStyle::Tinted(ui::TintColor::Accent)
                     })
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .child(Label::new(display).size(LabelSize::Small))
-                            .child(Label::new(meta).size(LabelSize::Small).color(Color::Muted)),
-                    )
-                    .child(
-                        Button::new(
-                            ("backboard-use-model", ix),
-                            if is_selected { "Using" } else { "Use" },
-                        )
-                        .style(if is_selected {
-                            ButtonStyle::Subtle
-                        } else {
-                            ButtonStyle::Tinted(ui::TintColor::Accent)
-                        })
-                        .on_click(cx.listener(
-                            move |this, _, _window, cx| {
-                                this.select_model(provider.clone(), name.clone(), cx);
-                            },
-                        )),
-                    )
-                    .into_any_element(),
-            );
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.select_model(provider.clone(), name.clone(), cx);
+                    })),
+                );
+            if highlighted_model_ix == Some(ix) {
+                rows.push(render_workspace_tour_highlight(div().child(row), cx).into_any_element());
+            } else {
+                rows.push(row.into_any_element());
+            }
         }
 
-        v_flex()
+        let drawer = v_flex()
             .border_t_1()
             .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().panel_background)
@@ -1212,11 +2002,7 @@ impl BackboardPanel {
                     .child(
                         Button::new(
                             "backboard-toggle-model-picker",
-                            if self.model_picker_open {
-                                "Close"
-                            } else {
-                                "Models"
-                            },
+                            if model_picker_open { "Close" } else { "Models" },
                         )
                         .style(ButtonStyle::Tinted(ui::TintColor::Accent))
                         .disabled(!self.api_ready)
@@ -1225,7 +2011,7 @@ impl BackboardPanel {
                         })),
                     ),
             )
-            .when(self.model_picker_open, |this| {
+            .when(model_picker_open, |this| {
                 this.child(
                     v_flex()
                         .id("backboard-model-picker-scroll")
@@ -1265,7 +2051,7 @@ impl BackboardPanel {
                         }),
                 )
             })
-            .when(self.model_picker_open && hidden_count > 0, |this| {
+            .when(model_picker_open && hidden_count > 0, |this| {
                 this.child(
                     h_flex()
                         .justify_between()
@@ -1286,19 +2072,29 @@ impl BackboardPanel {
                                 })),
                         ),
                 )
-            })
+            });
+
+        if force_model_picker_open && highlighted_model_ix.is_none() {
+            render_workspace_tour_highlight(drawer, cx)
+        } else {
+            drawer
+        }
     }
 
     fn render_full_message_body(body: &str, cx: &mut Context<Self>) -> impl IntoElement {
         let text_color = cx.theme().colors().text;
-        let background = cx.theme().colors().element_background;
-        let border = cx.theme().colors().border;
+        let background = cx
+            .theme()
+            .colors()
+            .editor_background
+            .blend(cx.theme().colors().element_background.opacity(0.08));
+        let border = cx.theme().colors().border_variant.opacity(0.32);
         let lines = body
             .lines()
             .map(|line| {
                 div()
                     .text_sm()
-                    .line_height(gpui::relative(1.32))
+                    .line_height(gpui::relative(1.45))
                     .text_color(text_color)
                     .child(if line.is_empty() {
                         " ".to_string()
@@ -1310,9 +2106,8 @@ impl BackboardPanel {
 
         v_flex()
             .gap_1()
-            .px_2()
-            .py_2()
-            .rounded_md()
+            .p_3()
+            .rounded(rems_from_px(8.))
             .border_1()
             .border_color(border)
             .bg(background)
@@ -1327,8 +2122,8 @@ impl BackboardPanel {
         v_flex()
             .id("backboard-messages")
             .flex_1()
-            .gap_3()
-            .px_3()
+            .gap_4()
+            .px(rems_from_px(14.))
             .py_3()
             .overflow_y_scroll()
             .children(self.messages.iter().enumerate().map(|(ix, message)| {
@@ -1343,21 +2138,26 @@ impl BackboardPanel {
                 };
                 let (label, color) = match message.role {
                     MessageRole::User => ("You", Color::Muted),
-                    MessageRole::Backboard => ("backboard", Color::Muted),
-                    MessageRole::Error => ("error", Color::Error),
+                    MessageRole::Backboard => ("Backboard", Color::Muted),
+                    MessageRole::Error => ("Error", Color::Error),
                 };
-                let icon = match message.role {
-                    MessageRole::User => IconName::Circle,
-                    MessageRole::Backboard => {
-                        if message.body.is_empty() {
-                            IconName::LoadCircle
-                        } else {
-                            IconName::ZedAgentTwo
-                        }
-                    }
-                    MessageRole::Error => IconName::XCircle,
-                };
-                let body = if message.body.is_empty() {
+                let message_surface = cx
+                    .theme()
+                    .colors()
+                    .editor_background
+                    .blend(cx.theme().colors().element_background.opacity(0.08));
+                let message_hover_surface = cx
+                    .theme()
+                    .colors()
+                    .editor_background
+                    .blend(cx.theme().colors().element_background.opacity(0.12));
+                let message_border = cx.theme().colors().border_variant.opacity(0.32);
+                let message_is_empty = message.body.is_empty();
+                let thinking_preview = is_active_backboard.then(|| {
+                    self.latest_thinking_activity()
+                        .unwrap_or_else(|| "Working through the next step.".to_string())
+                });
+                let body = if message_is_empty {
                     v_flex()
                         .gap_1()
                         .child(
@@ -1378,7 +2178,7 @@ impl BackboardPanel {
                 } else {
                     div()
                         .text_sm()
-                        .line_height(gpui::relative(1.32))
+                        .line_height(gpui::relative(1.45))
                         .text_color(cx.theme().colors().text)
                         .child(display_body.clone())
                         .into_any_element()
@@ -1387,21 +2187,24 @@ impl BackboardPanel {
                 if is_user {
                     v_flex()
                         .id(("backboard-message-row", ix))
-                        .ml_1()
-                        .pl_4()
-                        .gap_1()
-                        .border_l_1()
-                        .border_color(cx.theme().colors().border)
+                        .w_full()
+                        .gap_2()
+                        .p_3()
+                        .rounded(rems_from_px(10.))
+                        .border_1()
+                        .border_color(message_border)
+                        .bg(message_surface)
+                        .hover(move |style| style.bg(message_hover_surface))
                         .child(
-                            h_flex()
-                                .gap_2()
-                                .child(Icon::new(icon).color(Color::Muted).size(IconSize::Small))
-                                .child(Label::new(label).size(LabelSize::Small).color(color)),
+                            Label::new(label)
+                                .size(LabelSize::XSmall)
+                                .color(color)
+                                .weight(FontWeight::SEMIBOLD),
                         )
                         .child(
                             div()
                                 .text_sm()
-                                .line_height(gpui::relative(1.32))
+                                .line_height(gpui::relative(1.45))
                                 .text_color(cx.theme().colors().text)
                                 .child(display_body),
                         )
@@ -1409,23 +2212,37 @@ impl BackboardPanel {
                 } else {
                     v_flex()
                         .id(("backboard-message-row", ix))
-                        .gap_1()
+                        .w_full()
+                        .gap_2()
+                        .when(matches!(message.role, MessageRole::Error), |this| {
+                            this.p_3()
+                                .rounded(rems_from_px(10.))
+                                .border_1()
+                                .border_color(cx.theme().status().error_border)
+                                .bg(message_surface)
+                        })
                         .child(
                             h_flex()
-                                .gap_2()
-                                .child(if message.body.is_empty() {
-                                    Icon::new(icon)
+                                .gap_1()
+                                .items_center()
+                                .when(
+                                    matches!(message.role, MessageRole::Backboard)
+                                        && message_is_empty,
+                                    |this| {
+                                        this.child(
+                                            Icon::new(IconName::LoadCircle)
+                                                .color(color)
+                                                .size(IconSize::XSmall)
+                                                .with_rotate_animation(2),
+                                        )
+                                    },
+                                )
+                                .child(
+                                    Label::new(label)
+                                        .size(LabelSize::XSmall)
                                         .color(color)
-                                        .size(IconSize::Small)
-                                        .with_rotate_animation(2)
-                                        .into_any_element()
-                                } else {
-                                    Icon::new(icon)
-                                        .color(color)
-                                        .size(IconSize::Small)
-                                        .into_any_element()
-                                })
-                                .child(Label::new(label).size(LabelSize::Small).color(color))
+                                        .weight(FontWeight::SEMIBOLD),
+                                )
                                 .when(is_active_backboard, |this| {
                                     this.child(self.render_inline_activity(cx))
                                 }),
@@ -1434,6 +2251,9 @@ impl BackboardPanel {
                             Self::render_full_message_body(&message.body, cx).into_any_element()
                         } else {
                             body
+                        })
+                        .when_some(thinking_preview, |this, thought| {
+                            this.child(self.render_thinking_preview(thought, cx))
                         })
                         .when(is_active_backboard && self.activity_open, |this| {
                             this.child(self.render_activity_details(cx))
@@ -1562,50 +2382,124 @@ impl BackboardPanel {
             })
     }
 
-    fn render_composer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_composer(
+        &self,
+        workspace_tour_step: Option<WorkspaceTourStep>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let highlight_chat = matches!(
+            workspace_tour_step,
+            Some(WorkspaceTourStep::Composer | WorkspaceTourStep::TutorialPrompt)
+        );
+        let context_tool = div().child(
+            IconButton::new("backboard-context", IconName::AtSign)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Add context")),
+        );
+        let files_tool = div().child(
+            IconButton::new("backboard-files", IconName::FileCode)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Attach files")),
+        );
+        let voice_tool = div().child(
+            IconButton::new("backboard-voice", IconName::Mic)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Voice control")),
+        );
+        let voice_tool = if workspace_tour_step == Some(WorkspaceTourStep::VoiceControl) {
+            render_workspace_tour_highlight(voice_tool, cx)
+        } else {
+            voice_tool
+        };
+        let skills_tool = div().child(
+            IconButton::new("backboard-skills", IconName::Sparkle)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Skills")),
+        );
+        let skills_tool = if matches!(
+            workspace_tour_step,
+            Some(WorkspaceTourStep::Skills | WorkspaceTourStep::TutorialSkills)
+        ) {
+            render_workspace_tour_highlight(skills_tool, cx)
+        } else {
+            skills_tool
+        };
+        let mcp_tool = div().child(
+            IconButton::new("backboard-mcps", IconName::Server)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("MCP tools")),
+        );
+        let mcp_tool = if workspace_tour_step == Some(WorkspaceTourStep::McpTools) {
+            render_workspace_tour_highlight(mcp_tool, cx)
+        } else {
+            mcp_tool
+        };
+        let agent_options_tool = div().child(
+            IconButton::new("backboard-agent-options", IconName::Sliders)
+                .icon_size(IconSize::Small)
+                .tooltip(Tooltip::text("Agent options")),
+        );
+        let agent_options_tool = if matches!(
+            workspace_tour_step,
+            Some(WorkspaceTourStep::AgentOptions | WorkspaceTourStep::TutorialAgentOptions)
+        ) {
+            render_workspace_tour_highlight(agent_options_tool, cx)
+        } else {
+            agent_options_tool
+        };
+
+        let tools = h_flex()
+            .gap_1()
+            .child(context_tool)
+            .child(files_tool)
+            .child(voice_tool)
+            .child(skills_tool)
+            .child(mcp_tool)
+            .child(agent_options_tool);
+
+        let chat_input = v_flex().flex_1().min_w_0().child(self.composer.clone());
+        let chat_input = if highlight_chat {
+            render_workspace_tour_highlight(chat_input, cx)
+        } else {
+            chat_input
+        };
+        let send_tool = div().child(
+            IconButton::new("backboard-send", IconName::Send)
+                .icon_size(IconSize::Small)
+                .disabled(!self.api_ready || self.streaming)
+                .tooltip(Tooltip::text(if self.streaming {
+                    "Backboard is running"
+                } else {
+                    "Send to Backboard"
+                }))
+                .on_click(cx.listener(|this, _, window, cx| this.send_prompt(window, cx))),
+        );
+        let send_tool = if highlight_chat {
+            render_workspace_tour_highlight(send_tool, cx)
+        } else {
+            send_tool
+        };
+
+        let composer = h_flex()
+            .min_h(px(58.))
+            .gap_2()
+            .rounded_xl()
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .bg(cx.theme().colors().editor_background)
+            .px_3()
+            .py_2()
+            .child(tools)
+            .child(chat_input)
+            .child(send_tool);
+
         v_flex()
             .border_t_1()
             .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().panel_background)
             .px_4()
             .py_3()
-            .child(
-                h_flex()
-                    .min_h(px(58.))
-                    .gap_2()
-                    .rounded_xl()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .bg(cx.theme().colors().editor_background)
-                    .px_3()
-                    .py_2()
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(
-                                IconButton::new("backboard-context", IconName::AtSign)
-                                    .icon_size(IconSize::Small),
-                            )
-                            .child(
-                                IconButton::new("backboard-files", IconName::FileCode)
-                                    .icon_size(IconSize::Small),
-                            ),
-                    )
-                    .child(v_flex().flex_1().child(self.composer.clone()))
-                    .child(
-                        IconButton::new("backboard-send", IconName::Send)
-                            .icon_size(IconSize::Small)
-                            .disabled(!self.api_ready || self.streaming)
-                            .tooltip(Tooltip::text(if self.streaming {
-                                "Backboard is running"
-                            } else {
-                                "Send to Backboard"
-                            }))
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.send_prompt(window, cx)),
-                            ),
-                    ),
-            )
+            .child(composer)
     }
 }
 
@@ -1676,7 +2570,16 @@ impl Panel for BackboardPanel {
 }
 
 impl Render for BackboardPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let workspace_tour_step = self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).workspace_tour_step())
+            .or_else(|| {
+                Workspace::for_window(window, cx)
+                    .and_then(|workspace| workspace.read(cx).workspace_tour_step())
+            });
+
         v_flex()
             .size_full()
             .key_context("BackboardPanel")
@@ -1694,9 +2597,9 @@ impl Render for BackboardPanel {
             })
             .when(self.api_ready, |this| {
                 this.child(self.render_messages(cx))
-                    .child(self.render_model_drawer(cx))
+                    .child(self.render_model_drawer(workspace_tour_step, cx))
             })
-            .child(self.render_composer(cx))
+            .child(self.render_composer(workspace_tour_step, cx))
     }
 }
 

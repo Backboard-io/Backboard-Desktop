@@ -524,6 +524,25 @@ pub fn adjust_buffer_font_size(cx: &mut App, f: impl FnOnce(Pixels) -> Pixels) {
     cx.refresh_windows();
 }
 
+/// Adjusts every in-memory font size override by the same delta.
+pub fn adjust_all_font_sizes(cx: &mut App, delta: Pixels) {
+    let theme_settings = ThemeSettings::get_global(cx);
+    let buffer_font_size = clamp_font_size(theme_settings.buffer_font_size(cx) + delta);
+    let ui_font_size = ui_font_size_for_default_text_size(buffer_font_size);
+
+    cx.set_global(UiFontSize(ui_font_size));
+    cx.set_global(BufferFontSize(buffer_font_size));
+    cx.set_global(AgentUiFontSize(ui_font_size));
+    cx.set_global(AgentBufferFontSize(buffer_font_size));
+    cx.refresh_windows();
+}
+
+/// Returns the UI rem size needed for default UI text to match the buffer font size.
+pub fn ui_font_size_for_default_text_size(buffer_font_size: Pixels) -> Pixels {
+    // Default UI labels are 13px at a 16px rem base.
+    clamp_font_size(buffer_font_size * (16.0 / 13.0))
+}
+
 /// Resets the buffer font size to the default value.
 pub fn reset_buffer_font_size(cx: &mut App) {
     if cx.has_global::<BufferFontSize>() {

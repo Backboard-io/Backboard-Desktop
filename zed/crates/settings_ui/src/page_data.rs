@@ -151,7 +151,12 @@ fn general_page(cx: &App) -> SettingsPage {
                             } else {
                                 InterfaceMode::Simple
                             };
-                            mw.set_interface_mode(new_mode, original_window, cx);
+                            match new_mode {
+                                InterfaceMode::Expert => mw.open_code_editor(original_window, cx),
+                                InterfaceMode::Simple => {
+                                    mw.set_interface_mode(new_mode, original_window, cx);
+                                }
+                            }
                             original_window.activate_window();
                         })
                         .ok();

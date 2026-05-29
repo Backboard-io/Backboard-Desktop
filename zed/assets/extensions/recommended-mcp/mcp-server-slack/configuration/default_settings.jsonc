@@ -1,0 +1,5 @@
+{
+    "slack_bot_token": "SLACK_BOT_TOKEN",
+    "slack_team_id":  "SLACK_TEAM_ID",
+    "slack_channel_ids": "SLACK_CHANNEL_IDS"
+}

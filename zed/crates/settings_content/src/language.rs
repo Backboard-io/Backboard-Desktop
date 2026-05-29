@@ -247,11 +247,11 @@ pub struct BackboardSettingsContent {
     /// OpenRouter model IDs like `qwen/qwen-2.5-coder-7b-instruct` only work
     /// with OpenRouter-compatible `/chat/completions` APIs. Backboard model
     /// names must come from Backboard's supported model registry and can be
-    /// overridden in user settings. If this is unset, Backboard Studio uses the model saved
-    /// in `~/.backboard/config.json` or resolves one from Backboard's live
-    /// model registry.
+    /// overridden in user settings. If this is unset, Backboard Studio uses the
+    /// model saved in `~/.backboard/config.json` or resolves one from
+    /// Backboard's live model registry.
     ///
-    /// Default: resolved from the Backboard config or registry
+    /// Default: resolved from the Backboard registry
     pub model: Option<String>,
     /// Timeout for inline autocomplete requests in milliseconds.
     ///

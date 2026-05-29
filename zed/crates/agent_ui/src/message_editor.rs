@@ -1817,11 +1817,11 @@ impl Render for MessageEditor {
 
                 let text_style = TextStyle {
                     color: cx.theme().colors().text,
-                    font_family: settings.ui_font.family.clone(),
+                    font_family: settings.buffer_font.family.clone(),
                     font_fallbacks: settings.buffer_font.fallbacks.clone(),
-                    font_features: settings.ui_font.features.clone(),
-                    font_size: rems_from_px(13.).into(),
-                    font_weight: settings.ui_font.weight,
+                    font_features: settings.buffer_font.features.clone(),
+                    font_size: settings.agent_buffer_font_size(cx).into(),
+                    font_weight: settings.buffer_font.weight,
                     line_height: relative(1.35),
                     ..Default::default()
                 };

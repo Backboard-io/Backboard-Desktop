@@ -10,62 +10,85 @@ fn render_setting_import_card(
     asset_path: &'static str,
     action: &dyn Action,
     imported: bool,
+    cx: &App,
 ) -> impl IntoElement + 'static {
     let button_action = action.boxed_clone();
     let action_label = label.clone();
+    let card_id = SharedString::from(format!("import-card-{label}"));
+    let colors = cx.theme().colors();
 
-    v_flex()
-        .id(label.clone())
-        .w(rems_from_px(360.))
+    h_flex()
+        .id(card_id)
+        .w_full()
+        .items_center()
+        .justify_between()
         .gap_4()
+        .rounded_md()
+        .px_2()
+        .py_3()
         .tab_index(tab_index)
+        .hover(|style| style.bg(colors.element_hover.opacity(0.45)))
         .child(
-            v_flex()
-                .gap_0p5()
-                .child(Headline::new(label.clone()).size(HeadlineSize::Small))
-                .child(
-                    Label::new(description)
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                ),
-        )
-        .child(
-            div()
-                .w_full()
-                .h(rems_from_px(180.))
-                .flex()
+            h_flex()
+                .min_w_0()
                 .items_center()
-                .justify_center()
+                .gap_3()
                 .child(
-                    img(asset_path)
-                        .size(rems_from_px(120.))
-                        .object_fit(ObjectFit::Contain)
-                        .with_fallback(|| div().size(rems_from_px(120.)).into_any_element()),
+                    div()
+                        .size(rems_from_px(44.))
+                        .rounded_md()
+                        .bg(colors.element_background.opacity(0.55))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            img(asset_path)
+                                .size(rems_from_px(26.))
+                                .object_fit(ObjectFit::Contain)
+                                .with_fallback(|| div().size(rems_from_px(26.)).into_any_element()),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .min_w_0()
+                        .gap_0p5()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(Headline::new(label.clone()).size(HeadlineSize::Small))
+                                .when(imported, |this| {
+                                    this.child(
+                                        Icon::new(IconName::Check)
+                                            .size(IconSize::Small)
+                                            .color(Color::Success),
+                                    )
+                                }),
+                        )
+                        .child(
+                            Label::new(description)
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        ),
                 ),
         )
         .child(
-            div().rounded_full().overflow_hidden().w_full().child(
-                Button::new(
-                    SharedString::from(format!("import-{label}")),
-                    if imported {
-                        "Imported"
-                    } else {
-                        "Import settings"
-                    },
-                )
-                .style(ButtonStyle::OutlinedGhost)
-                .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-                .toggle_state(imported)
-                .full_width()
-                .when(imported, |this| {
-                    this.end_icon(Icon::new(IconName::Check).size(IconSize::Small))
-                        .color(Color::Success)
-                })
-                .on_click(move |_, window, cx| {
-                    telemetry::event!("Welcome Import Settings", import_source = action_label,);
-                    window.dispatch_action(button_action.boxed_clone(), cx);
-                }),
-            ),
+            Button::new(
+                SharedString::from(format!("import-{label}")),
+                if imported { "Imported" } else { "Import" },
+            )
+            .style(ButtonStyle::Subtle)
+            .selected_style(ButtonStyle::Tinted(TintColor::Accent))
+            .toggle_state(imported)
+            .width(rems_from_px(104.))
+            .when(imported, |this| {
+                this.end_icon(Icon::new(IconName::Check).size(IconSize::Small))
+                    .color(Color::Success)
+            })
+            .on_click(move |_, window, cx| {
+                telemetry::event!("Welcome Import Settings", import_source = action_label,);
+                window.dispatch_action(button_action.boxed_clone(), cx);
+            }),
         )
 }
 
@@ -98,15 +121,16 @@ pub(crate) fn render_import_settings_page(cx: &mut App) -> impl IntoElement {
             asset_path,
             action,
             imported,
+            cx,
         )
     });
 
     v_flex()
         .id("import-settings-page")
         .w_full()
-        .py_12()
+        .py_10()
         .items_center()
-        .gap_8()
+        .gap_7()
         .child(
             v_flex()
                 .items_center()
@@ -118,7 +142,13 @@ pub(crate) fn render_import_settings_page(cx: &mut App) -> impl IntoElement {
                         .size(LabelSize::Small),
                 ),
         )
-        .child(h_flex().gap_6().flex_wrap().child(vscode).child(cursor))
+        .child(
+            v_flex()
+                .w(rems_from_px(680.))
+                .gap_1()
+                .child(vscode)
+                .child(cursor),
+        )
         .child(
             Button::new("skip-import-settings", "Skip for now")
                 .style(ButtonStyle::Subtle)

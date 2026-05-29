@@ -587,9 +587,10 @@ impl AgentConfiguration {
                     .map(|parent| {
                         if context_server_ids.is_empty() {
                             parent.child(
-                                h_flex()
+                                v_flex()
                                     .p_4()
-                                    .justify_center()
+                                    .items_center()
+                                    .gap_3()
                                     .border_1()
                                     .border_dashed()
                                     .border_color(cx.theme().colors().border.opacity(0.6))
@@ -598,6 +599,28 @@ impl AgentConfiguration {
                                         Label::new("No MCP servers added yet.")
                                             .color(Color::Muted)
                                             .size(LabelSize::Small),
+                                    )
+                                    .child(
+                                        Button::new(
+                                            "install-recommended-mcp-servers",
+                                            "Install Recommended MCP Servers",
+                                        )
+                                        .style(ButtonStyle::Outlined)
+                                        .start_icon(
+                                            Icon::new(IconName::Download)
+                                                .size(IconSize::Small)
+                                                .color(Color::Muted),
+                                        )
+                                        .label_size(LabelSize::Small)
+                                        .on_click(
+                                            |_, window, cx| {
+                                                window.dispatch_action(
+                                                    crate::InstallRecommendedMcpServers
+                                                        .boxed_clone(),
+                                                    cx,
+                                                );
+                                            },
+                                        ),
                                     ),
                             )
                         } else {
