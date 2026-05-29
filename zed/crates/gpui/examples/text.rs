@@ -355,9 +355,9 @@ fn run_example() {
         }]);
 
         let fonts = [include_bytes!("../../../assets/fonts/inter/Inter.ttf")]
-        .iter()
-        .map(|b| Cow::Borrowed(&b[..]))
-        .collect();
+            .iter()
+            .map(|b| Cow::Borrowed(&b[..]))
+            .collect();
 
         _ = cx.text_system().add_fonts(fonts);
 

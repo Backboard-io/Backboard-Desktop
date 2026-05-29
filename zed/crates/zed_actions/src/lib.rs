@@ -141,6 +141,24 @@ pub struct IncreaseBufferFontSize {
     pub persist: bool,
 }
 
+/// Decreases all zoom levels.
+#[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
+#[action(namespace = zed)]
+#[serde(deny_unknown_fields)]
+pub struct DecreaseAllZoom {
+    #[serde(default)]
+    pub persist: bool,
+}
+
+/// Increases all zoom levels.
+#[derive(PartialEq, Clone, Default, Debug, Deserialize, JsonSchema, Action)]
+#[action(namespace = zed)]
+#[serde(deny_unknown_fields)]
+pub struct IncreaseAllZoom {
+    #[serde(default)]
+    pub persist: bool,
+}
+
 /// Opens the settings editor at a specific path.
 #[derive(PartialEq, Clone, Debug, Deserialize, JsonSchema, Action)]
 #[action(namespace = zed)]

@@ -6634,6 +6634,10 @@ impl Repository {
         )
     }
 
+    pub fn refresh_status(&mut self, cx: &mut Context<Self>) {
+        self.schedule_scan(None, cx);
+    }
+
     fn spawn_set_index_text_job(
         &mut self,
         path: RepoPath,

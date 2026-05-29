@@ -1,7 +1,8 @@
 use crate::{
     CloseWindow, NewCenterTerminal, NewFile, NewTerminal, OpenInTerminal, OpenOptions,
     OpenTerminal, OpenVisible, SplitDirection, ToggleFileFinder, ToggleProjectSymbols, ToggleZoom,
-    Workspace, WorkspaceItemBuilder, ZoomIn, ZoomOut,
+    WORKSPACE_CONTAINER_PADDING, WORKSPACE_CONTAINER_RADIUS, Workspace, WorkspaceItemBuilder,
+    ZoomIn, ZoomOut,
     focus_follows_mouse::FocusFollowsMouse as _,
     invalid_item_view::InvalidItemView,
     item::{
@@ -12,6 +13,7 @@ use crate::{
     move_item,
     notifications::NotifyResultExt,
     toolbar::Toolbar,
+    workspace_container_background, workspace_container_border, workspace_container_surface,
     workspace_settings::{AutosaveSetting, FocusFollowsMouse, TabBarSettings, WorkspaceSettings},
 };
 use anyhow::Result;
@@ -4319,14 +4321,18 @@ impl Render for Pane {
             return div().track_focus(&self.focus_handle(cx));
         };
         let is_local = project.read(cx).is_local();
-        let colors = cx.theme().colors();
-        let pane_background = colors
-            .panel_background
-            .blend(colors.editor_background.opacity(0.46));
-        let editor_card_background = colors
-            .editor_background
-            .blend(colors.element_background.opacity(0.18));
-        let editor_card_border = colors.border_variant.opacity(0.52);
+        let pane_background = workspace_container_background(cx);
+        let editor_card_background = workspace_container_surface(cx);
+        let editor_card_border = workspace_container_border(cx);
+        let connected_layout = self
+            .workspace
+            .upgrade()
+            .is_some_and(|workspace| workspace.read(cx).connected_layout());
+        let workspace_container_padding = if connected_layout {
+            px(0.)
+        } else {
+            WORKSPACE_CONTAINER_PADDING
+        };
 
         v_flex()
             .key_context(key_context)
@@ -4489,9 +4495,6 @@ impl Render for Pane {
                     cx.propagate();
                 }
             }))
-            .when(self.active_item().is_some() && display_tab_bar, |pane| {
-                pane.child((self.render_tab_bar.clone())(self, window, cx))
-            })
             .child({
                 let has_worktrees = project.read(cx).visible_worktrees(cx).next().is_some();
                 // main content
@@ -4499,7 +4502,8 @@ impl Render for Pane {
                     .flex_1()
                     .relative()
                     .group("")
-                    .p_1()
+                    .px(workspace_container_padding)
+                    .pb(workspace_container_padding)
                     .bg(pane_background)
                     .overflow_hidden()
                     .on_drag_move::<DraggedTab>(cx.listener(Self::handle_drag_move))
@@ -4512,11 +4516,18 @@ impl Render for Pane {
                             div.id("pane_placeholder")
                                 .v_flex()
                                 .size_full()
-                                .rounded_xl()
-                                .border_1()
-                                .border_color(editor_card_border)
+                                .when(!connected_layout, |placeholder| {
+                                    placeholder
+                                        .rounded(WORKSPACE_CONTAINER_RADIUS)
+                                        .border_1()
+                                        .border_color(editor_card_border)
+                                })
                                 .bg(editor_card_background)
                                 .overflow_hidden()
+                                .when(display_tab_bar, |placeholder| {
+                                    placeholder
+                                        .child((self.render_tab_bar.clone())(self, window, cx))
+                                })
                                 .child(self.toolbar.clone())
                                 .child(item.to_any_view())
                         } else {
@@ -4524,9 +4535,12 @@ impl Render for Pane {
                                 .id("pane_placeholder")
                                 .h_flex()
                                 .size_full()
-                                .rounded_xl()
-                                .border_1()
-                                .border_color(editor_card_border)
+                                .when(!connected_layout, |placeholder| {
+                                    placeholder
+                                        .rounded(WORKSPACE_CONTAINER_RADIUS)
+                                        .border_1()
+                                        .border_color(editor_card_border)
+                                })
                                 .bg(editor_card_background)
                                 .justify_center()
                                 .on_click(cx.listener(

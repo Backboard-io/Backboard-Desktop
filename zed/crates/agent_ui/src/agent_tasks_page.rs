@@ -309,7 +309,7 @@ impl BackboardTasksPage {
 
         self.multi_workspace
             .update(cx, |multi_workspace, cx| {
-                multi_workspace.set_multi_agent_expanded(true, cx);
+                multi_workspace.set_multi_agent_expanded(true, window, cx);
             })
             .ok();
     }

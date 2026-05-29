@@ -1228,14 +1228,8 @@ impl TitleBar {
                             el.on_click(move |_, window, cx| {
                                 multi_workspace
                                     .update(cx, |multi_workspace, cx| {
-                                        multi_workspace.set_interface_mode(
-                                            InterfaceMode::Expert,
-                                            window,
-                                            cx,
-                                        );
-                                        multi_workspace.multi_agent_expanded = false;
+                                        multi_workspace.open_code_editor(window, cx);
                                         mark_mode_tip_seen(cx);
-                                        cx.notify();
                                     })
                                     .log_err();
                             })

@@ -30,10 +30,11 @@ use crate::settings::adjust_buffer_font_size;
 pub use crate::settings::{
     AgentBufferFontSize, AgentUiFontSize, BufferLineHeight, FontFamilyName, IconThemeName,
     IconThemeSelection, ThemeAppearanceMode, ThemeName, ThemeSelection, ThemeSettings,
-    adjust_agent_buffer_font_size, adjust_agent_ui_font_size, adjust_ui_font_size,
-    adjusted_font_size, appearance_to_mode, clamp_font_size, default_theme,
+    adjust_agent_buffer_font_size, adjust_agent_ui_font_size, adjust_all_font_sizes,
+    adjust_ui_font_size, adjusted_font_size, appearance_to_mode, clamp_font_size, default_theme,
     observe_buffer_font_size_adjustment, reset_agent_buffer_font_size, reset_agent_ui_font_size,
     reset_buffer_font_size, reset_ui_font_size, set_icon_theme, set_mode, set_theme, setup_ui_font,
+    ui_font_size_for_default_text_size,
 };
 pub use theme::UiDensity;
 

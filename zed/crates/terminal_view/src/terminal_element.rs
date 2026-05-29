@@ -37,7 +37,6 @@ use std::{fmt::Debug, ops::RangeInclusive, rc::Rc};
 
 use crate::{BlockContext, BlockProperties, ContentMode, TerminalMode, TerminalView};
 
-const STANDALONE_TERMINAL_FONT_SCALE: f32 = 0.82;
 const STANDALONE_TERMINAL_LINE_HEIGHT_SCALE: f32 = 0.9;
 
 /// The information generated during layout that is necessary for painting.
@@ -928,14 +927,11 @@ impl Element for TerminalElement {
                     TerminalMode::Embedded { .. } => {
                         window.text_style().font_size.to_pixels(window.rem_size())
                     }
-                    TerminalMode::Standalone => {
-                        terminal_settings
-                            .font_size
-                            .map_or(buffer_font_size, |size| {
-                                theme_settings::adjusted_font_size(size, cx)
-                            })
-                            * STANDALONE_TERMINAL_FONT_SCALE
-                    }
+                    TerminalMode::Standalone => terminal_settings
+                        .font_size
+                        .map_or(buffer_font_size, |size| {
+                            theme_settings::adjusted_font_size(size, cx)
+                        }),
                 };
                 let line_height = match &self.mode {
                     TerminalMode::Embedded { .. } => line_height,

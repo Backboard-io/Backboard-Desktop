@@ -1,7 +1,11 @@
 use crate::focus_follows_mouse::FocusFollowsMouse as _;
 use crate::persistence::model::DockData;
 use crate::status_bar::HideStatusItem;
-use crate::{DraggedDock, Event, FocusFollowsMouse, ModalLayer, Pane, WorkspaceSettings};
+use crate::{
+    DraggedDock, Event, FocusFollowsMouse, ModalLayer, Pane, WORKSPACE_CONTAINER_PADDING,
+    WORKSPACE_CONTAINER_RADIUS, WorkspaceSettings, workspace_container_background,
+    workspace_container_border, workspace_container_surface,
+};
 use crate::{Workspace, status_bar::StatusItemView};
 use anyhow::Context as _;
 use client::proto;
@@ -1099,14 +1103,13 @@ impl Render for Dock {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dispatch_context = Self::dispatch_context();
         if let Some(entry) = self.visible_entry() {
-            let colors = cx.theme().colors();
-            let dock_bg = colors
-                .panel_background
-                .blend(colors.editor_background.opacity(0.42));
-            let panel_bg = colors
-                .element_background
-                .blend(colors.panel_background.opacity(0.34));
-            let panel_border = colors.border_variant.opacity(0.5);
+            let dock_bg = workspace_container_background(cx);
+            let panel_bg = workspace_container_surface(cx);
+            let panel_border = workspace_container_border(cx);
+            let connected_layout = self
+                .workspace
+                .upgrade()
+                .is_some_and(|workspace| workspace.read(cx).connected_layout());
             let position = self.position;
             let create_resize_handle = || {
                 let handle = div()
@@ -1167,45 +1170,79 @@ impl Render for Dock {
                 }
             };
 
+            let panel = entry
+                .panel
+                .to_any()
+                .cached(StyleRefinement::default().v_flex().size_full());
+
             div()
                 .id("dock-panel")
                 .key_context(dispatch_context)
                 .track_focus(&self.focus_handle(cx))
                 .focus_follows_mouse(self.focus_follows_mouse, cx)
                 .flex()
-                .p_1()
                 .bg(dock_bg)
-                .border_color(colors.border_variant.opacity(0.48))
                 .overflow_hidden()
+                .when(
+                    self.position() != DockPosition::Bottom && !connected_layout,
+                    |this| this.py(WORKSPACE_CONTAINER_PADDING),
+                )
                 .map(|this| match self.position().axis() {
                     // Width and height are always set on the workspace wrapper in
                     // render_dock, so fill whatever space the wrapper provides.
                     Axis::Horizontal => this.w_full().h_full().flex_row(),
                     Axis::Vertical => this.h_full().w_full().flex_col(),
                 })
-                .map(|this| match self.position() {
-                    DockPosition::Left => this.border_r_1(),
-                    DockPosition::Right => this.border_l_1(),
-                    DockPosition::Bottom => this.border_t_1(),
+                .map(|this| {
+                    if connected_layout {
+                        this.child(
+                            div()
+                                .when(self.position() == DockPosition::Left, |this| {
+                                    this.border_r_1()
+                                })
+                                .when(self.position() == DockPosition::Right, |this| {
+                                    this.border_l_1()
+                                })
+                                .when(self.position() == DockPosition::Bottom, |this| {
+                                    this.border_t_1()
+                                })
+                                .border_color(panel_border)
+                                .bg(panel_bg)
+                                .overflow_hidden()
+                                .map(|this| match self.position().axis() {
+                                    Axis::Horizontal => this.w_full().h_full(),
+                                    Axis::Vertical => this.h_full().w_full(),
+                                })
+                                .child(panel),
+                        )
+                    } else if self.position() == DockPosition::Bottom {
+                        this.child(panel)
+                    } else {
+                        this.child(
+                            div()
+                                .map(|this| match self.position() {
+                                    DockPosition::Left => this
+                                        .rounded_tr(WORKSPACE_CONTAINER_RADIUS)
+                                        .rounded_br(WORKSPACE_CONTAINER_RADIUS),
+                                    DockPosition::Right => this
+                                        .rounded_tl(WORKSPACE_CONTAINER_RADIUS)
+                                        .rounded_bl(WORKSPACE_CONTAINER_RADIUS),
+                                    DockPosition::Bottom => {
+                                        this.rounded(WORKSPACE_CONTAINER_RADIUS)
+                                    }
+                                })
+                                .border_1()
+                                .border_color(panel_border)
+                                .bg(panel_bg)
+                                .overflow_hidden()
+                                .map(|this| match self.position().axis() {
+                                    Axis::Horizontal => this.w_full().h_full(),
+                                    Axis::Vertical => this.h_full().w_full(),
+                                })
+                                .child(panel),
+                        )
+                    }
                 })
-                .child(
-                    div()
-                        .rounded_xl()
-                        .border_1()
-                        .border_color(panel_border)
-                        .bg(panel_bg)
-                        .overflow_hidden()
-                        .map(|this| match self.position().axis() {
-                            Axis::Horizontal => this.w_full().h_full(),
-                            Axis::Vertical => this.h_full().w_full(),
-                        })
-                        .child(
-                            entry
-                                .panel
-                                .to_any()
-                                .cached(StyleRefinement::default().v_flex().size_full()),
-                        ),
-                )
                 .when(self.resizable(cx), |this| {
                     this.child(create_resize_handle())
                 })

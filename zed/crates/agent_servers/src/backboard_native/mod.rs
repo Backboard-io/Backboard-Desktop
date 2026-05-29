@@ -1,4 +1,5 @@
 mod index;
+mod mcp;
 mod session_store;
 mod stream;
 mod tool_schemas;
@@ -9,7 +10,9 @@ use std::{
     any::Any,
     cell::RefCell,
     collections::BTreeSet,
-    path::PathBuf,
+    fs,
+    io::{ErrorKind, Read as _},
+    path::{Path, PathBuf},
     rc::Rc,
     sync::{
         Arc,
@@ -30,11 +33,12 @@ use anyhow::{Context as _, Result, anyhow};
 use chrono::Utc;
 use collections::{HashMap, IndexMap};
 use gpui::{App, AppContext as _, Entity, SharedString, Task, WeakEntity};
-use project::{AgentId, Project};
+use project::{AgentId, Project, context_server_store::ContextServerStore};
 use serde_json::{Map, Value, json};
 use ui::IconName;
 use util::path_list::PathList;
 use uuid::Uuid;
+use walkdir::WalkDir;
 
 const BACKBOARD_TELEMETRY_ID: &str = "backboard-native";
 const DEFAULT_PROVIDER: &str = "openai";
@@ -42,6 +46,7 @@ const DEFAULT_MODEL: &str = "gpt-4o";
 const DEFAULT_INTENSITY: &str = "fast";
 const DEFAULT_CONTEXT_WINDOW: u64 = 258_000;
 const HISTORY_REPLAY_MAX_MESSAGES: usize = 80;
+const BACKBOARD_SKILL_CONFIG_PREFIX: &str = "backboard_skill:";
 const MODEL_CATALOG_PROVIDERS: &[&str] = &[
     "anthropic",
     "openai",
@@ -67,8 +72,9 @@ pub(crate) const DEFAULT_TTS_FORMAT: &str = "mp3";
 pub(crate) const DEFAULT_STT_PROVIDER: &str = "openai";
 pub(crate) const DEFAULT_STT_MODEL: &str = "gpt-4o-mini-transcribe";
 pub(crate) const DEFAULT_STT_LANGUAGE: &str = "en";
-pub(crate) const DEFAULT_REALTIME_STT_PROVIDER: &str = "elevenlabs";
 pub(crate) const DEFAULT_REALTIME_STT_MODEL: &str = "scribe_v2_realtime";
+const MAX_NATIVE_SNAPSHOT_FILE_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_NATIVE_SNAPSHOT_PATHS: usize = 4096;
 
 static EMPTY_AUTH_METHODS: &[acp::AuthMethod] = &[];
 
@@ -98,12 +104,29 @@ pub(crate) struct NativeSession {
     intensity: String,
     feature_settings: FeatureSettings,
     rewound_history_context: Option<String>,
+    active_user_message_id: Option<UserMessageId>,
+    native_snapshots: Vec<NativeTurnSnapshot>,
+    context_server_store: Option<Entity<ContextServerStore>>,
+    mcp_tools: Vec<mcp::NativeMcpTool>,
     config_tx: watch::Sender<()>,
     config_rx: watch::Receiver<()>,
     cancel_flag: Arc<AtomicBool>,
     metrics: NativeTurnMetrics,
     context_window_tokens: Option<u64>,
     estimated_used_tokens: u64,
+}
+
+#[derive(Clone, Debug)]
+struct NativeTurnSnapshot {
+    user_message_id: UserMessageId,
+    paths: IndexMap<PathBuf, NativePathSnapshot>,
+}
+
+#[derive(Clone, Debug)]
+enum NativePathSnapshot {
+    Missing,
+    Directory,
+    File(Vec<u8>),
 }
 
 #[derive(Clone)]
@@ -117,6 +140,7 @@ pub(crate) struct SessionRuntime {
     pub intensity: String,
     pub feature_settings: FeatureSettings,
     pub cancel_flag: Arc<AtomicBool>,
+    pub context_server_store: Option<Entity<ContextServerStore>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -125,6 +149,10 @@ pub(crate) struct FeatureSettings {
     pub image_generation: String,
     pub voice_mode: String,
     pub live_voice: String,
+    pub mcp_figma: String,
+    pub mcp_notion: String,
+    pub mcp_google: String,
+    pub selected_skills: Vec<String>,
 }
 
 impl Default for FeatureSettings {
@@ -134,8 +162,20 @@ impl Default for FeatureSettings {
             image_generation: "off".to_string(),
             voice_mode: "off".to_string(),
             live_voice: "off".to_string(),
+            mcp_figma: "auto".to_string(),
+            mcp_notion: "off".to_string(),
+            mcp_google: "off".to_string(),
+            selected_skills: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct FileSystemSkill {
+    pub relative_path: String,
+    pub path: PathBuf,
+    pub name: String,
+    pub description: Option<String>,
 }
 
 #[derive(Default)]
@@ -352,7 +392,40 @@ impl BackboardNativeState {
             intensity: session.intensity.clone(),
             feature_settings: session.feature_settings.clone(),
             cancel_flag: session.cancel_flag.clone(),
+            context_server_store: session.context_server_store.clone(),
         })
+    }
+
+    pub(crate) fn set_mcp_tools(
+        &self,
+        session_id: &acp::SessionId,
+        mcp_tools: Vec<mcp::NativeMcpTool>,
+    ) {
+        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+            session.mcp_tools = mcp_tools;
+        }
+    }
+
+    pub(crate) fn mcp_tools(&self, session_id: &acp::SessionId) -> Vec<mcp::NativeMcpTool> {
+        self.sessions
+            .borrow()
+            .get(session_id)
+            .map(|session| session.mcp_tools.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn mcp_tool_for_name(
+        &self,
+        session_id: &acp::SessionId,
+        name: &str,
+    ) -> Option<mcp::NativeMcpTool> {
+        self.sessions
+            .borrow()
+            .get(session_id)?
+            .mcp_tools
+            .iter()
+            .find(|tool| tool.generated_name == name)
+            .cloned()
     }
 
     pub(crate) fn take_rewound_history_context(
@@ -376,6 +449,67 @@ impl BackboardNativeState {
         if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
             session.current_run_id = run_id;
         }
+    }
+
+    pub(crate) fn begin_turn(&self, session_id: &acp::SessionId, user_message_id: UserMessageId) {
+        let mut sessions = self.sessions.borrow_mut();
+        let Some(session) = sessions.get_mut(session_id) else {
+            return;
+        };
+        session.active_user_message_id = Some(user_message_id.clone());
+        if session
+            .native_snapshots
+            .iter()
+            .all(|snapshot| snapshot.user_message_id != user_message_id)
+        {
+            session.native_snapshots.push(NativeTurnSnapshot {
+                user_message_id,
+                paths: IndexMap::default(),
+            });
+        }
+    }
+
+    pub(crate) fn record_path_before_mutation(
+        &self,
+        session_id: &acp::SessionId,
+        path: &Path,
+    ) -> Result<()> {
+        self.record_paths_before_mutation(session_id, path, false)
+    }
+
+    pub(crate) fn record_path_tree_before_mutation(
+        &self,
+        session_id: &acp::SessionId,
+        path: &Path,
+    ) -> Result<()> {
+        self.record_paths_before_mutation(session_id, path, true)
+    }
+
+    fn record_paths_before_mutation(
+        &self,
+        session_id: &acp::SessionId,
+        path: &Path,
+        include_tree: bool,
+    ) -> Result<()> {
+        let mut sessions = self.sessions.borrow_mut();
+        let session = sessions
+            .get_mut(session_id)
+            .with_context(|| format!("unknown Backboard session: {session_id}"))?;
+        let workspace = session.workspace.clone();
+        let Some(snapshot) = active_native_snapshot_mut(session) else {
+            return Ok(());
+        };
+
+        record_missing_parent_dirs(snapshot, &workspace, path)?;
+        if include_tree && path.is_dir() {
+            for entry in WalkDir::new(path).follow_links(false).into_iter() {
+                let entry = entry?;
+                record_native_path_snapshot(snapshot, entry.path())?;
+            }
+        } else {
+            record_native_path_snapshot(snapshot, path)?;
+        }
+        Ok(())
     }
 
     fn prepare_truncate(
@@ -415,7 +549,7 @@ impl BackboardNativeState {
             (!context.trim().is_empty()).then_some(context)
         });
 
-        let record = {
+        let (record, native_restore_paths) = {
             let mut sessions = self.sessions.borrow_mut();
             let session = sessions
                 .get_mut(session_id)
@@ -425,24 +559,30 @@ impl BackboardNativeState {
             session.cancel_flag.store(true, Ordering::SeqCst);
             session.estimated_used_tokens = 0;
             session.rewound_history_context = rewound_history_context;
+            session.active_user_message_id = None;
+            let native_restore_paths = take_native_restore_paths(session, message_id);
 
-            session_store::SessionRecord {
-                workspace: session.workspace.to_string_lossy().to_string(),
-                assistant_id: None,
-                thread_id: None,
-                provider: session.provider.clone(),
-                model: session.model.clone(),
-                title: session
-                    .workspace
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("Backboard")
-                    .to_string(),
-                session_id: session_id.to_string(),
-                updated_at: Utc::now().to_rfc3339(),
-            }
+            (
+                session_store::SessionRecord {
+                    workspace: session.workspace.to_string_lossy().to_string(),
+                    assistant_id: None,
+                    thread_id: None,
+                    provider: session.provider.clone(),
+                    model: session.model.clone(),
+                    title: session
+                        .workspace
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("Backboard")
+                        .to_string(),
+                    session_id: session_id.to_string(),
+                    updated_at: Utc::now().to_rfc3339(),
+                },
+                native_restore_paths,
+            )
         };
 
+        restore_native_paths(native_restore_paths)?;
         session_store::write_session_record(&session_id.to_string(), &record).ok();
         session_store::write_workspace_record(PathBuf::from(&record.workspace).as_path(), &record)
             .ok();
@@ -622,6 +762,7 @@ impl BackboardNativeState {
     async fn ensure_thread_binding(
         self: Rc<Self>,
         session_id: &acp::SessionId,
+        tools: Vec<Value>,
         cx: &mut gpui::AsyncApp,
     ) -> Result<String> {
         if let Some(thread_id) = self.session_thread_id(session_id) {
@@ -630,11 +771,10 @@ impl BackboardNativeState {
 
         let runtime = self.runtime_for_session(session_id)?;
         let (_config, client) = self.client()?;
-        let mode = runtime.mode.to_string();
         let request = ::backboard::CreateAssistantRequest {
             name: "Backboard IDE Agent".to_string(),
             description: workspace::system_prompt(&runtime.workspace),
-            tools: Some(tool_schemas::tool_definitions(&mode)),
+            tools: Some(tools),
             custom_fact_extraction_prompt: None,
             custom_update_memory_prompt: None,
         };
@@ -694,6 +834,166 @@ impl BackboardNativeState {
     }
 }
 
+fn active_native_snapshot_mut(session: &mut NativeSession) -> Option<&mut NativeTurnSnapshot> {
+    let user_message_id = session.active_user_message_id.clone()?;
+    if let Some(ix) = session
+        .native_snapshots
+        .iter()
+        .position(|snapshot| snapshot.user_message_id == user_message_id)
+    {
+        return session.native_snapshots.get_mut(ix);
+    }
+
+    session.native_snapshots.push(NativeTurnSnapshot {
+        user_message_id,
+        paths: IndexMap::default(),
+    });
+    session.native_snapshots.last_mut()
+}
+
+fn record_missing_parent_dirs(
+    snapshot: &mut NativeTurnSnapshot,
+    workspace: &Path,
+    path: &Path,
+) -> Result<()> {
+    let mut parent = path.parent();
+    while let Some(dir) = parent {
+        if dir == workspace {
+            break;
+        }
+        if dir.starts_with(workspace) && !dir.exists() {
+            record_native_path_snapshot(snapshot, dir)?;
+        }
+        parent = dir.parent();
+    }
+    Ok(())
+}
+
+fn record_native_path_snapshot(snapshot: &mut NativeTurnSnapshot, path: &Path) -> Result<()> {
+    let path = path.to_path_buf();
+    if snapshot.paths.contains_key(&path) {
+        return Ok(());
+    }
+    if snapshot.paths.len() >= MAX_NATIVE_SNAPSHOT_PATHS {
+        log::warn!(
+            "Backboard native mutation snapshot path limit reached; skipping {}",
+            path.display()
+        );
+        return Ok(());
+    }
+    let Some(path_snapshot) = native_path_snapshot(&path)? else {
+        return Ok(());
+    };
+    snapshot.paths.insert(path, path_snapshot);
+    Ok(())
+}
+
+fn native_path_snapshot(path: &Path) -> Result<Option<NativePathSnapshot>> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(Some(NativePathSnapshot::Missing));
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("snapshotting {}", path.display()));
+        }
+    };
+
+    if metadata.is_dir() {
+        return Ok(Some(NativePathSnapshot::Directory));
+    }
+    if metadata.is_file() {
+        if metadata.len() > MAX_NATIVE_SNAPSHOT_FILE_BYTES {
+            log::warn!(
+                "Backboard native mutation snapshot skipped large file {} ({} bytes)",
+                path.display(),
+                metadata.len()
+            );
+            return Ok(None);
+        }
+        let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        return Ok(Some(NativePathSnapshot::File(bytes)));
+    }
+
+    Ok(None)
+}
+
+fn take_native_restore_paths(
+    session: &mut NativeSession,
+    message_id: &UserMessageId,
+) -> IndexMap<PathBuf, NativePathSnapshot> {
+    let Some(start_ix) = session
+        .native_snapshots
+        .iter()
+        .position(|snapshot| &snapshot.user_message_id == message_id)
+    else {
+        return IndexMap::default();
+    };
+
+    let snapshots = session
+        .native_snapshots
+        .drain(start_ix..)
+        .collect::<Vec<_>>();
+    let mut paths = IndexMap::default();
+    for snapshot in snapshots {
+        for (path, path_snapshot) in snapshot.paths {
+            if !paths.contains_key(&path) {
+                paths.insert(path, path_snapshot);
+            }
+        }
+    }
+    paths
+}
+
+fn restore_native_paths(paths: IndexMap<PathBuf, NativePathSnapshot>) -> Result<()> {
+    let mut missing_paths = Vec::new();
+
+    for (path, path_snapshot) in paths {
+        match path_snapshot {
+            NativePathSnapshot::File(bytes) => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("creating {}", parent.display()))?;
+                }
+                fs::write(&path, bytes).with_context(|| format!("restoring {}", path.display()))?;
+            }
+            NativePathSnapshot::Directory => {
+                fs::create_dir_all(&path)
+                    .with_context(|| format!("restoring directory {}", path.display()))?;
+            }
+            NativePathSnapshot::Missing => missing_paths.push(path),
+        }
+    }
+
+    missing_paths.sort_by(|left, right| right.components().count().cmp(&left.components().count()));
+    for path in missing_paths {
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error).with_context(|| format!("checking {}", path.display()));
+            }
+        };
+
+        if metadata.is_dir() {
+            match fs::remove_dir(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => {
+                    log::warn!(
+                        "Backboard native restore left non-empty directory {}: {error:#}",
+                        path.display()
+                    );
+                }
+            }
+        } else {
+            fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
+        }
+    }
+
+    Ok(())
+}
+
 fn config_watch_channel() -> (watch::Sender<()>, watch::Receiver<()>) {
     watch::channel(())
 }
@@ -731,6 +1031,7 @@ impl AgentConnection for BackboardNativeConnection {
         let (provider, model) = BackboardNativeState::fallback_provider_model(&config);
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let (config_tx, config_rx) = config_watch_channel();
+        let context_server_store = project.read(cx).context_server_store();
         let action_log = cx.new(|_| ActionLog::new(project.clone()));
         let thread = cx.new(|cx| {
             AcpThread::new(
@@ -760,6 +1061,10 @@ impl AgentConnection for BackboardNativeConnection {
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
                 rewound_history_context: None,
+                active_user_message_id: None,
+                native_snapshots: Vec::new(),
+                context_server_store: Some(context_server_store),
+                mcp_tools: Vec::new(),
                 config_tx,
                 config_rx,
                 cancel_flag,
@@ -951,6 +1256,7 @@ impl BackboardNativeConnection {
         let (default_provider, default_model) =
             BackboardNativeState::fallback_provider_model(&config);
         let (config_tx, config_rx) = config_watch_channel();
+        let context_server_store = project.read(cx).context_server_store();
         let action_log = cx.new(|_| ActionLog::new(project.clone()));
         let thread = cx.new(|cx| {
             AcpThread::new(
@@ -988,6 +1294,10 @@ impl BackboardNativeConnection {
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
                 rewound_history_context: None,
+                active_user_message_id: None,
+                native_snapshots: Vec::new(),
+                context_server_store: Some(context_server_store),
+                mcp_tools: Vec::new(),
                 config_tx,
                 config_rx,
                 cancel_flag: Arc::new(AtomicBool::new(false)),
@@ -1075,7 +1385,7 @@ struct BackboardConfigOptions {
 }
 
 impl BackboardConfigOptions {
-    fn current_config(&self) -> (String, String, FeatureSettings) {
+    fn current_config(&self) -> (String, String, FeatureSettings, Option<PathBuf>) {
         self.state
             .sessions
             .borrow()
@@ -1085,6 +1395,7 @@ impl BackboardConfigOptions {
                     session.mode.to_string(),
                     session.intensity.clone(),
                     session.feature_settings.clone(),
+                    Some(session.workspace.clone()),
                 )
             })
             .unwrap_or_else(|| {
@@ -1092,6 +1403,7 @@ impl BackboardConfigOptions {
                     "free".to_string(),
                     DEFAULT_INTENSITY.to_string(),
                     FeatureSettings::default(),
+                    None,
                 )
             })
     }
@@ -1099,8 +1411,8 @@ impl BackboardConfigOptions {
 
 impl AgentSessionConfigOptions for BackboardConfigOptions {
     fn config_options(&self) -> Vec<acp::SessionConfigOption> {
-        let (mode, intensity, feature_settings) = self.current_config();
-        config_options(&mode, &intensity, &feature_settings)
+        let (mode, intensity, feature_settings, workspace) = self.current_config();
+        config_options(&mode, &intensity, &feature_settings, workspace.as_deref())
     }
 
     fn set_config_option(
@@ -1110,7 +1422,6 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
         cx: &mut App,
     ) -> Task<Result<Vec<acp::SessionConfigOption>>> {
         let value = value.to_string();
-        let mut options = self.config_options();
         let config_id_string = config_id.to_string();
         let mut changed = false;
         let mut changed_mode = None;
@@ -1163,6 +1474,44 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
                             if value == "on" { "on" } else { "off" }.to_string();
                         changed = true;
                     }
+                    "backboard_mcp_figma" => {
+                        session.feature_settings.mcp_figma =
+                            if matches!(value.as_str(), "auto" | "on") {
+                                value
+                            } else {
+                                "off".to_string()
+                            };
+                        changed = true;
+                    }
+                    "backboard_mcp_notion" => {
+                        session.feature_settings.mcp_notion =
+                            if value == "on" { "on" } else { "off" }.to_string();
+                        changed = true;
+                    }
+                    "backboard_mcp_google" => {
+                        session.feature_settings.mcp_google =
+                            if value == "on" { "on" } else { "off" }.to_string();
+                        changed = true;
+                    }
+                    _ if config_id_string.starts_with(BACKBOARD_SKILL_CONFIG_PREFIX) => {
+                        let skill_path =
+                            config_id_string.trim_start_matches(BACKBOARD_SKILL_CONFIG_PREFIX);
+                        let available_skills = discover_file_system_skills(&session.workspace);
+                        if available_skills
+                            .iter()
+                            .any(|skill| skill.relative_path == skill_path)
+                        {
+                            let selected = &mut session.feature_settings.selected_skills;
+                            if value == "on" {
+                                if !selected.iter().any(|selected| selected == skill_path) {
+                                    selected.push(skill_path.to_string());
+                                }
+                            } else {
+                                selected.retain(|selected| selected != skill_path);
+                            }
+                            changed = true;
+                        }
+                    }
                     _ => {}
                 }
                 if changed {
@@ -1170,8 +1519,8 @@ impl AgentSessionConfigOptions for BackboardConfigOptions {
                 }
             }
         }
+        let options = self.config_options();
         if changed {
-            options = self.config_options();
             let state = self.state.clone();
             let session_id = self.session_id.clone();
             let options_for_update = options.clone();
@@ -1220,68 +1569,85 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                 return Ok(AgentModelList::Grouped(group_models(models)));
             }
 
-            let Ok((_config, client)) = state.client() else {
-                let config = state.load_config();
-                let (provider, model) = BackboardNativeState::fallback_provider_model(&config);
-                log::warn!(
-                    "Backboard model catalog unavailable; using uncached fallback model {provider}/{model}"
-                );
-                return Ok(AgentModelList::Grouped(group_models(vec![AgentModelInfo {
-                    id: acp::ModelId::new(format!("{provider}/{model}")),
-                    name: model.into(),
-                    description: Some(provider.into()),
-                    icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
-                    is_latest: false,
-                    cost: None,
-                }])));
-            };
-
-            log::info!(
-                "Backboard native endpoint call: GET /models?model_type=llm&limit=15000 plus provider-scoped model catalogs agent_id={}",
-                state.agent_id
-            );
-            let models = gpui_tokio::Tokio::spawn_result(cx, async move {
-                list_backboard_model_catalog(client).await
-            })
-            .await?;
-            let models = models
-                .into_iter()
-                .filter(|model| !model.provider.is_empty() && !model.name.is_empty())
-                .map(|model| {
-                    if let Some(context_limit) = model.context_limit {
-                        state.remember_model_context_window(
-                            &model.provider,
-                            &model.name,
-                            context_limit,
-                        );
-                    }
-                    let id = format!("{}/{}", model.provider, model.name);
-                    let mut info = AgentModelInfo {
-                        id: acp::ModelId::new(id),
-                        name: model
-                            .display_name
-                            .unwrap_or_else(|| model.name.clone())
-                            .into(),
-                        description: Some(model.provider.clone().into()),
-                        icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
-                        is_latest: false,
-                        cost: None,
+            let (models, should_cache) = match state.client() {
+                Ok((_config, client)) => {
+                    log::info!(
+                        "Backboard native endpoint call: GET /models?model_type=llm&limit=15000 plus provider-scoped model catalogs agent_id={}",
+                        state.agent_id
+                    );
+                    let catalog_result = gpui_tokio::Tokio::spawn_result(cx, async move {
+                        list_backboard_model_catalog(client).await
+                    })
+                    .await;
+                    let models = match catalog_result {
+                        Ok(models) => models,
+                        Err(error) => {
+                            log::warn!("failed to load Backboard model catalog: {error:#}");
+                            Vec::new()
+                        }
                     };
-                    if let (Some(input), Some(output)) = (
-                        model.input_cost_per_1m_tokens,
-                        model.output_cost_per_1m_tokens,
-                    ) {
-                        info.cost = Some(format!("${input:.2}/M in, ${output:.2}/M out").into());
+                    let models = models
+                        .into_iter()
+                        .filter(|model| !model.provider.is_empty() && !model.name.is_empty())
+                        .map(|model| {
+                            if let Some(context_limit) = model.context_limit {
+                                state.remember_model_context_window(
+                                    &model.provider,
+                                    &model.name,
+                                    context_limit,
+                                );
+                            }
+                            let id = format!("{}/{}", model.provider, model.name);
+                            let mut info = AgentModelInfo {
+                                id: acp::ModelId::new(id),
+                                name: model
+                                    .display_name
+                                    .unwrap_or_else(|| model.name.clone())
+                                    .into(),
+                                description: Some(model.provider.clone().into()),
+                                icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
+                                is_latest: false,
+                                cost: None,
+                            };
+                            if let (Some(input), Some(output)) = (
+                                model.input_cost_per_1m_tokens,
+                                model.output_cost_per_1m_tokens,
+                            ) {
+                                info.cost =
+                                    Some(format!("${input:.2}/M in, ${output:.2}/M out").into());
+                            }
+                            info
+                        })
+                        .collect::<Vec<_>>();
+                    if models.is_empty() {
+                        let config = state.load_config();
+                        let (provider, model) =
+                            BackboardNativeState::fallback_provider_model(&config);
+                        log::warn!(
+                            "Backboard model catalog returned no usable models; using uncached fallback model {provider}/{model}"
+                        );
+                        (vec![fallback_agent_model_info(&config)], false)
+                    } else {
+                        log::info!(
+                            "Backboard model catalog loaded {} usable models agent_id={}",
+                            models.len(),
+                            state.agent_id
+                        );
+                        (models, true)
                     }
-                    info
-                })
-                .collect::<Vec<_>>();
-            log::info!(
-                "Backboard model catalog loaded {} usable models agent_id={}",
-                models.len(),
-                state.agent_id
-            );
-            *state.model_cache.borrow_mut() = Some(models.clone());
+                }
+                Err(_) => {
+                    let config = state.load_config();
+                    let (provider, model) = BackboardNativeState::fallback_provider_model(&config);
+                    log::warn!(
+                        "Backboard model catalog unavailable; using uncached fallback model {provider}/{model}"
+                    );
+                    (vec![fallback_agent_model_info(&config)], false)
+                }
+            };
+            if should_cache {
+                *state.model_cache.borrow_mut() = Some(models.clone());
+            }
             Ok(AgentModelList::Grouped(group_models(models)))
         })
     }
@@ -1351,6 +1717,18 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
     }
 }
 
+fn fallback_agent_model_info(config: &BackboardConfig) -> AgentModelInfo {
+    let (provider, model) = BackboardNativeState::fallback_provider_model(config);
+    AgentModelInfo {
+        id: acp::ModelId::new(format!("{provider}/{model}")),
+        name: model.into(),
+        description: Some(provider.into()),
+        icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
+        is_latest: false,
+        cost: None,
+    }
+}
+
 struct BackboardSessionList {
     state: Rc<BackboardNativeState>,
 }
@@ -1412,8 +1790,9 @@ fn config_options(
     mode: &str,
     intensity: &str,
     feature_settings: &FeatureSettings,
+    workspace: Option<&Path>,
 ) -> Vec<acp::SessionConfigOption> {
-    vec![
+    let mut options = vec![
         acp::SessionConfigOption::select(
             "backboard_mode",
             "Mode",
@@ -1507,7 +1886,292 @@ fn config_options(
         )
         .description("Controls Backboard realtime voice WebSocket mode.")
         .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::select(
+            "backboard_mcp_figma",
+            "Figma Links",
+            feature_settings.mcp_figma.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new("auto", "Auto").description(
+                    "Enable Figma MCP calls only when the prompt includes a Figma file, frame, group, or board link.",
+                ),
+                acp::SessionConfigSelectOption::new("off", "Off")
+                    .description("Do not enable Figma MCP calls automatically."),
+                acp::SessionConfigSelectOption::new("on", "Always")
+                    .description("Send Figma MCP availability on every turn."),
+            ],
+        )
+        .description("Detects pasted Figma links and enables Backboard Figma MCP calls for that turn.")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::select(
+            "backboard_mcp_notion",
+            "Notion",
+            feature_settings.mcp_notion.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new("off", "Off")
+                    .description("Do not enable Notion MCP calls for this session."),
+                acp::SessionConfigSelectOption::new("on", "On")
+                    .description("Allow Backboard to use Notion MCP calls when useful."),
+            ],
+        )
+        .description("Controls Backboard Notion MCP calls.")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::select(
+            "backboard_mcp_google",
+            "Google",
+            feature_settings.mcp_google.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new("off", "Off")
+                    .description("Do not enable Google MCP calls for this session."),
+                acp::SessionConfigSelectOption::new("on", "On")
+                    .description("Allow Backboard to use Google MCP calls when useful."),
+            ],
+        )
+        .description("Controls Backboard Google MCP calls.")
+        .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+    ];
+
+    if let Some(workspace) = workspace {
+        options.extend(
+            discover_file_system_skills(workspace)
+                .into_iter()
+                .map(|skill| {
+                    let current_value = if feature_settings
+                        .selected_skills
+                        .iter()
+                        .any(|selected_skill| selected_skill == &skill.relative_path)
+                    {
+                        "on"
+                    } else {
+                        "off"
+                    };
+                    let config_id =
+                        format!("{}{}", BACKBOARD_SKILL_CONFIG_PREFIX, skill.relative_path);
+                    let description = skill.description.unwrap_or_else(|| {
+                        format!("Use instructions from {}.", skill.path.display())
+                    });
+                    acp::SessionConfigOption::select(
+                        config_id,
+                        skill.name,
+                        current_value.to_string(),
+                        vec![
+                            acp::SessionConfigSelectOption::new("off", "Off").description(
+                                "Do not include this skill in the next Backboard turn.",
+                            ),
+                            acp::SessionConfigSelectOption::new("on", "On")
+                                .description("Include this skill in the next Backboard turn."),
+                        ],
+                    )
+                    .description(description)
+                    .category(acp::SessionConfigOptionCategory::ThoughtLevel)
+                }),
+        );
+    }
+
+    options
+}
+
+pub(crate) fn discover_file_system_skills(workspace: &Path) -> Vec<FileSystemSkill> {
+    let mut relative_paths = BTreeSet::new();
+    let mut skills = Vec::new();
+
+    for skills_root in skills_roots_for_workspace(workspace) {
+        skills.extend(
+            walkdir::WalkDir::new(&skills_root)
+                .max_depth(3)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_type().is_file() && entry.file_name() == "SKILL.md")
+                .filter_map(|entry| file_system_skill_from_path(&skills_root, entry.path()))
+                .filter(|skill| relative_paths.insert(skill.relative_path.clone())),
+        );
+    }
+
+    skills.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.relative_path.cmp(&right.relative_path))
+    });
+    skills
+}
+
+fn skills_roots_for_workspace(workspace: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for ancestor in workspace.ancestors() {
+        if ancestor
+            .file_name()
+            .is_some_and(|name| name == std::ffi::OsStr::new("skills"))
+            && ancestor.is_dir()
+        {
+            push_skill_root(&mut roots, ancestor.to_path_buf());
+        }
+
+        for candidate in skill_root_candidates(ancestor) {
+            push_skill_root(&mut roots, candidate);
+        }
+    }
+
+    for candidate in default_skill_root_candidates() {
+        push_skill_root(&mut roots, candidate);
+    }
+
+    roots
+}
+
+fn skill_root_candidates(ancestor: &Path) -> [PathBuf; 3] {
+    [
+        ancestor.join("assets").join("skills"),
+        ancestor.join("zed").join("assets").join("skills"),
+        ancestor
+            .join("ide")
+            .join("zed")
+            .join("assets")
+            .join("skills"),
     ]
+}
+
+fn default_skill_root_candidates() -> Vec<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut candidates = vec![
+        manifest_dir
+            .join("..")
+            .join("..")
+            .join("assets")
+            .join("skills"),
+    ];
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        for ancestor in current_dir.ancestors() {
+            candidates.extend(skill_root_candidates(ancestor));
+        }
+    }
+
+    candidates
+}
+
+fn push_skill_root(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if !candidate.is_dir() {
+        return;
+    }
+
+    let candidate = match std::fs::canonicalize(&candidate) {
+        Ok(candidate) => candidate,
+        Err(_) => candidate,
+    };
+
+    if !roots.iter().any(|root| root == &candidate) {
+        roots.push(candidate);
+    }
+}
+
+fn file_system_skill_from_path(
+    skills_root: &Path,
+    skill_file_path: &Path,
+) -> Option<FileSystemSkill> {
+    let skill_dir = skill_file_path.parent()?;
+    let relative_path = skill_dir
+        .strip_prefix(skills_root)
+        .ok()?
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    if relative_path.is_empty() {
+        return None;
+    }
+
+    let fallback_name = skill_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(display_name_from_slug)
+        .unwrap_or_else(|| relative_path.clone());
+    let metadata = read_skill_metadata(skill_file_path);
+    Some(FileSystemSkill {
+        relative_path,
+        path: skill_file_path.to_path_buf(),
+        name: metadata
+            .name
+            .map(|name| display_name_from_slug(&name))
+            .unwrap_or(fallback_name),
+        description: metadata.description,
+    })
+}
+
+#[derive(Default)]
+struct SkillMetadata {
+    name: Option<String>,
+    description: Option<String>,
+}
+
+fn read_skill_metadata(path: &Path) -> SkillMetadata {
+    let Ok(file) = std::fs::File::open(path) else {
+        return SkillMetadata::default();
+    };
+    let mut preview = String::new();
+    let mut limited_file = file.take(8192);
+    if limited_file.read_to_string(&mut preview).is_err() {
+        return SkillMetadata::default();
+    }
+
+    parse_skill_metadata(&preview)
+}
+
+fn parse_skill_metadata(contents: &str) -> SkillMetadata {
+    let mut in_frontmatter = false;
+    let mut metadata = SkillMetadata::default();
+
+    for line in contents.lines() {
+        if line.trim() == "---" {
+            if in_frontmatter {
+                break;
+            }
+            in_frontmatter = true;
+            continue;
+        }
+
+        if !in_frontmatter {
+            continue;
+        }
+
+        if let Some((key, value)) = line.split_once(':') {
+            let value = normalize_frontmatter_value(value);
+            match key.trim() {
+                "name" => metadata.name = Some(value),
+                "description" => metadata.description = Some(value),
+                _ => {}
+            }
+        }
+    }
+
+    metadata
+}
+
+fn normalize_frontmatter_value(value: &str) -> String {
+    let value = value.trim();
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value)
+        .to_string()
+}
+
+fn display_name_from_slug(value: &str) -> String {
+    value
+        .split(|character: char| character == '-' || character == '_' || character == '/')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            let Some(first) = chars.next() else {
+                return String::new();
+            };
+            let mut titleized = first.to_uppercase().collect::<String>();
+            titleized.push_str(chars.as_str());
+            titleized
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn group_models(
@@ -1528,7 +2192,13 @@ fn group_models(
 }
 
 async fn list_backboard_model_catalog(client: BackboardClient) -> Result<Vec<BackboardModel>> {
-    let mut models = client.list_models(None, Some("llm"), Some(15_000)).await?;
+    let mut models = match client.list_models(None, Some("llm"), Some(15_000)).await {
+        Ok(models) => models,
+        Err(error) => {
+            log::debug!("Backboard global model catalog request failed: {error:#}");
+            Vec::new()
+        }
+    };
     let mut providers = MODEL_CATALOG_PROVIDERS
         .iter()
         .map(|provider| provider.to_string())
@@ -1617,14 +2287,111 @@ mod tests {
     }
 
     #[test]
+    fn native_mutation_snapshots_restore_truncated_turn_changes() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let workspace = temp_dir.path().to_path_buf();
+        fs::create_dir_all(workspace.join("src")).expect("create src");
+        fs::write(workspace.join("src/existing.txt"), "old").expect("write existing");
+        fs::write(workspace.join("src/deleted.txt"), "before delete").expect("write deleted");
+
+        let connection =
+            BackboardNativeConnection::new(AgentId::new("backboard"), Some("free".into()));
+        let state = connection.state.clone();
+        let session_id = acp::SessionId::new("test-session");
+        let (config_tx, config_rx) = config_watch_channel();
+
+        state.sessions.borrow_mut().insert(
+            session_id.clone(),
+            NativeSession {
+                thread: WeakEntity::new_invalid(),
+                workspace: workspace.clone(),
+                assistant_id: None,
+                thread_id: None,
+                current_run_id: None,
+                provider: Some(DEFAULT_PROVIDER.to_string()),
+                model: Some(DEFAULT_MODEL.to_string()),
+                mode: acp::SessionModeId::new("free"),
+                intensity: DEFAULT_INTENSITY.to_string(),
+                feature_settings: FeatureSettings::default(),
+                rewound_history_context: None,
+                active_user_message_id: None,
+                native_snapshots: Vec::new(),
+                context_server_store: None,
+                mcp_tools: Vec::new(),
+                config_tx,
+                config_rx,
+                cancel_flag: Arc::new(AtomicBool::new(false)),
+                metrics: NativeTurnMetrics::default(),
+                context_window_tokens: None,
+                estimated_used_tokens: 0,
+            },
+        );
+
+        let message_id = UserMessageId::new();
+        state.begin_turn(&session_id, message_id.clone());
+
+        let existing_path = workspace.join("src/existing.txt");
+        let created_path = workspace.join("generated/nested.txt");
+        let deleted_path = workspace.join("src/deleted.txt");
+        state
+            .record_path_before_mutation(&session_id, &existing_path)
+            .expect("snapshot existing");
+        state
+            .record_path_before_mutation(&session_id, &created_path)
+            .expect("snapshot created");
+        state
+            .record_path_tree_before_mutation(&session_id, &deleted_path)
+            .expect("snapshot deleted");
+
+        fs::write(&existing_path, "new").expect("mutate existing");
+        fs::create_dir_all(created_path.parent().unwrap()).expect("create generated dir");
+        fs::write(&created_path, "created").expect("write created");
+        fs::remove_file(&deleted_path).expect("delete file");
+
+        let paths = {
+            let mut sessions = state.sessions.borrow_mut();
+            let session = sessions.get_mut(&session_id).unwrap();
+            take_native_restore_paths(session, &message_id)
+        };
+        restore_native_paths(paths).expect("restore snapshots");
+
+        assert_eq!(fs::read_to_string(existing_path).unwrap(), "old");
+        assert_eq!(fs::read_to_string(deleted_path).unwrap(), "before delete");
+        assert!(!created_path.exists());
+        assert!(!workspace.join("generated").exists());
+    }
+
+    #[test]
+    fn fallback_agent_model_uses_configured_default() {
+        let config = BackboardConfig {
+            default_provider: Some("anthropic".to_string()),
+            default_model: Some("claude-sonnet-4-5".to_string()),
+            ..BackboardConfig::default()
+        };
+
+        let model = fallback_agent_model_info(&config);
+
+        assert_eq!(model.id, acp::ModelId::new("anthropic/claude-sonnet-4-5"));
+        assert_eq!(model.name, "claude-sonnet-4-5");
+        assert_eq!(
+            model.description.as_ref().map(|value| value.as_ref()),
+            Some("anthropic")
+        );
+    }
+
+    #[test]
     fn config_options_include_media_and_search_chips() {
         let settings = FeatureSettings {
             web_search: "Auto".to_string(),
             image_generation: "auto".to_string(),
             voice_mode: "tts".to_string(),
             live_voice: "on".to_string(),
+            mcp_figma: "auto".to_string(),
+            mcp_notion: "on".to_string(),
+            mcp_google: "on".to_string(),
+            selected_skills: Vec::new(),
         };
-        let options = config_options("free", "fast", &settings);
+        let options = config_options("free", "fast", &settings, None);
         let ids = options
             .iter()
             .map(|option| option.id.to_string())
@@ -1635,6 +2402,113 @@ mod tests {
         assert!(ids.contains(&"backboard_image_generation".to_string()));
         assert!(ids.contains(&"backboard_voice_mode".to_string()));
         assert!(ids.contains(&"backboard_live_voice".to_string()));
+        assert!(ids.contains(&"backboard_mcp_figma".to_string()));
+        assert!(ids.contains(&"backboard_mcp_notion".to_string()));
+        assert!(ids.contains(&"backboard_mcp_google".to_string()));
+    }
+
+    #[test]
+    fn discovers_skills_from_workspace_assets_directory() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let skill_dir = temp_dir
+            .path()
+            .join("assets")
+            .join("skills")
+            .join("shopify")
+            .join("shopify-admin");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"<!-- generated -->
+---
+name: shopify-admin
+description: "Build against the Shopify Admin API."
+---
+
+# Instructions
+"#,
+        )
+        .expect("write skill");
+
+        let workspace = temp_dir.path().join("crates").join("agent");
+        let skills = discover_file_system_skills(&workspace);
+        let skill = skills
+            .iter()
+            .find(|skill| skill.relative_path == "shopify/shopify-admin")
+            .expect("shopify admin skill should be discovered");
+
+        assert_eq!(skill.name, "Shopify Admin");
+        assert_eq!(
+            skill.description.as_deref(),
+            Some("Build against the Shopify Admin API.")
+        );
+    }
+
+    #[test]
+    fn discovers_skills_from_sibling_zed_assets_directory() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let ide_dir = temp_dir.path().join("ide");
+        let skill_dir = ide_dir
+            .join("zed")
+            .join("assets")
+            .join("skills")
+            .join("shopify")
+            .join("shopify-admin");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: shopify-admin
+description: "Build against the Shopify Admin API."
+---
+"#,
+        )
+        .expect("write skill");
+
+        let workspace = ide_dir.join("web");
+        let skills = discover_file_system_skills(&workspace);
+        let skill = skills
+            .iter()
+            .find(|skill| skill.relative_path == "shopify/shopify-admin")
+            .expect("shopify admin skill should be discovered");
+
+        assert_eq!(
+            skill.path,
+            std::fs::canonicalize(skill_dir.join("SKILL.md")).expect("canonicalize skill path"),
+            "skills should be loaded from ide/zed/assets/skills"
+        );
+    }
+
+    #[test]
+    fn config_options_include_file_system_skills() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let skill_dir = temp_dir
+            .path()
+            .join("assets")
+            .join("skills")
+            .join("web")
+            .join("modern");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: modern
+description: Modern design guidance.
+---
+"#,
+        )
+        .expect("write skill");
+
+        let settings = FeatureSettings {
+            selected_skills: vec!["web/modern".to_string()],
+            ..Default::default()
+        };
+        let options = config_options("free", "fast", &settings, Some(temp_dir.path()));
+
+        assert_eq!(
+            option_current_value(&options, "backboard_skill:web/modern").as_ref(),
+            Some(&acp::SessionConfigValueId::new("on"))
+        );
     }
 
     #[gpui::test]
@@ -1658,6 +2532,11 @@ mod tests {
                 mode: acp::SessionModeId::new("free"),
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
+                rewound_history_context: None,
+                active_user_message_id: None,
+                native_snapshots: Vec::new(),
+                context_server_store: None,
+                mcp_tools: Vec::new(),
                 config_tx,
                 config_rx,
                 cancel_flag: Arc::new(AtomicBool::new(false)),
@@ -1712,6 +2591,51 @@ mod tests {
         assert_eq!(
             option_current_value(&voice_options, "backboard_voice_mode").as_ref(),
             Some(&acp::SessionConfigValueId::new("tts"))
+        );
+
+        let figma_options = cx
+            .update(|cx| {
+                config_options.set_config_option(
+                    acp::SessionConfigId::new("backboard_mcp_figma"),
+                    acp::SessionConfigValueId::new("auto"),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            option_current_value(&figma_options, "backboard_mcp_figma").as_ref(),
+            Some(&acp::SessionConfigValueId::new("auto"))
+        );
+
+        let notion_options = cx
+            .update(|cx| {
+                config_options.set_config_option(
+                    acp::SessionConfigId::new("backboard_mcp_notion"),
+                    acp::SessionConfigValueId::new("on"),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            option_current_value(&notion_options, "backboard_mcp_notion").as_ref(),
+            Some(&acp::SessionConfigValueId::new("on"))
+        );
+
+        let google_options = cx
+            .update(|cx| {
+                config_options.set_config_option(
+                    acp::SessionConfigId::new("backboard_mcp_google"),
+                    acp::SessionConfigValueId::new("on"),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            option_current_value(&google_options, "backboard_mcp_google").as_ref(),
+            Some(&acp::SessionConfigValueId::new("on"))
         );
     }
 }

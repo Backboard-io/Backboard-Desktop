@@ -131,6 +131,7 @@ pub struct AssistantMessage {
     pub chunks: Vec<AssistantMessageChunk>,
     pub indented: bool,
     pub is_subagent_output: bool,
+    pub model_label: Option<SharedString>,
 }
 
 impl AssistantMessage {
@@ -1586,23 +1587,27 @@ impl AcpThread {
                 }
             }
             acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk { content, meta, .. }) => {
+                let model_label = Self::assistant_message_model_label(meta.as_ref());
                 self.push_assistant_content_block_with_options(
                     content,
                     false,
                     false,
                     Self::is_history_replay_message_start(meta.as_ref()),
+                    model_label,
                     cx,
                 );
             }
             acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk { content, meta, .. }) => {
+                let model_label = Self::assistant_message_model_label(meta.as_ref());
                 if Self::is_backboard_progress_update(&content, meta.as_ref()) {
-                    self.push_backboard_progress_content_block(content, cx);
+                    self.push_backboard_progress_content_block(content, model_label, cx);
                 } else {
                     self.push_assistant_content_block_with_options(
                         content,
                         true,
                         false,
                         Self::is_history_replay_message_start(meta.as_ref()),
+                        model_label,
                         cx,
                     );
                 }
@@ -1760,9 +1765,27 @@ impl AcpThread {
         self.push_assistant_content_block_with_indent(chunk, is_thought, false, cx)
     }
 
+    pub fn push_assistant_content_block_with_model_label(
+        &mut self,
+        chunk: acp::ContentBlock,
+        is_thought: bool,
+        model_label: Option<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        self.push_assistant_content_block_with_options(
+            chunk,
+            is_thought,
+            false,
+            false,
+            model_label,
+            cx,
+        )
+    }
+
     fn push_backboard_progress_content_block(
         &mut self,
         chunk: acp::ContentBlock,
+        model_label: Option<SharedString>,
         cx: &mut Context<Self>,
     ) {
         let path_style = self.project.read(cx).path_style(cx);
@@ -1770,19 +1793,26 @@ impl AcpThread {
         let entries_len = self.entries.len();
 
         if let Some(last_entry) = self.entries.last_mut()
-            && let AgentThreadEntry::AssistantMessage(AssistantMessage { chunks, .. }) = last_entry
+            && let AgentThreadEntry::AssistantMessage(AssistantMessage {
+                chunks,
+                model_label: existing_model_label,
+                ..
+            }) = last_entry
             && let Some(AssistantMessageChunk::Thought {
                 block: ContentBlock::Markdown { markdown },
             }) = chunks.last_mut()
             && Self::is_backboard_progress_markdown(markdown, cx)
         {
+            if existing_model_label.is_none() {
+                *existing_model_label = model_label;
+            }
             Self::flush_streaming_text(&mut self.streaming_text_buffer, cx);
             markdown.update(cx, |markdown, cx| markdown.replace(replacement_text, cx));
             cx.emit(AcpThreadEvent::EntryUpdated(entries_len - 1));
             return;
         }
 
-        self.push_assistant_content_block(chunk, true, cx);
+        self.push_assistant_content_block_with_options(chunk, true, false, false, model_label, cx);
     }
 
     pub fn push_assistant_content_block_with_indent(
@@ -1792,7 +1822,7 @@ impl AcpThread {
         indented: bool,
         cx: &mut Context<Self>,
     ) {
-        self.push_assistant_content_block_with_options(chunk, is_thought, indented, false, cx)
+        self.push_assistant_content_block_with_options(chunk, is_thought, indented, false, None, cx)
     }
 
     fn push_assistant_content_block_with_options(
@@ -1801,6 +1831,7 @@ impl AcpThread {
         is_thought: bool,
         indented: bool,
         force_new_entry: bool,
+        model_label: Option<SharedString>,
         cx: &mut Context<Self>,
     ) {
         let path_style = self.project.read(cx).path_style(cx);
@@ -1809,6 +1840,7 @@ impl AcpThread {
         // streaming instead of appending all at once which may feel more choppy.
         if !force_new_entry && let acp::ContentBlock::Text(text_content) = &chunk {
             if let Some(markdown) = self.streaming_markdown_target(is_thought, indented, cx) {
+                self.apply_model_label_to_last_assistant_message(model_label);
                 let entries_len = self.entries.len();
                 cx.emit(AcpThreadEvent::EntryUpdated(entries_len - 1));
                 self.buffer_streaming_text(&markdown, text_content.text.clone(), cx);
@@ -1824,10 +1856,14 @@ impl AcpThread {
                 chunks,
                 indented: existing_indented,
                 is_subagent_output: _,
+                model_label: existing_model_label,
             }) = last_entry
             && *existing_indented == indented
         {
             let idx = entries_len - 1;
+            if existing_model_label.is_none() {
+                *existing_model_label = model_label;
+            }
             Self::flush_streaming_text(&mut self.streaming_text_buffer, cx);
             cx.emit(AcpThreadEvent::EntryUpdated(idx));
             match (chunks.last_mut(), is_thought) {
@@ -1861,10 +1897,29 @@ impl AcpThread {
                     chunks: vec![chunk],
                     indented,
                     is_subagent_output: false,
+                    model_label,
                 }),
                 cx,
             );
         }
+    }
+
+    fn apply_model_label_to_last_assistant_message(&mut self, model_label: Option<SharedString>) {
+        let Some(model_label) = model_label else {
+            return;
+        };
+        if let Some(AgentThreadEntry::AssistantMessage(message)) = self.entries.last_mut()
+            && message.model_label.is_none()
+        {
+            message.model_label = Some(model_label);
+        }
+    }
+
+    fn assistant_message_model_label(
+        meta: Option<&serde_json::Map<String, Value>>,
+    ) -> Option<SharedString> {
+        let meta = meta?;
+        string_field(meta, "model_label").or_else(|| string_field(meta, "model"))
     }
 
     fn is_history_replay_message_start(meta: Option<&serde_json::Map<String, Value>>) -> bool {
@@ -3846,6 +3901,84 @@ mod tests {
 
             "#}
         );
+    }
+
+    #[gpui::test]
+    async fn test_agent_message_model_label_is_captured_from_chunk_meta(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let connection = Rc::new(FakeAgentConnection::new());
+        let thread = cx
+            .update(|cx| {
+                connection.new_session(project, PathList::new(&[Path::new(path!("/test"))]), cx)
+            })
+            .await
+            .unwrap();
+
+        let model_chunk = |text: &str, model: &str, message_start: bool| {
+            let mut meta = acp::Meta::new();
+            meta.insert("model".to_string(), model.into());
+            if message_start {
+                meta.insert("historyReplayMessageStart".to_string(), true.into());
+            }
+            acp::ContentChunk::new(acp::ContentBlock::from(text.to_string())).meta(meta)
+        };
+
+        thread.update(cx, |thread, cx| {
+            thread
+                .handle_session_update(
+                    acp::SessionUpdate::AgentMessageChunk(model_chunk(
+                        "First response",
+                        "model-a",
+                        true,
+                    )),
+                    cx,
+                )
+                .unwrap();
+            thread
+                .handle_session_update(
+                    acp::SessionUpdate::AgentMessageChunk(model_chunk(
+                        " still first",
+                        "model-b",
+                        false,
+                    )),
+                    cx,
+                )
+                .unwrap();
+            thread
+                .handle_session_update(
+                    acp::SessionUpdate::AgentMessageChunk(model_chunk(
+                        "Second response",
+                        "model-b",
+                        true,
+                    )),
+                    cx,
+                )
+                .unwrap();
+        });
+
+        thread.read_with(cx, |thread, _cx| {
+            let entries = thread.entries();
+            assert_eq!(entries.len(), 2);
+            let AgentThreadEntry::AssistantMessage(first) = &entries[0] else {
+                panic!("expected first assistant message");
+            };
+            let AgentThreadEntry::AssistantMessage(second) = &entries[1] else {
+                panic!("expected second assistant message");
+            };
+            assert_eq!(
+                first.model_label.as_ref().map(|label| label.as_ref()),
+                Some("model-a")
+            );
+            assert_eq!(
+                second.model_label.as_ref().map(|label| label.as_ref()),
+                Some("model-b")
+            );
+        });
     }
 
     #[gpui::test]

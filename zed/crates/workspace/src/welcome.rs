@@ -530,10 +530,6 @@ impl Item for WelcomePage {
         false
     }
 
-    fn is_fullscreen_onboarding(&self) -> bool {
-        true
-    }
-
     fn to_item_events(event: &Self::Event, f: &mut dyn FnMut(crate::item::ItemEvent)) {
         f(*event)
     }

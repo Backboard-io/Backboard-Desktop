@@ -1,26 +1,34 @@
 use crate::{
     DEFAULT_THREAD_TITLE, SelectPermissionGranularity,
-    agent_configuration::configure_context_server_modal::default_markdown_style,
+    agent_configuration::{
+        ConfigureContextServerModal, configure_context_server_modal::default_markdown_style,
+    },
     config_options::ConfigOptionSummary,
 };
 use agent_client_protocol::schema as acp;
-use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use context_server::ContextServerId;
+use std::{
+    cell::RefCell,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use crate::message_editor::SharedSessionCapabilities;
 use acp_thread::{ContentBlock, PlanEntry};
 use cloud_api_types::{SubmitAgentThreadFeedbackBody, SubmitAgentThreadFeedbackCommentsBody};
 use editor::actions::OpenExcerpts;
+use extension_host::ExtensionStore;
 
 use gpui::TaskExt;
-use gpui::{DismissEvent, List};
+use gpui::{DismissEvent, List, UniformListScrollHandle, uniform_list};
 use heapless::Vec as ArrayVec;
 use language_model::{LanguageModelEffortLevel, Speed};
 use settings::{SidebarSide, update_settings_file};
 use ui::{
-    ButtonLike, ElevationIndex, SpinnerLabel, SpinnerVariant, SplitButton, SplitButtonStyle, Tab,
+    ButtonLike, ButtonSize, ElevationIndex, SpinnerLabel, SpinnerVariant, SplitButton,
+    SplitButtonStyle, Tab,
 };
-use workspace::SERIALIZATION_THROTTLE_TIME;
+use workspace::{OpenOptions, OpenVisible, SERIALIZATION_THROTTLE_TIME};
 
 use super::*;
 
@@ -223,13 +231,130 @@ impl RenderOnce for GeneratingSpinnerElement {
 struct AgentOptionsMenu {
     focus_handle: FocusHandle,
     config_options_view: Entity<ConfigOptionsView>,
+    workspace: WeakEntity<Workspace>,
+    scroll_handle: ScrollHandle,
+    skills_scroll_handle: UniformListScrollHandle,
+    expanded_skill_categories: HashSet<String>,
+    mode: AgentOptionsMenuMode,
+}
+
+#[derive(Clone, Copy)]
+enum AgentOptionsMenuMode {
+    All,
+    Skills,
+}
+
+#[derive(Clone)]
+enum SkillListRow {
+    SectionLabel(SharedString),
+    CreateSkill,
+    Empty(&'static str),
+    CategoryHeader {
+        category: String,
+        option_count: usize,
+        collapsed: bool,
+    },
+    Option(ConfigOptionSummary),
+}
+
+struct RecommendedMcpServerStatus {
+    extension_id: &'static str,
+    label: &'static str,
+    installed: bool,
+    server_ids: Vec<Arc<str>>,
+}
+
+fn recommended_mcp_install_status(cx: &App) -> (usize, usize) {
+    let extension_ids = crate::recommended_mcp_extension_ids();
+    let total_count = extension_ids.len();
+    let installed_count = ExtensionStore::try_global(cx)
+        .map(|extension_store| {
+            let extension_store = extension_store.read(cx);
+            extension_ids
+                .iter()
+                .filter(|extension_id| {
+                    extension_store
+                        .installed_extensions()
+                        .contains_key(extension_id.as_ref())
+                })
+                .count()
+        })
+        .unwrap_or(0);
+
+    (installed_count, total_count)
+}
+
+fn recommended_mcp_server_statuses(cx: &App) -> Vec<RecommendedMcpServerStatus> {
+    const RECOMMENDED_MCP_SERVERS: &[(&str, &str)] = &[
+        ("mcp-server-github", "GitHub"),
+        ("mcp-server-slack", "Slack"),
+        ("mcp-server-supabase", "Supabase"),
+        ("mcp-server-figma", "Figma"),
+        ("mcp-server-shopify-dev", "Shopify"),
+    ];
+
+    let extension_store = ExtensionStore::try_global(cx);
+    RECOMMENDED_MCP_SERVERS
+        .iter()
+        .map(|(extension_id, label)| {
+            let server_ids = extension_store
+                .as_ref()
+                .and_then(|extension_store| {
+                    extension_store
+                        .read(cx)
+                        .installed_extensions()
+                        .get(*extension_id)
+                        .map(|entry| {
+                            entry
+                                .manifest
+                                .context_servers
+                                .keys()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                        })
+                })
+                .unwrap_or_default();
+
+            RecommendedMcpServerStatus {
+                extension_id,
+                label,
+                installed: !server_ids.is_empty(),
+                server_ids,
+            }
+        })
+        .collect()
 }
 
 impl AgentOptionsMenu {
-    fn new(config_options_view: Entity<ConfigOptionsView>, cx: &mut Context<Self>) -> Self {
+    fn new(
+        config_options_view: Entity<ConfigOptionsView>,
+        workspace: WeakEntity<Workspace>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             config_options_view,
+            workspace,
+            scroll_handle: ScrollHandle::new(),
+            skills_scroll_handle: UniformListScrollHandle::new(),
+            expanded_skill_categories: HashSet::default(),
+            mode: AgentOptionsMenuMode::All,
+        }
+    }
+
+    fn skills(
+        config_options_view: Entity<ConfigOptionsView>,
+        workspace: WeakEntity<Workspace>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self {
+            focus_handle: cx.focus_handle(),
+            config_options_view,
+            workspace,
+            scroll_handle: ScrollHandle::new(),
+            skills_scroll_handle: UniformListScrollHandle::new(),
+            expanded_skill_categories: HashSet::default(),
+            mode: AgentOptionsMenuMode::Skills,
         }
     }
 }
@@ -243,36 +368,83 @@ impl Focusable for AgentOptionsMenu {
 impl EventEmitter<DismissEvent> for AgentOptionsMenu {}
 
 impl Render for AgentOptionsMenu {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let option_summaries = self.config_options_view.read(cx).option_summaries();
+        let (title, icon, footer, options_list) = match self.mode {
+            AgentOptionsMenuMode::All => {
+                let session_options = option_summaries
+                    .into_iter()
+                    .filter(|option| {
+                        let option_id = option.id.to_string();
+                        !option_id.starts_with("backboard_skill:")
+                            && !option_id.starts_with("backboard_mcp_")
+                            && option_id != "backboard_voice_mode"
+                            && option_id != "backboard_live_voice"
+                    })
+                    .collect::<Vec<_>>();
 
-        let options_list = if option_summaries.is_empty() {
-            div()
-                .px_2()
-                .py_1()
-                .child(
-                    Label::new("No agent options available.")
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
+                let mut list = v_flex().gap_1();
+
+                if session_options.is_empty() {
+                    list = list.child(self.render_empty_options("No session options available."));
+                } else {
+                    list = list.child(self.render_option_group(session_options, cx));
+                }
+
+                let options_list = list.into_any_element();
+                (
+                    "Agent Options",
+                    IconName::Sliders,
+                    "Click an option to change it.",
+                    options_list,
                 )
-                .into_any_element()
-        } else {
-            let option_rows: Vec<_> = option_summaries
-                .into_iter()
-                .map(|option| self.render_option_row(option, cx).into_any_element())
-                .collect();
-
-            v_flex().gap_0p5().children(option_rows).into_any_element()
+            }
+            AgentOptionsMenuMode::Skills => {
+                let skill_options = option_summaries
+                    .into_iter()
+                    .filter(|option| option.id.to_string().starts_with("backboard_skill:"))
+                    .collect::<Vec<_>>();
+                let options_list = self.render_skills_list(skill_options, cx);
+                (
+                    "Skills",
+                    IconName::Box,
+                    "Click a skill to toggle it.",
+                    options_list,
+                )
+            }
         };
 
+        let is_skills_menu = matches!(self.mode, AgentOptionsMenuMode::Skills);
+        let options_container = if is_skills_menu {
+            div()
+                .id("agent-options-menu-options")
+                .max_h_96()
+                .overflow_y_hidden()
+                .child(options_list)
+                .vertical_scrollbar_for(&self.skills_scroll_handle, window, cx)
+                .into_any_element()
+        } else {
+            div()
+                .id("agent-options-menu-options")
+                .max_h(px(280.))
+                .overflow_y_scroll()
+                .child(options_list)
+                .vertical_scrollbar_for(&self.scroll_handle, window, cx)
+                .into_any_element()
+        };
+        let (menu_min_width, menu_max_width) = if is_skills_menu {
+            (px(300.), px(340.))
+        } else {
+            (px(244.), px(280.))
+        };
         let colors = cx.theme().colors();
 
         div()
             .key_context("AgentOptionsMenu")
             .track_focus(&self.focus_handle)
             .p_1()
-            .min_w(px(300.))
-            .max_w(px(340.))
+            .min_w(menu_min_width)
+            .max_w(menu_max_width)
             .rounded_md()
             .border_1()
             .border_color(colors.border_variant.opacity(0.64))
@@ -280,7 +452,7 @@ impl Render for AgentOptionsMenu {
             .elevation_2(cx)
             .child(
                 v_flex()
-                    .gap_1()
+                    .gap_0p5()
                     .child(
                         h_flex()
                             .w_full()
@@ -289,15 +461,11 @@ impl Render for AgentOptionsMenu {
                             .px_1()
                             .py_0p5()
                             .child(
-                                Label::new("Agent Options")
+                                Label::new(title)
                                     .size(LabelSize::Small)
                                     .color(Color::Default),
                             )
-                            .child(
-                                Icon::new(IconName::Sliders)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Muted),
-                            ),
+                            .child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted)),
                     )
                     .child(
                         div()
@@ -305,13 +473,13 @@ impl Render for AgentOptionsMenu {
                             .w_full()
                             .bg(colors.border_variant.opacity(0.48)),
                     )
-                    .child(options_list)
+                    .child(options_container)
                     .child(
-                        Label::new("Click an option to cycle values.")
+                        Label::new(footer)
                             .size(LabelSize::XSmall)
                             .color(Color::Muted)
                             .mx_1()
-                            .mt_1()
+                            .mt_0p5()
                             .mb_0p5(),
                     ),
             )
@@ -319,6 +487,438 @@ impl Render for AgentOptionsMenu {
 }
 
 impl AgentOptionsMenu {
+    fn render_skills_list(
+        &mut self,
+        skill_options: Vec<ConfigOptionSummary>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut grouped_options = BTreeMap::new();
+        for option in skill_options {
+            grouped_options
+                .entry(Self::skill_category_label(&option.id))
+                .or_insert_with(Vec::new)
+                .push(option);
+        }
+
+        let mut rows = vec![
+            SkillListRow::SectionLabel(SharedString::from("Create")),
+            SkillListRow::CreateSkill,
+        ];
+
+        if grouped_options.is_empty() {
+            rows.push(SkillListRow::Empty("No skills available."));
+        } else {
+            for (category, options) in grouped_options {
+                let collapsed = !self.expanded_skill_categories.contains(&category);
+                let option_count = options.len();
+                rows.push(SkillListRow::CategoryHeader {
+                    category: category.clone(),
+                    option_count,
+                    collapsed,
+                });
+                if !collapsed {
+                    rows.extend(options.into_iter().map(SkillListRow::Option));
+                }
+            }
+        }
+
+        let row_count = rows.len();
+        let rows = Rc::new(rows);
+
+        uniform_list(
+            "agent-options-skills-list",
+            row_count,
+            cx.processor(
+                move |this, visible_range: std::ops::Range<usize>, _window, cx| {
+                    visible_range
+                        .filter_map(|index| rows.get(index).cloned())
+                        .map(|row| this.render_skill_list_row(row, cx))
+                        .collect()
+                },
+            ),
+        )
+        .w_full()
+        .max_h_96()
+        .with_sizing_behavior(gpui::ListSizingBehavior::Infer)
+        .track_scroll(&self.skills_scroll_handle)
+        .into_any_element()
+    }
+
+    fn bundled_skills_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("assets")
+            .join("skills")
+    }
+
+    fn skill_preview_path(option_id: &acp::SessionConfigId) -> Option<PathBuf> {
+        option_id
+            .0
+            .strip_prefix("backboard_skill:")
+            .map(|relative_path| {
+                Self::bundled_skills_root()
+                    .join(relative_path)
+                    .join("preview.png")
+            })
+    }
+
+    fn custom_skill_dir(option_id: &acp::SessionConfigId) -> Option<PathBuf> {
+        let relative_path = option_id.0.strip_prefix("backboard_skill:custom/")?;
+        let relative_path = Path::new(relative_path);
+        if relative_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        }) {
+            return None;
+        }
+
+        Some(
+            Self::bundled_skills_root()
+                .join("custom")
+                .join(relative_path),
+        )
+    }
+
+    fn skill_category_label(option_id: &acp::SessionConfigId) -> String {
+        option_id
+            .0
+            .strip_prefix("backboard_skill:")
+            .and_then(|relative_path| relative_path.split('/').next())
+            .filter(|category| !category.is_empty())
+            .map(Self::display_name_from_slug)
+            .unwrap_or_else(|| "Other".to_string())
+    }
+
+    fn display_name_from_slug(value: &str) -> String {
+        value
+            .split(|character: char| character == '-' || character == '_')
+            .filter(|part| !part.is_empty())
+            .map(|part| {
+                let mut chars = part.chars();
+                let Some(first) = chars.next() else {
+                    return String::new();
+                };
+                let mut titleized = first.to_uppercase().collect::<String>();
+                titleized.push_str(chars.as_str());
+                titleized
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn next_new_skill_path() -> Option<(PathBuf, String)> {
+        let custom_root = Self::bundled_skills_root().join("custom");
+        for index in 1..1000 {
+            let slug = if index == 1 {
+                "new-skill".to_string()
+            } else {
+                format!("new-skill-{index}")
+            };
+            let path = custom_root.join(&slug).join("SKILL.md");
+            if !path.exists() {
+                return Some((path, slug));
+            }
+        }
+        None
+    }
+
+    fn new_skill_template(slug: &str) -> String {
+        format!(
+            "---\nname: {slug}\ndescription: Describe when to use this skill.\n---\n\n# {}\n\nWrite the instructions this skill should add to Backboard when enabled.\n",
+            Self::display_name_from_slug(slug)
+        )
+    }
+
+    fn create_new_skill(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((skill_path, slug)) = Self::next_new_skill_path() else {
+            log::error!("Could not allocate a new Backboard skill path");
+            return;
+        };
+
+        let Some(parent_dir) = skill_path.parent() else {
+            log::error!(
+                "New Backboard skill path has no parent: {}",
+                skill_path.display()
+            );
+            return;
+        };
+
+        if let Err(error) = std::fs::create_dir_all(parent_dir) {
+            log::error!(
+                "Failed to create Backboard skill directory {}: {error:#}",
+                parent_dir.display()
+            );
+            return;
+        }
+
+        if let Err(error) = std::fs::write(&skill_path, Self::new_skill_template(&slug)) {
+            log::error!(
+                "Failed to write Backboard skill file {}: {error:#}",
+                skill_path.display()
+            );
+            return;
+        }
+
+        self.config_options_view
+            .update(cx, |view, cx| view.refresh_options(window, cx));
+
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                let open_task = workspace.open_abs_path(
+                    skill_path.clone(),
+                    OpenOptions {
+                        visible: Some(OpenVisible::OnlyFiles),
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+                cx.spawn(async move |_, _| {
+                    if let Err(error) = open_task.await {
+                        log::error!("Failed to open Backboard skill file: {error:#}");
+                    }
+                })
+                .detach();
+            });
+        }
+
+        cx.notify();
+    }
+
+    fn delete_custom_skill(
+        &self,
+        option_id: acp::SessionConfigId,
+        skill_dir: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.config_options_view.update(cx, |view, cx| {
+            view.set_option_value(option_id, acp::SessionConfigValueId::new("off"), cx);
+        });
+
+        if let Err(error) = std::fs::remove_dir_all(&skill_dir) {
+            log::error!(
+                "Failed to delete Backboard skill directory {}: {error:#}",
+                skill_dir.display()
+            );
+        }
+
+        self.config_options_view
+            .update(cx, |view, cx| view.refresh_options(window, cx));
+        cx.notify();
+    }
+
+    fn toggle_skill_category(&mut self, category: String, cx: &mut Context<Self>) {
+        if !self.expanded_skill_categories.insert(category.clone()) {
+            self.expanded_skill_categories.remove(&category);
+        }
+        cx.notify();
+    }
+
+    fn render_empty_options(&self, label: &'static str) -> AnyElement {
+        div()
+            .px_2()
+            .py_1()
+            .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+            .into_any_element()
+    }
+
+    fn render_create_skill_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        ButtonLike::new("agent-option-create-skill")
+            .full_width()
+            .height(px(32.).into())
+            .style(ButtonStyle::Subtle)
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .min_w_0()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                Icon::new(IconName::Plus)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                            .child(
+                                Label::new("New Skill")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Default)
+                                    .truncate(),
+                            ),
+                    )
+                    .child(
+                        Icon::new(IconName::ChevronRight)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    ),
+            )
+            .tooltip(Tooltip::text("Create a filesystem skill"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.create_new_skill(window, cx);
+            }))
+    }
+
+    fn render_skill_list_row(&self, row: SkillListRow, cx: &mut Context<Self>) -> AnyElement {
+        match row {
+            SkillListRow::SectionLabel(label) => self.render_skill_section_label(label, cx),
+            SkillListRow::CreateSkill => self.render_create_skill_row(cx).into_any_element(),
+            SkillListRow::Empty(label) => self.render_skill_empty_row(label),
+            SkillListRow::CategoryHeader {
+                category,
+                option_count,
+                collapsed,
+            } => self.render_skill_category_header(category, option_count, collapsed, cx),
+            SkillListRow::Option(option) => self.render_option_row(option, cx).into_any_element(),
+        }
+    }
+
+    fn render_skill_section_label(
+        &self,
+        label: SharedString,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = cx.theme().colors();
+        v_flex()
+            .h(px(32.))
+            .w_full()
+            .justify_end()
+            .gap_1()
+            .child(
+                div()
+                    .h(px(1.))
+                    .w_full()
+                    .bg(colors.border_variant.opacity(0.32)),
+            )
+            .child(
+                Label::new(label)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .mx_1()
+                    .mb_0p5(),
+            )
+            .into_any_element()
+    }
+
+    fn render_skill_empty_row(&self, label: &'static str) -> AnyElement {
+        div()
+            .h(px(32.))
+            .w_full()
+            .px_2()
+            .flex()
+            .items_center()
+            .child(Label::new(label).size(LabelSize::Small).color(Color::Muted))
+            .into_any_element()
+    }
+
+    fn render_skill_category_header(
+        &self,
+        category: String,
+        option_count: usize,
+        collapsed: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = cx.theme().colors();
+        let category_for_click = category.clone();
+        div()
+            .h(px(32.))
+            .w_full()
+            .border_t_1()
+            .border_color(colors.border_variant.opacity(0.32))
+            .child(
+                ButtonLike::new(format!("skill-category-{category}"))
+                    .full_width()
+                    .height(px(31.).into())
+                    .style(ButtonStyle::Subtle)
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(
+                                h_flex()
+                                    .min_w_0()
+                                    .gap_1()
+                                    .items_center()
+                                    .child(
+                                        Icon::new(if collapsed {
+                                            IconName::ChevronRight
+                                        } else {
+                                            IconName::ChevronDown
+                                        })
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Muted),
+                                    )
+                                    .child(
+                                        Label::new(category)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted)
+                                            .truncate(),
+                                    ),
+                            )
+                            .child(
+                                Label::new(option_count.to_string())
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            ),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_skill_category(category_for_click.clone(), cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    fn render_section_label(
+        &self,
+        label: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = label.into();
+        let colors = cx.theme().colors();
+        v_flex()
+            .gap_0p5()
+            .pt_0p5()
+            .child(
+                div()
+                    .h(px(1.))
+                    .w_full()
+                    .bg(colors.border_variant.opacity(0.32)),
+            )
+            .child(
+                Label::new(label)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .mx_1(),
+            )
+            .into_any_element()
+    }
+
+    fn render_option_group(
+        &self,
+        options: Vec<ConfigOptionSummary>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        v_flex()
+            .children(
+                options
+                    .into_iter()
+                    .map(|option| self.render_option_row(option, cx).into_any_element()),
+            )
+            .into_any_element()
+    }
+
     fn render_option_row(
         &self,
         option: ConfigOptionSummary,
@@ -326,12 +926,25 @@ impl AgentOptionsMenu {
     ) -> impl IntoElement {
         let option_id = option.id.clone();
         let description = option.description.clone();
+        let preview_path = matches!(self.mode, AgentOptionsMenuMode::Skills)
+            .then(|| Self::skill_preview_path(&option.id))
+            .flatten();
+        let custom_skill_dir = matches!(self.mode, AgentOptionsMenuMode::Skills)
+            .then(|| Self::custom_skill_dir(&option.id))
+            .flatten();
+        let (row_height, label_size) = if matches!(self.mode, AgentOptionsMenuMode::Skills) {
+            (px(32.), LabelSize::Small)
+        } else {
+            (px(26.), LabelSize::XSmall)
+        };
+        let option_id_for_delete = option.id.clone();
+        let delete_button_id = format!("delete-custom-skill-{}", option_id_for_delete.0);
 
         ButtonLike::new(ElementId::Name(
             format!("agent-option-{}", option.id.0).into(),
         ))
         .full_width()
-        .height(px(32.).into())
+        .height(row_height.into())
         .style(ButtonStyle::Subtle)
         .child(
             h_flex()
@@ -343,7 +956,7 @@ impl AgentOptionsMenu {
                 .child(
                     div().min_w_0().flex_1().child(
                         Label::new(option.name)
-                            .size(LabelSize::Small)
+                            .size(label_size)
                             .color(Color::Default)
                             .truncate(),
                     ),
@@ -363,11 +976,46 @@ impl AgentOptionsMenu {
                             Icon::new(IconName::ChevronRight)
                                 .size(IconSize::XSmall)
                                 .color(Color::Muted),
-                        ),
+                        )
+                        .when_some(custom_skill_dir, |this, skill_dir| {
+                            this.child(
+                                IconButton::new(delete_button_id, IconName::Trash)
+                                    .icon_size(IconSize::XSmall)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(Tooltip::text("Delete custom skill"))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.delete_custom_skill(
+                                            option_id_for_delete.clone(),
+                                            skill_dir.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    })),
+                            )
+                        }),
                 ),
         )
         .tooltip(Tooltip::element(move |_window, _cx| {
             let mut content = v_flex().gap_1();
+            if let Some(preview_path) = preview_path.as_ref()
+                && preview_path.is_file()
+            {
+                content = content.child(
+                    div()
+                        .w(px(280.))
+                        .h(px(160.))
+                        .rounded_sm()
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(_cx.theme().colors().border_variant)
+                        .child(
+                            img(preview_path.clone())
+                                .size_full()
+                                .object_fit(ObjectFit::ScaleDown),
+                        ),
+                );
+            }
             if let Some(description) = description.clone() {
                 content = content.child(
                     Label::new(description)
@@ -390,6 +1038,192 @@ pub enum AcpThreadViewEvent {
 }
 
 impl EventEmitter<AcpThreadViewEvent> for ThreadView {}
+
+#[cfg(feature = "audio")]
+#[derive(Default)]
+enum DictationState {
+    #[default]
+    Idle,
+    Recording {
+        stop_tx: async_channel::Sender<()>,
+    },
+    Transcribing,
+}
+
+#[cfg(feature = "audio")]
+fn record_dictation_wav(stop_rx: async_channel::Receiver<()>) -> anyhow::Result<Vec<u8>> {
+    use anyhow::{Context as _, anyhow};
+    use rodio::Source as _;
+
+    let mut microphone = audio::open_input_stream(None).context("opening microphone")?;
+    let channels = microphone.channels().get();
+    let sample_rate = microphone.sample_rate().get();
+    let max_samples = sample_rate as usize * channels as usize * 300;
+    let min_samples = sample_rate as usize / 4;
+    let mut samples = Vec::new();
+
+    loop {
+        if stop_rx.try_recv().is_ok() {
+            break;
+        }
+        if samples.len() >= max_samples {
+            break;
+        }
+        let Some(sample) = microphone.next() else {
+            break;
+        };
+        samples.push(sample.clamp(-1.0, 1.0));
+    }
+
+    if samples.len() < min_samples {
+        return Err(anyhow!("recording was too short"));
+    }
+
+    Ok(encode_wav_pcm16(&samples, channels, sample_rate))
+}
+
+#[cfg(feature = "audio")]
+fn encode_wav_pcm16(samples: &[f32], channels: u16, sample_rate: u32) -> Vec<u8> {
+    let data_len = samples.len() as u32 * 2;
+    let mut wav = Vec::with_capacity(44 + data_len as usize);
+
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&channels.to_le_bytes());
+    wav.extend_from_slice(&sample_rate.to_le_bytes());
+    wav.extend_from_slice(&(sample_rate * channels as u32 * 2).to_le_bytes());
+    wav.extend_from_slice(&(channels * 2).to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+
+    for sample in samples {
+        let sample = (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+        wav.extend_from_slice(&sample.to_le_bytes());
+    }
+
+    wav
+}
+
+#[cfg(feature = "audio")]
+async fn transcribe_backboard_dictation(wav: Vec<u8>) -> anyhow::Result<String> {
+    use agent_servers::backboard::{
+        AudioAttachment, BackboardClient, BackboardConfig, CreateAssistantRequest,
+        SendMessageRequest,
+    };
+    use anyhow::{Context as _, anyhow};
+    use serde_json::json;
+
+    let config = BackboardConfig::load().context("loading Backboard config")?;
+    let client =
+        BackboardClient::from_config(config.clone()).context("creating Backboard client")?;
+
+    let thread_id = if let Some(thread_id) = config.thread_id.clone() {
+        thread_id
+    } else {
+        let assistant_id = if let Some(assistant_id) = config.assistant_id.clone() {
+            assistant_id
+        } else {
+            let assistant = client
+                .create_assistant(CreateAssistantRequest {
+                    name: "Backboard Dictation".to_string(),
+                    description:
+                        "Transcribes short microphone dictation clips for the Backboard IDE."
+                            .to_string(),
+                    tools: None,
+                    custom_fact_extraction_prompt: None,
+                    custom_update_memory_prompt: None,
+                })
+                .await?;
+            json_string(&assistant, &["assistant_id", "id"])
+                .context("Backboard create assistant response did not include assistant_id")?
+        };
+
+        let thread = client.create_thread(&assistant_id).await?;
+        json_string(&thread, &["thread_id", "id"])
+            .context("Backboard create thread response did not include thread_id")?
+    };
+
+    let response = client
+        .send_message(
+            &thread_id,
+            SendMessageRequest {
+                content: "Transcribe this dictation audio. Return only the transcript text."
+                    .to_string(),
+                voice: Some(json!({
+                    "stt": {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini-transcribe",
+                        "language": "en",
+                    }
+                })),
+                send_to_llm: Some(false),
+                audio_file: Some(AudioAttachment {
+                    data: wav,
+                    file_name: "backboard-dictation.wav".to_string(),
+                    mime_type: "audio/wav".to_string(),
+                }),
+                ..SendMessageRequest::default()
+            },
+        )
+        .await?;
+
+    transcript_from_response(&response)
+        .map(|transcript| transcript.trim().to_string())
+        .filter(|transcript| !transcript.is_empty())
+        .ok_or_else(|| anyhow!("Backboard did not return a transcript"))
+}
+
+#[cfg(feature = "audio")]
+fn json_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(serde_json::Value::as_str))
+        .map(str::to_string)
+}
+
+#[cfg(feature = "audio")]
+fn transcript_from_response(value: &serde_json::Value) -> Option<String> {
+    use serde_json::Value;
+
+    fn direct_string(value: &Value) -> Option<String> {
+        [
+            &["voice_records", "stt", "transcript"][..],
+            &["voice_records", "stt", "text"][..],
+            &["stt", "transcript"][..],
+            &["stt", "text"][..],
+            &["transcript"][..],
+            &["text"][..],
+            &["content"][..],
+            &["message", "content"][..],
+        ]
+        .into_iter()
+        .find_map(|path| {
+            path.iter()
+                .try_fold(value, |value, key| value.get(*key))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+    }
+
+    if let Some(text) = direct_string(value) {
+        return Some(text);
+    }
+
+    match value {
+        Value::Array(items) => items.iter().find_map(transcript_from_response),
+        Value::Object(object) => [
+            "message", "content", "result", "response", "data", "choices",
+        ]
+        .into_iter()
+        .filter_map(|key| object.get(key))
+        .find_map(transcript_from_response),
+        _ => None,
+    }
+}
 
 /// Tracks the user's permission dropdown selection state for a specific tool call.
 ///
@@ -506,8 +1340,11 @@ pub struct ThreadView {
     pub in_flight_prompt: Option<Vec<acp::ContentBlock>>,
     pub _subscriptions: Vec<Subscription>,
     pub message_editor: Entity<MessageEditor>,
+    #[cfg(feature = "audio")]
+    dictation_state: DictationState,
     pub add_context_menu_handle: PopoverMenuHandle<ContextMenu>,
-    agent_options_menu_handle: PopoverMenuHandle<AgentOptionsMenu>,
+    agent_options_menu_handle: PopoverMenuHandle<ContextMenu>,
+    skills_options_menu_handle: PopoverMenuHandle<ContextMenu>,
     pub thinking_effort_menu_handle: PopoverMenuHandle<ContextMenu>,
     pub project: WeakEntity<Project>,
     pub show_external_source_prompt_warning: bool,
@@ -673,6 +1510,12 @@ impl ThreadView {
             }));
         }));
 
+        if let Some(config_options_view) = config_options_view.as_ref() {
+            subscriptions.push(cx.observe(config_options_view, |_, _, cx| {
+                cx.notify();
+            }));
+        }
+
         let mut this = Self {
             session_id,
             parent_session_id,
@@ -736,8 +1579,11 @@ impl ThreadView {
             hovered_edited_file_buttons: None,
             in_flight_prompt: None,
             message_editor,
+            #[cfg(feature = "audio")]
+            dictation_state: DictationState::default(),
             add_context_menu_handle: PopoverMenuHandle::default(),
             agent_options_menu_handle: PopoverMenuHandle::default(),
+            skills_options_menu_handle: PopoverMenuHandle::default(),
             thinking_effort_menu_handle: PopoverMenuHandle::default(),
             project,
             show_external_source_prompt_warning,
@@ -926,9 +1772,11 @@ impl ThreadView {
             )
     }
 
-    fn render_assistant_message_header(&self, cx: &App) -> impl IntoElement {
-        let model_label = self.current_model_label(cx);
-
+    fn render_assistant_message_header(
+        &self,
+        model_label: Option<SharedString>,
+        _cx: &App,
+    ) -> impl IntoElement {
         h_flex()
             .gap_1()
             .items_center()
@@ -1115,8 +1963,12 @@ impl ThreadView {
                         y: px(-2.0),
                     })
                     .with_handle(menu_handle)
-                    .menu(move |_window, cx| {
-                        Some(cx.new(|cx| AgentOptionsMenu::new(config_options_view.clone(), cx)))
+                    .menu(move |window, cx| {
+                        Some(Self::build_agent_options_context_menu(
+                            config_options_view.clone(),
+                            window,
+                            cx,
+                        ))
                     })
                     .into_any_element(),
             );
@@ -1141,6 +1993,418 @@ impl ThreadView {
                 }))
                 .into_any_element(),
         )
+    }
+
+    fn render_skills_options_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let config_options_view = self.config_options_view.clone()?;
+        let workspace = self.workspace.clone();
+        let menu_handle = self.skills_options_menu_handle.clone();
+        let enabled_skills = self.enabled_skill_summaries(cx);
+        let enabled_skill_count = enabled_skills.len();
+        let tooltip = Self::skills_button_tooltip(&enabled_skills);
+        let badge = (enabled_skill_count > 0)
+            .then(|| Self::render_enabled_skill_count_badge(enabled_skill_count, cx));
+        let icon_color = if enabled_skill_count > 0 {
+            Color::Accent
+        } else {
+            Color::Muted
+        };
+
+        Some(
+            PopoverMenu::new("thread-skills-options-menu")
+                .trigger_with_tooltip(
+                    ButtonLike::new("thread-skills-options")
+                        .width(px(24.))
+                        .height(px(22.).into())
+                        .size(ButtonSize::None)
+                        .style(ButtonStyle::Transparent)
+                        .child(
+                            div()
+                                .relative()
+                                .size_5()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    Icon::new(IconName::Box)
+                                        .size(IconSize::Small)
+                                        .color(icon_color),
+                                )
+                                .when_some(badge, |this, badge| this.child(badge)),
+                        ),
+                    move |_, cx| Tooltip::simple(tooltip.clone(), cx),
+                )
+                .anchor(gpui::Anchor::BottomRight)
+                .offset(gpui::Point {
+                    x: px(0.0),
+                    y: px(-2.0),
+                })
+                .with_handle(menu_handle)
+                .menu(move |window, cx| {
+                    Some(Self::build_skills_context_menu(
+                        config_options_view.clone(),
+                        workspace.clone(),
+                        window,
+                        cx,
+                    ))
+                })
+                .into_any_element(),
+        )
+    }
+
+    fn build_agent_options_context_menu(
+        config_options_view: Entity<ConfigOptionsView>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<ContextMenu> {
+        let options = config_options_view
+            .read(cx)
+            .option_summaries()
+            .into_iter()
+            .filter(Self::is_agent_option_summary)
+            .collect::<Vec<_>>();
+
+        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            menu = menu.key_context("AgentOptionsMenu").header("Agent Options");
+
+            if options.is_empty() {
+                return menu.label("No session options available.");
+            }
+
+            for option in options.clone() {
+                let option_id = option.id.clone();
+                let label = SharedString::from(option.name);
+                let status = SharedString::from(option.current_value_name);
+                let config_options_view = config_options_view.clone();
+
+                menu = menu.custom_entry(
+                    move |_window, _cx| {
+                        Self::render_context_menu_status_row(
+                            label.clone(),
+                            status.clone(),
+                            IconName::Sliders,
+                            Color::Muted,
+                            Color::Muted,
+                        )
+                    },
+                    move |_window, cx| {
+                        config_options_view.update(cx, |view, cx| {
+                            view.cycle_option(&option_id, cx);
+                        });
+                    },
+                );
+            }
+
+            menu
+        })
+    }
+
+    fn build_skills_context_menu(
+        config_options_view: Entity<ConfigOptionsView>,
+        workspace: WeakEntity<Workspace>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<ContextMenu> {
+        let mut grouped_options = BTreeMap::new();
+        for option in config_options_view
+            .read(cx)
+            .option_summaries()
+            .into_iter()
+            .filter(|option| option.id.0.starts_with("backboard_skill:"))
+        {
+            grouped_options
+                .entry(AgentOptionsMenu::skill_category_label(&option.id))
+                .or_insert_with(Vec::new)
+                .push(option);
+        }
+
+        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            let config_options_view_for_create = config_options_view.clone();
+            let workspace_for_create = workspace.clone();
+            menu = menu
+                .key_context("SkillsMenu")
+                .header("Skills")
+                .custom_entry(
+                    |_window, _cx| {
+                        Self::render_context_menu_status_row(
+                            "New Skill".into(),
+                            "Create".into(),
+                            IconName::Plus,
+                            Color::Muted,
+                            Color::Accent,
+                        )
+                    },
+                    move |window, cx| {
+                        Self::create_new_skill_from_context_menu(
+                            config_options_view_for_create.clone(),
+                            workspace_for_create.clone(),
+                            window,
+                            cx,
+                        );
+                    },
+                );
+
+            if grouped_options.is_empty() {
+                return menu.separator().label("No skills available.");
+            }
+
+            menu = menu.separator();
+
+            for (category, options) in grouped_options.clone() {
+                let config_options_view = config_options_view.clone();
+                let category_for_header = category.clone();
+                menu = menu.submenu_with_icon(
+                    category,
+                    IconName::Box,
+                    move |mut menu, _window, _cx| {
+                        menu = menu.header(category_for_header.clone());
+
+                        for option in options.clone() {
+                            let option_id = option.id.clone();
+                            let label = SharedString::from(option.name);
+                            let status = SharedString::from(option.current_value_name);
+                            let enabled = status.to_string().eq_ignore_ascii_case("on");
+                            let description = option.description.clone();
+                            let preview_path = option
+                                .id
+                                .0
+                                .starts_with("backboard_skill:web/")
+                                .then(|| AgentOptionsMenu::skill_preview_path(&option.id))
+                                .flatten();
+                            let tooltip_id = format!("skill-preview-tooltip-{}", option.id.0);
+                            let config_options_view = config_options_view.clone();
+
+                            menu = menu.custom_entry(
+                                move |_window, _cx| {
+                                    Self::render_skill_context_menu_row(
+                                        tooltip_id.clone(),
+                                        label.clone(),
+                                        status.clone(),
+                                        if enabled {
+                                            IconName::Check
+                                        } else {
+                                            IconName::Box
+                                        },
+                                        if enabled {
+                                            Color::Success
+                                        } else {
+                                            Color::Muted
+                                        },
+                                        if enabled { Color::Accent } else { Color::Muted },
+                                        preview_path.clone(),
+                                        description.clone(),
+                                    )
+                                },
+                                move |_window, cx| {
+                                    config_options_view.update(cx, |view, cx| {
+                                        view.cycle_option(&option_id, cx);
+                                    });
+                                },
+                            );
+                        }
+
+                        menu
+                    },
+                );
+            }
+
+            menu
+        })
+    }
+
+    fn is_agent_option_summary(option: &ConfigOptionSummary) -> bool {
+        let option_id = option.id.to_string();
+        !option_id.starts_with("backboard_skill:")
+            && !option_id.starts_with("backboard_mcp_")
+            && option_id != "backboard_voice_mode"
+            && option_id != "backboard_live_voice"
+    }
+
+    fn create_new_skill_from_context_menu(
+        config_options_view: Entity<ConfigOptionsView>,
+        workspace: WeakEntity<Workspace>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some((skill_path, slug)) = AgentOptionsMenu::next_new_skill_path() else {
+            log::error!("Could not allocate a new Backboard skill path");
+            return;
+        };
+
+        let Some(parent_dir) = skill_path.parent() else {
+            log::error!(
+                "New Backboard skill path has no parent: {}",
+                skill_path.display()
+            );
+            return;
+        };
+
+        if let Err(error) = std::fs::create_dir_all(parent_dir) {
+            log::error!(
+                "Failed to create Backboard skill directory {}: {error:#}",
+                parent_dir.display()
+            );
+            return;
+        }
+
+        if let Err(error) = std::fs::write(&skill_path, AgentOptionsMenu::new_skill_template(&slug))
+        {
+            log::error!(
+                "Failed to write Backboard skill file {}: {error:#}",
+                skill_path.display()
+            );
+            return;
+        }
+
+        config_options_view.update(cx, |view, cx| view.refresh_options(window, cx));
+
+        if let Some(workspace) = workspace.upgrade() {
+            workspace.update(cx, |workspace, cx| {
+                let open_task = workspace.open_abs_path(
+                    skill_path.clone(),
+                    OpenOptions {
+                        visible: Some(OpenVisible::OnlyFiles),
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+                cx.spawn(async move |_, _| {
+                    if let Err(error) = open_task.await {
+                        log::error!("Failed to open Backboard skill file: {error:#}");
+                    }
+                })
+                .detach();
+            });
+        }
+    }
+
+    fn render_skill_context_menu_row(
+        tooltip_id: String,
+        label: SharedString,
+        status: SharedString,
+        icon: IconName,
+        icon_color: Color,
+        status_color: Color,
+        preview_path: Option<PathBuf>,
+        description: Option<String>,
+    ) -> AnyElement {
+        let row =
+            Self::render_context_menu_status_row(label, status, icon, icon_color, status_color);
+
+        if preview_path.is_none() && description.is_none() {
+            return row;
+        }
+
+        div()
+            .w_full()
+            .child(row)
+            .id(ElementId::Name(tooltip_id.into()))
+            .tooltip(Tooltip::element(move |_window, cx| {
+                let mut content = v_flex().gap_1();
+                if let Some(preview_path) = preview_path.as_ref()
+                    && preview_path.is_file()
+                {
+                    content = content.child(
+                        div()
+                            .w(px(280.))
+                            .h(px(160.))
+                            .rounded_sm()
+                            .overflow_hidden()
+                            .border_1()
+                            .border_color(cx.theme().colors().border_variant)
+                            .child(
+                                img(preview_path.clone())
+                                    .size_full()
+                                    .object_fit(ObjectFit::ScaleDown),
+                            ),
+                    );
+                }
+                if let Some(description) = description.clone() {
+                    content = content.child(
+                        Label::new(description)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    );
+                }
+                content.into_any()
+            }))
+            .into_any_element()
+    }
+
+    fn enabled_skill_summaries(&self, cx: &App) -> Vec<ConfigOptionSummary> {
+        self.config_options_view
+            .as_ref()
+            .map(|config_options_view| {
+                config_options_view
+                    .read(cx)
+                    .option_summaries()
+                    .into_iter()
+                    .filter(Self::is_enabled_skill_summary)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn is_enabled_skill_summary(option: &ConfigOptionSummary) -> bool {
+        option.id.0.starts_with("backboard_skill:")
+            && option.current_value_name.eq_ignore_ascii_case("on")
+    }
+
+    fn skills_button_tooltip(enabled_skills: &[ConfigOptionSummary]) -> SharedString {
+        if enabled_skills.is_empty() {
+            return SharedString::from("Skills: none enabled");
+        }
+
+        let mut skill_names = enabled_skills
+            .iter()
+            .take(3)
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let remaining = enabled_skills.len().saturating_sub(3);
+        if remaining > 0 {
+            skill_names.push_str(&format!(" +{remaining} more"));
+        }
+
+        let suffix = if enabled_skills.len() == 1 {
+            "skill"
+        } else {
+            "skills"
+        };
+        SharedString::from(format!(
+            "{} {suffix} enabled: {skill_names}",
+            enabled_skills.len()
+        ))
+    }
+
+    fn render_enabled_skill_count_badge(count: usize, cx: &App) -> AnyElement {
+        let label = if count > 99 {
+            "99+".to_string()
+        } else {
+            count.to_string()
+        };
+
+        div()
+            .absolute()
+            .top_neg_0p5()
+            .right_neg_0p5()
+            .h(rems_from_px(12.))
+            .min_w(rems_from_px(12.))
+            .px(rems_from_px(2.))
+            .rounded_full()
+            .border_1()
+            .border_color(cx.theme().status().info_border)
+            .bg(cx.theme().status().info_background)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                Label::new(label)
+                    .size(LabelSize::Custom(rems_from_px(8.)))
+                    .color(Color::Default),
+            )
+            .into_any_element()
     }
 
     /// Returns the currently active editor, either for a message that is being
@@ -1870,8 +3134,9 @@ impl ThreadView {
             //
             // If there are, we keep/accept them since we're not regenerating the prompt that created them.
             //
-            // If editing the prompt that generated the edits, they are auto-rejected
-            // through the `rewind` function in the `acp_thread`.
+            // If editing the prompt that generated the edits, restore the checkpoint
+            // captured before that prompt. This also reverts filesystem changes made
+            // outside the action log, such as shell-created files.
             let has_earlier_edits = thread.read_with(cx, |thread, _| {
                 thread
                     .entries()
@@ -1889,7 +3154,9 @@ impl ThreadView {
             }
 
             thread
-                .update(cx, |thread, cx| thread.rewind(user_message_id, cx))
+                .update(cx, |thread, cx| {
+                    thread.restore_checkpoint(user_message_id, cx)
+                })
                 .await?;
             this.update_in(cx, |thread, window, cx| {
                 cx.emit(AcpThreadViewEvent::Interacted);
@@ -2779,7 +4046,7 @@ impl ThreadView {
 
         Some(
             v_flex()
-                .px_5()
+                .px(rems_from_px(14.))
                 .pt_1()
                 .pb_3()
                 .child(
@@ -3395,7 +4662,7 @@ impl ThreadView {
         cx: &Context<Self>,
     ) -> AnyElement {
         v_flex()
-            .px_5()
+            .px(rems_from_px(14.))
             .py_1p5()
             .w_full()
             .child(
@@ -3859,10 +5126,12 @@ impl ThreadView {
                                             .items_center()
                                             .justify_end()
                                             .gap_1()
+                                            .child(self.render_dictation_button(cx))
                                             .child(self.render_follow_toggle(cx))
                                             .children(self.render_fast_mode_control(cx))
                                             .children(self.render_thinking_control(cx))
                                             .children(self.render_token_usage(cx))
+                                            .children(self.render_skills_options_button(cx))
                                             .children(self.render_session_options_button(cx))
                                             .child(self.render_send_button(cx)),
                                     ),
@@ -4517,6 +5786,153 @@ impl ThreadView {
             .anchor(gpui::Anchor::BottomLeft)
     }
 
+    #[cfg(feature = "audio")]
+    fn render_dictation_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let (tooltip, icon_color, style, disabled) = match self.dictation_state {
+            DictationState::Idle => (
+                "Start Dictation",
+                Color::Muted,
+                ButtonStyle::Transparent,
+                false,
+            ),
+            DictationState::Recording { .. } => (
+                "Stop Dictation",
+                Color::Error,
+                ButtonStyle::Tinted(TintColor::Error),
+                false,
+            ),
+            DictationState::Transcribing => (
+                "Transcribing Dictation",
+                Color::Accent,
+                ButtonStyle::Subtle,
+                true,
+            ),
+        };
+
+        IconButton::new("dictation", IconName::Mic)
+            .icon_size(IconSize::Small)
+            .icon_color(icon_color)
+            .style(style)
+            .shape(ui::IconButtonShape::Square)
+            .disabled(disabled)
+            .tooltip(Tooltip::text(tooltip))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.toggle_dictation(window, cx);
+            }))
+            .into_any_element()
+    }
+
+    #[cfg(not(feature = "audio"))]
+    fn render_dictation_button(&self, _cx: &mut Context<Self>) -> AnyElement {
+        IconButton::new("dictation", IconName::Mic)
+            .icon_size(IconSize::Small)
+            .icon_color(Color::Disabled)
+            .style(ButtonStyle::Subtle)
+            .shape(ui::IconButtonShape::Square)
+            .disabled(true)
+            .tooltip(Tooltip::text("Dictation unavailable in this build"))
+            .into_any_element()
+    }
+
+    #[cfg(feature = "audio")]
+    fn toggle_dictation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match &self.dictation_state {
+            DictationState::Idle => self.start_dictation(window, cx),
+            DictationState::Recording { stop_tx } => {
+                let _ = stop_tx.try_send(());
+                self.dictation_state = DictationState::Transcribing;
+                cx.notify();
+            }
+            DictationState::Transcribing => {}
+        }
+    }
+
+    #[cfg(feature = "audio")]
+    fn start_dictation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (stop_tx, stop_rx) = async_channel::bounded(1);
+        self.dictation_state = DictationState::Recording { stop_tx };
+        cx.notify();
+
+        let thread_view = cx.weak_entity();
+        let record_task = cx.background_spawn(async move { record_dictation_wav(stop_rx) });
+
+        window
+            .spawn(cx, async move |cx| {
+                let result = async {
+                    let wav = record_task.await?;
+                    gpui_tokio::Tokio::spawn_result(cx, transcribe_backboard_dictation(wav)).await
+                }
+                .await;
+
+                cx.update(|window, cx| {
+                    thread_view
+                        .update(cx, |this, cx| {
+                            this.finish_dictation(result, window, cx);
+                        })
+                        .ok();
+                })
+                .ok();
+
+                anyhow::Ok(())
+            })
+            .detach_and_log_err(cx);
+    }
+
+    #[cfg(feature = "audio")]
+    fn finish_dictation(
+        &mut self,
+        result: anyhow::Result<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dictation_state = DictationState::Idle;
+
+        match result {
+            Ok(transcript) => {
+                let transcript = transcript.trim();
+                if transcript.is_empty() {
+                    self.show_dictation_toast("No speech was detected.", cx);
+                } else {
+                    let current_text = self.message_editor.read(cx).text(cx);
+                    let separator = if current_text
+                        .chars()
+                        .last()
+                        .is_some_and(|last| !last.is_whitespace())
+                    {
+                        " "
+                    } else {
+                        ""
+                    };
+                    self.message_editor.update(cx, |editor, cx| {
+                        editor.insert_text(&format!("{separator}{transcript}"), window, cx);
+                    });
+                    self.message_editor.focus_handle(cx).focus(window, cx);
+                }
+            }
+            Err(error) => {
+                log::error!("Dictation failed: {error:#}");
+                self.show_dictation_toast(format!("Dictation failed: {error:#}"), cx);
+            }
+        }
+
+        cx.notify();
+    }
+
+    #[cfg(feature = "audio")]
+    fn show_dictation_toast(&self, message: impl Into<String>, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+
+        workspace.update(cx, |workspace, cx| {
+            struct DictationToast;
+            workspace.show_toast(
+                Toast::new(NotificationId::unique::<DictationToast>(), message.into()).autohide(),
+                cx,
+            );
+        });
+    }
+
     fn render_send_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let message_editor = self.message_editor.read(cx);
         let is_editor_empty = message_editor.is_empty(cx);
@@ -4646,6 +6062,7 @@ impl ThreadView {
     ) -> Entity<ContextMenu> {
         let message_editor = self.message_editor.clone();
         let workspace = self.workspace.clone();
+        let weak_self = cx.weak_entity();
         let session_capabilities = self.session_capabilities.read();
         let supports_images = session_capabilities.supports_images();
         let supports_embedded_context = session_capabilities.supports_embedded_context();
@@ -4671,8 +6088,18 @@ impl ThreadView {
         let has_selection = has_editor_selection || has_terminal_selection;
 
         ContextMenu::build(window, cx, move |menu, _window, _cx| {
+            let weak_self_for_mcp = weak_self.clone();
+
             menu.key_context("AddContextMenu")
                 .header("Context")
+                .submenu_with_colored_icon(
+                    "MCP Servers",
+                    IconName::Box,
+                    Color::Accent,
+                    move |menu, _window, cx| {
+                        ThreadView::build_mcp_context_submenu(menu, weak_self_for_mcp.clone(), cx)
+                    },
+                )
                 .item(
                     ContextMenuEntry::new("Files & Directories")
                         .icon(IconName::File)
@@ -4779,6 +6206,190 @@ impl ThreadView {
                         }),
                 )
         })
+    }
+
+    fn build_mcp_context_submenu(
+        mut menu: ContextMenu,
+        thread_view: WeakEntity<Self>,
+        cx: &mut Context<ContextMenu>,
+    ) -> ContextMenu {
+        let (installed_count, total_count) = recommended_mcp_install_status(cx);
+        let (setup_status, setup_status_color, setup_icon): (SharedString, Color, IconName) =
+            if total_count > 0 && installed_count == total_count {
+                ("Configure".into(), Color::Success, IconName::Check)
+            } else if installed_count == 0 {
+                ("Install".into(), Color::Accent, IconName::Download)
+            } else {
+                (
+                    format!("{installed_count}/{total_count} installed").into(),
+                    Color::Accent,
+                    IconName::Download,
+                )
+            };
+
+        let thread_view_for_setup = thread_view.clone();
+        menu = menu.header("MCP Servers").custom_entry(
+            {
+                let setup_status = setup_status.clone();
+                move |_window, _cx| {
+                    Self::render_context_menu_status_row(
+                        "Set Up MCP Servers".into(),
+                        setup_status.clone(),
+                        setup_icon,
+                        setup_status_color,
+                        setup_status_color,
+                    )
+                }
+            },
+            move |window, cx| {
+                thread_view_for_setup
+                    .update(cx, |this, cx| {
+                        this.install_recommended_mcp_servers(window, cx);
+                    })
+                    .ok();
+            },
+        );
+
+        menu = menu.separator().header("Bundled MCP Servers");
+
+        for server in recommended_mcp_server_statuses(cx) {
+            let thread_view_for_server = thread_view.clone();
+            let server_ids = server.server_ids.clone();
+            let installed = server.installed;
+            let label = SharedString::from(server.label);
+            let status = if installed {
+                SharedString::from("Configure")
+            } else {
+                SharedString::from("Install")
+            };
+            let status_color = if installed {
+                Color::Muted
+            } else {
+                Color::Accent
+            };
+            let icon = if installed {
+                IconName::Check
+            } else {
+                IconName::Download
+            };
+            let icon_color = if installed {
+                Color::Success
+            } else {
+                Color::Muted
+            };
+
+            menu = menu.custom_entry(
+                move |_window, _cx| {
+                    Self::render_context_menu_status_row(
+                        label.clone(),
+                        status.clone(),
+                        icon,
+                        icon_color,
+                        status_color,
+                    )
+                },
+                move |window, cx| {
+                    thread_view_for_server
+                        .update(cx, |this, cx| {
+                            if installed {
+                                this.configure_first_mcp_server(server_ids.clone(), window, cx);
+                            } else {
+                                this.install_recommended_mcp_servers(window, cx);
+                            }
+                        })
+                        .ok();
+                },
+            );
+        }
+
+        menu
+    }
+
+    fn render_context_menu_status_row(
+        label: SharedString,
+        status: SharedString,
+        icon: IconName,
+        icon_color: Color,
+        status_color: Color,
+    ) -> AnyElement {
+        h_flex()
+            .min_w(px(260.))
+            .w_full()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .child(
+                h_flex()
+                    .min_w_0()
+                    .items_center()
+                    .gap_1p5()
+                    .child(Icon::new(icon).size(IconSize::XSmall).color(icon_color))
+                    .child(Label::new(label).color(Color::Default).truncate()),
+            )
+            .child(
+                h_flex()
+                    .flex_none()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        Label::new(status)
+                            .size(LabelSize::Small)
+                            .color(status_color)
+                            .truncate(),
+                    )
+                    .child(
+                        Icon::new(IconName::ChevronRight)
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn install_recommended_mcp_servers(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            log::error!("Could not install recommended MCP servers: workspace unavailable");
+            return;
+        };
+
+        workspace.update(cx, |workspace, cx| {
+            let language_registry = workspace.app_state().languages.clone();
+            crate::install_recommended_mcp_servers(workspace, language_registry, window, cx);
+        });
+    }
+
+    fn configure_first_mcp_server(
+        &self,
+        server_ids: Vec<Arc<str>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(server_id) = server_ids.first().cloned() else {
+            self.install_recommended_mcp_servers(window, cx);
+            return;
+        };
+        let Some(workspace) = self.workspace.upgrade() else {
+            log::error!("Could not configure MCP server: workspace unavailable");
+            return;
+        };
+
+        workspace.update(cx, |workspace, cx| {
+            let language_registry = workspace.app_state().languages.clone();
+            let workspace_handle = cx.weak_entity();
+            let task = ConfigureContextServerModal::show_modal_for_existing_server(
+                ContextServerId(server_id),
+                language_registry,
+                workspace_handle,
+                window,
+                cx,
+            );
+            cx.spawn(async move |_, _| {
+                if let Err(error) = task.await {
+                    log::error!("Failed to configure MCP server: {error:#}");
+                }
+            })
+            .detach();
+        });
     }
 
     fn render_follow_toggle(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -5431,7 +7042,7 @@ impl ThreadView {
         h_flex()
             .id(header_id.clone())
             .group(&header_id)
-            .mx_5()
+            .mx(rems_from_px(14.))
             .pt_1()
             .pb_1()
             .justify_between()
@@ -5750,11 +7361,11 @@ impl ThreadView {
         let needs_controls = group.end == total_entries;
 
         v_flex()
-            .mx_5()
+            .mx(rems_from_px(14.))
             .my_0p5()
-            .rounded(rems_from_px(5.))
+            .rounded(rems_from_px(6.))
             .border_1()
-            .border_color(cx.theme().colors().border_variant.opacity(0.34))
+            .border_color(self.tool_card_border_color(cx))
             .bg(cx
                 .theme()
                 .colors()
@@ -5884,6 +7495,55 @@ impl ThreadView {
             .into_any_element()
     }
 
+    fn render_user_message_content(
+        &self,
+        content: &ContentBlock,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        match content {
+            ContentBlock::Empty => Empty.into_any_element(),
+            ContentBlock::Markdown { markdown } => div()
+                .text_ui(cx)
+                .child(self.render_markdown(
+                    markdown.clone(),
+                    MarkdownStyle::themed(MarkdownFont::Agent, window, cx).with_buffer_font(cx),
+                ))
+                .into_any_element(),
+            ContentBlock::ResourceLink { resource_link } => {
+                self.render_user_message_resource_link(resource_link, cx)
+            }
+            ContentBlock::Image { image } => img(image.clone())
+                .max_w_80()
+                .max_h_80()
+                .object_fit(ObjectFit::ScaleDown)
+                .into_any_element(),
+        }
+    }
+
+    fn render_user_message_resource_link(
+        &self,
+        resource_link: &acp::ResourceLink,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let uri: SharedString = resource_link.uri.clone().into();
+        let label: SharedString = resource_link.name.clone().into();
+        let button_id = SharedString::from(format!("user-message-resource-{}", uri));
+
+        Button::new(button_id, label)
+            .label_size(LabelSize::Small)
+            .color(Color::Muted)
+            .start_icon(Icon::new(IconName::File).size(IconSize::XSmall))
+            .truncate(true)
+            .on_click(cx.listener({
+                let workspace = self.workspace.clone();
+                move |_, _, window, cx: &mut Context<Self>| {
+                    open_link(uri.clone(), &workspace, window, cx);
+                }
+            }))
+            .into_any_element()
+    }
+
     fn render_entry(
         &self,
         entry_ix: usize,
@@ -5930,6 +7590,18 @@ impl ThreadView {
                 } else {
                     self.agent_id.clone()
                 };
+                let colors = cx.theme().colors();
+                let prompt_surface = colors
+                    .editor_background
+                    .blend(colors.element_background.opacity(0.08));
+                let prompt_hover_surface = colors
+                    .editor_background
+                    .blend(colors.element_background.opacity(0.12));
+                let prompt_border = colors.border_variant.opacity(0.32);
+                let prompt_hover_border = colors.border_variant.opacity(0.48);
+                let editing_surface = colors
+                    .editor_background
+                    .blend(colors.element_background.opacity(0.1));
 
                 v_flex()
                     .id(("user_message", entry_ix))
@@ -5941,8 +7613,8 @@ impl ThreadView {
                         }
                     })
                     .pb_3()
-                    .px_2()
-                    .gap_1p5()
+                    .px(rems_from_px(14.))
+                    .gap_2()
                     .w_full()
                     .when(is_editable && has_checkpoint_button, |this| {
                         this.children(message.id.clone().map(|message_id| {
@@ -5960,47 +7632,87 @@ impl ThreadView {
                                             this.restore_checkpoint(&message_id, cx);
                                         }))
                                 )
-                                .child(Divider::horizontal())
+                                    .child(Divider::horizontal())
                         }))
                     })
                     .child(
                         div()
                             .relative()
-                            .child(
-                                div()
-                                    .py_2p5()
-                                    .px_3()
-                                    .rounded_md()
-                                    .bg(
-                                        cx.theme()
-                                            .colors()
-                                            .editor_background
-                                            .blend(cx.theme().colors().element_background.opacity(0.08)),
-                                    )
+                            .child(if editing {
+                                v_flex()
+                                    .gap_2()
+                                    .p_3()
+                                    .rounded(rems_from_px(10.))
+                                    .bg(editing_surface)
                                     .border_1()
                                     .when(is_indented, |this| {
                                         this.py_2().px_2()
                                     })
-                                    .border_color(cx.theme().colors().border_variant.opacity(0.24))
-                                    .map(|this| {
-                                        if !is_editable {
-                                            if is_subagent {
-                                                return this.border_dashed();
-                                            }
-                                            return this;
-                                        }
-                                        if editing && editor_focus {
-                                            return this.border_color(focus_border);
-                                        }
-                                        if editing && !editor_focus {
-                                            return this.border_dashed()
-                                        }
-                                        this.hover(|s| s.border_color(focus_border.opacity(0.42)))
+                                    .border_color(if editor_focus {
+                                        focus_border
+                                    } else {
+                                        prompt_hover_border
                                     })
-                                    .text_xs()
+                                    .when(!editor_focus, |this| this.border_dashed())
+                                    .child(
+                                        Label::new("You")
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .text_ui(cx)
                                     .child(editor.clone().into_any_element())
-                            )
-                            .when(editor_focus, |this| {
+                                    .into_any_element()
+                            } else {
+                                v_flex()
+                                    .id(("edit-user-message", entry_ix))
+                                    .relative()
+                                    .gap_2()
+                                    .p_3()
+                                    .rounded(rems_from_px(10.))
+                                    .bg(prompt_surface)
+                                    .border_1()
+                                    .when(is_indented, |this| {
+                                        this.py_1p5().px_2()
+                                    })
+                                    .border_color(prompt_border)
+                                    .when(is_subagent, |this| this.border_dashed())
+                                    .when(is_editable, |this| {
+                                        let editor = editor.clone();
+                                        this.cursor(CursorStyle::PointingHand)
+                                            .hover(|style| {
+                                                style
+                                                    .bg(prompt_hover_surface)
+                                                    .border_color(prompt_hover_border)
+                                            })
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.editing_message = Some(entry_ix);
+                                                editor.focus_handle(cx).focus(window, cx);
+                                                cx.notify();
+                                            }))
+                                    })
+                                    .child(
+                                        Label::new("You")
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(self.render_user_message_content(
+                                        &message.content,
+                                        window,
+                                        cx,
+                                    ))
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .left_0()
+                                            .size_0()
+                                            .overflow_hidden()
+                                            .opacity(0.)
+                                            .child(editor.clone().into_any_element()),
+                                    )
+                                    .into_any_element()
+                            })
+                            .when(editing && editor_focus, |this| {
                                 let base_container = h_flex()
                                     .absolute()
                                     .top_neg_3p5()
@@ -6080,6 +7792,7 @@ impl ThreadView {
                 chunks,
                 indented: _,
                 is_subagent_output,
+                model_label,
             }) => {
                 let mut is_blank = true;
                 let mut rendered_regular_content = false;
@@ -6136,6 +7849,7 @@ impl ThreadView {
                                             entry_ix,
                                             chunk_ix,
                                             md.clone(),
+                                            model_label.clone(),
                                             window,
                                             cx,
                                         )
@@ -6159,15 +7873,17 @@ impl ThreadView {
                         );
 
                     v_flex()
-                        .px_5()
+                        .px(rems_from_px(14.))
                         .when(show_header, |this| this.pt_1().pb_0p5())
                         .when(!show_header, |this| this.pt_0().pb_0p5())
                         .when(is_last, |this| this.pb_2())
-                        .gap_1()
+                        .gap_2()
                         .w_full()
                         .text_ui(cx)
                         .when(show_header, |this| {
-                            this.child(self.render_assistant_message_header(cx))
+                            this.child(
+                                self.render_assistant_message_header(model_label.clone(), cx),
+                            )
                         })
                         .child(self.render_message_context_menu(entry_ix, message_body, cx))
                         .when_some(
@@ -6435,7 +8151,7 @@ impl ThreadView {
         let mut container = h_flex()
             .w_full()
             .py_1()
-            .px_5()
+            .px(rems_from_px(14.))
             .gap_px()
             .opacity(0.6)
             .hover(|s| s.opacity(1.))
@@ -7011,6 +8727,7 @@ impl ThreadView {
         entry_ix: usize,
         chunk_ix: usize,
         chunk: Entity<Markdown>,
+        model_label: Option<SharedString>,
         window: &Window,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -7080,7 +8797,7 @@ impl ThreadView {
                                             .text_color(cx.theme().colors().text_muted)
                                             .child("Backboard thinking"),
                                     )
-                                    .when_some(self.current_model_label(cx), |this, model| {
+                                    .when_some(model_label, |this, model| {
                                         this.child(
                                             Label::new(model)
                                                 .size(LabelSize::XSmall)
@@ -7661,11 +9378,11 @@ impl ThreadView {
         v_flex()
             .when(!is_subagent, |this| {
                 this.my_0p5()
-                    .mx_5()
+                    .mx(rems_from_px(14.))
                     .border_1()
                     .when(tool_failed || command_failed, |card| card.border_dashed())
                     .border_color(border_color)
-                    .rounded(rems_from_px(5.))
+                    .rounded(rems_from_px(6.))
             })
             .overflow_hidden()
             .child(
@@ -7808,7 +9525,6 @@ impl ThreadView {
         window: &Window,
         cx: &Context<Self>,
     ) -> Div {
-        let has_location = tool_call.locations.len() == 1;
         let card_header_id = SharedString::from("inner-tool-call-header");
 
         let failed_or_canceled = match &tool_call.status {
@@ -8059,14 +9775,7 @@ impl ThreadView {
                 }
             })
             .when(!is_subagent, |this| {
-                this.map(|this| {
-                    if has_location && !use_card_layout {
-                        this.ml_4()
-                    } else {
-                        this.ml_5()
-                    }
-                })
-                .mr_5()
+                this.mx(rems_from_px(14.))
             })
             .map(|this| {
                 if is_terminal_tool {
@@ -9907,11 +11616,11 @@ impl ThreadView {
         cx.theme()
             .colors()
             .editor_background
-            .blend(cx.theme().colors().element_background.opacity(0.14))
+            .blend(cx.theme().colors().element_background.opacity(0.1))
     }
 
     fn tool_card_border_color(&self, cx: &Context<Self>) -> Hsla {
-        cx.theme().colors().border_variant.opacity(0.46)
+        cx.theme().colors().border_variant.opacity(0.34)
     }
 
     fn tool_name_font_size(&self) -> Rems {

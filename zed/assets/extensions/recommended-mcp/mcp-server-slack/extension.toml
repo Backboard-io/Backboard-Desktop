@@ -1,0 +1,10 @@
+id = "mcp-server-slack"
+name = "Slack MCP Server"
+description = "Slack's Model Context Server"
+version = "0.0.2"
+schema_version = 1
+authors = ["Semih Berkay Öztürk <semihozt@gmail.com"]
+repository = "https://github.com/semioz/zed-slack-mcp"
+
+[context_servers.mcp-server-slack]
+name = "Slack Model Context Protocol Server"

@@ -27,7 +27,7 @@ use gpui::{
     MouseButton, MouseDownEvent, ParentElement, PathPromptOptions, Pixels, Point, PromptLevel,
     Render, ScrollStrategy, Stateful, Styled, Subscription, Task, UniformListScrollHandle,
     WeakEntity, Window, actions, anchored, deferred, div, linear_color_stop, linear_gradient,
-    point, px, size, uniform_list,
+    point, px, rems, size, uniform_list,
 };
 use language::DiagnosticSeverity;
 use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
@@ -564,6 +564,13 @@ struct ItemColors {
 
 fn compact_project_panel_indent_size(indent_size: f32) -> f32 {
     (indent_size * 0.65).max(7.)
+}
+
+fn project_panel_entry_label_size(window: &Window, cx: &App) -> LabelSize {
+    let buffer_font_size = ThemeSettings::get_global(cx).buffer_font_size(cx);
+    let rem_size = f32::from(window.rem_size()).max(1.);
+
+    LabelSize::Custom(rems(f32::from(buffer_font_size) / rem_size))
 }
 
 fn get_item_color(is_sticky: bool, cx: &App) -> ItemColors {
@@ -5290,6 +5297,7 @@ impl ProjectPanel {
         let sticky_index = details.sticky.as_ref().map(|this| this.sticky_index);
         let settings = ProjectPanelSettings::get_global(cx);
         let show_editor = details.is_editing && !details.is_processing;
+        let entry_label_size = project_panel_entry_label_size(window, cx);
 
         let selection = SelectedEntry {
             worktree_id: details.worktree_id,
@@ -5896,6 +5904,7 @@ impl ProjectPanel {
                                         item_colors.drag_over,
                                         folded_directory_drag_target,
                                         filename_text_color,
+                                        entry_label_size,
                                         cx,
                                     ))
                                 }
@@ -5903,7 +5912,7 @@ impl ProjectPanel {
                                 None => this.child(
                                     Label::new(file_name)
                                         .single_line()
-                                        .size(LabelSize::XSmall)
+                                        .size(entry_label_size)
                                         .line_height_style(LineHeightStyle::UiLabel)
                                         .color(filename_text_color)
                                         .when(
@@ -5967,6 +5976,7 @@ impl ProjectPanel {
         drag_over_color: Hsla,
         folded_directory_drag_target: Option<FoldedDirectoryDragTarget>,
         filename_text_color: Color,
+        entry_label_size: LabelSize,
         cx: &Context<Self>,
     ) -> impl Iterator<Item = AnyElement> {
         let components = Path::new(&file_name)
@@ -6073,7 +6083,7 @@ impl ProjectPanel {
                         .child(
                             Label::new(component)
                                 .single_line()
-                                .size(LabelSize::XSmall)
+                                .size(entry_label_size)
                                 .line_height_style(LineHeightStyle::UiLabel)
                                 .color(filename_text_color)
                                 .when(bold_folder_labels && !is_file, |this| {
@@ -6097,6 +6107,7 @@ impl ProjectPanel {
                 is_file,
                 drag_and_drop_enabled,
                 filename_text_color,
+                entry_label_size,
                 &delimiter,
                 folded_ancestors,
                 cx,
@@ -6114,6 +6125,7 @@ impl ProjectPanel {
         is_file: bool,
         drag_and_drop_enabled: bool,
         filename_text_color: Color,
+        entry_label_size: LabelSize,
         delimiter: &SharedString,
         folded_ancestors: &FoldedAncestors,
         cx: &Context<Self>,
@@ -6163,7 +6175,7 @@ impl ProjectPanel {
             .child(
                 Label::new(delimiter.clone())
                     .single_line()
-                    .size(LabelSize::XSmall)
+                    .size(entry_label_size)
                     .line_height_style(LineHeightStyle::UiLabel)
                     .color(filename_text_color),
             )
