@@ -2,10 +2,9 @@ use anyhow::Result;
 use fs::Fs;
 
 use gpui::{
-    Animation, AnimationExt, AnyView, App, BoxShadow, Context, DragMoveEvent, Entity, EntityId,
-    EventEmitter, FocusHandle, Focusable, FontWeight, ManagedView, MouseButton, Pixels, Render,
-    Subscription, Task, TaskExt, Tiling, WeakEntity, Window, WindowId, actions, deferred,
-    ease_out_quint, point, px,
+    Animation, AnimationExt, AnyView, App, Context, DragMoveEvent, Entity, EntityId, EventEmitter,
+    FocusHandle, Focusable, FontWeight, ManagedView, MouseButton, Pixels, Render, Subscription,
+    Task, TaskExt, Tiling, WeakEntity, Window, WindowId, actions, deferred, ease_out_quint, px,
 };
 pub use project::ProjectGroupKey;
 use project::{DisableAiSettings, Project};
@@ -2568,15 +2567,15 @@ impl MultiWorkspace {
         match target {
             WorkspaceModeTarget::Simple => "Open in Simple Mode",
             WorkspaceModeTarget::CodeEditor => "Open in Code Editor",
-            WorkspaceModeTarget::AgentWorkspace => "Open in Agents Window",
+            WorkspaceModeTarget::AgentWorkspace => "Open in Agents",
         }
     }
 
-    fn workspace_mode_target_icon(target: WorkspaceModeTarget) -> IconName {
+    fn workspace_mode_target_number(target: WorkspaceModeTarget) -> &'static str {
         match target {
-            WorkspaceModeTarget::Simple => IconName::Sparkle,
-            WorkspaceModeTarget::CodeEditor => IconName::FileCode,
-            WorkspaceModeTarget::AgentWorkspace => IconName::ZedAgentTwo,
+            WorkspaceModeTarget::CodeEditor => "1",
+            WorkspaceModeTarget::AgentWorkspace => "2",
+            WorkspaceModeTarget::Simple => "3",
         }
     }
 
@@ -2637,33 +2636,18 @@ impl MultiWorkspace {
             collapsed_width
         };
         let button_height = px(24.);
-        let icon = Icon::new(Self::workspace_mode_target_icon(target))
-            .size(IconSize::Small)
-            .color(Color::Accent);
-        let icon_chip = h_flex()
+        let number_mark = h_flex()
             .flex_none()
-            .size(px(20.))
+            .w(px(18.))
+            .h(button_height)
             .items_center()
             .justify_center()
-            .rounded_md()
-            .border_1()
-            .border_color(
-                colors
-                    .text_accent
-                    .opacity(if hovered { 0.42 } else { 0.22 }),
-            )
-            .bg(colors
-                .text_accent
-                .opacity(if hovered { 0.18 } else { 0.09 }))
-            .when(hovered, |this| {
-                this.shadow(vec![BoxShadow {
-                    color: colors.text_accent.opacity(0.20),
-                    offset: point(px(0.), px(1.)),
-                    blur_radius: px(5.),
-                    spread_radius: px(0.),
-                }])
-            })
-            .child(icon);
+            .child(
+                Label::new(Self::workspace_mode_target_number(target))
+                    .size(LabelSize::Small)
+                    .weight(FontWeight::BOLD)
+                    .color(Color::Accent),
+            );
 
         let button = h_flex()
             .id(id)
@@ -2691,7 +2675,7 @@ impl MultiWorkspace {
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_workspace_mode_target(target, window, cx);
             }))
-            .child(icon_chip)
+            .child(number_mark)
             .when(hovered, |this| {
                 let label_animation_id = ElementId::Name(format!("{id}-label").into());
                 this.child(

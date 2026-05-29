@@ -9,7 +9,8 @@ use futures::StreamExt as _;
 use gpui::{
     Action, AnyElement, App, AppContext as _, AsyncWindowContext, Context, DismissEvent, Div,
     Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, MouseButton, ParentElement,
-    Render, SharedString, Stateful, Styled, Task, WeakEntity, Window, actions, div, px, rgb,
+    Render, SharedString, Stateful, Styled, Subscription, Task, WeakEntity, Window, actions, div,
+    px, rgb,
 };
 use serde_json::{Value, json};
 use ui::{
@@ -236,6 +237,7 @@ pub struct BackboardPanel {
     selected_model: Option<String>,
     configuring_api_key: bool,
     is_zoomed: bool,
+    _workspace_subscription: Option<Subscription>,
     _config_task: Task<()>,
 }
 
@@ -975,6 +977,12 @@ impl BackboardPanel {
             }
         });
 
+        let workspace_subscription = workspace.upgrade().map(|workspace| {
+            cx.observe(&workspace, |_, _, cx| {
+                cx.notify();
+            })
+        });
+
         let mut panel = Self {
             focus_handle: cx.focus_handle(),
             workspace,
@@ -1006,6 +1014,7 @@ impl BackboardPanel {
             selected_model,
             configuring_api_key: false,
             is_zoomed: false,
+            _workspace_subscription: workspace_subscription,
             _config_task: config_task,
         };
 

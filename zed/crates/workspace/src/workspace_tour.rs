@@ -269,11 +269,11 @@ pub fn render_workspace_tour_highlight(target: Div, cx: &App) -> Div {
                 .absolute()
                 .inset_0()
                 .rounded(px(8.))
-                .border_1()
+                .border_2()
                 .border_color(palette.highlight_border)
                 .bg(palette.highlight_fill),
         )
-        .with_priority(5),
+        .with_priority(7),
     )
 }
 
