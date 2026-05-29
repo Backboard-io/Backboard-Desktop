@@ -18,13 +18,16 @@ use ui::prelude::*;
 use util::ResultExt;
 use util::path_list::PathList;
 use zed_actions::agents_sidebar::ToggleThreadSwitcher;
-use zed_actions::{ResetOnboarding, SwitchInterfaceMode};
+use zed_actions::{OpenSettings, ResetOnboarding, SwitchInterfaceMode};
 
 use agent_settings::AgentSettings;
 use settings::SidebarDockPosition;
-use ui::{ButtonSize, ContextMenu, DropdownMenu, DropdownStyle, IconPosition, right_click_menu};
+use ui::{
+    ButtonSize, ContextMenu, DropdownMenu, DropdownStyle, IconPosition, Tooltip, right_click_menu,
+};
 
 const SIDEBAR_RESIZE_HANDLE_SIZE: Pixels = px(6.0);
+const TERMINAL_PANEL_NAME: &str = "TerminalPanel";
 
 use crate::jarvis_directory_visualizer::{JarvisDirectoryVisualizer, JarvisThreadSummary};
 use crate::open_remote_project_with_existing_connection;
@@ -528,6 +531,62 @@ impl MultiWorkspace {
                 });
             }
         });
+    }
+
+    fn dock_is_open(&self, position: DockPosition, cx: &App) -> bool {
+        let dock = self.workspace().read(cx).dock_at_position(position).clone();
+        dock.read(cx).is_open()
+    }
+
+    fn panel_is_visible(&self, persistent_name: &str, cx: &App) -> bool {
+        let workspace = self.workspace().read(cx);
+        for dock in workspace.all_docks() {
+            let dock = dock.read(cx);
+            if dock
+                .visible_panel()
+                .is_some_and(|panel| panel.persistent_name() == persistent_name)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn toggle_panel_by_persistent_name(
+        &mut self,
+        persistent_name: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let workspace = self.workspace().clone();
+        workspace.update(cx, |workspace, cx| {
+            for dock in workspace.all_docks() {
+                let Some(panel_ix) = dock
+                    .read(cx)
+                    .panel_index_for_persistent_name(persistent_name, cx)
+                else {
+                    continue;
+                };
+                let panel_is_visible = dock
+                    .read(cx)
+                    .visible_panel()
+                    .is_some_and(|panel| panel.persistent_name() == persistent_name);
+
+                dock.update(cx, |dock, cx| {
+                    if panel_is_visible {
+                        dock.set_open(false, window, cx);
+                    } else {
+                        dock.activate_panel(panel_ix, window, cx);
+                        dock.set_open(true, window, cx);
+                        if let Some(panel) = dock.active_panel() {
+                            panel.panel_focus_handle(cx).focus(window, cx);
+                        }
+                    }
+                });
+                return;
+            }
+        });
+        cx.notify();
     }
 
     fn active_item_is_fullscreen_onboarding(&self, cx: &App) -> bool {
@@ -2318,6 +2377,42 @@ impl MultiWorkspace {
         })
     }
 
+    fn render_toggle_dock_button(
+        &self,
+        position: DockPosition,
+        id: &'static str,
+        icon: IconName,
+        tooltip: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        IconButton::new(id, icon)
+            .style(ButtonStyle::Transparent)
+            .size(ButtonSize::Compact)
+            .icon_size(IconSize::Small)
+            .icon_color(Color::Muted)
+            .toggle_state(self.dock_is_open(position, cx))
+            .tooltip(Tooltip::text(tooltip))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.toggle_dock(position, window, cx);
+            }))
+    }
+
+    fn render_toggle_terminal_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        IconButton::new(
+            "toggle-terminal-from-workspace-switcher",
+            IconName::Terminal,
+        )
+        .style(ButtonStyle::Transparent)
+        .size(ButtonSize::Compact)
+        .icon_size(IconSize::Small)
+        .icon_color(Color::Muted)
+        .toggle_state(self.panel_is_visible(TERMINAL_PANEL_NAME, cx))
+        .tooltip(Tooltip::text("Toggle Terminal"))
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.toggle_panel_by_persistent_name(TERMINAL_PANEL_NAME, window, cx);
+        }))
+    }
+
     fn render_workspace_mode_switcher(
         &self,
         window: &mut Window,
@@ -2332,11 +2427,38 @@ impl MultiWorkspace {
             .flex_shrink_0()
             .items_center()
             .justify_end()
+            .gap_1()
             .pl_2()
             .pr_2()
             .border_b_1()
             .border_color(colors.border_variant.opacity(0.5))
             .bg(switcher_bg)
+            .child(self.render_toggle_dock_button(
+                DockPosition::Left,
+                "toggle-left-panel-from-workspace-switcher",
+                IconName::ThreadsSidebarLeftOpen,
+                "Toggle Left Panel",
+                cx,
+            ))
+            .child(self.render_toggle_dock_button(
+                DockPosition::Right,
+                "toggle-right-panel-from-workspace-switcher",
+                IconName::ThreadsSidebarRightOpen,
+                "Toggle Right Panel",
+                cx,
+            ))
+            .child(self.render_toggle_terminal_button(cx))
+            .child(
+                IconButton::new("open-settings-from-workspace-switcher", IconName::Settings)
+                    .style(ButtonStyle::Transparent)
+                    .size(ButtonSize::Compact)
+                    .icon_size(IconSize::Small)
+                    .icon_color(Color::Muted)
+                    .tooltip(Tooltip::text("Open Settings"))
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(OpenSettings), cx);
+                    }),
+            )
             .child(
                 DropdownMenu::new_with_element(
                     "multi-workspace-mode-menu",

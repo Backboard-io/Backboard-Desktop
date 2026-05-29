@@ -540,18 +540,11 @@ pub struct BackboardSettings {
 const DEFAULT_BACKBOARD_API_URL: &str = "https://app.backboard.io/api";
 const DEFAULT_BACKBOARD_TIMEOUT_MS: u64 = 20_000;
 
-fn default_backboard_model() -> String {
-    backboard::BackboardConfig::load_or_default()
-        .default_model
-        .filter(|model| !model.trim().is_empty())
-        .unwrap_or_default()
-}
-
 impl Default for BackboardSettings {
     fn default() -> Self {
         Self {
             api_url: DEFAULT_BACKBOARD_API_URL.into(),
-            model: default_backboard_model(),
+            model: String::new(),
             timeout_ms: DEFAULT_BACKBOARD_TIMEOUT_MS,
         }
     }
@@ -883,7 +876,7 @@ impl settings::Settings for AllLanguageSettings {
             api_url: backboard
                 .api_url
                 .unwrap_or_else(|| DEFAULT_BACKBOARD_API_URL.into()),
-            model: backboard.model.unwrap_or_else(default_backboard_model),
+            model: backboard.model.unwrap_or_default(),
             timeout_ms: backboard.timeout_ms.unwrap_or(DEFAULT_BACKBOARD_TIMEOUT_MS),
         };
 
@@ -972,6 +965,11 @@ mod tests {
     use super::*;
     use gpui::TestAppContext;
     use util::rel_path::rel_path;
+
+    #[test]
+    fn backboard_edit_predictions_do_not_default_to_chat_model() {
+        assert!(BackboardSettings::default().model.is_empty());
+    }
 
     #[gpui::test]
     fn test_edit_predictions_enabled_for_file(cx: &mut TestAppContext) {

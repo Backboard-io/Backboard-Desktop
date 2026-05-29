@@ -1,6 +1,6 @@
 pub use ::backboard::{
-    BackboardClient, BackboardConfig, CreateAssistantRequest, DEV_API_URL, LOCAL_API_URL,
-    PROD_API_URL, RecentUsageQuery, SendMessageRequest, SubmitToolOutputsRequest,
+    AudioAttachment, BackboardClient, BackboardConfig, CreateAssistantRequest, DEV_API_URL,
+    LOCAL_API_URL, PROD_API_URL, RecentUsageQuery, SendMessageRequest, SubmitToolOutputsRequest,
     UpdateAssistantRequest,
 };
 

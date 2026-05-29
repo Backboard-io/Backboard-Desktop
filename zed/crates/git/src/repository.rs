@@ -27,7 +27,7 @@ use std::process::ExitStatus;
 use std::str::FromStr;
 use std::{
     cmp::Ordering,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::Arc,
 };
 use sum_tree::MapSeekTarget;
@@ -2686,7 +2686,31 @@ impl GitRepository for RealGitRepository {
         let git_binary = self.git_binary_in_worktree();
         self.executor
             .spawn(async move {
-                let git = git_binary?;
+                let mut git = git_binary?;
+                let mut excludes = exclude_files(&git).await?;
+                let added_paths = git
+                    .with_temp_index({
+                        let checkpoint = checkpoint.clone();
+                        async move |git| {
+                            git.run(&["add", "--all"]).await?;
+                            let current_tree = git.run(&["write-tree"]).await?;
+                            let output = git
+                                .run(&[
+                                    "diff",
+                                    "--name-only",
+                                    "--diff-filter=A",
+                                    "-z",
+                                    &checkpoint.commit_sha.to_string(),
+                                    &current_tree,
+                                ])
+                                .await?;
+                            Ok(checkpoint_path_list(&output))
+                        }
+                    })
+                    .await;
+                excludes.restore_original().await?;
+                let added_paths = added_paths?;
+
                 git.run(&[
                     "restore",
                     "--source",
@@ -2696,16 +2720,7 @@ impl GitRepository for RealGitRepository {
                 ])
                 .await?;
 
-                // TODO: We don't track binary and large files anymore,
-                //       so the following call would delete them.
-                //       Implement an alternative way to track files added by agent.
-                //
-                // git.with_temp_index(async move |git| {
-                //     git.run(&["read-tree", &checkpoint.commit_sha.to_string()])
-                //         .await?;
-                //     git.run(&["clean", "-d", "--force"]).await
-                // })
-                // .await?;
+                remove_checkpoint_added_paths(&git.working_directory, added_paths).await?;
 
                 Ok(())
             })
@@ -3251,6 +3266,63 @@ fn git_status_args(path_prefixes: &[RepoPath]) -> Vec<OsString> {
         }
     }));
     args
+}
+
+fn checkpoint_path_list(output: &str) -> Vec<PathBuf> {
+    output
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| is_safe_repo_relative_path(path))
+        .collect()
+}
+
+fn is_safe_repo_relative_path(path: &Path) -> bool {
+    !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+}
+
+async fn remove_checkpoint_added_paths(
+    working_directory: &Path,
+    added_paths: Vec<PathBuf>,
+) -> Result<()> {
+    for relative_path in added_paths {
+        let path = working_directory.join(&relative_path);
+        let metadata = match smol::fs::symlink_metadata(&path).await {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("checking checkpoint-added path {}", path.display()));
+            }
+        };
+
+        if metadata.file_type().is_dir() {
+            smol::fs::remove_dir_all(&path).await.with_context(|| {
+                format!("removing checkpoint-added directory {}", path.display())
+            })?;
+        } else {
+            smol::fs::remove_file(&path)
+                .await
+                .with_context(|| format!("removing checkpoint-added file {}", path.display()))?;
+        }
+
+        let mut parent = path.parent().map(Path::to_path_buf);
+        while let Some(directory) = parent {
+            if directory == working_directory {
+                break;
+            }
+
+            if smol::fs::remove_dir(&directory).await.is_err() {
+                break;
+            }
+            parent = directory.parent().map(Path::to_path_buf);
+        }
+    }
+
+    Ok(())
 }
 
 /// Temporarily git-ignore commonly ignored files and files over 2MB
@@ -3920,13 +3992,12 @@ mod tests {
                 .unwrap(),
             "1"
         );
-        // See TODO above
-        // assert_eq!(
-        //     smol::fs::read_to_string(repo_dir.path().join("new_file_after_checkpoint"))
-        //         .await
-        //         .ok(),
-        //     None
-        // );
+        assert_eq!(
+            smol::fs::read_to_string(repo_dir.path().join("new_file_after_checkpoint"))
+                .await
+                .ok(),
+            None
+        );
     }
 
     #[gpui::test]
@@ -4025,6 +4096,7 @@ mod tests {
         let repo_dir = tempfile::tempdir().unwrap();
         let text_path = repo_dir.path().join("main.rs");
         let bin_path = repo_dir.path().join("binary.o");
+        let new_bin_path = repo_dir.path().join("new-binary.o");
 
         git2::Repository::init(repo_dir.path()).unwrap();
 
@@ -4064,6 +4136,9 @@ mod tests {
         smol::fs::write(&bin_path, "Modified binary file")
             .await
             .unwrap();
+        smol::fs::write(&new_bin_path, "New binary file")
+            .await
+            .unwrap();
 
         repo.restore_checkpoint(checkpoint).await.unwrap();
 
@@ -4077,6 +4152,11 @@ mod tests {
         assert_eq!(
             smol::fs::read_to_string(&bin_path).await.unwrap(),
             "Modified binary file"
+        );
+
+        assert_eq!(
+            smol::fs::read_to_string(&new_bin_path).await.unwrap(),
+            "New binary file"
         );
     }
 

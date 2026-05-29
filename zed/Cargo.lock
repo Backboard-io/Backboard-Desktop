@@ -417,6 +417,7 @@ dependencies = [
  "remote_connection",
  "remote_server",
  "reqwest_client",
+ "rodio",
  "rope",
  "rules_library",
  "schemars 1.0.4",
@@ -9611,7 +9612,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "backboard",
  "clock",
  "collections",
  "criterion",
