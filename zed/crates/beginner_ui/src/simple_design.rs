@@ -1,4 +1,4 @@
-use gpui::{App, BoxShadow, Hsla, IntoElement, point, px};
+use gpui::{App, BoxShadow, Hsla, IntoElement, px};
 use theme::ActiveTheme;
 use ui::{Color, ElevationIndex, Icon, IconName, IconSize, prelude::*};
 
@@ -14,7 +14,6 @@ pub const TOP_BAR_HEIGHT: f32 = 40.;
 pub const SIDEBAR_WIDTH: f32 = 260.;
 pub const RIGHT_PANEL_WIDTH: f32 = 360.;
 pub const PREVIEW_DOMINANT_CHAT_WIDTH: f32 = 480.;
-pub const ROW_HEIGHT: f32 = 30.;
 pub const PROJECT_ROW_HEIGHT: f32 = 40.;
 pub const CHAT_MAX_WIDTH: f32 = 680.;
 
@@ -52,10 +51,6 @@ pub fn hover_background(cx: &App) -> Hsla {
     cx.theme().colors().element_hover
 }
 
-pub fn border(cx: &App) -> Hsla {
-    cx.theme().colors().border
-}
-
 pub fn soft_border(cx: &App) -> Hsla {
     cx.theme().colors().border_variant
 }
@@ -74,15 +69,6 @@ pub fn separator(cx: &App) -> Hsla {
 
 pub fn card_shadow(cx: &App) -> Vec<BoxShadow> {
     ElevationIndex::ElevatedSurface.shadow(cx)
-}
-
-pub fn hairline_shadow(cx: &App) -> Vec<BoxShadow> {
-    vec![BoxShadow {
-        color: cx.theme().colors().border.opacity(0.18),
-        offset: point(px(0.), px(1.)),
-        blur_radius: px(0.),
-        spread_radius: px(0.),
-    }]
 }
 
 pub fn render_project_mark(size: f32, cx: &App) -> impl IntoElement {

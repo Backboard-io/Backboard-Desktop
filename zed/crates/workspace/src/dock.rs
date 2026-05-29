@@ -1432,49 +1432,13 @@ impl Render for PanelButtons {
                                     })
                                 });
 
-                            let panel_button = div().relative().child(button).when_some(
+                            div().relative().child(button).when_some(
                                 icon_label
                                     .clone()
                                     .filter(|_| !is_active_button)
                                     .and_then(|label| label.parse::<usize>().ok()),
                                 |this, count| this.child(CountBadge::new(count)),
-                            );
-
-                            if dock_position == DockPosition::Left && name == "GitPanel" {
-                                let github_desktop_is_open = _window
-                                    .root::<crate::MultiWorkspace>()
-                                    .flatten()
-                                    .is_some_and(|multi_workspace| {
-                                        multi_workspace.read(_cx).git_workspace_is_open()
-                                    });
-
-                                h_flex().gap_1().child(panel_button).child(
-                                    IconButton::new(
-                                        "open-github-desktop-from-left-git-panel",
-                                        IconName::Github,
-                                    )
-                                    .icon_size(IconSize::Small)
-                                    .toggle_state(github_desktop_is_open)
-                                    .tooltip(Tooltip::text("Open GitHub Desktop"))
-                                    .on_click(
-                                        |_, window, cx| {
-                                            if let Some(multi_workspace) =
-                                                window.root::<crate::MultiWorkspace>().flatten()
-                                            {
-                                                multi_workspace.update(
-                                                    cx,
-                                                    |multi_workspace, cx| {
-                                                        multi_workspace
-                                                            .open_git_workspace(window, cx);
-                                                    },
-                                                );
-                                            }
-                                        },
-                                    ),
-                                )
-                            } else {
-                                panel_button
-                            }
+                            )
                         }),
                 )
             })

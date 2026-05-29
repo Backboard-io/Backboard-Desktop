@@ -44,7 +44,7 @@ pub use remote::{
     RemoteConnectionIdentity, remote_connection_identity, same_remote_connection_identity,
 };
 pub use toast_layer::{ToastAction, ToastLayer, ToastView};
-pub use workspace_tour::WorkspaceTourStep;
+pub use workspace_tour::{WorkspaceTourPlacement, WorkspaceTourStep, render_workspace_tour_target};
 
 use anyhow::{Context as _, Result, anyhow};
 use client::{
@@ -171,7 +171,6 @@ use crate::{
     },
     security_modal::SecurityModal,
     workspace_tour::{
-        WorkspaceTourPlacement,
         decorate_workspace_tour_target as decorate_workspace_tour_target_element,
         workspace_tour_handlers,
     },
@@ -7955,15 +7954,11 @@ impl Workspace {
             }
         }
 
-        let tour_target = match position {
-            DockPosition::Left => Some((
-                WorkspaceTourStep::GitPanel,
-                WorkspaceTourPlacement::TopRight,
-            )),
-            DockPosition::Right => {
+        let tour_target = match (position, self.workspace_tour_step) {
+            (DockPosition::Right, Some(WorkspaceTourStep::Composer)) => {
                 Some((WorkspaceTourStep::Composer, WorkspaceTourPlacement::TopLeft))
             }
-            DockPosition::Bottom => None,
+            _ => None,
         };
         if let Some((tour_step, tour_placement)) = tour_target {
             container =

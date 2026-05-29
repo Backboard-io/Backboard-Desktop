@@ -1622,7 +1622,7 @@ impl BackboardPanel {
             .pl_4()
             .gap_1()
             .border_l_1()
-            .border_color(cx.theme().colors().border)
+            .border_color(cx.theme().colors().border_variant.opacity(0.34))
             .children(self.activity_log.iter().rev().take(6).map(|activity| {
                 h_flex()
                     .gap_2()
@@ -1637,6 +1637,69 @@ impl BackboardPanel {
                             .color(Color::Muted),
                     )
             }))
+    }
+
+    fn latest_thinking_activity(&self) -> Option<String> {
+        self.activity_log.iter().rev().find_map(|activity| {
+            let activity = activity.trim();
+            if let Some(thinking) = activity.strip_prefix("Thinking: ") {
+                Some(thinking.trim().to_string())
+            } else if activity.starts_with("Thinking through") {
+                Some("Thinking through the request.".to_string())
+            } else if activity.starts_with("Finished planning") {
+                Some("Finished planning the next step.".to_string())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn render_thinking_preview(&self, thought: String, cx: &mut Context<Self>) -> impl IntoElement {
+        let background = cx
+            .theme()
+            .colors()
+            .editor_background
+            .blend(cx.theme().colors().element_background.opacity(0.06));
+
+        h_flex()
+            .id("backboard-thinking-preview")
+            .w_full()
+            .gap_2()
+            .items_start()
+            .px_3()
+            .py_2()
+            .rounded(rems_from_px(8.))
+            .border_1()
+            .border_color(cx.theme().colors().border_variant.opacity(0.24))
+            .bg(background)
+            .child(if self.streaming {
+                Icon::new(IconName::LoadCircle)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted)
+                    .with_rotate_animation(2)
+                    .into_any_element()
+            } else {
+                Icon::new(IconName::LoadCircle)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted)
+                    .into_any_element()
+            })
+            .child(
+                v_flex()
+                    .gap_0p5()
+                    .flex_1()
+                    .child(
+                        Label::new("Thinking")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
+                    .child(
+                        Label::new(thought)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    ),
+            )
     }
 
     fn render_api_key_setup(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1876,8 +1939,8 @@ impl BackboardPanel {
             .theme()
             .colors()
             .editor_background
-            .blend(cx.theme().colors().element_background.opacity(0.12));
-        let border = cx.theme().colors().border_variant.opacity(0.52);
+            .blend(cx.theme().colors().element_background.opacity(0.08));
+        let border = cx.theme().colors().border_variant.opacity(0.32);
         let lines = body
             .lines()
             .map(|line| {
@@ -1934,14 +1997,18 @@ impl BackboardPanel {
                     .theme()
                     .colors()
                     .editor_background
-                    .blend(cx.theme().colors().element_background.opacity(0.12));
+                    .blend(cx.theme().colors().element_background.opacity(0.08));
                 let message_hover_surface = cx
                     .theme()
                     .colors()
                     .editor_background
-                    .blend(cx.theme().colors().element_background.opacity(0.18));
-                let message_border = cx.theme().colors().border_variant.opacity(0.52);
+                    .blend(cx.theme().colors().element_background.opacity(0.12));
+                let message_border = cx.theme().colors().border_variant.opacity(0.32);
                 let message_is_empty = message.body.is_empty();
+                let thinking_preview = is_active_backboard.then(|| {
+                    self.latest_thinking_activity()
+                        .unwrap_or_else(|| "Working through the next step.".to_string())
+                });
                 let body = if message_is_empty {
                     v_flex()
                         .gap_1()
@@ -2036,6 +2103,9 @@ impl BackboardPanel {
                             Self::render_full_message_body(&message.body, cx).into_any_element()
                         } else {
                             body
+                        })
+                        .when_some(thinking_preview, |this, thought| {
+                            this.child(self.render_thinking_preview(thought, cx))
                         })
                         .when(is_active_backboard && self.activity_open, |this| {
                             this.child(self.render_activity_details(cx))
@@ -2165,49 +2235,64 @@ impl BackboardPanel {
     }
 
     fn render_composer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let tools = h_flex()
+            .gap_1()
+            .child(
+                IconButton::new("backboard-context", IconName::AtSign)
+                    .icon_size(IconSize::Small)
+                    .tooltip(Tooltip::text("Add context")),
+            )
+            .child(
+                IconButton::new("backboard-files", IconName::FileCode)
+                    .icon_size(IconSize::Small)
+                    .tooltip(Tooltip::text("Attach files")),
+            )
+            .child(
+                IconButton::new("backboard-voice", IconName::Mic)
+                    .icon_size(IconSize::Small)
+                    .tooltip(Tooltip::text("Voice control")),
+            )
+            .child(
+                IconButton::new("backboard-mcps", IconName::Server)
+                    .icon_size(IconSize::Small)
+                    .tooltip(Tooltip::text("MCP tools")),
+            )
+            .child(
+                IconButton::new("backboard-agent-options", IconName::Sliders)
+                    .icon_size(IconSize::Small)
+                    .tooltip(Tooltip::text("Agent options")),
+            );
+
+        let composer = h_flex()
+            .min_h(px(58.))
+            .gap_2()
+            .rounded_xl()
+            .border_1()
+            .border_color(cx.theme().colors().border)
+            .bg(cx.theme().colors().editor_background)
+            .px_3()
+            .py_2()
+            .child(tools)
+            .child(v_flex().flex_1().min_w_0().child(self.composer.clone()))
+            .child(
+                IconButton::new("backboard-send", IconName::Send)
+                    .icon_size(IconSize::Small)
+                    .disabled(!self.api_ready || self.streaming)
+                    .tooltip(Tooltip::text(if self.streaming {
+                        "Backboard is running"
+                    } else {
+                        "Send to Backboard"
+                    }))
+                    .on_click(cx.listener(|this, _, window, cx| this.send_prompt(window, cx))),
+            );
+
         v_flex()
             .border_t_1()
             .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().panel_background)
             .px_4()
             .py_3()
-            .child(
-                h_flex()
-                    .min_h(px(58.))
-                    .gap_2()
-                    .rounded_xl()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .bg(cx.theme().colors().editor_background)
-                    .px_3()
-                    .py_2()
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(
-                                IconButton::new("backboard-context", IconName::AtSign)
-                                    .icon_size(IconSize::Small),
-                            )
-                            .child(
-                                IconButton::new("backboard-files", IconName::FileCode)
-                                    .icon_size(IconSize::Small),
-                            ),
-                    )
-                    .child(v_flex().flex_1().child(self.composer.clone()))
-                    .child(
-                        IconButton::new("backboard-send", IconName::Send)
-                            .icon_size(IconSize::Small)
-                            .disabled(!self.api_ready || self.streaming)
-                            .tooltip(Tooltip::text(if self.streaming {
-                                "Backboard is running"
-                            } else {
-                                "Send to Backboard"
-                            }))
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.send_prompt(window, cx)),
-                            ),
-                    ),
-            )
+            .child(composer)
     }
 }
 

@@ -529,8 +529,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         .detach();
 
         {
-            use workspace::InterfaceMode;
-
             // Always create the beginner chat view so it's ready when the user switches to Chat.
             let workspace_weak = _multi_workspace.workspace().downgrade();
             let multi_weak = cx.weak_entity();

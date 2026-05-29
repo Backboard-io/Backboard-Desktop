@@ -79,7 +79,7 @@ use util::paths::PathStyle;
 use util::{ResultExt, TryFutureExt, markdown::MarkdownInlineCode, maybe, rel_path::RelPath};
 use workspace::SERIALIZATION_THROTTLE_TIME;
 use workspace::{
-    Workspace,
+    MultiWorkspace, Workspace,
     dock::{DockPosition, Panel, PanelEvent},
     notifications::{DetachAndPromptErr, ErrorMessagePrompt, NotificationId, NotifyResultExt},
 };
@@ -4312,6 +4312,49 @@ impl GitPanel {
             .anchor(Anchor::TopRight)
     }
 
+    pub(crate) fn render_workspace_more_menu(&self, cx: &mut Context<Self>) -> AnyElement {
+        let focus_handle = self.focus_handle.clone();
+        let has_tracked_changes = self.has_tracked_changes();
+        let has_staged_changes = self.has_staged_changes();
+        let has_unstaged_changes = self.has_unstaged_changes();
+        let has_new_changes = self.new_count > 0;
+        let has_stash_items = self.stash_entries.entries.len() > 0;
+        let can_commit = self.can_commit() && self.has_commit_message(cx);
+        let can_push_and_pull = self.can_push_and_pull(cx);
+        let has_previous_commit = self.head_commit(cx).is_some();
+
+        PopoverMenu::new("git-workspace-more-menu")
+            .trigger(
+                Button::new("git-workspace-more-menu-trigger", "More")
+                    .size(ButtonSize::Compact)
+                    .style(ButtonStyle::Subtle)
+                    .label_size(LabelSize::Small)
+                    .start_icon(Icon::new(IconName::Ellipsis).size(IconSize::XSmall))
+                    .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::XSmall)),
+            )
+            .menu(move |window, cx| {
+                Some(git_panel_context_menu(
+                    focus_handle.clone(),
+                    GitMenuState {
+                        can_commit,
+                        can_push_and_pull,
+                        has_tracked_changes,
+                        has_staged_changes,
+                        has_unstaged_changes,
+                        has_new_changes,
+                        has_previous_commit,
+                        sort_by_path: GitPanelSettings::get_global(cx).sort_by_path,
+                        has_stash_items,
+                        tree_view: GitPanelSettings::get_global(cx).tree_view,
+                    },
+                    window,
+                    cx,
+                ))
+            })
+            .anchor(Anchor::BottomRight)
+            .into_any_element()
+    }
+
     pub(crate) fn render_generate_commit_message_button(
         &self,
         cx: &Context<Self>,
@@ -4608,6 +4651,23 @@ impl GitPanel {
                     h_flex()
                         .gap_1()
                         .child(self.render_overflow_menu("overflow_menu", cx))
+                        .child(
+                            panel_icon_button(
+                                "open-github-desktop-from-git-panel",
+                                IconName::Github,
+                            )
+                            .icon_size(IconSize::Small)
+                            .tooltip(Tooltip::text("Open GitHub Desktop"))
+                            .on_click(|_, window, cx| {
+                                if let Some(multi_workspace) =
+                                    window.root::<MultiWorkspace>().flatten()
+                                {
+                                    multi_workspace.update(cx, |multi_workspace, cx| {
+                                        multi_workspace.open_git_workspace(window, cx);
+                                    });
+                                }
+                            }),
+                        )
                         .child(
                             panel_filled_button(text)
                                 .tooltip(Tooltip::for_action_title_in(

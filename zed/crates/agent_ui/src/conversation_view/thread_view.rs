@@ -7593,15 +7593,15 @@ impl ThreadView {
                 let colors = cx.theme().colors();
                 let prompt_surface = colors
                     .editor_background
-                    .blend(colors.element_background.opacity(0.12));
+                    .blend(colors.element_background.opacity(0.08));
                 let prompt_hover_surface = colors
                     .editor_background
-                    .blend(colors.element_background.opacity(0.18));
-                let prompt_border = colors.border_variant.opacity(0.52);
-                let prompt_hover_border = colors.border_variant.opacity(0.72);
+                    .blend(colors.element_background.opacity(0.12));
+                let prompt_border = colors.border_variant.opacity(0.32);
+                let prompt_hover_border = colors.border_variant.opacity(0.48);
                 let editing_surface = colors
                     .editor_background
-                    .blend(colors.element_background.opacity(0.14));
+                    .blend(colors.element_background.opacity(0.1));
 
                 v_flex()
                     .id(("user_message", entry_ix))
@@ -11616,11 +11616,11 @@ impl ThreadView {
         cx.theme()
             .colors()
             .editor_background
-            .blend(cx.theme().colors().element_background.opacity(0.14))
+            .blend(cx.theme().colors().element_background.opacity(0.1))
     }
 
     fn tool_card_border_color(&self, cx: &Context<Self>) -> Hsla {
-        cx.theme().colors().border_variant.opacity(0.46)
+        cx.theme().colors().border_variant.opacity(0.34)
     }
 
     fn tool_name_font_size(&self) -> Rems {

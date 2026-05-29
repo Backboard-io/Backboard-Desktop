@@ -10,20 +10,18 @@ pub enum WorkspaceTourStep {
     Menu,
     AgentWorkspace,
     CodeEditor,
-    GitPanel,
     Composer,
 }
 
 impl WorkspaceTourStep {
-    pub const TOTAL: usize = 5;
+    pub const TOTAL: usize = 4;
 
     pub fn index(self) -> usize {
         match self {
             Self::Menu => 1,
             Self::AgentWorkspace => 2,
             Self::CodeEditor => 3,
-            Self::GitPanel => 4,
-            Self::Composer => 5,
+            Self::Composer => 4,
         }
     }
 
@@ -32,7 +30,6 @@ impl WorkspaceTourStep {
             Self::Menu => "Menu",
             Self::AgentWorkspace => "Agent Workspace",
             Self::CodeEditor => "Code Editor",
-            Self::GitPanel => "Git",
             Self::Composer => "Composer",
         }
     }
@@ -42,18 +39,18 @@ impl WorkspaceTourStep {
             Self::Menu => "Switch views",
             Self::AgentWorkspace => "Plan with agents",
             Self::CodeEditor => "Edit code",
-            Self::GitPanel => "Review changes",
-            Self::Composer => "Send prompts",
+            Self::Composer => "Use the right panel",
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
             Self::Menu => "Jump between the editor, agents, Git, and Simple Mode.",
-            Self::AgentWorkspace => "Use this for larger AI tasks.",
+            Self::AgentWorkspace => "Use this for larger AI tasks and repo-wide changes.",
             Self::CodeEditor => "Inspect and edit the files.",
-            Self::GitPanel => "Track what changed.",
-            Self::Composer => "Send focused prompts from the side panel.",
+            Self::Composer => {
+                "Send prompts, pick a model, add context, use voice, choose MCP tools, and adjust agent options."
+            }
         }
     }
 
@@ -61,8 +58,7 @@ impl WorkspaceTourStep {
         match self {
             Self::Menu => Some(Self::AgentWorkspace),
             Self::AgentWorkspace => Some(Self::CodeEditor),
-            Self::CodeEditor => Some(Self::GitPanel),
-            Self::GitPanel => Some(Self::Composer),
+            Self::CodeEditor => Some(Self::Composer),
             Self::Composer => None,
         }
     }
@@ -72,15 +68,15 @@ impl WorkspaceTourStep {
             Self::Menu => None,
             Self::AgentWorkspace => Some(Self::Menu),
             Self::CodeEditor => Some(Self::AgentWorkspace),
-            Self::GitPanel => Some(Self::CodeEditor),
-            Self::Composer => Some(Self::GitPanel),
+            Self::Composer => Some(Self::CodeEditor),
         }
     }
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum WorkspaceTourPlacement {
+pub enum WorkspaceTourPlacement {
     BelowRight,
+    AboveRight,
     TopLeft,
     TopRight,
 }
@@ -127,6 +123,15 @@ pub(crate) fn workspace_tour_handlers(step: WorkspaceTourStep) -> WorkspaceTourH
             }
         }),
     }
+}
+
+pub fn render_workspace_tour_target(
+    target: Div,
+    step: WorkspaceTourStep,
+    placement: WorkspaceTourPlacement,
+    cx: &App,
+) -> Div {
+    decorate_workspace_tour_target(target, step, placement, workspace_tour_handlers(step), cx)
 }
 
 #[derive(Clone, Copy)]
@@ -277,7 +282,7 @@ fn render_workspace_tour_card(
         );
 
     let card = v_flex()
-        .w(px(230.))
+        .w(px(280.))
         .gap_1p5()
         .px_3p5()
         .py_3()
@@ -323,6 +328,12 @@ fn render_workspace_tour_card(
             .top(relative(1.0))
             .right(px(12.))
             .mt(px(8.))
+            .child(card),
+        WorkspaceTourPlacement::AboveRight => div()
+            .absolute()
+            .bottom(relative(1.0))
+            .right(px(12.))
+            .mb(px(8.))
             .child(card),
         WorkspaceTourPlacement::TopLeft => div().absolute().top(px(12.)).left(px(12.)).child(card),
         WorkspaceTourPlacement::TopRight => {

@@ -439,13 +439,9 @@ impl MultiWorkspace {
         self.set_workspace_mode_tab(WorkspaceModeTab::CodeEditor, window, cx);
     }
 
-    pub(crate) fn open_git_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_git_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_interface_mode(InterfaceMode::Expert, window, cx);
         self.set_workspace_mode_tab(WorkspaceModeTab::Git, window, cx);
-    }
-
-    pub(crate) fn git_workspace_is_open(&self) -> bool {
-        self.selected_workspace_mode_tab() == WorkspaceModeTab::Git
     }
 
     pub fn set_multi_agent_expanded(
@@ -677,11 +673,6 @@ impl MultiWorkspace {
                 self.set_interface_mode(InterfaceMode::Expert, window, cx);
                 self.set_multi_agent_expanded(true, window, cx);
                 self.close_workspace_tour_panels(window, cx);
-            }
-            WorkspaceTourStep::GitPanel => {
-                self.open_code_editor(window, cx);
-                self.close_workspace_tour_panels(window, cx);
-                self.open_panel_by_persistent_name("GitPanel", DockPosition::Left, window, cx);
             }
             WorkspaceTourStep::Composer => {
                 self.open_code_editor(window, cx);
