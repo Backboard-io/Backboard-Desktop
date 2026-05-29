@@ -90,8 +90,8 @@ use terminal::{Event as TerminalEvent, terminal_settings::TerminalSettings};
 use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use theme_settings::ThemeSettings;
 use ui::{
-    Button, ContextMenu, ContextMenuEntry, IconButton, PopoverMenu, PopoverMenuHandle, Tab,
-    Tooltip, prelude::*, utils::WithRemSize,
+    ContextMenu, ContextMenuEntry, IconButton, PopoverMenu, PopoverMenuHandle, Tab, Tooltip,
+    prelude::*, utils::WithRemSize,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -6530,52 +6530,24 @@ impl AgentPanel {
             .gap_2();
 
         let toolbar_content = if matches!(mode, ToolbarMode::EmptyThread | ToolbarMode::Terminal) {
-            let (chevron_icon, icon_color, label_color) =
-                if self.new_thread_menu_handle.is_deployed() {
-                    (IconName::ChevronUp, Color::Accent, Color::Accent)
-                } else {
-                    (IconName::ChevronDown, Color::Muted, Color::Default)
-                };
-
             let agent_icon = if let Some(icon_path) = selected_agent_custom_icon_for_button {
                 Icon::from_external_svg(icon_path)
                     .size(IconSize::Small)
-                    .color(icon_color)
+                    .color(Color::Muted)
             } else {
                 let icon_name = selected_agent_builtin_icon.unwrap_or(IconName::Sparkle);
-                Icon::new(icon_name).size(IconSize::Small).color(icon_color)
+                Icon::new(icon_name)
+                    .size(IconSize::Small)
+                    .color(Color::Muted)
             };
 
-            let agent_selector_button = Button::new("agent-selector-trigger", selected_agent_label)
-                .start_icon(agent_icon)
-                .color(label_color)
-                .end_icon(
-                    Icon::new(chevron_icon)
-                        .color(icon_color)
-                        .size(IconSize::XSmall),
-                );
-
-            let agent_selector_menu = PopoverMenu::new("new_thread_menu")
-                .trigger_with_tooltip(agent_selector_button, {
-                    move |_window, cx| {
-                        Tooltip::for_action_in(
-                            "New Thread…",
-                            &ToggleNewThreadMenu,
-                            &focus_handle,
-                            cx,
-                        )
-                    }
-                })
-                .menu({
-                    let builder = new_thread_menu_builder.clone();
-                    move |window, cx| builder(window, cx)
-                })
-                .with_handle(self.new_thread_menu_handle.clone())
-                .anchor(Anchor::TopLeft)
-                .offset(gpui::Point {
-                    x: px(1.0),
-                    y: px(1.0),
-                });
+            let agent_label = h_flex()
+                .id("selected-agent-label")
+                .min_w_0()
+                .gap_1()
+                .items_center()
+                .child(agent_icon)
+                .child(Label::new(selected_agent_label).truncate());
 
             base_container
                 .child(
@@ -6583,7 +6555,7 @@ impl AgentPanel {
                         .size_full()
                         .gap(DynamicSpacing::Base04.rems(cx))
                         .pl(DynamicSpacing::Base04.rems(cx))
-                        .child(agent_selector_menu)
+                        .child(agent_label)
                         .when(matches!(mode, ToolbarMode::Terminal), |this| {
                             this.child(self.render_title_view(window, cx))
                         }),

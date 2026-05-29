@@ -1180,7 +1180,7 @@ impl Render for Dock {
                 .bg(dock_bg)
                 .overflow_hidden()
                 .when(self.position() != DockPosition::Bottom, |this| {
-                    this.p(WORKSPACE_CONTAINER_PADDING)
+                    this.py(WORKSPACE_CONTAINER_PADDING)
                 })
                 .map(|this| match self.position().axis() {
                     // Width and height are always set on the workspace wrapper in
@@ -1194,7 +1194,17 @@ impl Render for Dock {
                     } else {
                         this.child(
                             div()
-                                .rounded(WORKSPACE_CONTAINER_RADIUS)
+                                .map(|this| match self.position() {
+                                    DockPosition::Left => this
+                                        .rounded_tr(WORKSPACE_CONTAINER_RADIUS)
+                                        .rounded_br(WORKSPACE_CONTAINER_RADIUS),
+                                    DockPosition::Right => this
+                                        .rounded_tl(WORKSPACE_CONTAINER_RADIUS)
+                                        .rounded_bl(WORKSPACE_CONTAINER_RADIUS),
+                                    DockPosition::Bottom => {
+                                        this.rounded(WORKSPACE_CONTAINER_RADIUS)
+                                    }
+                                })
                                 .border_1()
                                 .border_color(panel_border)
                                 .bg(panel_bg)
