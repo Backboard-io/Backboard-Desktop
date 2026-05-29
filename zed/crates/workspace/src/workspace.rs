@@ -44,7 +44,10 @@ pub use remote::{
     RemoteConnectionIdentity, remote_connection_identity, same_remote_connection_identity,
 };
 pub use toast_layer::{ToastAction, ToastLayer, ToastView};
-pub use workspace_tour::{WorkspaceTourPlacement, WorkspaceTourStep, render_workspace_tour_target};
+pub use workspace_tour::{
+    WorkspaceTourPlacement, WorkspaceTourStep, render_workspace_tour_highlight,
+    render_workspace_tour_target,
+};
 
 use anyhow::{Context as _, Result, anyhow};
 use client::{
@@ -172,7 +175,7 @@ use crate::{
     security_modal::SecurityModal,
     workspace_tour::{
         decorate_workspace_tour_target as decorate_workspace_tour_target_element,
-        workspace_tour_handlers,
+        render_workspace_tour_callout, workspace_tour_handlers,
     },
 };
 
@@ -7955,14 +7958,26 @@ impl Workspace {
         }
 
         let tour_target = match (position, self.workspace_tour_step) {
-            (DockPosition::Right, Some(WorkspaceTourStep::Composer)) => {
-                Some((WorkspaceTourStep::Composer, WorkspaceTourPlacement::TopLeft))
-            }
+            (
+                DockPosition::Left,
+                Some(step @ (WorkspaceTourStep::DirectoryPanel | WorkspaceTourStep::GitPanel)),
+            ) => Some((step, WorkspaceTourPlacement::TopRight, true)),
+            (
+                DockPosition::Right,
+                Some(
+                    step @ (WorkspaceTourStep::Composer
+                    | WorkspaceTourStep::ModelSelection
+                    | WorkspaceTourStep::ComposerTools),
+                ),
+            ) => Some((step, WorkspaceTourPlacement::TopLeft, false)),
             _ => None,
         };
-        if let Some((tour_step, tour_placement)) = tour_target {
-            container =
-                self.decorate_workspace_tour_target(container, tour_step, tour_placement, cx);
+        if let Some((tour_step, tour_placement, highlight_dock)) = tour_target {
+            container = if highlight_dock {
+                self.decorate_workspace_tour_target(container, tour_step, tour_placement, cx)
+            } else {
+                render_workspace_tour_callout(container, tour_step, tour_placement, cx)
+            };
         }
 
         Some(container)
@@ -9157,7 +9172,18 @@ impl Render for Workspace {
                     )
                     .when(
                         !fullscreen_onboarding && self.status_bar_visible(cx),
-                        |parent| parent.child(self.status_bar.clone()),
+                        |parent| {
+                            if self.workspace_tour_step == Some(WorkspaceTourStep::BottomBar) {
+                                parent.child(self.decorate_workspace_tour_target(
+                                    div().child(self.status_bar.clone()),
+                                    WorkspaceTourStep::BottomBar,
+                                    WorkspaceTourPlacement::AboveRight,
+                                    cx,
+                                ))
+                            } else {
+                                parent.child(self.status_bar.clone())
+                            }
+                        },
                     )
                     .child(self.toast_layer.clone()),
             )

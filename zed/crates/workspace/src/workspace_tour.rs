@@ -11,10 +11,15 @@ pub enum WorkspaceTourStep {
     AgentWorkspace,
     CodeEditor,
     Composer,
+    ModelSelection,
+    ComposerTools,
+    DirectoryPanel,
+    GitPanel,
+    BottomBar,
 }
 
 impl WorkspaceTourStep {
-    pub const TOTAL: usize = 4;
+    pub const TOTAL: usize = 9;
 
     pub fn index(self) -> usize {
         match self {
@@ -22,6 +27,11 @@ impl WorkspaceTourStep {
             Self::AgentWorkspace => 2,
             Self::CodeEditor => 3,
             Self::Composer => 4,
+            Self::ModelSelection => 5,
+            Self::ComposerTools => 6,
+            Self::DirectoryPanel => 7,
+            Self::GitPanel => 8,
+            Self::BottomBar => 9,
         }
     }
 
@@ -31,6 +41,11 @@ impl WorkspaceTourStep {
             Self::AgentWorkspace => "Agent Workspace",
             Self::CodeEditor => "Code Editor",
             Self::Composer => "Composer",
+            Self::ModelSelection => "Model Picker",
+            Self::ComposerTools => "Composer Tools",
+            Self::DirectoryPanel => "Directory",
+            Self::GitPanel => "Git",
+            Self::BottomBar => "Bottom Icons",
         }
     }
 
@@ -39,7 +54,12 @@ impl WorkspaceTourStep {
             Self::Menu => "Switch views",
             Self::AgentWorkspace => "Plan with agents",
             Self::CodeEditor => "Edit code",
-            Self::Composer => "Use the right panel",
+            Self::Composer => "Send prompts",
+            Self::ModelSelection => "Pick a model",
+            Self::ComposerTools => "Use composer tools",
+            Self::DirectoryPanel => "Browse files",
+            Self::GitPanel => "Review changes",
+            Self::BottomBar => "Open lower panels",
         }
     }
 
@@ -48,8 +68,17 @@ impl WorkspaceTourStep {
             Self::Menu => "Jump between the editor, agents, Git, and Simple Mode.",
             Self::AgentWorkspace => "Use this for larger AI tasks and repo-wide changes.",
             Self::CodeEditor => "Inspect and edit the files.",
-            Self::Composer => {
-                "Send prompts, pick a model, add context, use voice, choose MCP tools, and adjust agent options."
+            Self::Composer => "Use the right composer to send prompts with file context.",
+            Self::ModelSelection => "Choose the model for speed, cost, or deeper reasoning.",
+            Self::ComposerTools => {
+                "Voice dictates prompts, MCPs add tools, and agent options tune how edits run."
+            }
+            Self::DirectoryPanel => {
+                "Use the left directory to open, create, rename, and move files."
+            }
+            Self::GitPanel => "Use Git to inspect diffs, stage files, commit, and switch branches.",
+            Self::BottomBar => {
+                "Click icons to open terminal, diagnostics, Git/search, language, and status menus."
             }
         }
     }
@@ -59,7 +88,12 @@ impl WorkspaceTourStep {
             Self::Menu => Some(Self::AgentWorkspace),
             Self::AgentWorkspace => Some(Self::CodeEditor),
             Self::CodeEditor => Some(Self::Composer),
-            Self::Composer => None,
+            Self::Composer => Some(Self::ModelSelection),
+            Self::ModelSelection => Some(Self::ComposerTools),
+            Self::ComposerTools => Some(Self::DirectoryPanel),
+            Self::DirectoryPanel => Some(Self::GitPanel),
+            Self::GitPanel => Some(Self::BottomBar),
+            Self::BottomBar => None,
         }
     }
 
@@ -69,6 +103,11 @@ impl WorkspaceTourStep {
             Self::AgentWorkspace => Some(Self::Menu),
             Self::CodeEditor => Some(Self::AgentWorkspace),
             Self::Composer => Some(Self::CodeEditor),
+            Self::ModelSelection => Some(Self::Composer),
+            Self::ComposerTools => Some(Self::ModelSelection),
+            Self::DirectoryPanel => Some(Self::ComposerTools),
+            Self::GitPanel => Some(Self::DirectoryPanel),
+            Self::BottomBar => Some(Self::GitPanel),
         }
     }
 }
@@ -134,6 +173,40 @@ pub fn render_workspace_tour_target(
     decorate_workspace_tour_target(target, step, placement, workspace_tour_handlers(step), cx)
 }
 
+pub fn render_workspace_tour_highlight(target: Div, cx: &App) -> Div {
+    let palette = WorkspaceTourPalette::new(cx);
+    target.relative().child(
+        deferred(
+            div()
+                .absolute()
+                .inset_0()
+                .rounded(px(8.))
+                .border_1()
+                .border_color(palette.highlight_border)
+                .bg(palette.highlight_fill),
+        )
+        .with_priority(3),
+    )
+}
+
+pub(crate) fn render_workspace_tour_callout(
+    target: Div,
+    step: WorkspaceTourStep,
+    placement: WorkspaceTourPlacement,
+    cx: &App,
+) -> Div {
+    let palette = WorkspaceTourPalette::new(cx);
+    target.relative().child(
+        deferred(render_workspace_tour_card(
+            step,
+            placement,
+            palette,
+            workspace_tour_handlers(step),
+        ))
+        .with_priority(4),
+    )
+}
+
 #[derive(Clone, Copy)]
 struct WorkspaceTourPalette {
     overlay: Hsla,
@@ -193,26 +266,12 @@ pub(crate) fn decorate_workspace_tour_target(
     cx: &App,
 ) -> Div {
     let palette = WorkspaceTourPalette::new(cx);
-    target
-        .relative()
-        .child(
-            deferred(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .rounded(px(8.))
-                    .border_1()
-                    .border_color(palette.highlight_border)
-                    .bg(palette.highlight_fill),
-            )
-            .with_priority(3),
-        )
-        .child(
-            deferred(render_workspace_tour_card(
-                step, placement, palette, handlers,
-            ))
-            .with_priority(4),
-        )
+    render_workspace_tour_highlight(target, cx).child(
+        deferred(render_workspace_tour_card(
+            step, placement, palette, handlers,
+        ))
+        .with_priority(4),
+    )
 }
 
 fn render_workspace_tour_card(

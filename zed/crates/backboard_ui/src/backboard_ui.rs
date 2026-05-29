@@ -18,8 +18,9 @@ use ui::{
 };
 use util::ResultExt;
 use workspace::{
-    ModalView, Workspace,
+    ModalView, Workspace, WorkspaceTourStep,
     dock::{DockPosition, Panel, PanelEvent},
+    render_workspace_tour_highlight,
 };
 
 const BACKBOARD_PANEL_KEY: &str = "backboard_panel";
@@ -1753,8 +1754,15 @@ impl BackboardPanel {
             )
     }
 
-    fn render_model_drawer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_model_drawer(
+        &self,
+        workspace_tour_step: Option<WorkspaceTourStep>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let selected = self.selected_model_label();
+        let force_model_picker_open =
+            workspace_tour_step == Some(WorkspaceTourStep::ModelSelection);
+        let model_picker_open = self.model_picker_open || force_model_picker_open;
 
         let visible_count = self.visible_model_count.min(self.models.len());
         let hidden_count = self.models.len().saturating_sub(visible_count);
@@ -1826,7 +1834,7 @@ impl BackboardPanel {
             );
         }
 
-        v_flex()
+        let drawer = v_flex()
             .border_t_1()
             .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().panel_background)
@@ -1856,11 +1864,7 @@ impl BackboardPanel {
                     .child(
                         Button::new(
                             "backboard-toggle-model-picker",
-                            if self.model_picker_open {
-                                "Close"
-                            } else {
-                                "Models"
-                            },
+                            if model_picker_open { "Close" } else { "Models" },
                         )
                         .style(ButtonStyle::Tinted(ui::TintColor::Accent))
                         .disabled(!self.api_ready)
@@ -1869,7 +1873,7 @@ impl BackboardPanel {
                         })),
                     ),
             )
-            .when(self.model_picker_open, |this| {
+            .when(model_picker_open, |this| {
                 this.child(
                     v_flex()
                         .id("backboard-model-picker-scroll")
@@ -1909,7 +1913,7 @@ impl BackboardPanel {
                         }),
                 )
             })
-            .when(self.model_picker_open && hidden_count > 0, |this| {
+            .when(model_picker_open && hidden_count > 0, |this| {
                 this.child(
                     h_flex()
                         .justify_between()
@@ -1930,7 +1934,13 @@ impl BackboardPanel {
                                 })),
                         ),
                 )
-            })
+            });
+
+        if force_model_picker_open {
+            render_workspace_tour_highlight(drawer, cx)
+        } else {
+            drawer
+        }
     }
 
     fn render_full_message_body(body: &str, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2234,7 +2244,11 @@ impl BackboardPanel {
             })
     }
 
-    fn render_composer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_composer(
+        &self,
+        workspace_tour_step: Option<WorkspaceTourStep>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let tools = h_flex()
             .gap_1()
             .child(
@@ -2262,6 +2276,11 @@ impl BackboardPanel {
                     .icon_size(IconSize::Small)
                     .tooltip(Tooltip::text("Agent options")),
             );
+        let tools = if workspace_tour_step == Some(WorkspaceTourStep::ComposerTools) {
+            render_workspace_tour_highlight(tools, cx)
+        } else {
+            tools
+        };
 
         let composer = h_flex()
             .min_h(px(58.))
@@ -2285,6 +2304,11 @@ impl BackboardPanel {
                     }))
                     .on_click(cx.listener(|this, _, window, cx| this.send_prompt(window, cx))),
             );
+        let composer = if workspace_tour_step == Some(WorkspaceTourStep::Composer) {
+            render_workspace_tour_highlight(composer, cx)
+        } else {
+            composer
+        };
 
         v_flex()
             .border_t_1()
@@ -2363,7 +2387,10 @@ impl Panel for BackboardPanel {
 }
 
 impl Render for BackboardPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let workspace_tour_step = Workspace::for_window(window, cx)
+            .and_then(|workspace| workspace.read(cx).workspace_tour_step());
+
         v_flex()
             .size_full()
             .key_context("BackboardPanel")
@@ -2378,9 +2405,9 @@ impl Render for BackboardPanel {
             })
             .child(self.render_messages(cx))
             .when(self.api_ready, |this| {
-                this.child(self.render_model_drawer(cx))
+                this.child(self.render_model_drawer(workspace_tour_step, cx))
             })
-            .child(self.render_composer(cx))
+            .child(self.render_composer(workspace_tour_step, cx))
     }
 }
 

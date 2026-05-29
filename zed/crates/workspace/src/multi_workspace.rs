@@ -674,10 +674,26 @@ impl MultiWorkspace {
                 self.set_multi_agent_expanded(true, window, cx);
                 self.close_workspace_tour_panels(window, cx);
             }
-            WorkspaceTourStep::Composer => {
+            WorkspaceTourStep::Composer
+            | WorkspaceTourStep::ModelSelection
+            | WorkspaceTourStep::ComposerTools => {
                 self.open_code_editor(window, cx);
                 self.close_workspace_tour_panels(window, cx);
                 self.open_panel_by_persistent_name("Backboard", DockPosition::Right, window, cx);
+            }
+            WorkspaceTourStep::DirectoryPanel => {
+                self.open_code_editor(window, cx);
+                self.close_workspace_tour_panels(window, cx);
+                self.open_panel_by_persistent_name("ProjectPanel", DockPosition::Left, window, cx);
+            }
+            WorkspaceTourStep::GitPanel => {
+                self.open_code_editor(window, cx);
+                self.close_workspace_tour_panels(window, cx);
+                self.open_panel_by_persistent_name("GitPanel", DockPosition::Left, window, cx);
+            }
+            WorkspaceTourStep::BottomBar => {
+                self.open_code_editor(window, cx);
+                self.close_workspace_tour_panels(window, cx);
             }
         }
     }
