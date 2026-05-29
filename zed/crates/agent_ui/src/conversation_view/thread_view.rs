@@ -4046,7 +4046,7 @@ impl ThreadView {
 
         Some(
             v_flex()
-                .px_5()
+                .px(rems_from_px(14.))
                 .pt_1()
                 .pb_3()
                 .child(
@@ -4662,7 +4662,7 @@ impl ThreadView {
         cx: &Context<Self>,
     ) -> AnyElement {
         v_flex()
-            .px_5()
+            .px(rems_from_px(14.))
             .py_1p5()
             .w_full()
             .child(
@@ -7042,7 +7042,7 @@ impl ThreadView {
         h_flex()
             .id(header_id.clone())
             .group(&header_id)
-            .mx_5()
+            .mx(rems_from_px(14.))
             .pt_1()
             .pb_1()
             .justify_between()
@@ -7361,11 +7361,11 @@ impl ThreadView {
         let needs_controls = group.end == total_entries;
 
         v_flex()
-            .mx_5()
+            .mx(rems_from_px(14.))
             .my_0p5()
-            .rounded(rems_from_px(5.))
+            .rounded(rems_from_px(6.))
             .border_1()
-            .border_color(cx.theme().colors().border_variant.opacity(0.34))
+            .border_color(self.tool_card_border_color(cx))
             .bg(cx
                 .theme()
                 .colors()
@@ -7504,7 +7504,7 @@ impl ThreadView {
         match content {
             ContentBlock::Empty => Empty.into_any_element(),
             ContentBlock::Markdown { markdown } => div()
-                .text_xs()
+                .text_ui(cx)
                 .child(self.render_markdown(
                     markdown.clone(),
                     MarkdownStyle::themed(MarkdownFont::Agent, window, cx).with_buffer_font(cx),
@@ -7593,15 +7593,15 @@ impl ThreadView {
                 let colors = cx.theme().colors();
                 let prompt_surface = colors
                     .editor_background
-                    .blend(colors.element_background.opacity(0.05));
+                    .blend(colors.element_background.opacity(0.12));
                 let prompt_hover_surface = colors
                     .editor_background
-                    .blend(colors.element_background.opacity(0.1));
-                let prompt_border = colors.border_variant.opacity(0.18);
-                let prompt_hover_border = colors.border_variant.opacity(0.34);
+                    .blend(colors.element_background.opacity(0.18));
+                let prompt_border = colors.border_variant.opacity(0.52);
+                let prompt_hover_border = colors.border_variant.opacity(0.72);
                 let editing_surface = colors
                     .editor_background
-                    .blend(colors.element_background.opacity(0.08));
+                    .blend(colors.element_background.opacity(0.14));
 
                 v_flex()
                     .id(("user_message", entry_ix))
@@ -7613,8 +7613,8 @@ impl ThreadView {
                         }
                     })
                     .pb_3()
-                    .px_2()
-                    .gap_1p5()
+                    .px(rems_from_px(14.))
+                    .gap_2()
                     .w_full()
                     .when(is_editable && has_checkpoint_button, |this| {
                         this.children(message.id.clone().map(|message_id| {
@@ -7639,10 +7639,10 @@ impl ThreadView {
                         div()
                             .relative()
                             .child(if editing {
-                                div()
-                                    .py_2p5()
-                                    .px_3()
-                                    .rounded_md()
+                                v_flex()
+                                    .gap_2()
+                                    .p_3()
+                                    .rounded(rems_from_px(10.))
                                     .bg(editing_surface)
                                     .border_1()
                                     .when(is_indented, |this| {
@@ -7654,16 +7654,21 @@ impl ThreadView {
                                         prompt_hover_border
                                     })
                                     .when(!editor_focus, |this| this.border_dashed())
-                                    .text_xs()
+                                    .child(
+                                        Label::new("You")
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .text_ui(cx)
                                     .child(editor.clone().into_any_element())
                                     .into_any_element()
                             } else {
-                                div()
+                                v_flex()
                                     .id(("edit-user-message", entry_ix))
                                     .relative()
-                                    .py_2()
-                                    .px_3()
-                                    .rounded(rems_from_px(6.))
+                                    .gap_2()
+                                    .p_3()
+                                    .rounded(rems_from_px(10.))
                                     .bg(prompt_surface)
                                     .border_1()
                                     .when(is_indented, |this| {
@@ -7685,6 +7690,11 @@ impl ThreadView {
                                                 cx.notify();
                                             }))
                                     })
+                                    .child(
+                                        Label::new("You")
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
                                     .child(self.render_user_message_content(
                                         &message.content,
                                         window,
@@ -7863,11 +7873,11 @@ impl ThreadView {
                         );
 
                     v_flex()
-                        .px_5()
+                        .px(rems_from_px(14.))
                         .when(show_header, |this| this.pt_1().pb_0p5())
                         .when(!show_header, |this| this.pt_0().pb_0p5())
                         .when(is_last, |this| this.pb_2())
-                        .gap_1()
+                        .gap_2()
                         .w_full()
                         .text_ui(cx)
                         .when(show_header, |this| {
@@ -8141,7 +8151,7 @@ impl ThreadView {
         let mut container = h_flex()
             .w_full()
             .py_1()
-            .px_5()
+            .px(rems_from_px(14.))
             .gap_px()
             .opacity(0.6)
             .hover(|s| s.opacity(1.))
@@ -9368,11 +9378,11 @@ impl ThreadView {
         v_flex()
             .when(!is_subagent, |this| {
                 this.my_0p5()
-                    .mx_5()
+                    .mx(rems_from_px(14.))
                     .border_1()
                     .when(tool_failed || command_failed, |card| card.border_dashed())
                     .border_color(border_color)
-                    .rounded(rems_from_px(5.))
+                    .rounded(rems_from_px(6.))
             })
             .overflow_hidden()
             .child(
@@ -9515,7 +9525,6 @@ impl ThreadView {
         window: &Window,
         cx: &Context<Self>,
     ) -> Div {
-        let has_location = tool_call.locations.len() == 1;
         let card_header_id = SharedString::from("inner-tool-call-header");
 
         let failed_or_canceled = match &tool_call.status {
@@ -9766,14 +9775,7 @@ impl ThreadView {
                 }
             })
             .when(!is_subagent, |this| {
-                this.map(|this| {
-                    if has_location && !use_card_layout {
-                        this.ml_4()
-                    } else {
-                        this.ml_5()
-                    }
-                })
-                .mr_5()
+                this.mx(rems_from_px(14.))
             })
             .map(|this| {
                 if is_terminal_tool {

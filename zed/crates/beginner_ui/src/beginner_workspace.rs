@@ -14,7 +14,7 @@ use editor::actions::Newline;
 use gpui::{
     App, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle, Focusable, Hsla,
     IntoElement, PathBuilder, PathPromptOptions, Render, SharedString, Subscription, Task,
-    WeakEntity, Window, WindowControlArea, canvas, point,
+    WeakEntity, Window, WindowControlArea, canvas, point, rgb,
 };
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
@@ -185,6 +185,10 @@ impl AgentModelSelector for CuratedModelSelector {
 const BEGINNER_CHATS_KVP_KEY: &str = "beginner_chats_v1";
 const BEGINNER_OPEN_TABS_KVP_KEY: &str = "beginner_open_tabs_v1";
 const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
+
+fn api_access_color(hex: u32) -> Hsla {
+    Hsla::from(rgb(hex))
+}
 
 fn render_simple_home_icon(color: Hsla) -> impl IntoElement {
     canvas(
@@ -1036,6 +1040,24 @@ impl BeginnerWorkspace {
         cx.notify();
     }
 
+    fn toggle_preview_from_bottom_bar(&mut self, cx: &mut Context<Self>) {
+        if self.preview_visible && matches!(self.right_panel, RightPanel::Preview) {
+            self.preview_visible = false;
+            self.web_preview = None;
+            cx.notify();
+            return;
+        }
+
+        self.preview_visible = true;
+        self.right_panel = RightPanel::Preview;
+
+        if self.preview_url.is_none() && !self.is_preview_generating && !self.is_agent_running {
+            self.open_web_app_if_present(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
     fn preview_card_state(&self) -> PreviewCardState {
         if self.preview_url.is_some() {
             PreviewCardState::Ready
@@ -1261,7 +1283,6 @@ impl BeginnerWorkspace {
             .unwrap_or_else(|| self.claim_dev_server_port());
         self.dev_server_port = Some(port);
         self.preview_url = None;
-        self.preview_visible = false;
         self.is_preview_generating = true;
         self.web_preview = None;
         cx.notify();
@@ -2419,6 +2440,272 @@ impl BeginnerWorkspace {
             )
     }
 
+    fn show_backboard_api_key_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let beginner_workspace = cx.entity().downgrade();
+
+        workspace.update(cx, |workspace, cx| {
+            backboard_ui::show_backboard_api_key_modal(workspace, window, cx, move |cx| {
+                beginner_workspace
+                    .update(cx, |_this, cx| {
+                        cx.notify();
+                    })
+                    .ok();
+            });
+        });
+    }
+
+    fn render_no_api_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .h(px(32.))
+            .w_full()
+            .flex_shrink_0()
+            .justify_center()
+            .items_center()
+            .gap_2()
+            .bg(api_access_color(0xeceff4))
+            .child(
+                Label::new("API not connected - agents and generated outputs are unavailable.")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Custom(api_access_color(0x111722))),
+            )
+            .child(
+                h_flex()
+                    .id("simple-no-api-banner-connect")
+                    .cursor_pointer()
+                    .child(
+                        Label::new("Connect API key")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Custom(api_access_color(0x5b8cff))),
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.show_backboard_api_key_modal(window, cx);
+                    })),
+            )
+    }
+
+    fn render_no_api_status_strip(&self) -> impl IntoElement {
+        h_flex()
+            .h(px(28.))
+            .items_center()
+            .gap_2()
+            .px_2()
+            .rounded(px(8.))
+            .bg(api_access_color(0xf5f7fa))
+            .child(
+                div()
+                    .size(px(8.))
+                    .rounded_full()
+                    .bg(api_access_color(0xddc300)),
+            )
+            .child(
+                Label::new("API not connected")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Custom(api_access_color(0x141414))),
+            )
+    }
+
+    fn render_no_api_actions(
+        &self,
+        id_prefix: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .gap_2()
+            .items_center()
+            .child(
+                Button::new(
+                    SharedString::from(format!("{id_prefix}-connect")),
+                    "Connect API key",
+                )
+                .style(ButtonStyle::Filled)
+                .size(ButtonSize::Medium)
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.show_backboard_api_key_modal(window, cx);
+                })),
+            )
+            .child(
+                Button::new(
+                    SharedString::from(format!("{id_prefix}-continue")),
+                    "Continue without API",
+                )
+                .style(ButtonStyle::Subtle)
+                .size(ButtonSize::Medium),
+            )
+    }
+
+    fn render_no_api_chat_panel(
+        &self,
+        title: SharedString,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        v_flex()
+            .flex_1()
+            .min_w(px(ds::PREVIEW_DOMINANT_CHAT_WIDTH))
+            .min_h_0()
+            .h_full()
+            .overflow_hidden()
+            .border_r_1()
+            .border_color(ds::separator(cx))
+            .bg(ds::app_background(cx))
+            .child(self.render_simple_header(title, false, cx))
+            .child(
+                v_flex()
+                    .px_3()
+                    .pt_2()
+                    .child(self.render_no_api_status_strip()),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .items_center()
+                    .justify_center()
+                    .gap_3()
+                    .px_6()
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size(IconSize::Medium)
+                            .color(Color::Custom(api_access_color(0x8f9bad))),
+                    )
+                    .child(
+                        Label::new("API key required")
+                            .size(LabelSize::Large)
+                            .color(Color::Custom(api_access_color(0x141414))),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(340.))
+                            .text_center()
+                            .text_sm()
+                            .line_height(gpui::relative(1.35))
+                            .text_color(api_access_color(0x8f9bad))
+                            .child("Connect an API key to chat, generate artifacts, and use Simple Mode actions."),
+                    )
+                    .child(self.render_no_api_actions("simple-no-api-chat", cx))
+                    .child(
+                        Label::new("You can still view the project manually.")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Custom(api_access_color(0xaeb8c6))),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .flex_shrink_0()
+                    .px_3()
+                    .pt_1()
+                    .pb_2()
+                    .bg(ds::panel_background(cx))
+                    .child(
+                        h_flex()
+                            .h(px(36.))
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(api_access_color(0xeceff4))
+                            .bg(api_access_color(0xf5f7fa))
+                            .items_center()
+                            .px_3()
+                            .child(
+                                Label::new("API key required")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Custom(api_access_color(0x8f9bad))),
+                            ),
+                    ),
+            )
+    }
+
+    fn render_no_api_right_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .w(px(ds::RIGHT_PANEL_WIDTH))
+            .flex_shrink_0()
+            .h_full()
+            .bg(ds::field_background(cx))
+            .child(
+                h_flex()
+                    .h(px(ds::TOP_BAR_HEIGHT))
+                    .bg(ds::panel_background(cx))
+                    .child(
+                        h_flex()
+                            .h_full()
+                            .px_3()
+                            .gap_1p5()
+                            .items_center()
+                            .border_b_2()
+                            .border_color(ds::accent(cx))
+                            .bg(ds::app_background(cx))
+                            .child(
+                                Icon::new(IconName::Eye)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Default),
+                            )
+                            .child(Label::new("Preview").size(LabelSize::Small)),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        h_flex()
+                            .opacity(0.35)
+                            .gap_1()
+                            .pr_2()
+                            .child(Icon::new(IconName::ArrowUpRight).size(IconSize::XSmall))
+                            .child(Icon::new(IconName::RotateCw).size(IconSize::XSmall)),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .px_3()
+                    .pt_2()
+                    .child(self.render_no_api_status_strip()),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .items_center()
+                    .justify_center()
+                    .gap_3()
+                    .px_6()
+                    .child(
+                        Icon::new(IconName::Info)
+                            .size(IconSize::Medium)
+                            .color(Color::Custom(api_access_color(0x8f9bad))),
+                    )
+                    .child(
+                        Label::new("Artifact generation unavailable")
+                            .size(LabelSize::Large)
+                            .color(Color::Custom(api_access_color(0x141414))),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(340.))
+                            .text_center()
+                            .text_sm()
+                            .line_height(gpui::relative(1.35))
+                            .text_color(api_access_color(0x8f9bad))
+                            .child("Connect an API key to generate previews and workspace output."),
+                    )
+                    .child(self.render_no_api_actions("simple-no-api-artifact", cx))
+                    .child(
+                        Label::new("You can still view existing project files manually.")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Custom(api_access_color(0xaeb8c6))),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .h(px(36.))
+                    .flex_shrink_0()
+                    .border_t_1()
+                    .border_color(ds::separator(cx))
+                    .items_center()
+                    .gap_3()
+                    .px_3()
+                    .opacity(0.35)
+                    .child(Icon::new(IconName::FileCode).size(IconSize::XSmall))
+                    .child(Icon::new(IconName::Eye).size(IconSize::XSmall))
+                    .child(Icon::new(IconName::Terminal).size(IconSize::XSmall)),
+            )
+    }
+
     fn render_mode_button(
         &self,
         mode: ChatMode,
@@ -2471,7 +2758,101 @@ impl BeginnerWorkspace {
             )
     }
 
-    fn render_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_no_api_landing(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let header_height = platform_title_bar_height(window);
+        let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
+        let background_tabs = self.background_project_tabs();
+        let colors = cx.theme().colors().clone();
+
+        v_flex()
+            .key_context("BeginnerLanding")
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .font_family(ds::FONT_FAMILY)
+            .bg(ds::app_background(cx))
+            .child(
+                h_flex()
+                    .h(header_height)
+                    .w_full()
+                    .flex_shrink_0()
+                    .window_control_area(WindowControlArea::Drag)
+                    .when(traffic_lights, |this| {
+                        this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
+                    })
+                    .border_b_1()
+                    .border_color(ds::separator(cx))
+                    .bg(colors.title_bar_background),
+            )
+            .child(self.render_tab_bar(SharedString::from("Home"), background_tabs, cx))
+            .child(self.render_no_api_banner(cx))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .when(self.chats_sidebar_open, |el| {
+                        el.child(self.render_chats_sidebar(cx))
+                    })
+                    .child(self.render_no_api_chat_panel(SharedString::from("Home"), cx))
+                    .child(self.render_no_api_right_panel(cx)),
+            )
+    }
+
+    fn render_no_api_active_project(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let header_height = platform_title_bar_height(window);
+        let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
+        let active_title = self.current_tab_title();
+        let background_tabs = self.background_project_tabs();
+        let colors = cx.theme().colors().clone();
+
+        v_flex()
+            .size_full()
+            .font_family(ds::FONT_FAMILY)
+            .bg(ds::app_background(cx))
+            .child(
+                h_flex()
+                    .h(header_height)
+                    .w_full()
+                    .flex_shrink_0()
+                    .border_b_1()
+                    .border_color(ds::separator(cx))
+                    .bg(colors.title_bar_background)
+                    .window_control_area(WindowControlArea::Drag)
+                    .when(traffic_lights, |this| {
+                        this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
+                    }),
+            )
+            .child(self.render_tab_bar(active_title.clone(), background_tabs, cx))
+            .when(self.show_tab_limit_notice, |el| {
+                el.child(self.render_tab_limit_notice(cx))
+            })
+            .child(self.render_no_api_banner(cx))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .when(self.chats_sidebar_open, |el| {
+                        el.child(self.render_chats_sidebar(cx))
+                    })
+                    .child(self.render_no_api_chat_panel(active_title, cx))
+                    .child(self.render_no_api_right_panel(cx)),
+            )
+    }
+
+    fn render_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if !backboard_ui::backboard_api_key_is_connected() {
+            return self.render_no_api_landing(window, cx).into_any_element();
+        }
+
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
         let header_height = platform_title_bar_height(window);
         let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
@@ -2523,13 +2904,16 @@ impl BeginnerWorkspace {
                             .child(self.render_input_bar(false, false, draft_is_empty, window, cx)),
                     ),
             )
+            .into_any_element()
     }
 
-    fn render_active_project(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn render_active_project(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if !backboard_ui::backboard_api_key_is_connected() {
+            return self
+                .render_no_api_active_project(window, cx)
+                .into_any_element();
+        }
+
         let is_running = self.is_agent_running;
         let is_connecting = self.pending_conversation_view.is_some();
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
@@ -2593,7 +2977,7 @@ impl BeginnerWorkspace {
                             .border_color(ds::separator(cx))
                             .bg(ds::app_background(cx))
                             .child(self.render_simple_header(
-                                active_title.clone(),
+                                active_title,
                                 is_running || is_connecting,
                                 cx,
                             ))
@@ -2692,6 +3076,7 @@ impl BeginnerWorkspace {
                         ))
                     }),
             )
+            .into_any_element()
     }
 
     fn render_right_panel(
@@ -2982,6 +3367,23 @@ impl BeginnerWorkspace {
         let colors = cx.theme().colors().clone();
         let send_icon_color = ensure_minimum_contrast(colors.text, ds::accent(cx), 75.);
         let icon_hover_bg = ds::hover_background(cx);
+        let preview_hover_bg = ds::hover_background(cx);
+        let preview_button_enabled = self.preview_url.is_some()
+            || self.is_preview_generating
+            || self.selected_folder.is_some();
+        let preview_button_selected =
+            self.preview_visible && matches!(self.right_panel, RightPanel::Preview);
+        let preview_tooltip = if self.preview_url.is_some() {
+            "Show preview in the IDE"
+        } else if self.is_preview_generating {
+            "Show local preview while it starts"
+        } else if is_running {
+            "Show where the preview will appear"
+        } else if self.selected_folder.is_some() {
+            "Find and show this project's preview"
+        } else {
+            "Attach a project folder to preview"
+        };
         v_flex()
             .flex_shrink_0()
             .bg(ds::panel_background(cx))
@@ -3049,6 +3451,39 @@ impl BeginnerWorkspace {
                                 el.child(selector)
                             })
                             .child(div().flex_1())
+                            .child(
+                                div()
+                                    .id("simple-preview-browser")
+                                    .size(px(ds::ICON_BUTTON_SIZE))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .tooltip(Tooltip::text(preview_tooltip))
+                                    .when(preview_button_selected, |el| {
+                                        el.bg(ds::selected_background(cx))
+                                    })
+                                    .when(preview_button_enabled, |el| {
+                                        el.cursor_pointer()
+                                            .hover(move |el| el.bg(preview_hover_bg))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.toggle_preview_from_bottom_bar(cx);
+                                            }))
+                                    })
+                                    .child(
+                                        Icon::new(IconName::ToolWeb).size(IconSize::Small).color(
+                                            Color::Custom(if preview_button_enabled {
+                                                if preview_button_selected {
+                                                    colors.icon_accent
+                                                } else {
+                                                    colors.icon_muted
+                                                }
+                                            } else {
+                                                colors.icon_disabled
+                                            }),
+                                        ),
+                                    ),
+                            )
                             .child(
                                 h_flex()
                                     .gap_0p5()

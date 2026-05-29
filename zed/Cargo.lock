@@ -1941,6 +1941,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "ui",
+ "util",
  "workspace",
 ]
 
@@ -2017,6 +2018,7 @@ dependencies = [
  "agent-client-protocol",
  "agent_ui",
  "anyhow",
+ "backboard_ui",
  "cocoa 0.26.0",
  "db",
  "editor",
@@ -11920,6 +11922,7 @@ dependencies = [
  "agent_ui",
  "anyhow",
  "backboard",
+ "backboard_ui",
  "client",
  "cloud_api_types",
  "collections",
@@ -11937,6 +11940,7 @@ dependencies = [
  "schemars 1.0.4",
  "serde",
  "settings",
+ "smol",
  "telemetry",
  "theme",
  "theme_settings",

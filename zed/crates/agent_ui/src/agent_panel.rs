@@ -3629,49 +3629,6 @@ impl AgentPanel {
         )
     }
 
-    pub fn spawn_backboard_workspace_tour_agent(
-        &mut self,
-        task: String,
-        workspace_path: PathBuf,
-        scope: BackboardAgentWorkspaceScope,
-        kind: BackboardAgentWorkspaceKind,
-        mode: BackboardAgentWorkspaceMode,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<ThreadId> {
-        let task = task.trim().to_string();
-        if task.is_empty() {
-            return None;
-        }
-
-        if self.backboard_workspace_runs.len() >= MAX_BACKBOARD_WORKSPACE_AGENT_TASKS {
-            Self::show_deferred_toast(
-                &self.workspace,
-                "Backboard workspace is limited to 20 chats.",
-                cx,
-            );
-            return None;
-        }
-
-        let batch_id = workspace_agent_batch_id();
-        let work_dirs = PathList::new(&[workspace_path.clone()]);
-        Some(
-            self.spawn_current_workspace_backboard_workspace_agent_with_context(
-                task,
-                scope,
-                kind,
-                mode,
-                batch_id,
-                0,
-                1,
-                workspace_path,
-                Some(work_dirs),
-                window,
-                cx,
-            ),
-        )
-    }
-
     fn spawn_current_workspace_backboard_workspace_agent_with_context(
         &mut self,
         task: String,

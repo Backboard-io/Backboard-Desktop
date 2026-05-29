@@ -17,6 +17,7 @@ default = []
 [dependencies]
 agent_ui.workspace = true
 anyhow.workspace = true
+backboard_ui.workspace = true
 backboard.workspace = true
 client.workspace = true
 cloud_api_types.workspace = true
@@ -35,6 +36,7 @@ project.workspace = true
 schemars.workspace = true
 serde.workspace = true
 settings.workspace = true
+smol.workspace = true
 telemetry.workspace = true
 theme.workspace = true
 theme_settings.workspace = true

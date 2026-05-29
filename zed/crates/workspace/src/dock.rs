@@ -1106,6 +1106,10 @@ impl Render for Dock {
             let dock_bg = workspace_container_background(cx);
             let panel_bg = workspace_container_surface(cx);
             let panel_border = workspace_container_border(cx);
+            let connected_layout = self
+                .workspace
+                .upgrade()
+                .is_some_and(|workspace| workspace.read(cx).connected_layout());
             let position = self.position;
             let create_resize_handle = || {
                 let handle = div()
@@ -1179,9 +1183,10 @@ impl Render for Dock {
                 .flex()
                 .bg(dock_bg)
                 .overflow_hidden()
-                .when(self.position() != DockPosition::Bottom, |this| {
-                    this.py(WORKSPACE_CONTAINER_PADDING)
-                })
+                .when(
+                    self.position() != DockPosition::Bottom && !connected_layout,
+                    |this| this.py(WORKSPACE_CONTAINER_PADDING),
+                )
                 .map(|this| match self.position().axis() {
                     // Width and height are always set on the workspace wrapper in
                     // render_dock, so fill whatever space the wrapper provides.
@@ -1189,7 +1194,28 @@ impl Render for Dock {
                     Axis::Vertical => this.h_full().w_full().flex_col(),
                 })
                 .map(|this| {
-                    if self.position() == DockPosition::Bottom {
+                    if connected_layout {
+                        this.child(
+                            div()
+                                .when(self.position() == DockPosition::Left, |this| {
+                                    this.border_r_1()
+                                })
+                                .when(self.position() == DockPosition::Right, |this| {
+                                    this.border_l_1()
+                                })
+                                .when(self.position() == DockPosition::Bottom, |this| {
+                                    this.border_t_1()
+                                })
+                                .border_color(panel_border)
+                                .bg(panel_bg)
+                                .overflow_hidden()
+                                .map(|this| match self.position().axis() {
+                                    Axis::Horizontal => this.w_full().h_full(),
+                                    Axis::Vertical => this.h_full().w_full(),
+                                })
+                                .child(panel),
+                        )
+                    } else if self.position() == DockPosition::Bottom {
                         this.child(panel)
                     } else {
                         this.child(
@@ -1406,13 +1432,49 @@ impl Render for PanelButtons {
                                     })
                                 });
 
-                            div().relative().child(button).when_some(
+                            let panel_button = div().relative().child(button).when_some(
                                 icon_label
                                     .clone()
                                     .filter(|_| !is_active_button)
                                     .and_then(|label| label.parse::<usize>().ok()),
                                 |this, count| this.child(CountBadge::new(count)),
-                            )
+                            );
+
+                            if dock_position == DockPosition::Left && name == "GitPanel" {
+                                let github_desktop_is_open = _window
+                                    .root::<crate::MultiWorkspace>()
+                                    .flatten()
+                                    .is_some_and(|multi_workspace| {
+                                        multi_workspace.read(_cx).git_workspace_is_open()
+                                    });
+
+                                h_flex().gap_1().child(panel_button).child(
+                                    IconButton::new(
+                                        "open-github-desktop-from-left-git-panel",
+                                        IconName::Github,
+                                    )
+                                    .icon_size(IconSize::Small)
+                                    .toggle_state(github_desktop_is_open)
+                                    .tooltip(Tooltip::text("Open GitHub Desktop"))
+                                    .on_click(
+                                        |_, window, cx| {
+                                            if let Some(multi_workspace) =
+                                                window.root::<crate::MultiWorkspace>().flatten()
+                                            {
+                                                multi_workspace.update(
+                                                    cx,
+                                                    |multi_workspace, cx| {
+                                                        multi_workspace
+                                                            .open_git_workspace(window, cx);
+                                                    },
+                                                );
+                                            }
+                                        },
+                                    ),
+                                )
+                            } else {
+                                panel_button
+                            }
                         }),
                 )
             })

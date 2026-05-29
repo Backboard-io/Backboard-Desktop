@@ -1,14 +1,11 @@
 use crate::multibuffer_hint::MultibufferHint;
-use agent_ui::{
-    AgentPanel, BackboardAgentWorkspaceKind, BackboardAgentWorkspaceMode,
-    BackboardAgentWorkspaceScope,
-};
+use anyhow::Context as _;
 use db::kvp::KeyValueStore;
 use fs::Fs;
 use gpui::{
     Action, AnyElement, App, AppContext, AsyncWindowContext, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, Global, IntoElement, KeyContext, ObjectFit, PromptLevel, Render,
-    ScrollHandle, SharedString, Subscription, Task, TaskExt, WeakEntity, Window, actions, img,
+    FocusHandle, Focusable, Global, IntoElement, KeyContext, ObjectFit, Render, ScrollHandle,
+    SharedString, Subscription, Task, TaskExt as _, WeakEntity, Window, actions, img,
 };
 use notifications::status_toast::StatusToast;
 use schemars::JsonSchema;
@@ -23,14 +20,13 @@ use ui::{
     Divider, IconName, IconSize, KeyBinding, ParentElement as _, StatefulInteractiveElement,
     Vector, VectorName, WithScrollbar as _, prelude::*, rems_from_px,
 };
-use ui_input::InputField;
 
 pub use workspace::welcome::ShowWelcome;
 use workspace::welcome::WelcomePage;
 use workspace::{
-    AppState, InterfaceMode, MultiWorkspace, OpenOptions, OpenVisible, Workspace,
+    AppState, InterfaceMode, MultiWorkspace, OpenMode, OpenOptions, OpenVisible, Workspace,
     item::{Item, ItemEvent},
-    open_new, register_serializable_item, with_active_or_new_workspace,
+    open_new, open_paths, register_serializable_item, with_active_or_new_workspace,
 };
 use zed_actions::{OpenAccountSettings, OpenOnboarding, ResetOnboarding};
 
@@ -63,6 +59,7 @@ pub const DOCS_URL: &str = "https://zed.dev/docs/";
 pub const EXPERIENCE_LEVEL_KVP_KEY: &str = "backboard_experience_level";
 const BACKBOARD_DASHBOARD_URL: &str = "https://app.backboard.io/dashboard";
 const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
+const TOUR_TEST_PROMPT: &str = "In this sample repo, add a completed-task counter to the app. Update the tests and run `npm test`.";
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ExperienceLevel {
@@ -93,93 +90,6 @@ impl ExperienceLevel {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-enum FirstRepoTourWorkflow {
-    FixBug,
-    UnderstandCodebase,
-    GenerateTest,
-    RefactorFile,
-    ShipFeature,
-}
-
-impl FirstRepoTourWorkflow {
-    const ALL: [Self; 5] = [
-        Self::FixBug,
-        Self::UnderstandCodebase,
-        Self::GenerateTest,
-        Self::RefactorFile,
-        Self::ShipFeature,
-    ];
-
-    fn from_prompt_answer(answer: usize) -> Self {
-        Self::ALL.get(answer).copied().unwrap_or(Self::FixBug)
-    }
-
-    fn button_label(self) -> &'static str {
-        match self {
-            Self::FixBug => "Fix a Bug",
-            Self::UnderstandCodebase => "Understand This Codebase",
-            Self::GenerateTest => "Generate a Test",
-            Self::RefactorFile => "Refactor a File",
-            Self::ShipFeature => "Ship a Small Feature",
-        }
-    }
-
-    fn detail_label(self) -> &'static str {
-        match self {
-            Self::FixBug => "Draft fix",
-            Self::UnderstandCodebase => "Codepath explanation",
-            Self::GenerateTest => "Test generated",
-            Self::RefactorFile => "Safe edit plan",
-            Self::ShipFeature => "Small feature shipped",
-        }
-    }
-
-    fn focus_file(self) -> &'static str {
-        match self {
-            Self::GenerateTest => "test/cart.test.js",
-            _ => "src/cart.js",
-        }
-    }
-
-    fn task(self) -> &'static str {
-        match self {
-            Self::FixBug => {
-                "Fix the cart subtotal bug in the sample repo. `calculateSubtotal` in `src/cart.js` should multiply each item's price by its quantity, keep `npm test` passing, and return a short draft fix summary."
-            }
-            Self::UnderstandCodebase => {
-                "Explain the checkout codepath in this sample repo. Start from `src/cart.js`, connect it to `test/cart.test.js`, point out the existing subtotal bug, and return a concise codepath explanation."
-            }
-            Self::GenerateTest => {
-                "Add a focused test that proves cart subtotals account for item quantity. Run `npm test` and summarize the generated test."
-            }
-            Self::RefactorFile => {
-                "Refactor `src/cart.js` for clearer cart total calculations while keeping changes scoped. Start with a safe edit plan, make the smallest useful change, run `npm test`, and summarize the result."
-            }
-            Self::ShipFeature => {
-                "Add support for percentage discount codes in `src/cart.js` and cover it with `node:test`. Keep the API small, run `npm test`, and summarize the shipped change."
-            }
-        }
-    }
-
-    fn kind(self) -> BackboardAgentWorkspaceKind {
-        match self {
-            Self::UnderstandCodebase => BackboardAgentWorkspaceKind::Review,
-            Self::GenerateTest => BackboardAgentWorkspaceKind::Test,
-            Self::FixBug | Self::RefactorFile | Self::ShipFeature => {
-                BackboardAgentWorkspaceKind::Build
-            }
-        }
-    }
-
-    fn scope(self) -> BackboardAgentWorkspaceScope {
-        match self {
-            Self::GenerateTest => BackboardAgentWorkspaceScope::TestsOnly,
-            _ => BackboardAgentWorkspaceScope::WholeProject,
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 enum OnboardingStep {
     Splash,
@@ -187,7 +97,6 @@ enum OnboardingStep {
     ExperiencePicker,
     Setup(ExperienceLevel),
     ImportSettings(ExperienceLevel),
-    ApiKeySetup(ExperienceLevel),
 }
 
 actions!(
@@ -384,8 +293,6 @@ struct Onboarding {
     scroll_handle: ScrollHandle,
     step: OnboardingStep,
     splash_frame: usize,
-    api_key_field: Entity<InputField>,
-    api_key_status: Option<SharedString>,
     _splash_task: Option<Task<()>>,
     _settings_subscription: Subscription,
 }
@@ -405,7 +312,7 @@ impl Onboarding {
         "                 ████",
     ];
 
-    fn new(_workspace: &Workspace, window: &mut Window, cx: &mut App) -> Entity<Self> {
+    fn new(_workspace: &Workspace, _window: &mut Window, cx: &mut App) -> Entity<Self> {
         let font_family_cache = theme::FontFamilyCache::global(cx);
 
         telemetry::event!("Welcome Agent Setup Viewed");
@@ -413,11 +320,6 @@ impl Onboarding {
 
         cx.new(|cx| {
             let splash_task = Self::spawn_splash_task(cx);
-            let api_key_field = cx.new(|cx| {
-                InputField::new(window, cx, "Paste your Backboard API key")
-                    .masked(true)
-                    .start_icon(IconName::LockOutlined)
-            });
 
             cx.spawn(async move |this, cx| {
                 font_family_cache.prefetch(cx).await;
@@ -432,8 +334,6 @@ impl Onboarding {
                 scroll_handle: ScrollHandle::new(),
                 step: OnboardingStep::Splash,
                 splash_frame: 0,
-                api_key_field,
-                api_key_status: None,
                 _splash_task: Some(splash_task),
                 _settings_subscription: cx
                     .observe_global::<SettingsStore>(move |_, cx| cx.notify()),
@@ -495,13 +395,8 @@ impl Onboarding {
                 cx.notify();
                 return;
             }
-            OnboardingStep::ImportSettings(level) => {
-                self.step = OnboardingStep::ApiKeySetup(level);
-                cx.notify();
-                return;
-            }
+            OnboardingStep::ImportSettings(level) => level,
             OnboardingStep::Setup(level) => level,
-            OnboardingStep::ApiKeySetup(level) => level,
             OnboardingStep::Splash | OnboardingStep::Welcome | OnboardingStep::ExperiencePicker => {
                 return;
             }
@@ -538,263 +433,192 @@ impl Onboarding {
             });
         }
 
-        Self::show_first_repo_tour_prompt(window, cx);
-
         match level {
             ExperienceLevel::Beginner => {
                 close_onboarding_tab(cx);
             }
             ExperienceLevel::Developer | ExperienceLevel::Power => {
                 go_to_welcome_page(cx);
+                window.defer(cx, |_, cx| Self::show_api_key_modal_then_workspace_tour(cx));
             }
         }
     }
 
-    fn show_first_repo_tour_prompt(window: &mut Window, cx: &mut Context<Self>) {
-        let answers = [
-            FirstRepoTourWorkflow::FixBug.button_label(),
-            FirstRepoTourWorkflow::UnderstandCodebase.button_label(),
-            FirstRepoTourWorkflow::GenerateTest.button_label(),
-            FirstRepoTourWorkflow::RefactorFile.button_label(),
-            FirstRepoTourWorkflow::ShipFeature.button_label(),
-        ];
-        let prompt = window.prompt(
-            PromptLevel::Info,
-            "Start here: fix a bug",
-            Some(
-                "A sample repo will open now. Pick a focused first task; the recommended path is a draft bug fix.",
-            ),
-            &answers,
-            cx,
-        );
+    fn show_api_key_modal_then_workspace_tour(cx: &mut App) {
+        with_active_or_new_workspace(cx, |workspace, window, cx| {
+            if backboard_ui::backboard_api_key_is_connected() {
+                Self::start_workspace_tour(window, cx);
+                return;
+            }
 
-        window
-            .spawn(cx, async move |cx| {
-                let workflow = match prompt.await {
-                    Ok(answer) => FirstRepoTourWorkflow::from_prompt_answer(answer),
-                    Err(error) => {
-                        zlog::error!("first repo tour prompt closed before selection: {error}");
-                        return anyhow::Ok(());
-                    }
-                };
-
-                let repo_path = Self::create_first_repo_tour_repo(cx).await?;
-
-                cx.update(|window, cx| {
-                    Self::start_first_repo_tour(workflow, repo_path, window, cx);
-                })?;
-
-                let milestone_detail = format!(
-                    "Success milestones:\nRepo connected: backboard-tour-repo\nFirst task started: {}\nExpected output: {}",
-                    workflow.button_label(),
-                    workflow.detail_label(),
-                );
-                let milestone_prompt = cx.update(|window, cx| {
-                    window.prompt(
-                        PromptLevel::Info,
-                        "Repo tour started",
-                        Some(&milestone_detail),
-                        &["Open Agent Workspace"],
-                        cx,
-                    )
-                })?;
-
-                if milestone_prompt.await.is_ok() {
-                    cx.update(|window, cx| {
-                        if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
-                            multi_workspace.update(cx, |multi_workspace, cx| {
-                                multi_workspace.set_multi_agent_expanded(true, window, cx);
-                            });
-                        }
-                    })?;
-                }
-
-                anyhow::Ok(())
-            })
-            .detach_and_log_err(cx);
+            backboard_ui::show_backboard_api_key_modal_with_dismiss(
+                workspace,
+                window,
+                cx,
+                |_| {},
+                Some(Box::new(|window, cx| {
+                    Self::start_workspace_tour(window, cx);
+                })),
+            );
+        });
     }
 
-    async fn create_first_repo_tour_repo(cx: &mut AsyncWindowContext) -> anyhow::Result<PathBuf> {
-        let fs = cx.update(|_, cx| <dyn Fs>::global(cx))?;
-        let repo_path = Self::first_repo_tour_path();
-        fs.create_dir(&repo_path).await?;
+    fn start_workspace_tour(window: &mut Window, cx: &mut App) {
+        window.defer(cx, |window, cx| {
+            let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() else {
+                return;
+            };
 
-        for (relative_path, contents) in Self::first_repo_tour_files() {
-            fs.write(&repo_path.join(relative_path), contents.as_bytes())
-                .await?;
+            multi_workspace.update(cx, |multi_workspace, cx| {
+                multi_workspace.start_workspace_tour_with_completion(window, cx, |window, cx| {
+                    Self::open_sample_repo_and_prompt(window, cx);
+                });
+            });
+        });
+    }
+
+    fn open_sample_repo_and_prompt(window: &mut Window, cx: &mut App) {
+        let Some(window_handle) = window.window_handle().downcast::<MultiWorkspace>() else {
+            return;
+        };
+
+        let app_state = AppState::global(cx);
+        let sample_repo_task =
+            cx.background_spawn(async move { Self::create_sample_repo_for_tour().await });
+
+        cx.spawn(async move |cx| {
+            let repo_path = sample_repo_task.await?;
+            let source_file = repo_path.join("src").join("app.js");
+            let open_task = cx.update(|cx| {
+                open_paths(
+                    &[repo_path, source_file],
+                    app_state,
+                    OpenOptions {
+                        visible: Some(OpenVisible::OnlyFiles),
+                        requesting_window: Some(window_handle),
+                        open_mode: OpenMode::Activate,
+                        add_dirs_to_sidebar: false,
+                        ..OpenOptions::default()
+                    },
+                    cx,
+                )
+            });
+
+            let open_result = open_task.await?;
+            open_result
+                .window
+                .update(cx, |multi_workspace, window, cx| {
+                    multi_workspace.open_code_editor(window, cx);
+                    open_result.workspace.update(cx, |workspace, cx| {
+                        backboard_ui::open_backboard_panel_with_prompt(
+                            workspace,
+                            window,
+                            cx,
+                            TOUR_TEST_PROMPT,
+                        );
+                    });
+                })?;
+
+            anyhow::Ok(())
+        })
+        .detach_and_log_err(cx);
+    }
+
+    async fn create_sample_repo_for_tour() -> anyhow::Result<PathBuf> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("reading system time")?
+            .as_millis();
+        let repo_path = std::env::temp_dir().join(format!("backboard-tour-sample-{timestamp}"));
+
+        std::fs::create_dir_all(repo_path.join("src"))
+            .with_context(|| format!("creating sample repo source directory at {repo_path:?}"))?;
+        std::fs::create_dir_all(repo_path.join("tests"))
+            .with_context(|| format!("creating sample repo test directory at {repo_path:?}"))?;
+
+        std::fs::write(
+            repo_path.join("README.md"),
+            "# Backboard tour sample\n\nUse the prompt in the composer to make one small change, update the test, and run `npm test`.\n",
+        )
+        .context("writing sample README")?;
+        std::fs::write(
+            repo_path.join("package.json"),
+            r#"{
+  "name": "backboard-tour-sample",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/app.test.js"
+  }
+}
+"#,
+        )
+        .context("writing sample package.json")?;
+        std::fs::write(
+            repo_path.join("src").join("app.js"),
+            r#"export const tasks = [
+  { title: "Plan the feature", completed: true },
+  { title: "Edit the code", completed: false },
+  { title: "Run the test", completed: false }
+];
+
+export function openTasks(items = tasks) {
+  return items.filter((task) => !task.completed);
+}
+
+export function renderTasks(items = tasks) {
+  return openTasks(items).map((task) => `- ${task.title}`).join("\n");
+}
+"#,
+        )
+        .context("writing sample app.js")?;
+        std::fs::write(
+            repo_path.join("tests").join("app.test.js"),
+            r#"import assert from "node:assert/strict";
+import { openTasks, renderTasks, tasks } from "../src/app.js";
+
+assert.equal(openTasks(tasks).length, 2);
+assert.equal(renderTasks(tasks), "- Edit the code\n- Run the test");
+
+console.log("sample app tests passed");
+"#,
+        )
+        .context("writing sample app.test.js")?;
+
+        if let Err(error) = Self::initialize_sample_repo_git(&repo_path).await {
+            zlog::warn!("failed to initialize tour sample git repo: {error:#}");
         }
 
         Ok(repo_path)
     }
 
-    fn first_repo_tour_path() -> PathBuf {
-        let timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_millis());
-        std::env::temp_dir().join(format!("backboard-tour-repo-{timestamp_ms}"))
+    async fn initialize_sample_repo_git(repo_path: &Path) -> anyhow::Result<()> {
+        Self::run_git(repo_path, &["init"]).await?;
+        Self::run_git(repo_path, &["checkout", "-B", "main"]).await?;
+        Self::run_git(repo_path, &["config", "user.name", "Backboard Tour"]).await?;
+        Self::run_git(repo_path, &["config", "user.email", "tour@backboard.local"]).await?;
+        Self::run_git(repo_path, &["add", "."]).await?;
+        Self::run_git(repo_path, &["commit", "-m", "Initial sample app"]).await?;
+        Ok(())
     }
 
-    fn first_repo_tour_files() -> [(&'static Path, &'static str); 5] {
-        [
-            (
-                Path::new("package.json"),
-                r#"{
-  "name": "backboard-tour-repo",
-  "version": "0.1.0",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "test": "node --test"
-  }
-}
-"#,
-            ),
-            (
-                Path::new("README.md"),
-                r#"# Backboard Tour Repo
+    async fn run_git(repo_path: &Path, args: &[&str]) -> anyhow::Result<()> {
+        let output = smol::process::Command::new("git")
+            .args(args)
+            .current_dir(repo_path)
+            .output()
+            .await
+            .with_context(|| format!("running git {}", args.join(" ")))?;
 
-This tiny checkout service is intentionally small so the first Agent task can produce useful output quickly.
-
-Try one focused workflow:
-
-- Fix the cart subtotal bug
-- Explain the checkout codepath
-- Generate a focused regression test
-- Refactor the cart file safely
-- Ship percentage discount support
-"#,
-            ),
-            (
-                Path::new("src/cart.js"),
-                r#"export function calculateSubtotal(items) {
-  return items.reduce((total, item) => total + item.price, 0);
-}
-
-export function calculateTax(subtotal, taxRate) {
-  return Number((subtotal * taxRate).toFixed(2));
-}
-
-export function formatReceipt(items, taxRate = 0.08) {
-  const subtotal = calculateSubtotal(items);
-  const tax = calculateTax(subtotal, taxRate);
-  const total = subtotal + tax;
-
-  return {
-    itemCount: items.reduce((count, item) => count + item.quantity, 0),
-    subtotal,
-    tax,
-    total,
-  };
-}
-"#,
-            ),
-            (
-                Path::new("test/cart.test.js"),
-                r#"import assert from "node:assert/strict";
-import test from "node:test";
-
-import { calculateSubtotal, formatReceipt } from "../src/cart.js";
-
-test("calculateSubtotal includes each item's quantity", () => {
-  const items = [
-    { name: "Notebook", price: 8, quantity: 2 },
-    { name: "Pen", price: 3, quantity: 4 },
-  ];
-
-  assert.equal(calculateSubtotal(items), 28);
-});
-
-test("formatReceipt returns item count, tax, and total", () => {
-  const receipt = formatReceipt([{ name: "Mug", price: 10, quantity: 2 }], 0.1);
-
-  assert.deepEqual(receipt, {
-    itemCount: 2,
-    subtotal: 20,
-    tax: 2,
-    total: 22,
-  });
-});
-"#,
-            ),
-            (Path::new(".gitignore"), "node_modules\n.DS_Store\n"),
-        ]
-    }
-
-    fn start_first_repo_tour(
-        workflow: FirstRepoTourWorkflow,
-        repo_path: PathBuf,
-        _window: &mut Window,
-        cx: &mut App,
-    ) {
-        with_active_or_new_workspace(cx, move |workspace, window, cx| {
-            let focus_path = repo_path.join(workflow.focus_file());
-            let open_task = workspace.open_paths(
-                vec![repo_path.clone(), focus_path],
-                OpenOptions {
-                    visible: Some(OpenVisible::All),
-                    focus: Some(true),
-                    ..Default::default()
-                },
-                None,
-                window,
-                cx,
+        if !output.status.success() {
+            anyhow::bail!(
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr)
             );
-            cx.spawn(async move |_, _| {
-                for result in open_task.await.into_iter().flatten() {
-                    if let Err(error) = result {
-                        zlog::error!("failed to open first repo tour path: {error:#}");
-                    }
-                }
-            })
-            .detach();
+        }
 
-            window.defer(cx, |window, cx| {
-                if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
-                    multi_workspace.update(cx, |multi_workspace, cx| {
-                        multi_workspace.set_multi_agent_expanded(true, window, cx);
-                    });
-                }
-            });
-
-            let workspace_handle = cx.weak_entity();
-            cx.spawn_in(window, async move |_, cx| {
-                let panel = match workspace_handle
-                    .read_with(cx, |workspace, cx| workspace.panel::<AgentPanel>(cx))
-                {
-                    Ok(Some(panel)) => panel,
-                    Ok(None) => {
-                        let panel = AgentPanel::load(workspace_handle.clone(), cx.clone()).await?;
-                        workspace_handle.update_in(&mut cx.clone(), |workspace, window, cx| {
-                            if let Some(existing_panel) = workspace.panel::<AgentPanel>(cx) {
-                                existing_panel
-                            } else {
-                                workspace.add_panel(panel.clone(), window, cx);
-                                panel
-                            }
-                        })?
-                    }
-                    Err(error) => {
-                        zlog::error!("failed to read workspace for first repo tour: {error:#}");
-                        return anyhow::Ok(());
-                    }
-                };
-
-                panel.update_in(&mut cx.clone(), |panel, window, cx| {
-                    panel.spawn_backboard_workspace_tour_agent(
-                        workflow.task().to_string(),
-                        repo_path,
-                        workflow.scope(),
-                        workflow.kind(),
-                        BackboardAgentWorkspaceMode::Free,
-                        window,
-                        cx,
-                    );
-                })?;
-
-                anyhow::Ok(())
-            })
-            .detach_and_log_err(cx);
-        });
+        Ok(())
     }
 
     fn shows_import_settings_step(level: ExperienceLevel) -> bool {
@@ -804,8 +628,7 @@ test("formatReceipt returns item count, tax, and total", () => {
     fn primary_setup_action_label(&self) -> &'static str {
         match self.step {
             OnboardingStep::Setup(level) if Self::shows_import_settings_step(level) => "Continue",
-            OnboardingStep::ImportSettings(_) => "Continue",
-            OnboardingStep::Setup(_) | OnboardingStep::ApiKeySetup(_) => "Finish Setup",
+            OnboardingStep::ImportSettings(_) | OnboardingStep::Setup(_) => "Finish Setup",
             OnboardingStep::Splash | OnboardingStep::Welcome | OnboardingStep::ExperiencePicker => {
                 "Finish Setup"
             }
@@ -814,42 +637,11 @@ test("formatReceipt returns item count, tax, and total", () => {
 
     fn go_back_from_setup(&mut self, cx: &mut Context<Self>) {
         self.step = match self.step {
-            OnboardingStep::ApiKeySetup(level) => OnboardingStep::ImportSettings(level),
             OnboardingStep::ImportSettings(level) => OnboardingStep::Setup(level),
             OnboardingStep::Setup(_) => OnboardingStep::ExperiencePicker,
             step => step,
         };
         cx.notify();
-    }
-
-    fn save_api_key_and_finish(
-        &mut self,
-        level: ExperienceLevel,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let api_key = self.api_key_field.read(cx).text(cx).trim().to_string();
-
-        if api_key.is_empty() {
-            self.api_key_status = Some("Paste an API key or skip for now.".into());
-            self.api_key_field
-                .read(cx)
-                .focus_handle(cx)
-                .focus(window, cx);
-            cx.notify();
-            return;
-        }
-
-        match backboard::BackboardConfig::save_api_key_for_current_env(api_key) {
-            Ok(_) => {
-                self.api_key_status = Some("API key saved.".into());
-                self.finish_setup(level, window, cx);
-            }
-            Err(error) => {
-                self.api_key_status = Some(format!("Could not save API key: {error:#}").into());
-                cx.notify();
-            }
-        }
     }
 
     fn render_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -863,7 +655,6 @@ test("formatReceipt returns item count, tax, and total", () => {
             OnboardingStep::ImportSettings(_) => {
                 crate::import_settings_page::render_import_settings_page(cx).into_any_element()
             }
-            OnboardingStep::ApiKeySetup(level) => self.render_api_key_setup(level, cx),
         }
     }
 
@@ -1141,146 +932,6 @@ test("formatReceipt returns item count, tax, and total", () => {
         }
     }
 
-    fn render_api_key_setup(
-        &mut self,
-        level: ExperienceLevel,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let has_key = backboard::BackboardConfig::load_or_default()
-            .api_key()
-            .is_some();
-        let status = self.api_key_status.clone();
-
-        v_flex()
-            .id("api-key-setup-page")
-            .w_full()
-            .py_12()
-            .items_center()
-            .gap_7()
-            .child(
-                v_flex()
-                    .items_center()
-                    .gap_2()
-                    .child(Headline::new("Connect Backboard").size(HeadlineSize::Large))
-                    .child(
-                        Label::new("Add your API key now, or skip it for later.")
-                            .color(Color::Muted)
-                            .size(LabelSize::Small),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .w(rems_from_px(520.))
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().colors().border_variant)
-                    .bg(cx.theme().colors().element_background.opacity(0.35))
-                    .p_5()
-                    .gap_5()
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .size(rems_from_px(34.))
-                                    .rounded_md()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(cx.theme().colors().text_accent.opacity(0.12))
-                                    .child(
-                                        Icon::new(if has_key {
-                                            IconName::Check
-                                        } else {
-                                            IconName::LockOutlined
-                                        })
-                                        .size(IconSize::Small)
-                                        .color(if has_key {
-                                            Color::Success
-                                        } else {
-                                            Color::Accent
-                                        }),
-                                    ),
-                            )
-                            .child(
-                                v_flex()
-                                    .gap_0p5()
-                                    .child(Label::new(if has_key {
-                                        "API key configured"
-                                    } else {
-                                        "Paste your Backboard API key"
-                                    }))
-                                    .child(
-                                        Label::new(
-                                            "No key handy? Skip this and connect later from Settings.",
-                                        )
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
-                                    ),
-                            ),
-                    )
-                    .when(!has_key, |this| this.child(self.api_key_field.clone()))
-                    .when_some(status, |this, status| {
-                        this.child(
-                            Label::new(status)
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                        )
-                    })
-                    .child(
-                        div().rounded_full().overflow_hidden().child(
-                            Button::new("open-backboard-dashboard", "Open Backboard Dashboard")
-                                .style(ButtonStyle::OutlinedGhost)
-                                .full_width()
-                                .on_click(|_, _, cx| {
-                                    cx.open_url(BACKBOARD_DASHBOARD_URL);
-                                }),
-                        ),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_3()
-                            .when(!has_key, |this| {
-                                this.child(
-                                    div().rounded_full().overflow_hidden().flex_1().child(
-                                        Button::new("skip-api-key", "Skip for now")
-                                            .style(ButtonStyle::Subtle)
-                                            .full_width()
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                this.finish_setup(level, window, cx);
-                                            })),
-                                    ),
-                                )
-                            })
-                            .child(
-                                div().rounded_full().overflow_hidden().flex_1().child(
-                                    Button::new(
-                                        "save-api-key-and-finish",
-                                        if has_key {
-                                            "Finish Setup"
-                                        } else {
-                                            "Save and Finish"
-                                        },
-                                    )
-                                    .style(ButtonStyle::Filled)
-                                    .full_width()
-                                    .on_click(cx.listener(
-                                        move |this, _, window, cx| {
-                                            if has_key {
-                                                this.finish_setup(level, window, cx);
-                                            } else {
-                                                this.save_api_key_and_finish(level, window, cx);
-                                            }
-                                        },
-                                    )),
-                                ),
-                            ),
-                    ),
-            )
-            .into_any_element()
-    }
-
     fn render_asset_preloads(&self) -> impl IntoElement {
         div()
             .id("onboarding-asset-preloads")
@@ -1313,9 +964,7 @@ impl Render for Onboarding {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_setup = matches!(
             self.step,
-            OnboardingStep::Setup(_)
-                | OnboardingStep::ImportSettings(_)
-                | OnboardingStep::ApiKeySetup(_)
+            OnboardingStep::Setup(_) | OnboardingStep::ImportSettings(_)
         );
         let is_intro = matches!(self.step, OnboardingStep::Splash | OnboardingStep::Welcome);
         let is_experience_picker = matches!(self.step, OnboardingStep::ExperiencePicker);

@@ -29,12 +29,19 @@ use ui::{
 const SIDEBAR_RESIZE_HANDLE_SIZE: Pixels = px(6.0);
 const TERMINAL_PANEL_NAME: &str = "TerminalPanel";
 
+type WorkspaceTourCompletion = Box<dyn FnOnce(&mut Window, &mut App) + 'static>;
+
 use crate::jarvis_directory_visualizer::{JarvisDirectoryVisualizer, JarvisThreadSummary};
 use crate::open_remote_project_with_existing_connection;
 use crate::{
     CloseIntent, CloseWindow, DockPosition, Event as WorkspaceEvent, Item, ModalView, OpenMode,
     Panel, Workspace, WorkspaceId, client_side_decorations,
     persistence::model::MultiWorkspaceState,
+    workspace_tour::{
+        WorkspaceTourPlacement, WorkspaceTourStep,
+        decorate_workspace_tour_target as decorate_workspace_tour_target_element,
+        render_workspace_tour_backdrop, workspace_tour_handlers,
+    },
 };
 
 actions!(
@@ -330,6 +337,7 @@ pub struct MultiWorkspace {
     pub tasks_view: Option<AnyView>,
     pub git_view: Option<AnyView>,
     jarvis_visualizer: Entity<JarvisDirectoryVisualizer>,
+    workspace_tour_completion: Option<WorkspaceTourCompletion>,
 }
 
 impl EventEmitter<MultiWorkspaceEvent> for MultiWorkspace {}
@@ -412,6 +420,7 @@ impl MultiWorkspace {
             tasks_view: None,
             git_view: None,
             jarvis_visualizer,
+            workspace_tour_completion: None,
         }
     }
 
@@ -428,6 +437,15 @@ impl MultiWorkspace {
     pub fn open_code_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_interface_mode(InterfaceMode::Expert, window, cx);
         self.set_workspace_mode_tab(WorkspaceModeTab::CodeEditor, window, cx);
+    }
+
+    pub(crate) fn open_git_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_interface_mode(InterfaceMode::Expert, window, cx);
+        self.set_workspace_mode_tab(WorkspaceModeTab::Git, window, cx);
+    }
+
+    pub(crate) fn git_workspace_is_open(&self) -> bool {
+        self.selected_workspace_mode_tab() == WorkspaceModeTab::Git
     }
 
     pub fn set_multi_agent_expanded(
@@ -512,6 +530,22 @@ impl MultiWorkspace {
         });
     }
 
+    fn close_workspace_tour_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sidebar_overlay = None;
+        if self.sidebar_open() {
+            self.close_sidebar(window, cx);
+        }
+
+        let workspace = self.workspace().clone();
+        workspace.update(cx, |workspace, cx| {
+            for dock in workspace.all_docks() {
+                dock.update(cx, |dock, cx| {
+                    dock.set_open(false, window, cx);
+                });
+            }
+        });
+    }
+
     fn open_side_docks(&self, window: &mut Window, cx: &mut Context<Self>) {
         let workspace = self.workspace().clone();
         workspace.update(cx, |workspace, cx| {
@@ -531,6 +565,154 @@ impl MultiWorkspace {
                 });
             }
         });
+    }
+
+    fn open_dock(&self, position: DockPosition, window: &mut Window, cx: &mut Context<Self>) {
+        let workspace = self.workspace().clone();
+        workspace.update(cx, |workspace, cx| {
+            let dock = workspace.dock_at_position(position).clone();
+            dock.update(cx, |dock, cx| {
+                if dock.active_panel().is_none() {
+                    let Some(panel_ix) = dock
+                        .first_enabled_panel_idx(cx)
+                        .log_with_level(log::Level::Info)
+                    else {
+                        return;
+                    };
+                    dock.activate_panel(panel_ix, window, cx);
+                }
+                dock.set_open(true, window, cx);
+            });
+        });
+    }
+
+    fn open_panel_by_persistent_name(
+        &self,
+        persistent_name: &'static str,
+        fallback_position: DockPosition,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut panel_opened = false;
+        let workspace = self.workspace().clone();
+        workspace.update(cx, |workspace, cx| {
+            for dock in workspace.all_docks() {
+                let Some(panel_ix) = dock
+                    .read(cx)
+                    .panel_index_for_persistent_name(persistent_name, cx)
+                else {
+                    continue;
+                };
+
+                dock.update(cx, |dock, cx| {
+                    dock.activate_panel(panel_ix, window, cx);
+                    dock.set_open(true, window, cx);
+                });
+                panel_opened = true;
+                break;
+            }
+        });
+
+        if !panel_opened {
+            self.open_dock(fallback_position, window, cx);
+        }
+    }
+
+    pub fn start_workspace_tour(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.workspace_tour_completion = None;
+        self.go_to_workspace_tour_step(WorkspaceTourStep::Menu, window, cx);
+    }
+
+    pub fn start_workspace_tour_with_completion(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        on_finish: impl FnOnce(&mut Window, &mut App) + 'static,
+    ) {
+        self.workspace_tour_completion = Some(Box::new(on_finish));
+        self.go_to_workspace_tour_step(WorkspaceTourStep::Menu, window, cx);
+    }
+
+    pub(crate) fn go_to_workspace_tour_step(
+        &mut self,
+        step: WorkspaceTourStep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prepare_workspace_tour_step(step, window, cx);
+        self.workspace().update(cx, |workspace, cx| {
+            workspace.set_workspace_tour_step(Some(step), cx);
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn dismiss_workspace_tour(&mut self, cx: &mut Context<Self>) {
+        self.workspace().update(cx, |workspace, cx| {
+            workspace.set_workspace_tour_step(None, cx);
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn finish_workspace_tour(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dismiss_workspace_tour(cx);
+        if let Some(on_finish) = self.workspace_tour_completion.take() {
+            window.defer(cx, move |window, cx| {
+                on_finish(window, cx);
+            });
+        }
+    }
+
+    fn prepare_workspace_tour_step(
+        &mut self,
+        step: WorkspaceTourStep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match step {
+            WorkspaceTourStep::Menu | WorkspaceTourStep::CodeEditor => {
+                self.open_code_editor(window, cx);
+                self.close_workspace_tour_panels(window, cx);
+            }
+            WorkspaceTourStep::AgentWorkspace => {
+                self.set_interface_mode(InterfaceMode::Expert, window, cx);
+                self.set_multi_agent_expanded(true, window, cx);
+                self.close_workspace_tour_panels(window, cx);
+            }
+            WorkspaceTourStep::GitPanel => {
+                self.open_code_editor(window, cx);
+                self.close_workspace_tour_panels(window, cx);
+                self.open_panel_by_persistent_name("GitPanel", DockPosition::Left, window, cx);
+            }
+            WorkspaceTourStep::Composer => {
+                self.open_code_editor(window, cx);
+                self.close_workspace_tour_panels(window, cx);
+                self.open_panel_by_persistent_name("Backboard", DockPosition::Right, window, cx);
+            }
+        }
+    }
+
+    fn workspace_tour_is_active(&self, cx: &App) -> bool {
+        self.workspace().read(cx).workspace_tour_step().is_some()
+    }
+
+    fn decorate_workspace_tour_target(
+        &self,
+        target: Div,
+        step: WorkspaceTourStep,
+        placement: WorkspaceTourPlacement,
+        cx: &App,
+    ) -> Div {
+        if self.workspace().read(cx).workspace_tour_step() == Some(step) {
+            decorate_workspace_tour_target_element(
+                target,
+                step,
+                placement,
+                workspace_tour_handlers(step),
+                cx,
+            )
+        } else {
+            target
+        }
     }
 
     fn dock_is_open(&self, position: DockPosition, cx: &App) -> bool {
@@ -2332,7 +2514,6 @@ impl MultiWorkspace {
         ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
             let tabs = [
                 WorkspaceModeTab::CodeEditor,
-                WorkspaceModeTab::Git,
                 WorkspaceModeTab::AgentWorkspace,
             ];
 
@@ -2421,7 +2602,7 @@ impl MultiWorkspace {
         let colors = cx.theme().colors();
         let switcher_bg = colors.tab_bar_background;
 
-        h_flex()
+        let switcher = h_flex()
             .h(px(36.))
             .w_full()
             .flex_shrink_0()
@@ -2471,8 +2652,15 @@ impl MultiWorkspace {
                 .style(DropdownStyle::Ghost)
                 .trigger_size(ButtonSize::Compact)
                 .no_chevron(),
-            )
-            .into_any_element()
+            );
+
+        self.decorate_workspace_tour_target(
+            switcher,
+            WorkspaceTourStep::Menu,
+            WorkspaceTourPlacement::BelowRight,
+            cx,
+        )
+        .into_any_element()
     }
 }
 
@@ -2489,9 +2677,11 @@ impl Render for MultiWorkspace {
                 workspace_key_context.add("SimpleMode");
                 let root =
                     workspace.update(cx, |workspace, cx| workspace.actions(div(), window, cx));
+                let modal_layer = workspace.read(cx).modal_layer.clone();
 
                 return client_side_decorations(
                     root.key_context(workspace_key_context)
+                        .relative()
                         .flex()
                         .flex_col()
                         .size_full()
@@ -2502,7 +2692,11 @@ impl Render for MultiWorkspace {
                             this.open_code_editor(window, cx);
                         }))
                         .child(self.render_workspace_mode_switcher(window, cx))
-                        .child(div().flex_1().min_h_0().child(view.clone())),
+                        .child(div().flex_1().min_h_0().child(view.clone()))
+                        .when(self.workspace_tour_is_active(cx), |this| {
+                            this.child(render_workspace_tour_backdrop(cx))
+                        })
+                        .child(modal_layer),
                     window,
                     cx,
                     Tiling::default(),
@@ -2590,13 +2784,14 @@ impl Render for MultiWorkspace {
                     workspace.update(cx, |workspace, cx| workspace.key_context(cx));
                 let root =
                     workspace.update(cx, |workspace, cx| workspace.actions(div(), window, cx));
-                let (titlebar, status_bar) = {
+                let (titlebar, status_bar, modal_layer) = {
                     let workspace = workspace.read(cx);
                     (
                         workspace.titlebar_item(),
                         workspace
                             .status_bar_visible(cx)
                             .then(|| workspace.status_bar().clone()),
+                        workspace.modal_layer.clone(),
                     )
                 };
                 let left_dock = workspace.update(cx, |workspace, cx| {
@@ -2635,17 +2830,26 @@ impl Render for MultiWorkspace {
                                         .overflow_hidden()
                                         .children(left_dock)
                                         .child(
-                                            div()
-                                                .flex_1()
-                                                .min_w_0()
-                                                .h_full()
-                                                .overflow_hidden()
-                                                .child(view.clone()),
+                                            self.decorate_workspace_tour_target(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .h_full()
+                                                    .overflow_hidden()
+                                                    .child(view.clone()),
+                                                WorkspaceTourStep::AgentWorkspace,
+                                                WorkspaceTourPlacement::TopRight,
+                                                cx,
+                                            ),
                                         ),
                                 )
                                 .children(bottom_dock),
                         )
-                        .children(status_bar),
+                        .children(status_bar)
+                        .when(self.workspace_tour_is_active(cx), |this| {
+                            this.child(render_workspace_tour_backdrop(cx))
+                        })
+                        .child(modal_layer),
                     window,
                     cx,
                     Tiling::default(),
@@ -2721,7 +2925,10 @@ impl Render for MultiWorkspace {
                 workspace.update(cx, |workspace, cx| workspace.key_context(cx));
             workspace_key_context.add("GitView");
             let root = workspace.update(cx, |workspace, cx| workspace.actions(div(), window, cx));
-            let titlebar = self.workspace().read(cx).titlebar_item();
+            let (titlebar, modal_layer) = {
+                let workspace = self.workspace().read(cx);
+                (workspace.titlebar_item(), workspace.modal_layer.clone())
+            };
             return client_side_decorations(
                 root.key_context(workspace_key_context)
                     .relative()
@@ -2754,7 +2961,8 @@ impl Render for MultiWorkspace {
                                 },
                                 |view| view.into_any_element(),
                             )),
-                    ),
+                    )
+                    .child(modal_layer),
                 window,
                 cx,
                 Tiling::default(),
@@ -2764,9 +2972,11 @@ impl Render for MultiWorkspace {
         let workspace = self.workspace().clone();
         let workspace_key_context = workspace.update(cx, |workspace, cx| workspace.key_context(cx));
         let root = workspace.update(cx, |workspace, cx| workspace.actions(h_flex(), window, cx));
+        let modal_layer = workspace.read(cx).modal_layer.clone();
 
         client_side_decorations(
             div()
+                .relative()
                 .flex()
                 .flex_col()
                 .size_full()
@@ -2889,7 +3099,6 @@ impl Render for MultiWorkspace {
                                 .child(self.workspace().clone()),
                         )
                         .children(right_sidebar)
-                        .child(self.workspace().read(cx).modal_layer.clone())
                         .children(self.sidebar_overlay.as_ref().map(|view| {
                             deferred(div().absolute().size_full().inset_0().occlude().child(
                                 v_flex().h(px(0.0)).top_20().items_center().child(
@@ -2903,7 +3112,11 @@ impl Render for MultiWorkspace {
                             ))
                             .with_priority(2)
                         })),
-                ),
+                )
+                .when(self.workspace_tour_is_active(cx), |this| {
+                    this.child(render_workspace_tour_backdrop(cx))
+                })
+                .child(modal_layer),
             window,
             cx,
             Tiling {

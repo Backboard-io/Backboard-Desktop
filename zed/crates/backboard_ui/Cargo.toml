@@ -23,4 +23,5 @@ async-channel.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["time"] }
 ui.workspace = true
+util.workspace = true
 workspace.workspace = true

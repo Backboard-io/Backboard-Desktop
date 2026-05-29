@@ -4324,6 +4324,15 @@ impl Render for Pane {
         let pane_background = workspace_container_background(cx);
         let editor_card_background = workspace_container_surface(cx);
         let editor_card_border = workspace_container_border(cx);
+        let connected_layout = self
+            .workspace
+            .upgrade()
+            .is_some_and(|workspace| workspace.read(cx).connected_layout());
+        let workspace_container_padding = if connected_layout {
+            px(0.)
+        } else {
+            WORKSPACE_CONTAINER_PADDING
+        };
 
         v_flex()
             .key_context(key_context)
@@ -4493,8 +4502,8 @@ impl Render for Pane {
                     .flex_1()
                     .relative()
                     .group("")
-                    .px(WORKSPACE_CONTAINER_PADDING)
-                    .pb(WORKSPACE_CONTAINER_PADDING)
+                    .px(workspace_container_padding)
+                    .pb(workspace_container_padding)
                     .bg(pane_background)
                     .overflow_hidden()
                     .on_drag_move::<DraggedTab>(cx.listener(Self::handle_drag_move))
@@ -4507,9 +4516,12 @@ impl Render for Pane {
                             div.id("pane_placeholder")
                                 .v_flex()
                                 .size_full()
-                                .rounded(WORKSPACE_CONTAINER_RADIUS)
-                                .border_1()
-                                .border_color(editor_card_border)
+                                .when(!connected_layout, |placeholder| {
+                                    placeholder
+                                        .rounded(WORKSPACE_CONTAINER_RADIUS)
+                                        .border_1()
+                                        .border_color(editor_card_border)
+                                })
                                 .bg(editor_card_background)
                                 .overflow_hidden()
                                 .when(display_tab_bar, |placeholder| {
@@ -4523,9 +4535,12 @@ impl Render for Pane {
                                 .id("pane_placeholder")
                                 .h_flex()
                                 .size_full()
-                                .rounded(WORKSPACE_CONTAINER_RADIUS)
-                                .border_1()
-                                .border_color(editor_card_border)
+                                .when(!connected_layout, |placeholder| {
+                                    placeholder
+                                        .rounded(WORKSPACE_CONTAINER_RADIUS)
+                                        .border_1()
+                                        .border_color(editor_card_border)
+                                })
                                 .bg(editor_card_background)
                                 .justify_center()
                                 .on_click(cx.listener(

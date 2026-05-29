@@ -27,6 +27,7 @@ mod toast_layer;
 mod toolbar;
 pub mod welcome;
 mod workspace_settings;
+mod workspace_tour;
 
 pub use crate::notifications::NotificationFrame;
 pub use dock::Panel;
@@ -43,6 +44,7 @@ pub use remote::{
     RemoteConnectionIdentity, remote_connection_identity, same_remote_connection_identity,
 };
 pub use toast_layer::{ToastAction, ToastLayer, ToastView};
+pub use workspace_tour::WorkspaceTourStep;
 
 use anyhow::{Context as _, Result, anyhow};
 use client::{
@@ -147,7 +149,7 @@ pub use toolbar::{
     PaneSearchBarCallbacks, Toolbar, ToolbarItemEvent, ToolbarItemLocation, ToolbarItemView,
 };
 pub use ui;
-use ui::{Window, prelude::*};
+use ui::{Tooltip, Window, prelude::*};
 use util::{
     ResultExt, TryFutureExt,
     paths::{PathStyle, SanitizedPath},
@@ -168,6 +170,11 @@ use crate::{
         model::{SerializedItem, SerializedPane, SerializedPaneGroup},
     },
     security_modal::SecurityModal,
+    workspace_tour::{
+        WorkspaceTourPlacement,
+        decorate_workspace_tour_target as decorate_workspace_tour_target_element,
+        workspace_tour_handlers,
+    },
 };
 
 pub(crate) const WORKSPACE_CONTAINER_PADDING: Pixels = px(4.);
@@ -356,6 +363,8 @@ actions!(
         ToggleBottomDock,
         /// Toggles centered layout mode.
         ToggleCenteredLayout,
+        /// Toggles connected workspace layout mode.
+        ToggleConnectedLayout,
         /// Toggles edit prediction feature globally for all files.
         ToggleEditPrediction,
         /// Toggles the left dock.
@@ -1398,6 +1407,7 @@ pub struct Workspace {
     status_bar: Entity<StatusBar>,
     pub(crate) modal_layer: Entity<ModalLayer>,
     toast_layer: Entity<ToastLayer>,
+    workspace_tour_step: Option<WorkspaceTourStep>,
     titlebar_item: Option<AnyView>,
     notifications: Notifications,
     suppressed_notifications: HashSet<NotificationId>,
@@ -1422,6 +1432,7 @@ pub struct Workspace {
     pane_history_timestamp: Arc<AtomicUsize>,
     bounds: Bounds<Pixels>,
     pub centered_layout: bool,
+    connected_layout: bool,
     bounds_save_task_queued: Option<Task<()>>,
     on_prompt_for_new_path: Option<PromptForNewPath>,
     on_prompt_for_open_path: Option<PromptForOpenPath>,
@@ -1749,6 +1760,8 @@ impl Workspace {
         let left_dock_buttons = cx.new(|cx| PanelButtons::new(left_dock.clone(), cx));
         let bottom_dock_buttons = cx.new(|cx| PanelButtons::new(bottom_dock.clone(), cx));
         let right_dock_buttons = cx.new(|cx| PanelButtons::new(right_dock.clone(), cx));
+        let connected_layout_toggle =
+            cx.new(|cx| WorkspaceLayoutToggle::new(weak_handle.clone(), cx));
         let multi_workspace = window
             .root::<MultiWorkspace>()
             .flatten()
@@ -1758,6 +1771,7 @@ impl Workspace {
                 StatusBar::new(&center_pane.clone(), multi_workspace.clone(), window, cx);
             status_bar.add_left_item(left_dock_buttons, window, cx);
             status_bar.add_right_item(right_dock_buttons, window, cx);
+            status_bar.add_right_item(connected_layout_toggle, window, cx);
             status_bar.add_right_item(bottom_dock_buttons, window, cx);
             status_bar
         });
@@ -1839,6 +1853,7 @@ impl Workspace {
             status_bar,
             modal_layer,
             toast_layer,
+            workspace_tour_step: None,
             titlebar_item: None,
             notifications: Notifications::default(),
             suppressed_notifications: HashSet::default(),
@@ -1869,6 +1884,7 @@ impl Workspace {
             // This data will be incorrect, but it will be overwritten by the time it needs to be used.
             bounds: Default::default(),
             centered_layout: false,
+            connected_layout: false,
             bounds_save_task_queued: None,
             on_prompt_for_new_path: None,
             on_prompt_for_open_path: None,
@@ -2173,6 +2189,10 @@ impl Workspace {
 
     pub fn left_dock(&self) -> &Entity<Dock> {
         &self.left_dock
+    }
+
+    pub(crate) fn connected_layout(&self) -> bool {
+        self.connected_layout
     }
 
     pub fn bottom_dock(&self) -> &Entity<Dock> {
@@ -7567,6 +7587,7 @@ impl Workspace {
                 },
             ))
             .on_action(cx.listener(Workspace::toggle_centered_layout))
+            .on_action(cx.listener(Workspace::toggle_connected_layout))
             .on_action(cx.listener(
                 |workspace: &mut Workspace, action: &pane::ActivateNextItem, window, cx| {
                     if let Some(active_dock) = workspace.active_dock(window, cx) {
@@ -7788,6 +7809,39 @@ impl Workspace {
             .update(cx, |toast_layer, cx| toast_layer.toggle_toast(cx, entity))
     }
 
+    pub fn workspace_tour_step(&self) -> Option<WorkspaceTourStep> {
+        self.workspace_tour_step
+    }
+
+    pub fn set_workspace_tour_step(
+        &mut self,
+        step: Option<WorkspaceTourStep>,
+        cx: &mut Context<Self>,
+    ) {
+        self.workspace_tour_step = step;
+        cx.notify();
+    }
+
+    fn decorate_workspace_tour_target(
+        &self,
+        target: Div,
+        step: WorkspaceTourStep,
+        placement: WorkspaceTourPlacement,
+        cx: &App,
+    ) -> Div {
+        if self.workspace_tour_step == Some(step) {
+            decorate_workspace_tour_target_element(
+                target,
+                step,
+                placement,
+                workspace_tour_handlers(step),
+                cx,
+            )
+        } else {
+            target
+        }
+    }
+
     pub fn toggle_centered_layout(
         &mut self,
         _: &ToggleCenteredLayout,
@@ -7803,6 +7857,16 @@ impl Workspace {
             })
             .detach_and_log_err(cx);
         }
+        cx.notify();
+    }
+
+    pub fn toggle_connected_layout(
+        &mut self,
+        _: &ToggleConnectedLayout,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.connected_layout = !self.connected_layout;
         cx.notify();
     }
 
@@ -7889,6 +7953,21 @@ impl Workspace {
                     .unwrap_or_else(|| panel.default_size(window, cx));
                 container = container.h(size);
             }
+        }
+
+        let tour_target = match position {
+            DockPosition::Left => Some((
+                WorkspaceTourStep::GitPanel,
+                WorkspaceTourPlacement::TopRight,
+            )),
+            DockPosition::Right => {
+                Some((WorkspaceTourStep::Composer, WorkspaceTourPlacement::TopLeft))
+            }
+            DockPosition::Bottom => None,
+        };
+        if let Some((tour_step, tour_placement)) = tour_target {
+            container =
+                self.decorate_workspace_tour_target(container, tour_step, tour_placement, cx);
         }
 
         Some(container)
@@ -8462,6 +8541,61 @@ impl Render for DraggedDock {
     }
 }
 
+struct WorkspaceLayoutToggle {
+    workspace: WeakEntity<Workspace>,
+    _observe_workspace: Option<Subscription>,
+}
+
+impl WorkspaceLayoutToggle {
+    fn new(workspace: WeakEntity<Workspace>, cx: &mut Context<Self>) -> Self {
+        let _observe_workspace = workspace
+            .upgrade()
+            .map(|workspace| cx.observe(&workspace, |_, _, cx| cx.notify()));
+        Self {
+            workspace,
+            _observe_workspace,
+        }
+    }
+}
+
+impl Render for WorkspaceLayoutToggle {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let connected_layout = self
+            .workspace
+            .upgrade()
+            .is_some_and(|workspace| workspace.read(cx).connected_layout());
+        let workspace = self.workspace.clone();
+
+        IconButton::new("toggle-connected-layout", IconName::SplitAlt)
+            .icon_size(IconSize::Small)
+            .toggle_state(connected_layout)
+            .on_click(move |_, window, cx| {
+                if let Some(workspace) = workspace.upgrade() {
+                    workspace.update(cx, |workspace, cx| {
+                        workspace.toggle_connected_layout(&ToggleConnectedLayout, window, cx);
+                    });
+                }
+            })
+            .tooltip(|_, cx| {
+                Tooltip::for_action("Toggle Connected Layout", &ToggleConnectedLayout, cx)
+            })
+    }
+}
+
+impl StatusItemView for WorkspaceLayoutToggle {
+    fn set_active_pane_item(
+        &mut self,
+        _active_pane_item: Option<&dyn crate::ItemHandle>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+    }
+
+    fn hide_setting(&self, _: &App) -> Option<HideStatusItem> {
+        None
+    }
+}
+
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         static FIRST_PAINT: AtomicBool = AtomicBool::new(true);
@@ -8475,6 +8609,7 @@ impl Render for Workspace {
             .active_item()
             .is_some_and(|item| item.is_fullscreen_onboarding(cx));
         let centered_layout = self.centered_layout
+            && !self.connected_layout
             && self.center.panes().len() == 1
             && self.active_item(cx).is_some();
         let paddings = if centered_layout {
@@ -8501,6 +8636,11 @@ impl Render for Workspace {
             .map(|(_, notification)| notification.entity_id())
             .collect::<Vec<_>>();
         let bottom_dock_layout = WorkspaceSettings::get_global(cx).bottom_dock_layout;
+        let workspace_container_padding = if self.connected_layout {
+            px(0.)
+        } else {
+            WORKSPACE_CONTAINER_PADDING
+        };
 
         let pane_render_context = PaneRenderContext {
             follower_states: &self.follower_states,
@@ -8648,6 +8788,7 @@ impl Render for Workspace {
                                             div()
                                                 .flex()
                                                 .flex_row()
+                                                .gap(workspace_container_padding)
                                                 .flex_1()
                                                 .overflow_hidden()
                                                 .children(self.render_dock(
@@ -8661,34 +8802,51 @@ impl Render for Workspace {
                                                         .flex()
                                                         .flex_col()
                                                         .flex_1()
-                                                        .pt(WORKSPACE_CONTAINER_PADDING)
+                                                        .pt(workspace_container_padding)
                                                         .overflow_hidden()
                                                         .child(
-                                                            h_flex()
-                                                                .w_full()
-                                                                .flex_1()
-                                                                .when_some(
-                                                                    paddings.0.and_then(|padding| {
-                                                                        workspace_center_padding(padding, cx)
-                                                                    }),
-                                                                    |this, p| {
-                                                                        this.child(p.border_r_1())
-                                                                    },
-                                                                )
-                                                                .child(self.center.render(
-                                                                    self.zoomed.as_ref(),
-                                                                    &pane_render_context,
-                                                                    window,
-                                                                    cx,
-                                                                ))
-                                                                .when_some(
-                                                                    paddings.1.and_then(|padding| {
-                                                                        workspace_center_padding(padding, cx)
-                                                                    }),
-                                                                    |this, p| {
-                                                                        this.child(p.border_l_1())
-                                                                    },
-                                                                ),
+                                                            self.decorate_workspace_tour_target(
+                                                                h_flex()
+                                                                    .w_full()
+                                                                    .flex_1()
+                                                                    .when_some(
+                                                                        paddings.0.and_then(
+                                                                            |padding| {
+                                                                                workspace_center_padding(
+                                                                                    padding, cx,
+                                                                                )
+                                                                            },
+                                                                        ),
+                                                                        |this, p| {
+                                                                            this.child(
+                                                                                p.border_r_1(),
+                                                                            )
+                                                                        },
+                                                                    )
+                                                                    .child(self.center.render(
+                                                                        self.zoomed.as_ref(),
+                                                                        &pane_render_context,
+                                                                        window,
+                                                                        cx,
+                                                                    ))
+                                                                    .when_some(
+                                                                        paddings.1.and_then(
+                                                                            |padding| {
+                                                                                workspace_center_padding(
+                                                                                    padding, cx,
+                                                                                )
+                                                                            },
+                                                                        ),
+                                                                        |this, p| {
+                                                                            this.child(
+                                                                                p.border_l_1(),
+                                                                            )
+                                                                        },
+                                                                    ),
+                                                                WorkspaceTourStep::CodeEditor,
+                                                                WorkspaceTourPlacement::TopRight,
+                                                                cx,
+                                                            ),
                                                         ),
                                                 )
                                                 .children(self.render_dock(
@@ -8698,18 +8856,23 @@ impl Render for Workspace {
                                                     cx,
                                                 )),
                                         )
-                                        .child(div().w_full().pt(WORKSPACE_CONTAINER_PADDING).children(
-                                            self.render_dock(
-                                                DockPosition::Bottom,
-                                                &self.bottom_dock,
-                                                window,
-                                                cx,
-                                            ),
-                                        )),
+                                        .child(
+                                            div()
+                                                .w_full()
+                                                .pt(workspace_container_padding)
+                                                .pb(workspace_container_padding)
+                                                .children(self.render_dock(
+                                                    DockPosition::Bottom,
+                                                    &self.bottom_dock,
+                                                    window,
+                                                    cx,
+                                                )),
+                                        ),
 
                                     BottomDockLayout::LeftAligned => div()
                                         .flex()
                                         .flex_row()
+                                        .gap(workspace_container_padding)
                                         .h_full()
                                         .child(
                                             div()
@@ -8721,6 +8884,7 @@ impl Render for Workspace {
                                                     div()
                                                         .flex()
                                                         .flex_row()
+                                                        .gap(workspace_container_padding)
                                                         .flex_1()
                                                         .children(self.render_dock(
                                                             DockPosition::Left,
@@ -8733,58 +8897,65 @@ impl Render for Workspace {
                                                                 .flex()
                                                                 .flex_col()
                                                                 .flex_1()
-                                                                .pt(WORKSPACE_CONTAINER_PADDING)
+                                                                .pt(workspace_container_padding)
                                                                 .overflow_hidden()
                                                                 .child(
-                                                                    h_flex()
-                                                                        .w_full()
-                                                                        .flex_1()
-                                                                        .when_some(
-                                                                            paddings.0.and_then(
-                                                                                |padding| {
-                                                                                    workspace_center_padding(
-                                                                                        padding, cx,
+                                                                    self.decorate_workspace_tour_target(
+                                                                        h_flex()
+                                                                            .w_full()
+                                                                            .flex_1()
+                                                                            .when_some(
+                                                                                paddings.0.and_then(
+                                                                                    |padding| {
+                                                                                        workspace_center_padding(
+                                                                                            padding, cx,
+                                                                                        )
+                                                                                    },
+                                                                                ),
+                                                                                |this, p| {
+                                                                                    this.child(
+                                                                                        p.border_r_1(),
+                                                                                    )
+                                                                                },
+                                                                            )
+                                                                            .child(self.center.render(
+                                                                                self.zoomed.as_ref(),
+                                                                                &pane_render_context,
+                                                                                window,
+                                                                                cx,
+                                                                            ))
+                                                                            .when_some(
+                                                                                paddings.1.and_then(
+                                                                                    |padding| {
+                                                                                        workspace_center_padding(
+                                                                                            padding, cx,
+                                                                                        )
+                                                                                    },
+                                                                                ),
+                                                                                |this, p| {
+                                                                                    this.child(
+                                                                                        p.border_l_1(),
                                                                                     )
                                                                                 },
                                                                             ),
-                                                                            |this, p| {
-                                                                                this.child(
-                                                                                    p.border_r_1(),
-                                                                                )
-                                                                            },
-                                                                        )
-                                                                        .child(self.center.render(
-                                                                            self.zoomed.as_ref(),
-                                                                            &pane_render_context,
-                                                                            window,
-                                                                            cx,
-                                                                        ))
-                                                                        .when_some(
-                                                                            paddings.1.and_then(
-                                                                                |padding| {
-                                                                                    workspace_center_padding(
-                                                                                        padding, cx,
-                                                                                    )
-                                                                                },
-                                                                            ),
-                                                                            |this, p| {
-                                                                                this.child(
-                                                                                    p.border_l_1(),
-                                                                                )
-                                                                            },
-                                                                        ),
+                                                                        WorkspaceTourStep::CodeEditor,
+                                                                        WorkspaceTourPlacement::TopRight,
+                                                                        cx,
+                                                                    ),
                                                                 ),
                                                         ),
                                                 )
                                                 .child(
-                                                    div().w_full().pt(WORKSPACE_CONTAINER_PADDING).children(
-                                                        self.render_dock(
+                                                    div()
+                                                        .w_full()
+                                                        .pt(workspace_container_padding)
+                                                        .pb(workspace_container_padding)
+                                                        .children(self.render_dock(
                                                             DockPosition::Bottom,
                                                             &self.bottom_dock,
                                                             window,
                                                             cx,
-                                                        ),
-                                                    ),
+                                                        )),
                                                 ),
                                         )
                                         .children(self.render_dock(
@@ -8796,6 +8967,7 @@ impl Render for Workspace {
                                     BottomDockLayout::RightAligned => div()
                                         .flex()
                                         .flex_row()
+                                        .gap(workspace_container_padding)
                                         .h_full()
                                         .children(self.render_dock(
                                             DockPosition::Left,
@@ -8813,52 +8985,58 @@ impl Render for Workspace {
                                                     div()
                                                         .flex()
                                                         .flex_row()
+                                                        .gap(workspace_container_padding)
                                                         .flex_1()
                                                         .child(
                                                             div()
                                                                 .flex()
                                                                 .flex_col()
                                                                 .flex_1()
-                                                                .pt(WORKSPACE_CONTAINER_PADDING)
+                                                                .pt(workspace_container_padding)
                                                                 .overflow_hidden()
                                                                 .child(
-                                                                    h_flex()
-                                                                        .w_full()
-                                                                        .flex_1()
-                                                                        .when_some(
-                                                                            paddings.0.and_then(
-                                                                                |padding| {
-                                                                                    workspace_center_padding(
-                                                                                        padding, cx,
+                                                                    self.decorate_workspace_tour_target(
+                                                                        h_flex()
+                                                                            .w_full()
+                                                                            .flex_1()
+                                                                            .when_some(
+                                                                                paddings.0.and_then(
+                                                                                    |padding| {
+                                                                                        workspace_center_padding(
+                                                                                            padding, cx,
+                                                                                        )
+                                                                                    },
+                                                                                ),
+                                                                                |this, p| {
+                                                                                    this.child(
+                                                                                        p.border_r_1(),
+                                                                                    )
+                                                                                },
+                                                                            )
+                                                                            .child(self.center.render(
+                                                                                self.zoomed.as_ref(),
+                                                                                &pane_render_context,
+                                                                                window,
+                                                                                cx,
+                                                                            ))
+                                                                            .when_some(
+                                                                                paddings.1.and_then(
+                                                                                    |padding| {
+                                                                                        workspace_center_padding(
+                                                                                            padding, cx,
+                                                                                        )
+                                                                                    },
+                                                                                ),
+                                                                                |this, p| {
+                                                                                    this.child(
+                                                                                        p.border_l_1(),
                                                                                     )
                                                                                 },
                                                                             ),
-                                                                            |this, p| {
-                                                                                this.child(
-                                                                                    p.border_r_1(),
-                                                                                )
-                                                                            },
-                                                                        )
-                                                                        .child(self.center.render(
-                                                                            self.zoomed.as_ref(),
-                                                                            &pane_render_context,
-                                                                            window,
-                                                                            cx,
-                                                                        ))
-                                                                        .when_some(
-                                                                            paddings.1.and_then(
-                                                                                |padding| {
-                                                                                    workspace_center_padding(
-                                                                                        padding, cx,
-                                                                                    )
-                                                                                },
-                                                                            ),
-                                                                            |this, p| {
-                                                                                this.child(
-                                                                                    p.border_l_1(),
-                                                                                )
-                                                                            },
-                                                                        ),
+                                                                        WorkspaceTourStep::CodeEditor,
+                                                                        WorkspaceTourPlacement::TopRight,
+                                                                        cx,
+                                                                    ),
                                                                 ),
                                                         )
                                                         .children(self.render_dock(
@@ -8869,19 +9047,22 @@ impl Render for Workspace {
                                                         )),
                                                 )
                                                 .child(
-                                                    div().w_full().pt(WORKSPACE_CONTAINER_PADDING).children(
-                                                        self.render_dock(
+                                                    div()
+                                                        .w_full()
+                                                        .pt(workspace_container_padding)
+                                                        .pb(workspace_container_padding)
+                                                        .children(self.render_dock(
                                                             DockPosition::Bottom,
                                                             &self.bottom_dock,
                                                             window,
                                                             cx,
-                                                        ),
-                                                    ),
+                                                        )),
                                                 ),
                                         ),
                                     BottomDockLayout::Contained => div()
                                         .flex()
                                         .flex_row()
+                                        .gap(workspace_container_padding)
                                         .h_full()
                                         .children(self.render_dock(
                                             DockPosition::Left,
@@ -8894,44 +9075,55 @@ impl Render for Workspace {
                                                 .flex()
                                                 .flex_col()
                                                 .flex_1()
-                                                .pt(WORKSPACE_CONTAINER_PADDING)
+                                                .pt(workspace_container_padding)
                                                 .overflow_hidden()
                                                 .child(
-                                                    h_flex()
-                                                        .w_full()
-                                                        .flex_1()
-                                                        .when_some(
-                                                            paddings.0.and_then(|padding| {
-                                                                workspace_center_padding(
-                                                                    padding, cx,
-                                                                )
-                                                            }),
-                                                            |this, p| this.child(p.border_r_1()),
-                                                        )
-                                                        .child(self.center.render(
-                                                            self.zoomed.as_ref(),
-                                                            &pane_render_context,
-                                                            window,
-                                                            cx,
-                                                        ))
-                                                        .when_some(
-                                                            paddings.1.and_then(|padding| {
-                                                                workspace_center_padding(
-                                                                    padding, cx,
-                                                                )
-                                                            }),
-                                                            |this, p| this.child(p.border_l_1()),
-                                                        ),
+                                                    self.decorate_workspace_tour_target(
+                                                        h_flex()
+                                                            .w_full()
+                                                            .flex_1()
+                                                            .when_some(
+                                                                paddings.0.and_then(|padding| {
+                                                                    workspace_center_padding(
+                                                                        padding, cx,
+                                                                    )
+                                                                }),
+                                                                |this, p| {
+                                                                    this.child(p.border_r_1())
+                                                                },
+                                                            )
+                                                            .child(self.center.render(
+                                                                self.zoomed.as_ref(),
+                                                                &pane_render_context,
+                                                                window,
+                                                                cx,
+                                                            ))
+                                                            .when_some(
+                                                                paddings.1.and_then(|padding| {
+                                                                    workspace_center_padding(
+                                                                        padding, cx,
+                                                                    )
+                                                                }),
+                                                                |this, p| {
+                                                                    this.child(p.border_l_1())
+                                                                },
+                                                            ),
+                                                        WorkspaceTourStep::CodeEditor,
+                                                        WorkspaceTourPlacement::TopRight,
+                                                        cx,
+                                                    ),
                                                 )
                                                 .child(
-                                                    div().w_full().pt(WORKSPACE_CONTAINER_PADDING).children(
-                                                        self.render_dock(
+                                                    div()
+                                                        .w_full()
+                                                        .pt(workspace_container_padding)
+                                                        .pb(workspace_container_padding)
+                                                        .children(self.render_dock(
                                                             DockPosition::Bottom,
                                                             &self.bottom_dock,
                                                             window,
                                                             cx,
-                                                        ),
-                                                    ),
+                                                        )),
                                                 ),
                                         )
                                         .children(self.render_dock(
