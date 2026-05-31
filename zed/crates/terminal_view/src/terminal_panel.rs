@@ -632,48 +632,16 @@ impl TerminalPanel {
         cx: &mut Context<Self>,
     ) -> Task<Result<WeakEntity<Terminal>>> {
         let reveal = spawn_task.reveal;
-        let reveal_target = spawn_task.reveal_target;
-        match reveal_target {
-            RevealTarget::Center => self
-                .workspace
-                .update(cx, |workspace, cx| {
-                    Self::add_center_terminal(workspace, window, cx, |project, cx| {
-                        project.create_terminal_task(spawn_task, cx)
-                    })
-                })
-                .unwrap_or_else(|e| Task::ready(Err(e))),
-            RevealTarget::Dock => self.add_terminal_task(spawn_task, reveal, window, cx),
-        }
+        self.add_terminal_task(spawn_task, reveal, window, cx)
     }
 
     /// Create a new Terminal in the current working directory or the user's home directory
-    fn new_terminal(
+    pub(crate) fn new_terminal(
         workspace: &mut Workspace,
         action: &workspace::NewTerminal,
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) {
-        let center_pane = workspace.active_pane();
-        let center_pane_has_focus = center_pane.focus_handle(cx).contains_focused(window, cx);
-        let active_center_item_is_terminal = center_pane
-            .read(cx)
-            .active_item()
-            .is_some_and(|item| item.downcast::<TerminalView>().is_some());
-
-        if center_pane_has_focus && active_center_item_is_terminal {
-            let working_directory = default_working_directory(workspace, cx);
-            let local = action.local;
-            Self::add_center_terminal(workspace, window, cx, move |project, cx| {
-                if local {
-                    project.create_local_terminal(cx)
-                } else {
-                    project.create_terminal_shell(working_directory, cx)
-                }
-            })
-            .detach_and_log_err(cx);
-            return;
-        }
-
         let Some(terminal_panel) = workspace.panel::<Self>(cx) else {
             return;
         };
@@ -764,12 +732,15 @@ impl TerminalPanel {
                 "terminal not yet supported for remote projects"
             )));
         }
+        let Some(terminal_panel) = workspace.panel::<Self>(cx) else {
+            return Task::ready(Err(anyhow!("Terminal panel is unavailable")));
+        };
         let project = workspace.project().downgrade();
         cx.spawn_in(window, async move |workspace, cx| {
             let terminal = project.update(cx, create_terminal)?.await?;
 
             workspace.update_in(cx, |workspace, window, cx| {
-                let terminal_view = cx.new(|cx| {
+                let terminal_view = Box::new(cx.new(|cx| {
                     TerminalView::new(
                         terminal.clone(),
                         workspace.weak_handle(),
@@ -778,8 +749,13 @@ impl TerminalPanel {
                         window,
                         cx,
                     )
+                }));
+                terminal_panel.update(cx, |terminal_panel, cx| {
+                    terminal_panel.active_pane.update(cx, |pane, cx| {
+                        pane.add_item(terminal_view, true, true, None, window, cx);
+                    });
                 });
-                workspace.add_item_to_active_pane(Box::new(terminal_view), None, true, window, cx);
+                workspace.focus_panel::<Self>(window, cx);
             })?;
             Ok(terminal.downgrade())
         })
@@ -2001,13 +1977,24 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_new_terminal_opens_in_center_when_center_terminal_focused(
-        cx: &mut TestAppContext,
-    ) {
+    async fn test_new_center_terminal_opens_in_panel(cx: &mut TestAppContext) {
         cx.executor().allow_parking();
         init_test(cx);
 
         let (window_handle, terminal_panel) = init_workspace_with_panel(cx).await;
+
+        let panel_items_before =
+            terminal_panel.read_with(cx, |panel, cx| panel.active_pane.read(cx).items_len());
+        let center_items_before = window_handle
+            .read_with(cx, |multi_workspace, cx| {
+                multi_workspace
+                    .workspace()
+                    .read(cx)
+                    .active_pane()
+                    .read(cx)
+                    .items_len()
+            })
+            .expect("Failed to read center pane items");
 
         window_handle
             .update(cx, |multi_workspace, window, cx| {
@@ -2022,52 +2009,8 @@ mod tests {
             .expect("Failed to create center terminal");
         cx.run_until_parked();
 
-        let center_items_before = window_handle
-            .read_with(cx, |multi_workspace, cx| {
-                multi_workspace
-                    .workspace()
-                    .read(cx)
-                    .active_pane()
-                    .read(cx)
-                    .items_len()
-            })
-            .expect("Failed to read center pane items");
-        assert_eq!(center_items_before, 1, "Center pane should have 1 terminal");
-
-        window_handle
-            .update(cx, |multi_workspace, window, cx| {
-                multi_workspace.workspace().update(cx, |workspace, cx| {
-                    let active_item = workspace
-                        .active_pane()
-                        .read(cx)
-                        .active_item()
-                        .expect("Center pane should have an active item");
-                    let terminal_view = active_item
-                        .downcast::<TerminalView>()
-                        .expect("Active center item should be a TerminalView");
-                    window.focus(&terminal_view.focus_handle(cx), cx);
-                })
-            })
-            .expect("Failed to focus terminal view");
-        cx.run_until_parked();
-
-        let panel_items_before =
+        let panel_items_after =
             terminal_panel.read_with(cx, |panel, cx| panel.active_pane.read(cx).items_len());
-
-        window_handle
-            .update(cx, |multi_workspace, window, cx| {
-                multi_workspace.workspace().update(cx, |workspace, cx| {
-                    TerminalPanel::new_terminal(
-                        workspace,
-                        &workspace::NewTerminal::default(),
-                        window,
-                        cx,
-                    );
-                })
-            })
-            .expect("Failed to dispatch new_terminal");
-        cx.run_until_parked();
-
         let center_items_after = window_handle
             .read_with(cx, |multi_workspace, cx| {
                 multi_workspace
@@ -2078,17 +2021,15 @@ mod tests {
                     .items_len()
             })
             .expect("Failed to read center pane items");
-        let panel_items_after =
-            terminal_panel.read_with(cx, |panel, cx| panel.active_pane.read(cx).items_len());
 
         assert_eq!(
-            center_items_after,
-            center_items_before + 1,
-            "New terminal should be added to the center pane"
+            panel_items_after,
+            panel_items_before + 1,
+            "Center terminal requests should be routed to the terminal panel"
         );
         assert_eq!(
-            panel_items_after, panel_items_before,
-            "Terminal panel should not gain a new terminal"
+            center_items_after, center_items_before,
+            "Center pane should not gain a terminal"
         );
     }
 
@@ -2170,43 +2111,11 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_new_local_terminal_opens_in_center_when_center_terminal_focused(
-        cx: &mut TestAppContext,
-    ) {
+    async fn test_new_center_local_terminal_opens_in_panel(cx: &mut TestAppContext) {
         cx.executor().allow_parking();
         init_test(cx);
 
         let (window_handle, terminal_panel) = init_workspace_with_panel(cx).await;
-
-        window_handle
-            .update(cx, |multi_workspace, window, cx| {
-                multi_workspace.workspace().update(cx, |workspace, cx| {
-                    TerminalPanel::add_center_terminal(workspace, window, cx, |project, cx| {
-                        project.create_terminal_shell(None, cx)
-                    })
-                })
-            })
-            .expect("Failed to update workspace")
-            .await
-            .expect("Failed to create center terminal");
-        cx.run_until_parked();
-
-        window_handle
-            .update(cx, |multi_workspace, window, cx| {
-                multi_workspace.workspace().update(cx, |workspace, cx| {
-                    let active_item = workspace
-                        .active_pane()
-                        .read(cx)
-                        .active_item()
-                        .expect("Center pane should have an active item");
-                    let terminal_view = active_item
-                        .downcast::<TerminalView>()
-                        .expect("Active center item should be a TerminalView");
-                    window.focus(&terminal_view.focus_handle(cx), cx);
-                })
-            })
-            .expect("Failed to focus terminal view");
-        cx.run_until_parked();
 
         let center_items_before = window_handle
             .read_with(cx, |multi_workspace, cx| {
@@ -2224,15 +2133,14 @@ mod tests {
         window_handle
             .update(cx, |multi_workspace, window, cx| {
                 multi_workspace.workspace().update(cx, |workspace, cx| {
-                    TerminalPanel::new_terminal(
-                        workspace,
-                        &workspace::NewTerminal { local: true },
-                        window,
-                        cx,
-                    );
+                    TerminalPanel::add_center_terminal(workspace, window, cx, |project, cx| {
+                        project.create_local_terminal(cx)
+                    })
                 })
             })
-            .expect("Failed to dispatch new_terminal with local=true");
+            .expect("Failed to update workspace")
+            .await
+            .expect("Failed to create local terminal");
         cx.run_until_parked();
 
         let center_items_after = window_handle
@@ -2249,37 +2157,22 @@ mod tests {
             terminal_panel.read_with(cx, |panel, cx| panel.active_pane.read(cx).items_len());
 
         assert_eq!(
-            center_items_after,
-            center_items_before + 1,
-            "New local terminal should be added to the center pane"
+            panel_items_after,
+            panel_items_before + 1,
+            "Local center terminal requests should be routed to the terminal panel"
         );
         assert_eq!(
-            panel_items_after, panel_items_before,
-            "Terminal panel should not gain a new terminal"
+            center_items_after, center_items_before,
+            "Center pane should not gain a local terminal"
         );
     }
 
     #[gpui::test]
-    async fn test_new_terminal_opens_in_panel_when_panel_focused_and_center_has_terminal(
-        cx: &mut TestAppContext,
-    ) {
+    async fn test_terminal_item_cannot_move_to_center_pane(cx: &mut TestAppContext) {
         cx.executor().allow_parking();
         init_test(cx);
 
         let (window_handle, terminal_panel) = init_workspace_with_panel(cx).await;
-
-        window_handle
-            .update(cx, |multi_workspace, window, cx| {
-                multi_workspace.workspace().update(cx, |workspace, cx| {
-                    TerminalPanel::add_center_terminal(workspace, window, cx, |project, cx| {
-                        project.create_terminal_shell(None, cx)
-                    })
-                })
-            })
-            .expect("Failed to update workspace")
-            .await
-            .expect("Failed to create center terminal");
-        cx.run_until_parked();
 
         window_handle
             .update(cx, |_, window, cx| {
@@ -2293,42 +2186,33 @@ mod tests {
         cx.run_until_parked();
 
         window_handle
-            .update(cx, |_, window, cx| {
-                window.focus(&terminal_panel.read(cx).focus_handle(cx), cx);
-            })
-            .expect("Failed to focus terminal panel");
-        cx.run_until_parked();
-
-        let panel_items_before =
-            terminal_panel.read_with(cx, |panel, cx| panel.active_pane.read(cx).items_len());
-        let center_items_before = window_handle
-            .read_with(cx, |multi_workspace, cx| {
-                multi_workspace
-                    .workspace()
-                    .read(cx)
-                    .active_pane()
-                    .read(cx)
-                    .items_len()
-            })
-            .expect("Failed to read center pane items");
-
-        window_handle
             .update(cx, |multi_workspace, window, cx| {
-                multi_workspace.workspace().update(cx, |workspace, cx| {
-                    TerminalPanel::new_terminal(
-                        workspace,
-                        &workspace::NewTerminal::default(),
-                        window,
-                        cx,
-                    );
-                })
+                let center_pane = multi_workspace
+                    .workspace()
+                    .read_with(cx, |workspace, _| workspace.active_pane().clone());
+                let source_pane = terminal_panel.read(cx).active_pane.clone();
+                let terminal_item_id = source_pane
+                    .read(cx)
+                    .active_item()
+                    .expect("Terminal panel should have an active item")
+                    .item_id();
+
+                workspace::move_item(
+                    &source_pane,
+                    &center_pane,
+                    terminal_item_id,
+                    0,
+                    true,
+                    window,
+                    cx,
+                );
             })
-            .expect("Failed to dispatch new_terminal");
+            .expect("Failed to move terminal item");
         cx.run_until_parked();
 
-        let panel_items_after =
+        let panel_items =
             terminal_panel.read_with(cx, |panel, cx| panel.active_pane.read(cx).items_len());
-        let center_items_after = window_handle
+        let center_items = window_handle
             .read_with(cx, |multi_workspace, cx| {
                 multi_workspace
                     .workspace()
@@ -2340,14 +2224,10 @@ mod tests {
             .expect("Failed to read center pane items");
 
         assert_eq!(
-            panel_items_after,
-            panel_items_before + 1,
-            "New terminal should go to panel when panel is focused, even if center has a terminal"
+            panel_items, 1,
+            "Terminal should remain in the terminal panel when moved toward the center pane"
         );
-        assert_eq!(
-            center_items_after, center_items_before,
-            "Center pane should not gain a new terminal when panel is focused"
-        );
+        assert_eq!(center_items, 0, "Center pane should reject terminal items");
     }
 
     fn set_max_tabs(cx: &mut TestAppContext, value: Option<usize>) {

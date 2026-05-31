@@ -106,9 +106,17 @@ pub struct StatusBar {
     _observe_active_pane: Subscription,
 }
 
+fn status_bar_background(cx: &App) -> gpui::Hsla {
+    let colors = cx.theme().colors();
+    colors
+        .element_background
+        .blend(colors.panel_background.opacity(0.36))
+}
+
 impl Render for StatusBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let sidebar = SidebarStatus::query(&self.multi_workspace, cx);
+        let background = status_bar_background(cx);
 
         h_flex()
             .w_full()
@@ -116,11 +124,7 @@ impl Render for StatusBar {
             .gap(DynamicSpacing::Base08.rems(cx))
             .px(DynamicSpacing::Base06.rems(cx))
             .py(DynamicSpacing::Base04.rems(cx))
-            .bg(cx
-                .theme()
-                .colors()
-                .status_bar_background
-                .blend(cx.theme().colors().panel_background.opacity(0.16)))
+            .bg(background)
             .map(|el| match window.window_decorations() {
                 Decorations::Server => el,
                 Decorations::Client { tiling, .. } => el
@@ -148,7 +152,7 @@ impl Render for StatusBar {
                         if needs_gap_fix { px(-1.) } else { px(0.) }
                     })
                     .border_b(px(1.0))
-                    .border_color(cx.theme().colors().status_bar_background),
+                    .border_color(background),
             })
             .border_t_1()
             .border_color(cx.theme().colors().border_variant.opacity(0.56))
@@ -207,7 +211,7 @@ impl StatusBar {
     ) -> impl IntoElement {
         let on_right = sidebar.side == SidebarSide::Right;
         let has_notifications = sidebar.has_notifications;
-        let indicator_border = cx.theme().colors().status_bar_background;
+        let indicator_border = status_bar_background(cx);
 
         let toggle = sidebar_side_context_menu("sidebar-status-toggle-menu", cx)
             .anchor(if on_right {

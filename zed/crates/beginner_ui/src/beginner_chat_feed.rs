@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use acp_thread::{
     AcpThread, AcpThreadEvent, AgentThreadEntry, AssistantMessageChunk, ToolCallStatus,
 };
@@ -6,7 +8,7 @@ use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, Render, SharedString, Subscription,
     Window,
 };
-use ui::{Color, Icon, IconName, IconSize, Label, LabelSize, prelude::*};
+use ui::{Color, Icon, IconName, IconSize, Label, LabelSize, Tooltip, prelude::*};
 
 use crate::simple_design as ds;
 
@@ -48,11 +50,14 @@ pub struct BeginnerChatFeed {
     artifact_title: SharedString,
     preview_state: PreviewCardState,
     focus_handle: FocusHandle,
+    expanded_work_cards: HashSet<usize>,
+    collapsed_work_cards: HashSet<usize>,
     _subscription: Subscription,
 }
 
 pub enum BeginnerChatFeedEvent {
     PreviewRequested,
+    ShareRequested,
 }
 
 impl EventEmitter<BeginnerChatFeedEvent> for BeginnerChatFeed {}
@@ -79,6 +84,8 @@ impl BeginnerChatFeed {
             artifact_title,
             preview_state: PreviewCardState::Building,
             focus_handle: cx.focus_handle(),
+            expanded_work_cards: HashSet::default(),
+            collapsed_work_cards: HashSet::default(),
             _subscription: subscription,
         }
     }
@@ -109,6 +116,8 @@ impl Render for BeginnerChatFeed {
                 item,
                 &self.artifact_title,
                 self.preview_state,
+                &self.expanded_work_cards,
+                &self.collapsed_work_cards,
                 cx,
             ));
         }
@@ -120,10 +129,11 @@ impl Render for BeginnerChatFeed {
             .min_h_0()
             .w_full()
             .overflow_y_scroll()
-            .px_4()
-            .pt_4()
+            .items_center()
+            .px_6()
+            .pt_6()
             .pb(px(220.))
-            .gap_4()
+            .gap_5()
             .bg(ds::app_background(cx))
             .when(is_empty, |el| {
                 el.child(
@@ -363,59 +373,306 @@ fn render_item(
     item: FriendlyItem,
     artifact_title: &SharedString,
     preview_state: PreviewCardState,
+    expanded_work_cards: &HashSet<usize>,
+    collapsed_work_cards: &HashSet<usize>,
     cx: &mut Context<BeginnerChatFeed>,
 ) -> AnyElement {
     match item {
-        FriendlyItem::UserBubble { index, text } => v_flex()
+        FriendlyItem::UserBubble { index, text } => h_flex()
             .id(index)
             .w_full()
-            .items_start()
+            .justify_center()
             .py_1()
-            .child(render_message_bubble(text, MessageTone::User, cx))
+            .child(
+                h_flex()
+                    .w_full()
+                    .max_w(px(ds::CHAT_MAX_WIDTH))
+                    .justify_end()
+                    .child(render_message_bubble(text, MessageTone::User, cx)),
+            )
             .into_any_element(),
 
         FriendlyItem::BackboardCard { index, text, tasks } => {
             let cleaned_text = text.and_then(|text| clean_assistant_text(&text, &tasks));
+            let can_show_feedback = !tasks.is_empty()
+                && preview_state == PreviewCardState::Ready
+                && !tasks.iter().any(|task| task.failed);
+            let work_expanded =
+                work_card_is_expanded(index, &tasks, expanded_work_cards, collapsed_work_cards);
             v_flex()
                 .id(index + 10_000)
                 .w_full()
-                .items_start()
-                .gap_4()
+                .items_center()
+                .gap_3()
                 .py_1()
-                .when(!tasks.is_empty(), |el| {
-                    el.child(
-                        v_flex()
-                            .w_full()
-                            .max_w(px(ds::CHAT_MAX_WIDTH))
-                            .min_h(px(96.))
-                            .rounded(px(14.))
-                            .bg(ds::card_background(cx))
-                            .border_1()
-                            .border_color(ds::soft_border(cx))
-                            .when(tasks.iter().any(|task| task.failed), |el| {
-                                el.border_color(cx.theme().status().error_border)
-                            })
-                            .p_4()
-                            .child(
-                                h_flex()
-                                    .gap_4()
-                                    .items_center()
-                                    .child(render_artifact_tile(cx))
-                                    .child(render_artifact_summary(
-                                        &tasks,
-                                        artifact_title,
-                                        preview_state,
-                                        cx,
-                                    )),
-                            ),
-                    )
+                .when(tasks.is_empty(), |el| {
+                    el.when_some(cleaned_text.clone(), |el, text| {
+                        el.child(render_message_bubble(text, MessageTone::Assistant, cx))
+                    })
                 })
-                .when_some(cleaned_text, |el, text| {
-                    el.child(render_message_bubble(text, MessageTone::Assistant, cx))
+                .when(!tasks.is_empty(), |el| {
+                    el.child(render_work_section(
+                        index,
+                        cleaned_text,
+                        &tasks,
+                        work_expanded,
+                        cx,
+                    ))
+                    .child(render_artifact_card(
+                        &tasks,
+                        artifact_title,
+                        preview_state,
+                        cx,
+                    ))
+                })
+                .when(can_show_feedback, |el| {
+                    el.child(render_feedback_row(index, cx))
                 })
                 .into_any_element()
         }
     }
+}
+
+fn work_card_is_expanded(
+    index: usize,
+    tasks: &[TaskItem],
+    expanded_work_cards: &HashSet<usize>,
+    collapsed_work_cards: &HashSet<usize>,
+) -> bool {
+    if expanded_work_cards.contains(&index) {
+        return true;
+    }
+
+    if collapsed_work_cards.contains(&index) {
+        return false;
+    }
+
+    tasks.iter().any(|task| !task.done && !task.failed)
+}
+
+fn render_work_section(
+    index: usize,
+    text: Option<String>,
+    tasks: &[TaskItem],
+    is_expanded: bool,
+    cx: &mut Context<BeginnerChatFeed>,
+) -> impl IntoElement {
+    let header_id = SharedString::from(format!("simple-work-card-{index}"));
+    let is_running = tasks.iter().any(|task| !task.done && !task.failed);
+    let label = if is_running { "Working" } else { "Worked" };
+    let hover_background = ds::hover_background(cx);
+
+    v_flex()
+        .w_full()
+        .max_w(px(ds::CHAT_MAX_WIDTH))
+        .gap_3()
+        .child(
+            h_flex()
+                .id(header_id)
+                .w_full()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .py_2()
+                .border_b_1()
+                .border_color(ds::separator(cx))
+                .cursor_pointer()
+                .hover(move |el| el.bg(hover_background.opacity(0.35)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if is_expanded {
+                        this.expanded_work_cards.remove(&index);
+                        this.collapsed_work_cards.insert(index);
+                    } else {
+                        this.collapsed_work_cards.remove(&index);
+                        this.expanded_work_cards.insert(index);
+                    }
+                    cx.notify();
+                }))
+                .child(
+                    h_flex()
+                        .items_center()
+                        .gap_2()
+                        .when(is_running, |el| {
+                            el.child(
+                                Icon::new(IconName::LoadCircle)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Custom(ds::icon_muted(cx))),
+                            )
+                        })
+                        .child(
+                            Label::new(label)
+                                .size(LabelSize::Small)
+                                .color(Color::Custom(ds::text_muted(cx))),
+                        )
+                        .child(
+                            Label::new(work_summary_label(tasks))
+                                .size(LabelSize::XSmall)
+                                .color(Color::Custom(ds::text_muted(cx).opacity(0.72))),
+                        )
+                        .child(
+                            Icon::new(if is_expanded {
+                                IconName::ChevronUp
+                            } else {
+                                IconName::ChevronDown
+                            })
+                            .size(IconSize::XSmall)
+                            .color(Color::Custom(ds::icon_muted(cx))),
+                        ),
+                ),
+        )
+        .when(is_expanded, |el| {
+            el.when_some(text, |el, text| {
+                el.child(render_message_bubble(text, MessageTone::Assistant, cx))
+            })
+            .child(render_task_list(tasks, cx))
+        })
+}
+
+fn work_summary_label(tasks: &[TaskItem]) -> SharedString {
+    let file_changes = tasks
+        .iter()
+        .filter(|task| {
+            matches!(
+                task.kind,
+                TaskKind::Edit | TaskKind::Delete | TaskKind::Move
+            )
+        })
+        .count();
+    let commands = tasks
+        .iter()
+        .filter(|task| task.kind == TaskKind::Execute)
+        .count();
+    let context_steps = tasks
+        .iter()
+        .filter(|task| {
+            matches!(
+                task.kind,
+                TaskKind::Fetch | TaskKind::Read | TaskKind::Search
+            )
+        })
+        .count();
+
+    let mut parts = Vec::new();
+    if file_changes > 0 {
+        parts.push(format!(
+            "{} file {}",
+            file_changes,
+            if file_changes == 1 {
+                "change"
+            } else {
+                "changes"
+            }
+        ));
+    }
+    if commands > 0 {
+        parts.push(format!(
+            "{} {}",
+            commands,
+            if commands == 1 { "command" } else { "commands" }
+        ));
+    }
+    if context_steps > 0 {
+        parts.push(format!(
+            "{} context {}",
+            context_steps,
+            if context_steps == 1 { "step" } else { "steps" }
+        ));
+    }
+
+    if parts.is_empty() {
+        SharedString::from(format!(
+            "{} {}",
+            tasks.len(),
+            if tasks.len() == 1 { "step" } else { "steps" }
+        ))
+    } else {
+        SharedString::from(parts.join(" · "))
+    }
+}
+
+fn render_task_list(tasks: &[TaskItem], cx: &mut Context<BeginnerChatFeed>) -> impl IntoElement {
+    let rows = tasks
+        .iter()
+        .enumerate()
+        .map(|(index, task)| render_task_row(index, task, cx).into_any_element())
+        .collect::<Vec<_>>();
+
+    v_flex()
+        .w_full()
+        .max_w(px(ds::CHAT_MAX_WIDTH))
+        .gap_1()
+        .children(rows)
+}
+
+fn render_task_row(
+    index: usize,
+    task: &TaskItem,
+    cx: &mut Context<BeginnerChatFeed>,
+) -> impl IntoElement {
+    let icon = if task.failed {
+        IconName::XCircle
+    } else if task.done {
+        IconName::Check
+    } else {
+        IconName::Circle
+    };
+    let color = if task.failed {
+        ds::error(cx)
+    } else if task.done {
+        ds::text_muted(cx)
+    } else {
+        ds::accent(cx)
+    };
+
+    h_flex()
+        .id(SharedString::from(format!("simple-task-row-{index}")))
+        .w_full()
+        .min_h(px(28.))
+        .items_center()
+        .gap_2()
+        .child(
+            Icon::new(icon)
+                .size(IconSize::XSmall)
+                .color(Color::Custom(color)),
+        )
+        .child(
+            Label::new(SharedString::from(task.label.clone()))
+                .size(LabelSize::Small)
+                .color(Color::Custom(ds::text(cx)))
+                .truncate(),
+        )
+}
+
+fn render_artifact_card(
+    tasks: &[TaskItem],
+    artifact_title: &SharedString,
+    preview_state: PreviewCardState,
+    cx: &mut Context<BeginnerChatFeed>,
+) -> impl IntoElement {
+    v_flex()
+        .w_full()
+        .max_w(px(ds::CHAT_MAX_WIDTH))
+        .min_h(px(96.))
+        .rounded(px(14.))
+        .bg(ds::card_background(cx))
+        .border_1()
+        .border_color(ds::soft_border(cx))
+        .when(tasks.iter().any(|task| task.failed), |el| {
+            el.border_color(ds::error(cx)).bg(ds::error_background(cx))
+        })
+        .p_4()
+        .child(
+            h_flex()
+                .gap_4()
+                .items_center()
+                .child(render_artifact_tile(cx))
+                .child(render_artifact_summary(
+                    tasks,
+                    artifact_title,
+                    preview_state,
+                    cx,
+                )),
+        )
 }
 
 #[derive(Clone, Copy)]
@@ -450,9 +707,12 @@ fn render_message_bubble(
         .collect::<Vec<_>>();
 
     div()
-        .w_full()
-        .max_w(px(ds::CHAT_MAX_WIDTH))
-        .rounded(px(10.))
+        .max_w(px(match tone {
+            MessageTone::User => 640.,
+            MessageTone::Assistant => ds::CHAT_MAX_WIDTH,
+        }))
+        .when(matches!(tone, MessageTone::Assistant), |el| el.w_full())
+        .rounded(px(12.))
         .when(matches!(tone, MessageTone::User), |el| {
             el.bg(ds::field_background(cx))
                 .border_1()
@@ -521,7 +781,6 @@ fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
         Some(cleaned.join("\n"))
     }
 }
-
 fn push_unique_line(lines: &mut Vec<String>, line: String) {
     if lines.last().is_some_and(|last| last == &line) {
         return;
@@ -538,7 +797,7 @@ fn chat_lines(text: &str) -> Vec<String> {
             }
             continue;
         }
-        lines.extend(wrap_chat_paragraph(&paragraph, 74));
+        lines.extend(wrap_chat_paragraph(&paragraph, 104));
         lines.push(String::new());
     }
     while lines.last().is_some_and(|line| line.is_empty()) {
@@ -698,8 +957,10 @@ fn render_artifact_summary(
                         .min_w(px(56.))
                         .px_2p5()
                         .py_1()
-                        .rounded_full()
+                        .rounded(px(4.))
                         .bg(ds::field_background(cx))
+                        .border_1()
+                        .border_color(ds::soft_border(cx))
                         .cursor_pointer()
                         .hover(move |el| el.bg(preview_hover_border.opacity(0.12)))
                         .on_click(cx.listener(|_, _, _, cx| {
@@ -727,8 +988,8 @@ fn artifact_status(
 ) -> ArtifactStatus {
     if tasks.iter().any(|task| task.failed) {
         return ArtifactStatus {
-            title: SharedString::from("Could not finish changes"),
-            metadata: SharedString::from("Review the failed step and try again."),
+            title: SharedString::from("Preview unavailable"),
+            metadata: SharedString::from("Try generating the artifact again."),
         };
     }
 
@@ -746,21 +1007,21 @@ fn artifact_status(
         };
         return ArtifactStatus {
             title: SharedString::from(title),
-            metadata: SharedString::from("Working in your project"),
+            metadata: SharedString::from("Generating preview..."),
         };
     }
 
     match preview_state {
         PreviewCardState::Generating => ArtifactStatus {
-            title: SharedString::from("Starting local preview"),
-            metadata: SharedString::from("Waiting for the app server to respond."),
+            title: SharedString::from("Building landing page..."),
+            metadata: SharedString::from("Generating preview..."),
         },
         PreviewCardState::Ready => ArtifactStatus {
-            title: SharedString::from("Preview ready"),
-            metadata: artifact_title.clone(),
+            title: artifact_title.clone(),
+            metadata: SharedString::from("Code · HTML"),
         },
         PreviewCardState::Unavailable => ArtifactStatus {
-            title: SharedString::from("Changes finished"),
+            title: SharedString::from("Preview unavailable"),
             metadata: SharedString::from("No runnable preview was detected."),
         },
         PreviewCardState::Building => {
@@ -787,7 +1048,7 @@ fn artifact_status(
                 "Working in your project".to_string()
             };
             ArtifactStatus {
-                title: SharedString::from(format!("Updating {}", artifact_title.as_ref())),
+                title: SharedString::from(format!("Building {}...", artifact_title.as_ref())),
                 metadata: SharedString::from(metadata),
             }
         }
@@ -872,5 +1133,71 @@ fn render_artifact_tile(cx: &App) -> impl IntoElement {
                                 .color(Color::Custom(colors.icon_accent)),
                         ),
                 ),
+        )
+}
+
+fn render_feedback_row(index: usize, cx: &mut Context<BeginnerChatFeed>) -> impl IntoElement {
+    h_flex()
+        .max_w(px(ds::CHAT_MAX_WIDTH))
+        .w_full()
+        .gap_1()
+        .items_center()
+        .child(render_feedback_button(
+            SharedString::from(format!("simple-feedback-up-{index}")),
+            IconName::ThumbsUp,
+            "Good response",
+            false,
+            cx,
+        ))
+        .child(render_feedback_button(
+            SharedString::from(format!("simple-feedback-down-{index}")),
+            IconName::ThumbsDown,
+            "Bad response",
+            false,
+            cx,
+        ))
+        .child(render_feedback_button(
+            SharedString::from(format!("simple-feedback-copy-{index}")),
+            IconName::Copy,
+            "Copy",
+            false,
+            cx,
+        ))
+        .child(render_feedback_button(
+            SharedString::from(format!("simple-feedback-share-{index}")),
+            IconName::ArrowUpRight,
+            "Share",
+            true,
+            cx,
+        ))
+}
+
+fn render_feedback_button(
+    id: SharedString,
+    icon: IconName,
+    tooltip: &'static str,
+    emits_share: bool,
+    cx: &mut Context<BeginnerChatFeed>,
+) -> impl IntoElement {
+    let hover_background = ds::hover_background(cx);
+    div()
+        .id(id)
+        .size(px(26.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.))
+        .cursor_pointer()
+        .tooltip(Tooltip::text(tooltip))
+        .hover(move |el| el.bg(hover_background))
+        .when(emits_share, |el| {
+            el.on_click(cx.listener(|_, _, _, cx| {
+                cx.emit(BeginnerChatFeedEvent::ShareRequested);
+            }))
+        })
+        .child(
+            Icon::new(icon)
+                .size(IconSize::XSmall)
+                .color(Color::Custom(ds::icon_muted(cx))),
         )
 }

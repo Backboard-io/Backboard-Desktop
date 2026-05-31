@@ -89,6 +89,7 @@ pub(crate) struct BackboardNativeState {
     indexing_workspaces: RefCell<BTreeSet<PathBuf>>,
     model_cache: RefCell<Option<Vec<AgentModelInfo>>>,
     model_context_windows: RefCell<HashMap<String, u64>>,
+    model_pricing: RefCell<HashMap<String, BackboardModelPricing>>,
     prompt_capabilities: acp::PromptCapabilities,
 }
 
@@ -114,6 +115,13 @@ pub(crate) struct NativeSession {
     metrics: NativeTurnMetrics,
     context_window_tokens: Option<u64>,
     estimated_used_tokens: u64,
+    session_total_cost: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BackboardModelPricing {
+    input_cost_per_1m_tokens: f64,
+    output_cost_per_1m_tokens: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -294,6 +302,10 @@ fn rounded_number(value: f64) -> f64 {
     (value * 10.0).round() / 10.0
 }
 
+fn round_cost(value: f64) -> f64 {
+    (value * 1_000_000.0).round() / 1_000_000.0
+}
+
 fn model_context_key(provider: &str, model: &str) -> String {
     format!(
         "{}/{}",
@@ -335,6 +347,7 @@ impl BackboardNativeConnection {
                 indexing_workspaces: RefCell::default(),
                 model_cache: RefCell::default(),
                 model_context_windows: RefCell::default(),
+                model_pricing: RefCell::default(),
                 prompt_capabilities: acp::PromptCapabilities::new()
                     .embedded_context(true)
                     .image(true)
@@ -710,6 +723,59 @@ impl BackboardNativeState {
         }
     }
 
+    fn remember_model_pricing(&self, provider: &str, model: &str, pricing: BackboardModelPricing) {
+        if !pricing.input_cost_per_1m_tokens.is_finite()
+            || !pricing.output_cost_per_1m_tokens.is_finite()
+            || pricing.input_cost_per_1m_tokens < 0.0
+            || pricing.output_cost_per_1m_tokens < 0.0
+        {
+            return;
+        }
+
+        self.model_pricing
+            .borrow_mut()
+            .insert(model_context_key(provider, model), pricing);
+    }
+
+    pub(crate) fn estimated_turn_cost(
+        &self,
+        runtime: &SessionRuntime,
+        input_tokens: u64,
+        output_tokens: u64,
+    ) -> Option<f64> {
+        let pricing = self
+            .model_pricing
+            .borrow()
+            .get(&model_context_key(&runtime.provider, &runtime.model))
+            .copied()?;
+        let cost = (input_tokens as f64 * pricing.input_cost_per_1m_tokens
+            + output_tokens as f64 * pricing.output_cost_per_1m_tokens)
+            / 1_000_000.0;
+        (cost.is_finite() && cost >= 0.0).then(|| round_cost(cost))
+    }
+
+    pub(crate) fn add_session_cost_delta(
+        &self,
+        session_id: &acp::SessionId,
+        delta: f64,
+    ) -> Option<f64> {
+        if !delta.is_finite() {
+            return None;
+        }
+
+        let mut sessions = self.sessions.borrow_mut();
+        let session = sessions.get_mut(session_id)?;
+        session.session_total_cost = round_cost((session.session_total_cost + delta).max(0.0));
+        Some(session.session_total_cost)
+    }
+
+    pub(crate) fn session_total_cost(&self, session_id: &acp::SessionId) -> Option<f64> {
+        self.sessions
+            .borrow()
+            .get(session_id)
+            .map(|session| session.session_total_cost)
+    }
+
     fn prepare_workspace_and_start_indexing(self: &Rc<Self>, workspace: PathBuf, cx: &mut App) {
         let workspace_key = index::workspace_key(&workspace);
         if !self
@@ -1071,6 +1137,7 @@ impl AgentConnection for BackboardNativeConnection {
                 metrics: NativeTurnMetrics::default(),
                 context_window_tokens: None,
                 estimated_used_tokens: 0,
+                session_total_cost: 0.0,
             },
         );
         self.state
@@ -1304,6 +1371,7 @@ impl BackboardNativeConnection {
                 metrics: NativeTurnMetrics::default(),
                 context_window_tokens: None,
                 estimated_used_tokens: 0,
+                session_total_cost: 0.0,
             },
         );
         self.state
@@ -1595,6 +1663,19 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                                     &model.provider,
                                     &model.name,
                                     context_limit,
+                                );
+                            }
+                            if let (Some(input_cost_per_1m_tokens), Some(output_cost_per_1m_tokens)) = (
+                                model.input_cost_per_1m_tokens,
+                                model.output_cost_per_1m_tokens,
+                            ) {
+                                state.remember_model_pricing(
+                                    &model.provider,
+                                    &model.name,
+                                    BackboardModelPricing {
+                                        input_cost_per_1m_tokens,
+                                        output_cost_per_1m_tokens,
+                                    },
                                 );
                             }
                             let id = format!("{}/{}", model.provider, model.name);
@@ -2324,6 +2405,7 @@ mod tests {
                 metrics: NativeTurnMetrics::default(),
                 context_window_tokens: None,
                 estimated_used_tokens: 0,
+                session_total_cost: 0.0,
             },
         );
 
@@ -2543,6 +2625,7 @@ description: Modern design guidance.
                 metrics: NativeTurnMetrics::default(),
                 context_window_tokens: None,
                 estimated_used_tokens: 0,
+                session_total_cost: 0.0,
             },
         );
 

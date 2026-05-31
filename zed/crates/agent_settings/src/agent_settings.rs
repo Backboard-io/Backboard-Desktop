@@ -24,6 +24,7 @@ pub use crate::agent_profile::*;
 pub const SUMMARIZE_THREAD_PROMPT: &str = include_str!("prompts/summarize_thread_prompt.txt");
 pub const SUMMARIZE_THREAD_DETAILED_PROMPT: &str =
     include_str!("prompts/summarize_thread_detailed_prompt.txt");
+const MESSAGE_EDITOR_EXTRA_VISIBLE_LINES: usize = 9;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PanelLayout {
@@ -201,7 +202,8 @@ impl AgentSettings {
     }
 
     pub fn set_message_editor_max_lines(&self) -> usize {
-        self.message_editor_min_lines * 2
+        self.message_editor_min_lines
+            .saturating_add(MESSAGE_EDITOR_EXTRA_VISIBLE_LINES)
     }
 
     pub fn favorite_model_ids(&self) -> HashSet<acp::ModelId> {

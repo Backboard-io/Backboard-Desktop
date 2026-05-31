@@ -4,9 +4,9 @@ use db::kvp::KeyValueStore;
 use fs::Fs;
 use gpui::{
     Action, Animation, AnimationExt as _, AnyElement, App, AppContext, AsyncWindowContext, Context,
-    DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, Hsla, IntoElement,
-    KeyContext, MouseButton, ObjectFit, Render, ScrollHandle, SharedString, Subscription, Task,
-    TaskExt as _, WeakEntity, Window, actions, img, pulsating_between, rgb,
+    DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, IntoElement, KeyContext,
+    MouseButton, ObjectFit, Render, ScrollHandle, SharedString, Subscription, Task, TaskExt as _,
+    WeakEntity, Window, actions, img, pulsating_between,
 };
 use notifications::status_toast::StatusToast;
 use schemars::JsonSchema;
@@ -61,6 +61,9 @@ pub const EXPERIENCE_LEVEL_KVP_KEY: &str = "backboard_experience_level";
 const BACKBOARD_DASHBOARD_URL: &str = "https://app.backboard.io/dashboard";
 const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
 const TOUR_TEST_PROMPT: &str = "In this sample repo, add a completed-task counter to the app. Update the tests and run `npm test`.";
+const SPLASH_LOGO_PATH: &str = "images/animation_logo.png";
+const SPLASH_LOGO_SIZE: f32 = 280.;
+const WELCOME_LOGO_SIZE: f32 = 184.;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ExperienceLevel {
@@ -100,17 +103,6 @@ enum OnboardingStep {
     ImportSettings(ExperienceLevel),
 }
 
-const TOUR_PROMPT_OVERLAY: Hsla = Hsla {
-    h: 240. / 360.,
-    s: 0.33,
-    l: 0.03,
-    a: 0.20,
-};
-
-fn tour_prompt_color(hex: u32) -> Hsla {
-    Hsla::from(rgb(hex))
-}
-
 struct WorkspaceTourPromptModal {
     focus_handle: FocusHandle,
     start_tour: bool,
@@ -127,13 +119,18 @@ impl WorkspaceTourPromptModal {
 
 impl Render for WorkspaceTourPromptModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let overlay_background = colors.background.opacity(0.64);
+        let modal_background = colors.elevated_surface_background;
+        let modal_border = colors.border_variant;
+
         div()
             .absolute()
             .inset_0()
             .size_full()
             .occlude()
             .track_focus(&self.focus_handle)
-            .bg(TOUR_PROMPT_OVERLAY)
+            .bg(overlay_background)
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
             })
@@ -144,8 +141,8 @@ impl Render for WorkspaceTourPromptModal {
                         .max_w(px(420.))
                         .rounded(px(14.))
                         .border_1()
-                        .border_color(tour_prompt_color(0xeceff4))
-                        .bg(tour_prompt_color(0xfbfcfd))
+                        .border_color(modal_border)
+                        .bg(modal_background)
                         .shadow_lg()
                         .px_6()
                         .py_6()
@@ -156,14 +153,14 @@ impl Render for WorkspaceTourPromptModal {
                                 .child(
                                     Label::new("Take a quick tour?")
                                         .size(LabelSize::Default)
-                                        .color(Color::Custom(tour_prompt_color(0x141414))),
+                                        .color(Color::Default),
                                 )
                                 .child(
                                     Label::new(
                                         "Walk through the editor, composer, panels, and a sample repo.",
                                     )
                                     .size(LabelSize::Small)
-                                    .color(Color::Custom(tour_prompt_color(0x8f9bad))),
+                                    .color(Color::Muted),
                                 ),
                         )
                         .child(
@@ -173,6 +170,7 @@ impl Render for WorkspaceTourPromptModal {
                                 .child(
                                     Button::new("workspace-tour-prompt-skip", "Skip")
                                         .style(ButtonStyle::Subtle)
+                                        .color(Color::Muted)
                                         .on_click(cx.listener(|_, _, _, cx| {
                                             cx.emit(DismissEvent);
                                         })),
@@ -467,6 +465,7 @@ impl Onboarding {
             "onboarding/simple_dark.png",
             "onboarding/dev.png",
             "onboarding/dev_dark.png",
+            SPLASH_LOGO_PATH,
             "onboarding/Visual_Studio_Code_1.35_icon.svg.png",
             "onboarding/cursor-logo-png_seeklogo-611587.png",
         ] {
@@ -791,13 +790,22 @@ console.log("sample app tests passed");
         }
     }
 
-    fn render_startup_logo(&self) -> impl IntoElement {
-        Vector::new(
-            VectorName::BackboardLogo,
-            rems_from_px(132.),
-            rems_from_px(210.),
-        )
-        .color(Color::Accent)
+    fn render_pulsing_logo(&self, size: f32, animation_id: &'static str) -> impl IntoElement {
+        img(SPLASH_LOGO_PATH)
+            .size(px(size))
+            .object_fit(ObjectFit::Contain)
+            .with_fallback(move || div().size(px(size)).into_any_element())
+            .with_animation(
+                animation_id,
+                Animation::new(Duration::from_millis(1600))
+                    .repeat()
+                    .with_easing(pulsating_between(0.72, 1.)),
+                |logo, opacity| logo.opacity(opacity),
+            )
+    }
+
+    fn render_splash_logo(&self) -> impl IntoElement {
+        self.render_pulsing_logo(SPLASH_LOGO_SIZE, "onboarding-splash-logo-pulse")
     }
 
     fn render_splash(&mut self, _cx: &mut Context<Self>) -> AnyElement {
@@ -807,15 +815,9 @@ console.log("sample app tests passed");
             .items_center()
             .justify_center()
             .child(
-                v_flex().items_center().child(
-                    div().child(self.render_startup_logo()).with_animation(
-                        "onboarding-splash-logo-pulse",
-                        Animation::new(Duration::from_millis(1600))
-                            .repeat()
-                            .with_easing(pulsating_between(0.72, 1.)),
-                        |element, opacity| element.opacity(opacity),
-                    ),
-                ),
+                v_flex()
+                    .items_center()
+                    .child(div().child(self.render_splash_logo())),
             )
             .into_any_element()
     }
@@ -825,27 +827,19 @@ console.log("sample app tests passed");
             .w_full()
             .min_h(rems_from_px(620.))
             .items_center()
-            .gap_7()
-            .child(
-                div().w_full().flex().justify_center().child(
-                    Vector::new(
-                        VectorName::BackboardLogo,
-                        rems_from_px(124.),
-                        rems_from_px(198.),
-                    )
-                    .color(Color::Accent),
-                ),
-            )
+            .justify_center()
+            .pb_12()
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(rems_from_px(460.))
+                    .max_w(rems_from_px(420.))
                     .items_center()
-                    .gap_5()
-                    .child(Vector::new(
-                        VectorName::BackboardLogo,
-                        rems_from_px(48.),
-                        rems_from_px(64.),
+                    .gap_6()
+                    .child(div().mb_1().child(
+                        self.render_pulsing_logo(
+                            WELCOME_LOGO_SIZE,
+                            "onboarding-welcome-logo-pulse",
+                        ),
                     ))
                     .child(
                         v_flex()
@@ -861,23 +855,21 @@ console.log("sample app tests passed");
                             .child(
                                 div().w_full().text_center().child(
                                     Label::new("Let's get your workspace set up.")
-                                        .size(LabelSize::Large)
+                                        .size(LabelSize::Default)
                                         .color(Color::Muted),
                                 ),
                             ),
                     )
                     .child(
-                        div().rounded_full().overflow_hidden().child(
-                            Button::new("continue-from-welcome", "Continue")
-                                .style(ButtonStyle::Filled)
-                                .size(ButtonSize::Large)
-                                .width(rems_from_px(172.))
-                                .end_icon(Icon::new(IconName::ArrowRight).size(IconSize::Small))
-                                .on_click(cx.listener(|this, _, _window, cx| {
-                                    this.step = OnboardingStep::ExperiencePicker;
-                                    cx.notify();
-                                })),
-                        ),
+                        Button::new("continue-from-welcome", "Continue")
+                            .style(ButtonStyle::Filled)
+                            .size(ButtonSize::Large)
+                            .width(rems_from_px(168.))
+                            .end_icon(Icon::new(IconName::ArrowRight).size(IconSize::Small))
+                            .on_click(cx.listener(|this, _, _window, cx| {
+                                this.step = OnboardingStep::ExperiencePicker;
+                                cx.notify();
+                            })),
                     ),
             )
             .into_any_element()
@@ -1045,6 +1037,7 @@ console.log("sample app tests passed");
                     "onboarding/simple_dark.png",
                     "onboarding/dev.png",
                     "onboarding/dev_dark.png",
+                    SPLASH_LOGO_PATH,
                     "onboarding/Visual_Studio_Code_1.35_icon.svg.png",
                     "onboarding/cursor-logo-png_seeklogo-611587.png",
                 ]
@@ -1064,6 +1057,7 @@ impl Render for Onboarding {
             self.step,
             OnboardingStep::Setup(_) | OnboardingStep::ImportSettings(_)
         );
+        let is_splash = matches!(self.step, OnboardingStep::Splash);
         let is_intro = matches!(self.step, OnboardingStep::Splash | OnboardingStep::Welcome);
         let is_experience_picker = matches!(self.step, OnboardingStep::ExperiencePicker);
         let primary_setup_action_label = self.primary_setup_action_label();
@@ -1109,6 +1103,9 @@ impl Render for Onboarding {
                             .mx_auto()
                             .p_12()
                             .gap_6()
+                            .when(is_splash, |this| {
+                                this.size_full().max_w_full().p_0().gap_0()
+                            })
                             .when(!is_intro, |this| {
                                 this.child(
                                     h_flex()

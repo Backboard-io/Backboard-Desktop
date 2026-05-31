@@ -243,6 +243,10 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
         false
     }
 
+    fn can_open_in_center_pane(&self, _cx: &App) -> bool {
+        true
+    }
+
     fn is_fullscreen_onboarding(&self) -> bool {
         false
     }
@@ -490,6 +494,7 @@ pub trait ItemHandle: 'static + Send {
     fn buffer_kind(&self, cx: &App) -> ItemBufferKind;
     fn boxed_clone(&self) -> Box<dyn ItemHandle>;
     fn can_split(&self, cx: &App) -> bool;
+    fn can_open_in_center_pane(&self, cx: &App) -> bool;
     fn is_fullscreen_onboarding(&self, cx: &App) -> bool;
     fn clone_on_split(
         &self,
@@ -721,6 +726,10 @@ impl<T: Item> ItemHandle for Entity<T> {
 
     fn can_split(&self, cx: &App) -> bool {
         self.read(cx).can_split()
+    }
+
+    fn can_open_in_center_pane(&self, cx: &App) -> bool {
+        self.read(cx).can_open_in_center_pane(cx)
     }
 
     fn is_fullscreen_onboarding(&self, cx: &App) -> bool {

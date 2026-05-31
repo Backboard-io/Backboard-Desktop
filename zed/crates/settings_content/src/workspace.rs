@@ -472,7 +472,7 @@ pub struct TabBarSettingsContent {
     pub show: Option<bool>,
     /// Whether or not to show the navigation history buttons in the tab bar.
     ///
-    /// Default: true
+    /// Default: false
     pub show_nav_history_buttons: Option<bool>,
     /// Whether or not to show the tab bar buttons.
     ///

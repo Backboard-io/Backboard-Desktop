@@ -1314,7 +1314,7 @@ or
 {
   "tab_bar": {
     "show": true,
-    "show_nav_history_buttons": true,
+    "show_nav_history_buttons": false,
     "show_tab_bar_buttons": true
   }
 }

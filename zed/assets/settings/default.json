@@ -1165,8 +1165,8 @@
     "use_modifier_to_send": false,
     // Minimum number of lines to display in the agent message editor.
     //
-    // Default: 4
-    "message_editor_min_lines": 4,
+    // Default: 3
+    "message_editor_min_lines": 3,
     // Whether to show turn statistics (elapsed time during generation, final turn duration).
     //
     // Default: false
@@ -1232,7 +1232,7 @@
     // Whether or not to show the tab bar in the editor
     "show": true,
     // Whether or not to show the navigation history buttons.
-    "show_nav_history_buttons": true,
+    "show_nav_history_buttons": false,
     // Whether or not to show the tab bar buttons.
     "show_tab_bar_buttons": true,
     // Whether or not to show pinned tabs in a separate row.

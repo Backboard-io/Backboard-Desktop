@@ -314,12 +314,12 @@ Control whether to hear a notification sound when the agent is done generating c
 ### Message Editor Size
 
 Use the `message_editor_min_lines` setting to control the minimum number of lines of height the agent message editor should have.
-It is set to `4` by default, and the max number of lines is always double of the minimum.
+It is set to `3` by default, and the editor grows by 9 more lines before scrolling.
 
 ```json [settings]
 {
   "agent": {
-    "message_editor_min_lines": 4
+    "message_editor_min_lines": 3
   }
 }
 ```

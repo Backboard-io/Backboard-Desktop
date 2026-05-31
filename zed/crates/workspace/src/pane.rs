@@ -1,6 +1,6 @@
 use crate::{
-    CloseWindow, NewCenterTerminal, NewFile, NewTerminal, OpenInTerminal, OpenOptions,
-    OpenTerminal, OpenVisible, SplitDirection, ToggleFileFinder, ToggleProjectSymbols, ToggleZoom,
+    CloseWindow, NewFile, NewTerminal, OpenInTerminal, OpenOptions, OpenTerminal, OpenVisible,
+    SplitDirection, ToggleFileFinder, ToggleProjectSymbols, ToggleZoom,
     WORKSPACE_CONTAINER_PADDING, WORKSPACE_CONTAINER_RADIUS, Workspace, WorkspaceItemBuilder,
     ZoomIn, ZoomOut,
     focus_follows_mouse::FocusFollowsMouse as _,
@@ -1234,6 +1234,10 @@ impl Pane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.can_add_item(&*item, cx) {
+            return;
+        }
+
         let item_already_exists = self
             .items
             .iter()
@@ -1370,6 +1374,10 @@ impl Pane {
 
     pub fn items_len(&self) -> usize {
         self.items.len()
+    }
+
+    pub fn can_add_item(&self, item: &dyn ItemHandle, cx: &App) -> bool {
+        !self.in_center_group || item.can_open_in_center_pane(cx)
     }
 
     pub fn items(&self) -> impl DoubleEndedIterator<Item = &Box<dyn ItemHandle>> {
@@ -2899,6 +2907,7 @@ impl Pane {
 
         let capability = item.capability(cx);
         let tab = Tab::new(ix)
+            .straight_sided()
             .position(if is_first_item {
                 TabPosition::First
             } else if is_last_item {
@@ -3817,6 +3826,10 @@ impl Pane {
         let item_id = dragged_tab.item.item_id();
         self.unpreview_item_if_preview(item_id);
 
+        if !to_pane.read(cx).can_add_item(&*dragged_tab.item, cx) {
+            return;
+        }
+
         let is_clone = cfg!(target_os = "macos") && window.modifiers().alt
             || cfg!(not(target_os = "macos")) && window.modifiers().control;
 
@@ -4237,10 +4250,6 @@ fn default_render_tab_bar_buttons(
                             .action("Search Symbols", ToggleProjectSymbols.boxed_clone())
                             .separator()
                             .action("New Terminal", NewTerminal::default().boxed_clone())
-                            .action(
-                                "New Center Terminal",
-                                NewCenterTerminal::default().boxed_clone(),
-                            )
                     }))
                 }),
         )

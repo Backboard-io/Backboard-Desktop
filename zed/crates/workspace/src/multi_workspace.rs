@@ -3,8 +3,9 @@ use fs::Fs;
 
 use gpui::{
     Animation, AnimationExt, AnyView, App, Context, DragMoveEvent, Entity, EntityId, EventEmitter,
-    FocusHandle, Focusable, FontWeight, ManagedView, MouseButton, Pixels, Render, Subscription,
-    Task, TaskExt, Tiling, WeakEntity, Window, WindowId, actions, deferred, ease_out_quint, px,
+    FocusHandle, Focusable, FontWeight, ManagedView, MouseButton, ObjectFit, Pixels, Render,
+    Subscription, Task, TaskExt, Tiling, WeakEntity, Window, WindowId, actions, deferred,
+    ease_out_quint, img, px,
 };
 pub use project::ProjectGroupKey;
 use project::{DisableAiSettings, Project};
@@ -448,6 +449,11 @@ impl MultiWorkspace {
     pub fn open_code_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_interface_mode(InterfaceMode::Expert, window, cx);
         self.set_workspace_mode_tab(WorkspaceModeTab::CodeEditor, window, cx);
+    }
+
+    pub fn open_agent_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_interface_mode(InterfaceMode::Expert, window, cx);
+        self.set_workspace_mode_tab(WorkspaceModeTab::AgentWorkspace, window, cx);
     }
 
     pub fn open_git_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2557,7 +2563,7 @@ impl MultiWorkspace {
 
     fn workspace_mode_target_label(target: WorkspaceModeTarget) -> &'static str {
         match target {
-            WorkspaceModeTarget::Simple => "Simple",
+            WorkspaceModeTarget::Simple => "Simple Mode",
             WorkspaceModeTarget::CodeEditor => "Code Editor",
             WorkspaceModeTarget::AgentWorkspace => "Agents",
         }
@@ -2571,11 +2577,17 @@ impl MultiWorkspace {
         }
     }
 
-    fn workspace_mode_target_number(target: WorkspaceModeTarget) -> &'static str {
-        match target {
-            WorkspaceModeTarget::CodeEditor => "1",
-            WorkspaceModeTarget::AgentWorkspace => "2",
-            WorkspaceModeTarget::Simple => "3",
+    fn workspace_mode_target_image_path(
+        target: WorkspaceModeTarget,
+        dark_theme: bool,
+    ) -> &'static str {
+        match (target, dark_theme) {
+            (WorkspaceModeTarget::Simple, true) => "images/simple_dark.png",
+            (WorkspaceModeTarget::CodeEditor, true) => "images/codeeditor_dark.png",
+            (WorkspaceModeTarget::AgentWorkspace, true) => "images/agent_dark.png",
+            (WorkspaceModeTarget::Simple, false) => "images/simple.png",
+            (WorkspaceModeTarget::CodeEditor, false) => "images/codeeditor.png",
+            (WorkspaceModeTarget::AgentWorkspace, false) => "images/agent.png",
         }
     }
 
@@ -2589,9 +2601,9 @@ impl MultiWorkspace {
 
     fn workspace_mode_target_expanded_width(target: WorkspaceModeTarget) -> Pixels {
         match target {
-            WorkspaceModeTarget::Simple => px(118.),
-            WorkspaceModeTarget::CodeEditor => px(140.),
-            WorkspaceModeTarget::AgentWorkspace => px(116.),
+            WorkspaceModeTarget::Simple => px(162.),
+            WorkspaceModeTarget::CodeEditor => px(162.),
+            WorkspaceModeTarget::AgentWorkspace => px(124.),
         }
     }
 
@@ -2606,12 +2618,10 @@ impl MultiWorkspace {
                 self.set_interface_mode(InterfaceMode::Simple, window, cx);
             }
             WorkspaceModeTarget::CodeEditor => {
-                self.set_interface_mode(InterfaceMode::Expert, window, cx);
-                self.set_workspace_mode_tab(WorkspaceModeTab::CodeEditor, window, cx);
+                self.open_code_editor(window, cx);
             }
             WorkspaceModeTarget::AgentWorkspace => {
-                self.set_interface_mode(InterfaceMode::Expert, window, cx);
-                self.set_workspace_mode_tab(WorkspaceModeTab::AgentWorkspace, window, cx);
+                self.open_agent_workspace(window, cx);
             }
         }
     }
@@ -2628,7 +2638,8 @@ impl MultiWorkspace {
         let tooltip = Self::workspace_mode_target_tooltip(target);
         let hovered = self.hovered_workspace_mode_target == Some(target);
         let colors = cx.theme().colors();
-        let collapsed_width = px(27.);
+        let dark_theme = cx.theme().appearance() == theme::Appearance::Dark;
+        let collapsed_width = px(26.);
         let expanded_width = Self::workspace_mode_target_expanded_width(target);
         let width = if hovered {
             expanded_width
@@ -2636,17 +2647,17 @@ impl MultiWorkspace {
             collapsed_width
         };
         let button_height = px(24.);
-        let number_mark = h_flex()
+        let image_mark = h_flex()
             .flex_none()
             .w(px(18.))
             .h(button_height)
             .items_center()
             .justify_center()
             .child(
-                Label::new(Self::workspace_mode_target_number(target))
-                    .size(LabelSize::Small)
-                    .weight(FontWeight::BOLD)
-                    .color(Color::Accent),
+                img(Self::workspace_mode_target_image_path(target, dark_theme))
+                    .size(px(16.))
+                    .object_fit(ObjectFit::Contain)
+                    .with_fallback(|| div().size(px(16.)).into_any_element()),
             );
 
         let button = h_flex()
@@ -2675,7 +2686,7 @@ impl MultiWorkspace {
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_workspace_mode_target(target, window, cx);
             }))
-            .child(number_mark)
+            .child(image_mark)
             .when(hovered, |this| {
                 let label_animation_id = ElementId::Name(format!("{id}-label").into());
                 this.child(
@@ -2685,7 +2696,6 @@ impl MultiWorkspace {
                         .italic()
                         .color(Color::Default)
                         .single_line()
-                        .truncate()
                         .with_animation(
                             label_animation_id,
                             Animation::new(Duration::from_millis(140))
@@ -2797,7 +2807,9 @@ impl MultiWorkspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors();
-        let switcher_bg = colors.tab_bar_background;
+        let switcher_bg = colors
+            .element_background
+            .blend(colors.panel_background.opacity(0.36));
 
         let switcher = h_flex()
             .h(px(36.))
@@ -2870,6 +2882,8 @@ impl Render for MultiWorkspace {
 
         if self.interface_mode == InterfaceMode::Simple {
             if let Some(view) = self.beginner_view.as_ref() {
+                window.set_background_appearance(gpui::WindowBackgroundAppearance::Blurred);
+
                 let workspace = self.workspace().clone();
                 let mut workspace_key_context =
                     workspace.update(cx, |workspace, cx| workspace.key_context(cx));
@@ -2890,7 +2904,6 @@ impl Render for MultiWorkspace {
                         .on_action(cx.listener(|this, _: &SwitchInterfaceMode, window, cx| {
                             this.open_code_editor(window, cx);
                         }))
-                        .child(self.render_workspace_mode_switcher(window, cx))
                         .child(self.decorate_workspace_tour_target(
                             div().flex_1().min_h_0().child(view.clone()),
                             WorkspaceTourStep::SimpleMode,
@@ -2907,6 +2920,8 @@ impl Render for MultiWorkspace {
                 );
             }
         }
+
+        window.set_background_appearance(cx.theme().window_background_appearance());
 
         let fullscreen_onboarding = self.active_item_is_fullscreen_onboarding(cx);
         let multi_workspace_enabled = self.multi_workspace_enabled(cx) && !fullscreen_onboarding;

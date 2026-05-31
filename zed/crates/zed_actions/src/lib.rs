@@ -657,7 +657,7 @@ pub struct OpenDevContainer;
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RevealTarget {
-    /// In the central pane group, "main" editor area.
+    /// Accepted for compatibility and routed to the terminal dock.
     Center,
     /// In the terminal dock, "regular" terminal items' place.
     #[default]

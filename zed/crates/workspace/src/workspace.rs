@@ -1887,7 +1887,7 @@ impl Workspace {
             // This data will be incorrect, but it will be overwritten by the time it needs to be used.
             bounds: Default::default(),
             centered_layout: false,
-            connected_layout: false,
+            connected_layout: true,
             bounds_save_task_queued: None,
             on_prompt_for_new_path: None,
             on_prompt_for_open_path: None,
@@ -11148,6 +11148,10 @@ fn move_all_items(
         .collect::<Vec<_>>()
     {
         let ix = item_ix - moved_items;
+        if !to_pane.read(cx).can_add_item(&*item_handle, cx) {
+            continue;
+        }
+
         if destination_is_different {
             // Close item from previous pane
             from_pane.update(cx, |source, cx| {
@@ -11183,6 +11187,10 @@ pub fn move_item(
         // Tab was closed during drag
         return;
     };
+
+    if !destination.read(cx).can_add_item(&*item_handle, cx) {
+        return;
+    }
 
     if source != destination {
         // Close item from previous pane
@@ -11222,6 +11230,9 @@ pub fn move_active_item(
     let Some(active_item) = source.read(cx).active_item() else {
         return;
     };
+    if !destination.read(cx).can_add_item(&*active_item, cx) {
+        return;
+    }
     source.update(cx, |source_pane, cx| {
         let item_id = active_item.item_id();
         source_pane.remove_item(item_id, false, close_if_empty, window, cx);
@@ -11253,6 +11264,9 @@ pub fn clone_active_item(
         return;
     };
     if !active_item.can_split(cx) {
+        return;
+    }
+    if !destination.read(cx).can_add_item(&*active_item, cx) {
         return;
     }
     let destination = destination.downgrade();
@@ -11435,6 +11449,24 @@ mod tests {
     use settings::SettingsStore;
     use util::path;
     use util::rel_path::rel_path;
+
+    #[gpui::test]
+    async fn test_connected_layout_defaults_to_enabled(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project.clone(), window, cx));
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            assert!(workspace.connected_layout());
+
+            workspace.toggle_connected_layout(&ToggleConnectedLayout, window, cx);
+
+            assert!(!workspace.connected_layout());
+        });
+    }
 
     #[gpui::test]
     async fn test_tab_disambiguation(cx: &mut TestAppContext) {

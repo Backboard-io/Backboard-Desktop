@@ -1081,7 +1081,7 @@ mod tests {
             expand_terminal_card: true,
             cancel_generation_on_terminal_stop: true,
             use_modifier_to_send: true,
-            message_editor_min_lines: 1,
+            message_editor_min_lines: 3,
             tool_permissions: Default::default(),
             show_turn_stats: false,
             show_merge_conflict_indicator: true,

@@ -55,7 +55,7 @@ impl TasksModalDelegate {
             reveal_target: Some(RevealTarget::Center),
         }) = &task_overrides
         {
-            Arc::from("Find a task, or run a command in the central pane")
+            Arc::from("Find a task, or run a command in the terminal panel")
         } else {
             Arc::from("Find a task, or run a command")
         };

@@ -29,12 +29,19 @@ pub enum TabCloseSide {
     End,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum TabShape {
+    Pill,
+    StraightSided,
+}
+
 #[derive(IntoElement, RegisterComponent)]
 pub struct Tab {
     div: Stateful<Div>,
     selected: bool,
     position: TabPosition,
     close_side: TabCloseSide,
+    shape: TabShape,
     start_slot: Option<AnyElement>,
     end_slot: Option<AnyElement>,
     children: SmallVec<[AnyElement; 2]>,
@@ -50,6 +57,7 @@ impl Tab {
             selected: false,
             position: TabPosition::First,
             close_side: TabCloseSide::End,
+            shape: TabShape::Pill,
             start_slot: None,
             end_slot: None,
             children: SmallVec::new(),
@@ -63,6 +71,11 @@ impl Tab {
 
     pub fn close_side(mut self, close_side: TabCloseSide) -> Self {
         self.close_side = close_side;
+        self
+    }
+
+    pub fn straight_sided(mut self) -> Self {
+        self.shape = TabShape::StraightSided;
         self
     }
 
@@ -149,9 +162,11 @@ impl RenderOnce for Tab {
             }
         };
 
+        let shape = self.shape;
+
         self.div
             .h(Tab::content_height(cx))
-            .rounded_full()
+            .when(shape == TabShape::Pill, |this| this.rounded_full())
             .bg(tab_bg)
             .border_1()
             .border_color(border_color)

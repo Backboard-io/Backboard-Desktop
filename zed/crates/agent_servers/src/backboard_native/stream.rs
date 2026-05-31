@@ -5,7 +5,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ::backboard::{AudioAttachment, SendMessageRequest, SubmitToolOutputsRequest};
+use ::backboard::{
+    AudioAttachment, RecentUsageQuery, SendMessageRequest, SubmitToolOutputsRequest,
+};
 use acp_thread::{AcpThread, UserMessageId};
 use agent_client_protocol::schema as acp;
 use anyhow::{Context as _, Result, anyhow};
@@ -21,6 +23,7 @@ use crate::backboard_native::{mcp, tool_schemas, tools, workspace};
 
 const STREAM_TEXT_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 const STREAM_TEXT_FLUSH_BYTES: usize = 512;
+const COST_RECONCILE_DELAY: Duration = Duration::from_secs(4);
 
 pub async fn run_prompt(
     state: Rc<BackboardNativeState>,
@@ -877,11 +880,27 @@ fn emit_usage(
             "output_tokens": output_tokens,
         }),
     );
-    state.emit_update(
-        runtime,
-        acp::SessionUpdate::UsageUpdate(acp::UsageUpdate::new(used, size).meta(meta)),
+    let estimated_turn_cost = state.estimated_turn_cost(runtime, input_tokens, output_tokens);
+    let total_cost = estimated_turn_cost
+        .and_then(|cost| state.add_session_cost_delta(&runtime.session_id, cost));
+    let usage_update = usage_update_with_cost(
+        acp::UsageUpdate::new(used, size).meta(meta),
+        total_cost.or_else(|| {
+            state
+                .session_total_cost(&runtime.session_id)
+                .filter(|cost| *cost > 0.0)
+        }),
+    );
+    state.emit_update(runtime, acp::SessionUpdate::UsageUpdate(usage_update), cx)?;
+    schedule_cost_reconciliation(
+        state.clone(),
+        runtime.clone(),
+        input_tokens,
+        output_tokens,
+        estimated_turn_cost.unwrap_or(0.0),
         cx,
-    )
+    );
+    Ok(())
 }
 
 fn emit_speed_update(
@@ -915,6 +934,97 @@ fn emit_speed_update(
         acp::SessionUpdate::UsageUpdate(acp::UsageUpdate::new(used, size).meta(meta)),
         cx,
     )
+}
+
+fn usage_update_with_cost(update: acp::UsageUpdate, total_cost: Option<f64>) -> acp::UsageUpdate {
+    match total_cost.filter(|cost| cost.is_finite() && *cost >= 0.0) {
+        Some(total_cost) => update.cost(acp::Cost::new(total_cost, "USD")),
+        None => update,
+    }
+}
+
+fn schedule_cost_reconciliation(
+    state: Rc<BackboardNativeState>,
+    runtime: SessionRuntime,
+    input_tokens: u64,
+    output_tokens: u64,
+    estimated_turn_cost: f64,
+    cx: &mut AsyncApp,
+) {
+    if input_tokens == 0 && output_tokens == 0 {
+        return;
+    }
+
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(COST_RECONCILE_DELAY).await;
+
+        let client = match state.client() {
+            Ok((_config, client)) => client,
+            Err(error) => {
+                log::debug!("failed to load Backboard client for cost reconciliation: {error:#}");
+                return;
+            }
+        };
+        let model_name = runtime.model.clone();
+        let usage = gpui_tokio::Tokio::spawn_result(cx, async move {
+            client
+                .get_recent_usage(RecentUsageQuery {
+                    model_name: Some(model_name),
+                    input_tokens: Some(input_tokens),
+                    output_tokens: Some(output_tokens),
+                    page_size: 3,
+                })
+                .await
+        })
+        .await;
+        let usage = match usage {
+            Ok(Some(usage)) => usage,
+            Ok(None) => return,
+            Err(error) => {
+                log::debug!("failed to fetch Backboard usage cost: {error:#}");
+                return;
+            }
+        };
+        let Some(billed_turn_cost) = billed_turn_cost_from_recent_usage(&usage) else {
+            return;
+        };
+        let delta = billed_turn_cost - estimated_turn_cost;
+        let Some(total_cost) = state.add_session_cost_delta(&runtime.session_id, delta) else {
+            return;
+        };
+
+        let (used, size) = state.usage_snapshot(&runtime);
+        let mut meta = acp::Meta::new();
+        let remaining_tokens = size.saturating_sub(used);
+        let context_percent = if size > 0 {
+            ((used as f64 / size as f64) * 100.0).round() as u64
+        } else {
+            0
+        };
+        meta.insert("model".to_string(), runtime.model.clone().into());
+        meta.insert("provider".to_string(), runtime.provider.clone().into());
+        meta.insert("intensity".to_string(), runtime.intensity.clone().into());
+        meta.insert("remaining_tokens".to_string(), remaining_tokens.into());
+        meta.insert(
+            "context_percent".to_string(),
+            context_percent.min(100).into(),
+        );
+        meta.insert(
+            "context_model".to_string(),
+            format!("{}/{}", runtime.provider, runtime.model).into(),
+        );
+        meta.insert("backboard_speed".to_string(), state.speed_meta(&runtime));
+
+        let update = usage_update_with_cost(
+            acp::UsageUpdate::new(used, size).meta(meta),
+            Some(total_cost),
+        );
+        if let Err(error) = state.emit_update(&runtime, acp::SessionUpdate::UsageUpdate(update), cx)
+        {
+            log::debug!("failed to emit Backboard usage cost update: {error:#}");
+        }
+    })
+    .detach();
 }
 
 fn emit_media_generated(
@@ -1148,6 +1258,19 @@ fn nested_usage_number(chunk: &Value, keys: &[&str]) -> Option<u64> {
         .and_then(|usage| usage_number(usage, keys))
 }
 
+fn billed_turn_cost_from_recent_usage(payload: &Value) -> Option<f64> {
+    let rows = payload.get("data")?.as_array()?;
+    if rows.len() != 1 {
+        return None;
+    }
+
+    let cost = rows
+        .first()?
+        .get("amount_deducted_usd")
+        .and_then(value_to_f64)?;
+    (cost.is_finite() && cost >= 0.0).then_some(cost)
+}
+
 fn value_to_u64(value: &Value) -> Option<u64> {
     value
         .as_u64()
@@ -1161,6 +1284,12 @@ fn value_to_u64(value: &Value) -> Option<u64> {
             })
         })
         .or_else(|| value.as_str().and_then(|text| text.parse::<u64>().ok()))
+}
+
+fn value_to_f64(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_str().and_then(|text| text.parse::<f64>().ok()))
 }
 
 fn estimate_tokens(text: &str) -> u64 {
@@ -1539,6 +1668,32 @@ mod tests {
         assert_eq!(usage.context_limit, 102400);
         assert_eq!(usage.summary_tokens, 5000);
         assert_eq!(usage.model.as_deref(), Some("openai/gpt-5"));
+    }
+
+    #[test]
+    fn parses_single_recent_usage_cost() {
+        let payload = json!({
+            "data": [{
+                "model": "gpt-4o",
+                "input_tokens": 1200,
+                "output_tokens": 300,
+                "amount_deducted_usd": "0.0042"
+            }]
+        });
+
+        assert_eq!(billed_turn_cost_from_recent_usage(&payload), Some(0.0042));
+    }
+
+    #[test]
+    fn ignores_ambiguous_recent_usage_cost() {
+        let payload = json!({
+            "data": [
+                {"amount_deducted_usd": 0.0042},
+                {"amount_deducted_usd": 0.0042}
+            ]
+        });
+
+        assert_eq!(billed_turn_cost_from_recent_usage(&payload), None);
     }
 
     #[test]

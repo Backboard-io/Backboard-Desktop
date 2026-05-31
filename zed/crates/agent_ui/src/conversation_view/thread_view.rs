@@ -32,6 +32,35 @@ use workspace::{OpenOptions, OpenVisible, SERIALIZATION_THROTTLE_TIME};
 
 use super::*;
 
+pub(super) type BeforeSendHook = Rc<dyn Fn(&str, &mut Window, &mut App) -> bool>;
+
+fn prefix_content_blocks(
+    prompt_prefix: &str,
+    mut content: Vec<acp::ContentBlock>,
+) -> Vec<acp::ContentBlock> {
+    if prompt_prefix.trim().is_empty() {
+        return content;
+    }
+
+    for block in &mut content {
+        if let acp::ContentBlock::Text(text) = block {
+            if text.text.trim().is_empty() {
+                continue;
+            }
+
+            let user_text = std::mem::take(&mut text.text);
+            text.text = format!("{prompt_prefix}\n\n{user_text}");
+            return content;
+        }
+    }
+
+    content.insert(
+        0,
+        acp::ContentBlock::Text(acp::TextContent::new(prompt_prefix.to_string())),
+    );
+    content
+}
+
 #[derive(Default)]
 struct ThreadFeedbackState {
     feedback: Option<ThreadFeedback>,
@@ -1340,6 +1369,8 @@ pub struct ThreadView {
     pub in_flight_prompt: Option<Vec<acp::ContentBlock>>,
     pub _subscriptions: Vec<Subscription>,
     pub message_editor: Entity<MessageEditor>,
+    prompt_prefix: Option<SharedString>,
+    before_send_hook: Option<BeforeSendHook>,
     #[cfg(feature = "audio")]
     dictation_state: DictationState,
     pub add_context_menu_handle: PopoverMenuHandle<ContextMenu>,
@@ -1579,6 +1610,8 @@ impl ThreadView {
             hovered_edited_file_buttons: None,
             in_flight_prompt: None,
             message_editor,
+            prompt_prefix: None,
+            before_send_hook: None,
             #[cfg(feature = "audio")]
             dictation_state: DictationState::default(),
             add_context_menu_handle: PopoverMenuHandle::default(),
@@ -1672,6 +1705,14 @@ impl ThreadView {
             .thread(acp_thread.session_id(), cx)
     }
 
+    pub(super) fn set_prompt_prefix(&mut self, prompt_prefix: Option<SharedString>) {
+        self.prompt_prefix = prompt_prefix;
+    }
+
+    pub(super) fn set_before_send_hook(&mut self, before_send_hook: Option<BeforeSendHook>) {
+        self.before_send_hook = before_send_hook;
+    }
+
     /// Resolves the message editor's contents into content blocks. For profiles
     /// that do not enable any tools, directory mentions are expanded to inline
     /// file contents since the agent can't read files on its own.
@@ -1687,7 +1728,18 @@ impl ThreadView {
                 .get(thread.profile())
                 .is_some_and(|profile| profile.tools.is_empty())
         });
-        message_editor.update(cx, |message_editor, cx| message_editor.contents(expand, cx))
+        let contents =
+            message_editor.update(cx, |message_editor, cx| message_editor.contents(expand, cx));
+        let Some(prompt_prefix) = self.prompt_prefix.clone() else {
+            return contents;
+        };
+        cx.spawn(async move |_cx| {
+            let (content, tracked_buffers) = contents.await?;
+            Ok((
+                prefix_content_blocks(&prompt_prefix, content),
+                tracked_buffers,
+            ))
+        })
     }
 
     pub fn current_model_id(&self, cx: &App) -> Option<String> {
@@ -2729,6 +2781,12 @@ impl ThreadView {
             }
         }
 
+        if let Some(before_send_hook) = self.before_send_hook.clone()
+            && !before_send_hook(text, window, cx)
+        {
+            return;
+        }
+
         cx.emit(AcpThreadViewEvent::Interacted);
         self.send_impl(message_editor, window, cx)
     }
@@ -3377,6 +3435,25 @@ impl ThreadView {
                     cx,
                 )
             }
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn set_message_editor_auto_height(
+        &mut self,
+        min_lines: usize,
+        max_lines: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        self.editor_expanded = false;
+        self.message_editor.update(cx, |editor, cx| {
+            editor.set_mode(
+                EditorMode::AutoHeight {
+                    min_lines,
+                    max_lines,
+                },
+                cx,
+            );
         });
         cx.notify();
     }
@@ -4982,6 +5059,23 @@ impl ThreadView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.render_message_editor_with_container(window, cx, true)
+    }
+
+    pub(crate) fn render_message_editor_embedded(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_message_editor_with_container(window, cx, false)
+    }
+
+    fn render_message_editor_with_container(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        include_container: bool,
+    ) -> AnyElement {
         if self.is_subagent() {
             return div().into_any_element();
         }
@@ -5011,12 +5105,13 @@ impl ThreadView {
         let has_messages = self.list_state.item_count() > 0;
         let fills_container = editor_expanded;
 
-        h_flex()
-            .px_2()
-            .pt_1()
-            .pb_1p5()
-            .bg(editor_bg_color)
-            .justify_center()
+        let editor = v_flex()
+            .w_full()
+            .max_w_full()
+            .when(fills_container, |this| this.h_full())
+            .flex_shrink()
+            .flex_grow()
+            .justify_between()
             .map(|this| {
                 if has_messages {
                     this.on_action(cx.listener(Self::expand_message_editor))
@@ -5027,117 +5122,114 @@ impl ThreadView {
             })
             .child(
                 v_flex()
+                    .relative()
                     .w_full()
-                    .max_w_full()
-                    .when(fills_container, |this| this.h_full())
-                    .flex_shrink()
-                    .flex_grow()
-                    .justify_between()
-                    .child(
-                        v_flex()
-                            .relative()
-                            .w_full()
-                            .min_h(px(92.))
-                            .when(fills_container, |this| this.flex_1())
-                            .px_3()
-                            .pt_2()
-                            .pb_1p5()
-                            .rounded_lg()
+                    .min_h(px(92.))
+                    .when(fills_container, |this| this.flex_1())
+                    .px_3()
+                    .pt_2()
+                    .pb_1p5()
+                    .when(include_container, |this| {
+                        this.rounded_lg()
                             .border_1()
                             .border_color(composer_border)
                             .hover(|style| style.border_color(colors.border_variant.opacity(0.62)))
                             .bg(composer_surface_bg)
                             .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
-                            .track_focus(&focus_handle)
-                            .child(self.message_editor.clone())
-                            .when(has_messages, |this| {
-                                this.child(
-                                    h_flex()
-                                        .absolute()
-                                        .top_0()
-                                        .right_0()
-                                        .opacity(0.5)
-                                        .hover(|s| s.opacity(1.0))
-                                        .child(
-                                            IconButton::new("toggle-height", expand_icon)
-                                                .icon_size(IconSize::Small)
-                                                .icon_color(Color::Muted)
-                                                .tooltip({
-                                                    move |_window, cx| {
-                                                        Tooltip::for_action_in(
-                                                            expand_tooltip,
-                                                            &ExpandMessageEditor,
-                                                            &focus_handle,
-                                                            cx,
-                                                        )
-                                                    }
-                                                })
-                                                .on_click(cx.listener(|this, _, window, cx| {
-                                                    this.expand_message_editor(
-                                                        &ExpandMessageEditor,
-                                                        window,
-                                                        cx,
-                                                    );
-                                                })),
-                                        ),
-                                )
-                            })
+                    })
+                    .track_focus(&focus_handle)
+                    .child(self.message_editor.clone())
+                    .when(has_messages, |this| {
+                        this.child(
+                            h_flex()
+                                .absolute()
+                                .top_0()
+                                .right_0()
+                                .opacity(0.5)
+                                .hover(|s| s.opacity(1.0))
+                                .child(
+                                    IconButton::new("toggle-height", expand_icon)
+                                        .icon_size(IconSize::Small)
+                                        .icon_color(Color::Muted)
+                                        .tooltip({
+                                            move |_window, cx| {
+                                                Tooltip::for_action_in(
+                                                    expand_tooltip,
+                                                    &ExpandMessageEditor,
+                                                    &focus_handle,
+                                                    cx,
+                                                )
+                                            }
+                                        })
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.expand_message_editor(
+                                                &ExpandMessageEditor,
+                                                window,
+                                                cx,
+                                            );
+                                        })),
+                                ),
+                        )
+                    })
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .flex_none()
+                            .items_center()
+                            .justify_between()
+                            .flex_wrap()
+                            .gap_1()
+                            .mt_0p5()
+                            .pt_1()
+                            .border_t_1()
+                            .border_color(colors.border_variant.opacity(0.22))
                             .child(
                                 h_flex()
-                                    .w_full()
-                                    .flex_none()
+                                    .min_w_0()
+                                    .flex_1()
                                     .items_center()
-                                    .justify_between()
-                                    .flex_wrap()
                                     .gap_1()
-                                    .mt_0p5()
-                                    .pt_1()
-                                    .border_t_1()
-                                    .border_color(colors.border_variant.opacity(0.22))
-                                    .child(
-                                        h_flex()
-                                            .min_w_0()
-                                            .flex_1()
-                                            .items_center()
-                                            .gap_1()
-                                            .child(self.render_add_context_button(cx))
-                                            .map(|this| {
-                                                if let Some(model_selector) =
-                                                    self.model_selector.clone()
-                                                {
-                                                    this.child(model_selector)
-                                                } else if self.agent_display_name.as_ref()
-                                                    == "Backboard"
-                                                {
-                                                    this.child(
-                                                        self.render_backboard_footer_status(cx),
-                                                    )
-                                                } else {
-                                                    this.children(
-                                                        self.render_selected_model_readout(cx),
-                                                    )
-                                                }
-                                            }),
-                                    )
-                                    .child(
-                                        h_flex()
-                                            .flex_none()
-                                            .flex_wrap()
-                                            .items_center()
-                                            .justify_end()
-                                            .gap_1()
-                                            .child(self.render_dictation_button(cx))
-                                            .child(self.render_follow_toggle(cx))
-                                            .children(self.render_fast_mode_control(cx))
-                                            .children(self.render_thinking_control(cx))
-                                            .children(self.render_token_usage(cx))
-                                            .children(self.render_skills_options_button(cx))
-                                            .children(self.render_session_options_button(cx))
-                                            .child(self.render_send_button(cx)),
-                                    ),
+                                    .child(self.render_add_context_button(cx))
+                                    .map(|this| {
+                                        if let Some(model_selector) = self.model_selector.clone() {
+                                            this.child(model_selector)
+                                        } else if self.agent_display_name.as_ref() == "Backboard" {
+                                            this.child(self.render_backboard_footer_status(cx))
+                                        } else {
+                                            this.children(self.render_selected_model_readout(cx))
+                                        }
+                                    }),
+                            )
+                            .child(
+                                h_flex()
+                                    .flex_none()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .justify_end()
+                                    .gap_1()
+                                    .child(self.render_dictation_button(cx))
+                                    .child(self.render_follow_toggle(cx))
+                                    .children(self.render_fast_mode_control(cx))
+                                    .children(self.render_thinking_control(cx))
+                                    .children(self.render_token_usage(cx))
+                                    .children(self.render_skills_options_button(cx))
+                                    .children(self.render_session_options_button(cx))
+                                    .child(self.render_send_button(cx)),
                             ),
                     ),
-            )
+            );
+
+        if !include_container {
+            return editor.into_any();
+        }
+
+        h_flex()
+            .px_2()
+            .pt_1()
+            .pb_1p5()
+            .bg(editor_bg_color)
+            .justify_center()
+            .child(editor)
             .into_any()
     }
 

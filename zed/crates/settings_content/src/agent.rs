@@ -189,7 +189,7 @@ pub struct AgentSettingsContent {
     pub use_modifier_to_send: Option<bool>,
     /// Minimum number of lines of height the agent message editor should have.
     ///
-    /// Default: 4
+    /// Default: 3
     pub message_editor_min_lines: Option<usize>,
     /// Whether to show turn statistics (elapsed time during generation, final turn duration).
     ///

@@ -109,11 +109,20 @@ mod macos {
         ///   GPUI element bounds — origin is top-left of the window (logical px)
         ///   NSView frames      — origin is bottom-left of the view  (points)
         ///
-        ///   Conversion: ns_y = viewport_height − gpui_y − element_height
+        ///   Conversion: ns_y = parent_height − gpui_y − element_height
         pub fn set_frame(&self, bounds: Bounds<Pixels>, viewport_height: f32) {
             let x: f64 = f32::from(bounds.origin.x) as f64;
             let h: f64 = f32::from(bounds.size.height) as f64;
-            let y: f64 = (viewport_height as f64) - f32::from(bounds.origin.y) as f64 - h;
+            let parent_height = unsafe {
+                let parent: id = msg_send![self.webview.as_ptr(), superview];
+                if parent == nil {
+                    viewport_height as f64
+                } else {
+                    let parent_bounds: NSRect = msg_send![parent, bounds];
+                    parent_bounds.size.height
+                }
+            };
+            let y: f64 = parent_height - f32::from(bounds.origin.y) as f64 - h;
             let w: f64 = f32::from(bounds.size.width) as f64;
             let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(w, h));
             unsafe {

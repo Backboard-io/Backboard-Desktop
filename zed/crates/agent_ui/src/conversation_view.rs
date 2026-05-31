@@ -29,11 +29,11 @@ use file_icons::FileIcons;
 use fs::Fs;
 use futures::FutureExt as _;
 use gpui::{
-    Action, Animation, AnimationExt, AnyView, App, ClickEvent, ClipboardItem, CursorStyle,
-    ElementId, Empty, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, ListOffset,
-    ListState, ObjectFit, PlatformDisplay, ScrollHandle, SharedString, Subscription, Task, TaskExt,
-    TextStyle, WeakEntity, Window, WindowHandle, div, ease_in_out, img, linear_color_stop,
-    linear_gradient, list, point, pulsating_between,
+    Action, Animation, AnimationExt, AnyElement, AnyView, App, ClickEvent, ClipboardItem,
+    CursorStyle, ElementId, Empty, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla,
+    ListOffset, ListState, ObjectFit, PlatformDisplay, ScrollHandle, SharedString, Subscription,
+    Task, TaskExt, TextStyle, WeakEntity, Window, WindowHandle, div, ease_in_out, img,
+    linear_color_stop, linear_gradient, list, point, pulsating_between,
 };
 use language::Buffer;
 use language_model::{LanguageModelCompletionError, LanguageModelRegistry};
@@ -561,6 +561,111 @@ impl ConversationView {
         self.root_session_id
             .as_ref()
             .and_then(|id| self.thread_view(id))
+    }
+
+    pub fn render_root_message_editor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let root_thread = self.root_thread_view()?;
+        Some(root_thread.update(cx, |thread, cx| thread.render_message_editor(window, cx)))
+    }
+
+    pub fn render_embedded_root_message_editor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let root_thread = self.root_thread_view()?;
+        Some(root_thread.update(cx, |thread, cx| {
+            thread.render_message_editor_embedded(window, cx)
+        }))
+    }
+
+    pub fn seed_root_message_text_if_empty(
+        &self,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if text.trim().is_empty() {
+            return;
+        }
+
+        let Some(root_thread) = self.root_thread_view() else {
+            return;
+        };
+        root_thread.update(cx, |thread, cx| {
+            if thread.message_editor.read(cx).is_empty(cx) {
+                thread.message_editor.update(cx, |editor, cx| {
+                    editor.set_message(
+                        vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
+                        window,
+                        cx,
+                    );
+                });
+            }
+        });
+    }
+
+    pub fn root_message_editor_is_empty(&self, cx: &App) -> Option<bool> {
+        let root_thread = self.root_thread_view()?;
+        Some(root_thread.read(cx).message_editor.read(cx).is_empty(cx))
+    }
+
+    pub fn send_root_message_editor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(root_thread) = self.root_thread_view() else {
+            return false;
+        };
+        root_thread.update(cx, |thread, cx| {
+            thread.send(window, cx);
+        });
+        true
+    }
+
+    pub fn set_root_prompt_prefix(
+        &self,
+        prompt_prefix: Option<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(root_thread) = self.root_thread_view() else {
+            return;
+        };
+        root_thread.update(cx, |thread, _cx| {
+            thread.set_prompt_prefix(prompt_prefix);
+        });
+    }
+
+    pub fn set_root_message_editor_auto_height(
+        &self,
+        min_lines: usize,
+        max_lines: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(root_thread) = self.root_thread_view() else {
+            return;
+        };
+        root_thread.update(cx, |thread, cx| {
+            thread.set_message_editor_auto_height(min_lines, max_lines, cx);
+        });
+    }
+
+    pub fn set_root_before_send_hook(
+        &self,
+        before_send_hook: Option<Rc<dyn Fn(&str, &mut Window, &mut App) -> bool>>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(root_thread) = self.root_thread_view() else {
+            return;
+        };
+        root_thread.update(cx, |thread, _cx| {
+            thread.set_before_send_hook(before_send_hook);
+        });
     }
 
     pub fn thread_view(&self, session_id: &acp::SessionId) -> Option<Entity<ThreadView>> {

@@ -949,7 +949,7 @@ impl BackboardPanel {
         });
 
         let composer = cx.new(|cx| {
-            let mut editor = Editor::single_line(window, cx);
+            let mut editor = Editor::auto_height(3, 10, window, cx);
             editor.set_placeholder_text(
                 "Ask Backboard to build, edit, search, or run tools...",
                 window,
@@ -958,6 +958,7 @@ impl BackboardPanel {
             editor.set_show_gutter(false, cx);
             editor.set_show_wrap_guides(false, cx);
             editor.set_show_indent_guides(false, cx);
+            editor.set_soft_wrap();
             editor
         });
 

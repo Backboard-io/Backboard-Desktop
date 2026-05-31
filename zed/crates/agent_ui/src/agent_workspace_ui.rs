@@ -2821,7 +2821,6 @@ impl BackboardAgentWorkspacePage {
             .min_w(AGENT_WORKSPACE_CHAT_PANEL_MIN_WIDTH)
             .h_full()
             .flex_shrink_0()
-            .rounded(AGENT_WORKSPACE_CONTAINER_RADIUS)
             .border_1()
             .border_color(agent_workspace_border(cx))
             .bg(agent_workspace_surface(cx))
@@ -2941,6 +2940,7 @@ impl Render for BackboardAgentWorkspacePage {
                     .min_h_0()
                     .px_1()
                     .pb_1()
+                    .when(right_panel_open, |this| this.pr_0().pb_0())
                     .bg(workspace_background)
                     .child(
                         h_flex()

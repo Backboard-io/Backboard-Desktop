@@ -224,7 +224,7 @@ This could be useful for launching a terminal application that you want to use i
   "bindings": {
     "alt-g": [
       "task::Spawn",
-      { "task_name": "start lazygit", "reveal_target": "center" }
+      { "task_name": "start lazygit", "reveal_target": "dock" }
     ]
   }
 }
