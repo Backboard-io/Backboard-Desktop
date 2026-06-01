@@ -303,6 +303,7 @@ impl Member {
             }
             Member::Pane(entity) => entity.update(cx, |pane, _| {
                 pane.in_center_group = in_center_group;
+                pane.set_should_display_welcome_page(in_center_group);
             }),
         }
     }

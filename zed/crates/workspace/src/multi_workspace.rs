@@ -466,7 +466,11 @@ impl MultiWorkspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.interface_mode == mode {
+            return;
+        }
         self.interface_mode = mode;
+        self.serialize(cx);
         cx.notify();
     }
 
@@ -2132,6 +2136,7 @@ impl MultiWorkspace {
                 .read_with(cx, |this, cx| {
                     let state = MultiWorkspaceState {
                         active_workspace_id: this.workspace().read(cx).database_id(),
+                        interface_mode: Some(this.interface_mode.into()),
                         project_groups: this
                             .project_groups
                             .iter()

@@ -10,7 +10,7 @@ This cleanup spec recommends how Backboard Studio should present, hide, preserve
 ## Recommended Backboard Taxonomy
 
 1. **Appearance**: `theme`, `icon_theme`, `ui_font_*`, `buffer_font_*`, `agent_ui_font_size`, `agent_buffer_font_size`, core contrast/visual settings.
-2. **Simple Mode**: `preferred_interface_mode`, simple-mode launch defaults, chat-first font and layout controls.
+2. **Simple Mode**: simple-mode launch defaults, chat-first font and layout controls.
 3. **Editor Mode**: editor behavior, language settings, formatter/debugger settings, Vim/Helix compatibility.
 4. **AI / Models**: `agent.default_model`, `agent.favorite_models`, `language_models.*`, `edit_predictions.*`.
 5. **Agent Behavior**: agent panel layout, profiles, tools, tool permissions, context servers, agent servers, notifications, thinking display.
@@ -23,7 +23,6 @@ This cleanup spec recommends how Backboard Studio should present, hide, preserve
 
 | Group | Recommended action | Rationale |
 |---|---|---|
-| `preferred_interface_mode` | Keep public | Backboard-specific simple/editor launch mode. Reword as “Startup mode”. |
 | `theme`, `icon_theme`, font settings | Keep public | Required for both simple mode and editor mode. Rename visible copy from “Backboard Studio” to “Backboard Studio” where applicable. |
 | `agent_ui_font_size`, `agent_buffer_font_size` | Keep public | Directly affects agent readability; settings UI already supports these paths. |
 | `agent.default_model`, typed `agent.favorite_models`, model effort/speed/thinking fields | Keep public | Core model selector and chat behavior. Present under “AI / Models”. |
@@ -50,7 +49,6 @@ This cleanup spec recommends how Backboard Studio should present, hide, preserve
 | Inherited name | Backboard-facing wording | Recommendation |
 |---|---|---|
 | “Backboard Studio” in descriptions | “Backboard Studio” | Reword public docs and settings UI copy. Do not rename JSON keys yet. |
-| `preferred_interface_mode` | Startup mode | Keep JSON key, show friendly label. |
 | `agent` | Backboard Agent | Reword section label. |
 | `agent.default_model` | Default chat model | Keep public. |
 | `agent.favorite_models` | Pinned models | Typed-only setting; expose through model selector, not raw JSON first. |

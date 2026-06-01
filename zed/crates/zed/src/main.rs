@@ -58,7 +58,7 @@ use theme_settings::load_user_theme;
 use util::ResultExt;
 use uuid::Uuid;
 use workspace::{
-    AppState, InterfaceMode, MultiWorkspace, SerializedWorkspaceLocation, SessionWorkspace, Toast,
+    AppState, MultiWorkspace, SerializedWorkspaceLocation, SessionWorkspace, Toast,
     WorkspaceSettings, WorkspaceStore, notifications::NotificationId, restore_multiworkspace,
 };
 use zed::{
@@ -1540,21 +1540,9 @@ fn open_new_workspace_callback(
         return;
     }
 
-    let preferred_mode = WorkspaceSettings::get_global(cx).preferred_interface_mode;
-
-    match preferred_mode {
-        settings::PreferredInterfaceMode::Simple => {
-            // Simple mode — the BeginnerWorkspace UI is shown; no pane item needed.
-            workspace.set_initial_interface_mode(InterfaceMode::Simple);
-        }
-        settings::PreferredInterfaceMode::Editor => {
-            // Editor mode — show the welcome / recents page.
-            let welcome = cx.new(|cx| {
-                workspace::welcome::WelcomePage::new(workspace.weak_handle(), false, window, cx)
-            });
-            workspace.add_item_to_active_pane(Box::new(welcome), None, true, window, cx);
-        }
-    }
+    let welcome = cx
+        .new(|cx| workspace::welcome::WelcomePage::new(workspace.weak_handle(), false, window, cx));
+    workspace.add_item_to_active_pane(Box::new(welcome), None, true, window, cx);
 }
 
 async fn restorable_workspaces(

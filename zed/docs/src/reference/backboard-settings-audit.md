@@ -17,7 +17,7 @@ This document audits the inherited Backboard Studio settings surface as it exist
 
 - **E00**: Schema metadata in `assets/settings/default.json`; parsed by settings file helpers in `crates/settings/src/settings_file.rs`.
 - **E01**: Theme flattening in `crates/settings_content/src/theme.rs::ThemeSettingsContent`; runtime reads in `crates/theme_settings/src/settings.rs::ThemeSettings::from_settings`, `agent_ui_font_size`, and `agent_buffer_font_size`.
-- **E02**: Workspace flattening in `crates/settings_content/src/workspace.rs::WorkspaceSettingsContent`; runtime reads in `crates/workspace/src/workspace_settings.rs::WorkspaceSettings::from_settings` and launch behavior in `crates/zed/src/main.rs` around `restore_on_startup` and `preferred_interface_mode`.
+- **E02**: Workspace flattening in `crates/settings_content/src/workspace.rs::WorkspaceSettingsContent`; runtime reads in `crates/workspace/src/workspace_settings.rs::WorkspaceSettings::from_settings` and launch behavior in `crates/zed/src/main.rs` around `restore_on_startup`.
 - **E03**: Agent flattening in `crates/settings_content/src/agent.rs::AgentSettingsContent`; runtime reads in `crates/agent_settings/src/agent_settings.rs::AgentSettings::from_settings`, `crates/agent/src/thread.rs`, `crates/agent/src/tool_permissions.rs`, and `crates/agent_ui/src/conversation_view/thread_view.rs`.
 - **E04**: Backboard API/client routing in `crates/client/src/client.rs::ClientSettings::from_settings`, `ProxySettings::from_settings`, and `crates/client/src/zed_urls.rs`.
 - **E05**: Model provider settings in `crates/language_models/src/settings.rs::AllLanguageModelSettings::from_settings` and provider reads in `crates/language_models/src/provider/*`.
@@ -82,7 +82,6 @@ Source: `assets/settings/default.json`. Object rows and leaf rows are both liste
 | `hover_popover_hiding_delay` | Editor Mode | Gray Area | E14 | Still used by inherited editor mode and language tooling. | Keep internal only |
 | `confirm_quit` | Advanced Compatibility | Gray Area | E12 | Compatibility or internal diagnostic behavior. | Keep internal only |
 | `restore_on_startup` | Projects / Workspaces | Directly Useful / Used | E02 | Affects project restore, panels, tabs, file discovery, and workspace ergonomics. | Keep public |
-| `preferred_interface_mode` | Simple Mode | Directly Useful / Used | E02 | Controls chat-first versus editor launch behavior. | Keep public |
 | `cli_default_open_behavior` | Projects / Workspaces | Gray Area | E02 | Affects project restore, panels, tabs, file discovery, and workspace ergonomics. | Needs product decision |
 | `restore_on_file_reopen` | Projects / Workspaces | Gray Area | E02 | Affects project restore, panels, tabs, file discovery, and workspace ergonomics. | Needs product decision |
 | `close_on_file_delete` | Projects / Workspaces | Gray Area | E02 | Affects project restore, panels, tabs, file discovery, and workspace ergonomics. | Needs product decision |
@@ -872,6 +871,6 @@ These keys or key patterns are present in typed settings models or flattened use
 ## Audit Notes
 
 - The default file intentionally carries many editor-mode and language-specific settings inherited from Backboard Studio. Most of these are **Gray Area**, not **Not Used**, because editor mode still reads them through `EditorSettings`, `ProjectSettings`, and `AllLanguageSettings`.
-- Backboard-specific product weight is concentrated in `preferred_interface_mode`, `server_url`, `agent.*`, `language_models.*`, `edit_predictions.*`, `terminal.*`, `git.*`, project restore/session settings, and visual settings used by both simple mode and editor mode.
+- Backboard-specific product weight is concentrated in `server_url`, `agent.*`, `language_models.*`, `edit_predictions.*`, `terminal.*`, `git.*`, project restore/session settings, and visual settings used by both simple mode and editor mode.
 - Collaboration, calls, audio, Jupyter, REPL, journal, and which-key settings are inherited surfaces with little current Backboard value. They should be hidden from Backboard settings UI/docs before any removal is attempted.
 - Release-channel and platform override blocks are compatibility mechanics. They should stay internal because deleting them could break expected settings merges even if they are not user-facing Backboard concepts.

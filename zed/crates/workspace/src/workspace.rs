@@ -9467,8 +9467,20 @@ pub async fn apply_restored_multiworkspace_state(
         sidebar_open,
         project_groups,
         sidebar_state,
+        interface_mode,
         ..
     } = state;
+
+    if let Some(startup_mode) = interface_mode.map(InterfaceMode::from) {
+        window_handle
+            .update(cx, |multi_workspace, window, cx| match startup_mode {
+                InterfaceMode::Expert => multi_workspace.open_code_editor(window, cx),
+                InterfaceMode::Simple => {
+                    multi_workspace.set_interface_mode(InterfaceMode::Simple, window, cx);
+                }
+            })
+            .ok();
+    }
 
     if !project_groups.is_empty() {
         // Resolve linked worktree paths to their main repo paths so

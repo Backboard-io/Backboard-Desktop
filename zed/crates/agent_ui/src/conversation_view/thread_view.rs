@@ -4,6 +4,7 @@ use crate::{
         ConfigureContextServerModal, configure_context_server_modal::default_markdown_style,
     },
     config_options::ConfigOptionSummary,
+    ui::documentation_aside_side,
 };
 use agent_client_protocol::schema as acp;
 use context_server::ContextServerId;
@@ -2125,24 +2126,51 @@ impl ThreadView {
 
             for option in options.clone() {
                 let option_id = option.id.clone();
-                let label = SharedString::from(option.name);
-                let status = SharedString::from(option.current_value_name);
+                let submenu_label =
+                    SharedString::from(format!("{}: {}", option.name, option.current_value_name));
                 let config_options_view = config_options_view.clone();
 
-                menu = menu.custom_entry(
-                    move |_window, _cx| {
-                        Self::render_context_menu_status_row(
-                            label.clone(),
-                            status.clone(),
-                            IconName::Sliders,
-                            Color::Muted,
-                            Color::Muted,
-                        )
-                    },
-                    move |_window, cx| {
-                        config_options_view.update(cx, |view, cx| {
-                            view.cycle_option(&option_id, cx);
-                        });
+                menu = menu.submenu_with_icon(
+                    submenu_label,
+                    IconName::Sliders,
+                    move |mut menu, _window, cx| {
+                        let choices = config_options_view
+                            .read(cx)
+                            .option_value_summaries(&option_id);
+
+                        if choices.is_empty() {
+                            return menu.label("No values available.");
+                        }
+
+                        for choice in choices {
+                            let option_id_for_choice = option_id.clone();
+                            let value = choice.value.clone();
+                            let is_current = choice.is_current;
+                            let config_options_view = config_options_view.clone();
+                            let mut entry = ContextMenuEntry::new(choice.name)
+                                .toggle(IconPosition::End, is_current)
+                                .disabled(is_current)
+                                .handler(move |_window, cx| {
+                                    config_options_view.update(cx, |view, cx| {
+                                        view.set_option_value(
+                                            option_id_for_choice.clone(),
+                                            value.clone(),
+                                            cx,
+                                        );
+                                    });
+                                });
+
+                            if let Some(description) = choice.description {
+                                entry = entry.documentation_aside(
+                                    documentation_aside_side(cx),
+                                    move |_cx| Label::new(description.clone()).into_any_element(),
+                                );
+                            }
+
+                            menu = menu.item(entry);
+                        }
+
+                        menu
                     },
                 );
             }

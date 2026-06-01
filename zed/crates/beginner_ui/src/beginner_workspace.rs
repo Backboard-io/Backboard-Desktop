@@ -3191,6 +3191,8 @@ impl BeginnerWorkspace {
             .h_full()
             .flex_shrink_0()
             .bg(ds::sidebar_background(cx))
+            .child(div().absolute().inset_0().bg(ds::sidebar_glow_wash(cx)))
+            .child(div().absolute().inset_0().bg(ds::sidebar_edge_wash(cx)))
             .when(!api_key_ready, |el| {
                 el.child(self.render_sidebar_api_status_banner(cx))
             })
@@ -3521,13 +3523,6 @@ impl BeginnerWorkspace {
                                     )
                                     .child(
                                         div()
-                                            .size(px(8.))
-                                            .rounded_full()
-                                            .bg(ds::sidebar_status_dot(cx))
-                                            .flex_none(),
-                                    )
-                                    .child(
-                                        div()
                                             .id(SharedString::from(format!(
                                                 "chat-del-{record_id_for_delete}"
                                             )))
@@ -3583,10 +3578,13 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         v_flex()
+            .relative()
             .w(px(48.))
             .h_full()
             .flex_shrink_0()
             .bg(ds::sidebar_background(cx))
+            .child(div().absolute().inset_0().bg(ds::sidebar_glow_wash(cx)))
+            .child(div().absolute().inset_0().bg(ds::sidebar_edge_wash(cx)))
             .border_r_1()
             .border_color(ds::separator(cx))
             .child(

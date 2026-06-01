@@ -164,21 +164,6 @@ fn general_page(cx: &App) -> SettingsPage {
                 }),
                 files: USER,
             }),
-            SettingsPageItem::SettingItem(SettingItem {
-                title: "Preferred Mode",
-                description: "Choose which screen opens when Backboard Studio launches without restoring a previous project or session.",
-                field: Box::new(SettingField {
-                    json_path: Some("preferred_interface_mode"),
-                    pick: |settings_content| {
-                        settings_content.workspace.preferred_interface_mode.as_ref()
-                    },
-                    write: |settings_content, value, _| {
-                        settings_content.workspace.preferred_interface_mode = value;
-                    },
-                }),
-                metadata: None,
-                files: USER,
-            }),
             SettingsPageItem::SectionHeader("General Settings"),
             SettingsPageItem::SettingItem(SettingItem {
                 title: "When Closing With No Tabs",

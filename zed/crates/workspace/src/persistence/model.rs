@@ -1,7 +1,7 @@
 use super::{SerializedAxis, SerializedWindowBounds};
 use crate::{
-    Member, Pane, PaneAxis, SerializableItemRegistry, Workspace, WorkspaceId, item::ItemHandle,
-    multi_workspace::SerializedProjectGroupState, path_list::PathList,
+    InterfaceMode, Member, Pane, PaneAxis, SerializableItemRegistry, Workspace, WorkspaceId,
+    item::ItemHandle, multi_workspace::SerializedProjectGroupState, path_list::PathList,
 };
 use anyhow::{Context, Result};
 use async_recursion::async_recursion;
@@ -114,6 +114,33 @@ pub struct MultiWorkspaceState {
     pub project_groups: Vec<SerializedProjectGroup>,
     #[serde(default)]
     pub sidebar_state: Option<String>,
+    #[serde(default)]
+    pub interface_mode: Option<SerializedInterfaceMode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SerializedInterfaceMode {
+    Simple,
+    Editor,
+}
+
+impl From<InterfaceMode> for SerializedInterfaceMode {
+    fn from(mode: InterfaceMode) -> Self {
+        match mode {
+            InterfaceMode::Simple => Self::Simple,
+            InterfaceMode::Expert => Self::Editor,
+        }
+    }
+}
+
+impl From<SerializedInterfaceMode> for InterfaceMode {
+    fn from(mode: SerializedInterfaceMode) -> Self {
+        match mode {
+            SerializedInterfaceMode::Simple => Self::Simple,
+            SerializedInterfaceMode::Editor => Self::Expert,
+        }
+    }
 }
 
 /// The serialized state of a single MultiWorkspace window from a previous session:

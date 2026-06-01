@@ -132,6 +132,23 @@ impl ConfigOptionsView {
         self.option_summaries.clone()
     }
 
+    pub(crate) fn option_value_summaries(
+        &self,
+        config_id: &acp::SessionConfigId,
+    ) -> Vec<ConfigOptionValueSummary> {
+        let current_value = get_current_value(&self.config_options, config_id);
+
+        extract_options(&self.config_options, config_id)
+            .into_iter()
+            .map(|option| ConfigOptionValueSummary {
+                is_current: current_value.as_ref() == Some(&option.value),
+                value: option.value,
+                name: option.name,
+                description: option.description,
+            })
+            .collect()
+    }
+
     pub fn cycle_option(
         &mut self,
         config_id: &acp::SessionConfigId,
@@ -355,6 +372,14 @@ pub(crate) struct ConfigOptionSummary {
     pub name: String,
     pub description: Option<String>,
     pub current_value_name: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct ConfigOptionValueSummary {
+    pub value: acp::SessionConfigValueId,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_current: bool,
 }
 
 struct ConfigOptionSelector {
