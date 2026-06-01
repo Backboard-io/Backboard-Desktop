@@ -3,9 +3,9 @@ use fs::Fs;
 
 use gpui::{
     Animation, AnimationExt, AnyView, App, Context, DragMoveEvent, Entity, EntityId, EventEmitter,
-    FocusHandle, Focusable, FontWeight, ManagedView, MouseButton, ObjectFit, Pixels, Render,
+    FocusHandle, Focusable, FontWeight, Hsla, ManagedView, MouseButton, ObjectFit, Pixels, Render,
     Subscription, Task, TaskExt, Tiling, WeakEntity, Window, WindowId, actions, deferred,
-    ease_out_quint, img, px,
+    ease_out_quint, img, pulsating_between, px,
 };
 pub use project::ProjectGroupKey;
 use project::{DisableAiSettings, Project};
@@ -31,8 +31,24 @@ use ui::{
 
 const SIDEBAR_RESIZE_HANDLE_SIZE: Pixels = px(6.0);
 const TERMINAL_PANEL_NAME: &str = "TerminalPanel";
+const STARTUP_LOADING_LOGO_PATH: &str = "images/animation_logo.png";
+const STARTUP_LOADING_ANIMATION_DURATION: Duration = Duration::from_secs(6);
+const STARTUP_LOADING_LOGO_SIZE: f32 = 128.;
 
 type WorkspaceTourCompletion = Box<dyn FnOnce(&mut Window, &mut App) + 'static>;
+
+fn startup_loading_background(cx: &App) -> Hsla {
+    let colors = cx.theme().colors();
+    let opacity = if cx.theme().appearance().is_light() {
+        0.78
+    } else {
+        0.66
+    };
+    colors
+        .title_bar_background
+        .blend(colors.panel_background.opacity(0.14))
+        .opacity(opacity)
+}
 
 use crate::jarvis_directory_visualizer::{JarvisDirectoryVisualizer, JarvisThreadSummary};
 use crate::open_remote_project_with_existing_connection;
@@ -349,6 +365,10 @@ pub struct MultiWorkspace {
     jarvis_visualizer: Entity<JarvisDirectoryVisualizer>,
     hovered_workspace_mode_target: Option<WorkspaceModeTarget>,
     workspace_tour_completion: Option<WorkspaceTourCompletion>,
+    startup_loading_animation_visible: bool,
+    startup_loading_animation_has_played: bool,
+    startup_loading_animation_generation: u64,
+    startup_loading_animation_task: Option<Task<()>>,
 }
 
 impl EventEmitter<MultiWorkspaceEvent> for MultiWorkspace {}
@@ -433,6 +453,10 @@ impl MultiWorkspace {
             jarvis_visualizer,
             hovered_workspace_mode_target: None,
             workspace_tour_completion: None,
+            startup_loading_animation_visible: false,
+            startup_loading_animation_has_played: false,
+            startup_loading_animation_generation: 0,
+            startup_loading_animation_task: None,
         }
     }
 
@@ -444,6 +468,69 @@ impl MultiWorkspace {
     ) {
         self.interface_mode = mode;
         cx.notify();
+    }
+
+    fn ensure_startup_loading_animation(&mut self, cx: &mut Context<Self>) {
+        if !self.startup_loading_animation_has_played {
+            self.replay_startup_loading_animation(cx);
+        }
+    }
+
+    pub fn replay_startup_loading_animation(&mut self, cx: &mut Context<Self>) {
+        self.startup_loading_animation_has_played = true;
+        self.startup_loading_animation_visible = true;
+        self.startup_loading_animation_generation =
+            self.startup_loading_animation_generation.saturating_add(1);
+        let generation = self.startup_loading_animation_generation;
+        self.startup_loading_animation_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(STARTUP_LOADING_ANIMATION_DURATION)
+                .await;
+            this.update(cx, |this, cx| {
+                if this.startup_loading_animation_generation == generation {
+                    this.startup_loading_animation_visible = false;
+                    cx.notify();
+                }
+            })
+            .log_err();
+        }));
+        cx.notify();
+    }
+
+    fn render_startup_loading_screen(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let generation = self.startup_loading_animation_generation;
+        let logo_animation_id =
+            ElementId::Name(format!("startup-loading-animation-logo-{generation}").into());
+
+        div()
+            .id("startup-loading-screen")
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(startup_loading_background(cx))
+            .child(
+                div()
+                    .size(px(STARTUP_LOADING_LOGO_SIZE))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        img(STARTUP_LOADING_LOGO_PATH)
+                            .size(px(STARTUP_LOADING_LOGO_SIZE))
+                            .object_fit(ObjectFit::Contain)
+                            .with_fallback(|| {
+                                div().size(px(STARTUP_LOADING_LOGO_SIZE)).into_any_element()
+                            }),
+                    )
+                    .with_animation(
+                        logo_animation_id,
+                        Animation::new(Duration::from_millis(1600))
+                            .repeat()
+                            .with_easing(pulsating_between(0.78, 1.)),
+                        |logo, delta| logo.opacity(delta),
+                    ),
+            )
     }
 
     pub fn open_code_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2779,25 +2866,44 @@ impl MultiWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<ContextMenu> {
-        ContextMenu::build(window, cx, move |menu, _window, _cx| {
-            menu.item(
-                ContextMenuEntry::new("Dashboard")
-                    .icon(IconName::ArrowUpRight)
-                    .icon_position(IconPosition::End)
-                    .handler(|_, cx| {
-                        cx.open_url("https://app.backboard.io");
+        let multi_workspace = cx.entity().downgrade();
+
+        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            menu = menu
+                .item(
+                    ContextMenuEntry::new("Dashboard")
+                        .icon(IconName::ArrowUpRight)
+                        .icon_position(IconPosition::End)
+                        .handler(|_, cx| {
+                            cx.open_url("https://app.backboard.io");
+                        }),
+                )
+                .entry("Settings", Some(Box::new(OpenSettings)), |window, cx| {
+                    window.dispatch_action(Box::new(OpenSettings), cx);
+                })
+                .entry(
+                    "Configure API Key",
+                    Some(Box::new(ConfigureBackboardApiKey)),
+                    |window, cx| {
+                        window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
+                    },
+                );
+
+            let reset_animation = multi_workspace.clone();
+            menu = menu.item(
+                ContextMenuEntry::new("Reset Animation")
+                    .icon(IconName::HistoryRerun)
+                    .icon_position(IconPosition::Start)
+                    .handler(move |_window, cx| {
+                        reset_animation
+                            .update(cx, |multi_workspace, cx| {
+                                multi_workspace.replay_startup_loading_animation(cx);
+                            })
+                            .log_err();
                     }),
-            )
-            .entry("Settings", Some(Box::new(OpenSettings)), |window, cx| {
-                window.dispatch_action(Box::new(OpenSettings), cx);
-            })
-            .entry(
-                "Configure API Key",
-                Some(Box::new(ConfigureBackboardApiKey)),
-                |window, cx| {
-                    window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
-                },
-            )
+            );
+
+            menu
         })
     }
 
@@ -2879,6 +2985,23 @@ impl Render for MultiWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let ui_font = theme_settings::setup_ui_font(window, cx);
         let text_color = cx.theme().colors().text;
+
+        self.ensure_startup_loading_animation(cx);
+        if self.startup_loading_animation_visible {
+            window.set_background_appearance(gpui::WindowBackgroundAppearance::Blurred);
+            return client_side_decorations(
+                div()
+                    .relative()
+                    .size_full()
+                    .font(ui_font)
+                    .text_color(text_color)
+                    .on_action(cx.listener(Self::close_window))
+                    .child(self.render_startup_loading_screen(cx)),
+                window,
+                cx,
+                Tiling::default(),
+            );
+        }
 
         if self.interface_mode == InterfaceMode::Simple {
             if let Some(view) = self.beginner_view.as_ref() {

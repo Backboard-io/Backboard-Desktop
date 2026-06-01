@@ -9,7 +9,7 @@ use acp_thread::{
 };
 use agent_client_protocol::schema as acp;
 use agent_ui::thread_metadata_store::ThreadMetadataStore;
-use agent_ui::{AgentPanel, ConversationView, ModelSelectorPopover};
+use agent_ui::{AddContextServer, AgentPanel, ConversationView, ModelSelectorPopover};
 use anyhow::{Context as AnyhowContext, bail};
 use db::kvp::KeyValueStore;
 use editor::actions::Newline;
@@ -18,7 +18,8 @@ use gpui::{
     AnyElement, App, AsyncWindowContext, ClipboardItem, Context, DragMoveEvent, Entity,
     EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, MouseButton,
     MouseDownEvent, MouseUpEvent, ObjectFit, PathPromptOptions, Pixels, Render, SharedString,
-    Subscription, Task, WeakEntity, Window, WindowControlArea, canvas, img,
+    Subscription, Task, TextStyleRefinement, WeakEntity, Window, WindowControlArea, canvas, img,
+    rems,
 };
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
@@ -598,7 +599,12 @@ impl BeginnerWorkspace {
     fn make_search_editor(window: &mut Window, cx: &mut Context<Self>) -> Entity<Editor> {
         cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Search chats", window, cx);
+            editor.set_text_style_refinement(TextStyleRefinement {
+                color: Some(ds::sidebar_emphasis_text(cx)),
+                font_size: Some(rems(0.9375).into()),
+                font_weight: Some(FontWeight::SEMIBOLD),
+                ..Default::default()
+            });
             editor.set_show_gutter(false, cx);
             editor.set_show_wrap_guides(false, cx);
             editor.set_show_indent_guides(false, cx);
@@ -2805,6 +2811,7 @@ impl BeginnerWorkspace {
             let toggle_sidebar = beginner_workspace.clone();
             let show_panel_options = beginner_workspace.clone();
             let open_terminal = beginner_workspace.clone();
+            let reset_animation = multi_workspace.clone();
 
             menu.item(
                 ContextMenuEntry::new("Open in Code Editor")
@@ -2903,6 +2910,18 @@ impl BeginnerWorkspace {
                     .icon_position(IconPosition::Start)
                     .handler(|window, cx| {
                         window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
+                    }),
+            )
+            .item(
+                ContextMenuEntry::new("Reset Animation")
+                    .icon(IconName::HistoryRerun)
+                    .icon_position(IconPosition::Start)
+                    .handler(move |_window, cx| {
+                        reset_animation
+                            .update(cx, |multi_workspace, cx| {
+                                multi_workspace.replay_startup_loading_animation(cx);
+                            })
+                            .log_err();
                     }),
             )
             .item(
@@ -3161,6 +3180,9 @@ impl BeginnerWorkspace {
         } else {
             "Try a different search."
         };
+        let search_focus_handle = self.chat_search_editor.focus_handle(cx);
+        let search_field_is_empty = search_query.is_empty();
+        let search_field_is_focused = search_focus_handle.is_focused(window);
 
         v_flex()
             .relative()
@@ -3258,13 +3280,16 @@ impl BeginnerWorkspace {
                                     Color::Disabled
                                 },
                             ))
-                            .child(Label::new("New chat").size(LabelSize::Small).color(
-                                if can_start_new && api_key_ready {
-                                    Color::Custom(ds::sidebar_text(cx))
-                                } else {
-                                    Color::Disabled
-                                },
-                            )),
+                            .child(
+                                Label::new("New chat")
+                                    .size(LabelSize::Default)
+                                    .weight(FontWeight::SEMIBOLD)
+                                    .color(if can_start_new && api_key_ready {
+                                        Color::Custom(ds::sidebar_emphasis_text(cx))
+                                    } else {
+                                        Color::Disabled
+                                    }),
+                            ),
                     )
                     .child(
                         h_flex()
@@ -3276,6 +3301,12 @@ impl BeginnerWorkspace {
                             .rounded_lg()
                             .when(api_key_ready, |el| el.hover(move |el| el.bg(action_hover)))
                             .when(!api_key_ready, |el| el.opacity(0.35))
+                            .on_click({
+                                let search_focus_handle = search_focus_handle.clone();
+                                move |_, window, cx| {
+                                    window.focus(&search_focus_handle, cx);
+                                }
+                            })
                             .child(
                                 Icon::new(IconName::MagnifyingGlass)
                                     .size(IconSize::XSmall)
@@ -3283,9 +3314,79 @@ impl BeginnerWorkspace {
                             )
                             .child(
                                 div()
+                                    .relative()
+                                    .h_full()
+                                    .flex()
+                                    .items_center()
                                     .flex_1()
                                     .min_w_0()
-                                    .child(self.chat_search_editor.clone()),
+                                    .child(self.chat_search_editor.clone())
+                                    .when(
+                                        search_field_is_empty && !search_field_is_focused,
+                                        |el| {
+                                            el.child(
+                                                div()
+                                                    .absolute()
+                                                    .inset_0()
+                                                    .flex()
+                                                    .items_center()
+                                                    .child(
+                                                        Label::new("Search chats")
+                                                            .size(LabelSize::Default)
+                                                            .weight(FontWeight::SEMIBOLD)
+                                                            .color(Color::Custom(
+                                                                ds::sidebar_emphasis_text(cx),
+                                                            ))
+                                                            .truncate(),
+                                                    ),
+                                            )
+                                        },
+                                    ),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .id("simple-sidebar-mcp-section")
+                            .mt(px(6.))
+                            .px_2()
+                            .gap_0p5()
+                            .child(
+                                h_flex().h(px(22.)).px_1().items_center().child(
+                                    Label::new("MCP")
+                                        .size(LabelSize::XSmall)
+                                        .weight(FontWeight::SEMIBOLD)
+                                        .color(Color::Custom(ds::sidebar_text_muted(cx))),
+                                ),
+                            )
+                            .child(
+                                h_flex()
+                                    .id("simple-sidebar-connect-mcp")
+                                    .h(px(ds::CHAT_ROW_HEIGHT))
+                                    .px_3()
+                                    .gap_2p5()
+                                    .items_center()
+                                    .rounded_lg()
+                                    .cursor_pointer()
+                                    .hover({
+                                        let action_hover = action_hover;
+                                        move |el| el.bg(action_hover)
+                                    })
+                                    .tooltip(Tooltip::text("Connect an MCP server"))
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(Box::new(AddContextServer), cx);
+                                    })
+                                    .child(
+                                        Icon::new(IconName::Server)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Custom(ds::sidebar_icon(cx))),
+                                    )
+                                    .child(
+                                        Label::new("Connect MCP server")
+                                            .size(LabelSize::Default)
+                                            .weight(FontWeight::SEMIBOLD)
+                                            .color(Color::Custom(ds::sidebar_emphasis_text(cx)))
+                                            .truncate(),
+                                    ),
                             ),
                     ),
             )
@@ -3351,14 +3452,16 @@ impl BeginnerWorkspace {
                                         Label::new(folder_name)
                                             .size(LabelSize::Small)
                                             .weight(FontWeight::SEMIBOLD)
-                                            .color(Color::Custom(ds::sidebar_text_muted(cx)))
+                                            .color(Color::Custom(ds::sidebar_emphasis_text(cx)))
                                             .truncate(),
                                     )
                                     .when_some(parent_name, |el, parent_name| {
                                         el.child(
                                             Label::new(parent_name)
                                                 .size(LabelSize::XSmall)
-                                                .color(Color::Custom(ds::sidebar_text_subtle(cx)))
+                                                .color(Color::Custom(
+                                                    ds::sidebar_emphasis_text(cx).opacity(0.72),
+                                                ))
                                                 .truncate(),
                                         )
                                     }),

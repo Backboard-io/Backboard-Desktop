@@ -1,4 +1,4 @@
-use gpui::{App, Hsla, IntoElement, px};
+use gpui::{App, Hsla, IntoElement, px, white};
 use theme::ActiveTheme;
 use ui::{Color, Icon, IconName, IconSize, prelude::*};
 
@@ -56,6 +56,10 @@ pub fn sidebar_text(cx: &App) -> Hsla {
         0.94
     };
     cx.theme().colors().text.opacity(opacity)
+}
+
+pub fn sidebar_emphasis_text(_cx: &App) -> Hsla {
+    white()
 }
 
 pub fn sidebar_text_muted(cx: &App) -> Hsla {
