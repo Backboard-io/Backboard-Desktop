@@ -20,7 +20,7 @@ pub(crate) fn render_edit_prediction_setup_page(
 ) -> AnyElement {
     let providers = [Some(
         render_api_key_provider(
-            IconName::ZedPredict,
+            "B",
             "Backboard AI",
             ApiKeyDocs::Link {
                 dashboard_url: "https://app.backboard.io/dashboard/api-keys".into(),
@@ -55,7 +55,7 @@ enum ApiKeyDocs {
 }
 
 fn render_api_key_provider(
-    icon: IconName,
+    brand_letter: &'static str,
     title: &'static str,
     docs: ApiKeyDocs,
     api_key_state: Entity<ApiKeyState>,
@@ -112,7 +112,7 @@ fn render_api_key_provider(
 
     let base_container = v_flex().id(title).min_w_0().pt_8().gap_1p5();
     let header = SettingsSectionHeader::new(title)
-        .icon(icon)
+        .brand_letter(brand_letter)
         .no_padding(true);
     let button_link_label = format!("{} dashboard", title);
     let description = match docs {

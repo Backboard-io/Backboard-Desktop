@@ -3,7 +3,7 @@ use fs::Fs;
 
 use gpui::{
     Animation, AnimationExt, AnyView, App, Context, DragMoveEvent, Entity, EntityId, EventEmitter,
-    FocusHandle, Focusable, FontWeight, Hsla, ManagedView, MouseButton, ObjectFit, Pixels, Render,
+    FocusHandle, Focusable, Hsla, ManagedView, MouseButton, ObjectFit, Pixels, Render,
     Subscription, Task, TaskExt, Tiling, WeakEntity, Window, WindowId, actions, deferred,
     ease_out_quint, img, pulsating_between, px,
 };
@@ -369,7 +369,6 @@ pub struct MultiWorkspace {
     pub tasks_view: Option<AnyView>,
     pub git_view: Option<AnyView>,
     jarvis_visualizer: Entity<JarvisDirectoryVisualizer>,
-    hovered_workspace_mode_target: Option<WorkspaceModeTarget>,
     workspace_tour_completion: Option<WorkspaceTourCompletion>,
     startup_loading_animation_visible: bool,
     startup_loading_animation_has_played: bool,
@@ -458,7 +457,6 @@ impl MultiWorkspace {
             tasks_view: None,
             git_view: None,
             jarvis_visualizer,
-            hovered_workspace_mode_target: None,
             workspace_tour_completion: None,
             startup_loading_animation_visible: false,
             startup_loading_animation_has_played: false,
@@ -2698,7 +2696,7 @@ impl MultiWorkspace {
     fn workspace_mode_target_label(target: WorkspaceModeTarget) -> &'static str {
         match target {
             WorkspaceModeTarget::Simple => "Simple Mode",
-            WorkspaceModeTarget::CodeEditor => "Code Editor",
+            WorkspaceModeTarget::CodeEditor => "Editor",
             WorkspaceModeTarget::AgentWorkspace => "Agents",
         }
     }
@@ -2711,33 +2709,11 @@ impl MultiWorkspace {
         }
     }
 
-    fn workspace_mode_target_image_path(
-        target: WorkspaceModeTarget,
-        dark_theme: bool,
-    ) -> &'static str {
-        match (target, dark_theme) {
-            (WorkspaceModeTarget::Simple, true) => "images/simple_dark.png",
-            (WorkspaceModeTarget::CodeEditor, true) => "images/codeeditor_dark.png",
-            (WorkspaceModeTarget::AgentWorkspace, true) => "images/agent_dark.png",
-            (WorkspaceModeTarget::Simple, false) => "images/simple.png",
-            (WorkspaceModeTarget::CodeEditor, false) => "images/codeeditor.png",
-            (WorkspaceModeTarget::AgentWorkspace, false) => "images/agent.png",
-        }
-    }
-
     fn workspace_mode_target_id(target: WorkspaceModeTarget) -> &'static str {
         match target {
             WorkspaceModeTarget::Simple => "open-simple-mode",
             WorkspaceModeTarget::CodeEditor => "open-code-editor-mode",
             WorkspaceModeTarget::AgentWorkspace => "open-agent-workspace-mode",
-        }
-    }
-
-    fn workspace_mode_target_expanded_width(target: WorkspaceModeTarget) -> Pixels {
-        match target {
-            WorkspaceModeTarget::Simple => px(162.),
-            WorkspaceModeTarget::CodeEditor => px(162.),
-            WorkspaceModeTarget::AgentWorkspace => px(124.),
         }
     }
 
@@ -2768,93 +2744,18 @@ impl MultiWorkspace {
     ) -> AnyElement {
         let id = Self::workspace_mode_target_id(target);
         let label = Self::workspace_mode_target_label(target);
-        let button_label = format!("Open in {label}");
         let tooltip = Self::workspace_mode_target_tooltip(target);
-        let hovered = self.hovered_workspace_mode_target == Some(target);
-        let colors = cx.theme().colors();
-        let dark_theme = cx.theme().appearance() == theme::Appearance::Dark;
-        let collapsed_width = px(26.);
-        let expanded_width = Self::workspace_mode_target_expanded_width(target);
-        let width = if hovered {
-            expanded_width
-        } else {
-            collapsed_width
-        };
-        let button_height = px(24.);
-        let image_mark = h_flex()
-            .flex_none()
-            .w(px(18.))
-            .h(button_height)
-            .items_center()
-            .justify_center()
-            .child(
-                img(Self::workspace_mode_target_image_path(target, dark_theme))
-                    .size(px(16.))
-                    .object_fit(ObjectFit::Contain)
-                    .with_fallback(|| div().size(px(16.)).into_any_element()),
-            );
 
-        let button = h_flex()
-            .id(id)
-            .h(button_height)
-            .w(width)
-            .flex_none()
-            .px_1()
-            .overflow_hidden()
-            .items_center()
-            .justify_start()
-            .gap_1()
-            .rounded_md()
-            .cursor_pointer()
+        Button::new(id, label)
+            .style(ButtonStyle::Subtle)
+            .size(ButtonSize::Compact)
+            .label_size(LabelSize::Small)
+            .color(Color::Muted)
             .tooltip(Tooltip::text(tooltip))
-            .when(hovered, |this| this.bg(colors.element_hover))
-            .hover(|style| style.bg(colors.element_hover))
-            .on_hover(cx.listener(move |this, hovered, _window, cx| {
-                if *hovered {
-                    this.hovered_workspace_mode_target = Some(target);
-                } else if this.hovered_workspace_mode_target == Some(target) {
-                    this.hovered_workspace_mode_target = None;
-                }
-                cx.notify();
-            }))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_workspace_mode_target(target, window, cx);
             }))
-            .child(image_mark)
-            .when(hovered, |this| {
-                let label_animation_id = ElementId::Name(format!("{id}-label").into());
-                this.child(
-                    Label::new(button_label)
-                        .size(LabelSize::Small)
-                        .weight(FontWeight::SEMIBOLD)
-                        .italic()
-                        .color(Color::Default)
-                        .single_line()
-                        .with_animation(
-                            label_animation_id,
-                            Animation::new(Duration::from_millis(140))
-                                .with_easing(ease_out_quint()),
-                            |label, delta| label.alpha(delta),
-                        ),
-                )
-            });
-
-        if hovered {
-            let expand_animation_id = ElementId::Name(format!("{id}-expand").into());
-            button
-                .with_animation(
-                    expand_animation_id,
-                    Animation::new(Duration::from_millis(180)).with_easing(ease_out_quint()),
-                    move |button, delta| {
-                        let width = collapsed_width.as_f32()
-                            + (expanded_width.as_f32() - collapsed_width.as_f32()) * delta;
-                        button.w(px(width))
-                    },
-                )
-                .into_any_element()
-        } else {
-            button.into_any_element()
-        }
+            .into_any_element()
     }
 
     fn render_reset_onboarding_button(&self) -> impl IntoElement {

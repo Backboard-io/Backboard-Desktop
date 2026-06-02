@@ -1755,6 +1755,12 @@ impl ThreadView {
         Some(model.name.clone())
     }
 
+    fn current_model_provider_label(&self, cx: &App) -> Option<SharedString> {
+        let selector = self.model_selector.as_ref()?;
+        let model = selector.read(cx).active_model(cx)?;
+        model.description.clone()
+    }
+
     pub fn current_mode_id(&self, cx: &App) -> Option<Arc<str>> {
         if let Some(thread) = self.as_native_thread(cx) {
             Some(thread.read(cx).profile().0.clone())
@@ -1895,6 +1901,7 @@ impl ThreadView {
         let model_label = self
             .current_model_label(cx)
             .unwrap_or_else(|| SharedString::from("Select model"));
+        let provider_label = self.current_model_provider_label(cx);
         let tooltip_label = format!("Change model: {model_label}");
 
         ButtonLike::new("backboard-footer-model-selector")
@@ -1907,7 +1914,14 @@ impl ThreadView {
                     .min_w_0()
                     .gap_1()
                     .items_center()
-                    .child(self.render_backboard_logo(px(12.)))
+                    .when_some(provider_label, |this, provider| {
+                        this.child(
+                            Label::new(provider)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted)
+                                .flex_none(),
+                        )
+                    })
                     .child(
                         Label::new(model_label)
                             .size(LabelSize::XSmall)
@@ -1929,6 +1943,7 @@ impl ThreadView {
 
     fn render_selected_model_readout(&self, cx: &App) -> Option<impl IntoElement> {
         let model_label = self.current_model_label(cx)?;
+        let provider_label = self.current_model_provider_label(cx);
 
         Some(
             h_flex()
@@ -1936,7 +1951,14 @@ impl ThreadView {
                 .max_w_64()
                 .gap_1()
                 .items_center()
-                .child(self.render_backboard_logo(px(12.)))
+                .when_some(provider_label, |this, provider| {
+                    this.child(
+                        Label::new(provider)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .flex_none(),
+                    )
+                })
                 .child(
                     Label::new(model_label)
                         .size(LabelSize::XSmall)

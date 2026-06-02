@@ -1412,10 +1412,8 @@ impl ConversationView {
 
         if let Some(model_selector) = model_selector.as_ref() {
             if agent_display_name.as_ref() == "Backboard" {
-                let logo_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../../../app/logo.png");
                 model_selector.update(cx, |model_selector, _cx| {
-                    model_selector.set_trigger_brand(agent_display_name.clone(), Some(logo_path));
+                    model_selector.set_trigger_brand(SharedString::from(""), None);
                 });
             }
         }

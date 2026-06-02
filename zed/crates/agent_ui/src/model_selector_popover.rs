@@ -163,25 +163,37 @@ impl Render for ModelSelectorPopover {
                     })
                     .when(branded_trigger, |this| {
                         this.child(
+                            Icon::new(if self.menu_handle.is_deployed() {
+                                IconName::ChevronUp
+                            } else {
+                                IconName::ChevronDown
+                            })
+                            .color(Color::Muted)
+                            .size(IconSize::XSmall),
+                        )
+                        .child(
                             h_flex()
                                 .min_w_0()
                                 .flex_1()
                                 .gap_0p5()
                                 .items_center()
-                                .when_some(trigger_label.clone(), |this, label| {
-                                    this.child(
-                                        Label::new(label)
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted)
-                                            .truncate(),
-                                    )
-                                    .child(
-                                        Label::new("·")
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted)
-                                            .alpha(0.6),
-                                    )
-                                })
+                                .when_some(
+                                    trigger_label.clone().filter(|l| !l.is_empty()),
+                                    |this, label| {
+                                        this.child(
+                                            Label::new(label)
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted)
+                                                .truncate(),
+                                        )
+                                        .child(
+                                            Label::new("·")
+                                                .size(LabelSize::XSmall)
+                                                .color(Color::Muted)
+                                                .alpha(0.6),
+                                        )
+                                    },
+                                )
                                 .when_some(trigger_provider_name.clone(), |this, provider| {
                                     this.child(
                                         Label::new(provider)
@@ -206,15 +218,6 @@ impl Render for ModelSelectorPopover {
                                         })
                                         .truncate(),
                                 ),
-                        )
-                        .child(
-                            Icon::new(if self.menu_handle.is_deployed() {
-                                IconName::ChevronUp
-                            } else {
-                                IconName::ChevronDown
-                            })
-                            .color(Color::Muted)
-                            .size(IconSize::XSmall),
                         )
                     })
                     .when(!branded_trigger && !has_model_icon, |this| {
