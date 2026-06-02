@@ -15,11 +15,11 @@ use db::kvp::KeyValueStore;
 use editor::actions::Newline;
 use editor::{Editor, EditorEvent};
 use gpui::{
-    AnyElement, App, AsyncWindowContext, ClipboardItem, Context, DragMoveEvent, Entity,
+    AnyElement, App, AsyncWindowContext, BoxShadow, ClipboardItem, Context, DragMoveEvent, Entity,
     EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, MouseButton,
     MouseDownEvent, MouseUpEvent, ObjectFit, PathPromptOptions, Pixels, Render, SharedString,
     Subscription, Task, TextStyleRefinement, WeakEntity, Window, WindowControlArea, canvas, img,
-    rems,
+    point, rems,
 };
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
@@ -66,6 +66,13 @@ static CURATED_MODELS: &[(&str, &str, &str)] = &[
 ];
 
 const SIMPLE_LANDING_LOGO_PATH: &str = "images/animation_logo.png";
+const SIMPLE_PREVIEW_PORT: u16 = 3000;
+
+struct PreviewLaunch {
+    folder: PathBuf,
+    command: String,
+    url_path: String,
+}
 
 fn curated_display_name(model_id: &str) -> Option<&'static str> {
     let model_part = model_id.split_once('/').map(|(_, m)| m).unwrap_or(model_id);
@@ -411,26 +418,39 @@ impl ChatMode {
     }
 
     fn placeholder(self) -> &'static str {
-        "Do anything"
+        "Ask Backboard..."
     }
 
     fn follow_up_placeholder(self) -> &'static str {
-        "Do anything"
+        "Ask Backboard..."
     }
 
     fn prompt_prefix(self) -> &'static str {
         match self {
             ChatMode::Ask => {
-                "Ask mode: answer without editing files or making project changes unless I explicitly ask you to switch to build mode."
+                concat!(
+                    "Ask mode: answer without editing files or making project changes unless I explicitly ask you to switch to build mode.\n",
+                    "Ask focused clarifying questions when the request is underspecified, especially when the answer depends on project goals, audience, constraints, or user intent."
+                )
             }
             ChatMode::Build => {
-                "Simple mode: build or edit the project for a nontechnical user. Keep visible explanations short and natural. Avoid raw markdown, command output, implementation checklists, or code details unless the user asks."
+                concat!(
+                    "Simple build mode: build or edit the project for a nontechnical user.\n",
+                    "- Default to creating a polished web app or page when the user asks for a product, app, page, dashboard, tool, game, or visual experience and does not specify another medium.\n",
+                    "- Do not force a web app when the user explicitly asks for another artifact, such as docs, scripts, data work, configuration, terminal help, or repository cleanup.\n",
+                    "- Ask focused clarifying questions before building when core product, audience, content, brand, data, platform, or style choices are missing. Prefer 1-3 short questions at a time, and state sensible defaults when proceeding would be better than waiting.\n",
+                    "- Keep visible chat replies short, natural, and outcome-focused. Do not show code, filenames, commands, raw logs, markdown-heavy checklists, or implementation details unless the user asks.\n",
+                    "- Do not narrate implementation mechanics in chat. Avoid phrases like updating files, creating HTML/CSS/JavaScript files, editing components, running commands, or changing specific filenames. Say what user-facing experience is being built instead.\n",
+                    "- Summarize edits as product changes. Let the UI expose file counts and read-only diffs separately, such as Backboard changed 3 files.\n",
+                    "- Treat code and diffs as read-only review surfaces for the user.\n",
+                    "- After creating or updating a runnable artifact, start or refresh the preview."
+                )
             }
         }
     }
 
     fn prepare_message(self, text: String) -> String {
-        format!("{}\n\n{text}", self.prompt_prefix())
+        text
     }
 }
 
@@ -462,7 +482,7 @@ struct ProjectSession {
     is_preview_generating: bool,
     terminal_view: Option<Entity<TerminalView>>,
     terminal_working_directory: Option<PathBuf>,
-    // Port claimed by this session's dev server (3000–3002). None until first start.
+    // Fixed local preview port used by the active simple-mode preview.
     dev_server_port: Option<u16>,
     #[allow(dead_code)]
     web_preview: Option<crate::web_preview::WebPreview>,
@@ -533,8 +553,7 @@ pub struct BeginnerWorkspace {
     is_preview_generating: bool,
     terminal_view: Option<Entity<TerminalView>>,
     terminal_working_directory: Option<PathBuf>,
-    // Port claimed by this session (3000–3002). Persists across stash/switch so the
-    // server is never killed when switching tabs — only reclaimed when a session is reset.
+    // Fixed local preview port used by the active simple-mode preview.
     dev_server_port: Option<u16>,
     // Polling task for start_dev_server; stored per-session so it cancels on stash/switch.
     dev_server_task: Option<Task<()>>,
@@ -634,6 +653,9 @@ impl BeginnerWorkspace {
             return;
         }
 
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+        self.clear_current_preview_state();
+
         let (replacement_editor, enter_sub) =
             Self::make_chat_editor(window, cx, ChatMode::Build.placeholder());
         let session = ProjectSession {
@@ -672,8 +694,8 @@ impl BeginnerWorkspace {
             terminal_working_directory: self.terminal_working_directory.take(),
             dev_server_port: self.dev_server_port.take(),
             // Drop the live webview by not carrying it into the stash.
-            // preview_url and dev_server_port are preserved so the server stays alive
-            // on its port and can be shown again on switch-back.
+            // Only the active session may own a live preview; starting another
+            // preview clears stashed preview state and restarts the fixed port.
             web_preview: None,
             dev_server_task: self.dev_server_task.take(),
             subscriptions: std::mem::take(&mut self.session_subscriptions),
@@ -691,7 +713,16 @@ impl BeginnerWorkspace {
         if ix >= self.background_sessions.len() {
             return;
         }
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+        self.clear_current_preview_state();
         let session = &mut self.background_sessions[ix];
+        session.preview_url = None;
+        session.preview_visible = false;
+        session.is_preview_generating = false;
+        session.web_preview = None;
+        session.dev_server_port = None;
+        session.dev_server_task = None;
+
         std::mem::swap(&mut self.active_chat_record_id, &mut session.chat_record_id);
         std::mem::swap(&mut self.state, &mut session.state);
         std::mem::swap(&mut self.tab_name, &mut session.tab_name);
@@ -1254,19 +1285,15 @@ impl BeginnerWorkspace {
         self.model_selector = None;
         self.is_agent_running = false;
         self.agent_finished = false;
-        self.web_preview = None;
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+        self.clear_current_preview_state();
         self.right_panel = RightPanel::Preview;
         self.right_panel_open = false;
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Files;
         self.share_dialog_open = false;
-        self.preview_url = None;
-        self.preview_visible = false;
-        self.is_preview_generating = false;
         self.terminal_view = None;
         self.terminal_working_directory = None;
-        self.dev_server_port = None;
-        self.dev_server_task = None;
         cx.notify();
 
         let workspace = self.workspace.clone();
@@ -1318,15 +1345,13 @@ impl BeginnerWorkspace {
 
         self.is_agent_running = true;
         self.agent_finished = false;
-        self.web_preview = None;
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+        self.clear_current_preview_state();
         self.right_panel = RightPanel::Preview;
         self.right_panel_open = false;
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Files;
         self.share_dialog_open = false;
-        self.preview_url = None;
-        self.preview_visible = false;
-        self.is_preview_generating = false;
         self.terminal_view = None;
         self.terminal_working_directory = None;
         self.chat_editor.update(cx, |editor, cx| {
@@ -1500,11 +1525,9 @@ impl BeginnerWorkspace {
             editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
             editor.set_text("", window, cx);
         });
-        // Hide any old preview while the next response and preview are generated.
-        self.web_preview = None;
-        self.preview_url = None;
-        self.preview_visible = false;
-        self.is_preview_generating = false;
+        // Stop any old preview while the next response and preview are generated.
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+        self.clear_current_preview_state();
         self.is_agent_running = true;
         cx.notify();
 
@@ -1515,11 +1538,10 @@ impl BeginnerWorkspace {
         .detach();
     }
 
-    fn handle_file_panel_event(&mut self, event: &FileChangesPanelEvent, _cx: &mut Context<Self>) {
+    fn handle_file_panel_event(&mut self, event: &FileChangesPanelEvent, cx: &mut Context<Self>) {
         match event {
-            FileChangesPanelEvent::FileSelected(path) => {
-                self.open_file_read_only(path.as_path());
-                _cx.notify();
+            FileChangesPanelEvent::FileSelected(_path) => {
+                self.show_changes_diff(cx);
             }
         }
     }
@@ -1527,6 +1549,7 @@ impl BeginnerWorkspace {
     fn handle_chat_feed_event(&mut self, event: &BeginnerChatFeedEvent, cx: &mut Context<Self>) {
         match event {
             BeginnerChatFeedEvent::PreviewRequested => self.show_preview(cx),
+            BeginnerChatFeedEvent::ChangesRequested => self.show_changes_diff(cx),
             BeginnerChatFeedEvent::ShareRequested => {
                 self.share_dialog_open = true;
                 cx.notify();
@@ -1552,14 +1575,22 @@ impl BeginnerWorkspace {
     }
 
     fn show_preview(&mut self, cx: &mut Context<Self>) {
-        if self.preview_url.is_none() {
-            return;
-        }
-        self.preview_visible = true;
         self.right_panel = RightPanel::Preview;
         self.right_panel_open = true;
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Design;
+
+        if self.selected_folder.is_some() {
+            self.open_web_app_if_present(cx);
+            return;
+        }
+
+        if self.preview_url.is_none() {
+            cx.notify();
+            return;
+        }
+
+        self.preview_visible = true;
         cx.notify();
     }
 
@@ -1761,6 +1792,38 @@ impl BeginnerWorkspace {
         cx.notify();
     }
 
+    fn show_changes_diff(&mut self, cx: &mut Context<Self>) {
+        let Some(thread) = self.thread.as_ref() else {
+            self.show_code_artifact(cx);
+            return;
+        };
+
+        let diffs = thread
+            .read(cx)
+            .entries()
+            .iter()
+            .flat_map(|entry| entry.diffs())
+            .map(|diff| diff.read(cx).to_markdown(cx))
+            .filter(|diff| !diff.trim().is_empty())
+            .collect::<Vec<_>>();
+
+        if diffs.is_empty() {
+            self.show_code_artifact(cx);
+            return;
+        }
+
+        self.right_panel = RightPanel::CodeView {
+            title: SharedString::from("Changes"),
+            content: SharedString::from(diffs.join("\n\n")),
+        };
+        self.right_panel_open = true;
+        self.right_panel_mode = RightPanelMode::Artifact;
+        self.right_panel_option = RightPanelOption::Code;
+        self.preview_visible = false;
+        self.web_preview = None;
+        cx.notify();
+    }
+
     fn cancel_running_task(&mut self, cx: &mut Context<Self>) {
         let Some(thread) = self.thread.clone() else {
             return;
@@ -1867,73 +1930,338 @@ impl BeginnerWorkspace {
             return;
         };
 
-        // Search the root and one level of subdirectories for a runnable project.
-        // Agents often create a subdirectory (e.g. `my-folder/tree-site/`) rather
-        // than placing files directly in the selected root.
-        let mut candidates: Vec<PathBuf> = vec![root.clone()];
-        if let Ok(entries) = std::fs::read_dir(&root) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                if path.is_dir()
-                    && name != "node_modules"
-                    && name != "target"
-                    && !name.starts_with('.')
-                {
-                    candidates.push(path);
-                }
-            }
-        }
+        self.reset_all_preview_state();
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
 
-        for candidate in &candidates {
-            let package_json = candidate.join("package.json");
-            if package_json.exists() {
-                if let Ok(content) = std::fs::read_to_string(&package_json) {
-                    if content.contains("\"dev\"") {
-                        self.start_dev_server(candidate.clone(), cx);
-                        return;
-                    }
-                }
+        for candidate in Self::preview_candidate_dirs(&root, 2) {
+            if let Some(command) = Self::package_preview_command(&candidate, SIMPLE_PREVIEW_PORT) {
+                self.start_preview_server(
+                    PreviewLaunch {
+                        folder: candidate,
+                        command,
+                        url_path: "/".to_string(),
+                    },
+                    cx,
+                );
+                return;
             }
         }
 
         // Static HTML fallback — make it available from the chat Preview button.
-        for candidate in &candidates {
-            let index = candidate.join("index.html");
-            if index.exists() {
-                self.web_preview = None;
-                self.preview_visible = true;
-                self.is_preview_generating = false;
-                self.preview_url = Some(format!("file://{}", index.display()));
-                cx.notify();
-                return;
-            }
+        if let Some(html_path) = Self::static_preview_html_path(&root) {
+            self.start_static_preview_server(html_path, cx);
+            return;
         }
         self.is_preview_generating = false;
         cx.notify();
     }
 
-    /// Picks the lowest port in 3000–3002 not already claimed by another session.
-    fn claim_dev_server_port(&self) -> u16 {
-        let used: std::collections::HashSet<u16> = self
-            .background_sessions
-            .iter()
-            .filter_map(|s| s.dev_server_port)
-            .collect();
-        for port in 3000u16..3003 {
-            if !used.contains(&port) {
-                return port;
+    fn preview_candidate_dirs(root: &Path, max_depth: usize) -> Vec<PathBuf> {
+        let mut candidates = Vec::new();
+        let mut dirs = vec![(root.to_path_buf(), 0usize)];
+
+        while let Some((dir, depth)) = dirs.pop() {
+            candidates.push(dir.clone());
+            if depth >= max_depth {
+                continue;
+            }
+
+            let Ok(read_dir) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            let mut child_dirs = read_dir
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir())
+                .filter(|path| {
+                    let name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    name != "node_modules"
+                        && name != "target"
+                        && name != "dist"
+                        && name != "build"
+                        && !name.starts_with('.')
+                })
+                .collect::<Vec<_>>();
+            child_dirs.sort();
+            for child in child_dirs.into_iter().rev() {
+                dirs.push((child, depth + 1));
             }
         }
-        3000 // all three taken — reuse 3000 (shouldn't happen with max 3 tabs)
+
+        candidates
     }
 
-    fn shell_quote_path(path: &PathBuf) -> String {
-        let path = path.to_string_lossy();
-        format!("'{}'", path.replace('\'', "'\\''"))
+    fn package_preview_command(folder: &Path, port: u16) -> Option<String> {
+        let package_json = folder.join("package.json");
+        let package = std::fs::read_to_string(package_json).ok()?;
+        let package: serde_json::Value = serde_json::from_str(&package).ok()?;
+        let scripts = package
+            .get("scripts")
+            .and_then(|scripts| scripts.as_object());
+        let (pkg_manager, install_cmd) = Self::package_manager_commands(folder);
+        let install_if_needed = format!("if [ ! -d node_modules ]; then {install_cmd}; fi");
+
+        if let Some(scripts) = scripts {
+            for script_name in ["dev", "start", "serve", "preview"] {
+                let Some(script_body) = scripts.get(script_name).and_then(|script| script.as_str())
+                else {
+                    continue;
+                };
+                let args = Self::preview_script_args(script_body, port);
+                let run = Self::package_run_command(pkg_manager, script_name, &args);
+                return Some(format!("{install_if_needed} && {run}"));
+            }
+        }
+
+        if Self::package_has_dependency(&package, "next") {
+            return Some(format!(
+                "{install_if_needed} && {}",
+                Self::package_exec_command(
+                    pkg_manager,
+                    &format!("next dev -H 127.0.0.1 -p {port}")
+                )
+            ));
+        }
+        if Self::package_has_dependency(&package, "vite") {
+            return Some(format!(
+                "{install_if_needed} && {}",
+                Self::package_exec_command(
+                    pkg_manager,
+                    &format!("vite --host 127.0.0.1 --port {port}")
+                )
+            ));
+        }
+
+        None
+    }
+
+    fn package_manager_commands(folder: &Path) -> (&'static str, &'static str) {
+        if folder.join("pnpm-lock.yaml").exists() {
+            ("pnpm", "pnpm install")
+        } else if folder.join("bun.lockb").exists() || folder.join("bun.lock").exists() {
+            ("bun", "bun install")
+        } else if folder.join("yarn.lock").exists() {
+            ("yarn", "yarn install")
+        } else {
+            ("npm", "npm install")
+        }
+    }
+
+    fn package_run_command(pkg_manager: &str, script_name: &str, args: &str) -> String {
+        match pkg_manager {
+            "yarn" => format!("yarn run {script_name}{args}"),
+            "pnpm" => format!("pnpm run {script_name}{args}"),
+            "bun" => format!("bun run {script_name}{args}"),
+            _ => format!("npm run {script_name}{args}"),
+        }
+    }
+
+    fn package_exec_command(pkg_manager: &str, command: &str) -> String {
+        match pkg_manager {
+            "pnpm" => format!("pnpm exec {command}"),
+            "bun" => format!("bunx {command}"),
+            "yarn" => format!("yarn {command}"),
+            _ => format!("npx {command}"),
+        }
+    }
+
+    fn preview_script_args(script_body: &str, port: u16) -> String {
+        let lower = script_body.to_lowercase();
+        if lower.contains("react-scripts") {
+            String::new()
+        } else if lower.contains("next") {
+            format!(" -- -H 127.0.0.1 -p {port}")
+        } else if lower.contains("vite")
+            || lower.contains("astro")
+            || lower.contains("svelte")
+            || lower.contains("webpack")
+            || lower.contains("parcel")
+        {
+            format!(" -- --host 127.0.0.1 --port {port}")
+        } else {
+            format!(" -- --port {port}")
+        }
+    }
+
+    fn package_has_dependency(package: &serde_json::Value, dependency: &str) -> bool {
+        ["dependencies", "devDependencies", "peerDependencies"]
+            .into_iter()
+            .any(|section| {
+                package
+                    .get(section)
+                    .and_then(|deps| deps.as_object())
+                    .is_some_and(|deps| deps.contains_key(dependency))
+            })
+    }
+
+    fn static_preview_html_path(root: &Path) -> Option<PathBuf> {
+        let mut dirs = vec![(root.to_path_buf(), 0usize)];
+        let mut first_html = None;
+
+        while let Some((dir, depth)) = dirs.pop() {
+            let Ok(read_dir) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            let mut entries = read_dir
+                .flatten()
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>();
+            entries.sort();
+
+            for path in entries {
+                let name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if path.is_dir() {
+                    if depth < 2
+                        && name != "node_modules"
+                        && name != "target"
+                        && !name.starts_with('.')
+                    {
+                        dirs.push((path, depth + 1));
+                    }
+                    continue;
+                }
+
+                let is_html = path
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("html"));
+                if !is_html {
+                    continue;
+                }
+
+                if name.eq_ignore_ascii_case("index.html") {
+                    return Some(path);
+                }
+                first_html.get_or_insert(path);
+            }
+        }
+
+        first_html
+    }
+
+    fn start_static_preview_server(&mut self, html_path: PathBuf, cx: &mut Context<Self>) {
+        let folder = html_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.selected_folder.clone().unwrap_or_default());
+        let file_name = html_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "index.html".to_string());
+        let url_path = if file_name.eq_ignore_ascii_case("index.html") {
+            "/".to_string()
+        } else {
+            format!("/{}", Self::url_path_segment(&file_name))
+        };
+        let default_path = serde_json::to_string(&format!("/{file_name}"))
+            .unwrap_or_else(|_| "\"/index.html\"".to_string());
+        let node_script = format!(
+            "const http=require('http'),fs=require('fs'),path=require('path');\
+const root=process.cwd();\
+const types={{'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp','.ico':'image/x-icon'}};\
+http.createServer((req,res)=>{{\
+let url=(req.url||'/').split('?')[0];\
+let pathname=url==='/'?{}:url;\
+let decoded;try{{decoded=decodeURIComponent(pathname)}}catch{{decoded={}}}\
+let file=path.normalize(path.join(root,decoded));\
+if(!file.startsWith(root)){{res.writeHead(403);res.end('Forbidden');return;}}\
+fs.readFile(file,(err,data)=>{{\
+if(err){{res.writeHead(404);res.end('Not found');return;}}\
+res.writeHead(200,{{'Content-Type':types[path.extname(file).toLowerCase()]||'application/octet-stream'}});\
+res.end(data);\
+}});\
+}}).listen({},'127.0.0.1');",
+            default_path, default_path, SIMPLE_PREVIEW_PORT
+        );
+        let command = format!(
+            "if command -v python3 >/dev/null 2>&1; then python3 -m http.server {} --bind 127.0.0.1; elif command -v node >/dev/null 2>&1; then node -e {}; else python -m http.server {}; fi",
+            SIMPLE_PREVIEW_PORT,
+            Self::shell_quote(&node_script),
+            SIMPLE_PREVIEW_PORT
+        );
+
+        self.start_preview_server(
+            PreviewLaunch {
+                folder,
+                command,
+                url_path,
+            },
+            cx,
+        );
+    }
+
+    fn url_path_segment(segment: &str) -> String {
+        let mut encoded = String::new();
+        for byte in segment.bytes() {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+                encoded.push(byte as char);
+            } else {
+                encoded.push_str(&format!("%{byte:02X}"));
+            }
+        }
+        encoded
+    }
+
+    fn reset_all_preview_state(&mut self) {
+        self.clear_current_preview_state();
+
+        for session in &mut self.background_sessions {
+            session.preview_url = None;
+            session.preview_visible = false;
+            session.is_preview_generating = false;
+            session.web_preview = None;
+            session.dev_server_port = None;
+            session.dev_server_task = None;
+        }
+    }
+
+    fn clear_current_preview_state(&mut self) {
+        self.preview_url = None;
+        self.preview_visible = false;
+        self.is_preview_generating = false;
+        self.web_preview = None;
+        self.dev_server_port = None;
+        self.dev_server_task = None;
+    }
+
+    fn kill_preview_port(port: u16) {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            Command::new("sh")
+                .arg("-c")
+                .arg(format!(
+                    "lsof -ti :{port} | xargs kill -9 2>/dev/null; true"
+                ))
+                .status()
+                .ok();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!(
+                        "Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object {{ Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }}"
+                    ),
+                ])
+                .status()
+                .ok();
+        }
+    }
+
+    fn shell_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+
+    fn shell_quote_path(path: &Path) -> String {
+        Self::shell_quote(&path.to_string_lossy())
     }
 
     fn is_http_preview_ready(port: u16) -> bool {
@@ -1969,11 +2297,8 @@ impl BeginnerWorkspace {
         (200..400).contains(&status)
     }
 
-    fn start_dev_server(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
-        // Reuse the already-claimed port for this session; claim a fresh one if first start.
-        let port = self
-            .dev_server_port
-            .unwrap_or_else(|| self.claim_dev_server_port());
+    fn start_preview_server(&mut self, launch: PreviewLaunch, cx: &mut Context<Self>) {
+        let port = SIMPLE_PREVIEW_PORT;
         self.dev_server_port = Some(port);
         self.preview_url = None;
         self.preview_visible = false;
@@ -1982,49 +2307,22 @@ impl BeginnerWorkspace {
         cx.notify();
 
         let task = cx.spawn(async move |this, cx| {
-            // Kill only the specific port being claimed so other sessions' servers survive.
-            #[cfg(any(target_os = "macos", target_os = "linux"))]
-            {
-                std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(format!(
-                        "lsof -ti :{port} | xargs kill -9 2>/dev/null; true"
-                    ))
-                    .status()
-                    .ok();
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(400))
-                    .await;
-            }
-
-            // Detect the package manager from lockfiles present in the project folder.
-            let pkg_manager = if folder.join("pnpm-lock.yaml").exists() {
-                "pnpm"
-            } else if folder.join("bun.lockb").exists() || folder.join("bun.lock").exists() {
-                "bun"
-            } else if folder.join("yarn.lock").exists() {
-                "yarn"
-            } else {
-                "npm"
-            };
-            let install_cmd = match pkg_manager {
-                "pnpm" => "pnpm install",
-                "bun" => "bun install",
-                "yarn" => "yarn install",
-                _ => "npm install",
-            };
+            Self::kill_preview_port(port);
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(400))
+                .await;
 
             // Use the interactive login shell so ~/.zshrc / ~/.bashrc are sourced —
             // this makes nvm, Homebrew, mise, etc. available even from a GUI app launch.
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-            let folder_arg = Self::shell_quote_path(&folder);
-            let dev_cmd = format!(
-                "cd {folder_arg} && if [ ! -d node_modules ]; then {install_cmd}; fi && {pkg_manager} run dev -- --port={port}",
-            );
+            let folder_arg = Self::shell_quote_path(&launch.folder);
+            let dev_cmd = format!("cd {folder_arg} && {}", launch.command);
 
             let spawned = std::process::Command::new(&shell)
                 .args(["-i", "-l", "-c", &dev_cmd])
                 .env("PORT", port.to_string())
+                .env("HOST", "127.0.0.1")
+                .env("HOSTNAME", "127.0.0.1")
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
@@ -2049,7 +2347,7 @@ impl BeginnerWorkspace {
                     .timer(std::time::Duration::from_millis(500))
                     .await;
                 if Self::is_http_preview_ready(port) {
-                    let url = format!("http://localhost:{port}");
+                    let url = format!("http://localhost:{port}{}", launch.url_path);
                     this.update(cx, |this, cx| {
                         this.web_preview = None;
                         this.preview_visible = true;
@@ -2076,6 +2374,7 @@ impl BeginnerWorkspace {
 
     #[allow(dead_code)]
     fn new_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
         self.state = BeginnerState::Landing;
         self.active_chat_record_id = None;
         self.selected_folder = None;
@@ -2093,14 +2392,9 @@ impl BeginnerWorkspace {
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Files;
         self.share_dialog_open = false;
-        self.preview_url = None;
-        self.preview_visible = false;
-        self.is_preview_generating = false;
+        self.clear_current_preview_state();
         self.terminal_view = None;
         self.terminal_working_directory = None;
-        self.dev_server_port = None;
-        self.dev_server_task = None;
-        self.web_preview = None;
         self.chat_mode = ChatMode::Build;
         let (chat_editor, enter_sub) =
             Self::make_chat_editor(window, cx, self.chat_mode.placeholder());
@@ -2179,6 +2473,7 @@ impl BeginnerWorkspace {
     }
 
     fn reset_current_session_for_record(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
         self.chat_mode = ChatMode::Build;
         let (chat_editor, enter_sub) =
             Self::make_chat_editor(window, cx, self.chat_mode.placeholder());
@@ -2198,14 +2493,9 @@ impl BeginnerWorkspace {
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Files;
         self.share_dialog_open = false;
-        self.preview_url = None;
-        self.preview_visible = false;
-        self.is_preview_generating = false;
+        self.clear_current_preview_state();
         self.terminal_view = None;
         self.terminal_working_directory = None;
-        self.dev_server_port = None;
-        self.dev_server_task = None;
-        self.web_preview = None;
         self.session_subscriptions.clear();
         self.session_subscriptions.push(enter_sub);
     }
@@ -2290,7 +2580,8 @@ impl BeginnerWorkspace {
         self.is_agent_running = false;
         self.agent_finished = false;
         if let Some(conversation_view) = conversation_view {
-            self.bind_conversation_view(conversation_view, window, cx);
+            self.bind_conversation_view(conversation_view.clone(), window, cx);
+            self.schedule_restore_timeout(conversation_view, cx);
         }
     }
 
@@ -2324,125 +2615,159 @@ impl BeginnerWorkspace {
     ) {
         self.pending_conversation_view = Some(conversation_view.clone());
         let cv_sub = cx.observe_in(&conversation_view, window, |this, cv, window, cx| {
-            let (is_loading, root_thread) = {
-                let cv_ref = cv.read(cx);
-                (cv_ref.is_loading(), cv_ref.root_thread(cx))
-            };
+            this.handle_conversation_view_update(&cv, window, cx);
+        });
+        self.session_subscriptions.push(cv_sub);
+        self.handle_conversation_view_update(&conversation_view, window, cx);
+    }
 
-            if this.thread.is_none() {
-                if let Some(thread) = root_thread {
-                    let thread_sub =
-                        cx.subscribe(&thread, |this, thread_entity, event, cx| match event {
-                            AcpThreadEvent::Stopped(_) => {
-                                this.is_agent_running = false;
-                                this.agent_finished = true;
-                                if this.preview_url.is_none() {
-                                    this.open_web_app_if_present(cx);
-                                }
-                                cx.notify();
-                            }
-                            AcpThreadEvent::NewEntry | AcpThreadEvent::EntryUpdated(_) => {
-                                this.is_agent_running =
-                                    thread_entity.read(cx).status() != ThreadStatus::Idle;
-                                this.restore_preview_for_thread_if_present(&thread_entity, cx);
-                                cx.notify();
-                            }
-                            AcpThreadEvent::Error => {
-                                this.is_agent_running = false;
-                                this.agent_finished = false;
-                                cx.notify();
-                            }
-                            AcpThreadEvent::ToolAuthorizationRequested(tool_call_id) => {
-                                let outcome = thread_entity
-                                    .read(cx)
-                                    .tool_call(tool_call_id)
-                                    .and_then(|(_, call)| {
-                                        if let ToolCallStatus::WaitingForConfirmation {
-                                            options,
-                                            ..
-                                        } = &call.status
-                                        {
-                                            let option = options.first_option_of_kind(
-                                                acp::PermissionOptionKind::AllowOnce,
-                                            )?;
-                                            Some(SelectedPermissionOutcome::new(
-                                                option.option_id.clone(),
-                                                option.kind,
-                                            ))
-                                        } else {
-                                            None
-                                        }
-                                    });
-                                if let Some(outcome) = outcome {
-                                    let id = tool_call_id.clone();
-                                    thread_entity.update(cx, |t, cx| {
-                                        t.authorize_tool_call(id, outcome, cx);
-                                    });
-                                }
-                            }
-                            _ => {}
-                        });
-                    this.session_subscriptions.push(thread_sub);
-                    let artifact_title = this.artifact_title();
-                    let feed = cx.new(|cx| {
-                        BeginnerChatFeed::new(thread.clone(), artifact_title.clone(), cx)
-                    });
-                    let feed_sub = cx.subscribe(&feed, |bw, _, event, cx| {
-                        bw.handle_chat_feed_event(event, cx);
-                    });
-                    this.session_subscriptions.push(feed_sub);
-                    this.chat_feed = Some(feed);
-                    let file_panel = cx.new(|cx| FileChangesPanel::new(thread.clone(), cx));
-                    let file_sub = cx.subscribe(&file_panel, |bw, _, event, cx| {
-                        bw.handle_file_panel_event(event, cx);
-                    });
-                    this.session_subscriptions.push(file_sub);
-                    this.file_changes_panel = Some(file_panel);
-                    this.thread = Some(thread.clone());
-                    if let Some(folder) = this.selected_folder.clone() {
-                        let sid = thread.read(cx).session_id().0.to_string();
-                        this.update_latest_chat_record_session_id(&folder, sid, cx);
-                    }
-                    this.restore_preview_for_thread_if_present(&thread, cx);
-                    this.active_conversation_view = this.pending_conversation_view.take();
-                    if let Some(conversation_view) = this.active_conversation_view.as_ref() {
-                        this.configure_thread_composer(conversation_view, window, cx);
-                    }
-                    this.model_selector =
-                        this.active_conversation_view
-                            .as_ref()
-                            .and_then(|cv_entity| {
-                                cv_entity.update(cx, |cv_ref, cx| {
-                                    cv_ref.make_root_model_selector_wrapped(
-                                        |inner| {
-                                            Rc::new(CuratedModelSelector { inner })
-                                                as Rc<dyn AgentModelSelector>
-                                        },
-                                        window,
-                                        cx,
-                                    )
-                                })
-                            });
-                    if let Some(model_selector) = this.model_selector.as_ref() {
-                        let logo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                            .join("../../../../app/logo.png");
-                        model_selector.update(cx, |model_selector, _cx| {
-                            model_selector.set_trigger_brand(
-                                SharedString::from("Backboard"),
-                                Some(logo_path),
-                            );
-                        });
+    fn handle_conversation_view_update(
+        &mut self,
+        conversation_view: &Entity<ConversationView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (is_loading, root_thread) = {
+            let cv_ref = conversation_view.read(cx);
+            (cv_ref.is_loading(), cv_ref.root_thread(cx))
+        };
+
+        if self.thread.is_some() {
+            return;
+        }
+
+        if let Some(thread) = root_thread {
+            let thread_sub = cx.subscribe(&thread, |this, thread_entity, event, cx| match event {
+                AcpThreadEvent::Stopped(_) => {
+                    this.is_agent_running = false;
+                    this.agent_finished = true;
+                    if this.preview_url.is_none() {
+                        this.open_web_app_if_present(cx);
                     }
                     cx.notify();
-                } else if !is_loading {
+                }
+                AcpThreadEvent::NewEntry | AcpThreadEvent::EntryUpdated(_) => {
+                    this.is_agent_running = thread_entity.read(cx).status() != ThreadStatus::Idle;
+                    cx.notify();
+                }
+                AcpThreadEvent::Error => {
+                    this.is_agent_running = false;
+                    this.agent_finished = false;
+                    cx.notify();
+                }
+                AcpThreadEvent::ToolAuthorizationRequested(tool_call_id) => {
+                    let outcome =
+                        thread_entity
+                            .read(cx)
+                            .tool_call(tool_call_id)
+                            .and_then(|(_, call)| {
+                                if let ToolCallStatus::WaitingForConfirmation { options, .. } =
+                                    &call.status
+                                {
+                                    let option = options.first_option_of_kind(
+                                        acp::PermissionOptionKind::AllowOnce,
+                                    )?;
+                                    Some(SelectedPermissionOutcome::new(
+                                        option.option_id.clone(),
+                                        option.kind,
+                                    ))
+                                } else {
+                                    None
+                                }
+                            });
+                    if let Some(outcome) = outcome {
+                        let id = tool_call_id.clone();
+                        thread_entity.update(cx, |t, cx| {
+                            t.authorize_tool_call(id, outcome, cx);
+                        });
+                    }
+                }
+                _ => {}
+            });
+            self.session_subscriptions.push(thread_sub);
+            let artifact_title = self.artifact_title();
+            let feed =
+                cx.new(|cx| BeginnerChatFeed::new(thread.clone(), artifact_title.clone(), cx));
+            let feed_sub = cx.subscribe(&feed, |bw, _, event, cx| {
+                bw.handle_chat_feed_event(event, cx);
+            });
+            self.session_subscriptions.push(feed_sub);
+            self.chat_feed = Some(feed);
+            let file_panel = cx.new(|cx| FileChangesPanel::new(thread.clone(), cx));
+            let file_sub = cx.subscribe(&file_panel, |bw, _, event, cx| {
+                bw.handle_file_panel_event(event, cx);
+            });
+            self.session_subscriptions.push(file_sub);
+            self.file_changes_panel = Some(file_panel);
+            self.thread = Some(thread.clone());
+            if let Some(folder) = self.selected_folder.clone() {
+                let sid = thread.read(cx).session_id().0.to_string();
+                self.update_latest_chat_record_session_id(&folder, sid, cx);
+            }
+            self.restore_preview_for_thread_if_present(&thread, cx);
+            self.active_conversation_view = self.pending_conversation_view.take();
+            if let Some(conversation_view) = self.active_conversation_view.as_ref() {
+                self.configure_thread_composer(conversation_view, window, cx);
+            }
+            self.model_selector = self
+                .active_conversation_view
+                .as_ref()
+                .and_then(|cv_entity| {
+                    cv_entity.update(cx, |cv_ref, cx| {
+                        cv_ref.make_root_model_selector_wrapped(
+                            |inner| {
+                                Rc::new(CuratedModelSelector { inner })
+                                    as Rc<dyn AgentModelSelector>
+                            },
+                            window,
+                            cx,
+                        )
+                    })
+                });
+            if let Some(model_selector) = self.model_selector.as_ref() {
+                let logo_path =
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../app/logo.png");
+                model_selector.update(cx, |model_selector, _cx| {
+                    model_selector
+                        .set_trigger_brand(SharedString::from("Backboard"), Some(logo_path));
+                });
+            }
+            cx.notify();
+        } else if !is_loading {
+            self.is_agent_running = false;
+            self.pending_conversation_view = None;
+            self.active_conversation_view = None;
+            cx.notify();
+        }
+    }
+
+    fn schedule_restore_timeout(
+        &mut self,
+        conversation_view: Entity<ConversationView>,
+        cx: &mut Context<Self>,
+    ) {
+        let pending_id = conversation_view.entity_id();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(8))
+                .await;
+            this.update(cx, |this, cx| {
+                let still_pending = this
+                    .pending_conversation_view
+                    .as_ref()
+                    .is_some_and(|view| view.entity_id() == pending_id);
+                if this.thread.is_none() && still_pending {
                     this.is_agent_running = false;
                     this.pending_conversation_view = None;
                     this.active_conversation_view = None;
+                    this.chat_feed = None;
+                    this.file_changes_panel = None;
                     cx.notify();
                 }
-            }
-        });
-        self.session_subscriptions.push(cv_sub);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn make_session_for_record(
@@ -3944,8 +4269,8 @@ impl BeginnerWorkspace {
                                     .when(api_key_ready && self.chat_feed.is_none(), |el| {
                                         let (headline, subtext) = if is_connecting {
                                             (
-                                                "Backboard is connecting",
-                                                "Your agent is starting up.",
+                                                "Loading chat",
+                                                "Backboard is restoring this conversation.",
                                             )
                                         } else if self.chat_mode == ChatMode::Ask {
                                             (
@@ -3991,7 +4316,7 @@ impl BeginnerWorkspace {
                                     })
                                     .when(api_key_ready && (is_running || is_connecting), |el| {
                                         let status = if is_connecting {
-                                            SharedString::from("Thought for 1s")
+                                            SharedString::from("Loading chat...")
                                         } else if self.chat_mode == ChatMode::Ask {
                                             SharedString::from("Thinking...")
                                         } else if self.is_preview_generating {
@@ -4222,19 +4547,19 @@ impl BeginnerWorkspace {
                             .color(Color::Custom(ds::accent(cx))),
                     )
                     .child(
-                        Label::new("Building page...")
+                        Label::new("Starting preview...")
                             .size(LabelSize::XSmall)
                             .color(Color::Custom(ds::accent(cx))),
                     ),
             )
             .child(
-                Label::new("Building landing page...")
+                Label::new("Preparing preview...")
                     .size(LabelSize::Custom(rems_from_px(15.)))
                     .weight(FontWeight::SEMIBOLD)
                     .color(Color::Custom(ds::text(cx))),
             )
             .child(
-                Label::new("Generating preview...")
+                Label::new("Looking for a runnable app.")
                     .size(LabelSize::Custom(rems_from_px(13.)))
                     .color(Color::Custom(ds::text_muted(cx))),
             )
@@ -4261,7 +4586,7 @@ impl BeginnerWorkspace {
                     .text_size(rems_from_px(13.))
                     .text_color(ds::text_muted(cx))
                     .line_height(relative(1.46))
-                    .child("Something went wrong while generating the artifact."),
+                    .child("No runnable app was detected. Backboard can still make more changes."),
             )
             .child(
                 Button::new("retry-artifact-preview", "Try again")
@@ -5017,6 +5342,11 @@ impl BeginnerWorkspace {
         content: &SharedString,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let readonly_label = if title.as_ref() == "Changes" {
+            "Diff is read only"
+        } else {
+            "Code is read only"
+        };
         let lines: Vec<_> = content
             .as_ref()
             .lines()
@@ -5038,6 +5368,26 @@ impl BeginnerWorkspace {
                     .h_full()
                     .overflow_hidden()
                     .bg(ds::app_background(cx))
+                    .child(
+                        h_flex()
+                            .h(px(32.))
+                            .w_full()
+                            .items_center()
+                            .gap_2()
+                            .px_3()
+                            .border_b_1()
+                            .border_color(ds::separator(cx))
+                            .child(
+                                Icon::new(IconName::LockOutlined)
+                                    .size(IconSize::XSmall)
+                                    .color(Color::Custom(ds::icon_muted(cx))),
+                            )
+                            .child(
+                                Label::new(readonly_label)
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Custom(ds::text_muted(cx))),
+                            ),
+                    )
                     .child(
                         v_flex()
                             .id("artifact-code-scroll")
@@ -5743,6 +6093,23 @@ impl BeginnerWorkspace {
             .into_any_element()
     }
 
+    fn composer_shadow(focused: bool, cx: &App) -> Vec<BoxShadow> {
+        let mut shadows = ElevationIndex::ElevatedSurface.shadow(cx);
+        shadows.push(BoxShadow {
+            color: ds::accent(cx).opacity(if focused { 0.24 } else { 0.14 }),
+            offset: point(px(0.), px(0.)),
+            blur_radius: px(if focused { 24. } else { 18. }),
+            spread_radius: px(0.),
+        });
+        shadows.push(BoxShadow {
+            color: ds::accent(cx).opacity(if focused { 0.16 } else { 0.08 }),
+            offset: point(px(0.), px(0.)),
+            blur_radius: px(0.),
+            spread_radius: px(1.),
+        });
+        shadows
+    }
+
     fn render_input_bar(
         &self,
         is_running: bool,
@@ -5784,6 +6151,7 @@ impl BeginnerWorkspace {
             .editor_background
             .blend(colors.element_background.opacity(0.08));
         let composer_border = colors.border_variant.opacity(0.5);
+        let composer_shadow = Self::composer_shadow(false, cx);
         if let Some(conversation_view) = self.active_conversation_view.clone()
             && let Some(composer) = conversation_view.update(cx, |conversation_view, cx| {
                 conversation_view.render_embedded_root_message_editor(window, cx)
@@ -5796,7 +6164,7 @@ impl BeginnerWorkspace {
                 .border_1()
                 .border_color(composer_border)
                 .bg(composer_surface_bg)
-                .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
+                .shadow(composer_shadow)
                 .when(centered, |el| el.max_w(px(920.)))
                 .child(composer)
                 .child(self.render_composer_footer(window, cx))
@@ -5892,6 +6260,7 @@ impl BeginnerWorkspace {
             colors.border_variant.opacity(0.5)
         };
         let composer_hover_border = colors.border_variant.opacity(0.62);
+        let composer_shadow = Self::composer_shadow(editor_focused, cx);
 
         v_flex()
             .flex_shrink_0()
@@ -5914,7 +6283,7 @@ impl BeginnerWorkspace {
                     .border_color(composer_border)
                     .hover(move |el| el.border_color(composer_hover_border))
                     .bg(composer_surface_bg)
-                    .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
+                    .shadow(composer_shadow)
                     .track_focus(&focus_handle)
                     .px_3()
                     .pt_2()

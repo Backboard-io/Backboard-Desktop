@@ -56,6 +56,7 @@ pub struct BeginnerChatFeed {
 }
 
 pub enum BeginnerChatFeedEvent {
+    ChangesRequested,
     PreviewRequested,
     ShareRequested,
 }
@@ -144,7 +145,7 @@ impl Render for BeginnerChatFeed {
                         .gap_1()
                         .child(ds::render_project_mark(ds::UTILITY_ICON_SIZE, cx))
                         .child(
-                            Label::new("Thinking…")
+                            Label::new("Loading chat…")
                                 .size(LabelSize::Small)
                                 .color(Color::Custom(colors.text_muted)),
                         ),
@@ -252,6 +253,8 @@ fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
 }
 
 fn clean_user_text(text: &str) -> String {
+    let text = strip_visible_prompt_prefix(text).unwrap_or(text).trim();
+
     if looks_like_landing_page_testcase(text) {
         return "build me a landing page".to_string();
     }
@@ -270,6 +273,14 @@ fn clean_user_text(text: &str) -> String {
     }
 
     text.to_string()
+}
+
+fn strip_visible_prompt_prefix(text: &str) -> Option<&str> {
+    if text.starts_with("Simple build mode:") || text.starts_with("Ask mode:") {
+        return text.split_once("\n\n").map(|(_, rest)| rest.trim());
+    }
+
+    None
 }
 
 fn looks_like_landing_page_testcase(text: &str) -> bool {
@@ -461,6 +472,8 @@ fn render_work_section(
     let is_running = tasks.iter().any(|task| !task.done && !task.failed);
     let label = if is_running { "Working" } else { "Worked" };
     let hover_background = ds::hover_background(cx);
+    let file_changes = file_change_count(tasks);
+    let changes_label = changed_files_label(file_changes);
 
     v_flex()
         .w_full()
@@ -504,11 +517,37 @@ fn render_work_section(
                                 .size(LabelSize::Small)
                                 .color(Color::Custom(ds::text_muted(cx))),
                         )
-                        .child(
-                            Label::new(work_summary_label(tasks))
-                                .size(LabelSize::XSmall)
-                                .color(Color::Custom(ds::text_muted(cx).opacity(0.72))),
-                        )
+                        .when(file_changes > 0 && !is_running, |el| {
+                            el.child(
+                                div()
+                                    .id(SharedString::from(format!(
+                                        "simple-work-card-changes-{index}"
+                                    )))
+                                    .px_2()
+                                    .py_0p5()
+                                    .rounded(px(4.))
+                                    .border_1()
+                                    .border_color(ds::soft_border(cx))
+                                    .bg(ds::field_background(cx))
+                                    .hover(move |el| el.bg(hover_background.opacity(0.55)))
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        cx.stop_propagation();
+                                        cx.emit(BeginnerChatFeedEvent::ChangesRequested);
+                                    }))
+                                    .child(
+                                        Label::new(changes_label.clone())
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Custom(ds::text_muted(cx))),
+                                    ),
+                            )
+                        })
+                        .when(file_changes == 0 || is_running, |el| {
+                            el.child(
+                                Label::new(work_summary_label(tasks))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Custom(ds::text_muted(cx).opacity(0.72))),
+                            )
+                        })
                         .child(
                             Icon::new(if is_expanded {
                                 IconName::ChevronUp
@@ -528,8 +567,8 @@ fn render_work_section(
         })
 }
 
-fn work_summary_label(tasks: &[TaskItem]) -> SharedString {
-    let file_changes = tasks
+fn file_change_count(tasks: &[TaskItem]) -> usize {
+    tasks
         .iter()
         .filter(|task| {
             matches!(
@@ -537,7 +576,19 @@ fn work_summary_label(tasks: &[TaskItem]) -> SharedString {
                 TaskKind::Edit | TaskKind::Delete | TaskKind::Move
             )
         })
-        .count();
+        .count()
+}
+
+fn changed_files_label(file_changes: usize) -> SharedString {
+    SharedString::from(format!(
+        "Backboard changed {} {}",
+        file_changes,
+        if file_changes == 1 { "file" } else { "files" }
+    ))
+}
+
+fn work_summary_label(tasks: &[TaskItem]) -> SharedString {
+    let file_changes = file_change_count(tasks);
     let commands = tasks
         .iter()
         .filter(|task| task.kind == TaskKind::Execute)
@@ -761,6 +812,11 @@ fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
             continue;
         }
 
+        if let Some(progress) = simple_mode_progress_rewrite(line) {
+            push_unique_line(&mut cleaned, progress);
+            continue;
+        }
+
         let line = line
             .replace("**", "")
             .replace('`', "")
@@ -781,6 +837,31 @@ fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
         Some(cleaned.join("\n"))
     }
 }
+
+fn simple_mode_progress_rewrite(line: &str) -> Option<String> {
+    let lower = line.to_lowercase();
+
+    if lower.contains("updating the files") {
+        return Some("I'm working on it.".to_string());
+    }
+
+    if lower.contains("html")
+        && lower.contains("css")
+        && lower.contains("javascript")
+        && lower.contains("file")
+    {
+        if let Some(for_index) = lower.find(" for ") {
+            let subject = line[for_index + 5..].trim().trim_end_matches(':');
+            if !subject.is_empty() {
+                return Some(format!("I'm building {subject}."));
+            }
+        }
+        return Some("I'm building the experience.".to_string());
+    }
+
+    None
+}
+
 fn push_unique_line(lines: &mut Vec<String>, line: String) {
     if lines.last().is_some_and(|last| last == &line) {
         return;
@@ -1007,22 +1088,29 @@ fn artifact_status(
         };
         return ArtifactStatus {
             title: SharedString::from(title),
-            metadata: SharedString::from("Generating preview..."),
+            metadata: SharedString::from("Working in your project"),
         };
     }
 
     match preview_state {
         PreviewCardState::Generating => ArtifactStatus {
-            title: SharedString::from("Building landing page..."),
-            metadata: SharedString::from("Generating preview..."),
+            title: SharedString::from("Starting preview..."),
+            metadata: SharedString::from("Looking for a runnable app."),
         },
         PreviewCardState::Ready => ArtifactStatus {
             title: artifact_title.clone(),
-            metadata: SharedString::from("Code · HTML"),
+            metadata: {
+                let changed_files = file_change_count(tasks);
+                if changed_files > 0 {
+                    changed_files_label(changed_files)
+                } else {
+                    SharedString::from("Preview ready")
+                }
+            },
         },
         PreviewCardState::Unavailable => ArtifactStatus {
             title: SharedString::from("Preview unavailable"),
-            metadata: SharedString::from("No runnable preview was detected."),
+            metadata: SharedString::from("No runnable app was detected."),
         },
         PreviewCardState::Building => {
             let changed_files = tasks
