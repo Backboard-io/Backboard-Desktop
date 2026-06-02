@@ -614,6 +614,11 @@ impl ConversationView {
         Some(root_thread.read(cx).message_editor.read(cx).is_empty(cx))
     }
 
+    pub fn root_message_editor_focus_handle(&self, cx: &App) -> Option<FocusHandle> {
+        let root_thread = self.root_thread_view()?;
+        Some(root_thread.read(cx).message_editor.focus_handle(cx))
+    }
+
     pub fn send_root_message_editor(
         &mut self,
         window: &mut Window,

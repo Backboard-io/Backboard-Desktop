@@ -6152,6 +6152,14 @@ impl BeginnerWorkspace {
             .blend(colors.element_background.opacity(0.08));
         let composer_border = colors.border_variant.opacity(0.5);
         let composer_shadow = Self::composer_shadow(false, cx);
+        let root_composer_focus =
+            self.active_conversation_view
+                .as_ref()
+                .and_then(|conversation_view| {
+                    conversation_view
+                        .read(cx)
+                        .root_message_editor_focus_handle(cx)
+                });
         if let Some(conversation_view) = self.active_conversation_view.clone()
             && let Some(composer) = conversation_view.update(cx, |conversation_view, cx| {
                 conversation_view.render_embedded_root_message_editor(window, cx)
@@ -6165,6 +6173,11 @@ impl BeginnerWorkspace {
                 .border_color(composer_border)
                 .bg(composer_surface_bg)
                 .shadow(composer_shadow)
+                .when_some(root_composer_focus, |el, focus_handle| {
+                    el.on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        window.focus(&focus_handle, cx);
+                    })
+                })
                 .when(centered, |el| el.max_w(px(920.)))
                 .child(composer)
                 .child(self.render_composer_footer(window, cx))
@@ -6285,6 +6298,9 @@ impl BeginnerWorkspace {
                     .bg(composer_surface_bg)
                     .shadow(composer_shadow)
                     .track_focus(&focus_handle)
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        window.focus(&focus_handle, cx);
+                    })
                     .px_3()
                     .pt_2()
                     .pb_1p5()
