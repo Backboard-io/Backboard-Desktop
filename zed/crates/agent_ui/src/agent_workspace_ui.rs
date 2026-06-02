@@ -1,10 +1,11 @@
 use collections::{HashMap, HashSet};
 use editor::{Editor, EditorElement, EditorStyle};
 use gpui::{
-    AnyElement, App, Context, DefiniteLength, Entity, FocusHandle, Focusable, FontWeight, Hsla,
-    Image, ImageFormat, InteractiveElement, MouseButton, ObjectFit, ParentElement, Pixels, Render,
-    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription, Task, TextStyle,
-    WeakEntity, Window, img, prelude::*,
+    Animation, AnimationExt, AnyElement, App, Context, DefiniteLength, DragMoveEvent, Entity,
+    FocusHandle, Focusable, FontWeight, Hsla, Image, ImageFormat, InteractiveElement, MouseButton,
+    MouseDownEvent, MouseUpEvent, ObjectFit, ParentElement, Pixels, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Task, TextStyle, WeakEntity,
+    Window, ease_out_quint, img, prelude::*,
 };
 use settings::Settings;
 use std::{
@@ -16,7 +17,7 @@ use ui::{
     Button, ButtonSize, ButtonStyle, ElevationIndex, Icon, IconButton, IconButtonShape, IconSize,
     Label, LabelSize, TintColor, Tooltip, Vector, VectorName, WithScrollbar, prelude::*,
 };
-use workspace::{Workspace, dock::DockPosition};
+use workspace::{ToggleRightDock, Workspace, dock::DockPosition};
 
 use crate::ConversationView;
 use crate::agent_panel::{
@@ -33,8 +34,12 @@ const SHADOW_AGENT_PREVIEW_CARD_IMAGE_BYTES: &[u8] =
 const AGENT_WORKSPACE_HEADER_HEIGHT: Pixels = px(30.);
 const AGENT_WORKSPACE_CONTAINER_RADIUS: Pixels = px(12.);
 const AGENT_WORKSPACE_CARD_RADIUS: Pixels = px(12.);
-const AGENT_WORKSPACE_CHAT_PANEL_WIDTH: Pixels = px(480.);
+const AGENT_WORKSPACE_CHAT_PANEL_DEFAULT_WIDTH: Pixels = px(480.);
 const AGENT_WORKSPACE_CHAT_PANEL_MIN_WIDTH: Pixels = px(360.);
+const AGENT_WORKSPACE_DASHBOARD_MIN_WIDTH: Pixels = px(360.);
+const AGENT_WORKSPACE_PANEL_RESIZE_HANDLE_WIDTH: f32 = 8.;
+const AGENT_WORKSPACE_PANEL_OPEN_ANIMATION_DURATION: Duration = Duration::from_millis(220);
+const AGENT_WORKSPACE_PANEL_OPEN_SLIDE_OFFSET_PX: f32 = 44.;
 const WORKSPACE_STREAM_UPDATE_INTERVAL: Duration = Duration::from_millis(80);
 
 fn agent_workspace_backdrop(cx: &App) -> Hsla {
@@ -64,6 +69,7 @@ pub struct BackboardAgentWorkspacePage {
     focus_handle: FocusHandle,
     selected_thread_id: Option<ThreadId>,
     draft_drawer_open: bool,
+    chat_panel_width: Pixels,
     dashboard_scroll_handle: ScrollHandle,
     dismissed_threads: HashSet<ThreadId>,
     card_chat_inputs: HashMap<ThreadId, Entity<Editor>>,
@@ -75,6 +81,8 @@ pub struct BackboardAgentWorkspacePage {
     _config_task: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
+
+struct DraggedAgentWorkspaceRightPanelResize;
 
 struct BackboardAgentWorkspaceHeader {
     agent_count: usize,
@@ -202,6 +210,7 @@ impl BackboardAgentWorkspacePage {
                 focus_handle: cx.focus_handle(),
                 selected_thread_id: None,
                 draft_drawer_open: false,
+                chat_panel_width: AGENT_WORKSPACE_CHAT_PANEL_DEFAULT_WIDTH,
                 dashboard_scroll_handle: ScrollHandle::new(),
                 dismissed_threads: HashSet::default(),
                 card_chat_inputs: HashMap::default(),
@@ -377,6 +386,67 @@ impl BackboardAgentWorkspacePage {
         if let Some(active_thread) = active_thread {
             active_thread.update(cx, |thread, cx| thread.send(window, cx));
         }
+    }
+
+    pub(crate) fn toggle_right_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.selected_thread_id.is_some() || self.draft_drawer_open {
+            self.close_detail(cx);
+        } else {
+            self.create_chat(window, cx);
+        }
+    }
+
+    fn target_chat_panel_width(&self, available_width: Pixels) -> Pixels {
+        if available_width <= px(0.) {
+            return AGENT_WORKSPACE_CHAT_PANEL_MIN_WIDTH;
+        }
+
+        let minimum_panel_width = AGENT_WORKSPACE_CHAT_PANEL_MIN_WIDTH.min(available_width);
+        let maximum_panel_width =
+            (available_width - AGENT_WORKSPACE_DASHBOARD_MIN_WIDTH).max(minimum_panel_width);
+
+        self.chat_panel_width
+            .clamp(minimum_panel_width, maximum_panel_width)
+    }
+
+    fn reset_chat_panel_width(&mut self, cx: &mut Context<Self>) {
+        self.chat_panel_width = AGENT_WORKSPACE_CHAT_PANEL_DEFAULT_WIDTH;
+        cx.notify();
+    }
+
+    fn resize_chat_panel(
+        &mut self,
+        event: &DragMoveEvent<DraggedAgentWorkspaceRightPanelResize>,
+        cx: &mut Context<Self>,
+    ) {
+        let available_width = event.bounds.right() - event.bounds.left();
+        if available_width <= px(0.) {
+            return;
+        }
+
+        let requested_panel_width = event.bounds.right() - event.event.position.x;
+        let chat_panel_width =
+            Self::target_chat_panel_width_for_request(available_width, requested_panel_width);
+
+        if self.chat_panel_width != chat_panel_width {
+            self.chat_panel_width = chat_panel_width;
+            cx.notify();
+        }
+    }
+
+    fn target_chat_panel_width_for_request(
+        available_width: Pixels,
+        requested_panel_width: Pixels,
+    ) -> Pixels {
+        if available_width <= px(0.) {
+            return AGENT_WORKSPACE_CHAT_PANEL_MIN_WIDTH;
+        }
+
+        let minimum_panel_width = AGENT_WORKSPACE_CHAT_PANEL_MIN_WIDTH.min(available_width);
+        let maximum_panel_width =
+            (available_width - AGENT_WORKSPACE_DASHBOARD_MIN_WIDTH).max(minimum_panel_width);
+
+        requested_panel_width.clamp(minimum_panel_width, maximum_panel_width)
     }
 
     fn open_run(&mut self, thread_id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
@@ -2814,11 +2884,14 @@ impl BackboardAgentWorkspacePage {
     fn render_chat_panel_frame(
         &self,
         content: AnyElement,
+        width: Pixels,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         div()
-            .w(AGENT_WORKSPACE_CHAT_PANEL_WIDTH)
-            .min_w(AGENT_WORKSPACE_CHAT_PANEL_MIN_WIDTH)
+            .relative()
+            .w(width)
+            .min_w(width)
+            .max_w(width)
             .h_full()
             .flex_shrink_0()
             .border_1()
@@ -2826,6 +2899,49 @@ impl BackboardAgentWorkspacePage {
             .bg(agent_workspace_surface(cx))
             .overflow_hidden()
             .child(content)
+            .child(self.render_chat_panel_resize_handle(cx))
+    }
+
+    fn render_chat_panel_resize_handle(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("agent-workspace-right-panel-resize-divider")
+            .absolute()
+            .left_0()
+            .top_0()
+            .h_full()
+            .w(px(1.))
+            .bg(agent_workspace_border(cx))
+            .child(
+                div()
+                    .id("agent-workspace-right-panel-resize-handle")
+                    .absolute()
+                    .left(px(-AGENT_WORKSPACE_PANEL_RESIZE_HANDLE_WIDTH / 2.))
+                    .top_0()
+                    .h_full()
+                    .w(px(AGENT_WORKSPACE_PANEL_RESIZE_HANDLE_WIDTH))
+                    .cursor_col_resize()
+                    .block_mouse_except_scroll()
+                    .tooltip(Tooltip::text("Resize composer"))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseUpEvent, _, cx| {
+                            if event.click_count == 2 {
+                                this.reset_chat_panel_width(cx);
+                            }
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_drag(DraggedAgentWorkspaceRightPanelResize, |_, _, _, cx| {
+                        cx.stop_propagation();
+                        cx.new(|_| gpui::Empty)
+                    }),
+            )
     }
 
     fn render_chat_panel_header(
@@ -2921,6 +3037,7 @@ impl Render for BackboardAgentWorkspacePage {
             .as_ref()
             .and_then(|summary| self.conversation_for_thread(summary.thread_id, cx));
         let right_panel_open = selected_summary.is_some() || draft_drawer_open;
+        let chat_panel_width = self.target_chat_panel_width(window.viewport_size().width);
         let workspace_background = agent_workspace_backdrop(cx);
         let workspace_surface = agent_workspace_surface(cx);
         let workspace_border = agent_workspace_border(cx);
@@ -2932,6 +3049,9 @@ impl Render for BackboardAgentWorkspacePage {
             .key_context("BackboardAgentWorkspace")
             .on_action(cx.listener(|this, _: &Chat, window, cx| {
                 this.submit_chat_action(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleRightDock, window, cx| {
+                this.toggle_right_panel(window, cx);
             }))
             .child(self.render_header(&summaries, right_panel_open, cx))
             .child(
@@ -2950,6 +3070,13 @@ impl Render for BackboardAgentWorkspacePage {
                             .border_1()
                             .border_color(workspace_border)
                             .bg(workspace_surface)
+                            .when(right_panel_open, |this| {
+                                this.on_drag_move::<DraggedAgentWorkspaceRightPanelResize>(
+                                    cx.listener(|this, event, _, cx| {
+                                        this.resize_chat_panel(event, cx);
+                                    }),
+                                )
+                            })
                             .child(
                                 div().flex_1().min_w_0().h_full().overflow_hidden().child(
                                     self.render_dashboard(
@@ -2974,8 +3101,9 @@ impl Render for BackboardAgentWorkspacePage {
 
                                 this.child(
                                     div()
-                                        .w(AGENT_WORKSPACE_CHAT_PANEL_WIDTH)
-                                        .min_w(AGENT_WORKSPACE_CHAT_PANEL_MIN_WIDTH)
+                                        .w(chat_panel_width)
+                                        .min_w(chat_panel_width)
+                                        .max_w(chat_panel_width)
                                         .flex_shrink_0(),
                                 )
                                 .child(
@@ -2984,9 +3112,29 @@ impl Render for BackboardAgentWorkspacePage {
                                         .top(-AGENT_WORKSPACE_HEADER_HEIGHT)
                                         .right_0()
                                         .bottom_0()
-                                        .w(AGENT_WORKSPACE_CHAT_PANEL_WIDTH)
-                                        .min_w(AGENT_WORKSPACE_CHAT_PANEL_MIN_WIDTH)
-                                        .child(self.render_chat_panel_frame(content, cx)),
+                                        .w(chat_panel_width)
+                                        .min_w(chat_panel_width)
+                                        .max_w(chat_panel_width)
+                                        .child(self.render_chat_panel_frame(
+                                            content,
+                                            chat_panel_width,
+                                            cx,
+                                        ))
+                                        .with_animation(
+                                            "agent-workspace-right-panel-open-slide",
+                                            Animation::new(
+                                                AGENT_WORKSPACE_PANEL_OPEN_ANIMATION_DURATION,
+                                            )
+                                            .with_easing(ease_out_quint()),
+                                            |panel, delta| {
+                                                let offset =
+                                                    AGENT_WORKSPACE_PANEL_OPEN_SLIDE_OFFSET_PX
+                                                        * (1.0 - delta);
+                                                panel
+                                                    .right(px(-offset))
+                                                    .opacity(0.82 + delta * 0.18)
+                                            },
+                                        ),
                                 )
                             }),
                     ),
@@ -3103,6 +3251,7 @@ mod tests {
         Entity<Workspace>,
         Entity<AgentPanel>,
         Entity<BackboardAgentWorkspacePage>,
+        Entity<MultiWorkspace>,
         VisualTestContext,
     ) {
         init_test(cx);
@@ -3152,8 +3301,11 @@ mod tests {
         let _ = multi_workspace.update(&mut cx, |multi_workspace, _window, _cx| {
             multi_workspace.agent_workspace_view = Some(page.clone().into());
         });
+        let multi_workspace = multi_workspace
+            .entity(&cx)
+            .expect("multi workspace window should still be open");
 
-        (workspace, panel, page, cx)
+        (workspace, panel, page, multi_workspace, cx)
     }
 
     fn draw_workspace_page(page: &Entity<BackboardAgentWorkspacePage>, cx: &mut VisualTestContext) {
@@ -3168,11 +3320,51 @@ mod tests {
         );
     }
 
+    fn draw_multi_workspace(multi_workspace: &Entity<MultiWorkspace>, cx: &mut VisualTestContext) {
+        let multi_workspace = multi_workspace.clone();
+        cx.draw(
+            point(px(0.), px(0.)),
+            size(
+                AvailableSpace::Definite(px(1200.)),
+                AvailableSpace::Definite(px(800.)),
+            ),
+            move |_, _| div().size_full().child(multi_workspace),
+        );
+    }
+
+    #[test]
+    fn test_workspace_agent_page_chat_panel_width_clamps() {
+        let available_width = px(1000.);
+
+        assert_eq!(
+            BackboardAgentWorkspacePage::target_chat_panel_width_for_request(
+                available_width,
+                px(240.)
+            ),
+            AGENT_WORKSPACE_CHAT_PANEL_MIN_WIDTH
+        );
+        assert_eq!(
+            BackboardAgentWorkspacePage::target_chat_panel_width_for_request(
+                available_width,
+                px(520.)
+            ),
+            px(520.)
+        );
+        assert_eq!(
+            BackboardAgentWorkspacePage::target_chat_panel_width_for_request(
+                available_width,
+                px(900.)
+            ),
+            px(640.)
+        );
+    }
+
     #[gpui::test]
     async fn test_workspace_agent_page_new_chat_focuses_draft_in_right_panel(
         cx: &mut TestAppContext,
     ) {
-        let (workspace, panel, page, mut cx) = setup_workspace_page(cx, true).await;
+        let (workspace, panel, page, _multi_workspace, mut cx) =
+            setup_workspace_page(cx, true).await;
 
         page.update_in(&mut cx, |page, window, cx| {
             page.create_chat(window, cx);
@@ -3219,10 +3411,66 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn test_workspace_agent_page_toggle_right_dock_toggles_right_panel(
+        cx: &mut TestAppContext,
+    ) {
+        let (workspace, panel, page, multi_workspace, mut cx) =
+            setup_workspace_page(cx, true).await;
+
+        draw_multi_workspace(&multi_workspace, &mut cx);
+        multi_workspace.update_in(&mut cx, |multi_workspace, window, cx| {
+            multi_workspace.toggle_dock(DockPosition::Right, window, cx);
+        });
+        cx.run_until_parked();
+
+        page.read_with(&cx, |page, _cx| {
+            assert!(
+                page.selected_thread_id.is_none(),
+                "toggle should open a draft, not select a run card"
+            );
+            assert!(
+                page.draft_drawer_open,
+                "toggle should open the Agent Workspace right panel"
+            );
+        });
+        workspace.read_with(&cx, |workspace, cx| {
+            assert!(
+                !workspace
+                    .dock_at_position(DockPosition::Right)
+                    .read(cx)
+                    .is_open(),
+                "toggle should not open the docked right panel"
+            );
+        });
+        panel.read_with(&cx, |panel, cx| {
+            assert!(
+                panel
+                    .active_backboard_workspace_draft_thread_id(cx)
+                    .is_some(),
+                "toggle should focus a Backboard workspace draft"
+            );
+        });
+
+        multi_workspace.update_in(&mut cx, |multi_workspace, window, cx| {
+            multi_workspace.toggle_dock(DockPosition::Right, window, cx);
+        });
+        cx.run_until_parked();
+
+        page.read_with(&cx, |page, _cx| {
+            assert!(
+                !page.draft_drawer_open,
+                "toggle should close the Agent Workspace right panel"
+            );
+            assert!(page.selected_thread_id.is_none());
+        });
+    }
+
+    #[gpui::test]
     async fn test_workspace_agent_page_agent_button_opens_workspace_composer(
         cx: &mut TestAppContext,
     ) {
-        let (workspace, panel, page, mut cx) = setup_workspace_page(cx, true).await;
+        let (workspace, panel, page, _multi_workspace, mut cx) =
+            setup_workspace_page(cx, true).await;
 
         workspace.update_in(&mut cx, |workspace, window, cx| {
             let right_dock = workspace.dock_at_position(DockPosition::Right).clone();
@@ -3348,7 +3596,8 @@ mod tests {
     async fn test_workspace_agent_page_first_draft_send_promotes_and_opens_next_draft(
         cx: &mut TestAppContext,
     ) {
-        let (_workspace, panel, page, mut cx) = setup_workspace_page(cx, false).await;
+        let (_workspace, panel, page, _multi_workspace, mut cx) =
+            setup_workspace_page(cx, false).await;
 
         page.update_in(&mut cx, |page, window, cx| {
             page.create_chat(window, cx);
@@ -3414,7 +3663,8 @@ mod tests {
     async fn test_workspace_agent_page_review_opens_diff_without_nested_workspace_update(
         cx: &mut TestAppContext,
     ) {
-        let (workspace, panel, page, mut cx) = setup_workspace_page(cx, false).await;
+        let (workspace, panel, page, _multi_workspace, mut cx) =
+            setup_workspace_page(cx, false).await;
 
         page.update_in(&mut cx, |page, window, cx| {
             page.create_chat(window, cx);
@@ -3455,7 +3705,8 @@ mod tests {
     async fn test_workspace_agent_page_card_input_focus_opens_right_panel_without_losing_focus(
         cx: &mut TestAppContext,
     ) {
-        let (_workspace, panel, page, mut cx) = setup_workspace_page(cx, false).await;
+        let (_workspace, panel, page, _multi_workspace, mut cx) =
+            setup_workspace_page(cx, false).await;
 
         page.update_in(&mut cx, |page, window, cx| {
             page.create_chat(window, cx);

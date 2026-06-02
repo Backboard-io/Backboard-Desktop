@@ -68,12 +68,13 @@ use futures::{
     future::{Shared, try_join_all},
 };
 use gpui::{
-    Action, AnyEntity, AnyView, AnyWeakView, App, AsyncApp, AsyncWindowContext, Axis, Bounds,
-    Context, CursorStyle, Decorations, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle,
-    Focusable, Global, HitboxBehavior, Hsla, KeyContext, Keystroke, ManagedView, MouseButton,
-    PathPromptOptions, Point, PromptLevel, Render, ResizeEdge, Size, Stateful, Subscription,
-    SystemWindowTabController, Task, TaskExt, Tiling, WeakEntity, WindowBounds, WindowHandle,
-    WindowId, WindowOptions, actions, canvas, point, relative, size, transparent_black,
+    Action, Animation, AnimationExt, AnyElement, AnyEntity, AnyView, AnyWeakView, App, AsyncApp,
+    AsyncWindowContext, Axis, Bounds, Context, CursorStyle, Decorations, DragMoveEvent, ElementId,
+    Entity, EntityId, EventEmitter, FocusHandle, Focusable, Global, HitboxBehavior, Hsla,
+    KeyContext, Keystroke, ManagedView, MouseButton, PathPromptOptions, Point, PromptLevel, Render,
+    ResizeEdge, Size, Stateful, Subscription, SystemWindowTabController, Task, TaskExt, Tiling,
+    WeakEntity, WindowBounds, WindowHandle, WindowId, WindowOptions, actions, canvas,
+    ease_out_quint, point, relative, size, transparent_black,
 };
 pub use history_manager::*;
 pub use item::{
@@ -181,6 +182,8 @@ use crate::{
 
 pub(crate) const WORKSPACE_CONTAINER_PADDING: Pixels = px(4.);
 pub(crate) const WORKSPACE_CONTAINER_RADIUS: Pixels = px(8.);
+const RIGHT_DOCK_OPEN_ANIMATION_DURATION: Duration = Duration::from_millis(220);
+const RIGHT_DOCK_OPEN_SLIDE_OFFSET_PX: f32 = 44.;
 
 pub(crate) fn workspace_container_background(cx: &App) -> Hsla {
     let colors = cx.theme().colors();
@@ -7897,7 +7900,7 @@ impl Workspace {
         dock: &Entity<Dock>,
         window: &mut Window,
         cx: &mut App,
-    ) -> Option<Div> {
+    ) -> Option<AnyElement> {
         if self.zoomed_position == Some(position) {
             return None;
         }
@@ -7923,6 +7926,8 @@ impl Workspace {
         // included in the element tree so its focus handle remains mounted — without
         // this, toggle_panel_focus cannot focus the panel when the dock is closed.
         let dock = dock.read(cx);
+        let open_animation_generation = dock.open_animation_generation();
+        let mut right_dock_animation_width = None;
         if let Some(panel) = dock.visible_panel() {
             let size_state = dock.stored_panel_size_state(panel.as_ref());
             let min_size = panel.min_size(window, cx);
@@ -7945,6 +7950,9 @@ impl Workspace {
                     let size = size_state
                         .and_then(|state| state.size)
                         .unwrap_or_else(|| panel.default_size(window, cx));
+                    if position == DockPosition::Right {
+                        right_dock_animation_width = Some(size);
+                    }
                     container = container.w(size);
                 }
                 if let Some(min) = min_size {
@@ -7988,7 +7996,37 @@ impl Workspace {
             };
         }
 
-        Some(container)
+        if position == DockPosition::Right && dock.visible_panel().is_some() {
+            Some(
+                container
+                    .with_animation(
+                        ElementId::NamedInteger(
+                            "right-dock-open".into(),
+                            open_animation_generation,
+                        ),
+                        Animation::new(RIGHT_DOCK_OPEN_ANIMATION_DURATION)
+                            .with_easing(ease_out_quint()),
+                        move |dock, delta| {
+                            let offset = RIGHT_DOCK_OPEN_SLIDE_OFFSET_PX * (1.0 - delta);
+                            let dock = dock
+                                .relative()
+                                .right(px(-offset))
+                                .opacity(0.82 + delta * 0.18);
+
+                            if let Some(target_width) = right_dock_animation_width {
+                                let width = RESIZE_HANDLE_SIZE.as_f32()
+                                    + (target_width.as_f32() - RESIZE_HANDLE_SIZE.as_f32()) * delta;
+                                dock.w(px(width)).min_w(px(width))
+                            } else {
+                                dock
+                            }
+                        },
+                    )
+                    .into_any_element(),
+            )
+        } else {
+            Some(container.into_any_element())
+        }
     }
 
     pub fn for_window(window: &Window, cx: &App) -> Option<Entity<Workspace>> {

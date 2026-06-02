@@ -180,10 +180,6 @@ pub fn panel_divider(cx: &App) -> Hsla {
     cx.theme().colors().border_variant.opacity(0.72)
 }
 
-pub fn strong_border(cx: &App) -> Hsla {
-    cx.theme().colors().border_variant
-}
-
 pub fn text(cx: &App) -> Hsla {
     cx.theme().colors().text
 }
