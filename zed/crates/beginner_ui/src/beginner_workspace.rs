@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use acp_thread::{
     AcpThread, AcpThreadEvent, AgentModelList, AgentModelSelector, SelectedPermissionOutcome,
@@ -15,11 +17,11 @@ use db::kvp::KeyValueStore;
 use editor::actions::Newline;
 use editor::{Editor, EditorEvent};
 use gpui::{
-    AnyElement, App, AsyncWindowContext, ClipboardItem, Context, DragMoveEvent, Entity,
-    EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, MouseButton,
-    MouseDownEvent, MouseUpEvent, ObjectFit, PathPromptOptions, Pixels, Render, SharedString,
-    Subscription, Task, TextStyleRefinement, WeakEntity, Window, WindowControlArea, canvas, img,
-    rems,
+    Animation, AnimationExt, AnyElement, App, AsyncWindowContext, ClipboardItem, Context,
+    DragMoveEvent, ElementId, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ObjectFit, PathPromptOptions, Pixels,
+    Render, SharedString, Subscription, Task, TextStyleRefinement, WeakEntity, Window,
+    WindowControlArea, canvas, ease_out_quint, img, rems,
 };
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
@@ -66,6 +68,17 @@ static CURATED_MODELS: &[(&str, &str, &str)] = &[
 ];
 
 const SIMPLE_LANDING_LOGO_PATH: &str = "images/animation_logo.png";
+const PANEL_OPEN_ANIMATION_MS: u64 = 280;
+const PANEL_OPEN_SLIDE_OFFSET_PX: f32 = 28.0;
+const RIGHT_PANEL_CLOSED_WIDTH_PX: f32 = 44.0;
+const DOCKED_PANEL_DEFAULT_HEIGHT_PX: f32 = 340.0;
+const DOCKED_PANEL_MIN_HEIGHT_PX: f32 = 220.0;
+const DOCKED_PANEL_MIN_MAIN_SIZE_PX: f32 = 240.0;
+const CLOSED_CHATS_SIDEBAR_WIDTH_PX: f32 = 48.0;
+const FILES_SPLIT_MIN_DIRECTORY_WIDTH_PX: f32 = 160.0;
+const FILES_SPLIT_MIN_CODE_WIDTH_PX: f32 = 160.0;
+const MAX_UNTRACKED_DIFF_BYTES: u64 = 256 * 1024;
+const LOCAL_BROWSER_DISCOVERY_INTERVAL: Duration = Duration::from_secs(3);
 
 fn curated_display_name(model_id: &str) -> Option<&'static str> {
     let model_part = model_id.split_once('/').map(|(_, m)| m).unwrap_or(model_id);
@@ -132,34 +145,10 @@ struct ComposerGitState {
     branches: Vec<SharedString>,
 }
 
-fn render_preview_feature_card(
-    title: &'static str,
-    subtitle: &'static str,
-    accent_background: Hsla,
-    cx: &mut Context<BeginnerWorkspace>,
-) -> impl IntoElement {
-    v_flex()
-        .flex_1()
-        .min_w_0()
-        .h(px(108.))
-        .rounded(px(8.))
-        .border_1()
-        .border_color(ds::soft_border(cx))
-        .bg(ds::field_background(cx))
-        .p_4()
-        .gap_2()
-        .child(div().size(px(24.)).rounded(px(6.)).bg(accent_background))
-        .child(
-            Label::new(title)
-                .size(LabelSize::Small)
-                .weight(FontWeight::SEMIBOLD)
-                .color(Color::Custom(ds::text(cx))),
-        )
-        .child(
-            Label::new(subtitle)
-                .size(LabelSize::XSmall)
-                .color(Color::Custom(ds::text_muted(cx))),
-        )
+#[derive(Clone, PartialEq, Eq)]
+struct LocalBrowserInstance {
+    title: String,
+    url: String,
 }
 
 /// Wraps an inner `AgentModelSelector` and returns only the curated model list.
@@ -271,6 +260,9 @@ struct DraggedSimpleSidebarResize;
 #[derive(Debug, Clone)]
 struct DraggedSimplePanelResize;
 
+#[derive(Debug, Clone)]
+struct DraggedSimplePanelDock;
+
 /// A saved simple-mode conversation entry shown on the home page.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct BeginnerChatRecord {
@@ -337,11 +329,90 @@ enum LeftTab {
 
 enum RightPanel {
     Preview,
-    CodeEmpty,
-    CodeView {
-        title: SharedString,
-        content: SharedString,
+    CodeDiff {
+        selected_path: Option<SharedString>,
     },
+    CodeView {
+        path: PathBuf,
+        title: SharedString,
+        editor: Entity<Editor>,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SimplePanelDock {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl SimplePanelDock {
+    fn is_side(self) -> bool {
+        matches!(self, Self::Left | Self::Right)
+    }
+}
+
+#[derive(Clone)]
+struct CodeDiffFile {
+    path: SharedString,
+    old_path: Option<SharedString>,
+    status: CodeDiffFileStatus,
+    additions: usize,
+    deletions: usize,
+    content: Option<SharedString>,
+}
+
+#[derive(Default)]
+struct CodeDiffState {
+    folder: Option<PathBuf>,
+    files: Vec<CodeDiffFile>,
+    loading_files: bool,
+    loading_content_path: Option<SharedString>,
+    error: Option<SharedString>,
+    generation: u64,
+    content_generation: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodeDiffFileStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Binary,
+}
+
+impl CodeDiffFileStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Added => "Added",
+            Self::Modified => "Modified",
+            Self::Deleted => "Deleted",
+            Self::Renamed => "Renamed",
+            Self::Binary => "Binary",
+        }
+    }
+
+    fn icon(self) -> IconName {
+        match self {
+            Self::Added => IconName::Plus,
+            Self::Modified => IconName::Pencil,
+            Self::Deleted => IconName::Trash,
+            Self::Renamed => IconName::FileCode,
+            Self::Binary => IconName::File,
+        }
+    }
+
+    fn color(self) -> Color {
+        match self {
+            Self::Added => Color::Created,
+            Self::Modified => Color::Modified,
+            Self::Deleted => Color::Deleted,
+            Self::Renamed => Color::Modified,
+            Self::Binary => Color::Muted,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -360,16 +431,14 @@ enum RightPanelMode {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RightPanelOption {
     Files,
-    SideChat,
     Design,
     Code,
     Terminal,
 }
 
 impl RightPanelOption {
-    const VISIBLE: [RightPanelOption; 5] = [
+    const VISIBLE: [RightPanelOption; 4] = [
         RightPanelOption::Files,
-        RightPanelOption::SideChat,
         RightPanelOption::Design,
         RightPanelOption::Code,
         RightPanelOption::Terminal,
@@ -378,9 +447,8 @@ impl RightPanelOption {
     fn label(self) -> &'static str {
         match self {
             Self::Files => "Files",
-            Self::SideChat => "Side chat",
             Self::Design => "Design",
-            Self::Code => "Code",
+            Self::Code => "Diff",
             Self::Terminal => "Terminal",
         }
     }
@@ -388,10 +456,54 @@ impl RightPanelOption {
     fn icon(self) -> IconName {
         match self {
             Self::Files => IconName::FolderOpen,
-            Self::SideChat => IconName::Chat,
             Self::Design => IconName::Public,
-            Self::Code => IconName::FileCode,
+            Self::Code => IconName::Split,
             Self::Terminal => IconName::Terminal,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WorkspaceModeAction {
+    CodeEditor,
+    AgentWorkspace,
+}
+
+impl WorkspaceModeAction {
+    fn label(self) -> &'static str {
+        match self {
+            Self::CodeEditor => "Code Editor",
+            Self::AgentWorkspace => "Agents",
+        }
+    }
+
+    fn tooltip(self) -> &'static str {
+        match self {
+            Self::CodeEditor => "Open in Code Editor",
+            Self::AgentWorkspace => "Open in Agents",
+        }
+    }
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::CodeEditor => "simple-open-code-editor",
+            Self::AgentWorkspace => "simple-open-agents",
+        }
+    }
+
+    fn image_path(self, dark_theme: bool) -> &'static str {
+        match (self, dark_theme) {
+            (Self::CodeEditor, true) => "images/codeeditor_dark.png",
+            (Self::AgentWorkspace, true) => "images/agent_dark.png",
+            (Self::CodeEditor, false) => "images/codeeditor.png",
+            (Self::AgentWorkspace, false) => "images/agent.png",
+        }
+    }
+
+    fn expanded_width(self) -> Pixels {
+        match self {
+            Self::CodeEditor => px(162.),
+            Self::AgentWorkspace => px(124.),
         }
     }
 }
@@ -440,6 +552,7 @@ struct ProjectSession {
     tab_name: SharedString,
     chat_mode: ChatMode,
     chat_editor: Entity<Editor>,
+    browser_address_editor: Entity<Editor>,
     selected_folder: Option<PathBuf>,
     thread: Option<Entity<AcpThread>>,
     pending_conversation_view: Option<Entity<ConversationView>>,
@@ -453,9 +566,15 @@ struct ProjectSession {
     show_raw_files: bool,
     raw_browse_path: Option<PathBuf>,
     right_panel: RightPanel,
+    code_diff_state: CodeDiffState,
     right_panel_open: bool,
+    right_panel_closing: bool,
+    right_panel_expanded: bool,
+    right_panel_animation_generation: u64,
     right_panel_mode: RightPanelMode,
     right_panel_option: RightPanelOption,
+    right_panel_dock: SimplePanelDock,
+    right_panel_height: Pixels,
     share_dialog_open: bool,
     preview_url: Option<String>,
     preview_visible: bool,
@@ -501,6 +620,7 @@ pub struct BeginnerWorkspace {
     chat_mode: ChatMode,
     chat_editor: Entity<Editor>,
     chat_search_editor: Entity<Editor>,
+    browser_address_editor: Entity<Editor>,
     selected_folder: Option<PathBuf>,
     composer_git_state: ComposerGitState,
     composer_git_state_folder: Option<PathBuf>,
@@ -522,10 +642,17 @@ pub struct BeginnerWorkspace {
     show_raw_files: bool,
     raw_browse_path: Option<PathBuf>,
     right_panel: RightPanel,
+    code_diff_state: CodeDiffState,
     right_panel_open: bool,
+    right_panel_closing: bool,
+    right_panel_expanded: bool,
+    right_panel_animation_generation: u64,
     right_panel_mode: RightPanelMode,
     right_panel_option: RightPanelOption,
+    right_panel_dock: SimplePanelDock,
+    right_panel_height: Pixels,
     chat_panel_width: Pixels,
+    hovered_workspace_mode_action: Option<WorkspaceModeAction>,
     share_dialog_open: bool,
     // URL of the running dev server once it's ready.
     preview_url: Option<String>,
@@ -546,6 +673,7 @@ pub struct BeginnerWorkspace {
     chats_sidebar_open: bool,
     chats_sidebar_width: Pixels,
     background_sessions: Vec<ProjectSession>,
+    local_browser_instances: Vec<LocalBrowserInstance>,
     chat_history: Vec<BeginnerChatRecord>,
     pending_open_tabs: Option<BeginnerOpenTabsState>,
     open_tabs_loaded: bool,
@@ -612,6 +740,63 @@ impl BeginnerWorkspace {
         })
     }
 
+    fn make_browser_address_editor(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<Editor>, Subscription) {
+        let workspace = cx.entity().downgrade();
+        let editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text("Enter a URL", window, cx);
+            editor.set_text_style_refinement(TextStyleRefinement {
+                color: Some(ds::text_muted(cx)),
+                font_size: Some(rems(0.875).into()),
+                ..Default::default()
+            });
+            editor.set_show_gutter(false, cx);
+            editor.set_show_wrap_guides(false, cx);
+            editor.set_show_indent_guides(false, cx);
+            editor
+        });
+        let address_editor = editor.clone();
+        let subscription = editor.update(cx, |editor, _cx| {
+            let workspace = workspace.clone();
+            let address_editor = address_editor.clone();
+            editor.register_action(move |_: &Newline, window, cx| {
+                let url_text = address_editor.read(cx).text(cx);
+                workspace
+                    .update(cx, |this, cx| {
+                        this.navigate_browser_to_input(url_text, window, cx);
+                    })
+                    .log_err();
+            })
+        });
+        (editor, subscription)
+    }
+
+    fn make_file_preview_editor(
+        path: PathBuf,
+        content: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<Editor> {
+        let editor = cx.new(|cx| {
+            let mut editor = Editor::multi_line(window, cx);
+            editor.set_text(content, window, cx);
+            editor
+        });
+        cx.subscribe(&editor, move |_, editor, event: &EditorEvent, cx| {
+            if matches!(event, EditorEvent::Edited { .. }) {
+                let text = editor.read(cx).text(cx);
+                std::fs::write(&path, text)
+                    .with_context(|| format!("failed to write {}", path.display()))
+                    .log_err();
+            }
+        })
+        .detach();
+        editor
+    }
+
     fn current_tab_title(&self) -> SharedString {
         match &self.state {
             BeginnerState::ActiveProject => self.tab_name.clone(),
@@ -636,12 +821,18 @@ impl BeginnerWorkspace {
 
         let (replacement_editor, enter_sub) =
             Self::make_chat_editor(window, cx, ChatMode::Build.placeholder());
+        let (replacement_browser_address_editor, browser_enter_sub) =
+            Self::make_browser_address_editor(window, cx);
         let session = ProjectSession {
             chat_record_id: self.active_chat_record_id.take(),
             state: std::mem::replace(&mut self.state, BeginnerState::Landing),
             tab_name: std::mem::replace(&mut self.tab_name, SharedString::from("Home")),
             chat_mode: std::mem::replace(&mut self.chat_mode, ChatMode::Build),
             chat_editor: std::mem::replace(&mut self.chat_editor, replacement_editor),
+            browser_address_editor: std::mem::replace(
+                &mut self.browser_address_editor,
+                replacement_browser_address_editor,
+            ),
             selected_folder: self.selected_folder.take(),
             thread: self.thread.take(),
             pending_conversation_view: self.pending_conversation_view.take(),
@@ -655,7 +846,14 @@ impl BeginnerWorkspace {
             show_raw_files: std::mem::replace(&mut self.show_raw_files, false),
             raw_browse_path: self.raw_browse_path.take(),
             right_panel: std::mem::replace(&mut self.right_panel, RightPanel::Preview),
+            code_diff_state: std::mem::take(&mut self.code_diff_state),
             right_panel_open: std::mem::replace(&mut self.right_panel_open, false),
+            right_panel_closing: std::mem::replace(&mut self.right_panel_closing, false),
+            right_panel_expanded: std::mem::replace(&mut self.right_panel_expanded, false),
+            right_panel_animation_generation: std::mem::replace(
+                &mut self.right_panel_animation_generation,
+                0,
+            ),
             right_panel_mode: std::mem::replace(
                 &mut self.right_panel_mode,
                 RightPanelMode::Artifact,
@@ -663,6 +861,11 @@ impl BeginnerWorkspace {
             right_panel_option: std::mem::replace(
                 &mut self.right_panel_option,
                 RightPanelOption::Files,
+            ),
+            right_panel_dock: std::mem::replace(&mut self.right_panel_dock, SimplePanelDock::Right),
+            right_panel_height: std::mem::replace(
+                &mut self.right_panel_height,
+                px(DOCKED_PANEL_DEFAULT_HEIGHT_PX),
             ),
             share_dialog_open: std::mem::replace(&mut self.share_dialog_open, false),
             preview_url: self.preview_url.take(),
@@ -682,6 +885,7 @@ impl BeginnerWorkspace {
         self.web_preview = None;
         // The new editor's Enter-to-submit subscription belongs to the fresh session.
         self.session_subscriptions.push(enter_sub);
+        self.session_subscriptions.push(browser_enter_sub);
         self.background_sessions.push(session);
         self.save_open_tabs(cx);
         cx.notify();
@@ -697,6 +901,10 @@ impl BeginnerWorkspace {
         std::mem::swap(&mut self.tab_name, &mut session.tab_name);
         std::mem::swap(&mut self.chat_mode, &mut session.chat_mode);
         std::mem::swap(&mut self.chat_editor, &mut session.chat_editor);
+        std::mem::swap(
+            &mut self.browser_address_editor,
+            &mut session.browser_address_editor,
+        );
         std::mem::swap(&mut self.selected_folder, &mut session.selected_folder);
         std::mem::swap(&mut self.thread, &mut session.thread);
         std::mem::swap(
@@ -719,11 +927,29 @@ impl BeginnerWorkspace {
         std::mem::swap(&mut self.show_raw_files, &mut session.show_raw_files);
         std::mem::swap(&mut self.raw_browse_path, &mut session.raw_browse_path);
         std::mem::swap(&mut self.right_panel, &mut session.right_panel);
+        std::mem::swap(&mut self.code_diff_state, &mut session.code_diff_state);
         std::mem::swap(&mut self.right_panel_open, &mut session.right_panel_open);
+        std::mem::swap(
+            &mut self.right_panel_closing,
+            &mut session.right_panel_closing,
+        );
+        std::mem::swap(
+            &mut self.right_panel_expanded,
+            &mut session.right_panel_expanded,
+        );
+        std::mem::swap(
+            &mut self.right_panel_animation_generation,
+            &mut session.right_panel_animation_generation,
+        );
         std::mem::swap(&mut self.right_panel_mode, &mut session.right_panel_mode);
         std::mem::swap(
             &mut self.right_panel_option,
             &mut session.right_panel_option,
+        );
+        std::mem::swap(&mut self.right_panel_dock, &mut session.right_panel_dock);
+        std::mem::swap(
+            &mut self.right_panel_height,
+            &mut session.right_panel_height,
         );
         std::mem::swap(&mut self.share_dialog_open, &mut session.share_dialog_open);
         std::mem::swap(&mut self.preview_url, &mut session.preview_url);
@@ -766,6 +992,8 @@ impl BeginnerWorkspace {
         let (chat_editor, chat_enter_sub) =
             Self::make_chat_editor(window, cx, ChatMode::Build.placeholder());
         let chat_search_editor = Self::make_search_editor(window, cx);
+        let (browser_address_editor, browser_enter_sub) =
+            Self::make_browser_address_editor(window, cx);
         let search_sub = cx.subscribe(&chat_search_editor, |_, _, event: &EditorEvent, cx| {
             if matches!(event, EditorEvent::Edited { .. }) {
                 cx.notify();
@@ -773,10 +1001,11 @@ impl BeginnerWorkspace {
         });
 
         let load_recent = Self::load_chat_history(workspace.clone(), cx);
+        let discover_local_browser_instances = Self::discover_local_browser_instances(cx);
         let config_changes = backboard::subscribe_config_changes();
         let watch_api_key = cx.spawn(async move |this, cx| {
             while config_changes.recv().await.is_ok() {
-                this.update(cx, |_, cx| cx.notify()).ok();
+                this.update(cx, |_, cx| cx.notify()).log_err();
             }
         });
 
@@ -813,6 +1042,7 @@ impl BeginnerWorkspace {
             chat_mode: ChatMode::Build,
             chat_editor,
             chat_search_editor,
+            browser_address_editor,
             selected_folder: initial_folder,
             composer_git_state: ComposerGitState::default(),
             composer_git_state_folder: None,
@@ -828,10 +1058,17 @@ impl BeginnerWorkspace {
             show_raw_files: false,
             raw_browse_path: None,
             right_panel: RightPanel::Preview,
+            code_diff_state: CodeDiffState::default(),
             right_panel_open: false,
+            right_panel_closing: false,
+            right_panel_expanded: false,
+            right_panel_animation_generation: 0,
             right_panel_mode: RightPanelMode::Artifact,
             right_panel_option: RightPanelOption::Files,
+            right_panel_dock: SimplePanelDock::Right,
+            right_panel_height: px(DOCKED_PANEL_DEFAULT_HEIGHT_PX),
             chat_panel_width: px(ds::CHAT_PANEL_WIDTH),
+            hovered_workspace_mode_action: None,
             share_dialog_open: false,
             preview_url: None,
             preview_visible: false,
@@ -845,14 +1082,15 @@ impl BeginnerWorkspace {
             chats_sidebar_open: true,
             chats_sidebar_width: px(ds::SIDEBAR_WIDTH),
             background_sessions: Vec::new(),
+            local_browser_instances: Vec::new(),
             chat_history: Vec::new(),
             pending_open_tabs: None,
             open_tabs_loaded: false,
             open_tabs_restored: false,
-            _tasks: vec![load_recent, watch_api_key],
+            _tasks: vec![load_recent, discover_local_browser_instances, watch_api_key],
             _project_subscription: project_sub,
             _search_subscription: search_sub,
-            session_subscriptions: vec![chat_enter_sub],
+            session_subscriptions: vec![chat_enter_sub, browser_enter_sub],
         }
     }
 
@@ -886,7 +1124,10 @@ impl BeginnerWorkspace {
                 self.file_changes_panel = None;
                 self.is_agent_running = false;
                 self.right_panel = RightPanel::Preview;
+                self.code_diff_state = CodeDiffState::default();
                 self.right_panel_open = false;
+                self.right_panel_closing = false;
+                self.right_panel_expanded = false;
                 self.right_panel_mode = RightPanelMode::Artifact;
                 self.right_panel_option = RightPanelOption::Files;
                 self.share_dialog_open = false;
@@ -963,7 +1204,216 @@ impl BeginnerWorkspace {
         .detach();
     }
 
-    fn run_git_command(folder: &Path, args: &[&str]) -> anyhow::Result<String> {
+    fn discover_local_browser_instances(cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn(async move |this, cx| {
+            loop {
+                let Some(ports) = this
+                    .update(cx, |this, _cx| this.local_browser_scan_ports())
+                    .log_err()
+                else {
+                    break;
+                };
+                let instances = cx
+                    .background_spawn(async move { Self::scan_local_browser_instances(ports) })
+                    .await;
+
+                let Some(()) = this
+                    .update(cx, |this, cx| {
+                        if this.local_browser_instances != instances {
+                            this.local_browser_instances = instances;
+                            cx.notify();
+                        }
+                    })
+                    .log_err()
+                else {
+                    break;
+                };
+
+                cx.background_executor()
+                    .timer(LOCAL_BROWSER_DISCOVERY_INTERVAL)
+                    .await;
+            }
+        })
+    }
+
+    fn local_browser_scan_ports(&self) -> Vec<u16> {
+        let mut ports = Vec::new();
+        ports.extend(3000u16..=3010);
+        ports.extend(4000u16..=4010);
+        ports.extend(5000u16..=5010);
+        ports.extend(5173u16..=5180);
+        ports.extend(5500u16..=5510);
+        ports.extend(6006u16..=6010);
+        ports.extend(7000u16..=7010);
+        ports.extend(8000u16..=8010);
+        ports.extend(8080u16..=8090);
+        ports.extend(9000u16..=9010);
+
+        if let Some(port) = self.dev_server_port {
+            ports.push(port);
+        }
+        for session in &self.background_sessions {
+            if let Some(port) = session.dev_server_port {
+                ports.push(port);
+            }
+        }
+
+        ports.sort_unstable();
+        ports.dedup();
+        ports
+    }
+
+    fn scan_local_browser_instances(mut ports: Vec<u16>) -> Vec<LocalBrowserInstance> {
+        ports.extend(Self::local_listening_ports());
+        ports.sort_unstable();
+        ports.dedup();
+
+        ports
+            .into_iter()
+            .filter_map(Self::read_local_browser_instance)
+            .collect()
+    }
+
+    fn local_listening_ports() -> Vec<u16> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let Ok(output) = Command::new("lsof")
+                .args(["-nP", "-iTCP", "-sTCP:LISTEN"])
+                .output()
+            else {
+                return Vec::new();
+            };
+            if !output.status.success() {
+                return Vec::new();
+            }
+
+            let output = String::from_utf8_lossy(&output.stdout);
+            output
+                .lines()
+                .skip(1)
+                .flat_map(|line| line.split_whitespace())
+                .filter_map(Self::parse_lsof_port)
+                .collect()
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            Vec::new()
+        }
+    }
+
+    fn parse_lsof_port(token: &str) -> Option<u16> {
+        let (_, port) = token.rsplit_once(':')?;
+        let port = port
+            .chars()
+            .take_while(|character| character.is_ascii_digit())
+            .collect::<String>();
+        if port.is_empty() {
+            None
+        } else {
+            port.parse::<u16>().ok()
+        }
+    }
+
+    fn read_local_browser_instance(port: u16) -> Option<LocalBrowserInstance> {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        let mut stream =
+            std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(150)).ok()?;
+        if stream
+            .set_read_timeout(Some(Duration::from_millis(350)))
+            .is_err()
+        {
+            return None;
+        }
+        if stream
+            .set_write_timeout(Some(Duration::from_millis(150)))
+            .is_err()
+        {
+            return None;
+        }
+
+        let request =
+            format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+        if std::io::Write::write_all(&mut stream, request.as_bytes()).is_err() {
+            return None;
+        }
+
+        let mut response_bytes = Vec::with_capacity(8192);
+        let mut buffer = [0u8; 2048];
+        while response_bytes.len() < 16 * 1024 {
+            match std::io::Read::read(&mut stream, &mut buffer) {
+                Ok(0) => break,
+                Ok(bytes_read) => response_bytes.extend_from_slice(&buffer[..bytes_read]),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    break;
+                }
+                Err(_) => return None,
+            }
+        }
+
+        if response_bytes.is_empty() {
+            return None;
+        }
+
+        let response = String::from_utf8_lossy(&response_bytes);
+        let status = response
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse::<u16>().ok())?;
+        if !(200..400).contains(&status) {
+            return None;
+        }
+
+        let title =
+            Self::extract_html_title(&response).unwrap_or_else(|| format!("localhost:{port}"));
+        Some(LocalBrowserInstance {
+            title,
+            url: format!("http://localhost:{port}"),
+        })
+    }
+
+    fn extract_html_title(response: &str) -> Option<String> {
+        let title_tag_start = Self::find_ascii_case_insensitive(response, "<title")?;
+        let after_title_tag_start = &response[title_tag_start..];
+        let title_content_start = title_tag_start + after_title_tag_start.find('>')? + 1;
+        let after_title_content = &response[title_content_start..];
+        let title_content_end = title_content_start
+            + Self::find_ascii_case_insensitive(after_title_content, "</title>")?;
+        let title = response[title_content_start..title_content_end].trim();
+        if title.is_empty() {
+            return None;
+        }
+
+        let title = title
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'");
+        if title.is_empty() { None } else { Some(title) }
+    }
+
+    fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+        if needle.is_empty() {
+            return Some(0);
+        }
+
+        haystack
+            .as_bytes()
+            .windows(needle.len())
+            .position(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+    }
+
+    fn run_git_command_raw(folder: &Path, args: &[&str]) -> anyhow::Result<String> {
         let output = Command::new("git")
             .arg("-C")
             .arg(folder)
@@ -980,7 +1430,11 @@ impl BeginnerWorkspace {
             bail!("git {command} failed: {stderr}");
         }
 
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    fn run_git_command(folder: &Path, args: &[&str]) -> anyhow::Result<String> {
+        Ok(Self::run_git_command_raw(folder, args)?.trim().to_string())
     }
 
     fn read_composer_git_state(folder: &Path) -> anyhow::Result<ComposerGitState> {
@@ -1256,7 +1710,10 @@ impl BeginnerWorkspace {
         self.agent_finished = false;
         self.web_preview = None;
         self.right_panel = RightPanel::Preview;
+        self.code_diff_state = CodeDiffState::default();
         self.right_panel_open = false;
+        self.right_panel_closing = false;
+        self.right_panel_expanded = false;
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Files;
         self.share_dialog_open = false;
@@ -1320,7 +1777,10 @@ impl BeginnerWorkspace {
         self.agent_finished = false;
         self.web_preview = None;
         self.right_panel = RightPanel::Preview;
+        self.code_diff_state = CodeDiffState::default();
         self.right_panel_open = false;
+        self.right_panel_closing = false;
+        self.right_panel_expanded = false;
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Files;
         self.share_dialog_open = false;
@@ -1515,18 +1975,28 @@ impl BeginnerWorkspace {
         .detach();
     }
 
-    fn handle_file_panel_event(&mut self, event: &FileChangesPanelEvent, _cx: &mut Context<Self>) {
+    fn handle_file_panel_event(
+        &mut self,
+        event: &FileChangesPanelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match event {
             FileChangesPanelEvent::FileSelected(path) => {
-                self.open_file_read_only(path.as_path());
-                _cx.notify();
+                self.open_file_read_only(path.as_path(), window, cx);
+                cx.notify();
             }
         }
     }
 
-    fn handle_chat_feed_event(&mut self, event: &BeginnerChatFeedEvent, cx: &mut Context<Self>) {
+    fn handle_chat_feed_event(
+        &mut self,
+        event: &BeginnerChatFeedEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match event {
-            BeginnerChatFeedEvent::PreviewRequested => self.show_preview(cx),
+            BeginnerChatFeedEvent::PreviewRequested => self.show_preview(window, cx),
             BeginnerChatFeedEvent::ShareRequested => {
                 self.share_dialog_open = true;
                 cx.notify();
@@ -1551,26 +2021,125 @@ impl BeginnerWorkspace {
         })
     }
 
-    fn show_preview(&mut self, cx: &mut Context<Self>) {
-        if self.preview_url.is_none() {
+    fn open_right_panel(&mut self) {
+        if !self.right_panel_open || self.right_panel_closing {
+            self.right_panel_animation_generation =
+                self.right_panel_animation_generation.saturating_add(1);
+        }
+        self.right_panel_open = true;
+        self.right_panel_closing = false;
+    }
+
+    fn toggle_right_panel_expanded(&mut self, cx: &mut Context<Self>) {
+        self.open_right_panel();
+        self.right_panel_expanded = !self.right_panel_expanded;
+        self.right_panel_animation_generation =
+            self.right_panel_animation_generation.saturating_add(1);
+        cx.notify();
+    }
+
+    fn close_right_panel(&mut self, cx: &mut Context<Self>) {
+        if !self.right_panel_open {
+            self.preview_visible = false;
+            self.right_panel_closing = false;
+            self.right_panel_expanded = false;
+            cx.notify();
             return;
         }
+
+        if self.right_panel_closing {
+            return;
+        }
+
+        self.right_panel_closing = true;
+        self.right_panel_animation_generation =
+            self.right_panel_animation_generation.saturating_add(1);
+        let generation = self.right_panel_animation_generation;
+        let close_panel = cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(PANEL_OPEN_ANIMATION_MS))
+                .await;
+            this.update(cx, |this, cx| {
+                if this.right_panel_closing && this.right_panel_animation_generation == generation {
+                    this.right_panel_open = false;
+                    this.right_panel_closing = false;
+                    this.right_panel_expanded = false;
+                    this.preview_visible = false;
+                    cx.notify();
+                }
+            })
+            .ok();
+        });
+        self._tasks.push(close_panel);
+        cx.notify();
+    }
+
+    fn show_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(url) = self.preview_url.clone() else {
+            return;
+        };
+        self.navigate_browser_to_url(url, window, cx);
+    }
+
+    fn normalize_browser_url(input: String) -> Option<String> {
+        let input = input.trim();
+        if input.is_empty() {
+            return None;
+        }
+
+        if input.contains("://") || input.starts_with("file:") {
+            return Some(input.to_string());
+        }
+
+        if input.starts_with("localhost") || input.starts_with("127.") || input.starts_with("[::1]")
+        {
+            return Some(format!("http://{input}"));
+        }
+
+        Some(format!("https://{input}"))
+    }
+
+    fn navigate_browser_to_input(
+        &mut self,
+        input: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(url) = Self::normalize_browser_url(input) {
+            self.navigate_browser_to_url(url, window, cx);
+        }
+    }
+
+    fn navigate_browser_to_url(
+        &mut self,
+        url: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let address_label = Self::browser_address_label(Some(&url));
+        self.browser_address_editor.update(cx, |editor, cx| {
+            editor.set_text(address_label, window, cx);
+        });
+        self.preview_url = Some(url);
         self.preview_visible = true;
+        self.web_preview = None;
         self.right_panel = RightPanel::Preview;
-        self.right_panel_open = true;
+        self.open_right_panel();
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Design;
         cx.notify();
     }
 
-    fn open_artifact_panel(&mut self, cx: &mut Context<Self>) {
+    fn open_artifact_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.right_panel = RightPanel::Preview;
-        self.right_panel_open = true;
+        self.open_right_panel();
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Design;
-        if self.preview_url.is_some() {
-            self.preview_visible = true;
-        }
+        self.preview_visible = false;
+        self.web_preview = None;
+        self.browser_address_editor.update(cx, |editor, cx| {
+            editor.set_text("", window, cx);
+        });
         cx.notify();
     }
 
@@ -1581,7 +2150,7 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) {
         self.right_panel_option = option;
-        self.right_panel_open = true;
+        self.open_right_panel();
 
         match option {
             RightPanelOption::Files => {
@@ -1593,18 +2162,15 @@ impl BeginnerWorkspace {
                 }
                 cx.notify();
             }
-            RightPanelOption::SideChat => {
-                self.right_panel_mode = RightPanelMode::Launcher;
-                self.preview_visible = false;
-                self.web_preview = None;
-                cx.notify();
-            }
             RightPanelOption::Design => {
                 self.right_panel = RightPanel::Preview;
-                self.right_panel_open = true;
                 self.right_panel_mode = RightPanelMode::Artifact;
+                self.preview_visible = false;
+                self.web_preview = None;
+                self.browser_address_editor.update(cx, |editor, cx| {
+                    editor.set_text("", window, cx);
+                });
                 if self.preview_url.is_some() {
-                    self.preview_visible = true;
                     cx.notify();
                 } else if self.selected_folder.is_some() {
                     self.open_web_app_if_present(cx);
@@ -1617,6 +2183,11 @@ impl BeginnerWorkspace {
             }
             RightPanelOption::Terminal => {
                 self.right_panel_mode = RightPanelMode::Launcher;
+                if self.right_panel_expanded {
+                    self.right_panel_expanded = false;
+                    self.right_panel_animation_generation =
+                        self.right_panel_animation_generation.saturating_add(1);
+                }
                 self.preview_visible = false;
                 self.web_preview = None;
                 self.raw_browse_path = None;
@@ -1695,7 +2266,12 @@ impl BeginnerWorkspace {
         .detach_and_prompt_err("Failed to open terminal", window, cx, |_, _, _| None);
     }
 
-    fn open_file_read_only(&mut self, path: &std::path::Path) {
+    fn code_view_for_path(
+        &self,
+        path: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> RightPanel {
         let resolved_path = if path.is_absolute() {
             path.to_path_buf()
         } else if let Some(folder) = self.selected_folder.as_ref() {
@@ -1714,13 +2290,32 @@ impl BeginnerWorkspace {
                 resolved_path.display()
             ),
         };
-        self.right_panel = RightPanel::CodeView {
+        RightPanel::CodeView {
+            editor: Self::make_file_preview_editor(resolved_path.clone(), &content, window, cx),
+            path: resolved_path,
             title: SharedString::from(title),
-            content: SharedString::from(content),
-        };
-        self.right_panel_open = true;
+        }
+    }
+
+    fn open_file_read_only(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        self.right_panel = self.code_view_for_path(path, window, cx);
+        self.open_right_panel();
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Code;
+        self.preview_visible = false;
+        self.web_preview = None;
+    }
+
+    fn preview_file_in_files_panel(
+        &mut self,
+        path: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.right_panel = self.code_view_for_path(path, window, cx);
+        self.open_right_panel();
+        self.right_panel_mode = RightPanelMode::Launcher;
+        self.right_panel_option = RightPanelOption::Files;
         self.preview_visible = false;
         self.web_preview = None;
     }
@@ -1748,17 +2343,177 @@ impl BeginnerWorkspace {
     fn show_code_artifact(&mut self, cx: &mut Context<Self>) {
         self.preview_visible = false;
         self.web_preview = None;
+        self.open_right_panel();
+        self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Code;
-        if !matches!(self.right_panel, RightPanel::CodeView { .. }) {
-            if let Some(path) = self.artifact_file_paths(cx).into_iter().next() {
-                self.open_file_read_only(&path);
-            } else {
-                self.right_panel = RightPanel::CodeEmpty;
-                self.right_panel_open = true;
-                self.right_panel_mode = RightPanelMode::Artifact;
-            }
-        }
+        self.right_panel = RightPanel::CodeDiff {
+            selected_path: None,
+        };
+        self.refresh_code_diff_files(cx);
         cx.notify();
+    }
+
+    fn refresh_code_diff_files(&mut self, cx: &mut Context<Self>) {
+        let Some(folder) = self.selected_folder.clone() else {
+            self.code_diff_state = CodeDiffState::default();
+            cx.notify();
+            return;
+        };
+
+        let folder_changed = self.code_diff_state.folder.as_ref() != Some(&folder);
+        self.code_diff_state.folder = Some(folder.clone());
+        if folder_changed {
+            self.code_diff_state.files.clear();
+        }
+        self.code_diff_state.loading_files = true;
+        self.code_diff_state.loading_content_path = None;
+        self.code_diff_state.error = None;
+        self.code_diff_state.generation = self.code_diff_state.generation.saturating_add(1);
+        let generation = self.code_diff_state.generation;
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let folder_for_git = folder.clone();
+            let files = cx
+                .background_spawn(
+                    async move { Self::load_git_diff_files_for_folder(&folder_for_git) },
+                )
+                .await;
+
+            this.update(cx, |this, cx| {
+                if this.selected_folder.as_ref() != Some(&folder)
+                    || this.code_diff_state.generation != generation
+                {
+                    return;
+                }
+
+                this.code_diff_state.loading_files = false;
+                let selected_path = match files {
+                    Ok(files) => {
+                        this.code_diff_state.files = files;
+                        this.code_diff_state.error = None;
+
+                        let current_path = match &this.right_panel {
+                            RightPanel::CodeDiff { selected_path } => selected_path.clone(),
+                            _ => None,
+                        };
+                        let selected_path = current_path
+                            .filter(|path| {
+                                this.code_diff_state
+                                    .files
+                                    .iter()
+                                    .any(|file| file.path.as_ref() == path.as_ref())
+                            })
+                            .or_else(|| {
+                                this.code_diff_state
+                                    .files
+                                    .first()
+                                    .map(|file| file.path.clone())
+                            });
+
+                        if let RightPanel::CodeDiff {
+                            selected_path: path,
+                        } = &mut this.right_panel
+                        {
+                            *path = selected_path.clone();
+                        }
+                        selected_path
+                    }
+                    Err(error) => {
+                        this.code_diff_state.files.clear();
+                        this.code_diff_state.error = Some(SharedString::from(error.to_string()));
+                        None
+                    }
+                };
+
+                if let Some(selected_path) = selected_path {
+                    this.load_code_diff_content_for_path(selected_path, cx);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn load_code_diff_content_for_path(&mut self, path: SharedString, cx: &mut Context<Self>) {
+        if self.code_diff_state.loading_content_path.as_ref() == Some(&path) {
+            return;
+        }
+
+        let Some(file) = self
+            .code_diff_state
+            .files
+            .iter()
+            .find(|file| file.path.as_ref() == path.as_ref())
+        else {
+            return;
+        };
+        if file.content.is_some() {
+            return;
+        }
+
+        let Some(folder) = self.selected_folder.clone() else {
+            return;
+        };
+        let status = file.status;
+        let path_for_git = path.as_ref().to_string();
+        self.code_diff_state.loading_content_path = Some(path);
+        self.code_diff_state.content_generation =
+            self.code_diff_state.content_generation.saturating_add(1);
+        let generation = self.code_diff_state.content_generation;
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let folder_for_git = folder.clone();
+            let path_for_task = path_for_git.clone();
+            let content = cx
+                .background_spawn(async move {
+                    Self::load_git_diff_content_for_file(&folder_for_git, &path_for_task, status)
+                })
+                .await;
+
+            this.update(cx, |this, cx| {
+                if this.selected_folder.as_ref() != Some(&folder)
+                    || this.code_diff_state.content_generation != generation
+                {
+                    return;
+                }
+
+                if this
+                    .code_diff_state
+                    .loading_content_path
+                    .as_ref()
+                    .map(|path| path.as_ref())
+                    == Some(path_for_git.as_str())
+                {
+                    this.code_diff_state.loading_content_path = None;
+                }
+
+                let content = match content {
+                    Ok(content) => content,
+                    Err(error) => format!("Unable to load diff for {path_for_git}: {error}"),
+                };
+                let parsed_file = Self::parse_git_diff_file(content.clone());
+                if let Some(file) = this
+                    .code_diff_state
+                    .files
+                    .iter_mut()
+                    .find(|file| file.path.as_ref() == path_for_git)
+                {
+                    if let Some(parsed_file) = parsed_file {
+                        file.old_path = parsed_file.old_path;
+                        file.status = parsed_file.status;
+                        file.additions = parsed_file.additions;
+                        file.deletions = parsed_file.deletions;
+                    }
+                    file.content = Some(SharedString::from(content));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn cancel_running_task(&mut self, cx: &mut Context<Self>) {
@@ -1905,7 +2660,7 @@ impl BeginnerWorkspace {
             let index = candidate.join("index.html");
             if index.exists() {
                 self.web_preview = None;
-                self.preview_visible = true;
+                self.preview_visible = false;
                 self.is_preview_generating = false;
                 self.preview_url = Some(format!("file://{}", index.display()));
                 cx.notify();
@@ -2052,7 +2807,7 @@ impl BeginnerWorkspace {
                     let url = format!("http://localhost:{port}");
                     this.update(cx, |this, cx| {
                         this.web_preview = None;
-                        this.preview_visible = true;
+                        this.preview_visible = false;
                         this.is_preview_generating = false;
                         this.preview_url = Some(url);
                         cx.notify();
@@ -2089,7 +2844,10 @@ impl BeginnerWorkspace {
         self.agent_finished = false;
         self.show_raw_files = false;
         self.right_panel = RightPanel::Preview;
+        self.code_diff_state = CodeDiffState::default();
         self.right_panel_open = false;
+        self.right_panel_closing = false;
+        self.right_panel_expanded = false;
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Files;
         self.share_dialog_open = false;
@@ -2104,9 +2862,13 @@ impl BeginnerWorkspace {
         self.chat_mode = ChatMode::Build;
         let (chat_editor, enter_sub) =
             Self::make_chat_editor(window, cx, self.chat_mode.placeholder());
+        let (browser_address_editor, browser_enter_sub) =
+            Self::make_browser_address_editor(window, cx);
         self.chat_editor = chat_editor;
+        self.browser_address_editor = browser_address_editor;
         self.session_subscriptions.clear();
         self.session_subscriptions.push(enter_sub);
+        self.session_subscriptions.push(browser_enter_sub);
         self.save_open_tabs(cx);
         cx.notify();
     }
@@ -2194,7 +2956,10 @@ impl BeginnerWorkspace {
         self.show_raw_files = false;
         self.raw_browse_path = None;
         self.right_panel = RightPanel::Preview;
+        self.code_diff_state = CodeDiffState::default();
         self.right_panel_open = false;
+        self.right_panel_closing = false;
+        self.right_panel_expanded = false;
         self.right_panel_mode = RightPanelMode::Artifact;
         self.right_panel_option = RightPanelOption::Files;
         self.share_dialog_open = false;
@@ -2208,6 +2973,10 @@ impl BeginnerWorkspace {
         self.web_preview = None;
         self.session_subscriptions.clear();
         self.session_subscriptions.push(enter_sub);
+        let (browser_address_editor, browser_enter_sub) =
+            Self::make_browser_address_editor(window, cx);
+        self.browser_address_editor = browser_address_editor;
+        self.session_subscriptions.push(browser_enter_sub);
     }
 
     fn restore_active_chat_if_needed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2387,15 +3156,16 @@ impl BeginnerWorkspace {
                     let feed = cx.new(|cx| {
                         BeginnerChatFeed::new(thread.clone(), artifact_title.clone(), cx)
                     });
-                    let feed_sub = cx.subscribe(&feed, |bw, _, event, cx| {
-                        bw.handle_chat_feed_event(event, cx);
+                    let feed_sub = cx.subscribe_in(&feed, window, |bw, _, event, window, cx| {
+                        bw.handle_chat_feed_event(event, window, cx);
                     });
                     this.session_subscriptions.push(feed_sub);
                     this.chat_feed = Some(feed);
                     let file_panel = cx.new(|cx| FileChangesPanel::new(thread.clone(), cx));
-                    let file_sub = cx.subscribe(&file_panel, |bw, _, event, cx| {
-                        bw.handle_file_panel_event(event, cx);
-                    });
+                    let file_sub =
+                        cx.subscribe_in(&file_panel, window, |bw, _, event, window, cx| {
+                            bw.handle_file_panel_event(event, window, cx);
+                        });
                     this.session_subscriptions.push(file_sub);
                     this.file_changes_panel = Some(file_panel);
                     this.thread = Some(thread.clone());
@@ -2452,6 +3222,8 @@ impl BeginnerWorkspace {
     ) -> ProjectSession {
         let (chat_editor, enter_sub) =
             Self::make_chat_editor(window, cx, ChatMode::Build.placeholder());
+        let (browser_address_editor, browser_enter_sub) =
+            Self::make_browser_address_editor(window, cx);
         let folder = record.folder();
         ProjectSession {
             chat_record_id: Some(record.id.clone()),
@@ -2459,6 +3231,7 @@ impl BeginnerWorkspace {
             tab_name: SharedString::from(record.name.clone()),
             chat_mode: ChatMode::Build,
             chat_editor,
+            browser_address_editor,
             selected_folder: Some(folder),
             thread: None,
             pending_conversation_view: None,
@@ -2472,9 +3245,15 @@ impl BeginnerWorkspace {
             show_raw_files: false,
             raw_browse_path: None,
             right_panel: RightPanel::Preview,
+            code_diff_state: CodeDiffState::default(),
             right_panel_open: false,
+            right_panel_closing: false,
+            right_panel_expanded: false,
+            right_panel_animation_generation: 0,
             right_panel_mode: RightPanelMode::Artifact,
             right_panel_option: RightPanelOption::Files,
+            right_panel_dock: SimplePanelDock::Right,
+            right_panel_height: px(DOCKED_PANEL_DEFAULT_HEIGHT_PX),
             share_dialog_open: false,
             preview_url: None,
             preview_visible: false,
@@ -2484,7 +3263,7 @@ impl BeginnerWorkspace {
             dev_server_port: None,
             web_preview: None,
             dev_server_task: None,
-            subscriptions: vec![enter_sub],
+            subscriptions: vec![enter_sub, browser_enter_sub],
         }
     }
 
@@ -2806,39 +3585,12 @@ impl BeginnerWorkspace {
         let sidebar_is_open = self.chats_sidebar_open;
 
         ContextMenu::build(window, cx, move |menu, _window, _cx| {
-            let open_editor_workspace = multi_workspace.clone();
-            let open_agent_workspace = multi_workspace.clone();
             let toggle_sidebar = beginner_workspace.clone();
             let show_panel_options = beginner_workspace.clone();
             let open_terminal = beginner_workspace.clone();
             let reset_animation = multi_workspace.clone();
 
             menu.item(
-                ContextMenuEntry::new("Open in Code Editor")
-                    .icon(IconName::FileCode)
-                    .icon_position(IconPosition::Start)
-                    .handler(move |window, cx| {
-                        open_editor_workspace
-                            .update(cx, |multi_workspace, cx| {
-                                multi_workspace.open_code_editor(window, cx);
-                            })
-                            .log_err();
-                    }),
-            )
-            .item(
-                ContextMenuEntry::new("Open in Agents")
-                    .icon(IconName::ZedAgentTwo)
-                    .icon_position(IconPosition::Start)
-                    .handler(move |window, cx| {
-                        open_agent_workspace
-                            .update(cx, |multi_workspace, cx| {
-                                multi_workspace.open_agent_workspace(window, cx);
-                            })
-                            .log_err();
-                    }),
-            )
-            .separator()
-            .item(
                 ContextMenuEntry::new(if sidebar_is_open {
                     "Close Sidebar"
                 } else {
@@ -2935,6 +3687,132 @@ impl BeginnerWorkspace {
         })
     }
 
+    fn render_workspace_mode_button(
+        &self,
+        action: WorkspaceModeAction,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = action.id();
+        let label = action.label();
+        let button_label = format!("Open in {label}");
+        let tooltip = action.tooltip();
+        let hovered = self.hovered_workspace_mode_action == Some(action);
+        let colors = cx.theme().colors();
+        let dark_theme = !cx.theme().appearance().is_light();
+        let collapsed_width = px(26.);
+        let expanded_width = action.expanded_width();
+        let width = if hovered {
+            expanded_width
+        } else {
+            collapsed_width
+        };
+        let button_height = px(24.);
+        let image_mark = h_flex()
+            .flex_none()
+            .w(px(18.))
+            .h(button_height)
+            .items_center()
+            .justify_center()
+            .child(
+                img(action.image_path(dark_theme))
+                    .size(px(16.))
+                    .object_fit(ObjectFit::Contain)
+                    .with_fallback(|| div().size(px(16.)).into_any_element()),
+            );
+
+        let button = h_flex()
+            .id(id)
+            .h(button_height)
+            .w(width)
+            .flex_none()
+            .px_1()
+            .overflow_hidden()
+            .items_center()
+            .justify_start()
+            .gap_1()
+            .rounded_md()
+            .cursor_pointer()
+            .tooltip(Tooltip::text(tooltip))
+            .when(hovered, |this| this.bg(colors.element_hover))
+            .hover(move |style| style.bg(colors.element_hover))
+            .on_hover(cx.listener(move |this, hovered, _window, cx| {
+                if *hovered {
+                    this.hovered_workspace_mode_action = Some(action);
+                } else if this.hovered_workspace_mode_action == Some(action) {
+                    this.hovered_workspace_mode_action = None;
+                }
+                cx.notify();
+            }))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.multi_workspace
+                    .update(cx, |multi_workspace, cx| match action {
+                        WorkspaceModeAction::CodeEditor => {
+                            multi_workspace.open_code_editor(window, cx);
+                        }
+                        WorkspaceModeAction::AgentWorkspace => {
+                            multi_workspace.open_agent_workspace(window, cx);
+                        }
+                    })
+                    .log_err();
+            }))
+            .child(image_mark)
+            .when(hovered, |this| {
+                let label_animation_id = ElementId::Name(format!("{id}-label").into());
+                this.child(
+                    Label::new(button_label)
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::SEMIBOLD)
+                        .italic()
+                        .color(Color::Default)
+                        .single_line()
+                        .with_animation(
+                            label_animation_id,
+                            Animation::new(Duration::from_millis(140))
+                                .with_easing(ease_out_quint()),
+                            |label, delta| label.alpha(delta),
+                        ),
+                )
+            });
+
+        if hovered {
+            let expand_animation_id = ElementId::Name(format!("{id}-expand").into());
+            button
+                .with_animation(
+                    expand_animation_id,
+                    Animation::new(Duration::from_millis(180)).with_easing(ease_out_quint()),
+                    move |button, delta| {
+                        let width = collapsed_width.as_f32()
+                            + (expanded_width.as_f32() - collapsed_width.as_f32()) * delta;
+                        button.w(px(width))
+                    },
+                )
+                .into_any_element()
+        } else {
+            button.into_any_element()
+        }
+    }
+
+    fn render_workspace_mode_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .items_center()
+            .justify_end()
+            .gap_1p5()
+            .child(self.render_workspace_mode_button(WorkspaceModeAction::CodeEditor, cx))
+            .child(self.render_workspace_mode_button(WorkspaceModeAction::AgentWorkspace, cx))
+    }
+
+    fn render_workspace_mode_section_controls(
+        &self,
+        top: Pixels,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .absolute()
+            .top(top)
+            .right(px(24.))
+            .child(self.render_workspace_mode_buttons(cx))
+    }
+
     fn render_simple_sidebar_menu_button(
         &self,
         id: &'static str,
@@ -2956,7 +3834,57 @@ impl BeginnerWorkspace {
 
     fn reset_simple_panel_width(&mut self, cx: &mut Context<Self>) {
         self.chat_panel_width = px(ds::CHAT_PANEL_WIDTH);
+        self.right_panel_height = px(DOCKED_PANEL_DEFAULT_HEIGHT_PX);
         cx.notify();
+    }
+
+    fn visible_chats_sidebar_width(&self) -> Pixels {
+        if self.chats_sidebar_open {
+            self.chats_sidebar_width
+        } else {
+            px(CLOSED_CHATS_SIDEBAR_WIDTH_PX)
+        }
+    }
+
+    fn target_right_panel_width(&self, window: &Window) -> Pixels {
+        if self.right_panel_expanded {
+            return window
+                .viewport_size()
+                .width
+                .max(px(RIGHT_PANEL_CLOSED_WIDTH_PX));
+        }
+
+        let content_width =
+            (window.viewport_size().width - self.visible_chats_sidebar_width()).max(px(0.));
+        let minimum_chat_width = px(ds::CHAT_PANEL_MIN_WIDTH).min(content_width);
+        let maximum_chat_width =
+            (content_width - px(ds::RIGHT_PANEL_MIN_WIDTH)).max(minimum_chat_width);
+        let chat_panel_width = self
+            .chat_panel_width
+            .clamp(minimum_chat_width, maximum_chat_width);
+        let target_width = (content_width - chat_panel_width).max(px(ds::RIGHT_PANEL_MIN_WIDTH));
+
+        target_width
+            .min(content_width.max(px(RIGHT_PANEL_CLOSED_WIDTH_PX)))
+            .max(px(RIGHT_PANEL_CLOSED_WIDTH_PX))
+    }
+
+    fn target_right_panel_height(&self, window: &Window) -> Pixels {
+        if self.right_panel_expanded {
+            return window
+                .viewport_size()
+                .height
+                .max(px(RIGHT_PANEL_CLOSED_WIDTH_PX));
+        }
+
+        let content_height = window.viewport_size().height.max(px(0.));
+        let minimum_panel_height = px(DOCKED_PANEL_MIN_HEIGHT_PX).min(content_height);
+        let maximum_panel_height =
+            (content_height - px(DOCKED_PANEL_MIN_MAIN_SIZE_PX)).max(minimum_panel_height);
+
+        self.right_panel_height
+            .clamp(minimum_panel_height, maximum_panel_height)
+            .max(px(RIGHT_PANEL_CLOSED_WIDTH_PX))
     }
 
     fn resize_simple_panels(
@@ -2964,98 +3892,453 @@ impl BeginnerWorkspace {
         event: &DragMoveEvent<DraggedSimplePanelResize>,
         cx: &mut Context<Self>,
     ) {
-        let available_width = event.bounds.right() - event.bounds.left();
-        if available_width <= px(0.) {
-            return;
+        if self.right_panel_dock.is_side() {
+            let available_width = event.bounds.right() - event.bounds.left();
+            if available_width <= px(0.) {
+                return;
+            }
+
+            let minimum_chat_width = px(ds::CHAT_PANEL_MIN_WIDTH).min(available_width);
+            let maximum_chat_width =
+                (available_width - px(ds::RIGHT_PANEL_MIN_WIDTH)).max(minimum_chat_width);
+            let requested_chat_width = match self.right_panel_dock {
+                SimplePanelDock::Left => event.bounds.right() - event.event.position.x,
+                SimplePanelDock::Right => event.event.position.x - event.bounds.left(),
+                SimplePanelDock::Top | SimplePanelDock::Bottom => unreachable!(),
+            };
+            let chat_panel_width =
+                requested_chat_width.clamp(minimum_chat_width, maximum_chat_width);
+
+            if self.chat_panel_width != chat_panel_width {
+                self.chat_panel_width = chat_panel_width;
+                cx.notify();
+            }
+        } else {
+            let available_height = event.bounds.bottom() - event.bounds.top();
+            if available_height <= px(0.) {
+                return;
+            }
+
+            let minimum_panel_height = px(DOCKED_PANEL_MIN_HEIGHT_PX).min(available_height);
+            let maximum_panel_height =
+                (available_height - px(DOCKED_PANEL_MIN_MAIN_SIZE_PX)).max(minimum_panel_height);
+            let requested_panel_height = match self.right_panel_dock {
+                SimplePanelDock::Top => event.event.position.y - event.bounds.top(),
+                SimplePanelDock::Bottom => event.bounds.bottom() - event.event.position.y,
+                SimplePanelDock::Left | SimplePanelDock::Right => unreachable!(),
+            };
+            let right_panel_height =
+                requested_panel_height.clamp(minimum_panel_height, maximum_panel_height);
+
+            if self.right_panel_height != right_panel_height {
+                self.right_panel_height = right_panel_height;
+                cx.notify();
+            }
         }
+    }
 
-        let minimum_chat_width = px(ds::CHAT_PANEL_MIN_WIDTH).min(available_width);
-        let maximum_chat_width =
-            (available_width - px(ds::RIGHT_PANEL_MIN_WIDTH)).max(minimum_chat_width);
-        let requested_chat_width = event.event.position.x - event.bounds.left();
-        let chat_panel_width = requested_chat_width.clamp(minimum_chat_width, maximum_chat_width);
+    fn move_right_panel_to_drag_position(
+        &mut self,
+        event: &DragMoveEvent<DraggedSimplePanelDock>,
+        cx: &mut Context<Self>,
+    ) {
+        let left_distance = event.event.position.x - event.bounds.left();
+        let right_distance = event.bounds.right() - event.event.position.x;
+        let top_distance = event.event.position.y - event.bounds.top();
+        let bottom_distance = event.bounds.bottom() - event.event.position.y;
 
-        if self.chat_panel_width != chat_panel_width {
-            self.chat_panel_width = chat_panel_width;
+        let (side_dock, side_distance) = if left_distance <= right_distance {
+            (SimplePanelDock::Left, left_distance)
+        } else {
+            (SimplePanelDock::Right, right_distance)
+        };
+        let (vertical_dock, vertical_distance) = if top_distance <= bottom_distance {
+            (SimplePanelDock::Top, top_distance)
+        } else {
+            (SimplePanelDock::Bottom, bottom_distance)
+        };
+        let dock = if vertical_distance <= side_distance {
+            vertical_dock
+        } else {
+            side_dock
+        };
+
+        if self.right_panel_dock != dock {
+            self.right_panel_dock = dock;
+            self.right_panel_expanded = false;
+            self.right_panel_animation_generation =
+                self.right_panel_animation_generation.saturating_add(1);
             cx.notify();
         }
     }
 
-    fn render_simple_panel_resize_handle(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .id("simple-panel-resize-divider")
-            .relative()
-            .h_full()
-            .w(px(1.))
-            .flex_shrink_0()
-            .bg(ds::panel_divider(cx))
-            .child(
-                div()
-                    .id("simple-panel-resize-handle")
-                    .absolute()
-                    .left(px(-ds::PANEL_RESIZE_HANDLE_WIDTH / 2.))
-                    .top_0()
-                    .h_full()
-                    .w(px(ds::PANEL_RESIZE_HANDLE_WIDTH))
-                    .cursor_col_resize()
-                    .block_mouse_except_scroll()
-                    .tooltip(Tooltip::text("Resize panels"))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|this, event: &MouseUpEvent, _, cx| {
-                            if event.click_count == 2 {
-                                this.reset_simple_panel_width(cx);
-                            }
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_drag(DraggedSimplePanelResize, |_, _, _, cx| {
+    fn render_simple_panel_resize_handle(&self, cx: &mut Context<Self>) -> AnyElement {
+        let drag_handle = |el: Div, cursor_is_row_resize: bool| {
+            let el = el
+                .id("simple-panel-resize-handle")
+                .absolute()
+                .block_mouse_except_scroll()
+                .tooltip(Tooltip::text("Resize panels"))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|_, _: &MouseDownEvent, _, cx| {
                         cx.stop_propagation();
-                        cx.new(|_| gpui::Empty)
                     }),
-            )
+                )
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|this, event: &MouseUpEvent, _, cx| {
+                        if event.click_count == 2 {
+                            this.reset_simple_panel_width(cx);
+                        }
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_drag(DraggedSimplePanelResize, |_, _, _, cx| {
+                    cx.stop_propagation();
+                    cx.new(|_| gpui::Empty)
+                });
+
+            if cursor_is_row_resize {
+                el.cursor_row_resize()
+            } else {
+                el.cursor_col_resize()
+            }
+        };
+
+        match self.right_panel_dock {
+            SimplePanelDock::Left | SimplePanelDock::Right => div()
+                .id("simple-panel-resize-divider")
+                .relative()
+                .h_full()
+                .w(px(1.))
+                .flex_shrink_0()
+                .bg(ds::panel_divider(cx))
+                .child(drag_handle(
+                    div()
+                        .left(px(-ds::PANEL_RESIZE_HANDLE_WIDTH / 2.))
+                        .top_0()
+                        .h_full()
+                        .w(px(ds::PANEL_RESIZE_HANDLE_WIDTH)),
+                    false,
+                ))
+                .into_any_element(),
+            SimplePanelDock::Top | SimplePanelDock::Bottom => div()
+                .id("simple-panel-resize-divider")
+                .relative()
+                .w_full()
+                .h(px(1.))
+                .flex_shrink_0()
+                .bg(ds::panel_divider(cx))
+                .child(drag_handle(
+                    div()
+                        .top(px(-ds::PANEL_RESIZE_HANDLE_WIDTH / 2.))
+                        .left_0()
+                        .w_full()
+                        .h(px(ds::PANEL_RESIZE_HANDLE_WIDTH)),
+                    true,
+                ))
+                .into_any_element(),
+        }
     }
 
-    fn render_open_artifact_panel_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_right_panel_slide_shell(
+        &self,
+        is_running: bool,
+        preview_url: Option<String>,
+        preview_dominant: bool,
+        target_size: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let is_closing = self.right_panel_closing;
+        let dock = self.right_panel_dock;
+        let content = self.render_right_panel(is_running, preview_url, preview_dominant, cx);
+        let resize_handle = (!preview_dominant).then(|| self.render_simple_panel_resize_handle(cx));
+
+        let panel = match dock {
+            SimplePanelDock::Right => h_flex()
+                .id("right-panel-slide-shell")
+                .w(target_size)
+                .min_w(target_size)
+                .max_w(target_size)
+                .flex_shrink_0()
+                .h_full()
+                .overflow_hidden()
+                .children(resize_handle)
+                .child(content),
+            SimplePanelDock::Left => h_flex()
+                .id("right-panel-slide-shell")
+                .w(target_size)
+                .min_w(target_size)
+                .max_w(target_size)
+                .flex_shrink_0()
+                .h_full()
+                .overflow_hidden()
+                .child(content)
+                .children(resize_handle),
+            SimplePanelDock::Top => v_flex()
+                .id("right-panel-slide-shell")
+                .h(target_size)
+                .min_h(target_size)
+                .max_h(target_size)
+                .flex_shrink_0()
+                .w_full()
+                .overflow_hidden()
+                .child(content)
+                .children(resize_handle),
+            SimplePanelDock::Bottom => v_flex()
+                .id("right-panel-slide-shell")
+                .h(target_size)
+                .min_h(target_size)
+                .max_h(target_size)
+                .flex_shrink_0()
+                .w_full()
+                .overflow_hidden()
+                .children(resize_handle)
+                .child(content),
+        };
+
+        panel
+            .with_animation(
+                ("right-panel-slide", self.right_panel_animation_generation),
+                Animation::new(Duration::from_millis(PANEL_OPEN_ANIMATION_MS))
+                    .with_easing(ease_out_quint()),
+                move |panel, delta| {
+                    let visible_progress = if is_closing { 1.0 - delta } else { delta };
+                    let offset = PANEL_OPEN_SLIDE_OFFSET_PX * (1.0 - visible_progress);
+                    let panel = panel.relative().opacity(0.86 + visible_progress * 0.14);
+                    match dock {
+                        SimplePanelDock::Left => panel.left(px(-offset)),
+                        SimplePanelDock::Right => panel.right(px(-offset)),
+                        SimplePanelDock::Top => panel.top(px(-offset)),
+                        SimplePanelDock::Bottom => panel.bottom(px(-offset)),
+                    }
+                },
+            )
+            .into_any_element()
+    }
+
+    fn render_right_panel_slot(
+        &self,
+        is_running: bool,
+        preview_url: Option<String>,
+        preview_dominant: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if !self.right_panel_open {
+            return self.render_open_artifact_panel_button(cx);
+        }
+
+        let preview_dominant = preview_dominant || self.right_panel_expanded;
+        let is_closing = self.right_panel_closing;
+        let dock = self.right_panel_dock;
+        let target_size = if dock.is_side() {
+            self.target_right_panel_width(window)
+        } else {
+            self.target_right_panel_height(window)
+        };
+        let closed_size = px(RIGHT_PANEL_CLOSED_WIDTH_PX);
+
+        let slot = match dock {
+            SimplePanelDock::Left | SimplePanelDock::Right => h_flex()
+                .id("right-panel-width-slot")
+                .h_full()
+                .w(target_size)
+                .flex_shrink_0()
+                .overflow_hidden()
+                .child(self.render_right_panel_slide_shell(
+                    is_running,
+                    preview_url,
+                    preview_dominant,
+                    target_size,
+                    cx,
+                )),
+            SimplePanelDock::Top | SimplePanelDock::Bottom => v_flex()
+                .id("right-panel-width-slot")
+                .w_full()
+                .h(target_size)
+                .flex_shrink_0()
+                .overflow_hidden()
+                .child(self.render_right_panel_slide_shell(
+                    is_running,
+                    preview_url,
+                    preview_dominant,
+                    target_size,
+                    cx,
+                )),
+        };
+
+        slot.with_animation(
+            ("right-panel-width", self.right_panel_animation_generation),
+            Animation::new(Duration::from_millis(PANEL_OPEN_ANIMATION_MS))
+                .with_easing(ease_out_quint()),
+            move |slot, delta| {
+                let visible_progress = if is_closing { 1.0 - delta } else { delta };
+                let size = closed_size + (target_size - closed_size) * visible_progress;
+
+                if dock.is_side() {
+                    slot.w(size.max(closed_size))
+                } else {
+                    slot.h(size.max(closed_size))
+                }
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_main_with_right_panel(
+        &self,
+        main_content: AnyElement,
+        is_running: bool,
+        preview_url: Option<String>,
+        right_panel_expanded: bool,
+        api_key_ready: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let panel = api_key_ready.then(|| {
+            self.render_right_panel_slot(is_running, preview_url, right_panel_expanded, window, cx)
+        });
+
+        if right_panel_expanded {
+            return h_flex()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .overflow_hidden()
+                .on_drag_move::<DraggedSimplePanelDock>(cx.listener(|this, event, _, cx| {
+                    this.move_right_panel_to_drag_position(event, cx);
+                }))
+                .on_drag_move::<DraggedSimplePanelResize>(cx.listener(|this, event, _, cx| {
+                    this.resize_simple_panels(event, cx);
+                }))
+                .children(panel)
+                .into_any_element();
+        }
+
+        match self.right_panel_dock {
+            SimplePanelDock::Left => h_flex()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .overflow_hidden()
+                .on_drag_move::<DraggedSimplePanelDock>(cx.listener(|this, event, _, cx| {
+                    this.move_right_panel_to_drag_position(event, cx);
+                }))
+                .on_drag_move::<DraggedSimplePanelResize>(cx.listener(|this, event, _, cx| {
+                    this.resize_simple_panels(event, cx);
+                }))
+                .children(panel)
+                .child(main_content)
+                .into_any_element(),
+            SimplePanelDock::Right => h_flex()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .overflow_hidden()
+                .on_drag_move::<DraggedSimplePanelDock>(cx.listener(|this, event, _, cx| {
+                    this.move_right_panel_to_drag_position(event, cx);
+                }))
+                .on_drag_move::<DraggedSimplePanelResize>(cx.listener(|this, event, _, cx| {
+                    this.resize_simple_panels(event, cx);
+                }))
+                .child(main_content)
+                .children(panel)
+                .into_any_element(),
+            SimplePanelDock::Top => v_flex()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .h_full()
+                .overflow_hidden()
+                .on_drag_move::<DraggedSimplePanelDock>(cx.listener(|this, event, _, cx| {
+                    this.move_right_panel_to_drag_position(event, cx);
+                }))
+                .on_drag_move::<DraggedSimplePanelResize>(cx.listener(|this, event, _, cx| {
+                    this.resize_simple_panels(event, cx);
+                }))
+                .children(panel)
+                .child(main_content)
+                .into_any_element(),
+            SimplePanelDock::Bottom => v_flex()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .h_full()
+                .overflow_hidden()
+                .on_drag_move::<DraggedSimplePanelDock>(cx.listener(|this, event, _, cx| {
+                    this.move_right_panel_to_drag_position(event, cx);
+                }))
+                .on_drag_move::<DraggedSimplePanelResize>(cx.listener(|this, event, _, cx| {
+                    this.resize_simple_panels(event, cx);
+                }))
+                .child(main_content)
+                .children(panel)
+                .into_any_element(),
+        }
+    }
+
+    fn render_open_artifact_panel_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let hover_background = ds::hover_background(cx);
 
-        div()
-            .w(px(44.))
-            .h_full()
-            .flex_shrink_0()
-            .border_l_1()
-            .border_color(ds::separator(cx))
-            .bg(ds::app_background(cx))
+        let button = div()
+            .id("open-artifact-panel")
+            .size(px(30.))
             .flex()
-            .items_start()
+            .items_center()
             .justify_center()
-            .pt_2()
+            .rounded(px(6.))
+            .cursor_pointer()
+            .hover(move |el| el.bg(hover_background))
+            .tooltip(Tooltip::text("Open panel"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.open_artifact_panel(window, cx);
+            }))
             .child(
-                div()
-                    .id("open-artifact-panel")
-                    .size(px(30.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(6.))
-                    .cursor_pointer()
-                    .hover(move |el| el.bg(hover_background))
-                    .tooltip(Tooltip::text("Open right panel"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.open_artifact_panel(cx);
-                    }))
-                    .child(
-                        Icon::new(IconName::ThreadsSidebarRightClosed)
-                            .size(IconSize::Small)
-                            .color(Color::Custom(ds::icon_muted(cx))),
-                    ),
-            )
+                Icon::new(IconName::ThreadsSidebarRightClosed)
+                    .size(IconSize::Small)
+                    .color(Color::Custom(ds::icon_muted(cx))),
+            );
+
+        match self.right_panel_dock {
+            SimplePanelDock::Left | SimplePanelDock::Right => div()
+                .w(px(44.))
+                .h_full()
+                .flex_shrink_0()
+                .when(self.right_panel_dock == SimplePanelDock::Left, |el| {
+                    el.border_r_1()
+                })
+                .when(self.right_panel_dock == SimplePanelDock::Right, |el| {
+                    el.border_l_1()
+                })
+                .border_color(ds::separator(cx))
+                .bg(ds::app_background(cx))
+                .flex()
+                .items_start()
+                .justify_center()
+                .pt_2()
+                .child(button)
+                .into_any_element(),
+            SimplePanelDock::Top | SimplePanelDock::Bottom => div()
+                .h(px(44.))
+                .w_full()
+                .flex_shrink_0()
+                .when(self.right_panel_dock == SimplePanelDock::Top, |el| {
+                    el.border_b_1()
+                })
+                .when(self.right_panel_dock == SimplePanelDock::Bottom, |el| {
+                    el.border_t_1()
+                })
+                .border_color(ds::separator(cx))
+                .bg(ds::app_background(cx))
+                .flex()
+                .items_center()
+                .justify_end()
+                .pr_2()
+                .child(button)
+                .into_any_element(),
+        }
     }
 
     fn render_sidebar_api_status_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3183,6 +4466,11 @@ impl BeginnerWorkspace {
         let search_focus_handle = self.chat_search_editor.focus_handle(cx);
         let search_field_is_empty = search_query.is_empty();
         let search_field_is_focused = search_focus_handle.is_focused(window);
+        let sidebar_opacity = if window.is_window_active() {
+            0.58
+        } else {
+            0.72
+        };
 
         v_flex()
             .relative()
@@ -3190,6 +4478,7 @@ impl BeginnerWorkspace {
             .min_w(px(ds::SIDEBAR_MIN_WIDTH))
             .h_full()
             .flex_shrink_0()
+            .opacity(sidebar_opacity)
             .bg(ds::sidebar_background(cx))
             .child(div().absolute().inset_0().bg(ds::sidebar_glow_wash(cx)))
             .child(div().absolute().inset_0().bg(ds::sidebar_edge_wash(cx)))
@@ -3570,6 +4859,18 @@ impl BeginnerWorkspace {
                     })),
             )
             .child(self.render_simple_sidebar_resize_handle(cx))
+            .with_animation(
+                "simple-sidebar-open-slide",
+                Animation::new(Duration::from_millis(PANEL_OPEN_ANIMATION_MS))
+                    .with_easing(ease_out_quint()),
+                |sidebar, delta| {
+                    let offset = PANEL_OPEN_SLIDE_OFFSET_PX * (1.0 - delta);
+                    sidebar
+                        .relative()
+                        .left(px(-offset))
+                        .opacity(0.82 + delta * 0.18)
+                },
+            )
     }
 
     fn render_closed_chats_sidebar(
@@ -3577,11 +4878,18 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let sidebar_opacity = if window.is_window_active() {
+            0.58
+        } else {
+            0.72
+        };
+
         v_flex()
             .relative()
             .w(px(48.))
             .h_full()
             .flex_shrink_0()
+            .opacity(sidebar_opacity)
             .bg(ds::sidebar_background(cx))
             .child(div().absolute().inset_0().bg(ds::sidebar_glow_wash(cx)))
             .child(div().absolute().inset_0().bg(ds::sidebar_edge_wash(cx)))
@@ -3722,6 +5030,8 @@ impl BeginnerWorkspace {
     fn render_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
         let api_key_ready = Self::has_backboard_api_key();
+        let right_panel_expanded =
+            api_key_ready && self.right_panel_open && self.right_panel_expanded;
         if api_key_ready {
             self.ensure_composer_thread(window, cx);
         }
@@ -3746,97 +5056,91 @@ impl BeginnerWorkspace {
                             this.resize_simple_sidebar(event, cx);
                         },
                     ))
-                    .child(if self.chats_sidebar_open {
-                        self.render_chats_sidebar(window, cx).into_any_element()
-                    } else {
-                        self.render_closed_chats_sidebar(window, cx)
-                            .into_any_element()
+                    .when(!right_panel_expanded, |el| {
+                        el.child(if self.chats_sidebar_open {
+                            self.render_chats_sidebar(window, cx).into_any_element()
+                        } else {
+                            self.render_closed_chats_sidebar(window, cx)
+                                .into_any_element()
+                        })
                     })
                     .child(
-                        h_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .overflow_hidden()
-                            .on_drag_move::<DraggedSimplePanelResize>(cx.listener(
-                                |this, event, _, cx| {
-                                    this.resize_simple_panels(event, cx);
-                                },
-                            ))
-                            .child(
-                                v_flex()
-                                    .when(api_key_ready && self.right_panel_open, |el| {
-                                        el.w(self.chat_panel_width)
-                                            .min_w(px(ds::CHAT_PANEL_MIN_WIDTH))
-                                            .flex_shrink_0()
-                                    })
-                                    .when(!api_key_ready || !self.right_panel_open, |el| {
-                                        el.flex_1().min_w_0()
-                                    })
-                                    .min_h_0()
-                                    .h_full()
-                                    .overflow_hidden()
-                                    .bg(ds::app_background(cx))
-                                    .when(!api_key_ready, |el| {
-                                        el.child(self.render_api_status_banner(cx))
-                                    })
-                                    .child(if api_key_ready {
-                                        v_flex()
-                                            .flex_1()
-                                            .min_h_0()
-                                            .items_center()
-                                            .justify_center()
-                                            .px_4()
-                                            .pb(rems_from_px(96.))
-                                            .child(
-                                                v_flex()
-                                                    .w_full()
-                                                    .max_w(px(920.))
-                                                    .items_center()
-                                                    .gap_6()
-                                                    .child(self.render_empty_conversation(cx))
-                                                    .child(self.render_input_bar(
-                                                        false,
-                                                        false,
-                                                        draft_is_empty,
-                                                        true,
-                                                        api_key_ready,
-                                                        window,
-                                                        cx,
-                                                    )),
-                                            )
-                                            .into_any_element()
-                                    } else {
-                                        v_flex()
-                                            .flex_1()
-                                            .min_h_0()
-                                            .child(
-                                                v_flex()
-                                                    .flex_1()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .px_4()
-                                                    .child(self.render_api_key_required(cx)),
-                                            )
-                                            .child(self.render_input_bar(
-                                                false,
-                                                false,
-                                                draft_is_empty,
-                                                false,
-                                                api_key_ready,
-                                                window,
-                                                cx,
-                                            ))
-                                            .into_any_element()
-                                    }),
-                            )
-                            .when(api_key_ready && self.right_panel_open, |el| {
-                                el.child(self.render_simple_panel_resize_handle(cx))
-                                    .child(self.render_right_panel(false, None, false, cx))
-                            })
-                            .when(api_key_ready && !self.right_panel_open, |el| {
-                                el.child(self.render_open_artifact_panel_button(cx))
-                            }),
+                        self.render_main_with_right_panel(
+                            v_flex()
+                                .flex_1()
+                                .when(api_key_ready && self.right_panel_open, |el| {
+                                    el.min_w(px(ds::CHAT_PANEL_MIN_WIDTH))
+                                })
+                                .when(!api_key_ready || !self.right_panel_open, |el| el.min_w_0())
+                                .min_h_0()
+                                .h_full()
+                                .overflow_hidden()
+                                .bg(ds::app_background(cx))
+                                .when(api_key_ready, |el| {
+                                    el.child(
+                                        self.render_workspace_mode_section_controls(px(18.), cx),
+                                    )
+                                })
+                                .when(!api_key_ready, |el| {
+                                    el.child(self.render_api_status_banner(cx))
+                                })
+                                .child(if api_key_ready {
+                                    v_flex()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .items_center()
+                                        .justify_center()
+                                        .px_4()
+                                        .pb(rems_from_px(96.))
+                                        .child(
+                                            v_flex()
+                                                .w_full()
+                                                .max_w(px(920.))
+                                                .items_center()
+                                                .gap_6()
+                                                .child(self.render_empty_conversation(cx))
+                                                .child(self.render_input_bar(
+                                                    false,
+                                                    false,
+                                                    draft_is_empty,
+                                                    true,
+                                                    api_key_ready,
+                                                    window,
+                                                    cx,
+                                                )),
+                                        )
+                                        .into_any_element()
+                                } else {
+                                    v_flex()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .child(
+                                            v_flex()
+                                                .flex_1()
+                                                .items_center()
+                                                .justify_center()
+                                                .px_4()
+                                                .child(self.render_api_key_required(cx)),
+                                        )
+                                        .child(self.render_input_bar(
+                                            false,
+                                            false,
+                                            draft_is_empty,
+                                            false,
+                                            api_key_ready,
+                                            window,
+                                            cx,
+                                        ))
+                                        .into_any_element()
+                                })
+                                .into_any_element(),
+                            false,
+                            None,
+                            right_panel_expanded,
+                            api_key_ready,
+                            window,
+                            cx,
+                        ),
                     ),
             )
             .when(self.share_dialog_open, |el| {
@@ -3853,6 +5157,8 @@ impl BeginnerWorkspace {
         let is_connecting = self.pending_conversation_view.is_some();
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
         let api_key_ready = Self::has_backboard_api_key();
+        let right_panel_expanded =
+            api_key_ready && self.right_panel_open && self.right_panel_expanded;
         if api_key_ready {
             self.ensure_composer_thread(window, cx);
         }
@@ -3879,166 +5185,157 @@ impl BeginnerWorkspace {
                             this.resize_simple_sidebar(event, cx);
                         },
                     ))
-                    .child(if self.chats_sidebar_open {
-                        self.render_chats_sidebar(window, cx).into_any_element()
-                    } else {
-                        self.render_closed_chats_sidebar(window, cx)
-                            .into_any_element()
+                    .when(!right_panel_expanded, |el| {
+                        el.child(if self.chats_sidebar_open {
+                            self.render_chats_sidebar(window, cx).into_any_element()
+                        } else {
+                            self.render_closed_chats_sidebar(window, cx)
+                                .into_any_element()
+                        })
                     })
                     .child(
-                        h_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .overflow_hidden()
-                            .on_drag_move::<DraggedSimplePanelResize>(cx.listener(
-                                |this, event, _, cx| {
-                                    this.resize_simple_panels(event, cx);
-                                },
-                            ))
-                            .child(
-                                v_flex()
-                                    .when(api_key_ready && self.right_panel_open, |el| {
-                                        el.w(self.chat_panel_width)
-                                            .min_w(px(ds::CHAT_PANEL_MIN_WIDTH))
-                                            .flex_shrink_0()
-                                    })
-                                    .when(!api_key_ready || !self.right_panel_open, |el| {
-                                        el.flex_1().min_w_0()
-                                    })
-                                    .min_h_0()
-                                    .h_full()
-                                    .overflow_hidden()
-                                    .bg(ds::app_background(cx))
-                                    .child(self.render_simple_header(
-                                        active_title.clone(),
-                                        is_running || is_connecting,
+                        self.render_main_with_right_panel(
+                            v_flex()
+                                .flex_1()
+                                .when(api_key_ready && self.right_panel_open, |el| {
+                                    el.min_w(px(ds::CHAT_PANEL_MIN_WIDTH))
+                                })
+                                .when(!api_key_ready || !self.right_panel_open, |el| el.min_w_0())
+                                .min_h_0()
+                                .h_full()
+                                .overflow_hidden()
+                                .bg(ds::app_background(cx))
+                                .when(api_key_ready, |el| {
+                                    el.child(self.render_workspace_mode_section_controls(
+                                        px(ds::TOP_BAR_HEIGHT + 12.),
                                         cx,
                                     ))
-                                    .when(!api_key_ready, |el| {
-                                        el.child(self.render_api_status_banner(cx)).child(
+                                })
+                                .child(self.render_simple_header(
+                                    active_title.clone(),
+                                    is_running || is_connecting,
+                                    cx,
+                                ))
+                                .when(!api_key_ready, |el| {
+                                    el.child(self.render_api_status_banner(cx)).child(
+                                        v_flex()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .items_center()
+                                            .justify_center()
+                                            .px_4()
+                                            .child(self.render_api_key_required(cx)),
+                                    )
+                                })
+                                .when(api_key_ready, |el| {
+                                    el.when_some(self.chat_feed.as_ref(), |el, feed| {
+                                        feed.update(cx, |feed, cx| {
+                                            feed.set_preview_state(preview_card_state, cx);
+                                        });
+                                        el.child(
                                             v_flex()
+                                                .h_full()
                                                 .flex_1()
                                                 .min_h_0()
-                                                .items_center()
-                                                .justify_center()
-                                                .px_4()
-                                                .child(self.render_api_key_required(cx)),
+                                                .overflow_hidden()
+                                                .child(feed.clone()),
                                         )
                                     })
-                                    .when(api_key_ready, |el| {
-                                        el.when_some(self.chat_feed.as_ref(), |el, feed| {
-                                            feed.update(cx, |feed, cx| {
-                                                feed.set_preview_state(preview_card_state, cx);
-                                            });
-                                            el.child(
+                                })
+                                .when(api_key_ready && self.chat_feed.is_none(), |el| {
+                                    let (headline, subtext) = if is_connecting {
+                                        ("Backboard is connecting", "Your agent is starting up.")
+                                    } else if self.chat_mode == ChatMode::Ask {
+                                        (
+                                            "What do you want to ask?",
+                                            "Ask about this project without changing files.",
+                                        )
+                                    } else {
+                                        (
+                                            "What do you want to build?",
+                                            "Describe a page, feature, or change.",
+                                        )
+                                    };
+                                    el.child(
+                                        v_flex()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .items_center()
+                                            .justify_center()
+                                            .px_4()
+                                            .pb(rems_from_px(48.))
+                                            .child(if is_connecting {
                                                 v_flex()
-                                                    .h_full()
-                                                    .flex_1()
-                                                    .min_h_0()
-                                                    .overflow_hidden()
-                                                    .child(feed.clone()),
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .child(
+                                                        Label::new(headline)
+                                                            .size(LabelSize::Large)
+                                                            .color(Color::Custom(colors.text)),
+                                                    )
+                                                    .child(
+                                                        Label::new(subtext)
+                                                            .size(LabelSize::Small)
+                                                            .color(Color::Custom(
+                                                                colors.text_muted,
+                                                            )),
+                                                    )
+                                                    .into_any_element()
+                                            } else {
+                                                self.render_empty_conversation(cx)
+                                                    .into_any_element()
+                                            }),
+                                    )
+                                })
+                                .when(api_key_ready && (is_running || is_connecting), |el| {
+                                    let status = if is_connecting {
+                                        SharedString::from("Thought for 1s")
+                                    } else if self.chat_mode == ChatMode::Ask {
+                                        SharedString::from("Thinking...")
+                                    } else if self.is_preview_generating {
+                                        SharedString::from("Starting local preview")
+                                    } else {
+                                        SharedString::from(format!(
+                                            "Working on {}",
+                                            self.artifact_title().as_ref()
+                                        ))
+                                    };
+                                    el.child(
+                                        h_flex()
+                                            .flex_shrink_0()
+                                            .px_4()
+                                            .py_2()
+                                            .gap_2()
+                                            .items_center()
+                                            .child(
+                                                Icon::new(IconName::LoadCircle)
+                                                    .size(IconSize::XSmall)
+                                                    .color(Color::Custom(colors.icon_accent)),
                                             )
-                                        })
-                                    })
-                                    .when(api_key_ready && self.chat_feed.is_none(), |el| {
-                                        let (headline, subtext) = if is_connecting {
-                                            (
-                                                "Backboard is connecting",
-                                                "Your agent is starting up.",
-                                            )
-                                        } else if self.chat_mode == ChatMode::Ask {
-                                            (
-                                                "What do you want to ask?",
-                                                "Ask about this project without changing files.",
-                                            )
-                                        } else {
-                                            (
-                                                "What do you want to build?",
-                                                "Describe a page, feature, or change.",
-                                            )
-                                        };
-                                        el.child(
-                                            v_flex()
-                                                .flex_1()
-                                                .min_h_0()
-                                                .items_center()
-                                                .justify_center()
-                                                .px_4()
-                                                .pb(rems_from_px(48.))
-                                                .child(if is_connecting {
-                                                    v_flex()
-                                                        .items_center()
-                                                        .gap_2()
-                                                        .child(
-                                                            Label::new(headline)
-                                                                .size(LabelSize::Large)
-                                                                .color(Color::Custom(colors.text)),
-                                                        )
-                                                        .child(
-                                                            Label::new(subtext)
-                                                                .size(LabelSize::Small)
-                                                                .color(Color::Custom(
-                                                                    colors.text_muted,
-                                                                )),
-                                                        )
-                                                        .into_any_element()
-                                                } else {
-                                                    self.render_empty_conversation(cx)
-                                                        .into_any_element()
-                                                }),
-                                        )
-                                    })
-                                    .when(api_key_ready && (is_running || is_connecting), |el| {
-                                        let status = if is_connecting {
-                                            SharedString::from("Thought for 1s")
-                                        } else if self.chat_mode == ChatMode::Ask {
-                                            SharedString::from("Thinking...")
-                                        } else if self.is_preview_generating {
-                                            SharedString::from("Starting local preview")
-                                        } else {
-                                            SharedString::from(format!(
-                                                "Working on {}",
-                                                self.artifact_title().as_ref()
-                                            ))
-                                        };
-                                        el.child(
-                                            h_flex()
-                                                .flex_shrink_0()
-                                                .px_4()
-                                                .py_2()
-                                                .gap_2()
-                                                .items_center()
-                                                .child(
-                                                    Icon::new(IconName::LoadCircle)
-                                                        .size(IconSize::XSmall)
-                                                        .color(Color::Custom(colors.icon_accent)),
-                                                )
-                                                .child(
-                                                    Label::new(status)
-                                                        .size(LabelSize::XSmall)
-                                                        .color(Color::Custom(colors.text_muted)),
-                                                ),
-                                        )
-                                    })
-                                    .child(self.render_input_bar(
-                                        is_running,
-                                        is_connecting,
-                                        draft_is_empty,
-                                        false,
-                                        api_key_ready,
-                                        window,
-                                        cx,
-                                    )),
-                            )
-                            .when(api_key_ready && self.right_panel_open, |el| {
-                                el.child(self.render_simple_panel_resize_handle(cx)).child(
-                                    self.render_right_panel(is_running, preview_url, false, cx),
-                                )
-                            })
-                            .when(api_key_ready && !self.right_panel_open, |el| {
-                                el.child(self.render_open_artifact_panel_button(cx))
-                            }),
+                                            .child(
+                                                Label::new(status)
+                                                    .size(LabelSize::XSmall)
+                                                    .color(Color::Custom(colors.text_muted)),
+                                            ),
+                                    )
+                                })
+                                .child(self.render_input_bar(
+                                    is_running,
+                                    is_connecting,
+                                    draft_is_empty,
+                                    false,
+                                    api_key_ready,
+                                    window,
+                                    cx,
+                                ))
+                                .into_any_element(),
+                            is_running,
+                            preview_url,
+                            right_panel_expanded,
+                            api_key_ready,
+                            window,
+                            cx,
+                        ),
                     ),
             )
             .when(self.share_dialog_open, |el| {
@@ -4274,125 +5571,413 @@ impl BeginnerWorkspace {
             )
     }
 
+    fn local_browser_entries(&self, preview_url: Option<String>) -> Vec<LocalBrowserInstance> {
+        let mut entries = Vec::new();
+        let mut push_entry = |title: String, url: String| {
+            if entries
+                .iter()
+                .any(|entry: &LocalBrowserInstance| entry.url == url)
+            {
+                return;
+            }
+            entries.push(LocalBrowserInstance { title, url });
+        };
+
+        for instance in &self.local_browser_instances {
+            push_entry(instance.title.clone(), instance.url.clone());
+        }
+
+        if let Some(url) = preview_url {
+            push_entry(self.artifact_title().as_ref().to_string(), url);
+        }
+
+        for session in &self.background_sessions {
+            if let Some(url) = session.preview_url.clone() {
+                let title = session.tab_name.as_ref().trim();
+                let title = if title.is_empty() {
+                    Self::browser_address_label(Some(&url)).as_ref().to_string()
+                } else {
+                    title.to_string()
+                };
+                push_entry(title, url);
+            }
+        }
+
+        entries
+    }
+
     fn render_design_preview_fallback(
         &self,
-        url: String,
+        preview_url: Option<String>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let colors = cx.theme().colors().clone();
+        let status_color = cx.theme().status().success;
+        let entries = self.local_browser_entries(preview_url);
+        let entries_empty = entries.is_empty();
+
         v_flex()
             .flex_1()
             .min_h_0()
-            .items_center()
-            .justify_center()
             .bg(ds::app_background(cx))
+            .px_8()
+            .pb_8()
             .child(
                 v_flex()
-                    .w_full()
-                    .h_full()
-                    .overflow_hidden()
-                    .bg(ds::app_background(cx))
+                    .flex_1()
+                    .min_h_0()
+                    .justify_end()
+                    .gap_4()
                     .child(
                         h_flex()
-                            .h(px(44.))
-                            .px_4()
-                            .gap_3()
+                            .w_full()
+                            .max_w(px(860.))
                             .items_center()
-                            .border_b_1()
-                            .border_color(ds::separator(cx))
+                            .mx_auto()
                             .child(
-                                Label::new("MyApp")
-                                    .size(LabelSize::Default)
-                                    .weight(FontWeight::SEMIBOLD)
-                                    .color(Color::Custom(ds::text(cx))),
+                                Label::new("Local")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Custom(ds::text_muted(cx))),
                             )
                             .child(div().flex_1())
                             .child(
-                                h_flex()
-                                    .gap_4()
+                                Icon::new(IconName::ListFilter)
+                                    .size(IconSize::Small)
+                                    .color(Color::Custom(ds::icon_muted(cx))),
+                            ),
+                    )
+                    .when(entries_empty, |el| {
+                        el.child(
+                            h_flex()
+                                .w_full()
+                                .max_w(px(860.))
+                                .min_h(px(90.))
+                                .mx_auto()
+                                .px_4()
+                                .items_center()
+                                .rounded(px(14.))
+                                .border_1()
+                                .border_color(ds::soft_border(cx))
+                                .bg(ds::card_background(cx))
+                                .child(
+                                    Label::new("No local apps found")
+                                        .size(LabelSize::Small)
+                                        .color(Color::Custom(ds::text_muted(cx))),
+                                ),
+                        )
+                    })
+                    .children(entries.into_iter().enumerate().map(|(index, entry)| {
+                        let LocalBrowserInstance { title, url } = entry;
+                        let display_url = Self::browser_address_label(Some(&url));
+                        h_flex()
+                            .id(SharedString::from(format!(
+                                "generated-local-preview-card-{index}"
+                            )))
+                            .w_full()
+                            .max_w(px(860.))
+                            .min_h(px(122.))
+                            .mx_auto()
+                            .px_4()
+                            .gap_5()
+                            .items_center()
+                            .rounded(px(14.))
+                            .border_1()
+                            .border_color(ds::soft_border(cx))
+                            .bg(ds::card_background(cx))
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.navigate_browser_to_url(url.clone(), window, cx);
+                            }))
+                            .child(
+                                div()
+                                    .w(px(170.))
+                                    .h(px(92.))
+                                    .flex_shrink_0()
+                                    .rounded(px(12.))
+                                    .border_1()
+                                    .border_color(ds::soft_border(cx))
+                                    .bg(ds::field_background(cx))
+                                    .p(px(10.))
                                     .child(
-                                        Label::new("Home")
-                                            .size(LabelSize::Small)
-                                            .color(Color::Custom(ds::text_muted(cx))),
+                                        div()
+                                            .size_full()
+                                            .rounded(px(8.))
+                                            .border_1()
+                                            .border_color(ds::soft_border(cx))
+                                            .bg(ds::app_background(cx))
+                                            .p(px(8.))
+                                            .child(
+                                                h_flex()
+                                                    .gap(px(5.))
+                                                    .mb(px(8.))
+                                                    .child(
+                                                        div()
+                                                            .size(px(5.))
+                                                            .rounded_full()
+                                                            .bg(ds::error(cx)),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .size(px(5.))
+                                                            .rounded_full()
+                                                            .bg(ds::warning(cx)),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .size(px(5.))
+                                                            .rounded_full()
+                                                            .bg(status_color),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(92.))
+                                                    .h(px(8.))
+                                                    .rounded(px(4.))
+                                                    .bg(ds::separator(cx)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .mt(px(8.))
+                                                    .w(px(68.))
+                                                    .h(px(7.))
+                                                    .rounded(px(3.5))
+                                                    .bg(ds::separator(cx)),
+                                            )
+                                            .child(
+                                                Label::new(title.clone())
+                                                    .mt(px(10.))
+                                                    .size(LabelSize::XSmall)
+                                                    .weight(FontWeight::SEMIBOLD)
+                                                    .color(Color::Custom(ds::text(cx)))
+                                                    .truncate(),
+                                            )
+                                            .child(
+                                                Label::new(display_url.clone())
+                                                    .size(LabelSize::XSmall)
+                                                    .color(Color::Custom(ds::text_muted(cx)))
+                                                    .truncate(),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_1()
+                                    .child(
+                                        Label::new(title.clone())
+                                            .size(LabelSize::Custom(rems_from_px(20.)))
+                                            .weight(FontWeight::SEMIBOLD)
+                                            .color(Color::Custom(ds::text(cx)))
+                                            .truncate(),
                                     )
                                     .child(
-                                        Label::new("Features")
-                                            .size(LabelSize::Small)
-                                            .color(Color::Custom(ds::text_muted(cx))),
-                                    )
+                                        Label::new(display_url)
+                                            .size(LabelSize::Custom(rems_from_px(18.)))
+                                            .color(Color::Custom(ds::text_muted(cx)))
+                                            .truncate(),
+                                    ),
+                            )
+                            .child(div().size(px(14.)).rounded_full().bg(status_color))
+                    })),
+            )
+    }
+
+    fn render_artifact_browser_shell(
+        &self,
+        preview_url: Option<String>,
+        content: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let has_selected_folder = self.selected_folder.is_some();
+        let preview_url_for_open = preview_url.clone();
+        let hover_background = ds::hover_background(cx);
+        let disabled_icon = ds::icon_muted(cx).opacity(0.42);
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .size_full()
+            .overflow_hidden()
+            .bg(ds::app_background(cx))
+            .child(
+                h_flex()
+                    .h(px(52.))
+                    .flex_shrink_0()
+                    .px_5()
+                    .gap_3()
+                    .items_center()
+                    .bg(ds::app_background(cx))
+                    .border_b_1()
+                    .border_color(ds::separator(cx).opacity(0.42))
+                    .child(self.render_right_panel_dock_handle(cx))
+                    .child(self.render_right_panel_option_tabs(cx))
+                    .child(
+                        Icon::new(IconName::Public)
+                            .size(IconSize::Small)
+                            .color(Color::Custom(ds::icon_muted(cx))),
+                    )
+                    .child(
+                        Label::new(self.artifact_title())
+                            .size(LabelSize::Small)
+                            .color(Color::Custom(ds::text_muted(cx)))
+                            .truncate(),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        self.render_right_panel_expand_button("artifact-browser-expand-panel", cx),
+                    )
+                    .child(
+                        div()
+                            .id("artifact-browser-close-panel")
+                            .size(px(28.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(6.))
+                            .cursor_pointer()
+                            .hover(move |el| el.bg(hover_background))
+                            .tooltip(Tooltip::text("Close panel"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_right_panel(cx);
+                            }))
+                            .child(
+                                Icon::new(IconName::Close)
+                                    .size(IconSize::Small)
+                                    .color(Color::Custom(ds::icon_muted(cx))),
+                            ),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .h(px(50.))
+                    .flex_shrink_0()
+                    .px_4()
+                    .gap_3()
+                    .items_center()
+                    .bg(ds::field_background(cx))
+                    .border_b_1()
+                    .border_color(ds::separator(cx).opacity(0.55))
+                    .child(
+                        div()
+                            .id("artifact-browser-back")
+                            .size(px(32.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(8.))
+                            .child(
+                                Icon::new(IconName::ArrowLeft)
+                                    .size(IconSize::Small)
+                                    .color(Color::Custom(disabled_icon)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("artifact-browser-forward")
+                            .size(px(32.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(8.))
+                            .child(
+                                Icon::new(IconName::ArrowRight)
+                                    .size(IconSize::Small)
+                                    .color(Color::Custom(disabled_icon)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("artifact-browser-refresh")
+                            .size(px(32.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(8.))
+                            .when(has_selected_folder, |el| {
+                                el.cursor_pointer()
+                                    .hover(move |el| el.bg(hover_background))
+                                    .tooltip(Tooltip::text("Refresh artifact preview"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_web_app_if_present(cx);
+                                    }))
+                            })
+                            .when(!has_selected_folder, |el| el.opacity(0.42))
+                            .child(
+                                Icon::new(IconName::RotateCw)
+                                    .size(IconSize::Small)
+                                    .color(Color::Custom(ds::icon_muted(cx))),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .id("artifact-browser-address")
+                            .h(px(34.))
+                            .flex_1()
+                            .min_w(px(132.))
+                            .px_3()
+                            .gap_2()
+                            .items_center()
+                            .rounded(px(8.))
+                            .border_1()
+                            .border_color(ds::soft_border(cx))
+                            .bg(ds::app_background(cx))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .child(self.browser_address_editor.clone()),
+                            )
+                            .child(
+                                div()
+                                    .id("artifact-browser-open-external")
+                                    .size(px(24.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(6.))
+                                    .when_some(preview_url_for_open, |el, url| {
+                                        el.cursor_pointer()
+                                            .hover(move |el| el.bg(hover_background))
+                                            .tooltip(Tooltip::text("Open in browser"))
+                                            .on_click(cx.listener(move |_, _, _, cx| {
+                                                cx.open_url(&url);
+                                            }))
+                                    })
+                                    .when(preview_url.is_none(), |el| el.opacity(0.48))
                                     .child(
-                                        Label::new("Pricing")
-                                            .size(LabelSize::Small)
-                                            .color(Color::Custom(ds::text_muted(cx))),
-                                    )
-                                    .child(
-                                        Label::new("Pricing")
-                                            .size(LabelSize::Small)
-                                            .color(Color::Custom(ds::text_muted(cx))),
+                                        Icon::new(IconName::ArrowUpRight)
+                                            .size(IconSize::Small)
+                                            .color(Color::Custom(ds::icon_muted(cx))),
                                     ),
                             ),
                     )
                     .child(
-                        v_flex()
-                            .flex_1()
+                        div()
+                            .id("artifact-browser-more")
+                            .size(px(36.))
+                            .flex()
                             .items_center()
                             .justify_center()
-                            .gap_5()
-                            .px_8()
+                            .rounded(px(8.))
+                            .hover(move |el| el.bg(hover_background))
                             .child(
-                                v_flex()
-                                    .items_center()
-                                    .gap_4()
-                                    .child(
-                                        Label::new("Build something amazing")
-                                            .size(LabelSize::Custom(rems_from_px(36.)))
-                                            .weight(FontWeight::BOLD)
-                                            .color(Color::Custom(ds::text(cx))),
-                                    )
-                                    .child(
-                                        div()
-                                            .max_w(px(520.))
-                                            .text_center()
-                                            .text_size(rems_from_px(18.))
-                                            .text_color(ds::text_muted(cx))
-                                            .line_height(relative(1.55))
-                                            .child("A clean, minimal landing page\ngenerated by Backboard."),
-                                    )
-                                    .child(
-                                        Button::new("open-generated-preview", "Get Started")
-                                            .style(ButtonStyle::Filled)
-                                            .size(ButtonSize::Compact)
-                                            .label_size(LabelSize::XSmall)
-                                            .on_click(cx.listener(move |_, _, _, cx| {
-                                                cx.open_url(&url);
-                                            })),
-                                    ),
-                            )
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .max_w(px(880.))
-                                    .gap_5()
-                                    .child(render_preview_feature_card(
-                                        "Fast",
-                                        "A short feature description goes here.",
-                                        colors.element_background,
-                                        cx,
-                                    ))
-                                    .child(render_preview_feature_card(
-                                        "Secure",
-                                        "A short feature description goes here.",
-                                        colors.status_bar_background,
-                                        cx,
-                                    ))
-                                    .child(render_preview_feature_card(
-                                        "Simple",
-                                        "A short feature description goes here.",
-                                        colors.element_background,
-                                        cx,
-                                    )),
+                                Icon::new(IconName::Ellipsis)
+                                    .size(IconSize::Small)
+                                    .color(Color::Custom(ds::icon_muted(cx))),
                             ),
                     ),
+            )
+            .child(
+                v_flex()
+                    .id("artifact-browser-page")
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .overflow_hidden()
+                    .bg(ds::app_background(cx))
+                    .child(content),
             )
     }
 
@@ -4436,6 +6021,69 @@ impl BeginnerWorkspace {
             }))
     }
 
+    fn render_right_panel_dock_handle(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let hover_background = ds::hover_background(cx);
+
+        div()
+            .id("right-panel-dock-handle")
+            .size(px(28.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(6.))
+            .cursor_grab()
+            .hover(move |el| el.bg(hover_background))
+            .tooltip(Tooltip::text("Drag panel to dock"))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                }),
+            )
+            .on_drag(DraggedSimplePanelDock, |_, _, _, cx| {
+                cx.stop_propagation();
+                cx.new(|_| gpui::Empty)
+            })
+            .child(
+                Icon::new(IconName::Ellipsis)
+                    .size(IconSize::Small)
+                    .color(Color::Custom(ds::icon_muted(cx))),
+            )
+    }
+
+    fn render_right_panel_expand_button(
+        &self,
+        id: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let hover_background = ds::hover_background(cx);
+        let expanded = self.right_panel_expanded;
+        let (icon, tooltip) = if expanded {
+            (IconName::Minimize, "Restore panel")
+        } else {
+            (IconName::Maximize, "Expand panel")
+        };
+
+        div()
+            .id(id)
+            .size(px(28.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(6.))
+            .cursor_pointer()
+            .hover(move |el| el.bg(hover_background))
+            .tooltip(Tooltip::text(tooltip))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.toggle_right_panel_expanded(cx);
+            }))
+            .child(
+                Icon::new(icon)
+                    .size(IconSize::Small)
+                    .color(Color::Custom(ds::icon_muted(cx))),
+            )
+    }
+
     fn render_right_panel_launcher(&self, cx: &mut Context<Self>) -> AnyElement {
         let hover_background = ds::hover_background(cx);
 
@@ -4443,6 +6091,7 @@ impl BeginnerWorkspace {
             .flex_1()
             .min_w(px(ds::RIGHT_PANEL_MIN_WIDTH))
             .h_full()
+            .overflow_hidden()
             .bg(ds::app_background(cx))
             .child(
                 h_flex()
@@ -4452,25 +6101,10 @@ impl BeginnerWorkspace {
                     .items_center()
                     .border_b_1()
                     .border_color(ds::separator(cx).opacity(0.42))
+                    .child(self.render_right_panel_dock_handle(cx))
                     .child(self.render_right_panel_option_tabs(cx))
                     .child(div().flex_1())
-                    .child(
-                        div()
-                            .id("right-panel-expand")
-                            .size(px(28.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(6.))
-                            .cursor_pointer()
-                            .hover(move |el| el.bg(hover_background))
-                            .tooltip(Tooltip::text("Expand panel"))
-                            .child(
-                                Icon::new(IconName::Maximize)
-                                    .size(IconSize::Small)
-                                    .color(Color::Custom(ds::icon_muted(cx))),
-                            ),
-                    )
+                    .child(self.render_right_panel_expand_button("right-panel-expand", cx))
                     .child(
                         div()
                             .id("right-panel-close")
@@ -4483,9 +6117,7 @@ impl BeginnerWorkspace {
                             .hover(move |el| el.bg(hover_background))
                             .tooltip(Tooltip::text("Close panel"))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.right_panel_open = false;
-                                this.preview_visible = false;
-                                cx.notify();
+                                this.close_right_panel(cx);
                             }))
                             .child(
                                 Icon::new(IconName::Close)
@@ -4497,63 +6129,17 @@ impl BeginnerWorkspace {
             .child(match self.right_panel_option {
                 RightPanelOption::Files => self.render_right_panel_files_state(cx),
                 RightPanelOption::Terminal => self.render_right_panel_terminal_state(cx),
-                RightPanelOption::SideChat | RightPanelOption::Design | RightPanelOption::Code => {
-                    self.render_right_panel_side_chat_launcher_state(cx)
-                }
+                RightPanelOption::Design => self.render_empty_artifact_state(cx).into_any_element(),
+                RightPanelOption::Code => match &self.right_panel {
+                    RightPanel::CodeDiff { .. } => {
+                        self.render_code_diff_state(cx).into_any_element()
+                    }
+                    RightPanel::CodeView { title, editor, .. } => self
+                        .render_code_artifact_state(title, editor.clone(), cx)
+                        .into_any_element(),
+                    _ => self.render_code_empty_state(cx).into_any_element(),
+                },
             })
-            .into_any_element()
-    }
-
-    fn render_right_panel_side_chat_launcher_state(&self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
-            .flex_1()
-            .min_h_0()
-            .px_6()
-            .py_5()
-            .gap_5()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(
-                        Icon::new(IconName::Chat)
-                            .size(IconSize::Small)
-                            .color(Color::Custom(ds::icon_muted(cx))),
-                    )
-                    .child(
-                        Label::new("Side chat")
-                            .size(LabelSize::Custom(rems_from_px(15.)))
-                            .weight(FontWeight::SEMIBOLD)
-                            .color(Color::Custom(ds::text(cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .max_w(px(440.))
-                    .text_size(rems_from_px(13.))
-                    .line_height(relative(1.44))
-                    .text_color(ds::text_muted(cx))
-                    .child("Ask for follow-up changes while keeping the generated artifact, files, and terminal available in this panel."),
-            )
-            .child(div().flex_1())
-            .child(
-                h_flex()
-                    .w_full()
-                    .h(px(42.))
-                    .items_center()
-                    .gap_2()
-                    .border_t_1()
-                    .border_color(ds::separator(cx).opacity(0.42))
-                    .pt_3()
-                    .child(
-                        Button::new("right-panel-open-side-chat", "Open artifact")
-                            .style(ButtonStyle::Subtle)
-                            .size(ButtonSize::Medium)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.select_right_panel_option(RightPanelOption::Design, window, cx);
-                            })),
-                    ),
-            )
             .into_any_element()
     }
 
@@ -4670,102 +6256,304 @@ impl BeginnerWorkspace {
             })
         });
 
-        v_flex()
+        let entry_count = entries.len();
+        let item_count_label = if entry_count == 1 {
+            SharedString::from("1 item")
+        } else {
+            SharedString::from(format!("{entry_count} items"))
+        };
+        let selected_path = match &self.right_panel {
+            RightPanel::CodeView { path, .. } => Some(path.clone()),
+            _ => None,
+        };
+        let selected_code_view = match &self.right_panel {
+            RightPanel::CodeView {
+                path,
+                title,
+                editor,
+            } => Some((path.clone(), title.clone(), editor.clone())),
+            _ => None,
+        };
+
+        h_flex()
             .flex_1()
             .min_h_0()
             .overflow_hidden()
-            .bg(ds::app_background(cx))
             .child(
                 v_flex()
-                    .flex_shrink_0()
-                    .gap_1()
-                    .px_5()
-                    .pt_4()
-                    .pb_3()
+                    .flex_1()
+                    .flex_basis(relative(0.5))
+                    .min_w(px(FILES_SPLIT_MIN_DIRECTORY_WIDTH_PX))
+                    .h_full()
+                    .overflow_hidden()
+                    .border_r_1()
+                    .border_color(ds::separator(cx).opacity(0.5))
                     .child(
                         h_flex()
-                            .h(px(32.))
+                            .h(px(52.))
                             .items_center()
+                            .px_3()
                             .gap_2()
                             .border_b_1()
                             .border_color(ds::separator(cx).opacity(0.45))
                             .child(
-                                Icon::new(IconName::MagnifyingGlass)
+                                Icon::new(IconName::FileTree)
                                     .size(IconSize::Small)
                                     .color(Color::Custom(ds::icon_muted(cx))),
                             )
                             .child(
-                                Label::new("Filter files...")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Custom(ds::text_disabled(cx))),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .min_w_0()
-                            .gap_1p5()
-                            .items_center()
-                            .pt_1()
-                            .child(
-                                Icon::new(IconName::Folder)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Custom(ds::icon_muted(cx))),
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_0p5()
+                                    .child(
+                                        Label::new("File directory")
+                                            .size(LabelSize::Small)
+                                            .weight(FontWeight::SEMIBOLD)
+                                            .color(Color::Custom(ds::text(cx))),
+                                    )
+                                    .child(
+                                        Label::new(current_label)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Custom(ds::text_muted(cx)))
+                                            .truncate(),
+                                    ),
                             )
                             .child(
-                                Label::new(current_label)
+                                h_flex()
+                                    .h(px(22.))
+                                    .flex_shrink_0()
+                                    .items_center()
+                                    .rounded(px(11.))
+                                    .border_1()
+                                    .border_color(ds::soft_border(cx))
+                                    .bg(ds::chip_background(cx))
+                                    .px_2()
+                                    .child(
+                                        Label::new(item_count_label)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Custom(ds::text_muted(cx))),
+                                    ),
+                            ),
+                    )
+                    .when_some(error_label, |el, error| {
+                        el.child(
+                            h_flex()
+                                .mx_2()
+                                .mt_2()
+                                .rounded(px(8.))
+                                .border_1()
+                                .border_color(ds::soft_border(cx))
+                                .bg(ds::field_background(cx))
+                                .px_3()
+                                .py_2()
+                                .child(
+                                    Label::new(error)
+                                        .size(LabelSize::XSmall)
+                                        .color(Color::Custom(ds::text_muted(cx))),
+                                ),
+                        )
+                    })
+                    .child(
+                        v_flex()
+                            .id("right-panel-files-list")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .p_2()
+                            .when(browse_path != root, |el| {
+                                let parent_path = browse_path.parent().map(Path::to_path_buf);
+                                el.when_some(parent_path, |el, parent_path| {
+                                    el.child(self.render_file_browser_row(
+                                        "right-panel-file-parent",
+                                        SharedString::from("Parent folder"),
+                                        parent_path,
+                                        true,
+                                        false,
+                                        cx,
+                                    ))
+                                })
+                            })
+                            .when(entry_count == 0, |el| {
+                                el.child(
+                                    v_flex()
+                                        .flex_1()
+                                        .items_center()
+                                        .justify_center()
+                                        .gap_2()
+                                        .px_4()
+                                        .child(
+                                            Icon::new(IconName::FolderOpen)
+                                                .size(IconSize::Medium)
+                                                .color(Color::Custom(ds::icon_muted(cx))),
+                                        )
+                                        .child(
+                                            Label::new("This folder is empty")
+                                                .size(LabelSize::Small)
+                                                .color(Color::Custom(ds::text_muted(cx))),
+                                        ),
+                                )
+                            })
+                            .children(entries.into_iter().enumerate().map(|(index, entry)| {
+                                let is_selected = selected_path
+                                    .as_ref()
+                                    .map_or(false, |selected_path| selected_path == &entry.path);
+                                self.render_file_browser_row(
+                                    SharedString::from(format!("right-panel-file-row-{index}")),
+                                    entry.label,
+                                    entry.path,
+                                    entry.is_directory,
+                                    is_selected,
+                                    cx,
+                                )
+                            })),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .flex_basis(relative(0.5))
+                    .min_w(px(FILES_SPLIT_MIN_CODE_WIDTH_PX))
+                    .h_full()
+                    .overflow_hidden()
+                    .child(match selected_code_view {
+                        Some((path, title, editor)) => {
+                            self.render_files_code_preview(&path, &title, editor, cx)
+                        }
+                        None => self.render_file_preview_empty_state(cx),
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_files_code_preview(
+        &self,
+        path: &Path,
+        title: &SharedString,
+        editor: Entity<Editor>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let hover_background = ds::hover_background(cx);
+        let path_label = self
+            .selected_folder
+            .as_ref()
+            .and_then(|folder| path.strip_prefix(folder).ok())
+            .unwrap_or(path)
+            .parent()
+            .map(|parent| parent.to_string_lossy().into_owned())
+            .filter(|parent| !parent.is_empty())
+            .unwrap_or_else(|| "Project root".to_string());
+        let content_for_copy = editor.read(cx).text(cx);
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .overflow_hidden()
+            .child(
+                h_flex()
+                    .h(px(52.))
+                    .items_center()
+                    .gap_2()
+                    .px_3()
+                    .border_b_1()
+                    .border_color(ds::separator(cx).opacity(0.45))
+                    .child(
+                        Icon::new(Self::file_browser_icon(path))
+                            .size(IconSize::Small)
+                            .color(Color::Custom(ds::icon_muted(cx))),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                Label::new(title.clone())
+                                    .size(LabelSize::Small)
+                                    .weight(FontWeight::SEMIBOLD)
+                                    .color(Color::Custom(ds::text(cx)))
+                                    .truncate(),
+                            )
+                            .child(
+                                Label::new(SharedString::from(path_label))
                                     .size(LabelSize::XSmall)
                                     .color(Color::Custom(ds::text_muted(cx)))
                                     .truncate(),
                             ),
+                    )
+                    .child(
+                        div()
+                            .id("right-panel-files-copy-code")
+                            .size(px(28.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(6.))
+                            .cursor_pointer()
+                            .hover(move |el| el.bg(hover_background))
+                            .tooltip(Tooltip::text("Copy code"))
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    content_for_copy.clone(),
+                                ));
+                            }))
+                            .child(
+                                Icon::new(IconName::Copy)
+                                    .size(IconSize::Small)
+                                    .color(Color::Custom(ds::icon_muted(cx))),
+                            ),
                     ),
             )
-            .when_some(error_label, |el, error| {
-                el.child(
-                    h_flex()
-                        .mx_4()
-                        .mb_2()
-                        .rounded(px(8.))
-                        .border_1()
-                        .border_color(ds::soft_border(cx))
-                        .bg(ds::field_background(cx))
-                        .px_3()
-                        .py_2()
-                        .child(
-                            Label::new(error)
-                                .size(LabelSize::XSmall)
-                                .color(Color::Custom(ds::text_muted(cx))),
-                        ),
-                )
-            })
             .child(
-                v_flex()
-                    .id("right-panel-files-list")
+                div()
+                    .id("right-panel-files-code-editor")
                     .flex_1()
+                    .h_full()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .px_4()
-                    .pb_4()
-                    .when(browse_path != root, |el| {
-                        let parent_path = browse_path.parent().map(Path::to_path_buf);
-                        el.when_some(parent_path, |el, parent_path| {
-                            el.child(self.render_file_browser_row(
-                                "right-panel-file-parent",
-                                SharedString::from(".."),
-                                parent_path,
-                                true,
-                                cx,
-                            ))
-                        })
-                    })
-                    .children(entries.into_iter().enumerate().map(|(index, entry)| {
-                        self.render_file_browser_row(
-                            SharedString::from(format!("right-panel-file-row-{index}")),
-                            entry.label,
-                            entry.path,
-                            entry.is_directory,
-                            cx,
-                        )
-                    })),
+                    .overflow_hidden()
+                    .child(editor),
+            )
+            .into_any_element()
+    }
+
+    fn render_file_preview_empty_state(&self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .items_center()
+            .justify_center()
+            .gap_3()
+            .px_6()
+            .child(
+                div()
+                    .size(px(52.))
+                    .rounded(px(12.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .border_1()
+                    .border_color(ds::soft_border(cx))
+                    .bg(ds::field_background(cx))
+                    .child(
+                        Icon::new(IconName::FileCode)
+                            .size(IconSize::Medium)
+                            .color(Color::Custom(ds::icon_muted(cx))),
+                    ),
+            )
+            .child(
+                Label::new("Select a file")
+                    .size(LabelSize::Custom(rems_from_px(15.)))
+                    .weight(FontWeight::SEMIBOLD)
+                    .color(Color::Custom(ds::text(cx))),
+            )
+            .child(
+                div()
+                    .max_w(px(260.))
+                    .text_center()
+                    .text_size(rems_from_px(13.))
+                    .line_height(relative(1.44))
+                    .text_color(ds::text_muted(cx))
+                    .child("Choose a file from the directory to preview its contents here."),
             )
             .into_any_element()
     }
@@ -4776,6 +6564,7 @@ impl BeginnerWorkspace {
         label: SharedString,
         path: PathBuf,
         is_directory: bool,
+        is_selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let hover_background = ds::hover_background(cx);
@@ -4784,51 +6573,160 @@ impl BeginnerWorkspace {
         } else {
             Self::file_browser_icon(&path)
         };
+        let icon_color = if is_selected {
+            ds::accent(cx)
+        } else if is_directory {
+            ds::icon_muted(cx)
+        } else {
+            ds::text_muted(cx)
+        };
+        let row_label_color = if is_selected {
+            ds::accent(cx)
+        } else {
+            ds::text(cx)
+        };
 
         h_flex()
             .id(id.into())
-            .h(px(36.))
+            .h(px(34.))
             .w_full()
             .items_center()
             .gap_2()
             .rounded(px(6.))
             .px_2()
             .cursor_pointer()
+            .when(is_selected, |el| el.bg(ds::accent(cx).opacity(0.13)))
             .hover(move |el| el.bg(hover_background))
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, _, window, cx| {
                 if is_directory {
                     this.raw_browse_path = Some(path.clone());
                 } else {
-                    this.open_file_read_only(path.as_path());
+                    this.preview_file_in_files_panel(path.as_path(), window, cx);
                 }
                 cx.notify();
             }))
             .child(
-                Icon::new(if is_directory {
-                    IconName::ChevronRight
-                } else {
-                    icon
-                })
-                .size(IconSize::XSmall)
-                .color(Color::Custom(if is_directory {
-                    ds::icon_muted(cx)
-                } else {
-                    ds::text_muted(cx)
-                })),
+                Icon::new(icon)
+                    .size(IconSize::Small)
+                    .color(Color::Custom(icon_color)),
             )
-            .when(is_directory, |el| {
-                el.child(
-                    Icon::new(IconName::Folder)
-                        .size(IconSize::Small)
-                        .color(Color::Custom(ds::icon_muted(cx))),
-                )
-            })
             .child(
                 Label::new(label)
                     .size(LabelSize::Small)
-                    .color(Color::Custom(ds::text(cx)))
-                    .truncate(),
+                    .color(Color::Custom(row_label_color))
+                    .truncate()
+                    .flex_1(),
             )
+            .when(is_directory, |el| {
+                el.child(
+                    Icon::new(IconName::ChevronRight)
+                        .size(IconSize::XSmall)
+                        .color(Color::Custom(ds::icon_muted(cx))),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_code_lines(
+        &self,
+        id: &'static str,
+        content: &SharedString,
+        is_diff: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let lines: Vec<_> = content
+            .as_ref()
+            .lines()
+            .take(500)
+            .enumerate()
+            .map(|(index, line)| (index + 1, SharedString::from(line.to_string())))
+            .collect();
+
+        v_flex()
+            .id(id)
+            .flex_1()
+            .overflow_y_scroll()
+            .py_3()
+            .children(lines.into_iter().map(|(line_number, line)| {
+                let line_text = line.as_ref();
+                let is_diff_header = is_diff
+                    && (line_text.starts_with("diff --")
+                        || line_text.starts_with("---")
+                        || line_text.starts_with("+++")
+                        || line_text.starts_with("@@"));
+                let is_added =
+                    is_diff && line_text.starts_with('+') && !line_text.starts_with("+++");
+                let is_deleted =
+                    is_diff && line_text.starts_with('-') && !line_text.starts_with("---");
+                let is_context = is_diff && line_text.starts_with(' ');
+                let text_color = if is_added {
+                    Color::VersionControlAdded.color(cx)
+                } else if is_deleted {
+                    Color::VersionControlDeleted.color(cx)
+                } else if is_diff_header {
+                    ds::text_muted(cx)
+                } else {
+                    ds::text(cx)
+                };
+                let added_background = Color::VersionControlAdded.color(cx).opacity(0.08);
+                let deleted_background = Color::VersionControlDeleted.color(cx).opacity(0.08);
+                let gutter_width = if is_diff { px(32.) } else { px(56.) };
+                let gutter_text = if is_diff {
+                    if is_added {
+                        "+"
+                    } else if is_deleted {
+                        "-"
+                    } else if line_text.starts_with("@@") {
+                        "@"
+                    } else {
+                        ""
+                    }
+                    .to_string()
+                } else {
+                    line_number.to_string()
+                };
+                let display_line = if is_added || is_deleted || is_context {
+                    SharedString::from(line_text[1..].to_string())
+                } else {
+                    line.clone()
+                };
+
+                h_flex()
+                    .h(px(18.))
+                    .w_full()
+                    .items_center()
+                    .when(is_added, |el| el.bg(added_background))
+                    .when(is_deleted, |el| el.bg(deleted_background))
+                    .child(
+                        div()
+                            .w(gutter_width)
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .justify_end()
+                            .border_r_1()
+                            .border_color(ds::separator(cx))
+                            .pr_3()
+                            .text_size(rems_from_px(11.))
+                            .font_family("Roboto Mono")
+                            .text_color(ds::text_muted(cx))
+                            .line_height(px(18.))
+                            .child(gutter_text),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .overflow_hidden()
+                            .px_2()
+                            .text_size(rems_from_px(11.))
+                            .font_family("Roboto Mono")
+                            .text_color(text_color)
+                            .line_height(px(18.))
+                            .child(display_line),
+                    )
+            }))
             .into_any_element()
     }
 
@@ -4846,75 +6744,581 @@ impl BeginnerWorkspace {
     }
 
     fn render_right_panel_terminal_state(&self, cx: &mut Context<Self>) -> AnyElement {
-        let working_directory = self
-            .terminal_working_directory
-            .clone()
-            .or_else(|| self.terminal_working_directory());
-        let folder_name = working_directory
-            .as_deref()
-            .map(folder_display_name)
-            .unwrap_or_else(|| SharedString::from("No folder"));
-
         v_flex()
             .flex_1()
             .min_h_0()
-            .bg(ds::app_background(cx))
-            .child(
+            .overflow_hidden()
+            .child(if let Some(terminal_view) = self.terminal_view.clone() {
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(terminal_view)
+                    .into_any_element()
+            } else {
                 v_flex()
                     .flex_1()
                     .min_h_0()
-                    .px_5()
-                    .py_4()
+                    .items_center()
+                    .justify_center()
                     .gap_3()
                     .child(
-                        h_flex()
-                            .h(px(28.))
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                Icon::new(IconName::Terminal)
-                                    .size(IconSize::Small)
-                                    .color(Color::Custom(ds::icon_muted(cx))),
-                            )
-                            .child(
-                                Label::new(folder_name.clone())
-                                    .size(LabelSize::Small)
-                                    .color(Color::Custom(ds::text_muted(cx)))
-                                    .truncate(),
-                            ),
+                        Icon::new(IconName::LoadCircle)
+                            .size(IconSize::Medium)
+                            .color(Color::Custom(ds::icon_muted(cx))),
                     )
-                    .child(if let Some(terminal_view) = self.terminal_view.clone() {
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_hidden()
-                            .child(terminal_view)
-                            .into_any_element()
-                    } else {
-                        v_flex()
-                            .flex_1()
-                            .min_h(px(220.))
-                            .items_center()
-                            .justify_center()
-                            .gap_3()
-                            .child(
-                                Icon::new(IconName::LoadCircle)
-                                    .size(IconSize::Medium)
-                                    .color(Color::Custom(ds::icon_muted(cx))),
-                            )
-                            .child(
-                                Label::new("Starting terminal...")
-                                    .size(LabelSize::Small)
-                                    .color(Color::Custom(ds::text_muted(cx))),
-                            )
-                            .into_any_element()
-                    }),
-            )
+                    .child(
+                        Label::new("Starting terminal...")
+                            .size(LabelSize::Small)
+                            .color(Color::Custom(ds::text_muted(cx))),
+                    )
+                    .into_any_element()
+            })
             .into_any_element()
     }
 
     fn render_code_empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
         self.render_empty_artifact_state(cx)
+    }
+
+    fn parse_git_diff_file(content: String) -> Option<CodeDiffFile> {
+        let mut path = None;
+        let mut old_path = None;
+        let mut fallback_path = None;
+        let mut additions = 0;
+        let mut deletions = 0;
+
+        for line in content.lines() {
+            if let Some(diff_paths) = line.strip_prefix("diff --git ") {
+                fallback_path = diff_paths
+                    .split_once(" b/")
+                    .map(|(_, path)| path.to_string())
+                    .or_else(|| {
+                        diff_paths
+                            .rsplit_once(' ')
+                            .map(|(_, path)| path.to_string())
+                    });
+            } else if let Some(path_line) = line.strip_prefix("+++ b/") {
+                path = Some(path_line.to_string());
+            } else if path.is_none()
+                && let Some(path_line) = line.strip_prefix("--- a/")
+            {
+                path = Some(path_line.to_string());
+            } else if let Some(path_line) = line.strip_prefix("rename from ") {
+                old_path = Some(path_line.to_string());
+            } else if let Some(path_line) = line.strip_prefix("rename to ") {
+                path = Some(path_line.to_string());
+            }
+
+            if line.starts_with('+') && !line.starts_with("+++") {
+                additions += 1;
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                deletions += 1;
+            }
+        }
+
+        let status = if content.contains("\nnew file mode ") {
+            CodeDiffFileStatus::Added
+        } else if content.contains("\ndeleted file mode ") {
+            CodeDiffFileStatus::Deleted
+        } else if content.contains("\nrename from ") {
+            CodeDiffFileStatus::Renamed
+        } else if content.contains("Binary files ") {
+            CodeDiffFileStatus::Binary
+        } else {
+            CodeDiffFileStatus::Modified
+        };
+
+        Some(CodeDiffFile {
+            path: SharedString::from(path.or(fallback_path)?),
+            old_path: old_path.map(SharedString::from),
+            status,
+            additions,
+            deletions,
+            content: Some(SharedString::from(content)),
+        })
+    }
+
+    fn parse_git_diff_numstat(content: &str) -> HashMap<String, (usize, usize)> {
+        let mut stats = HashMap::new();
+        for line in content.lines() {
+            let mut columns = line.split('\t');
+            let additions = columns
+                .next()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or_default();
+            let deletions = columns
+                .next()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or_default();
+            let Some(path) = columns.next() else {
+                continue;
+            };
+            stats.insert(path.to_string(), (additions, deletions));
+        }
+        stats
+    }
+
+    fn parse_git_diff_name_status(
+        content: &str,
+        stats: &HashMap<String, (usize, usize)>,
+    ) -> Vec<CodeDiffFile> {
+        content
+            .lines()
+            .filter_map(|line| {
+                let mut columns = line.split('\t');
+                let status_code = columns.next()?;
+                let status = match status_code.chars().next()? {
+                    'A' => CodeDiffFileStatus::Added,
+                    'D' => CodeDiffFileStatus::Deleted,
+                    'R' => CodeDiffFileStatus::Renamed,
+                    _ => CodeDiffFileStatus::Modified,
+                };
+                let old_path = if matches!(status, CodeDiffFileStatus::Renamed) {
+                    columns.next().map(SharedString::from)
+                } else {
+                    None
+                };
+                let path = columns.next()?;
+                let (additions, deletions) = stats.get(path).copied().unwrap_or_default();
+
+                Some(CodeDiffFile {
+                    path: SharedString::from(path.to_string()),
+                    old_path,
+                    status,
+                    additions,
+                    deletions,
+                    content: None,
+                })
+            })
+            .collect()
+    }
+
+    fn git_root_for_folder(folder: &Path) -> anyhow::Result<PathBuf> {
+        Self::run_git_command(folder, &["rev-parse", "--show-toplevel"]).map(PathBuf::from)
+    }
+
+    fn load_git_diff_files_for_folder(folder: &Path) -> anyhow::Result<Vec<CodeDiffFile>> {
+        let root = Self::git_root_for_folder(folder)?;
+        let name_status = Self::run_git_command_raw(
+            &root,
+            &["diff", "--name-status", "--find-renames", "HEAD", "--"],
+        )
+        .or_else(|_| {
+            Self::run_git_command_raw(&root, &["diff", "--name-status", "--find-renames"])
+        })?;
+        let numstat = Self::run_git_command_raw(
+            &root,
+            &["diff", "--numstat", "--find-renames", "HEAD", "--"],
+        )
+        .or_else(|_| Self::run_git_command_raw(&root, &["diff", "--numstat", "--find-renames"]))?;
+        let stats = Self::parse_git_diff_numstat(&numstat);
+        let mut files = Self::parse_git_diff_name_status(&name_status, &stats);
+
+        let untracked_files =
+            Self::run_git_command_raw(&root, &["ls-files", "--others", "--exclude-standard", "-z"])
+                .unwrap_or_default();
+        for path in untracked_files.split('\0').filter(|path| !path.is_empty()) {
+            let relative_path = Path::new(path);
+            if !root.join(relative_path).is_file()
+                || files.iter().any(|file| file.path.as_ref() == path)
+            {
+                continue;
+            }
+
+            files.push(CodeDiffFile {
+                path: SharedString::from(path.to_string()),
+                old_path: None,
+                status: CodeDiffFileStatus::Added,
+                additions: 0,
+                deletions: 0,
+                content: None,
+            });
+        }
+
+        Ok(files)
+    }
+
+    fn load_git_diff_content_for_file(
+        folder: &Path,
+        path: &str,
+        status: CodeDiffFileStatus,
+    ) -> anyhow::Result<String> {
+        let root = Self::git_root_for_folder(folder)?;
+        let content = Self::run_git_command_raw(
+            &root,
+            &["diff", "--no-color", "--find-renames", "HEAD", "--", path],
+        )
+        .or_else(|_| {
+            Self::run_git_command_raw(&root, &["diff", "--no-color", "--find-renames", "--", path])
+        })?;
+
+        if !content.trim().is_empty() || !matches!(status, CodeDiffFileStatus::Added) {
+            return Ok(content);
+        }
+
+        Self::load_untracked_diff_content(&root, Path::new(path))
+    }
+
+    fn load_untracked_diff_content(root: &Path, path: &Path) -> anyhow::Result<String> {
+        let absolute_path = root.join(path);
+        let display_path = path.to_string_lossy();
+        let mut content = format!(
+            "diff --git a/{display_path} b/{display_path}\nnew file mode 100644\n--- /dev/null\n+++ b/{display_path}\n"
+        );
+
+        let metadata = std::fs::metadata(&absolute_path)
+            .with_context(|| format!("failed to read metadata for {}", absolute_path.display()))?;
+        if metadata.len() > MAX_UNTRACKED_DIFF_BYTES {
+            content.push_str("Binary files /dev/null and b/");
+            content.push_str(&display_path);
+            content.push_str(" differ\n");
+            return Ok(content);
+        }
+
+        match std::fs::read_to_string(&absolute_path) {
+            Ok(new_text) => {
+                content.push_str(&language::unified_diff("", &new_text));
+            }
+            Err(_) => {
+                content.push_str("Binary files /dev/null and b/");
+                content.push_str(&display_path);
+                content.push_str(" differ\n");
+            }
+        }
+
+        Ok(content)
+    }
+
+    fn selected_code_diff_file(&self) -> Option<&CodeDiffFile> {
+        let selected_path = match &self.right_panel {
+            RightPanel::CodeDiff { selected_path } => selected_path.as_ref(),
+            _ => None,
+        };
+        selected_path
+            .and_then(|selected_path| {
+                self.code_diff_state
+                    .files
+                    .iter()
+                    .find(|file| file.path.as_ref() == selected_path.as_ref())
+            })
+            .or_else(|| self.code_diff_state.files.first())
+    }
+
+    fn code_diff_content(&self) -> Option<SharedString> {
+        self.selected_code_diff_file()
+            .and_then(|file| file.content.clone())
+    }
+
+    fn render_code_diff_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let files = &self.code_diff_state.files;
+        let selected_path = match &self.right_panel {
+            RightPanel::CodeDiff { selected_path } => selected_path.as_ref(),
+            _ => None,
+        };
+        let selected_file = selected_path
+            .and_then(|selected_path| {
+                files
+                    .iter()
+                    .find(|file| file.path.as_ref() == selected_path.as_ref())
+            })
+            .or_else(|| files.first());
+
+        if let Some(selected_file) = selected_file {
+            let total_additions = files.iter().map(|file| file.additions).sum::<usize>();
+            let total_deletions = files.iter().map(|file| file.deletions).sum::<usize>();
+            let selected_content = selected_file.content.clone();
+            let selected_path = selected_file.path.clone();
+            let is_selected_content_loading = self
+                .code_diff_state
+                .loading_content_path
+                .as_ref()
+                .map(|path| path.as_ref())
+                == Some(selected_path.as_ref())
+                || selected_content.is_none();
+
+            return h_flex()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .overflow_hidden()
+                .child(
+                    v_flex()
+                        .w(px(260.))
+                        .h_full()
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .border_r_1()
+                        .border_color(ds::separator(cx).opacity(0.5))
+                        .child(
+                            h_flex()
+                                .h(px(52.))
+                                .items_center()
+                                .px_3()
+                                .gap_2()
+                                .border_b_1()
+                                .border_color(ds::separator(cx).opacity(0.45))
+                                .child(
+                                    Icon::new(IconName::Split)
+                                        .size(IconSize::Small)
+                                        .color(Color::Custom(ds::icon_muted(cx))),
+                                )
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .gap_0p5()
+                                        .child(
+                                            Label::new("Changed files")
+                                                .size(LabelSize::Small)
+                                                .weight(FontWeight::SEMIBOLD)
+                                                .color(Color::Custom(ds::text(cx))),
+                                        )
+                                        .child(
+                                            Label::new(format!(
+                                                "{} files  +{} -{}{}",
+                                                files.len(),
+                                                total_additions,
+                                                total_deletions,
+                                                if self.code_diff_state.loading_files {
+                                                    "  refreshing"
+                                                } else {
+                                                    ""
+                                                }
+                                            ))
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Custom(ds::text_muted(cx)))
+                                            .truncate(),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            v_flex()
+                                .id("artifact-diff-file-list")
+                                .flex_1()
+                                .min_h_0()
+                                .overflow_y_scroll()
+                                .p_2()
+                                .children(files.iter().enumerate().map(|(index, file)| {
+                                    let path = file.path.clone();
+                                    let is_selected = path.as_ref() == selected_path.as_ref();
+                                    let row_id = SharedString::from(format!("diff-file-{index}"));
+                                    let icon_color = if is_selected {
+                                        ds::accent(cx)
+                                    } else {
+                                        file.status.color().color(cx)
+                                    };
+
+                                    v_flex()
+                                        .id(row_id)
+                                        .min_h(px(44.))
+                                        .w_full()
+                                        .gap_0p5()
+                                        .rounded(px(6.))
+                                        .px_2()
+                                        .py_1()
+                                        .cursor_pointer()
+                                        .when(is_selected, |el| el.bg(ds::accent(cx).opacity(0.14)))
+                                        .hover({
+                                            let hover_background = ds::hover_background(cx);
+                                            move |el| el.bg(hover_background)
+                                        })
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            if let RightPanel::CodeDiff { selected_path } =
+                                                &mut this.right_panel
+                                            {
+                                                *selected_path = Some(path.clone());
+                                            }
+                                            this.load_code_diff_content_for_path(path.clone(), cx);
+                                            cx.notify();
+                                        }))
+                                        .child(
+                                            h_flex()
+                                                .w_full()
+                                                .items_center()
+                                                .gap_1p5()
+                                                .child(
+                                                    Icon::new(file.status.icon())
+                                                        .size(IconSize::XSmall)
+                                                        .color(Color::Custom(icon_color)),
+                                                )
+                                                .child(
+                                                    Label::new(file.path.clone())
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::Custom(if is_selected {
+                                                            ds::accent(cx)
+                                                        } else {
+                                                            ds::text(cx)
+                                                        }))
+                                                        .truncate()
+                                                        .flex_1(),
+                                                ),
+                                        )
+                                        .child(
+                                            h_flex()
+                                                .ml(px(18.))
+                                                .gap_2()
+                                                .items_center()
+                                                .child(
+                                                    Label::new(file.status.label())
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::Custom(ds::text_muted(cx))),
+                                                )
+                                                .child(
+                                                    Label::new(format!("+{}", file.additions))
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::VersionControlAdded),
+                                                )
+                                                .child(
+                                                    Label::new(format!("-{}", file.deletions))
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::VersionControlDeleted),
+                                                ),
+                                        )
+                                })),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .overflow_hidden()
+                        .child(
+                            h_flex()
+                                .h(px(52.))
+                                .items_center()
+                                .gap_2()
+                                .px_3()
+                                .border_b_1()
+                                .border_color(ds::separator(cx).opacity(0.45))
+                                .child(
+                                    Icon::new(selected_file.status.icon())
+                                        .size(IconSize::Small)
+                                        .color(selected_file.status.color()),
+                                )
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .gap_0p5()
+                                        .child(
+                                            Label::new(selected_file.path.clone())
+                                                .size(LabelSize::Small)
+                                                .weight(FontWeight::SEMIBOLD)
+                                                .color(Color::Custom(ds::text(cx)))
+                                                .truncate(),
+                                        )
+                                        .child(
+                                            Label::new(format!(
+                                                "{}  +{} -{}",
+                                                selected_file.status.label(),
+                                                selected_file.additions,
+                                                selected_file.deletions
+                                            ))
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Custom(ds::text_muted(cx)))
+                                            .truncate(),
+                                        ),
+                                ),
+                        )
+                        .child(if let Some(selected_content) = selected_content {
+                            self.render_code_lines(
+                                "artifact-diff-scroll",
+                                &selected_content,
+                                true,
+                                cx,
+                            )
+                        } else {
+                            v_flex()
+                                .flex_1()
+                                .min_h_0()
+                                .items_center()
+                                .justify_center()
+                                .gap_3()
+                                .child(
+                                    Icon::new(IconName::LoadCircle)
+                                        .size(IconSize::Medium)
+                                        .color(Color::Custom(ds::icon_muted(cx))),
+                                )
+                                .child(
+                                    Label::new(if is_selected_content_loading {
+                                        "Loading diff..."
+                                    } else {
+                                        "Select a file"
+                                    })
+                                    .size(LabelSize::Small)
+                                    .color(Color::Custom(ds::text_muted(cx))),
+                                )
+                                .into_any_element()
+                        }),
+                )
+                .into_any_element();
+        }
+
+        if self.code_diff_state.loading_files {
+            return v_flex()
+                .flex_1()
+                .min_h_0()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .child(
+                    Icon::new(IconName::LoadCircle)
+                        .size(IconSize::Medium)
+                        .color(Color::Custom(ds::icon_muted(cx))),
+                )
+                .child(
+                    Label::new("Loading changed files...")
+                        .size(LabelSize::Small)
+                        .color(Color::Custom(ds::text_muted(cx))),
+                )
+                .into_any_element();
+        }
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .items_center()
+            .justify_center()
+            .gap_3()
+            .px_6()
+            .child(
+                div()
+                    .size(px(52.))
+                    .rounded(px(12.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .border_1()
+                    .border_color(ds::soft_border(cx))
+                    .bg(ds::field_background(cx))
+                    .child(
+                        Icon::new(IconName::Split)
+                            .size(IconSize::Medium)
+                            .color(Color::Custom(ds::icon_muted(cx))),
+                    ),
+            )
+            .child(
+                Label::new("No diff yet")
+                    .size(LabelSize::Custom(rems_from_px(15.)))
+                    .weight(FontWeight::SEMIBOLD)
+                    .color(Color::Custom(ds::text(cx))),
+            )
+            .child(
+                div()
+                    .max_w(px(280.))
+                    .text_center()
+                    .text_size(rems_from_px(13.))
+                    .line_height(relative(1.44))
+                    .text_color(ds::text_muted(cx))
+                    .child(self.code_diff_state.error.clone().unwrap_or_else(|| {
+                        SharedString::from(
+                            "Code changes will appear here after the agent edits files.",
+                        )
+                    })),
+            )
+            .into_any_element()
     }
 
     fn render_code_file_tree(
@@ -4934,7 +7338,6 @@ impl BeginnerWorkspace {
             .flex_shrink_0()
             .overflow_hidden()
             .p_2()
-            .bg(ds::app_background(cx))
             .border_r_1()
             .border_color(ds::separator(cx).opacity(0.42))
             .child(
@@ -4977,8 +7380,8 @@ impl BeginnerWorkspace {
                     .cursor_pointer()
                     .when(is_selected, |el| el.bg(ds::accent(cx).opacity(0.16)))
                     .hover(move |el| el.bg(hover_background))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_file_read_only(&path_for_click);
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_file_read_only(&path_for_click, window, cx);
                         cx.notify();
                     }))
                     .child(
@@ -5014,17 +7417,9 @@ impl BeginnerWorkspace {
     fn render_code_artifact_state(
         &self,
         title: &SharedString,
-        content: &SharedString,
+        editor: Entity<Editor>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let lines: Vec<_> = content
-            .as_ref()
-            .lines()
-            .take(500)
-            .enumerate()
-            .map(|(index, line)| (index + 1, SharedString::from(line.to_string())))
-            .collect();
-
         h_flex()
             .flex_1()
             .min_h_0()
@@ -5037,50 +7432,35 @@ impl BeginnerWorkspace {
                     .min_w_0()
                     .h_full()
                     .overflow_hidden()
-                    .bg(ds::app_background(cx))
                     .child(
-                        v_flex()
-                            .id("artifact-code-scroll")
+                        div()
+                            .id("artifact-code-editor")
                             .flex_1()
-                            .overflow_y_scroll()
-                            .py_3()
-                            .children(lines.into_iter().map(|(line_number, line)| {
-                                h_flex()
-                                    .h(px(18.))
-                                    .w_full()
-                                    .items_center()
-                                    .child(
-                                        div()
-                                            .w(px(56.))
-                                            .h_full()
-                                            .flex()
-                                            .items_center()
-                                            .justify_end()
-                                            .border_r_1()
-                                            .border_color(ds::separator(cx))
-                                            .pr_3()
-                                            .text_size(rems_from_px(11.))
-                                            .font_family("Roboto Mono")
-                                            .text_color(ds::text_muted(cx))
-                                            .line_height(px(18.))
-                                            .child(line_number.to_string()),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .h_full()
-                                            .overflow_hidden()
-                                            .px_2()
-                                            .text_size(rems_from_px(11.))
-                                            .font_family("Roboto Mono")
-                                            .text_color(ds::text(cx))
-                                            .line_height(px(18.))
-                                            .child(line),
-                                    )
-                            })),
+                            .h_full()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .child(editor),
                     ),
             )
+    }
+
+    fn browser_address_label(preview_url: Option<&String>) -> SharedString {
+        let Some(preview_url) = preview_url else {
+            return SharedString::from("about:blank");
+        };
+
+        let display_url = preview_url
+            .strip_prefix("https://")
+            .or_else(|| preview_url.strip_prefix("http://"))
+            .or_else(|| preview_url.strip_prefix("file://"))
+            .unwrap_or(preview_url.as_str())
+            .trim_end_matches('/');
+
+        if display_url.is_empty() {
+            SharedString::from(preview_url.clone())
+        } else {
+            SharedString::from(display_url.to_string())
+        }
     }
 
     fn render_right_panel(
@@ -5092,10 +7472,65 @@ impl BeginnerWorkspace {
     ) -> AnyElement {
         let is_code_view = matches!(
             self.right_panel,
-            RightPanel::CodeEmpty | RightPanel::CodeView { .. }
+            RightPanel::CodeDiff { .. } | RightPanel::CodeView { .. }
         );
+        let is_diff_view = matches!(self.right_panel, RightPanel::CodeDiff { .. });
         if self.right_panel_mode == RightPanelMode::Launcher {
             return self.render_right_panel_launcher(cx);
+        }
+
+        if matches!(self.right_panel, RightPanel::Preview) {
+            let has_webview = self.web_preview.is_some();
+            let has_failed_artifact = self.has_failed_tool_call(cx);
+            let workspace = cx.entity().downgrade();
+            let available_preview_url = preview_url.clone();
+            let preview_url_for_browser = preview_url.clone();
+            let content = if has_failed_artifact {
+                self.render_artifact_error_state(cx).into_any_element()
+            } else if has_webview {
+                canvas(
+                    move |bounds, window, cx| {
+                        let viewport_height = f32::from(window.viewport_size().height);
+                        if let Some(ws) = workspace.upgrade() {
+                            if let Some(preview) = ws.read(cx).web_preview.as_ref() {
+                                preview.set_frame(bounds, viewport_height);
+                            }
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .flex_1()
+                .w_full()
+                .into_any_element()
+            } else if is_running
+                && self
+                    .local_browser_entries(preview_url_for_browser.clone())
+                    .is_empty()
+            {
+                self.render_artifact_working_state(cx).into_any_element()
+            } else {
+                self.render_design_preview_fallback(preview_url_for_browser, cx)
+                    .into_any_element()
+            };
+
+            return v_flex()
+                .when(preview_dominant, |el| el.flex_1())
+                .when(!preview_dominant, |el| {
+                    el.flex_1().min_w(px(ds::RIGHT_PANEL_MIN_WIDTH))
+                })
+                .h_full()
+                .overflow_hidden()
+                .bg(ds::app_background(cx))
+                .child(
+                    self.render_artifact_browser_shell(
+                        self.preview_visible
+                            .then_some(available_preview_url)
+                            .flatten(),
+                        content,
+                        cx,
+                    ),
+                )
+                .into_any_element();
         }
 
         let has_webview = self.web_preview.is_some();
@@ -5103,17 +7538,23 @@ impl BeginnerWorkspace {
         let workspace = cx.entity().downgrade();
         let artifact_title = self.artifact_title();
         let panel_title = match &self.right_panel {
-            RightPanel::CodeEmpty => SharedString::from("App.tsx"),
+            RightPanel::CodeDiff { .. } => SharedString::from("Diff"),
             RightPanel::CodeView { title, .. } => title.clone(),
             RightPanel::Preview => artifact_title.clone(),
         };
         let hover_background = ds::hover_background(cx);
         let preview_url_for_browser = preview_url.clone();
-        let preview_url_for_viewport = preview_url.clone();
-        let has_selected_folder = self.selected_folder.is_some();
         let code_content_for_copy = match &self.right_panel {
-            RightPanel::CodeView { content, .. } => Some(content.as_ref().to_string()),
+            RightPanel::CodeDiff { .. } => self
+                .code_diff_content()
+                .map(|content| content.as_ref().to_string()),
+            RightPanel::CodeView { editor, .. } => Some(editor.read(cx).text(cx)),
             _ => None,
+        };
+        let copy_tooltip = if is_diff_view {
+            "Copy diff"
+        } else {
+            "Copy code"
         };
 
         v_flex()
@@ -5122,6 +7563,7 @@ impl BeginnerWorkspace {
                 el.flex_1().min_w(px(ds::RIGHT_PANEL_MIN_WIDTH))
             })
             .h_full()
+            .overflow_hidden()
             .bg(ds::app_background(cx))
             .child(
                 h_flex()
@@ -5131,85 +7573,48 @@ impl BeginnerWorkspace {
                     .items_center()
                     .border_b_1()
                     .border_color(ds::separator(cx).opacity(0.42))
+                    .child(self.render_right_panel_dock_handle(cx))
                     .child(self.render_right_panel_option_tabs(cx))
-                    .when(is_code_view, |el| {
-                        el.child(
-                            Icon::new(IconName::Split)
-                                .size(IconSize::Small)
-                                .color(Color::Custom(ds::icon_muted(cx))),
-                        )
-                    })
                     .child(
-                        Label::new(panel_title)
+                        Icon::new(if is_code_view {
+                            IconName::Split
+                        } else {
+                            IconName::Public
+                        })
+                        .size(IconSize::Small)
+                        .color(Color::Custom(ds::icon_muted(cx))),
+                    )
+                    .child(
+                        Label::new(panel_title.clone())
                             .size(LabelSize::Small)
                             .color(Color::Custom(ds::text_muted(cx)))
                             .truncate(),
                     )
                     .child(div().flex_1())
-                    .when(!is_code_view, |el| {
-                        el.child(
-                            div()
-                                .id("artifact-viewport")
-                                .size(px(28.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(6.))
-                                .border_1()
-                                .border_color(ds::strong_border(cx))
-                                .when(preview_url_for_viewport.is_some(), |el| {
-                                    el.cursor_pointer()
-                                        .hover(move |el| el.bg(hover_background))
-                                        .tooltip(Tooltip::text("Show preview"))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.show_preview(cx);
-                                        }))
-                                })
-                                .child(
-                                    Icon::new(IconName::Screen)
-                                        .size(IconSize::Small)
-                                        .color(Color::Custom(ds::icon_muted(cx))),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .id("artifact-refresh")
-                                .size(px(16.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(4.))
-                                .when(has_selected_folder, |el| {
-                                    el.cursor_pointer()
-                                        .hover(move |el| el.bg(hover_background))
-                                        .tooltip(Tooltip::text("Refresh artifact preview"))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.open_web_app_if_present(cx);
-                                        }))
-                                })
-                                .child(
-                                    Icon::new(IconName::RotateCw)
-                                        .size(IconSize::Small)
-                                        .color(Color::Custom(ds::icon_muted(cx))),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .id("artifact-more")
-                                .size(px(16.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(4.))
-                                .child(
-                                    Icon::new(IconName::Ellipsis)
-                                        .size(IconSize::Small)
-                                        .color(Color::Custom(ds::icon_muted(cx))),
-                                ),
-                        )
-                    })
                     .when(is_code_view, |el| {
-                        el.child(
+                        el.when(is_diff_view, |el| {
+                            el.child(
+                                div()
+                                    .id("artifact-refresh-diff")
+                                    .size(px(16.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(4.))
+                                    .tooltip(Tooltip::text("Refresh diff"))
+                                    .cursor_pointer()
+                                    .hover(move |el| el.bg(hover_background))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.refresh_code_diff_files(cx);
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::RotateCw)
+                                            .size(IconSize::Small)
+                                            .color(Color::Custom(ds::icon_muted(cx))),
+                                    ),
+                            )
+                        })
+                        .child(
                             div()
                                 .id("artifact-copy-code")
                                 .size(px(16.))
@@ -5217,7 +7622,7 @@ impl BeginnerWorkspace {
                                 .items_center()
                                 .justify_center()
                                 .rounded(px(4.))
-                                .tooltip(Tooltip::text("Copy code"))
+                                .tooltip(Tooltip::text(copy_tooltip))
                                 .when_some(code_content_for_copy, |el, content| {
                                     el.cursor_pointer()
                                         .hover(move |el| el.bg(hover_background))
@@ -5263,6 +7668,7 @@ impl BeginnerWorkspace {
                                 ),
                         )
                     })
+                    .child(self.render_right_panel_expand_button("artifact-expand-panel", cx))
                     .child(
                         div()
                             .id("artifact-close-panel")
@@ -5275,9 +7681,7 @@ impl BeginnerWorkspace {
                             .hover(move |el| el.bg(hover_background))
                             .tooltip(Tooltip::text("Close panel"))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.right_panel_open = false;
-                                this.preview_visible = false;
-                                cx.notify();
+                                this.close_right_panel(cx);
                             }))
                             .child(
                                 Icon::new(IconName::Close)
@@ -5287,12 +7691,13 @@ impl BeginnerWorkspace {
                     ),
             )
             .child(match &self.right_panel {
-                RightPanel::CodeEmpty => self.render_code_empty_state(cx).into_any_element(),
-                RightPanel::CodeView { title, content } => self
-                    .render_code_artifact_state(title, content, cx)
+                RightPanel::CodeDiff { .. } => self.render_code_diff_state(cx).into_any_element(),
+                RightPanel::CodeView { title, editor, .. } => self
+                    .render_code_artifact_state(title, editor.clone(), cx)
                     .into_any_element(),
                 RightPanel::Preview => {
-                    if has_failed_artifact {
+                    let browser_url = preview_url_for_browser.clone();
+                    let content = if has_failed_artifact {
                         self.render_artifact_error_state(cx).into_any_element()
                     } else if has_webview {
                         canvas(
@@ -5309,14 +7714,19 @@ impl BeginnerWorkspace {
                         .flex_1()
                         .w_full()
                         .into_any_element()
-                    } else if let Some(url) = preview_url_for_browser {
-                        self.render_design_preview_fallback(url, cx)
-                            .into_any_element()
-                    } else if is_running {
+                    } else if is_running
+                        && self
+                            .local_browser_entries(preview_url_for_browser.clone())
+                            .is_empty()
+                    {
                         self.render_artifact_working_state(cx).into_any_element()
                     } else {
-                        self.render_empty_artifact_state(cx).into_any_element()
-                    }
+                        self.render_design_preview_fallback(preview_url_for_browser, cx)
+                            .into_any_element()
+                    };
+
+                    self.render_artifact_browser_shell(browser_url, content, cx)
+                        .into_any_element()
                 }
             })
             .into_any_element()
@@ -5781,25 +8191,31 @@ impl BeginnerWorkspace {
 
         let colors = cx.theme().colors().clone();
         let composer_surface_bg = colors
-            .editor_background
-            .blend(colors.element_background.opacity(0.08));
-        let composer_border = colors.border_variant.opacity(0.5);
+            .surface_background
+            .blend(colors.element_background.opacity(0.24));
+        let composer_border = colors.border_variant.opacity(0.82);
+        let composer_hover_border = colors.border_variant.opacity(0.96);
         if let Some(conversation_view) = self.active_conversation_view.clone()
             && let Some(composer) = conversation_view.update(cx, |conversation_view, cx| {
                 conversation_view.render_embedded_root_message_editor(window, cx)
             })
         {
-            let composer = v_flex()
+            let composer_shell = v_flex()
                 .w_full()
-                .rounded(px(28.))
+                .rounded(px(18.))
                 .overflow_hidden()
                 .border_1()
                 .border_color(composer_border)
+                .hover(move |el| el.border_color(composer_hover_border))
                 .bg(composer_surface_bg)
                 .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
-                .when(centered, |el| el.max_w(px(920.)))
                 .child(composer)
                 .child(self.render_composer_footer(window, cx))
+                .into_any_element();
+            let composer = v_flex()
+                .w_full()
+                .when(centered, |el| el.max_w(px(920.)))
+                .child(composer_shell)
                 .into_any_element();
 
             return v_flex()
@@ -5884,14 +8300,18 @@ impl BeginnerWorkspace {
             .panel_background
             .blend(colors.editor_background.opacity(0.18));
         let composer_surface_bg = colors
-            .editor_background
-            .blend(colors.element_background.opacity(0.08));
+            .surface_background
+            .blend(colors.element_background.opacity(0.24));
         let composer_border = if editor_focused {
             colors.border_focused
         } else {
-            colors.border_variant.opacity(0.5)
+            colors.border_variant.opacity(0.82)
         };
-        let composer_hover_border = colors.border_variant.opacity(0.62);
+        let composer_hover_border = if editor_focused {
+            colors.border_focused
+        } else {
+            colors.border_variant.opacity(0.96)
+        };
 
         v_flex()
             .flex_shrink_0()
@@ -5904,25 +8324,25 @@ impl BeginnerWorkspace {
             .child(
                 v_flex()
                     .w_full()
-                    .max_w_full()
-                    .flex_shrink()
-                    .flex_grow()
-                    .justify_between()
-                    .min_h(px(92.))
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(composer_border)
-                    .hover(move |el| el.border_color(composer_hover_border))
-                    .bg(composer_surface_bg)
-                    .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
-                    .track_focus(&focus_handle)
-                    .px_3()
-                    .pt_2()
-                    .pb_1p5()
+                    .when(centered, |el| el.max_w(px(920.)))
                     .child(
                         v_flex()
                             .w_full()
-                            .min_h(px(64.))
+                            .max_w_full()
+                            .flex_shrink()
+                            .flex_grow()
+                            .justify_between()
+                            .min_h(px(92.))
+                            .rounded(px(18.))
+                            .border_1()
+                            .border_color(composer_border)
+                            .hover(move |el| el.border_color(composer_hover_border))
+                            .bg(composer_surface_bg)
+                            .shadow(ElevationIndex::ElevatedSurface.shadow(cx))
+                            .track_focus(&focus_handle)
+                            .px_3()
+                            .pt_2()
+                            .pb_1p5()
                             .child(self.chat_editor.clone())
                             .child(
                                 h_flex()

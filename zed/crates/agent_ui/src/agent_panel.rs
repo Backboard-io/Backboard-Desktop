@@ -38,6 +38,7 @@ use zed_actions::{
 use crate::ExpandMessageEditor;
 use crate::ManageProfiles;
 use crate::agent_connection_store::AgentConnectionStore;
+use crate::agent_workspace_ui::BackboardAgentWorkspacePage;
 use crate::completion_provider::AgentContextSource;
 use crate::thread_metadata_store::{
     ThreadId, ThreadMetadata, ThreadMetadataStore, ThreadMetadataStoreEvent,
@@ -96,7 +97,7 @@ use ui::{
 use util::ResultExt as _;
 use workspace::{
     CollaboratorId, DraggedSelection, DraggedTab, MultiWorkspace, PathList, SerializedPathList,
-    ToggleZoom, Workspace, WorkspaceId,
+    ToggleRightDock, ToggleZoom, Workspace, WorkspaceId,
     dock::{DockPosition, Panel, PanelEvent},
     item::ItemEvent,
 };
@@ -931,6 +932,23 @@ struct SerializedActiveThread {
 
 pub fn init(cx: &mut App) {
     cx.observe_new(
+        |multi_workspace: &mut MultiWorkspace, _window, _cx: &mut Context<MultiWorkspace>| {
+            multi_workspace.set_agent_workspace_right_panel_toggler(
+                |agent_workspace_view, window, cx| {
+                    if let Ok(agent_workspace) =
+                        agent_workspace_view.downcast::<BackboardAgentWorkspacePage>()
+                    {
+                        agent_workspace.update(cx, |agent_workspace, cx| {
+                            agent_workspace.toggle_right_panel(window, cx);
+                        });
+                    }
+                },
+            );
+        },
+    )
+    .detach();
+
+    cx.observe_new(
         |workspace: &mut Workspace, _window, _cx: &mut Context<Workspace>| {
             workspace
                 .register_action(|workspace, action: &NewThread, window, cx| {
@@ -941,6 +959,19 @@ pub fn init(cx: &mut App) {
                 })
                 .register_action(|_workspace, _action: &OpenBackboardPortal, window, cx| {
                     window.dispatch_action(Box::new(OpenBackboardAgentWorkspace), cx);
+                })
+                .register_action(|workspace, _: &ToggleRightDock, window, cx| {
+                    if let Some(agent_workspace) =
+                        AgentPanel::active_backboard_agent_workspace(workspace, window, cx)
+                    {
+                        window.defer(cx, move |window, cx| {
+                            agent_workspace.update(cx, |agent_workspace, cx| {
+                                agent_workspace.toggle_right_panel(window, cx);
+                            });
+                        });
+                    } else {
+                        cx.propagate();
+                    }
                 })
                 .register_action(
                     |workspace, action: &NewNativeAgentThreadFromSummary, window, cx| {
@@ -1892,21 +1923,7 @@ impl AgentPanel {
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) {
-        let agent_workspace =
-            window
-                .root::<MultiWorkspace>()
-                .flatten()
-                .and_then(|multi_workspace| {
-                    let multi_workspace = multi_workspace.read(cx);
-                    multi_workspace.multi_agent_expanded.then(|| {
-                        multi_workspace
-                            .agent_workspace_view
-                            .as_ref()?
-                            .clone()
-                            .downcast::<crate::agent_workspace_ui::BackboardAgentWorkspacePage>()
-                            .ok()
-                    })?
-                });
+        let agent_workspace = Self::active_backboard_agent_workspace(workspace, window, cx);
 
         if let Some(agent_workspace) = agent_workspace {
             window.defer(cx, move |window, cx| {
@@ -1923,6 +1940,43 @@ impl AgentPanel {
         {
             workspace.toggle_panel_focus::<Self>(window, cx);
         }
+    }
+
+    fn active_backboard_agent_workspace(
+        workspace: &Workspace,
+        window: &mut Window,
+        cx: &App,
+    ) -> Option<Entity<BackboardAgentWorkspacePage>> {
+        window
+            .root::<MultiWorkspace>()
+            .flatten()
+            .and_then(|multi_workspace| {
+                let multi_workspace = multi_workspace.read(cx);
+                multi_workspace.multi_agent_expanded.then(|| {
+                    multi_workspace
+                        .agent_workspace_view
+                        .as_ref()?
+                        .clone()
+                        .downcast::<BackboardAgentWorkspacePage>()
+                        .ok()
+                })?
+            })
+            .or_else(|| {
+                workspace
+                    .multi_workspace()
+                    .and_then(|handle| handle.upgrade())
+                    .and_then(|multi_workspace| {
+                        let multi_workspace = multi_workspace.read(cx);
+                        multi_workspace.multi_agent_expanded.then(|| {
+                            multi_workspace
+                                .agent_workspace_view
+                                .as_ref()?
+                                .clone()
+                                .downcast::<BackboardAgentWorkspacePage>()
+                                .ok()
+                        })?
+                    })
+            })
     }
 
     pub fn focus(

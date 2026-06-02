@@ -12,10 +12,9 @@ use project::{DisableAiSettings, Project};
 use remote::RemoteConnectionOptions;
 use settings::Settings;
 pub use settings::SidebarSide;
-use std::future::Future;
-
 use std::path::PathBuf;
 use std::time::Duration;
+use std::{future::Future, rc::Rc};
 use ui::prelude::*;
 use util::ResultExt;
 use util::path_list::PathList;
@@ -32,10 +31,16 @@ use ui::{
 const SIDEBAR_RESIZE_HANDLE_SIZE: Pixels = px(6.0);
 const TERMINAL_PANEL_NAME: &str = "TerminalPanel";
 const STARTUP_LOADING_LOGO_PATH: &str = "images/animation_logo.png";
-const STARTUP_LOADING_ANIMATION_DURATION: Duration = Duration::from_secs(6);
-const STARTUP_LOADING_LOGO_SIZE: f32 = 128.;
+const STARTUP_LOADING_ANIMATION_DURATION: Duration = Duration::from_secs(4);
+const STARTUP_LOADING_LOGO_SIZE: f32 = 208.;
+const STARTUP_LOADING_LOGO_PULSE_SIZE: f32 = 42.;
+const STARTUP_LOADING_LOGO_STAGE_SIZE: f32 =
+    STARTUP_LOADING_LOGO_SIZE + STARTUP_LOADING_LOGO_PULSE_SIZE;
+const SIDEBAR_OPEN_ANIMATION_DURATION: Duration = Duration::from_millis(220);
+const SIDEBAR_OPEN_SLIDE_OFFSET_PX: f32 = 44.;
 
 type WorkspaceTourCompletion = Box<dyn FnOnce(&mut Window, &mut App) + 'static>;
+type AgentWorkspaceRightPanelToggler = Rc<dyn Fn(AnyView, &mut Window, &mut App)>;
 
 fn startup_loading_background(cx: &App) -> Hsla {
     let colors = cx.theme().colors();
@@ -359,6 +364,7 @@ pub struct MultiWorkspace {
     pub jarvis_placeholder_expanded: bool,
     pub beginner_view: Option<AnyView>,
     pub agent_workspace_view: Option<AnyView>,
+    agent_workspace_right_panel_toggler: Option<AgentWorkspaceRightPanelToggler>,
     pub skills_view: Option<AnyView>,
     pub tasks_view: Option<AnyView>,
     pub git_view: Option<AnyView>,
@@ -447,6 +453,7 @@ impl MultiWorkspace {
             jarvis_placeholder_expanded: false,
             beginner_view: None,
             agent_workspace_view: None,
+            agent_workspace_right_panel_toggler: None,
             skills_view: None,
             tasks_view: None,
             git_view: None,
@@ -515,7 +522,7 @@ impl MultiWorkspace {
             .bg(startup_loading_background(cx))
             .child(
                 div()
-                    .size(px(STARTUP_LOADING_LOGO_SIZE))
+                    .size(px(STARTUP_LOADING_LOGO_STAGE_SIZE))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -525,14 +532,18 @@ impl MultiWorkspace {
                             .object_fit(ObjectFit::Contain)
                             .with_fallback(|| {
                                 div().size(px(STARTUP_LOADING_LOGO_SIZE)).into_any_element()
-                            }),
-                    )
-                    .with_animation(
-                        logo_animation_id,
-                        Animation::new(Duration::from_millis(1600))
-                            .repeat()
-                            .with_easing(pulsating_between(0.78, 1.)),
-                        |logo, delta| logo.opacity(delta),
+                            })
+                            .with_animation(
+                                logo_animation_id,
+                                Animation::new(Duration::from_millis(1100))
+                                    .repeat()
+                                    .with_easing(pulsating_between(0., 1.)),
+                                |logo, delta| {
+                                    let size = STARTUP_LOADING_LOGO_SIZE
+                                        + STARTUP_LOADING_LOGO_PULSE_SIZE * delta;
+                                    logo.size(px(size)).opacity(0.55 + 0.45 * delta)
+                                },
+                            ),
                     ),
             )
     }
@@ -2254,9 +2265,40 @@ impl MultiWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if dock_side == DockPosition::Right && self.toggle_agent_workspace_right_panel(window, cx) {
+            return;
+        }
+
         self.workspace().update(cx, |workspace, cx| {
             workspace.toggle_dock(dock_side, window, cx);
         });
+    }
+
+    pub fn set_agent_workspace_right_panel_toggler(
+        &mut self,
+        toggler: impl Fn(AnyView, &mut Window, &mut App) + 'static,
+    ) {
+        self.agent_workspace_right_panel_toggler = Some(Rc::new(toggler));
+    }
+
+    fn toggle_agent_workspace_right_panel(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.multi_agent_expanded {
+            return false;
+        }
+
+        let Some(agent_workspace_view) = self.agent_workspace_view.clone() else {
+            return false;
+        };
+        let Some(toggler) = self.agent_workspace_right_panel_toggler.clone() else {
+            return false;
+        };
+
+        toggler(agent_workspace_view, window, cx);
+        true
     }
 
     pub fn active_item_as<I: 'static>(&self, cx: &App) -> Option<Entity<I>> {
@@ -3104,6 +3146,14 @@ impl Render for MultiWorkspace {
                         .occlude(),
                 );
 
+                let sidebar_animation_id = ElementId::Name(
+                    format!(
+                        "workspace-sidebar-open-{}",
+                        if sidebar_on_right { "right" } else { "left" }
+                    )
+                    .into(),
+                );
+
                 div()
                     .id("sidebar-container")
                     .relative()
@@ -3112,6 +3162,20 @@ impl Render for MultiWorkspace {
                     .flex_shrink_0()
                     .child(sidebar_handle.to_any())
                     .child(resize_handle)
+                    .with_animation(
+                        sidebar_animation_id,
+                        Animation::new(SIDEBAR_OPEN_ANIMATION_DURATION)
+                            .with_easing(ease_out_quint()),
+                        move |sidebar, delta| {
+                            let offset = SIDEBAR_OPEN_SLIDE_OFFSET_PX * (1.0 - delta);
+                            let sidebar = sidebar.opacity(0.82 + delta * 0.18);
+                            if sidebar_on_right {
+                                sidebar.right(px(-offset))
+                            } else {
+                                sidebar.left(px(-offset))
+                            }
+                        },
+                    )
                     .into_any_element()
             })
         } else {

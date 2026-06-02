@@ -287,6 +287,7 @@ pub struct Dock {
     panel_entries: Vec<PanelEntry>,
     workspace: WeakEntity<Workspace>,
     is_open: bool,
+    open_animation_generation: u64,
     active_panel_index: Option<usize>,
     focus_handle: FocusHandle,
     focus_follows_mouse: FocusFollowsMouse,
@@ -432,6 +433,7 @@ impl Dock {
                 panel_entries: Default::default(),
                 active_panel_index: None,
                 is_open: false,
+                open_animation_generation: 0,
                 focus_handle: focus_handle.clone(),
                 focus_follows_mouse: WorkspaceSettings::get_global(cx).focus_follows_mouse,
                 _subscriptions: [focus_subscription, zoom_subscription],
@@ -493,6 +495,10 @@ impl Dock {
         self.is_open
     }
 
+    pub(crate) fn open_animation_generation(&self) -> u64 {
+        self.open_animation_generation
+    }
+
     fn resizable(&self, cx: &App) -> bool {
         !(self.zoom_layer_open || self.modal_layer.read(cx).has_active_modal())
     }
@@ -552,6 +558,9 @@ impl Dock {
     pub fn set_open(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
         if open != self.is_open {
             self.is_open = open;
+            if open {
+                self.open_animation_generation = self.open_animation_generation.saturating_add(1);
+            }
             if let Some(active_panel) = self.active_panel_entry() {
                 active_panel.panel.set_active(open, window, cx);
             }
