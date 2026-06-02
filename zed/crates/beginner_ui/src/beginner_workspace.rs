@@ -577,6 +577,7 @@ struct ProjectSession {
     thread: Option<Entity<AcpThread>>,
     pending_conversation_view: Option<Entity<ConversationView>>,
     active_conversation_view: Option<Entity<ConversationView>>,
+    queued_composer_submit: Option<String>,
     model_selector: Option<Entity<ModelSelectorPopover>>,
     is_agent_running: bool,
     agent_finished: bool,
@@ -651,6 +652,7 @@ pub struct BeginnerWorkspace {
     pending_conversation_view: Option<Entity<ConversationView>>,
     // Kept alive after connection so that ThreadView (and its send tasks) are not dropped.
     active_conversation_view: Option<Entity<ConversationView>>,
+    queued_composer_submit: Option<String>,
     // Model selector extracted from the ThreadView once connected.
     model_selector: Option<Entity<ModelSelectorPopover>>,
     is_agent_running: bool,
@@ -859,6 +861,7 @@ impl BeginnerWorkspace {
             thread: self.thread.take(),
             pending_conversation_view: self.pending_conversation_view.take(),
             active_conversation_view: self.active_conversation_view.take(),
+            queued_composer_submit: self.queued_composer_submit.take(),
             model_selector: self.model_selector.take(),
             is_agent_running: std::mem::replace(&mut self.is_agent_running, false),
             agent_finished: std::mem::replace(&mut self.agent_finished, false),
@@ -945,6 +948,10 @@ impl BeginnerWorkspace {
         std::mem::swap(
             &mut self.active_conversation_view,
             &mut session.active_conversation_view,
+        );
+        std::mem::swap(
+            &mut self.queued_composer_submit,
+            &mut session.queued_composer_submit,
         );
         std::mem::swap(&mut self.model_selector, &mut session.model_selector);
         std::mem::swap(&mut self.is_agent_running, &mut session.is_agent_running);
@@ -1080,6 +1087,7 @@ impl BeginnerWorkspace {
             thread: None,
             pending_conversation_view: None,
             active_conversation_view: None,
+            queued_composer_submit: None,
             model_selector: None,
             is_agent_running: false,
             agent_finished: false,
@@ -1152,6 +1160,7 @@ impl BeginnerWorkspace {
                 self.thread = None;
                 self.pending_conversation_view = None;
                 self.active_conversation_view = None;
+                self.queued_composer_submit = None;
                 self.file_changes_panel = None;
                 self.is_agent_running = false;
                 self.right_panel = RightPanel::Preview;
@@ -1577,6 +1586,47 @@ impl BeginnerWorkspace {
         .detach_and_prompt_err("Failed to switch branch", window, cx, |_, _, _| None);
     }
 
+    fn initialize_composer_git_repository(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(folder) = self.selected_folder.clone() else {
+            self.pick_folder(window, cx);
+            return;
+        };
+
+        self.composer_git_state = ComposerGitState {
+            is_loading: true,
+            ..ComposerGitState::default()
+        };
+        self.composer_git_state_folder = Some(folder.clone());
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let folder_for_git = folder.clone();
+            let state = cx
+                .background_spawn(async move {
+                    Self::run_git_command(&folder_for_git, &["init"])?;
+                    Self::read_composer_git_state(&folder_for_git)
+                })
+                .await?;
+
+            this.update(cx, |this, cx| {
+                if this.selected_folder.as_ref() != Some(&folder) {
+                    return;
+                }
+
+                this.composer_git_state = state;
+                cx.notify();
+            })?;
+
+            anyhow::Ok(())
+        })
+        .detach_and_prompt_err(
+            "Failed to initialize Git repository",
+            window,
+            cx,
+            |_, _, _| None,
+        );
+    }
+
     fn add_chat_record(&mut self, name: String, folder: &PathBuf, cx: &mut App) -> String {
         let record = BeginnerChatRecord::new(name, folder);
         let id = record.id.clone();
@@ -1730,12 +1780,28 @@ impl BeginnerWorkspace {
             return;
         }
 
+        if self.pending_conversation_view.is_some() || self.active_conversation_view.is_some() {
+            self.queued_composer_submit = Some(agent_text);
+            self.chat_editor.update(cx, |editor, cx| {
+                editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
+                editor.set_text("", window, cx);
+            });
+            Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+            self.clear_current_preview_state();
+            self.is_agent_running = true;
+            self.agent_finished = false;
+            self.send_queued_composer_submit(window, cx);
+            cx.notify();
+            return;
+        }
+
         // Clear all previous session state so the new project starts completely fresh.
         self.thread = None;
         self.chat_feed = None;
         self.file_changes_panel = None;
         self.pending_conversation_view = None;
         self.active_conversation_view = None;
+        self.queued_composer_submit = None;
         self.model_selector = None;
         self.is_agent_running = false;
         self.agent_finished = false;
@@ -3113,6 +3179,7 @@ res.end(data);\
         self.thread = None;
         self.pending_conversation_view = None;
         self.active_conversation_view = None;
+        self.queued_composer_submit = None;
         self.is_agent_running = false;
         self.agent_finished = false;
         self.show_raw_files = false;
@@ -3219,6 +3286,7 @@ res.end(data);\
         self.file_changes_panel = None;
         self.pending_conversation_view = None;
         self.active_conversation_view = None;
+        self.queued_composer_submit = None;
         self.model_selector = None;
         self.is_agent_running = false;
         self.agent_finished = false;
@@ -3473,16 +3541,34 @@ res.end(data);\
                     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../app/logo.png");
                 model_selector.update(cx, |model_selector, _cx| {
                     model_selector
-                        .set_trigger_brand(SharedString::from("Backboard"), Some(logo_path));
+                        .set_trigger_brand(SharedString::from("Backboard model"), Some(logo_path));
                 });
             }
+            self.send_queued_composer_submit(window, cx);
             cx.notify();
         } else if !is_loading {
             self.is_agent_running = false;
             self.pending_conversation_view = None;
             self.active_conversation_view = None;
+            self.queued_composer_submit = None;
             cx.notify();
         }
+    }
+
+    fn send_queued_composer_submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = self.queued_composer_submit.take() else {
+            return;
+        };
+
+        let Some(conversation_view) = self.active_conversation_view.clone() else {
+            self.queued_composer_submit = Some(text);
+            return;
+        };
+
+        conversation_view.update(cx, |conversation_view, cx| {
+            conversation_view.seed_root_message_text_if_empty(text, window, cx);
+            conversation_view.send_root_message_editor(window, cx);
+        });
     }
 
     fn schedule_restore_timeout(
@@ -3504,6 +3590,7 @@ res.end(data);\
                     this.is_agent_running = false;
                     this.pending_conversation_view = None;
                     this.active_conversation_view = None;
+                    this.queued_composer_submit = None;
                     this.chat_feed = None;
                     this.file_changes_panel = None;
                     cx.notify();
@@ -3535,6 +3622,7 @@ res.end(data);\
             thread: None,
             pending_conversation_view: None,
             active_conversation_view: None,
+            queued_composer_submit: None,
             model_selector: None,
             is_agent_running: false,
             agent_finished: false,
@@ -8350,7 +8438,19 @@ impl BeginnerWorkspace {
             }
 
             if !git_state.is_git_repository {
-                return menu.item(ContextMenuEntry::new("No Git repository").disabled(true));
+                let initialize_workspace = beginner_workspace.clone();
+                return menu.item(
+                    ContextMenuEntry::new("Initialize Git repository")
+                        .icon(IconName::GitBranch)
+                        .icon_position(IconPosition::Start)
+                        .handler(move |window, cx| {
+                            initialize_workspace
+                                .update(cx, |this, cx| {
+                                    this.initialize_composer_git_repository(window, cx);
+                                })
+                                .log_err();
+                        }),
+                );
             }
 
             if git_state.branches.is_empty() {
@@ -8404,7 +8504,7 @@ impl BeginnerWorkspace {
         } else if self.composer_git_state.is_git_repository {
             SharedString::from("Detached HEAD")
         } else {
-            SharedString::from("No Git repo")
+            SharedString::from("Connect Git")
         };
 
         h_flex()
