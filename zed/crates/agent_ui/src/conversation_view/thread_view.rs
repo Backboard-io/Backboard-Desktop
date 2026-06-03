@@ -5262,6 +5262,7 @@ impl ThreadView {
                                 h_flex()
                                     .min_w_0()
                                     .flex_1()
+                                    .overflow_hidden()
                                     .items_center()
                                     .gap_1()
                                     .child(self.render_add_context_button(cx))

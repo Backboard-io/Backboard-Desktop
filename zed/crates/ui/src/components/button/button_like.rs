@@ -1,7 +1,7 @@
 use documented::Documented;
 use gpui::{
-    AnyElement, AnyView, ClickEvent, CursorStyle, DefiniteLength, FocusHandle, Hsla, MouseButton,
-    MouseClickEvent, MouseDownEvent, MouseUpEvent, Rems, StyleRefinement, relative,
+    AnyElement, AnyView, ClickEvent, CursorStyle, DefiniteLength, FocusHandle, Hsla, Length,
+    MouseButton, MouseClickEvent, MouseDownEvent, MouseUpEvent, Rems, StyleRefinement, relative,
     transparent_black,
 };
 use smallvec::SmallVec;
@@ -488,6 +488,7 @@ pub struct ButtonLike {
     pub(super) selected_style: Option<ButtonStyle>,
     pub(super) width: Option<DefiniteLength>,
     pub(super) height: Option<DefiniteLength>,
+    flex_shrink: bool,
     pub(super) layer: Option<ElevationIndex>,
     tab_index: Option<isize>,
     size: ButtonSize,
@@ -512,6 +513,7 @@ impl ButtonLike {
             selected_style: None,
             width: None,
             height: None,
+            flex_shrink: false,
             size: ButtonSize::Default,
             rounding: Some(ButtonLikeRounding::ALL),
             tooltip: None,
@@ -545,6 +547,26 @@ impl ButtonLike {
 
     pub fn height(mut self, height: DefiniteLength) -> Self {
         self.height = Some(height);
+        self
+    }
+
+    pub fn min_width(mut self, width: impl Into<Length> + Clone) -> Self {
+        self.base = self.base.min_w(width);
+        self
+    }
+
+    pub fn max_width(mut self, width: impl Into<Length> + Clone) -> Self {
+        self.base = self.base.max_w(width);
+        self
+    }
+
+    pub fn flex_shrink(mut self) -> Self {
+        self.flex_shrink = true;
+        self
+    }
+
+    pub fn overflow_hidden(mut self) -> Self {
+        self.base = self.base.overflow_hidden();
         self
     }
 
@@ -685,7 +707,8 @@ impl RenderOnce for ButtonLike {
             })
             .font_ui(cx)
             .group("")
-            .flex_none()
+            .when(!self.flex_shrink, |this| this.flex_none())
+            .when(self.flex_shrink, |this| this.flex_shrink())
             .h(self.height.unwrap_or(self.size.rems().into()))
             .when_some(self.width, |this, width| {
                 this.w(width).justify_center().text_center()

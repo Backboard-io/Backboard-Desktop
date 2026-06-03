@@ -121,7 +121,14 @@ impl Render for ModelSelectorPopover {
             .filter(|provider| !provider.is_empty());
 
         let trigger = ButtonLike::new("active-model")
-            .width(if branded_trigger { px(220.) } else { px(28.) })
+            .when(branded_trigger, |this| {
+                this.width(px(220.))
+                    .min_width(px(34.))
+                    .max_width(px(220.))
+                    .flex_shrink()
+                    .overflow_hidden()
+            })
+            .when(!branded_trigger, |this| this.width(px(28.)))
             .height(if branded_trigger {
                 px(22.).into()
             } else {
@@ -178,6 +185,7 @@ impl Render for ModelSelectorPopover {
                             h_flex()
                                 .min_w_0()
                                 .flex_1()
+                                .overflow_hidden()
                                 .gap_0p5()
                                 .items_center()
                                 .when_some(
