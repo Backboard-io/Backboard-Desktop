@@ -913,6 +913,54 @@ mod remote_button {
                         .when_some(keybinding_target.clone(), |el, keybinding_target| {
                             el.context(keybinding_target)
                         })
+                        .action("Clone", git::Clone.boxed_clone())
+                        .separator()
+                        .submenu("Branch", |menu, _, _| {
+                            menu.action(
+                                "Checkout to...",
+                                zed_actions::git::CheckoutBranch.boxed_clone(),
+                            )
+                            .action("Switch Branch", zed_actions::git::Branch.boxed_clone())
+                            .separator()
+                            .action("Rename Branch", git::RenameBranch::default().boxed_clone())
+                            .action("Copy Branch Name", git::CopyBranchName.boxed_clone())
+                        })
+                        .submenu("Remote", |menu, _, _| {
+                            menu.action(
+                                "Branch and Remote Picker",
+                                zed_actions::git::Branch.boxed_clone(),
+                            )
+                            .action("Fetch From", git::FetchFrom.boxed_clone())
+                            .action("Push To", git::PushTo.boxed_clone())
+                        })
+                        .submenu("Commit", |menu, _, _| {
+                            menu.action("Commit", git::Commit.boxed_clone())
+                                .action("Amend Commit", git::Amend.boxed_clone())
+                        })
+                        .submenu("Changes", |menu, _, _| {
+                            menu.action("Stage All", git::StageAll.boxed_clone())
+                                .action("Unstage All", git::UnstageAll.boxed_clone())
+                                .separator()
+                                .action("Open Diff", crate::project_diff::Diff.boxed_clone())
+                                .action("Open Modified Files", git::OpenModifiedFiles.boxed_clone())
+                                .separator()
+                                .action(
+                                    "Discard Tracked Changes",
+                                    git::RestoreTrackedFiles.boxed_clone(),
+                                )
+                                .action(
+                                    "Trash Untracked Files",
+                                    git::TrashUntrackedFiles.boxed_clone(),
+                                )
+                        })
+                        .submenu("Stash", |menu, _, _| {
+                            menu.action("Stash All", git::StashAll.boxed_clone())
+                                .action("Stash Pop", git::StashPop.boxed_clone())
+                                .action("Stash Apply", git::StashApply.boxed_clone())
+                                .action("View Stash", zed_actions::git::ViewStash.boxed_clone())
+                        })
+                        .separator()
+                        .action("Sync Changes", git::Sync.boxed_clone())
                         .action("Fetch", git::Fetch.boxed_clone())
                         .action("Fetch From", git::FetchFrom.boxed_clone())
                         .action("Pull", git::Pull.boxed_clone())

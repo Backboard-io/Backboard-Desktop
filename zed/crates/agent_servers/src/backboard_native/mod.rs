@@ -1784,11 +1784,12 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                 )
             })
             .unwrap_or((DEFAULT_PROVIDER.to_string(), DEFAULT_MODEL.to_string()));
+        let icon = model_icon(&provider, &model, None);
         Task::ready(Ok(AgentModelInfo {
             id: acp::ModelId::new(format!("{provider}/{model}")),
             name: model.into(),
             description: Some(provider.into()),
-            icon: Some(model_icon(&provider, &model, None)),
+            icon: Some(icon),
             is_latest: false,
             cost: None,
         }))
@@ -1797,11 +1798,12 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
 
 fn fallback_agent_model_info(config: &BackboardConfig) -> AgentModelInfo {
     let (provider, model) = BackboardNativeState::fallback_provider_model(config);
+    let icon = model_icon(&provider, &model, None);
     AgentModelInfo {
         id: acp::ModelId::new(format!("{provider}/{model}")),
         name: model.into(),
         description: Some(provider.into()),
-        icon: Some(model_icon(&provider, &model, None)),
+        icon: Some(icon),
         is_latest: false,
         cost: None,
     }

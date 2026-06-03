@@ -18,10 +18,10 @@ use editor::actions::{Cancel as EditorCancel, Newline};
 use editor::{Editor, EditorEvent};
 use gpui::{
     Animation, AnimationExt, AnyElement, App, AsyncWindowContext, ClipboardItem, Context,
-    DragMoveEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, MouseUpEvent, ObjectFit, PathPromptOptions, Pixels, Render,
-    SharedString, Subscription, Task, TextStyleRefinement, WeakEntity, Window, WindowControlArea,
-    canvas, ease_out_quint, img, rems,
+    DragMoveEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
+    IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ObjectFit, PathPromptOptions, Pixels,
+    Render, SharedString, Subscription, Task, TextStyleRefinement, WeakEntity, Window,
+    WindowControlArea, canvas, ease_out_quint, img, rems,
 };
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
@@ -73,7 +73,6 @@ static CURATED_MODELS: &[(&str, &str, &str)] = &[
 const SIMPLE_LANDING_LOGO_PATH: &str = "images/animation_logo.png";
 const SIMPLE_PREVIEW_PORT: u16 = 3000;
 const PANEL_OPEN_ANIMATION_MS: u64 = 210;
-const SIMPLE_SIDEBAR_HOVER_OPEN_DELAY_MS: u64 = 180;
 const PANEL_OPEN_SLIDE_OFFSET_PX: f32 = 28.0;
 const RIGHT_PANEL_FADE_START_OPACITY: f32 = 0.94;
 const RIGHT_PANEL_CLOSED_WIDTH_PX: f32 = 44.0;
@@ -682,7 +681,6 @@ pub struct BeginnerWorkspace {
     chats_sidebar_closing: bool,
     chats_sidebar_animation_generation: u64,
     chats_sidebar_width: Pixels,
-    pending_chats_sidebar_hover_open: Option<Task<()>>,
     background_sessions: Vec<ProjectSession>,
     chat_history: Vec<BeginnerChatRecord>,
     pending_open_tabs: Option<BeginnerOpenTabsState>,
