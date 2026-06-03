@@ -5,12 +5,34 @@ use acp_thread::{
 };
 use agent_client_protocol::schema as acp;
 use gpui::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, Render, SharedString, Subscription,
-    Window,
+    App, Context, Entity, EventEmitter, FocusHandle, Focusable, Hsla, Render, SharedString,
+    Subscription, Window,
 };
 use ui::{Color, Icon, IconName, IconSize, Label, LabelSize, Tooltip, prelude::*};
 
 use crate::simple_design as ds;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ChatFeedDisplayMode {
+    Simple,
+    LiveWork,
+}
+
+impl ChatFeedDisplayMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Simple => "Simple",
+            Self::LiveWork => "Live Work",
+        }
+    }
+
+    pub fn tooltip(self) -> &'static str {
+        match self {
+            Self::Simple => "Show concise chat summaries",
+            Self::LiveWork => "Show Backboard talking and working",
+        }
+    }
+}
 
 #[derive(Clone)]
 struct TaskItem {
@@ -41,14 +63,18 @@ enum FriendlyItem {
     BackboardCard {
         index: usize,
         text: Option<String>,
+        thought: Option<String>,
         tasks: Vec<TaskItem>,
     },
 }
+
+const CHAT_LONG_TOKEN_BREAK_CHARS: usize = 48;
 
 pub struct BeginnerChatFeed {
     thread: Entity<AcpThread>,
     artifact_title: SharedString,
     preview_state: PreviewCardState,
+    display_mode: ChatFeedDisplayMode,
     focus_handle: FocusHandle,
     expanded_work_cards: HashSet<usize>,
     collapsed_work_cards: HashSet<usize>,
@@ -84,6 +110,7 @@ impl BeginnerChatFeed {
             thread,
             artifact_title,
             preview_state: PreviewCardState::Building,
+            display_mode: ChatFeedDisplayMode::LiveWork,
             focus_handle: cx.focus_handle(),
             expanded_work_cards: HashSet::default(),
             collapsed_work_cards: HashSet::default(),
@@ -96,6 +123,14 @@ impl BeginnerChatFeed {
             return;
         }
         self.preview_state = preview_state;
+        cx.notify();
+    }
+
+    pub fn set_display_mode(&mut self, display_mode: ChatFeedDisplayMode, cx: &mut Context<Self>) {
+        if self.display_mode == display_mode {
+            return;
+        }
+        self.display_mode = display_mode;
         cx.notify();
     }
 }
@@ -117,6 +152,7 @@ impl Render for BeginnerChatFeed {
                 item,
                 &self.artifact_title,
                 self.preview_state,
+                self.display_mode,
                 &self.expanded_work_cards,
                 &self.collapsed_work_cards,
                 cx,
@@ -158,17 +194,18 @@ impl Render for BeginnerChatFeed {
 fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
     let entries = thread.read(cx).entries();
     let mut items: Vec<FriendlyItem> = Vec::new();
-    // (start_index, text, tasks)
-    let mut pending_card: Option<(usize, Option<String>, Vec<TaskItem>)> = None;
+    // (start_index, text, thought, tasks)
+    let mut pending_card: Option<(usize, Option<String>, Option<String>, Vec<TaskItem>)> = None;
 
     for (index, entry) in entries.iter().enumerate() {
         match entry {
             AgentThreadEntry::UserMessage(msg) => {
-                if let Some((card_index, text, tasks)) = pending_card.take() {
-                    if text.is_some() || !tasks.is_empty() {
+                if let Some((card_index, text, thought, tasks)) = pending_card.take() {
+                    if text.is_some() || thought.is_some() || !tasks.is_empty() {
                         items.push(FriendlyItem::BackboardCard {
                             index: card_index,
                             text,
+                            thought,
                             tasks,
                         });
                     }
@@ -184,18 +221,26 @@ fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
             }
 
             AgentThreadEntry::AssistantMessage(msg) => {
-                let parts: Vec<String> = msg
-                    .chunks
-                    .iter()
-                    .filter_map(|chunk| match chunk {
+                let mut message_parts = Vec::new();
+                let mut thought_parts = Vec::new();
+                for chunk in &msg.chunks {
+                    match chunk {
                         AssistantMessageChunk::Message { block } => {
                             let s = block.to_markdown(cx).to_string();
-                            if s.trim().is_empty() { None } else { Some(s) }
+                            if !s.trim().is_empty() {
+                                message_parts.push(s);
+                            }
                         }
-                        AssistantMessageChunk::Thought { .. } => None,
-                    })
-                    .collect();
-                let text = parts.join("\n\n");
+                        AssistantMessageChunk::Thought { block } => {
+                            let s = block.to_markdown(cx).to_string();
+                            if !s.trim().is_empty() {
+                                thought_parts.push(s);
+                            }
+                        }
+                    }
+                }
+
+                let text = message_parts.join("\n\n");
                 if !text.trim().is_empty() {
                     match &mut pending_card {
                         Some(card) => {
@@ -206,7 +251,23 @@ fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
                             card.1 = Some(combined);
                         }
                         None => {
-                            pending_card = Some((index, Some(text), Vec::new()));
+                            pending_card = Some((index, Some(text), None, Vec::new()));
+                        }
+                    }
+                }
+
+                let thought = thought_parts.join("\n\n");
+                if !thought.trim().is_empty() {
+                    match &mut pending_card {
+                        Some(card) => {
+                            let combined = match &card.2 {
+                                Some(existing) => format!("{}\n\n{}", existing, thought),
+                                None => thought,
+                            };
+                            card.2 = Some(combined);
+                        }
+                        None => {
+                            pending_card = Some((index, None, Some(thought), Vec::new()));
                         }
                     }
                 }
@@ -228,22 +289,45 @@ fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
                     failed,
                 };
                 match &mut pending_card {
-                    Some(card) => card.2.push(task),
+                    Some(card) => card.3.push(task),
                     None => {
-                        pending_card = Some((index, None, vec![task]));
+                        pending_card = Some((index, None, None, vec![task]));
                     }
                 }
             }
 
-            AgentThreadEntry::CompletedPlan(_) => {}
+            AgentThreadEntry::CompletedPlan(entries) => {
+                let mut tasks = entries
+                    .iter()
+                    .filter_map(|entry| {
+                        let label = simplify_plan_label(entry.content.read(cx).source());
+                        (!label.is_empty()).then_some(TaskItem {
+                            label,
+                            kind: TaskKind::Think,
+                            done: true,
+                            failed: false,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if tasks.is_empty() {
+                    continue;
+                }
+                match &mut pending_card {
+                    Some(card) => card.3.append(&mut tasks),
+                    None => {
+                        pending_card = Some((index, None, None, tasks));
+                    }
+                }
+            }
         }
     }
 
-    if let Some((card_index, text, tasks)) = pending_card {
-        if text.is_some() || !tasks.is_empty() {
+    if let Some((card_index, text, thought, tasks)) = pending_card {
+        if text.is_some() || thought.is_some() || !tasks.is_empty() {
             items.push(FriendlyItem::BackboardCard {
                 index: card_index,
                 text,
+                thought,
                 tasks,
             });
         }
@@ -255,24 +339,31 @@ fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
 fn clean_user_text(text: &str) -> String {
     let text = strip_visible_prompt_prefix(text).unwrap_or(text).trim();
 
-    if looks_like_landing_page_testcase(text) {
-        return "build me a landing page".to_string();
-    }
-
     for prefix in [
         "Ask mode: answer without editing files or making project changes unless I explicitly ask you to switch to build mode.",
         "Simple mode: build or edit the project for a nontechnical user. Keep visible explanations short and natural. Avoid raw markdown, command output, implementation checklists, or code details unless the user asks.",
     ] {
         if let Some(rest) = text.strip_prefix(prefix) {
             let rest = rest.trim();
-            if looks_like_landing_page_testcase(rest) {
-                return "build me a landing page".to_string();
-            }
             return rest.to_string();
         }
     }
 
     text.to_string()
+}
+
+fn simplify_plan_label(raw: &str) -> String {
+    let label = raw
+        .trim()
+        .trim_start_matches('-')
+        .trim_start_matches('*')
+        .replace("**", "")
+        .replace('`', "");
+    if let Some(progress) = simplified_progress_line(&label) {
+        progress
+    } else {
+        label
+    }
 }
 
 fn strip_visible_prompt_prefix(text: &str) -> Option<&str> {
@@ -281,12 +372,6 @@ fn strip_visible_prompt_prefix(text: &str) -> Option<&str> {
     }
 
     None
-}
-
-fn looks_like_landing_page_testcase(text: &str) -> bool {
-    text.contains("Create a single-page hero section")
-        && text.contains("fullscreen looping background video")
-        && text.contains("Liquid Glass Effect")
 }
 
 fn task_kind(kind: &acp::ToolKind) -> TaskKind {
@@ -384,6 +469,7 @@ fn render_item(
     item: FriendlyItem,
     artifact_title: &SharedString,
     preview_state: PreviewCardState,
+    display_mode: ChatFeedDisplayMode,
     expanded_work_cards: &HashSet<usize>,
     collapsed_work_cards: &HashSet<usize>,
     cx: &mut Context<BeginnerChatFeed>,
@@ -392,32 +478,52 @@ fn render_item(
         FriendlyItem::UserBubble { index, text } => h_flex()
             .id(index)
             .w_full()
+            .min_w_0()
             .justify_center()
             .py_1()
             .child(
                 h_flex()
                     .w_full()
+                    .min_w_0()
                     .max_w(px(ds::CHAT_MAX_WIDTH))
                     .justify_end()
                     .child(render_message_bubble(text, MessageTone::User, cx)),
             )
             .into_any_element(),
 
-        FriendlyItem::BackboardCard { index, text, tasks } => {
+        FriendlyItem::BackboardCard {
+            index,
+            text,
+            thought,
+            tasks,
+        } => {
             let cleaned_text = text.and_then(|text| clean_assistant_text(&text, &tasks));
+            let cleaned_thought =
+                thought.and_then(|thought| clean_thought_text(&thought, display_mode));
             let can_show_feedback = !tasks.is_empty()
                 && preview_state == PreviewCardState::Ready
                 && !tasks.iter().any(|task| task.failed);
-            let work_expanded =
-                work_card_is_expanded(index, &tasks, expanded_work_cards, collapsed_work_cards);
+            let work_expanded = work_card_is_expanded(
+                index,
+                &tasks,
+                display_mode,
+                expanded_work_cards,
+                collapsed_work_cards,
+            );
             v_flex()
                 .id(index + 10_000)
                 .w_full()
+                .min_w_0()
                 .items_center()
                 .gap_3()
                 .py_1()
                 .when(tasks.is_empty(), |el| {
-                    el.when_some(cleaned_text.clone(), |el, text| {
+                    el.when(display_mode == ChatFeedDisplayMode::LiveWork, |el| {
+                        el.when_some(cleaned_thought.clone(), |el, thought| {
+                            el.child(render_thought_block(thought, cx))
+                        })
+                    })
+                    .when_some(cleaned_text.clone(), |el, text| {
                         el.child(render_message_bubble(text, MessageTone::Assistant, cx))
                     })
                 })
@@ -425,8 +531,10 @@ fn render_item(
                     el.child(render_work_section(
                         index,
                         cleaned_text,
+                        cleaned_thought,
                         &tasks,
                         work_expanded,
+                        display_mode,
                         cx,
                     ))
                     .child(render_artifact_card(
@@ -447,6 +555,7 @@ fn render_item(
 fn work_card_is_expanded(
     index: usize,
     tasks: &[TaskItem],
+    display_mode: ChatFeedDisplayMode,
     expanded_work_cards: &HashSet<usize>,
     collapsed_work_cards: &HashSet<usize>,
 ) -> bool {
@@ -458,37 +567,59 @@ fn work_card_is_expanded(
         return false;
     }
 
+    if display_mode == ChatFeedDisplayMode::LiveWork {
+        return true;
+    }
+
     tasks.iter().any(|task| !task.done && !task.failed)
 }
 
 fn render_work_section(
     index: usize,
     text: Option<String>,
+    thought: Option<String>,
     tasks: &[TaskItem],
     is_expanded: bool,
+    display_mode: ChatFeedDisplayMode,
     cx: &mut Context<BeginnerChatFeed>,
 ) -> impl IntoElement {
     let header_id = SharedString::from(format!("simple-work-card-{index}"));
     let is_running = tasks.iter().any(|task| !task.done && !task.failed);
-    let label = if is_running { "Working" } else { "Worked" };
+    let label = if is_running {
+        "Backboard is working"
+    } else {
+        "Work completed"
+    };
     let hover_background = ds::hover_background(cx);
     let file_changes = file_change_count(tasks);
     let changes_label = changed_files_label(file_changes);
+    let detailed = display_mode == ChatFeedDisplayMode::LiveWork;
 
     v_flex()
         .w_full()
+        .min_w_0()
         .max_w(px(ds::CHAT_MAX_WIDTH))
         .gap_3()
+        .when(detailed, |el| {
+            el.rounded(px(12.))
+                .border_1()
+                .border_color(ds::soft_border(cx))
+                .bg(ds::card_background(cx))
+                .p_2()
+        })
         .child(
             h_flex()
                 .id(header_id)
                 .w_full()
+                .min_w_0()
                 .items_center()
                 .justify_between()
                 .gap_2()
+                .px_2()
                 .py_2()
-                .border_b_1()
-                .border_color(ds::separator(cx))
+                .when(!detailed, |el| {
+                    el.border_b_1().border_color(ds::separator(cx))
+                })
                 .cursor_pointer()
                 .hover(move |el| el.bg(hover_background.opacity(0.35)))
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -503,15 +634,22 @@ fn render_work_section(
                 }))
                 .child(
                     h_flex()
+                        .min_w_0()
                         .items_center()
                         .gap_2()
-                        .when(is_running, |el| {
-                            el.child(
-                                Icon::new(IconName::LoadCircle)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Custom(ds::icon_muted(cx))),
-                            )
-                        })
+                        .child(
+                            Icon::new(if is_running {
+                                IconName::LoadCircle
+                            } else {
+                                IconName::CheckDouble
+                            })
+                            .size(IconSize::XSmall)
+                            .color(Color::Custom(if is_running {
+                                ds::accent(cx)
+                            } else {
+                                ds::icon_muted(cx)
+                            })),
+                        )
                         .child(
                             Label::new(label)
                                 .size(LabelSize::Small)
@@ -560,10 +698,15 @@ fn render_work_section(
                 ),
         )
         .when(is_expanded, |el| {
-            el.when_some(text, |el, text| {
+            el.when(detailed, |el| {
+                el.when_some(thought, |el, thought| {
+                    el.child(render_thought_block(thought, cx))
+                })
+            })
+            .when_some(text, |el, text| {
                 el.child(render_message_bubble(text, MessageTone::Assistant, cx))
             })
-            .child(render_task_list(tasks, cx))
+            .child(render_task_list(tasks, display_mode, cx))
         })
 }
 
@@ -641,26 +784,35 @@ fn work_summary_label(tasks: &[TaskItem]) -> SharedString {
     }
 }
 
-fn render_task_list(tasks: &[TaskItem], cx: &mut Context<BeginnerChatFeed>) -> impl IntoElement {
+fn render_task_list(
+    tasks: &[TaskItem],
+    display_mode: ChatFeedDisplayMode,
+    cx: &mut Context<BeginnerChatFeed>,
+) -> impl IntoElement {
     let rows = tasks
         .iter()
         .enumerate()
-        .map(|(index, task)| render_task_row(index, task, cx).into_any_element())
+        .map(|(index, task)| render_task_row(index, task, display_mode, cx).into_any_element())
         .collect::<Vec<_>>();
 
     v_flex()
         .w_full()
+        .min_w_0()
         .max_w(px(ds::CHAT_MAX_WIDTH))
         .gap_1()
+        .when(display_mode == ChatFeedDisplayMode::LiveWork, |el| {
+            el.gap_1p5()
+        })
         .children(rows)
 }
 
 fn render_task_row(
     index: usize,
     task: &TaskItem,
+    display_mode: ChatFeedDisplayMode,
     cx: &mut Context<BeginnerChatFeed>,
 ) -> impl IntoElement {
-    let icon = if task.failed {
+    let status_icon = if task.failed {
         IconName::XCircle
     } else if task.done {
         IconName::Check
@@ -674,24 +826,56 @@ fn render_task_row(
     } else {
         ds::accent(cx)
     };
+    let kind_icon = task_kind_icon(task.kind);
+    let detailed = display_mode == ChatFeedDisplayMode::LiveWork;
 
     h_flex()
         .id(SharedString::from(format!("simple-task-row-{index}")))
         .w_full()
+        .min_w_0()
         .min_h(px(28.))
         .items_center()
         .gap_2()
+        .when(detailed, |el| {
+            el.rounded(px(7.))
+                .border_1()
+                .border_color(ds::soft_border(cx).opacity(0.72))
+                .bg(ds::field_background(cx).opacity(0.62))
+                .px_2()
+                .py_1()
+        })
         .child(
-            Icon::new(icon)
+            Icon::new(status_icon)
                 .size(IconSize::XSmall)
                 .color(Color::Custom(color)),
         )
+        .when(detailed, |el| {
+            el.child(
+                Icon::new(kind_icon)
+                    .size(IconSize::XSmall)
+                    .color(Color::Custom(ds::icon_muted(cx))),
+            )
+        })
         .child(
             Label::new(SharedString::from(task.label.clone()))
                 .size(LabelSize::Small)
                 .color(Color::Custom(ds::text(cx)))
                 .truncate(),
         )
+}
+
+fn task_kind_icon(kind: TaskKind) -> IconName {
+    match kind {
+        TaskKind::Edit => IconName::ToolPencil,
+        TaskKind::Delete => IconName::ToolDeleteFile,
+        TaskKind::Execute => IconName::ToolTerminal,
+        TaskKind::Fetch => IconName::ToolWeb,
+        TaskKind::Move => IconName::ArrowRightLeft,
+        TaskKind::Read => IconName::Reader,
+        TaskKind::Search => IconName::ToolSearch,
+        TaskKind::Think => IconName::ToolThink,
+        TaskKind::Other => IconName::ToolHammer,
+    }
 }
 
 fn render_artifact_card(
@@ -702,6 +886,7 @@ fn render_artifact_card(
 ) -> impl IntoElement {
     v_flex()
         .w_full()
+        .min_w_0()
         .max_w(px(ds::CHAT_MAX_WIDTH))
         .min_h(px(96.))
         .rounded(px(14.))
@@ -714,6 +899,8 @@ fn render_artifact_card(
         .p_4()
         .child(
             h_flex()
+                .w_full()
+                .min_w_0()
                 .gap_4()
                 .items_center()
                 .child(render_artifact_tile(cx))
@@ -742,27 +929,16 @@ fn render_message_bubble(
         MessageTone::User => "You",
         MessageTone::Assistant => "Assistant",
     };
-    let lines = chat_lines(&text)
-        .into_iter()
-        .map(|line| {
-            if line.is_empty() {
-                div().h(px(7.)).into_any_element()
-            } else {
-                Label::new(SharedString::from(line))
-                    .size(LabelSize::Small)
-                    .color(Color::Custom(colors.text))
-                    .single_line()
-                    .into_any_element()
-            }
-        })
-        .collect::<Vec<_>>();
+    let text = chat_text_for_display(&text);
 
     div()
+        .min_w_0()
         .max_w(px(match tone {
             MessageTone::User => 640.,
             MessageTone::Assistant => ds::CHAT_MAX_WIDTH,
         }))
         .when(matches!(tone, MessageTone::Assistant), |el| el.w_full())
+        .overflow_x_hidden()
         .rounded(px(12.))
         .when(matches!(tone, MessageTone::User), |el| {
             el.bg(ds::field_background(cx))
@@ -773,14 +949,48 @@ fn render_message_bubble(
         .py_2()
         .child(
             v_flex()
+                .w_full()
+                .min_w_0()
                 .gap_1p5()
                 .child(
                     Label::new(speaker)
                         .size(LabelSize::XSmall)
                         .color(Color::Custom(colors.text_muted)),
                 )
-                .children(lines),
+                .child(render_chat_copy(text, colors.text, cx)),
         )
+}
+
+fn render_thought_block(text: String, cx: &mut Context<BeginnerChatFeed>) -> impl IntoElement {
+    let colors = cx.theme().colors().clone();
+    let text = chat_text_for_display(&text);
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .max_w(px(ds::CHAT_MAX_WIDTH))
+        .gap_2()
+        .rounded(px(10.))
+        .border_1()
+        .border_color(ds::soft_border(cx).opacity(0.74))
+        .bg(ds::field_background(cx).opacity(0.48))
+        .px_3()
+        .py_2()
+        .child(
+            h_flex()
+                .gap_1p5()
+                .items_center()
+                .child(
+                    Icon::new(IconName::QueueMessage)
+                        .size(IconSize::XSmall)
+                        .color(Color::Custom(ds::icon_muted(cx))),
+                )
+                .child(
+                    Label::new("Talking")
+                        .size(LabelSize::XSmall)
+                        .color(Color::Custom(colors.text_muted)),
+                ),
+        )
+        .child(render_chat_copy(text, colors.text.opacity(0.86), cx))
 }
 
 fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
@@ -838,6 +1048,48 @@ fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
     }
 }
 
+fn clean_thought_text(text: &str, display_mode: ChatFeedDisplayMode) -> Option<String> {
+    if display_mode != ChatFeedDisplayMode::LiveWork {
+        return None;
+    }
+
+    let mut cleaned = Vec::new();
+    let mut in_code_block = false;
+    for raw_line in readable_paragraphs(text) {
+        let mut line = raw_line.trim();
+        if line.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if in_code_block || line.is_empty() || is_shell_noise(line) {
+            continue;
+        }
+
+        line = line
+            .trim_start_matches('#')
+            .trim_start_matches('-')
+            .trim_start_matches('*')
+            .trim();
+        if let Some(progress) = simplified_progress_line(line) {
+            push_unique_line(&mut cleaned, progress);
+            continue;
+        }
+
+        let line = line
+            .replace("<thinking>", "")
+            .replace("</thinking>", "")
+            .replace("**", "")
+            .replace('`', "")
+            .replace("AI", "Backboard");
+        let line = line.trim();
+        if !line.is_empty() {
+            push_unique_line(&mut cleaned, line.to_string());
+        }
+    }
+
+    (!cleaned.is_empty()).then(|| cleaned.join("\n"))
+}
+
 fn simple_mode_progress_rewrite(line: &str) -> Option<String> {
     let lower = line.to_lowercase();
 
@@ -869,24 +1121,6 @@ fn push_unique_line(lines: &mut Vec<String>, line: String) {
     lines.push(line);
 }
 
-fn chat_lines(text: &str) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    for paragraph in readable_paragraphs(text) {
-        if paragraph.is_empty() {
-            if !lines.last().is_some_and(|line| line.is_empty()) {
-                lines.push(String::new());
-            }
-            continue;
-        }
-        lines.extend(wrap_chat_paragraph(&paragraph, 104));
-        lines.push(String::new());
-    }
-    while lines.last().is_some_and(|line| line.is_empty()) {
-        lines.pop();
-    }
-    lines
-}
-
 fn readable_paragraphs(text: &str) -> Vec<String> {
     let normalized = text
         .replace(":Now ", ":\nNow ")
@@ -901,26 +1135,51 @@ fn readable_paragraphs(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn wrap_chat_paragraph(paragraph: &str, max_chars: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for word in paragraph.split_whitespace() {
-        if current.is_empty() {
-            current.push_str(word);
+fn chat_text_for_display(text: &str) -> SharedString {
+    let paragraphs = readable_paragraphs(text)
+        .into_iter()
+        .map(|paragraph| break_long_chat_tokens(&paragraph, CHAT_LONG_TOKEN_BREAK_CHARS))
+        .collect::<Vec<_>>();
+    SharedString::from(paragraphs.join("\n\n"))
+}
+
+fn render_chat_copy(text: SharedString, color: Hsla, cx: &App) -> impl IntoElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .overflow_x_hidden()
+        .text_ui_sm(cx)
+        .line_height(relative(1.42))
+        .text_color(color)
+        .child(text)
+}
+
+fn break_long_chat_tokens(paragraph: &str, max_chars: usize) -> String {
+    let mut output = String::new();
+    for (index, token) in paragraph.split_whitespace().enumerate() {
+        if index > 0 {
+            output.push(' ');
+        }
+
+        if token.chars().count() <= max_chars {
+            output.push_str(token);
             continue;
         }
-        if current.chars().count() + 1 + word.chars().count() > max_chars {
-            lines.push(current);
-            current = word.to_string();
-        } else {
-            current.push(' ');
-            current.push_str(word);
+
+        let mut token_chars = token.chars().peekable();
+        while token_chars.peek().is_some() {
+            for _ in 0..max_chars {
+                let Some(ch) = token_chars.next() else {
+                    break;
+                };
+                output.push(ch);
+            }
+            if token_chars.peek().is_some() {
+                output.push('\n');
+            }
         }
     }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    lines
+    output
 }
 
 fn simplified_progress_line(line: &str) -> Option<String> {

@@ -9,7 +9,7 @@ use gpui::{
 };
 use language_model::{
     ConfiguredModel, IconOrSvg, LanguageModel, LanguageModelId, LanguageModelProvider,
-    LanguageModelProviderId, LanguageModelRegistry,
+    LanguageModelProviderId, LanguageModelRegistry, icon_for_model,
 };
 use ordered_float::OrderedFloat;
 use picker::{Picker, PickerDelegate};
@@ -108,10 +108,11 @@ impl ModelInfo {
         let is_favorite = favorites_index
             .get(&provider.id())
             .map_or(false, |set| set.contains(&model.id()));
+        let icon = icon_for_model(&*model, provider);
 
         Self {
             model,
-            icon: provider.icon(),
+            icon,
             is_favorite,
         }
     }

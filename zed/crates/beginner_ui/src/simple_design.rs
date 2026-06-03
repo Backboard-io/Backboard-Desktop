@@ -1,4 +1,6 @@
-use gpui::{App, Background, Hsla, IntoElement, linear_color_stop, linear_gradient, px, white};
+use gpui::{
+    App, Background, Hsla, IntoElement, black, linear_color_stop, linear_gradient, px, white,
+};
 use theme::ActiveTheme;
 use ui::{Color, Icon, IconName, IconSize, prelude::*};
 
@@ -10,6 +12,8 @@ pub const CHAT_PANEL_WIDTH: f32 = 540.;
 pub const CHAT_PANEL_MIN_WIDTH: f32 = 360.;
 pub const RIGHT_PANEL_MIN_WIDTH: f32 = 320.;
 pub const PANEL_RESIZE_HANDLE_WIDTH: f32 = 8.;
+pub const PANEL_CORNER_RADIUS: f32 = 18.;
+pub const PANEL_OVERLAP: f32 = PANEL_CORNER_RADIUS;
 pub const CHAT_ROW_HEIGHT: f32 = 36.;
 pub const PROJECT_ROW_HEIGHT: f32 = 40.;
 pub const CHAT_MAX_WIDTH: f32 = 880.;
@@ -118,8 +122,8 @@ pub fn sidebar_text(cx: &App) -> Hsla {
     cx.theme().colors().text.opacity(opacity)
 }
 
-pub fn sidebar_emphasis_text(_cx: &App) -> Hsla {
-    white()
+pub fn sidebar_emphasis_text(cx: &App) -> Hsla {
+    cx.theme().colors().text
 }
 
 pub fn sidebar_text_muted(cx: &App) -> Hsla {
@@ -176,8 +180,12 @@ pub fn separator(cx: &App) -> Hsla {
     cx.theme().colors().border_variant.opacity(0.34)
 }
 
-pub fn panel_divider(cx: &App) -> Hsla {
-    cx.theme().colors().border_variant.opacity(0.72)
+pub fn panel_edge_line(cx: &App) -> Hsla {
+    if cx.theme().appearance().is_light() {
+        black().opacity(0.18)
+    } else {
+        white().opacity(0.22)
+    }
 }
 
 pub fn text(cx: &App) -> Hsla {

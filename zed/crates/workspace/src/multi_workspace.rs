@@ -2695,9 +2695,9 @@ impl MultiWorkspace {
 
     fn workspace_mode_target_label(target: WorkspaceModeTarget) -> &'static str {
         match target {
-            WorkspaceModeTarget::Simple => "Simple Mode",
-            WorkspaceModeTarget::CodeEditor => "Editor",
-            WorkspaceModeTarget::AgentWorkspace => "Agents",
+            WorkspaceModeTarget::Simple => "Open in Simple Mode",
+            WorkspaceModeTarget::CodeEditor => "Open in Code Editor",
+            WorkspaceModeTarget::AgentWorkspace => "Open in Agents",
         }
     }
 
@@ -2745,16 +2745,34 @@ impl MultiWorkspace {
         let id = Self::workspace_mode_target_id(target);
         let label = Self::workspace_mode_target_label(target);
         let tooltip = Self::workspace_mode_target_tooltip(target);
+        let colors = cx.theme().colors();
+        let pill_bg = colors
+            .element_background
+            .blend(colors.panel_background.opacity(0.18));
+        let pill_border = colors.border_variant.opacity(0.56);
+        let hover_bg = colors.element_hover.opacity(0.68);
 
-        Button::new(id, label)
-            .style(ButtonStyle::Subtle)
-            .size(ButtonSize::Compact)
-            .label_size(LabelSize::Small)
-            .color(Color::Muted)
+        h_flex()
+            .id(id)
+            .h(px(26.))
+            .items_center()
+            .justify_start()
+            .px_2p5()
+            .rounded_full()
+            .border_1()
+            .border_color(pill_border)
+            .bg(pill_bg)
+            .cursor_pointer()
+            .hover(move |style| style.bg(hover_bg))
             .tooltip(Tooltip::text(tooltip))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_workspace_mode_target(target, window, cx);
             }))
+            .child(
+                Label::new(label)
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+            )
             .into_any_element()
     }
 
@@ -2871,10 +2889,9 @@ impl MultiWorkspace {
             .flex_shrink_0()
             .items_center()
             .justify_end()
-            .gap_1()
+            .gap_2()
             .pl_2()
             .pr_2()
-            .gap_1()
             .border_b_1()
             .border_color(colors.border_variant.opacity(0.5))
             .bg(switcher_bg)

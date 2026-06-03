@@ -14,6 +14,7 @@ use gpui::{
     Subscription, Task, TaskExt, WeakEntity,
 };
 use itertools::Itertools;
+use language_model::icon_for_model_identifiers;
 use ordered_float::OrderedFloat;
 use picker::{Picker, PickerDelegate};
 use settings::SettingsStore;
@@ -526,6 +527,7 @@ impl PickerDelegate for ModelPickerDelegate {
                 let is_selected = Some(model_info) == self.selected_model.as_ref();
                 let default_model = self.agent_server.default_model(cx);
                 let is_default = default_model.as_ref() == Some(&model_info.id);
+                let model_icon = icon_for_agent_model(model_info);
 
                 let is_favorite = *is_favorite;
                 let handle_action_click = {
@@ -569,7 +571,7 @@ impl PickerDelegate for ModelPickerDelegate {
                         })
                         .child(
                             ModelSelectorListItem::new(ix, model_info.name.clone())
-                                .map(|this| match &model_info.icon {
+                                .map(|this| match &model_icon {
                                     Some(AgentModelIcon::Path(path)) => this.icon_path(path.clone()),
                                     Some(AgentModelIcon::Named(icon)) => this.icon(*icon),
                                     None => this,
@@ -770,6 +772,28 @@ fn provider_filter_id(provider: &str) -> String {
     }
 }
 
+pub(crate) fn icon_for_agent_model(model: &AgentModelInfo) -> Option<AgentModelIcon> {
+    let provider = provider_id(model);
+    let model_id = model_id_without_provider(&model.id);
+    icon_for_model_identifiers(
+        &provider,
+        provider_display_name(&provider),
+        model_id,
+        model.name.as_ref(),
+    )
+    .map(AgentModelIcon::Named)
+    .or_else(|| model.icon.clone())
+}
+
+fn model_id_without_provider(model_id: &acp::ModelId) -> &str {
+    let model_id = model_id.0.as_ref();
+    model_id
+        .split_once('/')
+        .map(|(_, model)| model)
+        .or_else(|| model_id.split_once(':').map(|(_, model)| model))
+        .unwrap_or(model_id)
+}
+
 fn provider_id(model: &AgentModelInfo) -> String {
     let id = model.id.0.as_ref().to_lowercase();
     let name = model.name.to_lowercase();
@@ -942,10 +966,15 @@ fn apply_model_filters(
 ) -> AgentModelList {
     match model_list {
         AgentModelList::Flat(list) => {
+            let original = list.clone();
             let base: Vec<_> = list
                 .into_iter()
                 .filter(|model| !is_featherless_model(model))
                 .collect();
+
+            if base.is_empty() {
+                return AgentModelList::Flat(original);
+            }
 
             if selected_providers.is_empty() {
                 return AgentModelList::Flat(base);
@@ -966,6 +995,7 @@ fn apply_model_filters(
             }
         }
         AgentModelList::Grouped(index_map) => {
+            let original_map = index_map.clone();
             let base_map =
                 IndexMap::from_iter(index_map.into_iter().filter_map(|(group_name, models)| {
                     let base: Vec<_> = models
@@ -978,6 +1008,10 @@ fn apply_model_filters(
                         Some((group_name, base))
                     }
                 }));
+
+            if base_map.is_empty() {
+                return AgentModelList::Grouped(original_map);
+            }
 
             if selected_providers.is_empty() {
                 return AgentModelList::Grouped(base_map);

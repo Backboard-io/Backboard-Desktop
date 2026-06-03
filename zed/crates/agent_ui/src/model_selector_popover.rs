@@ -9,7 +9,10 @@ use picker::popover_menu::PickerPopoverMenu;
 use ui::{ButtonLike, PopoverMenuHandle, TintColor, Tooltip, prelude::*};
 
 use crate::ui::ModelSelectorTooltip;
-use crate::{ModelSelector, model_selector::acp_model_selector};
+use crate::{
+    ModelSelector,
+    model_selector::{acp_model_selector, icon_for_agent_model},
+};
 
 pub struct ModelSelectorPopover {
     selector: Entity<ModelSelector>,
@@ -72,7 +75,7 @@ impl Render for ModelSelectorPopover {
             .map(|model| model.name.clone())
             .unwrap_or_else(|| SharedString::from("Select a Model"));
 
-        let model_icon = model.as_ref().and_then(|model| model.icon.clone());
+        let model_icon = model.as_ref().and_then(|model| icon_for_agent_model(model));
 
         let color = if self.menu_handle.is_deployed() {
             Color::Accent

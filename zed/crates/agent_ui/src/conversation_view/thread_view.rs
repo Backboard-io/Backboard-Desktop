@@ -62,6 +62,22 @@ fn prefix_content_blocks(
     content
 }
 
+fn prompt_title_for_content_blocks(contents: &[acp::ContentBlock]) -> Option<SharedString> {
+    let text = contents
+        .iter()
+        .filter_map(|block| match block {
+            acp::ContentBlock::Text(text_content) => Some(text_content.text.clone()),
+            acp::ContentBlock::ResourceLink(resource_link) => {
+                Some(format!("@{}", resource_link.name))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let title = text.lines().map(str::trim).find(|line| !line.is_empty())?;
+    Some(util::truncate_and_trailoff(title, 200).into())
+}
+
 #[derive(Default)]
 struct ThreadFeedbackState {
     feedback: Option<ThreadFeedback>,
@@ -2890,6 +2906,20 @@ impl ThreadView {
         let parent_session_id = self.thread.read(cx).parent_session_id().cloned();
         let agent_telemetry_id = self.thread.read(cx).connection().telemetry_id();
         let is_first_message = self.thread.read(cx).entries().is_empty();
+        let should_replace_initial_title = self.uses_compact_assistant_turns() && {
+            let thread = self.thread.read(cx);
+            thread.title().is_some_and(|title| {
+                let title = title.as_ref();
+                title == "Backboard"
+                    || thread.work_dirs().is_some_and(|work_dirs| {
+                        work_dirs.ordered_paths().any(|path| {
+                            path.file_name()
+                                .and_then(|name| name.to_str())
+                                .is_some_and(|name| name == title)
+                        })
+                    })
+            })
+        };
         let thread = self.thread.downgrade();
 
         self.is_loading_contents = true;
@@ -2940,24 +2970,19 @@ impl ThreadView {
                     .ok();
                 }
             });
-            if is_first_message && thread.read_with(cx, |thread, _cx| thread.title().is_none())? {
-                let text: String = contents
-                    .iter()
-                    .filter_map(|block| match block {
-                        acp::ContentBlock::Text(text_content) => Some(text_content.text.clone()),
-                        acp::ContentBlock::ResourceLink(resource_link) => {
-                            Some(format!("@{}", resource_link.name))
+            if is_first_message && let Some(title) = prompt_title_for_content_blocks(&contents) {
+                let set_title = thread.update(cx, |thread, cx| {
+                    if should_replace_initial_title {
+                        if thread.title().as_ref() != Some(&title) {
+                            return Some(thread.set_title(title, cx));
                         }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let text = text.lines().next().unwrap_or("").trim();
-                if !text.is_empty() {
-                    let title: SharedString = util::truncate_and_trailoff(text, 200).into();
-                    thread.update(cx, |thread, cx| {
+                    } else if thread.title().is_none() {
                         thread.set_provisional_title(title, cx);
-                    })?;
+                    }
+                    None
+                })?;
+                if let Some(set_title) = set_title {
+                    set_title.await?;
                 }
             }
 
@@ -5258,7 +5283,9 @@ impl ThreadView {
                                     .justify_end()
                                     .gap_1()
                                     .child(self.render_dictation_button(cx))
-                                    .child(self.render_follow_toggle(cx))
+                                    .when(include_container, |this| {
+                                        this.child(self.render_follow_toggle(cx))
+                                    })
                                     .children(self.render_fast_mode_control(cx))
                                     .children(self.render_thinking_control(cx))
                                     .children(self.render_token_usage(cx))

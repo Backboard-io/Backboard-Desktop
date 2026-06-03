@@ -295,6 +295,124 @@ pub trait LanguageModelProvider: 'static {
     fn reset_credentials(&self, cx: &mut App) -> Task<Result<()>>;
 }
 
+pub fn icon_for_model(
+    model: &dyn LanguageModel,
+    provider: &dyn LanguageModelProvider,
+) -> IconOrSvg {
+    icon_for_model_identifiers(
+        model.upstream_provider_id().0.as_ref(),
+        model.upstream_provider_name().0.as_ref(),
+        model.id().0.as_ref(),
+        model.name().0.as_ref(),
+    )
+    .map(IconOrSvg::Icon)
+    .unwrap_or_else(|| provider.icon())
+}
+
+pub fn icon_for_configured_model(model: &ConfiguredModel) -> IconOrSvg {
+    icon_for_model(&*model.model, &*model.provider)
+}
+
+pub fn icon_for_model_identifiers(
+    provider_id: &str,
+    provider_name: &str,
+    model_id: &str,
+    model_name: &str,
+) -> Option<IconName> {
+    let provider_text = normalized_model_icon_text(&format!("{provider_id} {provider_name}"));
+    let model_text = normalized_model_icon_text(&format!("{model_id} {model_name}"));
+    let combined_text = format!("{provider_text} {model_text}");
+
+    icon_for_model_family(&model_text)
+        .or_else(|| icon_for_provider_family(&provider_text))
+        .or_else(|| icon_for_model_family(&combined_text))
+}
+
+fn normalized_model_icon_text(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect()
+}
+
+fn text_contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn icon_for_model_family(text: &str) -> Option<IconName> {
+    if text_contains_any(text, &["claude", "haiku", "sonnet", "opus"]) {
+        return Some(IconName::AiClaude);
+    }
+    if text_contains_any(text, &["gemini"]) {
+        return Some(IconName::AiGemini);
+    }
+    if text_contains_any(
+        text,
+        &["gpt", "chatgpt", "openai", "o1", "o3", "o4", "o5", "codex"],
+    ) {
+        return Some(IconName::AiOpenAi);
+    }
+    if text_contains_any(text, &["grok", "xai", "x ai"]) {
+        return Some(IconName::AiXAi);
+    }
+    if text_contains_any(text, &["deepseek"]) {
+        return Some(IconName::AiDeepSeek);
+    }
+    if text_contains_any(text, &["mistral", "codestral", "magistral", "mixtral"]) {
+        return Some(IconName::AiMistral);
+    }
+    None
+}
+
+fn icon_for_provider_family(text: &str) -> Option<IconName> {
+    if text_contains_any(text, &["anthropic"]) {
+        return Some(IconName::AiAnthropic);
+    }
+    if text_contains_any(text, &["google", "googleai", "google ai"]) {
+        return Some(IconName::AiGoogle);
+    }
+    if text_contains_any(text, &["xai", "x ai"]) {
+        return Some(IconName::AiXAi);
+    }
+    if text_contains_any(text, &["openai compatible", "open ai compatible"]) {
+        return Some(IconName::AiOpenAiCompat);
+    }
+    if text_contains_any(text, &["openai", "open ai"]) {
+        return Some(IconName::AiOpenAi);
+    }
+    if text_contains_any(text, &["amazon", "aws", "bedrock"]) {
+        return Some(IconName::AiBedrock);
+    }
+    if text_contains_any(text, &["deepseek", "deep seek"]) {
+        return Some(IconName::AiDeepSeek);
+    }
+    if text_contains_any(text, &["mistral"]) {
+        return Some(IconName::AiMistral);
+    }
+    if text_contains_any(text, &["openrouter", "open router"]) {
+        return Some(IconName::AiOpenRouter);
+    }
+    if text_contains_any(text, &["vercel"]) {
+        return Some(IconName::AiVercel);
+    }
+    if text_contains_any(text, &["ollama"]) {
+        return Some(IconName::AiOllama);
+    }
+    if text_contains_any(text, &["lmstudio", "lm studio"]) {
+        return Some(IconName::AiLmStudio);
+    }
+    if text_contains_any(text, &["opencode", "open code"]) {
+        return Some(IconName::AiOpenCode);
+    }
+    None
+}
+
 #[derive(Default, Clone, PartialEq, Eq)]
 pub enum ConfigurationViewTargetAgent {
     #[default]
@@ -354,5 +472,49 @@ impl LanguageModelCostInfo {
         } else {
             SharedString::from(format!("{:.2}", cost))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_model_family_icons() {
+        assert_eq!(
+            icon_for_model_identifiers("zed.dev", "Backboard", "gpt-5", "GPT-5"),
+            Some(IconName::AiOpenAi)
+        );
+        assert_eq!(
+            icon_for_model_identifiers("zed.dev", "Backboard", "gemini-2.5-pro", "Gemini 2.5 Pro",),
+            Some(IconName::AiGemini)
+        );
+        assert_eq!(
+            icon_for_model_identifiers(
+                "anthropic",
+                "Anthropic",
+                "claude-sonnet-4",
+                "Claude Sonnet 4",
+            ),
+            Some(IconName::AiClaude)
+        );
+        assert_eq!(
+            icon_for_model_identifiers(
+                "amazon-bedrock",
+                "Amazon Bedrock",
+                "amazon.nova-pro",
+                "Nova Pro",
+            ),
+            Some(IconName::AiBedrock)
+        );
+        assert_eq!(
+            icon_for_model_identifiers(
+                "open_ai_compatible",
+                "OpenAI Compatible",
+                "custom-model",
+                "Custom Model",
+            ),
+            Some(IconName::AiOpenAiCompat)
+        );
     }
 }

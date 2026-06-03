@@ -12,6 +12,7 @@ use release_channel::{AppCommitSha, ReleaseChannel};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use settings::{RegisterSetting, Settings, SettingsStore};
+use sha2::{Digest, Sha256};
 use smol::fs::File;
 use smol::{fs, io::AsyncReadExt};
 use std::mem;
@@ -175,6 +176,8 @@ pub struct AutoUpdater {
 pub struct ReleaseAsset {
     pub version: String,
     pub url: String,
+    pub sha256: Option<String>,
+    pub size_bytes: Option<u64>,
 }
 
 struct MacOsUnmounter<'a> {
@@ -316,7 +319,7 @@ pub fn release_notes_url(cx: &mut App) -> Option<String> {
             current_version.pre = semver::Prerelease::EMPTY;
             current_version.build = semver::BuildMetadata::EMPTY;
             let release_channel = release_channel.dev_name();
-            let path = format!("/releases/{release_channel}/{current_version}");
+            let path = format!("/release_notes/v2/{release_channel}/{current_version}");
             auto_updater.client.http_client().build_url(&path)
         }
         ReleaseChannel::Nightly => "https://github.com/backboard/ide/commits/nightly/".to_string(),
@@ -339,7 +342,7 @@ impl InstallerDir {
     async fn new() -> Result<Self> {
         Ok(Self(
             tempfile::Builder::new()
-                .prefix("zed-auto-update")
+                .prefix("bbide-auto-update")
                 .tempdir()?,
         ))
     }
@@ -524,7 +527,7 @@ impl AutoUpdater {
             &this,
             release_channel,
             version,
-            "zed-remote-server",
+            "bbide-remote-server",
             os,
             arch,
             cx,
@@ -541,7 +544,7 @@ impl AutoUpdater {
 
         if smol::fs::metadata(&version_path).await.is_err() {
             log::info!(
-                "downloading zed-remote-server {os} {arch} version {}",
+                "downloading bbide-remote-server {os} {arch} version {}",
                 release.version
             );
             set_status("Downloading remote server", cx);
@@ -576,7 +579,7 @@ impl AutoUpdater {
         })?;
 
         let release =
-            Self::get_release_asset(&this, channel, version, "zed-remote-server", os, arch, cx)
+            Self::get_release_asset(&this, channel, version, "bbide-remote-server", os, arch, cx)
                 .await?;
 
         Ok(Some(release.url))
@@ -665,7 +668,7 @@ impl AutoUpdater {
         });
 
         let fetched_release_data =
-            Self::get_release_asset(&this, release_channel, None, "zed", OS, ARCH, cx).await?;
+            Self::get_release_asset(&this, release_channel, None, "bbide", OS, ARCH, cx).await?;
         let fetched_version = fetched_release_data.clone().version;
         let app_commit_sha = Ok(cx.update(|cx| AppCommitSha::try_global(cx).map(|sha| sha.full())));
         let newer_version = Self::check_if_fetched_version_is_newer(
@@ -961,9 +964,55 @@ async fn download_release(
         response.status()
     );
     smol::io::copy(response.body_mut(), &mut target_file).await?;
+    drop(target_file);
+
+    validate_downloaded_release(target_path, &release).await?;
     log::info!("downloaded update. path:{:?}", target_path);
 
     Ok(())
+}
+
+async fn validate_downloaded_release(target_path: &Path, release: &ReleaseAsset) -> Result<()> {
+    if let Some(expected_size) = release.size_bytes {
+        let actual_size = smol::fs::metadata(target_path).await?.len();
+        anyhow::ensure!(
+            actual_size == expected_size,
+            "downloaded update size mismatch: expected {expected_size} bytes, got {actual_size} bytes"
+        );
+    }
+
+    if let Some(expected_sha256) = release.sha256.as_deref() {
+        let expected_sha256 = expected_sha256
+            .trim()
+            .strip_prefix("sha256:")
+            .unwrap_or(expected_sha256.trim())
+            .to_ascii_lowercase();
+        if !expected_sha256.is_empty() {
+            let actual_sha256 = sha256_file(target_path).await?;
+            anyhow::ensure!(
+                actual_sha256 == expected_sha256,
+                "downloaded update checksum mismatch: expected {expected_sha256}, got {actual_sha256}"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn sha256_file(path: &Path) -> Result<String> {
+    let mut file = File::open(path).await?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0; 64 * 1024];
+
+    loop {
+        let read = file.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 async fn install_release_linux(
@@ -1153,7 +1202,6 @@ pub async fn finalize_auto_update_on_quit() {
 mod tests {
     use client::Client;
     use clock::FakeSystemClock;
-    use futures::channel::oneshot;
     use gpui::TestAppContext;
     use http_client::{FakeHttpClient, Response};
     use settings::default_settings;
@@ -1197,9 +1245,10 @@ mod tests {
         zlog::init_test();
         let release_available = Arc::new(AtomicBool::new(false));
 
-        let (dmg_tx, dmg_rx) = oneshot::channel::<String>();
+        let tmp_dir = Arc::new(tempdir().unwrap());
 
         cx.update(|cx| {
+            cx.set_global(db::AppDatabase::test_new());
             settings::init(cx);
 
             let current_version = semver::Version::new(0, 100, 0);
@@ -1207,32 +1256,39 @@ mod tests {
 
             let clock = Arc::new(FakeSystemClock::new());
             let release_available = Arc::clone(&release_available);
-            let dmg_rx = Arc::new(parking_lot::Mutex::new(Some(dmg_rx)));
             let fake_client_http = FakeHttpClient::create(move |req| {
-                let release_available = release_available.load(atomic::Ordering::Relaxed);
-                let dmg_rx = dmg_rx.clone();
+                let release_available = release_available.clone();
                 async move {
-                if req.uri().path() == "/releases/stable/latest/asset" {
-                    if release_available {
-                        return Ok(Response::builder().status(200).body(
-                            r#"{"version":"0.100.1","url":"https://test.example/new-download"}"#.into()
-                        ).unwrap());
-                    } else {
-                        return Ok(Response::builder().status(200).body(
-                            r#"{"version":"0.100.0","url":"https://test.example/old-download"}"#.into()
-                        ).unwrap());
+                    let release_available = release_available.load(atomic::Ordering::Relaxed);
+                    if req.uri().path() == "/releases/stable/latest/asset" {
+                        if release_available {
+                            return Ok(Response::builder().status(200).body(
+                                r#"{"version":"0.100.1","url":"https://test.example/new-download","sha256":"c4eab9d5d7696df8189f650980dcf86b511a6f0ced8645b445785733e610f245","size_bytes":19}"#.into()
+                            ).unwrap());
+                        } else {
+                            return Ok(Response::builder().status(200).body(
+                                r#"{"version":"0.100.0","url":"https://test.example/old-download"}"#.into()
+                            ).unwrap());
+                        }
+                    } else if req.uri().path() == "/new-download" {
+                        return Ok(Response::builder()
+                            .status(200)
+                            .body("<fake-bbide-update>".into())
+                            .unwrap());
                     }
-                } else if req.uri().path() == "/new-download" {
-                    return Ok(Response::builder().status(200).body({
-                        let dmg_rx = dmg_rx.lock().take().unwrap();
-                        dmg_rx.await.unwrap().into()
-                    }).unwrap());
-                }
-                Ok(Response::builder().status(404).body("".into()).unwrap())
+                    Ok(Response::builder().status(404).body("".into()).unwrap())
                 }
             });
             let client = Client::new(clock, fake_client_http, cx);
             crate::init(client, cx);
+
+            let tmp_dir = tmp_dir.clone();
+            cx.set_global(InstallOverride(Rc::new(move |target_path, _cx| {
+                let tmp_dir = tmp_dir.clone();
+                let dest_path = tmp_dir.path().join("bbide");
+                std::fs::copy(target_path, &dest_path)?;
+                Ok(Some(dest_path))
+            })));
         });
 
         let auto_updater = cx.update(|cx| AutoUpdater::get(cx).expect("auto updater should exist"));
@@ -1245,47 +1301,16 @@ mod tests {
         });
 
         release_available.store(true, atomic::Ordering::SeqCst);
-        cx.background_executor.advance_clock(POLL_INTERVAL);
-        cx.background_executor.run_until_parked();
-
-        loop {
-            cx.background_executor.timer(Duration::from_millis(0)).await;
-            cx.run_until_parked();
-            let status = auto_updater.read_with(cx, |updater, _| updater.status());
-            if !matches!(status, AutoUpdateStatus::Idle) {
-                break;
-            }
-        }
-        let status = auto_updater.read_with(cx, |updater, _| updater.status());
-        assert_eq!(
-            status,
-            AutoUpdateStatus::Downloading {
-                version: VersionCheckType::Semantic(semver::Version::new(0, 100, 1))
-            }
-        );
-
-        dmg_tx.send("<fake-zed-update>".to_owned()).unwrap();
-
-        let tmp_dir = Arc::new(tempdir().unwrap());
-
-        cx.update(|cx| {
-            let tmp_dir = tmp_dir.clone();
-            cx.set_global(InstallOverride(Rc::new(move |target_path, _cx| {
-                let tmp_dir = tmp_dir.clone();
-                let dest_path = tmp_dir.path().join("zed");
-                std::fs::copy(&target_path, &dest_path)?;
-                Ok(Some(dest_path))
-            })));
+        let pending_poll = auto_updater.update(cx, |updater, cx| {
+            updater.poll(UpdateCheckType::Manual, cx);
+            updater
+                .pending_poll
+                .take()
+                .expect("manual poll should spawn an update task")
         });
+        pending_poll.await;
+        cx.run_until_parked();
 
-        loop {
-            cx.background_executor.timer(Duration::from_millis(0)).await;
-            cx.run_until_parked();
-            let status = auto_updater.read_with(cx, |updater, _| updater.status());
-            if !matches!(status, AutoUpdateStatus::Downloading { .. }) {
-                break;
-            }
-        }
         let status = auto_updater.read_with(cx, |updater, _| updater.status());
         assert_eq!(
             status,
@@ -1296,8 +1321,79 @@ mod tests {
         let will_restart = cx.expect_restart();
         cx.update(|cx| cx.restart());
         let path = will_restart.await.unwrap().unwrap();
-        assert_eq!(path, tmp_dir.path().join("zed"));
-        assert_eq!(std::fs::read_to_string(path).unwrap(), "<fake-zed-update>");
+        assert_eq!(path, tmp_dir.path().join("bbide"));
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            "<fake-bbide-update>"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_download_release_accepts_checksum_and_size(cx: &mut TestAppContext) {
+        cx.background_executor.allow_parking();
+
+        let fake_client_http = FakeHttpClient::create(|req| async move {
+            if req.uri().path() == "/download" {
+                return Ok(Response::builder()
+                    .status(200)
+                    .body("<fake-bbide-update>".into())
+                    .unwrap());
+            }
+            Ok(Response::builder().status(404).body("".into()).unwrap())
+        });
+
+        let tmp_dir = tempdir().unwrap();
+        let target_path = tmp_dir.path().join("Backboard Studio.dmg");
+        let release = ReleaseAsset {
+            version: "0.100.1".to_string(),
+            url: "https://test.example/download".to_string(),
+            sha256: Some(
+                "sha256:c4eab9d5d7696df8189f650980dcf86b511a6f0ced8645b445785733e610f245"
+                    .to_string(),
+            ),
+            size_bytes: Some(19),
+        };
+
+        download_release(&target_path, release, fake_client_http)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(target_path).unwrap(),
+            "<fake-bbide-update>"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_download_release_rejects_checksum_mismatch(cx: &mut TestAppContext) {
+        cx.background_executor.allow_parking();
+
+        let fake_client_http = FakeHttpClient::create(|req| async move {
+            if req.uri().path() == "/bad-download" {
+                return Ok(Response::builder()
+                    .status(200)
+                    .body("<fake-bbide-update>".into())
+                    .unwrap());
+            }
+            Ok(Response::builder().status(404).body("".into()).unwrap())
+        });
+
+        let tmp_dir = tempdir().unwrap();
+        let target_path = tmp_dir.path().join("Backboard Studio.dmg");
+        let release = ReleaseAsset {
+            version: "0.100.1".to_string(),
+            url: "https://test.example/bad-download".to_string(),
+            sha256: Some(
+                "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            ),
+            size_bytes: Some(19),
+        };
+
+        let error = download_release(&target_path, release, fake_client_http)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("checksum mismatch"));
     }
 
     #[test]

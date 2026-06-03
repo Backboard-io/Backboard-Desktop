@@ -5,7 +5,7 @@ use crate::{
 };
 use fs::Fs;
 use gpui::{Entity, FocusHandle, SharedString};
-use language_model::IconOrSvg;
+use language_model::{IconOrSvg, icon_for_configured_model};
 use picker::popover_menu::PickerPopoverMenu;
 use settings::update_settings_file;
 use std::sync::Arc;
@@ -93,7 +93,7 @@ impl Render for AgentModelSelector {
             .map(|model| model.model.name().0)
             .unwrap_or_else(|| SharedString::from("Select a Model"));
 
-        let provider_icon = model.as_ref().map(|model| model.provider.icon());
+        let model_icon = model.as_ref().map(icon_for_configured_model);
         let color = if self.menu_handle.is_deployed() {
             Color::Accent
         } else {
@@ -117,7 +117,7 @@ impl Render for AgentModelSelector {
             }
         });
 
-        let has_provider_icon = provider_icon.is_some();
+        let has_model_icon = model_icon.is_some();
         PickerPopoverMenu::new(
             self.selector.clone(),
             ButtonLike::new("active-model")
@@ -127,7 +127,7 @@ impl Render for AgentModelSelector {
                     h_flex()
                         .justify_center()
                         .items_center()
-                        .when_some(provider_icon, |this, icon| {
+                        .when_some(model_icon, |this, icon| {
                             this.child(
                                 match icon {
                                     IconOrSvg::Svg(path) => Icon::from_external_svg(path),
@@ -137,7 +137,7 @@ impl Render for AgentModelSelector {
                                 .size(IconSize::XSmall),
                             )
                         })
-                        .when(!has_provider_icon, |this| {
+                        .when(!has_model_icon, |this| {
                             this.child(
                                 Icon::new(IconName::ChevronDown)
                                     .color(color)

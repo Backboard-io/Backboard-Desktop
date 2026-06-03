@@ -121,7 +121,12 @@ pub async fn run_prompt(
     let assistant_started = Instant::now();
     let thread_id = state
         .clone()
-        .ensure_thread_binding(&params.session_id, turn_tools.clone(), cx)
+        .ensure_thread_binding(
+            &params.session_id,
+            turn_tools.clone(),
+            prompt_title(&message),
+            cx,
+        )
         .await?;
     state.record_turn_timing(&params.session_id, "assistant_create_ms", assistant_started);
     let provider = Some(runtime.provider.clone());
@@ -1329,6 +1334,14 @@ fn prompt_parts(blocks: &[acp::ContentBlock]) -> PromptParts {
     PromptParts { text, audio }
 }
 
+fn prompt_title(prompt: &str) -> Option<String> {
+    prompt
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| util::truncate_and_trailoff(line, 200))
+}
+
 fn audio_attachment_from_block(block: &acp::ContentBlock) -> Option<AudioAttachment> {
     let acp::ContentBlock::Audio(audio) = block else {
         return None;
@@ -1614,6 +1627,19 @@ fn strip_ide_context(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompt_title_uses_first_non_empty_line() {
+        assert_eq!(
+            prompt_title("\n\n  Fix the right panel title\nand keep going").as_deref(),
+            Some("Fix the right panel title")
+        );
+    }
+
+    #[test]
+    fn prompt_title_ignores_empty_prompt() {
+        assert_eq!(prompt_title("  \n\t").as_deref(), None);
+    }
 
     #[test]
     fn fast_intensity_omits_thinking_payload() {

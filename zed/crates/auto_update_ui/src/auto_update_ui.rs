@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use agent_settings::{AgentSettings, WindowLayout};
-use auto_update::{AutoUpdater, release_notes_url};
+use auto_update::{AutoUpdateStatus, AutoUpdater, VersionCheckType, release_notes_url};
 use db::kvp::Dismissable;
 use editor::{Editor, MultiBuffer};
 use fs::Fs;
@@ -50,6 +50,15 @@ pub fn init(cx: &mut App) {
                 show_update_notification(cx);
             });
         }
+
+        if let Some(updater) = AutoUpdater::get(cx) {
+            cx.observe(&updater, |workspace: &mut Workspace, updater, cx| {
+                if let AutoUpdateStatus::Updated { version } = updater.read(cx).status() {
+                    show_update_ready_notification(workspace, &version, cx);
+                }
+            })
+            .detach();
+        }
     })
     .detach();
 }
@@ -87,6 +96,15 @@ fn view_release_notes_locally(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
+    view_release_notes_locally_for_version(workspace, None, window, cx);
+}
+
+fn view_release_notes_locally_for_version(
+    workspace: &mut Workspace,
+    version_override: Option<String>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
     let release_channel = ReleaseChannel::global(cx);
 
     if matches!(
@@ -99,11 +117,11 @@ fn view_release_notes_locally(
         return;
     }
 
-    let version = AppVersion::global(cx).to_string();
+    let version = version_override.unwrap_or_else(|| AppVersion::global(cx).to_string());
 
     let client = client::Client::global(cx).http_client();
     let url = client.build_url(&format!(
-        "/api/release_notes/v2/{}/{}",
+        "/release_notes/v2/{}/{}",
         release_channel.dev_name(),
         version
     ));
@@ -364,6 +382,69 @@ impl Render for AnnouncementToastNotification {
 }
 
 struct UpdateNotification;
+struct UpdateReadyNotification;
+
+fn update_version_label(version: &VersionCheckType) -> SharedString {
+    match version {
+        VersionCheckType::Sha(sha) => format!("{}…", sha.short()).into(),
+        VersionCheckType::Semantic(version) => version.to_string().into(),
+    }
+}
+
+fn update_release_notes_version(version: &VersionCheckType) -> String {
+    match version {
+        VersionCheckType::Sha(sha) => sha.full(),
+        VersionCheckType::Semantic(version) => version.to_string(),
+    }
+}
+
+fn show_update_ready_notification(
+    workspace: &mut Workspace,
+    version: &VersionCheckType,
+    cx: &mut Context<Workspace>,
+) {
+    let workspace_handle = cx.entity().downgrade();
+    let version_label = update_version_label(version);
+    let release_notes_version = update_release_notes_version(version);
+    workspace.show_notification(
+        NotificationId::unique::<UpdateReadyNotification>(),
+        cx,
+        move |cx| {
+            let workspace_handle = workspace_handle.clone();
+            let version_label = version_label.clone();
+            let release_notes_version = release_notes_version.clone();
+            cx.new(|cx| {
+                MessageNotification::new(
+                    format!("Backboard Studio {version_label} is ready to install."),
+                    cx,
+                )
+                .primary_message("Restart")
+                .primary_icon(IconName::ArrowCircle)
+                .primary_on_click(|_, cx| {
+                    workspace::reload(cx);
+                    cx.emit(DismissEvent);
+                })
+                .secondary_message("Release Notes")
+                .secondary_icon(IconName::Book)
+                .secondary_on_click(move |window, cx| {
+                    if let Some(workspace) = workspace_handle.upgrade() {
+                        let release_notes_version = release_notes_version.clone();
+                        workspace.update(cx, |workspace, cx| {
+                            crate::view_release_notes_locally_for_version(
+                                workspace,
+                                Some(release_notes_version),
+                                window,
+                                cx,
+                            );
+                        });
+                    }
+                    cx.emit(DismissEvent);
+                })
+                .show_suppress_button(false)
+            })
+        },
+    );
+}
 
 fn show_update_notification(cx: &mut App) {
     let Some(updater) = AutoUpdater::get(cx) else {

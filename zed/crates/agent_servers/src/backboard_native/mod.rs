@@ -33,6 +33,7 @@ use anyhow::{Context as _, Result, anyhow};
 use chrono::Utc;
 use collections::{HashMap, IndexMap};
 use gpui::{App, AppContext as _, Entity, SharedString, Task, WeakEntity};
+use language_model::icon_for_model_identifiers;
 use project::{AgentId, Project, context_server_store::ContextServerStore};
 use serde_json::{Map, Value, json};
 use ui::IconName;
@@ -582,12 +583,7 @@ impl BackboardNativeState {
                     thread_id: None,
                     provider: session.provider.clone(),
                     model: session.model.clone(),
-                    title: session
-                        .workspace
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("Backboard")
-                        .to_string(),
+                    title: native_session_record_title(session, cx),
                     session_id: session_id.to_string(),
                     updated_at: Utc::now().to_rfc3339(),
                 },
@@ -829,6 +825,7 @@ impl BackboardNativeState {
         self: Rc<Self>,
         session_id: &acp::SessionId,
         tools: Vec<Value>,
+        title: Option<String>,
         cx: &mut gpui::AsyncApp,
     ) -> Result<String> {
         if let Some(thread_id) = self.session_thread_id(session_id) {
@@ -868,12 +865,7 @@ impl BackboardNativeState {
             thread_id: Some(thread_id.clone()),
             provider: Some(runtime.provider.clone()),
             model: Some(runtime.model.clone()),
-            title: runtime
-                .workspace
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("Backboard")
-                .to_string(),
+            title: title.unwrap_or_else(|| "Backboard".to_string()),
             session_id: session_id.to_string(),
             updated_at: Utc::now().to_rfc3339(),
         };
@@ -898,6 +890,15 @@ impl BackboardNativeState {
 
         Ok(thread_id)
     }
+}
+
+fn native_session_record_title(session: &NativeSession, cx: &App) -> String {
+    session
+        .thread
+        .upgrade()
+        .and_then(|thread| thread.read(cx).title().map(|title| title.to_string()))
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or_else(|| "Backboard".to_string())
 }
 
 fn active_native_snapshot_mut(session: &mut NativeSession) -> Option<&mut NativeTurnSnapshot> {
@@ -1679,14 +1680,15 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                                 );
                             }
                             let id = format!("{}/{}", model.provider, model.name);
+                            let display_name = model
+                                .display_name
+                                .clone()
+                                .unwrap_or_else(|| model.name.clone());
                             let mut info = AgentModelInfo {
                                 id: acp::ModelId::new(id),
-                                name: model
-                                    .display_name
-                                    .unwrap_or_else(|| model.name.clone())
-                                    .into(),
+                                name: display_name.clone().into(),
                                 description: Some(model.provider.clone().into()),
-                                icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
+                                icon: Some(model_icon(&model.provider, &model.name, Some(&display_name))),
                                 is_latest: false,
                                 cost: None,
                             };
@@ -1733,7 +1735,7 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
         })
     }
 
-    fn select_model(&self, model_id: acp::ModelId, _cx: &mut App) -> Task<Result<()>> {
+    fn select_model(&self, model_id: acp::ModelId, cx: &mut App) -> Task<Result<()>> {
         let model_id = model_id.to_string();
         let (provider, model) = split_model_id(&model_id);
         if let Some(session) = self.state.sessions.borrow_mut().get_mut(&self.session_id) {
@@ -1754,12 +1756,7 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                     thread_id: Some(thread_id),
                     provider: Some(provider.clone()),
                     model: Some(model.clone()),
-                    title: session
-                        .workspace
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("Backboard")
-                        .to_string(),
+                    title: native_session_record_title(session, cx),
                     session_id: self.session_id.to_string(),
                     updated_at: Utc::now().to_rfc3339(),
                 };
@@ -1791,7 +1788,7 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
             id: acp::ModelId::new(format!("{provider}/{model}")),
             name: model.into(),
             description: Some(provider.into()),
-            icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
+            icon: Some(model_icon(&provider, &model, None)),
             is_latest: false,
             cost: None,
         }))
@@ -1804,10 +1801,21 @@ fn fallback_agent_model_info(config: &BackboardConfig) -> AgentModelInfo {
         id: acp::ModelId::new(format!("{provider}/{model}")),
         name: model.into(),
         description: Some(provider.into()),
-        icon: Some(acp_thread::AgentModelIcon::Named(IconName::Sparkle)),
+        icon: Some(model_icon(&provider, &model, None)),
         is_latest: false,
         cost: None,
     }
+}
+
+fn model_icon(
+    provider: &str,
+    model: &str,
+    display_name: Option<&str>,
+) -> acp_thread::AgentModelIcon {
+    acp_thread::AgentModelIcon::Named(
+        icon_for_model_identifiers(provider, provider, model, display_name.unwrap_or(model))
+            .unwrap_or(IconName::Sparkle),
+    )
 }
 
 struct BackboardSessionList {
