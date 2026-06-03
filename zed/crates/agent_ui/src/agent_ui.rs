@@ -106,34 +106,34 @@ const RECOMMENDED_MCP_ARCHIVE_FILENAME: &str = "archive.tar.gz";
 const RECOMMENDED_MCP_EXTENSIONS_RAW: &[RecommendedMcpExtension] = &[
     RecommendedMcpExtension {
         id: "mcp-server-shopify-dev",
-        repository: "https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev",
+        repository: Some("https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev"),
     },
     RecommendedMcpExtension {
         id: "mcp-server-slack",
-        repository: "https://github.com/semioz/zed-slack-mcp",
+        repository: None,
     },
     RecommendedMcpExtension {
         id: "mcp-server-supabase",
-        repository: "https://github.com/maximoffua/zed-mcp-server-supabase",
+        repository: Some("https://github.com/maximoffua/zed-mcp-server-supabase"),
     },
     RecommendedMcpExtension {
         id: "mcp-server-figma",
-        repository: "https://github.com/LoamStudios/zed-mcp-server-figma",
+        repository: Some("https://github.com/LoamStudios/zed-mcp-server-figma"),
     },
     RecommendedMcpExtension {
         id: "mcp-server-github",
-        repository: "https://github.com/LoamStudios/zed-mcp-server-github",
+        repository: None,
     },
     RecommendedMcpExtension {
         id: "mcp-server-shopify-dev",
-        repository: "https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev",
+        repository: Some("https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev"),
     },
 ];
 
 #[derive(Clone, Copy)]
 struct RecommendedMcpExtension {
     id: &'static str,
-    repository: &'static str,
+    repository: Option<&'static str>,
 }
 
 fn recommended_mcp_extensions() -> Vec<RecommendedMcpExtension> {
@@ -1009,11 +1009,11 @@ mod tests {
         assert_eq!(
             repositories,
             vec![
-                "https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev",
-                "https://github.com/semioz/zed-slack-mcp",
-                "https://github.com/maximoffua/zed-mcp-server-supabase",
-                "https://github.com/LoamStudios/zed-mcp-server-figma",
-                "https://github.com/LoamStudios/zed-mcp-server-github",
+                Some("https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev"),
+                None,
+                Some("https://github.com/maximoffua/zed-mcp-server-supabase"),
+                Some("https://github.com/LoamStudios/zed-mcp-server-figma"),
+                None,
             ]
         );
 

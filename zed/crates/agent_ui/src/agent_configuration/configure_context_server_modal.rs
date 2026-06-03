@@ -20,14 +20,14 @@ use project::{
     project_settings::{ContextServerSettings, ProjectSettings},
     worktree_store::WorktreeStore,
 };
-use serde::Deserialize;
 use settings::{Settings as _, update_settings_file};
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use theme_settings::ThemeSettings;
 use ui::{
     CommonAnimationExt, KeyBinding, Modal, ModalFooter, ModalHeader, Section, Tooltip,
     WithScrollbar, prelude::*,
 };
+use ui_input::InputField;
 use util::ResultExt as _;
 use workspace::{ModalView, Workspace};
 
@@ -51,14 +51,517 @@ enum ConfigurationTarget {
     },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConfigurationFormKind {
+    Local,
+    Remote,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConfigurationViewMode {
+    Form,
+    Json,
+}
+
+struct CustomContextServerConfiguration {
+    form: ContextServerForm,
+    editor: Entity<Editor>,
+    view_mode: ConfigurationViewMode,
+}
+
+impl CustomContextServerConfiguration {
+    fn new(
+        kind: ConfigurationFormKind,
+        id: Option<ContextServerId>,
+        command: Option<ContextServerCommand>,
+        url: Option<String>,
+        headers: HashMap<String, String>,
+        jsonc_language: Option<Arc<Language>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
+        let form = ContextServerForm::new(
+            kind,
+            id,
+            command,
+            url,
+            headers,
+            jsonc_language.clone(),
+            window,
+            cx,
+        );
+        let editor = create_json_editor(form.to_json_text(cx), jsonc_language, window, cx);
+
+        Self {
+            form,
+            editor,
+            view_mode: ConfigurationViewMode::Form,
+        }
+    }
+
+    fn output(&self, cx: &mut App) -> Result<(ContextServerId, ContextServerSettings)> {
+        match self.view_mode {
+            ConfigurationViewMode::Form => self.form.output(cx),
+            ConfigurationViewMode::Json => parse_json_input(&self.editor.read(cx).text(cx)),
+        }
+    }
+
+    fn sync_form_to_json(&self, window: &mut Window, cx: &mut App) {
+        let json = self.form.to_json_text(cx);
+        self.editor
+            .update(cx, |editor, cx| editor.set_text(json, window, cx));
+    }
+
+    fn sync_json_to_form(&mut self, window: &mut Window, cx: &mut App) -> Result<()> {
+        let (id, settings) = parse_json_input(&self.editor.read(cx).text(cx))?;
+        self.form.apply_settings(id, settings, window, cx);
+        Ok(())
+    }
+}
+
+struct ContextServerForm {
+    kind: ConfigurationFormKind,
+    name: Entity<InputField>,
+    command: Entity<InputField>,
+    args: Entity<Editor>,
+    env: Entity<Editor>,
+    url: Entity<InputField>,
+    headers: Entity<Editor>,
+}
+
+impl ContextServerForm {
+    fn new(
+        kind: ConfigurationFormKind,
+        id: Option<ContextServerId>,
+        command: Option<ContextServerCommand>,
+        url: Option<String>,
+        headers: HashMap<String, String>,
+        jsonc_language: Option<Arc<Language>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
+        let name = create_text_input(
+            "Name",
+            match kind {
+                ConfigurationFormKind::Local => "filesystem",
+                ConfigurationFormKind::Remote => "remote-server",
+            },
+            id.as_ref().map(|id| id.0.as_ref()),
+            1,
+            window,
+            cx,
+        );
+
+        let (command_text, args_text, env_text) = if let Some(command) = command {
+            (
+                Some(command.path.to_string_lossy().into_owned()),
+                serde_json::to_string_pretty(&command.args).unwrap_or_else(|_| "[]".to_string()),
+                serde_json::to_string_pretty(&command.env.unwrap_or_default())
+                    .unwrap_or_else(|_| "{}".to_string()),
+            )
+        } else {
+            (None, String::new(), String::new())
+        };
+
+        let command = create_text_input("Command", "npx", command_text.as_deref(), 2, window, cx);
+        let args = create_parameter_editor(
+            args_text,
+            "Arguments, for example: -y @modelcontextprotocol/server-filesystem",
+            2,
+            6,
+            jsonc_language.clone(),
+            window,
+            cx,
+        );
+        let env = create_parameter_editor(
+            env_text,
+            "Environment variables, for example: API_KEY=...",
+            2,
+            6,
+            jsonc_language.clone(),
+            window,
+            cx,
+        );
+
+        let url = create_text_input(
+            "URL",
+            "https://example.com/mcp",
+            url.as_deref(),
+            3,
+            window,
+            cx,
+        );
+        let headers = create_parameter_editor(
+            if headers.is_empty() {
+                String::new()
+            } else {
+                serde_json::to_string_pretty(&headers).unwrap_or_else(|_| "{}".to_string())
+            },
+            "Headers, for example: Authorization: Bearer <token>",
+            4,
+            8,
+            jsonc_language,
+            window,
+            cx,
+        );
+
+        Self {
+            kind,
+            name,
+            command,
+            args,
+            env,
+            url,
+            headers,
+        }
+    }
+
+    fn output(&self, cx: &mut App) -> Result<(ContextServerId, ContextServerSettings)> {
+        let name = self.name.read(cx).text(cx).trim().to_string();
+        anyhow::ensure!(!name.is_empty(), "Server name is required");
+
+        match self.kind {
+            ConfigurationFormKind::Local => {
+                let command = self.command.read(cx).text(cx).trim().to_string();
+                anyhow::ensure!(!command.is_empty(), "Command is required");
+
+                let args = parse_args_text(&self.args.read(cx).text(cx))?;
+                let env = parse_key_value_text(&self.env.read(cx).text(cx), "environment")?;
+
+                Ok((
+                    ContextServerId(name.into()),
+                    ContextServerSettings::Stdio {
+                        enabled: true,
+                        remote: false,
+                        command: ContextServerCommand {
+                            path: PathBuf::from(command),
+                            args,
+                            env: (!env.is_empty()).then_some(env),
+                            timeout: None,
+                        },
+                    },
+                ))
+            }
+            ConfigurationFormKind::Remote => {
+                let url = self.url.read(cx).text(cx).trim().to_string();
+                anyhow::ensure!(!url.is_empty(), "URL is required");
+                let headers = parse_key_value_text(&self.headers.read(cx).text(cx), "headers")?;
+
+                Ok((
+                    ContextServerId(name.into()),
+                    ContextServerSettings::Http {
+                        enabled: true,
+                        url,
+                        headers,
+                        timeout: None,
+                    },
+                ))
+            }
+        }
+    }
+
+    fn to_json_text(&self, cx: &App) -> String {
+        let name = self.name.read(cx).text(cx).trim().to_string();
+        match self.kind {
+            ConfigurationFormKind::Local => {
+                let command = self.command.read(cx).text(cx).trim().to_string();
+                let args = parse_args_text(&self.args.read(cx).text(cx)).unwrap_or_default();
+                let env = parse_key_value_text(&self.env.read(cx).text(cx), "environment")
+                    .unwrap_or_default();
+                context_server_input(
+                    if name.is_empty() {
+                        None
+                    } else {
+                        Some(ContextServerId(name.into()))
+                    },
+                    ContextServerCommand {
+                        path: PathBuf::from(command),
+                        args,
+                        env: (!env.is_empty()).then_some(env),
+                        timeout: None,
+                    },
+                )
+            }
+            ConfigurationFormKind::Remote => {
+                let url = self.url.read(cx).text(cx).trim().to_string();
+                let headers = parse_key_value_text(&self.headers.read(cx).text(cx), "headers")
+                    .unwrap_or_default();
+                context_server_http_input(
+                    if name.is_empty() {
+                        None
+                    } else {
+                        Some(ContextServerId(name.into()))
+                    },
+                    url,
+                    headers,
+                )
+            }
+        }
+    }
+
+    fn apply_settings(
+        &mut self,
+        id: ContextServerId,
+        settings: ContextServerSettings,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.name.update(cx, |input, cx| {
+            input.set_text(id.0.as_ref(), window, cx);
+        });
+
+        match settings {
+            ContextServerSettings::Stdio { command, .. } => {
+                self.kind = ConfigurationFormKind::Local;
+                let command_text = command.path.to_string_lossy().into_owned();
+                let args_text =
+                    serde_json::to_string_pretty(&command.args).unwrap_or_else(|_| "[]".into());
+                let env_text = serde_json::to_string_pretty(&command.env.unwrap_or_default())
+                    .unwrap_or_else(|_| "{}".into());
+
+                self.command.update(cx, |input, cx| {
+                    input.set_text(&command_text, window, cx);
+                });
+                self.args
+                    .update(cx, |editor, cx| editor.set_text(args_text, window, cx));
+                self.env
+                    .update(cx, |editor, cx| editor.set_text(env_text, window, cx));
+            }
+            ContextServerSettings::Http { url, headers, .. } => {
+                self.kind = ConfigurationFormKind::Remote;
+                let headers_text =
+                    serde_json::to_string_pretty(&headers).unwrap_or_else(|_| "{}".into());
+
+                self.url.update(cx, |input, cx| {
+                    input.set_text(&url, window, cx);
+                });
+                self.headers
+                    .update(cx, |editor, cx| editor.set_text(headers_text, window, cx));
+            }
+            ContextServerSettings::Extension { .. } => {}
+        }
+    }
+}
+
+fn create_text_input(
+    label: impl Into<SharedString>,
+    placeholder: &str,
+    text: Option<&str>,
+    tab_index: isize,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<InputField> {
+    cx.new(|cx| {
+        let input = InputField::new(window, cx, placeholder)
+            .label(label)
+            .tab_index(tab_index)
+            .tab_stop(true);
+
+        if let Some(text) = text {
+            input.set_text(text, window, cx);
+        }
+
+        input
+    })
+}
+
+fn create_parameter_editor(
+    text: String,
+    placeholder: &str,
+    min_lines: usize,
+    max_lines: usize,
+    jsonc_language: Option<Arc<Language>>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<Editor> {
+    cx.new(|cx| {
+        let mut editor = Editor::auto_height(min_lines, max_lines, window, cx);
+        editor.set_text(text, window, cx);
+        editor.set_placeholder_text(placeholder, window, cx);
+        editor.set_show_gutter(false, cx);
+        editor.set_soft_wrap_mode(language::language_settings::SoftWrap::EditorWidth, cx);
+        if let Some(buffer) = editor.buffer().read(cx).as_singleton() {
+            buffer.update(cx, |buffer, cx| buffer.set_language(jsonc_language, cx))
+        }
+        editor
+    })
+}
+
+fn create_json_editor(
+    json: String,
+    jsonc_language: Option<Arc<Language>>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<Editor> {
+    cx.new(|cx| {
+        let mut editor = Editor::auto_height(4, 16, window, cx);
+        editor.set_text(json, window, cx);
+        editor.set_show_gutter(false, cx);
+        editor.set_soft_wrap_mode(language::language_settings::SoftWrap::None, cx);
+        if let Some(buffer) = editor.buffer().read(cx).as_singleton() {
+            buffer.update(cx, |buffer, cx| buffer.set_language(jsonc_language, cx))
+        }
+        editor
+    })
+}
+
+fn parse_args_text(text: &str) -> Result<Vec<String>> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if text.starts_with('[') {
+        return serde_json_lenient::from_str::<Vec<String>>(text)
+            .context("Arguments must be a JSON array of strings");
+    }
+
+    Ok(text.split_whitespace().map(str::to_string).collect())
+}
+
+fn parse_key_value_text(text: &str, label: &str) -> Result<HashMap<String, String>> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(HashMap::default());
+    }
+
+    if text.starts_with('{') {
+        return serde_json_lenient::from_str::<HashMap<String, String>>(text)
+            .with_context(|| format!("{label} must be a JSON object with string values"));
+    }
+
+    let mut values = HashMap::default();
+    for (ix, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("//") {
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=').or_else(|| line.split_once(':')) else {
+            anyhow::bail!(
+                "{} line {} must use KEY=VALUE or Header: Value",
+                label,
+                ix + 1
+            );
+        };
+        let key = key.trim();
+        anyhow::ensure!(
+            !key.is_empty(),
+            "{} line {} has an empty key",
+            label,
+            ix + 1
+        );
+        values.insert(key.to_string(), value.trim().to_string());
+    }
+
+    Ok(values)
+}
+
+fn context_server_input(id: Option<ContextServerId>, command: ContextServerCommand) -> String {
+    let name = id
+        .map(|id| id.0.to_string())
+        .unwrap_or_else(|| "some-mcp-server".to_string());
+    let name = serde_json::to_string(&name).unwrap_or_else(|_| "\"some-mcp-server\"".to_string());
+    let command_path = serde_json::to_string(&command.path).unwrap_or_else(|_| "\"\"".to_string());
+    let args = serde_json::to_string_pretty(&command.args).unwrap_or_else(|_| "[]".to_string());
+    let env = serde_json::to_string_pretty(&command.env.unwrap_or_default())
+        .unwrap_or_else(|_| "{}".to_string());
+
+    format!(
+        r#"{{
+  /// Configure an MCP server that runs locally via stdin/stdout
+  ///
+  /// The name of your MCP server
+  {name}: {{
+    /// The command which runs the MCP server
+    "command": {command_path},
+    /// The arguments to pass to the MCP server
+    "args": {args},
+    /// The environment variables to set
+    "env": {env}
+  }}
+}}"#
+    )
+}
+
+fn context_server_http_input(
+    id: Option<ContextServerId>,
+    url: String,
+    headers: HashMap<String, String>,
+) -> String {
+    let name = id
+        .map(|id| id.0.to_string())
+        .unwrap_or_else(|| "some-remote-server".to_string());
+    let name =
+        serde_json::to_string(&name).unwrap_or_else(|_| "\"some-remote-server\"".to_string());
+    let url = serde_json::to_string(&url).unwrap_or_else(|_| "\"\"".to_string());
+    let headers = serde_json::to_string_pretty(&headers).unwrap_or_else(|_| "{}".to_string());
+
+    format!(
+        r#"{{
+  /// Configure an MCP server that you connect to over HTTP
+  ///
+  /// The name of your remote MCP server
+  {name}: {{
+    /// The URL of the remote MCP server
+    "url": {url},
+    /// Any headers to send along
+    "headers": {headers}
+  }}
+}}"#
+    )
+}
+
+fn parse_json_input(text: &str) -> Result<(ContextServerId, ContextServerSettings)> {
+    let value: serde_json::Value = serde_json_lenient::from_str(text)?;
+    let object = value.as_object().context("Expected object")?;
+    anyhow::ensure!(
+        object.len() == 1,
+        "Expected exactly one context server configuration"
+    );
+
+    let (context_server_name, value) = object.into_iter().next().unwrap();
+    if value.get("url").is_some() {
+        let url = value
+            .get("url")
+            .and_then(|value| value.as_str())
+            .context("Remote MCP server URL is required")?
+            .to_string();
+        let headers = value
+            .get("headers")
+            .map(|headers| serde_json::from_value::<HashMap<String, String>>(headers.clone()))
+            .transpose()
+            .context("Headers must be an object with string values")?
+            .unwrap_or_default();
+
+        Ok((
+            ContextServerId(context_server_name.clone().into()),
+            ContextServerSettings::Http {
+                enabled: true,
+                url,
+                headers,
+                timeout: None,
+            },
+        ))
+    } else {
+        let command: ContextServerCommand = serde_json::from_value(value.clone())?;
+        Ok((
+            ContextServerId(context_server_name.clone().into()),
+            ContextServerSettings::Stdio {
+                enabled: true,
+                remote: false,
+                command,
+            },
+        ))
+    }
+}
+
 enum ConfigurationSource {
     New {
-        editor: Entity<Editor>,
-        is_http: bool,
+        configuration: CustomContextServerConfiguration,
     },
     Existing {
-        editor: Entity<Editor>,
-        is_http: bool,
+        configuration: CustomContextServerConfiguration,
     },
     Extension {
         id: ContextServerId,
@@ -85,50 +588,46 @@ impl ConfigurationSource {
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
-        fn create_editor(
-            json: String,
-            jsonc_language: Option<Arc<Language>>,
-            window: &mut Window,
-            cx: &mut App,
-        ) -> Entity<Editor> {
-            cx.new(|cx| {
-                let mut editor = Editor::auto_height(4, 16, window, cx);
-                editor.set_text(json, window, cx);
-                editor.set_show_gutter(false, cx);
-                editor.set_soft_wrap_mode(language::language_settings::SoftWrap::None, cx);
-                if let Some(buffer) = editor.buffer().read(cx).as_singleton() {
-                    buffer.update(cx, |buffer, cx| buffer.set_language(jsonc_language, cx))
-                }
-                editor
-            })
-        }
-
         match target {
             ConfigurationTarget::New => ConfigurationSource::New {
-                editor: create_editor(context_server_input(None), jsonc_language, window, cx),
-                is_http: false,
-            },
-            ConfigurationTarget::Existing { id, command } => ConfigurationSource::Existing {
-                editor: create_editor(
-                    context_server_input(Some((id, command))),
+                configuration: CustomContextServerConfiguration::new(
+                    ConfigurationFormKind::Local,
+                    None,
+                    None,
+                    None,
+                    HashMap::default(),
                     jsonc_language,
                     window,
                     cx,
                 ),
-                is_http: false,
+            },
+            ConfigurationTarget::Existing { id, command } => ConfigurationSource::Existing {
+                configuration: CustomContextServerConfiguration::new(
+                    ConfigurationFormKind::Local,
+                    Some(id),
+                    Some(command),
+                    None,
+                    HashMap::default(),
+                    jsonc_language,
+                    window,
+                    cx,
+                ),
             },
             ConfigurationTarget::ExistingHttp {
                 id,
                 url,
                 headers: auth,
             } => ConfigurationSource::Existing {
-                editor: create_editor(
-                    context_server_http_input(Some((id, url, auth))),
+                configuration: CustomContextServerConfiguration::new(
+                    ConfigurationFormKind::Remote,
+                    Some(id),
+                    None,
+                    Some(url),
+                    auth,
                     jsonc_language,
                     window,
                     cx,
                 ),
-                is_http: true,
             },
             ConfigurationTarget::Extension {
                 id,
@@ -156,7 +655,12 @@ impl ConfigurationSource {
                     installation_instructions,
                     settings_validator,
                     editor: installation.map(|installation| {
-                        create_editor(installation.default_settings, jsonc_language, window, cx)
+                        create_json_editor(
+                            installation.default_settings,
+                            jsonc_language,
+                            window,
+                            cx,
+                        )
                     }),
                 }
             }
@@ -165,33 +669,8 @@ impl ConfigurationSource {
 
     fn output(&self, cx: &mut App) -> Result<(ContextServerId, ContextServerSettings)> {
         match self {
-            ConfigurationSource::New { editor, is_http }
-            | ConfigurationSource::Existing { editor, is_http } => {
-                if *is_http {
-                    parse_http_input(&editor.read(cx).text(cx)).map(|(id, url, auth)| {
-                        (
-                            id,
-                            ContextServerSettings::Http {
-                                enabled: true,
-                                url,
-                                headers: auth,
-                                timeout: None,
-                            },
-                        )
-                    })
-                } else {
-                    parse_input(&editor.read(cx).text(cx)).map(|(id, command)| {
-                        (
-                            id,
-                            ContextServerSettings::Stdio {
-                                enabled: true,
-                                remote: false,
-                                command,
-                            },
-                        )
-                    })
-                }
-            }
+            ConfigurationSource::New { configuration }
+            | ConfigurationSource::Existing { configuration } => configuration.output(cx),
             ConfigurationSource::Extension {
                 id,
                 editor,
@@ -220,101 +699,6 @@ impl ConfigurationSource {
             }
         }
     }
-}
-
-fn context_server_input(existing: Option<(ContextServerId, ContextServerCommand)>) -> String {
-    let (name, command, args, env) = match existing {
-        Some((id, cmd)) => {
-            let args = serde_json::to_string(&cmd.args).unwrap();
-            let env = serde_json::to_string(&cmd.env.unwrap_or_default()).unwrap();
-            let cmd_path = serde_json::to_string(&cmd.path).unwrap();
-            (id.0.to_string(), cmd_path, args, env)
-        }
-        None => (
-            "some-mcp-server".to_string(),
-            "".to_string(),
-            "[]".to_string(),
-            "{}".to_string(),
-        ),
-    };
-
-    format!(
-        r#"{{
-  /// Configure an MCP server that runs locally via stdin/stdout
-  ///
-  /// The name of your MCP server
-  "{name}": {{
-    /// The command which runs the MCP server
-    "command": {command},
-    /// The arguments to pass to the MCP server
-    "args": {args},
-    /// The environment variables to set
-    "env": {env}
-  }}
-}}"#
-    )
-}
-
-fn context_server_http_input(
-    existing: Option<(ContextServerId, String, HashMap<String, String>)>,
-) -> String {
-    let (name, url, headers) = match existing {
-        Some((id, url, headers)) => {
-            let header = if headers.is_empty() {
-                r#"// "Authorization": "Bearer <token>"#.to_string()
-            } else {
-                let json = serde_json::to_string_pretty(&headers).unwrap();
-                let mut lines = json.split("\n").collect::<Vec<_>>();
-                if lines.len() > 1 {
-                    lines.remove(0);
-                    lines.pop();
-                }
-                lines
-                    .into_iter()
-                    .map(|line| format!("  {}", line))
-                    .collect::<String>()
-            };
-            (id.0.to_string(), url, header)
-        }
-        None => (
-            "some-remote-server".to_string(),
-            "https://example.com/mcp".to_string(),
-            r#"// "Authorization": "Bearer <token>"#.to_string(),
-        ),
-    };
-
-    format!(
-        r#"{{
-  /// Configure an MCP server that you connect to over HTTP
-  ///
-  /// The name of your remote MCP server
-  "{name}": {{
-    /// The URL of the remote MCP server
-    "url": "{url}",
-    "headers": {{
-     /// Any headers to send along
-     {headers}
-    }}
-  }}
-}}"#
-    )
-}
-
-fn parse_http_input(text: &str) -> Result<(ContextServerId, String, HashMap<String, String>)> {
-    #[derive(Deserialize)]
-    struct Temp {
-        url: String,
-        #[serde(default)]
-        headers: HashMap<String, String>,
-    }
-    let value: HashMap<String, Temp> = serde_json_lenient::from_str(text)?;
-    if value.len() != 1 {
-        anyhow::bail!("Expected exactly one context server configuration");
-    }
-
-    let (key, value) = value.into_iter().next().unwrap();
-
-    Ok((ContextServerId(key.into()), value.url, value.headers))
 }
 
 fn resolve_context_server_extension(
@@ -648,22 +1032,16 @@ impl ConfigureContextServerModal {
     }
 }
 
-fn parse_input(text: &str) -> Result<(ContextServerId, ContextServerCommand)> {
-    let value: serde_json::Value = serde_json_lenient::from_str(text)?;
-    let object = value.as_object().context("Expected object")?;
-    anyhow::ensure!(object.len() == 1, "Expected exactly one key-value pair");
-    let (context_server_name, value) = object.into_iter().next().unwrap();
-    let command: ContextServerCommand = serde_json::from_value(value.clone())?;
-    Ok((ContextServerId(context_server_name.clone().into()), command))
-}
-
 impl ModalView for ConfigureContextServerModal {}
 
 impl Focusable for ConfigureContextServerModal {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         match &self.source {
-            ConfigurationSource::New { editor, .. } => editor.focus_handle(cx),
-            ConfigurationSource::Existing { editor, .. } => editor.focus_handle(cx),
+            ConfigurationSource::New { configuration }
+            | ConfigurationSource::Existing { configuration } => match configuration.view_mode {
+                ConfigurationViewMode::Form => configuration.form.name.focus_handle(cx),
+                ConfigurationViewMode::Json => configuration.editor.focus_handle(cx),
+            },
             ConfigurationSource::Extension { editor, .. } => editor
                 .as_ref()
                 .map(|editor| editor.focus_handle(cx))
@@ -709,8 +1087,9 @@ impl ConfigureContextServerModal {
     }
 
     fn render_tab_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let is_http = match &self.source {
-            ConfigurationSource::New { is_http, .. } => *is_http,
+        let kind = match &self.source {
+            ConfigurationSource::New { configuration }
+            | ConfigurationSource::Existing { configuration } => configuration.form.kind,
             _ => return None,
         };
 
@@ -740,47 +1119,44 @@ impl ConfigureContextServerModal {
                 .border_b_1()
                 .border_color(cx.theme().colors().border.opacity(0.5))
                 .child(
-                    tab("Local", !is_http).on_click(cx.listener(|this, _, window, cx| {
-                        if let ConfigurationSource::New { editor, is_http } = &mut this.source {
-                            if *is_http {
-                                *is_http = false;
-                                let new_text = context_server_input(None);
-                                editor.update(cx, |editor, cx| {
-                                    editor.set_text(new_text, window, cx);
-                                });
+                    tab("Local", kind == ConfigurationFormKind::Local).on_click(cx.listener(
+                        |this, _, window, cx| {
+                            match &mut this.source {
+                                ConfigurationSource::New { configuration }
+                                | ConfigurationSource::Existing { configuration } => {
+                                    configuration.form.kind = ConfigurationFormKind::Local;
+                                    if configuration.view_mode == ConfigurationViewMode::Json {
+                                        configuration.sync_form_to_json(window, cx);
+                                    }
+                                }
+                                ConfigurationSource::Extension { .. } => {}
                             }
-                        }
-                    })),
+                            cx.notify();
+                        },
+                    )),
                 )
                 .child(
-                    tab("Remote", is_http).on_click(cx.listener(|this, _, window, cx| {
-                        if let ConfigurationSource::New { editor, is_http } = &mut this.source {
-                            if !*is_http {
-                                *is_http = true;
-                                let new_text = context_server_http_input(None);
-                                editor.update(cx, |editor, cx| {
-                                    editor.set_text(new_text, window, cx);
-                                });
+                    tab("Remote", kind == ConfigurationFormKind::Remote).on_click(cx.listener(
+                        |this, _, window, cx| {
+                            match &mut this.source {
+                                ConfigurationSource::New { configuration }
+                                | ConfigurationSource::Existing { configuration } => {
+                                    configuration.form.kind = ConfigurationFormKind::Remote;
+                                    if configuration.view_mode == ConfigurationViewMode::Json {
+                                        configuration.sync_form_to_json(window, cx);
+                                    }
+                                }
+                                ConfigurationSource::Extension { .. } => {}
                             }
-                        }
-                    })),
+                            cx.notify();
+                        },
+                    )),
                 )
                 .into_any_element(),
         )
     }
 
-    fn render_modal_content(&self, cx: &App) -> AnyElement {
-        let editor = match &self.source {
-            ConfigurationSource::New { editor, .. } => editor,
-            ConfigurationSource::Existing { editor, .. } => editor,
-            ConfigurationSource::Extension { editor, .. } => {
-                let Some(editor) = editor else {
-                    return div().into_any_element();
-                };
-                editor
-            }
-        };
-
+    fn render_editor_box(&self, editor: &Entity<Editor>, cx: &App) -> Div {
         div()
             .p_2()
             .rounded_md()
@@ -809,7 +1185,111 @@ impl ConfigureContextServerModal {
                     },
                 )
             })
+    }
+
+    fn render_parameter_field(
+        &self,
+        label: &'static str,
+        description: &'static str,
+        editor: &Entity<Editor>,
+        cx: &App,
+    ) -> Div {
+        v_flex()
+            .gap_1()
+            .child(Label::new(label).size(LabelSize::Small))
+            .child(
+                Label::new(description)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .child(self.render_editor_box(editor, cx))
+    }
+
+    fn render_form_content(&self, form: &ContextServerForm, cx: &App) -> AnyElement {
+        v_flex()
+            .gap_3()
+            .child(form.name.clone())
+            .child(match form.kind {
+                ConfigurationFormKind::Local => v_flex()
+                    .gap_3()
+                    .child(
+                        Label::new("Runs locally via stdin/stdout.")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(form.command.clone())
+                    .child(self.render_parameter_field(
+                        "Arguments",
+                        "Use space-separated arguments or a JSON array.",
+                        &form.args,
+                        cx,
+                    ))
+                    .child(self.render_parameter_field(
+                        "Environment variables",
+                        "Use KEY=VALUE lines or a JSON object.",
+                        &form.env,
+                        cx,
+                    )),
+                ConfigurationFormKind::Remote => v_flex()
+                    .gap_3()
+                    .child(
+                        Label::new("Connects to a remote MCP server over HTTP.")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(form.url.clone())
+                    .child(self.render_parameter_field(
+                        "Headers",
+                        "Use Header: Value lines or a JSON object.",
+                        &form.headers,
+                        cx,
+                    )),
+            })
             .into_any_element()
+    }
+
+    fn render_modal_content(&self, cx: &App) -> AnyElement {
+        match &self.source {
+            ConfigurationSource::New { configuration }
+            | ConfigurationSource::Existing { configuration } => match configuration.view_mode {
+                ConfigurationViewMode::Form => self.render_form_content(&configuration.form, cx),
+                ConfigurationViewMode::Json => self
+                    .render_editor_box(&configuration.editor, cx)
+                    .into_any_element(),
+            },
+            ConfigurationSource::Extension { editor, .. } => {
+                let Some(editor) = editor else {
+                    return div().into_any_element();
+                };
+                self.render_editor_box(editor, cx).into_any_element()
+            }
+        }
+    }
+
+    fn toggle_configuration_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match &mut self.source {
+            ConfigurationSource::New { configuration }
+            | ConfigurationSource::Existing { configuration } => match configuration.view_mode {
+                ConfigurationViewMode::Form => {
+                    configuration.sync_form_to_json(window, cx);
+                    configuration.view_mode = ConfigurationViewMode::Json;
+                    self.state = State::Idle;
+                    configuration.editor.focus_handle(cx).focus(window, cx);
+                }
+                ConfigurationViewMode::Json => {
+                    if let Err(error) = configuration.sync_json_to_form(window, cx) {
+                        self.set_error(error.to_string(), cx);
+                        return;
+                    }
+                    configuration.view_mode = ConfigurationViewMode::Form;
+                    self.state = State::Idle;
+                    configuration.form.name.focus_handle(cx).focus(window, cx);
+                }
+            },
+            ConfigurationSource::Extension { .. } => {}
+        }
+
+        cx.notify();
     }
 
     fn render_modal_footer(&self, cx: &mut Context<Self>) -> ModalFooter {
@@ -818,41 +1298,56 @@ impl ConfigureContextServerModal {
             self.state,
             State::Waiting | State::AuthRequired { .. } | State::Authenticating { .. }
         );
+        let view_toggle_label = match &self.source {
+            ConfigurationSource::New { configuration }
+            | ConfigurationSource::Existing { configuration } => match configuration.view_mode {
+                ConfigurationViewMode::Form => Some("JSON View"),
+                ConfigurationViewMode::Json => Some("Form View"),
+            },
+            ConfigurationSource::Extension { .. } => None,
+        };
 
         ModalFooter::new()
-            .start_slot::<Button>(
-                if let ConfigurationSource::Extension {
-                    repository_url: Some(repository_url),
-                    ..
-                } = &self.source
-                {
-                    Some(
-                        Button::new("open-repository", "Open Repository")
-                            .end_icon(
-                                Icon::new(IconName::ArrowUpRight)
-                                    .size(IconSize::Small)
-                                    .color(Color::Muted),
-                            )
-                            .tooltip({
-                                let repository_url = repository_url.clone();
-                                move |_window, cx| {
-                                    Tooltip::with_meta(
-                                        "Open Repository",
-                                        None,
-                                        repository_url.clone(),
-                                        cx,
-                                    )
-                                }
-                            })
-                            .on_click({
-                                let repository_url = repository_url.clone();
-                                move |_, _, cx| cx.open_url(&repository_url)
-                            }),
-                    )
-                } else {
-                    None
-                },
-            )
+            .start_slot::<Button>(if let Some(label) = view_toggle_label {
+                Some(
+                    Button::new("toggle-configuration-view", label)
+                        .style(ButtonStyle::Outlined)
+                        .label_size(LabelSize::Small)
+                        .on_click(cx.listener(|this, _event, window, cx| {
+                            this.toggle_configuration_view(window, cx);
+                        })),
+                )
+            } else if let ConfigurationSource::Extension {
+                repository_url: Some(repository_url),
+                ..
+            } = &self.source
+            {
+                Some(
+                    Button::new("open-repository", "Open Repository")
+                        .end_icon(
+                            Icon::new(IconName::ArrowUpRight)
+                                .size(IconSize::Small)
+                                .color(Color::Muted),
+                        )
+                        .tooltip({
+                            let repository_url = repository_url.clone();
+                            move |_window, cx| {
+                                Tooltip::with_meta(
+                                    "Open Repository",
+                                    None,
+                                    repository_url.clone(),
+                                    cx,
+                                )
+                            }
+                        })
+                        .on_click({
+                            let repository_url = repository_url.clone();
+                            move |_, _, cx| cx.open_url(&repository_url)
+                        }),
+                )
+            } else {
+                None
+            })
             .end_slot(
                 h_flex()
                     .gap_2()

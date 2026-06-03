@@ -6420,6 +6420,21 @@ impl ThreadView {
             },
         );
 
+        menu = menu.separator().header("Custom MCP Server").custom_entry(
+            move |_window, _cx| {
+                Self::render_context_menu_status_row(
+                    "Custom".into(),
+                    "Add".into(),
+                    IconName::Plus,
+                    Color::Muted,
+                    Color::Accent,
+                )
+            },
+            move |window, cx| {
+                window.dispatch_action(crate::AddContextServer.boxed_clone(), cx);
+            },
+        );
+
         menu = menu.separator().header("Bundled MCP Servers");
 
         for server in recommended_mcp_server_statuses(cx) {
