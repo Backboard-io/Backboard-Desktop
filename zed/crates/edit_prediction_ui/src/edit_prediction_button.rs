@@ -335,9 +335,7 @@ impl Render for EditPredictionButton {
                     .edit_prediction_provider
                     .as_ref()
                     .map(|p| p.icons(cx))
-                    .unwrap_or_else(|| {
-                        edit_prediction_types::EditPredictionIconSet::new(IconName::ZedPredict)
-                    });
+                    .unwrap_or_else(|| default_icon_set_for_provider(provider));
 
                 let ep_icon;
                 let tooltip_meta;
@@ -362,7 +360,7 @@ impl Render for EditPredictionButton {
                     }
                     _ => {
                         ep_icon = if enabled { icons.base } else { icons.disabled };
-                        tooltip_meta = "Powered by Zeta"
+                        tooltip_meta = "Powered by Backboard AI"
                     }
                 };
 
@@ -939,7 +937,9 @@ impl EditPredictionButton {
                 .as_ref()
                 .map(|p| p.icons(cx))
                 .unwrap_or_else(|| {
-                    edit_prediction_types::EditPredictionIconSet::new(IconName::ZedPredict)
+                    default_icon_set_for_provider(
+                        all_language_settings(None, cx).edit_predictions.provider,
+                    )
                 });
             menu = menu.item(
                 ContextMenuEntry::new("This file is excluded.")
@@ -1073,14 +1073,14 @@ impl EditPredictionButton {
                     .custom_row(move |_window, cx| {
                         let description = indoc! {
                             "You get 2,000 accepted suggestions at every keystroke for free, \
-                            powered by Zeta, our open-source, open-data model"
+                            powered by Backboard AI"
                         };
 
                         v_flex()
                             .max_w_64()
                             .h(rems_from_px(148.))
-                            .child(render_zeta_tab_animation(cx))
-                            .child(Label::new("Edit Prediction"))
+                            .child(render_backboard_tab_animation(cx))
+                            .child(Label::new("Backboard Edit Prediction"))
                             .child(
                                 Label::new(description)
                                     .color(Color::Muted)
@@ -1526,7 +1526,23 @@ fn toggle_edit_prediction_mode(fs: Arc<dyn Fs>, mode: EditPredictionsMode, cx: &
     }
 }
 
-fn render_zeta_tab_animation(cx: &App) -> impl IntoElement {
+fn default_icon_set_for_provider(
+    provider: EditPredictionProvider,
+) -> edit_prediction_types::EditPredictionIconSet {
+    match provider {
+        EditPredictionProvider::Backboard => {
+            edit_prediction_types::EditPredictionIconSet::new(IconName::BackboardLogo)
+                .with_disabled(IconName::BackboardLogo)
+                .with_error(IconName::BackboardLogo)
+        }
+        EditPredictionProvider::Mercury => {
+            edit_prediction_types::EditPredictionIconSet::new(IconName::Inception)
+        }
+        _ => edit_prediction_types::EditPredictionIconSet::new(IconName::ZedPredict),
+    }
+}
+
+fn render_backboard_tab_animation(cx: &App) -> impl IntoElement {
     let tab = |n: u64, inverted: bool| {
         let text_color = cx.theme().colors().text;
 
@@ -1589,7 +1605,7 @@ fn render_zeta_tab_animation(cx: &App) -> impl IntoElement {
             8.,
         ))
         .child(tab_sequence(true))
-        .child(Icon::new(IconName::ZedPredict))
+        .child(Icon::new(IconName::BackboardLogo))
         .child(tab_sequence(false))
 }
 

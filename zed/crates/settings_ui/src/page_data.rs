@@ -8819,7 +8819,7 @@ fn edit_prediction_language_settings_section() -> [SettingsPageItem; 5] {
             title: "Configure Providers".into(),
             r#type: Default::default(),
             json_path: Some("edit_predictions.providers"),
-            description: Some("Set up different edit prediction providers in complement to Backboard Studio's built-in Zeta model.".into()),
+            description: Some("Set up different edit prediction providers in complement to Backboard Studio's built-in Backboard AI.".into()),
             in_json: false,
             files: USER,
             render: render_edit_prediction_setup_page

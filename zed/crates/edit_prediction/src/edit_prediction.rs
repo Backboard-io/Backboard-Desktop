@@ -935,9 +935,9 @@ impl EditPredictionStore {
         use ui::IconName;
         match self.edit_prediction_model {
             EditPredictionModel::Backboard => {
-                edit_prediction_types::EditPredictionIconSet::new(IconName::ZedPredict)
-                    .with_disabled(IconName::ZedPredictDisabled)
-                    .with_error(IconName::ZedPredictError)
+                edit_prediction_types::EditPredictionIconSet::new(IconName::BackboardLogo)
+                    .with_disabled(IconName::BackboardLogo)
+                    .with_error(IconName::BackboardLogo)
             }
             EditPredictionModel::Mercury => {
                 edit_prediction_types::EditPredictionIconSet::new(IconName::Inception)
