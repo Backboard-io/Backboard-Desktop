@@ -40,6 +40,7 @@ pub enum IconName {
     Attach,
     AudioOff,
     AudioOn,
+    BackboardLogo,
     Backspace,
     Bell,
     BellDot,
