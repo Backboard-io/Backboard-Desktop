@@ -37,7 +37,6 @@
     <url type="homepage">https://app.backboard.io</url>
     <url type="bugtracker">https://github.com/backboard/ide/issues</url>
     <url type="faq">https://app.backboard.io/faq</url>
-    <url type="help">https://app.backboard.io/docs/getting-started</url>
     <url type="contact">https://app.backboard.io/community-links</url>
     <url type="vcs-browser">https://github.com/backboard/ide</url>
     <url type="contribute">https://github.com/backboard/ide/blob/main/CONTRIBUTING.md</url>

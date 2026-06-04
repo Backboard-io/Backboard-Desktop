@@ -56,7 +56,6 @@ actions!(
 
 const COPILOT_SETTINGS_PATH: &str = "/settings/copilot";
 const COPILOT_SETTINGS_URL: &str = concat!("https://github.com", "/settings/copilot");
-const PRIVACY_DOCS: &str = "https://app.backboard.io/docs/ai/privacy-and-security";
 
 struct CopilotErrorToast;
 
@@ -932,17 +931,6 @@ impl EditPredictionButton {
                             .detach_and_log_err(cx);
                     }
                 }),
-        ).item(
-            ContextMenuEntry::new("View Docs")
-                .icon(IconName::FileGeneric)
-                .icon_color(Color::Muted)
-                .handler(move |_, cx| {
-                    telemetry::event!(
-                        "Edit Prediction Menu Action",
-                        action = "view_docs",
-                    );
-                    cx.open_url(PRIVACY_DOCS);
-                })
         );
 
         if !self.editor_enabled.unwrap_or(true) {

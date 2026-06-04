@@ -2717,51 +2717,19 @@ impl MultiWorkspace {
         }
     }
 
-    fn available_workspace_mode_targets(&self) -> [WorkspaceModeTarget; 2] {
-        match self.current_workspace_mode_target() {
-            WorkspaceModeTarget::Simple => [
-                WorkspaceModeTarget::CodeEditor,
-                WorkspaceModeTarget::AgentWorkspace,
-            ],
-            WorkspaceModeTarget::CodeEditor => [
-                WorkspaceModeTarget::AgentWorkspace,
-                WorkspaceModeTarget::Simple,
-            ],
-            WorkspaceModeTarget::AgentWorkspace => {
-                [WorkspaceModeTarget::CodeEditor, WorkspaceModeTarget::Simple]
-            }
-        }
+    fn workspace_mode_targets() -> [WorkspaceModeTarget; 3] {
+        [
+            WorkspaceModeTarget::CodeEditor,
+            WorkspaceModeTarget::Simple,
+            WorkspaceModeTarget::AgentWorkspace,
+        ]
     }
 
-    fn workspace_mode_target_label(target: WorkspaceModeTarget) -> &'static str {
+    fn workspace_mode_target_menu_label(target: WorkspaceModeTarget) -> &'static str {
         match target {
-            WorkspaceModeTarget::Simple => "Open in Simple Mode",
-            WorkspaceModeTarget::CodeEditor => "Open in Code Editor",
-            WorkspaceModeTarget::AgentWorkspace => "Open in Agents",
-        }
-    }
-
-    fn workspace_mode_target_tooltip(target: WorkspaceModeTarget) -> &'static str {
-        match target {
-            WorkspaceModeTarget::Simple => "Open in Simple Mode",
-            WorkspaceModeTarget::CodeEditor => "Open in Code Editor",
-            WorkspaceModeTarget::AgentWorkspace => "Open in Agents",
-        }
-    }
-
-    fn workspace_mode_target_id(target: WorkspaceModeTarget) -> &'static str {
-        match target {
-            WorkspaceModeTarget::Simple => "open-simple-mode",
-            WorkspaceModeTarget::CodeEditor => "open-code-editor-mode",
-            WorkspaceModeTarget::AgentWorkspace => "open-agent-workspace-mode",
-        }
-    }
-
-    fn workspace_mode_target_icon(target: WorkspaceModeTarget) -> IconName {
-        match target {
-            WorkspaceModeTarget::Simple => IconName::Sparkle,
-            WorkspaceModeTarget::CodeEditor => IconName::Code,
-            WorkspaceModeTarget::AgentWorkspace => IconName::BackboardLogo,
+            WorkspaceModeTarget::Simple => "Simple Mode",
+            WorkspaceModeTarget::CodeEditor => "Code Editor",
+            WorkspaceModeTarget::AgentWorkspace => "Agents",
         }
     }
 
@@ -2782,28 +2750,6 @@ impl MultiWorkspace {
                 self.open_agent_workspace(window, cx);
             }
         }
-    }
-
-    fn render_workspace_mode_button(
-        &self,
-        target: WorkspaceModeTarget,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let id = Self::workspace_mode_target_id(target);
-        let label = Self::workspace_mode_target_label(target);
-        let tooltip = Self::workspace_mode_target_tooltip(target);
-
-        Button::new(id, label)
-            .style(ButtonStyle::Subtle)
-            .size(ButtonSize::Compact)
-            .label_size(LabelSize::XSmall)
-            .start_icon(Icon::new(Self::workspace_mode_target_icon(target)).size(IconSize::XSmall))
-            .tooltip(Tooltip::text(tooltip))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.open_workspace_mode_target(target, window, cx);
-            }))
-            .into_any_element()
     }
 
     fn render_reset_onboarding_button(&self) -> impl IntoElement {
@@ -2903,6 +2849,38 @@ impl MultiWorkspace {
         })
     }
 
+    fn workspace_mode_menu(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<ContextMenu> {
+        let current_target = self.current_workspace_mode_target();
+        let multi_workspace = cx.entity().downgrade();
+
+        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            for target in Self::workspace_mode_targets() {
+                menu = menu.toggleable_entry(
+                    Self::workspace_mode_target_menu_label(target),
+                    target == current_target,
+                    IconPosition::Start,
+                    None,
+                    {
+                        let multi_workspace = multi_workspace.clone();
+                        move |window, cx| {
+                            multi_workspace
+                                .update(cx, |multi_workspace, cx| {
+                                    multi_workspace.open_workspace_mode_target(target, window, cx);
+                                })
+                                .log_err();
+                        }
+                    },
+                );
+            }
+
+            menu
+        })
+    }
+
     fn render_workspace_mode_switcher(
         &self,
         window: &mut Window,
@@ -2925,10 +2903,15 @@ impl MultiWorkspace {
             .border_b_1()
             .border_color(colors.border_variant.opacity(0.5))
             .bg(switcher_bg)
-            .children(
-                self.available_workspace_mode_targets()
-                    .into_iter()
-                    .map(|target| self.render_workspace_mode_button(target, window, cx)),
+            .child(
+                DropdownMenu::new(
+                    "workspace-mode-menu",
+                    Self::workspace_mode_target_menu_label(self.current_workspace_mode_target()),
+                    self.workspace_mode_menu(window, cx),
+                )
+                .style(DropdownStyle::Ghost)
+                .trigger_size(ButtonSize::Compact)
+                .trigger_tooltip(|_, cx| Tooltip::simple("Switch interface mode", cx).into()),
             )
             .child(
                 div()

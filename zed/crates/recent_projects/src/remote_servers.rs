@@ -2129,30 +2129,13 @@ impl RemoteServerProjects {
                             )
                         } else {
                             this.child(
-                                h_flex()
-                                    .p_2()
-                                    .w_full()
-                                    .gap_1()
-                                    .child(
-                                        Label::new(
-                                            "Enter the command you use to SSH into this server.",
-                                        )
-                                        .color(Color::Muted)
-                                        .size(LabelSize::Small),
+                                h_flex().p_2().w_full().gap_1().child(
+                                    Label::new(
+                                        "Enter the command you use to SSH into this server.",
                                     )
-                                    .child(
-                                        Button::new("learn-more", "Learn More")
-                                            .label_size(LabelSize::Small)
-                                            .end_icon(
-                                                Icon::new(IconName::ArrowUpRight)
-                                                    .size(IconSize::XSmall),
-                                            )
-                                            .on_click(|_, _, cx| {
-                                                cx.open_url(
-                                                    "https://app.backboard.io/docs/remote-development",
-                                                );
-                                            }),
-                                    ),
+                                    .color(Color::Muted)
+                                    .size(LabelSize::Small),
+                                ),
                             )
                         }
                     }),

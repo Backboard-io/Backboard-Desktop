@@ -603,19 +603,6 @@ impl Render for ConfigurationView {
                     .child(Label::new(
                         "Backboard also supports OpenAI-compatible models.",
                     )),
-            )
-            .child(
-                Button::new("docs", "Learn More")
-                    .end_icon(
-                        Icon::new(IconName::ArrowUpRight)
-                            .size(IconSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .on_click(move |_, _window, cx| {
-                        cx.open_url(
-                            "https://app.backboard.io/docs/ai/llm-providers#openai-api-compatible",
-                        )
-                    }),
             );
 
         if self.load_credentials_task.is_some() {

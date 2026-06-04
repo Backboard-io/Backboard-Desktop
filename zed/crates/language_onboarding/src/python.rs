@@ -54,14 +54,6 @@ impl Render for BasedPyrightBanner {
                         .action_slot(
                             h_flex()
                                 .gap_0p5()
-                                .child(
-                                    Button::new("learn-more", "Learn More")
-                                        .label_size(LabelSize::Small)
-                                        .end_icon(Icon::new(IconName::ArrowUpRight).size(IconSize::XSmall).color(Color::Muted))
-                                        .on_click(|_, _, cx| {
-                                            cx.open_url("https://app.backboard.io/docs/languages/python")
-                                        }),
-                                )
                                 .child(IconButton::new("dismiss", IconName::Close).icon_size(IconSize::Small).on_click(
                                     cx.listener(|this, _, _, cx| {
                                         this.dismissed = true;

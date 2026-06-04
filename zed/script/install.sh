@@ -3,7 +3,7 @@ set -eu
 
 # Downloads a tarball from https://app.backboard.io/releases and unpacks it
 # into ~/.local/. If you'd prefer to do this manually, instructions are at
-# https://app.backboard.io/docs/linux.
+# Installs Backboard Studio on Linux.
 
 main() {
     platform="$(uname -s)"

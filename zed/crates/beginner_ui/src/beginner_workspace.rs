@@ -25,13 +25,15 @@ use gpui::{
     DragMoveEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
     IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ObjectFit, PathPromptOptions, Pixels,
     Render, SharedString, Subscription, Task, TextStyleRefinement, WeakEntity, Window,
-    WindowControlArea, canvas, ease_out_quint, img, rems,
+    WindowControlArea, canvas, ease_out_quint, img,
 };
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
 use project::Project;
 use serde_json::Value;
+use settings::Settings;
 use terminal_view::TerminalView;
+use theme_settings::ThemeSettings;
 use ui::{
     Button, ButtonSize, ButtonStyle, Color, ContextMenu, ContextMenuEntry, DropdownMenu,
     DropdownStyle, Icon, IconButton, IconName, IconPosition, IconSize, Label, LabelSize, Tooltip,
@@ -1606,6 +1608,13 @@ impl SidebarProjectGroup {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SimpleModeTarget {
+    Simple,
+    CodeEditor,
+    Agents,
+}
+
 pub struct BeginnerWorkspace {
     workspace: WeakEntity<Workspace>,
     multi_workspace: WeakEntity<MultiWorkspace>,
@@ -1734,12 +1743,9 @@ impl BeginnerWorkspace {
     fn make_search_editor(window: &mut Window, cx: &mut Context<Self>) -> Entity<Editor> {
         cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_text_style_refinement(TextStyleRefinement {
-                color: Some(ds::sidebar_emphasis_text(cx)),
-                font_size: Some(rems(0.9375).into()),
-                font_weight: Some(FontWeight::SEMIBOLD),
-                ..Default::default()
-            });
+            let mut text_style = Self::simple_mode_editor_text_style(cx);
+            text_style.color = Some(ds::sidebar_emphasis_text(cx));
+            editor.set_text_style_refinement(text_style);
             editor.set_show_gutter(false, cx);
             editor.set_show_wrap_guides(false, cx);
             editor.set_show_indent_guides(false, cx);
@@ -1755,11 +1761,9 @@ impl BeginnerWorkspace {
         let editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
             editor.set_placeholder_text("Enter a URL", window, cx);
-            editor.set_text_style_refinement(TextStyleRefinement {
-                color: Some(ds::text_muted(cx)),
-                font_size: Some(rems(0.875).into()),
-                ..Default::default()
-            });
+            let mut text_style = Self::simple_mode_editor_text_style(cx);
+            text_style.color = Some(ds::text_muted(cx));
+            editor.set_text_style_refinement(text_style);
             editor.set_show_gutter(false, cx);
             editor.set_show_wrap_guides(false, cx);
             editor.set_show_indent_guides(false, cx);
@@ -1779,6 +1783,18 @@ impl BeginnerWorkspace {
             })
         });
         (editor, subscription)
+    }
+
+    fn simple_mode_editor_text_style(cx: &mut App) -> TextStyleRefinement {
+        let settings = ThemeSettings::get_global(cx);
+        TextStyleRefinement {
+            font_family: Some(settings.ui_font.family.clone()),
+            font_features: Some(settings.ui_font.features.clone()),
+            font_fallbacks: settings.ui_font.fallbacks.clone(),
+            font_size: Some(settings.ui_font_size(cx).into()),
+            font_weight: Some(settings.ui_font.weight),
+            ..Default::default()
+        }
     }
 
     fn make_file_preview_editor(
@@ -5778,6 +5794,7 @@ impl Focusable for BeginnerWorkspace {
 
 impl Render for BeginnerWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let ui_font = theme_settings::setup_ui_font(window, cx);
         self.restore_persisted_open_tabs(window, cx);
 
         let should_show_embedded_preview = self.right_panel_open
@@ -5805,12 +5822,12 @@ impl Render for BeginnerWorkspace {
             preview.load_url(url);
         }
 
-        match &self.state {
+        div().size_full().font(ui_font).child(match &self.state {
             BeginnerState::Landing => self.render_landing(window, cx).into_any_element(),
             BeginnerState::ActiveProject => {
                 self.render_active_project(window, cx).into_any_element()
             }
-        }
+        })
     }
 }
 
@@ -7476,46 +7493,96 @@ impl BeginnerWorkspace {
             )
     }
 
-    fn render_simple_mode_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .flex_none()
-            .gap_1()
-            .child(
-                Button::new("simple-open-code-editor", "Open in Code Editor")
-                    .style(ButtonStyle::Subtle)
-                    .size(ButtonSize::Compact)
-                    .label_size(LabelSize::XSmall)
-                    .start_icon(Icon::new(IconName::Code).size(IconSize::XSmall))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        persist_experience_level(ExperienceLevel::Developer, cx);
-                        this.multi_workspace
-                            .update(cx, |multi_workspace, cx| {
-                                multi_workspace.open_code_editor(window, cx);
-                            })
-                            .log_err();
-                    })),
-            )
-            .child(
-                Button::new("simple-open-agents", "Open in Agents")
-                    .style(ButtonStyle::Subtle)
-                    .size(ButtonSize::Compact)
-                    .label_size(LabelSize::XSmall)
-                    .start_icon(Icon::new(IconName::BackboardLogo).size(IconSize::XSmall))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        persist_experience_level(ExperienceLevel::Developer, cx);
-                        this.multi_workspace
-                            .update(cx, |multi_workspace, cx| {
-                                multi_workspace.open_agent_workspace(window, cx);
-                            })
-                            .log_err();
-                    })),
-            )
+    fn simple_mode_targets() -> [SimpleModeTarget; 3] {
+        [
+            SimpleModeTarget::Simple,
+            SimpleModeTarget::CodeEditor,
+            SimpleModeTarget::Agents,
+        ]
+    }
+
+    fn simple_mode_target_label(target: SimpleModeTarget) -> &'static str {
+        match target {
+            SimpleModeTarget::Simple => "Simple Mode",
+            SimpleModeTarget::CodeEditor => "Code Editor",
+            SimpleModeTarget::Agents => "Agents",
+        }
+    }
+
+    fn open_simple_mode_target(
+        &mut self,
+        target: SimpleModeTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match target {
+            SimpleModeTarget::Simple => {}
+            SimpleModeTarget::CodeEditor => {
+                persist_experience_level(ExperienceLevel::Developer, cx);
+                self.multi_workspace
+                    .update(cx, |multi_workspace, cx| {
+                        multi_workspace.open_code_editor(window, cx);
+                    })
+                    .log_err();
+            }
+            SimpleModeTarget::Agents => {
+                persist_experience_level(ExperienceLevel::Developer, cx);
+                self.multi_workspace
+                    .update(cx, |multi_workspace, cx| {
+                        multi_workspace.open_agent_workspace(window, cx);
+                    })
+                    .log_err();
+            }
+        }
+    }
+
+    fn simple_mode_menu(&self, window: &mut Window, cx: &mut Context<Self>) -> Entity<ContextMenu> {
+        let beginner_workspace = cx.entity().downgrade();
+
+        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
+            for target in Self::simple_mode_targets() {
+                menu = menu.toggleable_entry(
+                    Self::simple_mode_target_label(target),
+                    target == SimpleModeTarget::Simple,
+                    IconPosition::Start,
+                    None,
+                    {
+                        let beginner_workspace = beginner_workspace.clone();
+                        move |window, cx| {
+                            beginner_workspace
+                                .update(cx, |beginner_workspace, cx| {
+                                    beginner_workspace.open_simple_mode_target(target, window, cx);
+                                })
+                                .log_err();
+                        }
+                    },
+                );
+            }
+
+            menu
+        })
+    }
+
+    fn render_simple_mode_buttons(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        DropdownMenu::new(
+            "simple-workspace-mode-menu",
+            Self::simple_mode_target_label(SimpleModeTarget::Simple),
+            self.simple_mode_menu(window, cx),
+        )
+        .style(DropdownStyle::Ghost)
+        .trigger_size(ButtonSize::Compact)
+        .trigger_tooltip(|_, cx| Tooltip::simple("Switch interface mode", cx).into())
     }
 
     fn render_simple_header(
         &self,
         title: SharedString,
         is_running: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         h_flex()
@@ -7544,7 +7611,7 @@ impl BeginnerWorkspace {
                         .color(Color::Custom(ds::accent(cx))),
                 )
             })
-            .child(self.render_simple_mode_buttons(cx))
+            .child(self.render_simple_mode_buttons(window, cx))
             .child(div().size(px(16.)).flex_none())
     }
 
@@ -7848,7 +7915,7 @@ impl BeginnerWorkspace {
                                             .absolute()
                                             .top(px(mode_buttons_top))
                                             .right(px(14.))
-                                            .child(self.render_simple_mode_buttons(cx)),
+                                            .child(self.render_simple_mode_buttons(window, cx)),
                                     )
                                     .into_any_element(),
                                 false,
@@ -7931,6 +7998,7 @@ impl BeginnerWorkspace {
                                     .child(self.render_simple_header(
                                         active_title.clone(),
                                         is_running || is_connecting,
+                                        window,
                                         cx,
                                     ))
                                     .when(!api_key_ready, |el| {
@@ -9388,6 +9456,8 @@ impl BeginnerWorkspace {
         is_diff: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let settings = ThemeSettings::get_global(cx);
+        let code_font_family = settings.buffer_font.family.clone();
         let lines: Vec<_> = content
             .as_ref()
             .lines()
@@ -9461,8 +9531,8 @@ impl BeginnerWorkspace {
                             .border_r_1()
                             .border_color(ds::separator(cx))
                             .pr_3()
-                            .text_size(rems_from_px(11.))
-                            .font_family("Roboto Mono")
+                            .text_buffer(cx)
+                            .font_family(code_font_family.clone())
                             .text_color(ds::text_muted(cx))
                             .line_height(px(18.))
                             .child(gutter_text),
@@ -9474,8 +9544,8 @@ impl BeginnerWorkspace {
                             .h_full()
                             .overflow_hidden()
                             .px_2()
-                            .text_size(rems_from_px(11.))
-                            .font_family("Roboto Mono")
+                            .text_buffer(cx)
+                            .font_family(code_font_family.clone())
                             .text_color(text_color)
                             .line_height(px(18.))
                             .child(display_line),

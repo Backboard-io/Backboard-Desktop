@@ -171,12 +171,7 @@ impl Workspace {
         struct PortalError;
 
         self.show_notification(NotificationId::unique::<PortalError>(), cx, |cx| {
-            cx.new(|cx| {
-                ErrorMessagePrompt::new(err.to_string(), cx).with_link_button(
-                    "See docs",
-                    "https://app.backboard.io/docs/linux#i-cant-open-any-files",
-                )
-            })
+            cx.new(|cx| ErrorMessagePrompt::new(err.to_string(), cx))
         });
     }
 

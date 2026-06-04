@@ -4,7 +4,7 @@ use gpui::{
     prelude::*,
 };
 use project::ProjectItem as _;
-use ui::{ButtonLike, ElevationIndex, KeyBinding, prelude::*};
+use ui::{KeyBinding, prelude::*};
 use util::ResultExt as _;
 use workspace::item::ItemEvent;
 use workspace::{Workspace, item::Item};
@@ -223,20 +223,7 @@ impl Render for ReplSessionsPage {
 
             return ReplSessionsContainer::new("No Jupyter Kernels Available")
                 .child(Label::new(instructions))
-                .child(
-                    h_flex().w_full().p_4().justify_center().gap_2().child(
-                        ButtonLike::new("install-kernels")
-                            .style(ButtonStyle::Filled)
-                            .size(ButtonSize::Large)
-                            .layer(ElevationIndex::ModalSurface)
-                            .child(Label::new("Install Kernels"))
-                            .on_click(move |_, _, cx| {
-                                cx.open_url(
-                                    "https://app.backboard.io/docs/repl#language-specific-instructions",
-                                )
-                            }),
-                    ),
-                );
+                .child(h_flex().w_full().p_4().justify_center().gap_2());
         }
 
         // When there are no sessions, show the command to run code in an editor

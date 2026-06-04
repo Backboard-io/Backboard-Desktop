@@ -326,17 +326,6 @@ impl PickerDelegate for IconThemeSelectorDelegate {
                 .border_t_1()
                 .border_color(cx.theme().colors().border_variant)
                 .child(
-                    Button::new("docs", "View Icon Theme Docs")
-                        .end_icon(
-                            Icon::new(IconName::ArrowUpRight)
-                                .size(IconSize::Small)
-                                .color(Color::Muted),
-                        )
-                        .on_click(|_event, _window, cx| {
-                            cx.open_url("https://app.backboard.io/docs/icon-themes");
-                        }),
-                )
-                .child(
                     Button::new("more-icon-themes", "Install Icon Themes").on_click(
                         move |_event, window, cx| {
                             window.dispatch_action(

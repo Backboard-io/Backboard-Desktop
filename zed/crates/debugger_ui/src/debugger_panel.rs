@@ -644,13 +644,6 @@ impl DebugPanel {
                 .tooltip(Tooltip::text("Edit debug.json"))
         };
 
-        let documentation_button = || {
-            IconButton::new("debug-open-documentation", IconName::CircleHelp)
-                .icon_size(IconSize::Small)
-                .on_click(move |_, _, cx| cx.open_url("https://app.backboard.io/docs/debugger"))
-                .tooltip(Tooltip::text("Open Documentation"))
-        };
-
         let logs_button = || {
             IconButton::new("debug-open-logs", IconName::Notepad)
                 .icon_size(IconSize::Small)
@@ -938,7 +931,6 @@ impl DebugPanel {
                         .when(is_side, |this| {
                             this.child(new_session_button())
                                 .child(edit_debug_json_button())
-                                .child(documentation_button())
                                 .child(logs_button())
                         }),
                 )
@@ -991,7 +983,6 @@ impl DebugPanel {
                                 .when(!is_side, |this| {
                                     this.child(new_session_button())
                                         .child(edit_debug_json_button())
-                                        .child(documentation_button())
                                         .child(logs_button())
                                         .child(close_bottom_panel_button)
                                 }),
@@ -1842,17 +1833,6 @@ impl Render for DebugPanel {
                                         zed_actions::OpenProjectDebugTasks.boxed_clone(),
                                         cx,
                                     );
-                                }),
-                        )
-                        .child(
-                            Button::new("open-debugger-docs", "Debugger Docs")
-                                .start_icon(
-                                    Icon::new(IconName::Book)
-                                        .size(IconSize::Small)
-                                        .color(Color::Muted),
-                                )
-                                .on_click(|_, _, cx| {
-                                    cx.open_url("https://app.backboard.io/docs/debugger")
                                 }),
                         )
                         .child(

@@ -1,4 +1,3 @@
-use crate::KERNEL_DOCS_URL;
 use crate::kernels::KernelSpecification;
 use crate::repl_store::ReplStore;
 
@@ -420,26 +419,9 @@ impl PickerDelegate for KernelPickerDelegate {
     fn render_footer(
         &self,
         _: &mut Window,
-        cx: &mut Context<Picker<Self>>,
+        _: &mut Context<Picker<Self>>,
     ) -> Option<gpui::AnyElement> {
-        Some(
-            h_flex()
-                .w_full()
-                .border_t_1()
-                .border_color(cx.theme().colors().border_variant)
-                .p_1()
-                .gap_4()
-                .child(
-                    Button::new("kernel-docs", "Kernel Docs")
-                        .end_icon(
-                            Icon::new(IconName::ArrowUpRight)
-                                .size(IconSize::Small)
-                                .color(Color::Muted),
-                        )
-                        .on_click(move |_, _, cx| cx.open_url(KERNEL_DOCS_URL)),
-                )
-                .into_any(),
-        )
+        None
     }
 }
 

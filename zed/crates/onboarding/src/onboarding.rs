@@ -56,7 +56,6 @@ pub struct ImportCursorSettings {
 }
 
 pub const FIRST_OPEN: &str = "first_open";
-pub const DOCS_URL: &str = "https://app.backboard.io/docs/";
 pub const EXPERIENCE_LEVEL_KVP_KEY: &str = "backboard_experience_level";
 const BACKBOARD_DASHBOARD_URL: &str = "https://app.backboard.io/dashboard";
 const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";

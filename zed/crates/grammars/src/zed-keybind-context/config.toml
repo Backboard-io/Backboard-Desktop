@@ -1,4 +1,4 @@
-name = "Zed Keybind Context"
+name = "Keybind Context"
 grammar = "rust"
 hidden = true
 autoclose_before = ")"

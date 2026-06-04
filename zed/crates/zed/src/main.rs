@@ -135,9 +135,7 @@ fn fail_to_open_window_async(e: anyhow::Error, cx: &mut AsyncApp) {
 }
 
 fn fail_to_open_window(e: anyhow::Error, _cx: &mut App) {
-    eprintln!(
-        "Backboard Studio failed to open a window: {e:?}. See https://app.backboard.io/docs/linux for troubleshooting steps."
-    );
+    eprintln!("Backboard Studio failed to open a window: {e:?}.");
     #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
     {
         process::exit(1);
@@ -157,12 +155,7 @@ fn fail_to_open_window(e: anyhow::Error, _cx: &mut App) {
                 .add_notification(
                     notification_id,
                     Notification::new("Backboard Studio failed to launch")
-                        .body(Some(
-                            format!(
-                                "{e:?}. See https://app.backboard.io/docs/linux for troubleshooting steps."
-                            )
-                            .as_str(),
-                        ))
+                        .body(Some(format!("{e:?}.").as_str()))
                         .priority(Priority::High)
                         .icon(ashpd::desktop::Icon::with_names(&[
                             "dialog-question-symbolic",

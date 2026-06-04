@@ -207,11 +207,6 @@ impl Render for KeyContextView {
                     .mt_4()
                     .gap_4()
                     .child(
-                        Button::new("open_documentation", "Open Documentation")
-                            .style(ButtonStyle::Filled)
-                            .on_click(|_, _, cx| cx.open_url("https://app.backboard.io/docs/key-bindings")),
-                    )
-                    .child(
                         Button::new("view_default_keymap", "View Default Keymap")
                             .style(ButtonStyle::Filled)
                             .key_binding(ui::KeyBinding::for_action(

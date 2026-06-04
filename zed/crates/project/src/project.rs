@@ -3697,10 +3697,7 @@ impl Project {
                     let message = format!("Failed to set local tasks in {path:?}:\n{message}");
                     cx.emit(Event::Toast {
                         notification_id: format!("local-tasks-{path:?}").into(),
-                        link: Some(ToastLink {
-                            label: "Open Tasks Documentation",
-                            url: "https://app.backboard.io/docs/tasks",
-                        }),
+                        link: None,
                         message,
                     });
                 }

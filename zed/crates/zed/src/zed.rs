@@ -48,7 +48,6 @@ use language_tools::lsp_log_view::LspLogToolbarItemView;
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
 use migrate::{MigrationBanner, MigrationEvent, MigrationNotification, MigrationType};
 use migrator::migrate_keymap;
-use onboarding::DOCS_URL;
 use onboarding::multibuffer_hint::MultibufferHint;
 pub use open_listener::*;
 use outline_panel::OutlinePanel;
@@ -96,7 +95,7 @@ use workspace::{
 };
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
-    About, OpenAccountSettings, OpenBackboardUrl, OpenBrowser, OpenDocs, OpenServerSettings,
+    About, OpenAccountSettings, OpenBackboardUrl, OpenBrowser, OpenServerSettings,
     OpenSettingsFile, Quit, SwitchInterfaceMode,
 };
 
@@ -720,7 +719,7 @@ fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
             db::indoc! {r#"
             inotify_init returned {}
 
-            This may be due to system-wide limits on inotify instances. For troubleshooting see: https://app.backboard.io/docs/linux
+            This may be due to system-wide limits on inotify instances.
             "#},
             e
         );
@@ -728,13 +727,12 @@ fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
             PromptLevel::Critical,
             "Could not start inotify",
             Some(&message),
-            &["Troubleshoot and Quit"],
+            &["Quit"],
             cx,
         );
         cx.spawn(async move |_, cx| {
             if prompt.await == Ok(0) {
                 cx.update(|cx| {
-                    cx.open_url("https://app.backboard.io/docs/linux#could-not-start-inotify");
                     cx.quit();
                 });
             }
@@ -751,7 +749,7 @@ fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
             db::indoc! {r#"
             ReadDirectoryChangesW initialization failed: {}
 
-            This may occur on network filesystems and WSL paths. For troubleshooting see: https://app.backboard.io/docs/windows
+            This may occur on network filesystems and WSL paths.
             "#},
             e
         );
@@ -759,15 +757,12 @@ fn initialize_file_watcher(window: &mut Window, cx: &mut Context<Workspace>) {
             PromptLevel::Critical,
             "Could not start ReadDirectoryChangesW",
             Some(&message),
-            &["Troubleshoot and Quit"],
+            &["Quit"],
             cx,
         );
         cx.spawn(async move |_, cx| {
             if prompt.await == Ok(0) {
-                cx.update(|cx| {
-                    cx.open_url("https://app.backboard.io/docs/windows");
-                    cx.quit()
-                });
+                cx.update(|cx| cx.quit());
             }
         })
         .detach()
@@ -780,18 +775,10 @@ fn show_software_emulation_warning_if_needed(
     cx: &mut Context<Workspace>,
 ) {
     if specs.is_software_emulated && std::env::var("ZED_ALLOW_EMULATED_GPU").is_err() {
-        let (graphics_api, docs_url, open_url) = if cfg!(target_os = "windows") {
-            (
-                "DirectX",
-                "https://app.backboard.io/docs/windows",
-                "https://app.backboard.io/docs/windows",
-            )
+        let graphics_api = if cfg!(target_os = "windows") {
+            "DirectX"
         } else {
-            (
-                "Vulkan",
-                "https://app.backboard.io/docs/linux",
-                "https://app.backboard.io/docs/linux#zed-fails-to-open-windows",
-            )
+            "Vulkan"
         };
         let message = format!(
             db::indoc! {r#"
@@ -800,22 +787,20 @@ fn show_software_emulation_warning_if_needed(
             Currently you are using a software emulated GPU ({}) which
             will result in awful performance.
 
-            For troubleshooting see: {}
             Set ZED_ALLOW_EMULATED_GPU=1 env var to permanently override.
             "#},
-            graphics_api, specs.device_name, docs_url
+            graphics_api, specs.device_name
         );
         let prompt = window.prompt(
             PromptLevel::Critical,
             "Unsupported GPU",
             Some(&message),
-            &["Skip", "Troubleshoot and Quit"],
+            &["Skip", "Quit"],
             cx,
         );
         cx.spawn(async move |_, cx| {
             if prompt.await == Ok(1) {
                 cx.update(|cx| {
-                    cx.open_url(open_url);
                     cx.quit();
                 });
             }
@@ -1136,7 +1121,6 @@ fn register_actions(
     cx: &mut Context<Workspace>,
 ) {
     workspace
-        .register_action(|_, _: &OpenDocs, _, cx| cx.open_url(DOCS_URL))
         .register_action(
             |workspace: &mut Workspace,
              _: &input_latency_ui::DumpInputLatencyHistogram,
