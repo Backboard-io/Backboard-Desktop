@@ -2721,7 +2721,7 @@ impl MultiWorkspace {
         match target {
             WorkspaceModeTarget::Simple => IconName::Sparkle,
             WorkspaceModeTarget::CodeEditor => IconName::Code,
-            WorkspaceModeTarget::AgentWorkspace => IconName::ZedAgent,
+            WorkspaceModeTarget::AgentWorkspace => IconName::BackboardLogo,
         }
     }
 

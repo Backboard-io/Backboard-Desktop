@@ -84,7 +84,7 @@ const SIMPLE_SIDEBAR_HOVER_OPEN_DELAY_MS: u64 = 3000;
 const SIMPLE_SIDEBAR_HOVER_OPEN_POLL_MS: u64 = 100;
 const PANEL_OPEN_SLIDE_OFFSET_PX: f32 = 28.0;
 const RIGHT_PANEL_FADE_START_OPACITY: f32 = 0.94;
-const RIGHT_PANEL_CLOSED_WIDTH_PX: f32 = 44.0;
+const RIGHT_PANEL_CLOSED_WIDTH_PX: f32 = 52.0;
 const DOCKED_PANEL_DEFAULT_HEIGHT_PX: f32 = 340.0;
 const DOCKED_PANEL_MIN_HEIGHT_PX: f32 = 220.0;
 const DOCKED_PANEL_MIN_MAIN_SIZE_PX: f32 = 240.0;
@@ -790,7 +790,7 @@ enum RightPanelOption {
 }
 
 impl RightPanelOption {
-    const ALL: [Self; 4] = [Self::Files, Self::Design, Self::Code, Self::Terminal];
+    const ALL: [Self; 3] = [Self::Files, Self::Design, Self::Code];
 
     fn label(self) -> &'static str {
         match self {
@@ -2756,6 +2756,11 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if option == RightPanelOption::Terminal {
+            self.open_bottom_terminal_panel(window, cx);
+            return;
+        }
+
         self.activate_right_panel_tab(option);
 
         match option {
@@ -2791,14 +2796,7 @@ impl BeginnerWorkspace {
             RightPanelOption::Code => {
                 self.show_code_artifact(cx);
             }
-            RightPanelOption::Terminal => {
-                self.right_panel_mode = RightPanelMode::Launcher;
-                self.preview_visible = false;
-                self.web_preview = None;
-                self.raw_browse_path = None;
-                self.ensure_right_terminal(window, cx);
-                cx.notify();
-            }
+            RightPanelOption::Terminal => {}
         }
     }
 
@@ -2915,53 +2913,6 @@ impl BeginnerWorkspace {
                     )
                 });
                 this.terminal_view = Some(terminal_view);
-                cx.notify();
-            })?;
-
-            anyhow::Ok(())
-        })
-        .detach_and_prompt_err("Failed to open terminal", window, cx, |_, _, _| None);
-    }
-
-    fn ensure_right_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(working_directory) = self.terminal_working_directory() else {
-            return;
-        };
-
-        if self.right_terminal_view.is_some()
-            && self.right_terminal_working_directory.as_ref() == Some(&working_directory)
-        {
-            return;
-        }
-
-        self.right_terminal_view = None;
-        self.right_terminal_working_directory = Some(working_directory.clone());
-        let project = self.project.clone();
-        let weak_project = self.project.downgrade();
-        let workspace = self.workspace.clone();
-
-        cx.spawn_in(window, async move |this, cx| {
-            let create_terminal = project.update(cx, |project, cx| {
-                project.create_terminal_shell(Some(working_directory.clone()), cx)
-            });
-            let terminal = create_terminal.await?;
-
-            this.update_in(cx, |this, window, cx| {
-                if this.right_terminal_working_directory.as_ref() != Some(&working_directory) {
-                    return;
-                }
-
-                let terminal_view = cx.new(|cx| {
-                    TerminalView::new(
-                        terminal.clone(),
-                        workspace.clone(),
-                        None,
-                        weak_project.clone(),
-                        window,
-                        cx,
-                    )
-                });
-                this.right_terminal_view = Some(terminal_view);
                 cx.notify();
             })?;
 
@@ -4892,11 +4843,7 @@ impl BeginnerWorkspace {
                     .handler(move |window, cx| {
                         open_terminal
                             .update(cx, |this, cx| {
-                                this.select_right_panel_option(
-                                    RightPanelOption::Terminal,
-                                    window,
-                                    cx,
-                                );
+                                this.open_bottom_terminal_panel(window, cx);
                             })
                             .log_err();
                     }),
@@ -5511,6 +5458,31 @@ impl BeginnerWorkspace {
         }
 
         let bottom_panel_height = self.target_bottom_panel_height(window);
+        let reserve_side_panel =
+            api_key_ready && !self.right_panel_expanded && self.right_panel_dock.is_side();
+        let reserved_side_panel_width = if reserve_side_panel {
+            if self.right_panel_open || self.right_panel_closing {
+                self.target_right_panel_width(window)
+            } else {
+                px(RIGHT_PANEL_CLOSED_WIDTH_PX)
+            }
+        } else {
+            px(0.)
+        };
+        let reserve_left_panel =
+            reserve_side_panel && self.right_panel_dock == SimplePanelDock::Left;
+        let reserve_right_panel =
+            reserve_side_panel && self.right_panel_dock == SimplePanelDock::Right;
+        let terminal_left_inset = if reserve_left_panel {
+            reserved_side_panel_width
+        } else {
+            px(0.)
+        };
+        let terminal_right_inset = if reserve_right_panel {
+            reserved_side_panel_width
+        } else {
+            px(0.)
+        };
 
         v_flex()
             .relative()
@@ -5537,12 +5509,14 @@ impl BeginnerWorkspace {
                     .child(
                         div()
                             .absolute()
-                            .left(px(-ds::PANEL_OVERLAP))
-                            .right_0()
+                            .left(terminal_left_inset)
+                            .right(terminal_right_inset)
                             .top_0()
                             .bottom_0()
                             .overflow_hidden()
-                            .rounded_tl(px(ds::PANEL_CORNER_RADIUS))
+                            .when(reserve_left_panel, |el| el.border_l_1())
+                            .when(reserve_right_panel, |el| el.border_r_1())
+                            .border_color(ds::panel_edge_line(cx))
                             .bg(ds::sidebar_background(cx))
                             .child(self.render_bottom_terminal_slot(bottom_panel_height, cx)),
                     ),
@@ -5559,7 +5533,6 @@ impl BeginnerWorkspace {
             .h(height)
             .flex_shrink_0()
             .overflow_hidden()
-            .rounded_tl(px(ds::PANEL_CORNER_RADIUS))
             .bg(ds::sidebar_background(cx))
             .child(
                 div()
@@ -5597,7 +5570,6 @@ impl BeginnerWorkspace {
             .w_full()
             .flex_shrink_0()
             .overflow_hidden()
-            .rounded_tl(px(ds::PANEL_CORNER_RADIUS))
             .bg(ds::app_background(cx))
             .child(
                 h_flex()
@@ -5702,7 +5674,7 @@ impl BeginnerWorkspace {
 
         match self.right_panel_dock {
             SimplePanelDock::Left | SimplePanelDock::Right => div()
-                .w(px(44.))
+                .w(px(RIGHT_PANEL_CLOSED_WIDTH_PX))
                 .h_full()
                 .flex_shrink_0()
                 .overflow_hidden()
@@ -5717,7 +5689,8 @@ impl BeginnerWorkspace {
                 .flex()
                 .items_start()
                 .justify_center()
-                .pt_2()
+                .pt_5()
+                .px_2()
                 .child(button)
                 .into_any_element(),
             SimplePanelDock::Top | SimplePanelDock::Bottom => div()
@@ -6428,7 +6401,7 @@ impl BeginnerWorkspace {
                     .style(ButtonStyle::Subtle)
                     .size(ButtonSize::Compact)
                     .label_size(LabelSize::XSmall)
-                    .start_icon(Icon::new(IconName::ZedAgent).size(IconSize::XSmall))
+                    .start_icon(Icon::new(IconName::BackboardLogo).size(IconSize::XSmall))
                     .on_click(cx.listener(|this, _, window, cx| {
                         persist_experience_level(ExperienceLevel::Developer, cx);
                         this.multi_workspace
@@ -7396,6 +7369,7 @@ impl BeginnerWorkspace {
             .max_w(px(560.))
             .items_center()
             .gap_1p5()
+            .overflow_hidden()
             .child(
                 DropdownMenu::new_with_element(
                     "right-panel-new-tab",
@@ -7422,67 +7396,76 @@ impl BeginnerWorkspace {
                 .attach(gpui::Anchor::BottomLeft)
                 .no_chevron(),
             )
-            .children(self.right_panel_tabs.iter().copied().map(|option| {
-                let is_active = active_option == Some(option);
-                let tab_color = Color::Custom(if is_active {
-                    ds::text(cx)
-                } else {
-                    ds::icon_muted(cx)
-                });
-                let close_hover_background = hover_background;
+            .children(
+                self.right_panel_tabs
+                    .iter()
+                    .copied()
+                    .filter(|option| *option != RightPanelOption::Terminal)
+                    .map(|option| {
+                        let is_active = active_option == Some(option);
+                        let tab_color = Color::Custom(if is_active {
+                            ds::text(cx)
+                        } else {
+                            ds::icon_muted(cx)
+                        });
+                        let close_hover_background = hover_background;
 
-                h_flex()
-                    .id(option.element_id())
-                    .h(px(32.))
-                    .max_w(px(118.))
-                    .min_w(px(82.))
-                    .items_center()
-                    .gap_1p5()
-                    .pl(px(10.))
-                    .pr(px(6.))
-                    .rounded_full()
-                    .border_1()
-                    .border_color(border_color)
-                    .cursor_pointer()
-                    .tooltip(Tooltip::text(option.label()))
-                    .when(is_active, |el| el.bg(ds::selected_background(cx)))
-                    .when(!is_active, |el| el.hover(move |el| el.bg(hover_background)))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_right_panel_option(option, window, cx);
-                    }))
-                    .child(
-                        Icon::new(option.icon())
-                            .size(IconSize::XSmall)
-                            .color(tab_color),
-                    )
-                    .child(
-                        Label::new(option.label())
-                            .size(LabelSize::XSmall)
-                            .color(tab_color)
-                            .truncate()
-                            .flex_1(),
-                    )
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("{}-close", option.element_id())))
-                            .size(px(16.))
-                            .flex()
+                        h_flex()
+                            .id(option.element_id())
+                            .h(px(32.))
+                            .max_w(px(118.))
+                            .min_w(px(82.))
                             .items_center()
-                            .justify_center()
+                            .gap_1p5()
+                            .pl(px(10.))
+                            .pr(px(6.))
                             .rounded_full()
+                            .border_1()
+                            .border_color(border_color)
                             .cursor_pointer()
-                            .hover(move |el| el.bg(close_hover_background))
+                            .tooltip(Tooltip::text(option.label()))
+                            .when(is_active, |el| el.bg(ds::selected_background(cx)))
+                            .when(!is_active, |el| el.hover(move |el| el.bg(hover_background)))
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.close_right_panel_tab(option, window, cx);
+                                this.select_right_panel_option(option, window, cx);
                             }))
                             .child(
-                                Icon::new(IconName::Close)
+                                Icon::new(option.icon())
                                     .size(IconSize::XSmall)
                                     .color(tab_color),
-                            ),
-                    )
-            }))
+                            )
+                            .child(
+                                Label::new(option.label())
+                                    .size(LabelSize::XSmall)
+                                    .color(tab_color)
+                                    .truncate()
+                                    .flex_1(),
+                            )
+                            .child(
+                                div()
+                                    .id(SharedString::from(format!(
+                                        "{}-close",
+                                        option.element_id()
+                                    )))
+                                    .size(px(16.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .cursor_pointer()
+                                    .hover(move |el| el.bg(close_hover_background))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.close_right_panel_tab(option, window, cx);
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::Close)
+                                            .size(IconSize::XSmall)
+                                            .color(tab_color),
+                                    ),
+                            )
+                    }),
+            )
     }
 
     fn render_right_panel_expand_button(
@@ -7501,6 +7484,7 @@ impl BeginnerWorkspace {
         div()
             .id(id)
             .size(px(28.))
+            .flex_shrink_0()
             .flex()
             .items_center()
             .justify_center()
@@ -7565,7 +7549,7 @@ impl BeginnerWorkspace {
             )
             .child(match self.right_panel_option {
                 RightPanelOption::Files => self.render_right_panel_files_state(cx),
-                RightPanelOption::Terminal => self.render_right_panel_terminal_state(cx),
+                RightPanelOption::Terminal => self.render_right_panel_files_state(cx),
                 RightPanelOption::Design => self.render_empty_artifact_state(cx).into_any_element(),
                 RightPanelOption::Code => match &self.right_panel {
                     RightPanel::CodeDiff { .. } => {
@@ -8275,42 +8259,6 @@ impl BeginnerWorkspace {
             }
             _ => IconName::File,
         }
-    }
-
-    fn render_right_panel_terminal_state(&self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
-            .flex_1()
-            .min_h_0()
-            .overflow_hidden()
-            .child(
-                if let Some(terminal_view) = self.right_terminal_view.clone() {
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_hidden()
-                        .child(terminal_view)
-                        .into_any_element()
-                } else {
-                    v_flex()
-                        .flex_1()
-                        .min_h_0()
-                        .items_center()
-                        .justify_center()
-                        .gap_3()
-                        .child(
-                            Icon::new(IconName::LoadCircle)
-                                .size(IconSize::Medium)
-                                .color(Color::Custom(ds::icon_muted(cx))),
-                        )
-                        .child(
-                            Label::new("Starting terminal...")
-                                .size(LabelSize::Small)
-                                .color(Color::Custom(ds::text_muted(cx))),
-                        )
-                        .into_any_element()
-                },
-            )
-            .into_any_element()
     }
 
     fn render_code_empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {

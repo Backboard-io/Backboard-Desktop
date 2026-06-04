@@ -5241,8 +5241,8 @@ impl ThreadView {
                         this.child(
                             h_flex()
                                 .absolute()
-                                .top_0()
-                                .right_0()
+                                .top(px(6.))
+                                .right(px(6.))
                                 .opacity(0.5)
                                 .hover(|s| s.opacity(1.0))
                                 .child(
