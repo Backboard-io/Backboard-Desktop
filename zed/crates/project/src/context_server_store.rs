@@ -197,6 +197,17 @@ impl ContextServerConfiguration {
                 settings,
                 remote,
             } => {
+                if settings
+                    .as_object()
+                    .is_some_and(|settings| settings.is_empty())
+                    || settings.is_null()
+                {
+                    log::debug!(
+                        "Skipping extension context server {id} because it has no configured settings"
+                    );
+                    return None;
+                }
+
                 let descriptor =
                     cx.update(|cx| registry.read(cx).context_server_descriptor(&id.0))?;
 
@@ -210,13 +221,20 @@ impl ContextServerConfiguration {
                         remote,
                     }),
                     Either::Left((Err(e), _)) => {
-                        log::error!(
-                            "Failed to create context server configuration from settings: {e:#}"
-                        );
+                        let error = format!("{e:#}");
+                        if error.contains("missing field") {
+                            log::debug!(
+                                "Skipping incomplete extension context server {id}: {error}"
+                            );
+                        } else {
+                            log::warn!(
+                                "Failed to create extension context server configuration for {id}: {error}"
+                            );
+                        }
                         None
                     }
                     Either::Right(_) => {
-                        log::error!(
+                        log::debug!(
                             "Timed out resolving command for extension context server {id}"
                         );
                         None

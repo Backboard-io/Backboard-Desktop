@@ -173,9 +173,9 @@ fn configured_icon_theme(cx: &mut App) -> Arc<theme::IconTheme> {
 
     match themes.get_icon_theme(&icon_theme_name.0) {
         Ok(theme) => theme,
-        Err(err) => {
+        Err(_) => {
             if themes.extensions_loaded() {
-                log::error!("{err}");
+                log::debug!("Configured icon theme unavailable, using default");
             }
             themes.get_icon_theme(DEFAULT_ICON_THEME_NAME).unwrap()
         }
