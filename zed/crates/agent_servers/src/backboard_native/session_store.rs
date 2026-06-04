@@ -25,15 +25,41 @@ pub fn record_for_session_or_workspace(
     workspace: &Path,
 ) -> Option<SessionRecord> {
     let store = load_session_store().ok()?;
-    store
-        .get(&session_id.to_string())
-        .and_then(record_from_value)
-        .or_else(|| {
-            store
-                .get(&workspace_store_key(workspace))
-                .and_then(record_from_value)
-        })
-        .or_else(|| latest_legacy_record_for_workspace(&store, workspace))
+    let session_key = session_id.to_string();
+    if let Some(record) = store.get(&session_key).and_then(record_from_value) {
+        log::debug!(
+            "Loaded Backboard IDE session record: source=session session_id={} workspace={}",
+            session_id,
+            workspace.display()
+        );
+        return Some(record);
+    }
+
+    let workspace_key = workspace_store_key(workspace);
+    if let Some(record) = store.get(&workspace_key).and_then(record_from_value) {
+        log::debug!(
+            "Loaded Backboard IDE session record: source=workspace session_id={} workspace={}",
+            session_id,
+            workspace.display()
+        );
+        return Some(record);
+    }
+
+    let record = latest_legacy_record_for_workspace(&store, workspace);
+    if record.is_some() {
+        log::debug!(
+            "Loaded Backboard IDE session record: source=legacy session_id={} workspace={}",
+            session_id,
+            workspace.display()
+        );
+    } else {
+        log::debug!(
+            "No Backboard IDE session record found: session_id={} workspace={}",
+            session_id,
+            workspace.display()
+        );
+    }
+    record
 }
 
 pub fn workspace_records(workspace: Option<&Path>) -> Vec<SessionRecord> {
@@ -65,6 +91,13 @@ pub fn workspace_records(workspace: Option<&Path>) -> Vec<SessionRecord> {
         records.push(record);
     }
     records.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    log::debug!(
+        "Loaded Backboard IDE workspace session records: workspace={} count={}",
+        workspace
+            .map(|workspace| workspace.display().to_string())
+            .unwrap_or_else(|| "all".to_string()),
+        records.len()
+    );
     records
 }
 
@@ -92,6 +125,12 @@ fn write_record(key: &str, record: &SessionRecord) -> Result<()> {
     ));
     fs::write(&tmp, serde_json::to_vec_pretty(&store)?)?;
     fs::rename(tmp, path)?;
+    log::debug!(
+        "Wrote Backboard IDE session record: key={} session_id={} workspace={}",
+        key,
+        record.session_id,
+        record.workspace
+    );
     Ok(())
 }
 

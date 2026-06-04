@@ -2880,6 +2880,16 @@ impl ThreadView {
         true
     }
 
+    pub(super) fn send_without_before_send_hook(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let before_send_hook = self.before_send_hook.take();
+        self.send(window, cx);
+        self.before_send_hook = before_send_hook;
+    }
+
     pub fn send_impl(
         &mut self,
         message_editor: Entity<MessageEditor>,

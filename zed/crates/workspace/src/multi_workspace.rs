@@ -38,6 +38,7 @@ const STARTUP_LOADING_LOGO_STAGE_SIZE: f32 =
     STARTUP_LOADING_LOGO_SIZE + STARTUP_LOADING_LOGO_PULSE_SIZE;
 const SIDEBAR_OPEN_ANIMATION_DURATION: Duration = Duration::from_millis(220);
 const SIDEBAR_OPEN_SLIDE_OFFSET_PX: f32 = 44.;
+const LAST_INTERFACE_MODE_KVP_KEY: &str = "backboard_last_interface_mode";
 
 type WorkspaceTourCompletion = Box<dyn FnOnce(&mut Window, &mut App) + 'static>;
 type AgentWorkspaceRightPanelToggler = Rc<dyn Fn(AnyView, &mut Window, &mut App)>;
@@ -344,6 +345,23 @@ pub enum InterfaceMode {
     Expert,
 }
 
+impl InterfaceMode {
+    fn from_kvp_value(value: &str) -> Option<Self> {
+        match value {
+            "simple" => Some(Self::Simple),
+            "editor" | "expert" => Some(Self::Expert),
+            _ => None,
+        }
+    }
+
+    fn as_kvp_value(self) -> &'static str {
+        match self {
+            Self::Simple => "simple",
+            Self::Expert => "editor",
+        }
+    }
+}
+
 pub struct MultiWorkspace {
     window_id: WindowId,
     retained_workspaces: Vec<Entity<Workspace>>,
@@ -423,6 +441,7 @@ impl MultiWorkspace {
         let interface_mode = workspace
             .read(cx)
             .initial_interface_mode()
+            .or_else(|| Self::last_user_interface_mode(cx))
             .unwrap_or(InterfaceMode::Expert);
         let jarvis_visualizer = cx.new(|cx| {
             let project = workspace.read(cx).project().clone();
@@ -475,8 +494,29 @@ impl MultiWorkspace {
             return;
         }
         self.interface_mode = mode;
+        Self::save_last_user_interface_mode(mode, cx);
         self.serialize(cx);
         cx.notify();
+    }
+
+    fn last_user_interface_mode(cx: &mut App) -> Option<InterfaceMode> {
+        let kvp = db::kvp::KeyValueStore::global(cx);
+        kvp.read_kvp(LAST_INTERFACE_MODE_KVP_KEY)
+            .log_err()
+            .flatten()
+            .as_deref()
+            .and_then(InterfaceMode::from_kvp_value)
+    }
+
+    fn save_last_user_interface_mode(mode: InterfaceMode, cx: &mut App) {
+        let kvp = db::kvp::KeyValueStore::global(cx);
+        db::write_and_log(cx, move || async move {
+            kvp.write_kvp(
+                LAST_INTERFACE_MODE_KVP_KEY.to_string(),
+                mode.as_kvp_value().to_string(),
+            )
+            .await
+        });
     }
 
     fn ensure_startup_loading_animation(&mut self, cx: &mut Context<Self>) {
@@ -3444,5 +3484,27 @@ impl Render for MultiWorkspace {
                 ..Tiling::default()
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InterfaceMode;
+
+    #[test]
+    fn interface_mode_round_trips_kvp_values() {
+        assert_eq!(
+            InterfaceMode::from_kvp_value(InterfaceMode::Simple.as_kvp_value()),
+            Some(InterfaceMode::Simple)
+        );
+        assert_eq!(
+            InterfaceMode::from_kvp_value(InterfaceMode::Expert.as_kvp_value()),
+            Some(InterfaceMode::Expert)
+        );
+        assert_eq!(
+            InterfaceMode::from_kvp_value("expert"),
+            Some(InterfaceMode::Expert)
+        );
+        assert_eq!(InterfaceMode::from_kvp_value("unknown"), None);
     }
 }

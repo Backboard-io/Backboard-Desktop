@@ -1462,6 +1462,13 @@ impl AcpThread {
     }
 
     pub fn set_work_dirs(&mut self, work_dirs: PathList, cx: &mut Context<Self>) {
+        let update_task =
+            self.connection
+                .update_session_work_dirs(&self.session_id, work_dirs.clone(), cx);
+        cx.spawn(async move |_this, _cx| {
+            update_task.await.log_err();
+        })
+        .detach();
         self.work_dirs = Some(work_dirs);
         cx.emit(AcpThreadEvent::WorkingDirectoriesUpdated)
     }

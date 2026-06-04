@@ -115,6 +115,18 @@ pub trait AgentConnection {
         self.supports_load_session() || self.supports_resume_session()
     }
 
+    /// Notify the connection that a loaded session's active working directories changed.
+    /// Connections that execute tools against a cached workspace should update that
+    /// runtime state here.
+    fn update_session_work_dirs(
+        &self,
+        _session_id: &acp::SessionId,
+        _work_dirs: PathList,
+        _cx: &mut App,
+    ) -> Task<Result<()>> {
+        Task::ready(Ok(()))
+    }
+
     fn auth_methods(&self) -> &[acp::AuthMethod];
 
     fn terminal_auth_task(

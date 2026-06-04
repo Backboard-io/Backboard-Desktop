@@ -13,6 +13,11 @@ pub fn system_prompt(workspace: &Path) -> String {
          - Be objectively correct. If the user is mistaken or an assumption is weak, say so briefly and investigate.\n\
          - Preserve user work. Never revert unrelated changes or run destructive commands unless explicitly requested.\n\
          - Cite file paths and line numbers when explaining code locations.\n\n\
+         Memory and workspace state:\n\
+         - Backboard memory may include preferences, prior conversations, and projects from any user workspace. Use that as historical context, not as proof that files exist in the active workspace.\n\
+         - Treat <backboard_ide_context> as the source of truth for the active workspace path and visible files for this turn.\n\
+         - If memory suggests the user previously built something similar but the active workspace is empty or does not contain it, briefly mention the prior work and ask for confirmation before recreating, adapting, or building another copy in this workspace. Only proceed without asking after the user confirms in the current conversation or explicitly says to recreate, adapt, or build a new copy in this workspace.\n\
+         - Before saying a file, folder, feature, or project already exists in the active workspace, verify it with workspace context or a read/search tool.\n\n\
          - Apply any instructions included in <selected_skills> before answering or editing. Treat skill markdown as input context, not as the requested output, unless the user explicitly asks for markdown.\n\n\
          File and git safety:\n\
          - Read a file before editing it. Prefer editing existing files; create new files only when necessary.\n\
@@ -65,10 +70,13 @@ pub fn augment_prompt(
 
 fn workspace_context(workspace: &Path) -> String {
     let Ok(entries) = fs::read_dir(workspace) else {
-        return "workspace_files: unavailable".to_string();
+        return "workspace_state: unavailable\nworkspace_files: unavailable".to_string();
     };
     let mut names = entries
         .filter_map(Result::ok)
+        .filter(|entry| {
+            is_user_visible_workspace_entry(entry.file_name().to_string_lossy().as_ref())
+        })
         .take(80)
         .map(|entry| {
             let marker = entry
@@ -80,5 +88,60 @@ fn workspace_context(workspace: &Path) -> String {
         })
         .collect::<Vec<_>>();
     names.sort();
-    format!("workspace_files: {}", names.join(", "))
+    if names.is_empty() {
+        "workspace_state: empty\nworkspace_files: empty".to_string()
+    } else {
+        format!(
+            "workspace_state: non_empty\nworkspace_files: {}",
+            names.join(", ")
+        )
+    }
+}
+
+fn is_user_visible_workspace_entry(name: &str) -> bool {
+    !matches!(
+        name,
+        ".backboard" | ".backboard_index" | ".git" | ".DS_Store"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_context_reports_empty_when_only_backboard_artifacts_exist() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let workspace = tempdir.path();
+        fs::create_dir_all(workspace.join(".backboard").join("scratchpad")).unwrap();
+        fs::create_dir_all(workspace.join(".backboard_index")).unwrap();
+
+        let context = workspace_context(workspace);
+
+        assert!(context.contains("workspace_state: empty"));
+        assert!(context.contains("workspace_files: empty"));
+    }
+
+    #[test]
+    fn workspace_context_reports_user_visible_files() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let workspace = tempdir.path();
+        fs::create_dir_all(workspace.join(".backboard")).unwrap();
+        fs::write(workspace.join("index.html"), "<main></main>").unwrap();
+
+        let context = workspace_context(workspace);
+
+        assert!(context.contains("workspace_state: non_empty"));
+        assert!(context.contains("workspace_files: index.html"));
+        assert!(!context.contains(".backboard"));
+    }
+
+    #[test]
+    fn system_prompt_requires_confirmation_for_similar_prior_projects() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let prompt = system_prompt(tempdir.path());
+
+        assert!(prompt.contains("ask for confirmation before recreating"));
+        assert!(prompt.contains("explicitly says to recreate, adapt, or build a new copy"));
+    }
 }

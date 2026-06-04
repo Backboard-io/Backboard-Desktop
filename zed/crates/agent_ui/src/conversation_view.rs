@@ -655,6 +655,20 @@ impl ConversationView {
         root_thread.update(cx, |thread, cx| thread.try_send(window, cx))
     }
 
+    pub fn send_root_message_editor_without_before_send_hook(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(root_thread) = self.root_thread_view() else {
+            return false;
+        };
+        root_thread.update(cx, |thread, cx| {
+            thread.send_without_before_send_hook(window, cx);
+        });
+        true
+    }
+
     pub fn set_root_prompt_prefix(
         &self,
         prompt_prefix: Option<SharedString>,
@@ -704,6 +718,12 @@ impl ConversationView {
     pub fn root_model_selector(&self, cx: &App) -> Option<Entity<ModelSelectorPopover>> {
         self.root_thread_view()
             .and_then(|tv| tv.read(cx).model_selector.clone())
+    }
+
+    pub fn root_agent_model_selector(&self) -> Option<Rc<dyn AgentModelSelector>> {
+        let session_id = self.root_session_id.as_ref()?;
+        let connected = self.as_connected()?;
+        connected.connection.model_selector(session_id)
     }
 
     /// Creates a new model selector popover for the root thread with the inner selector

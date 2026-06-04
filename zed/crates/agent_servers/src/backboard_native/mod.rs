@@ -837,6 +837,10 @@ impl BackboardNativeState {
         }
 
         let state = self.clone();
+        log::debug!(
+            "Backboard native workspace indexing started: workspace={}",
+            workspace.display()
+        );
         cx.spawn(async move |cx| {
             let workspace_for_task = workspace.clone();
             let result = cx
@@ -855,6 +859,11 @@ impl BackboardNativeState {
             if let Err(error) = result {
                 log::debug!(
                     "Backboard native workspace indexing failed for {}: {error:#}",
+                    workspace.display()
+                );
+            } else {
+                log::debug!(
+                    "Backboard native workspace indexing finished: workspace={}",
                     workspace.display()
                 );
             }
@@ -1187,6 +1196,11 @@ impl AgentConnection for BackboardNativeConnection {
             return Task::ready(Err(anyhow!("Working directory cannot be empty")));
         };
         let session_id = acp::SessionId::new(format!("backboard-{}", Uuid::new_v4().simple()));
+        log::info!(
+            "Backboard native session created: session_id={} workspace={}",
+            session_id,
+            workspace.display()
+        );
         let mode = self.state.default_mode.clone();
         let config = self.state.load_config();
         let (provider, model) = BackboardNativeState::fallback_provider_model(&config);
@@ -1285,6 +1299,66 @@ impl AgentConnection for BackboardNativeConnection {
         cx: &mut App,
     ) -> Task<Result<Entity<AcpThread>>> {
         self.create_loaded_session(session_id, project, work_dirs, title, false, cx)
+    }
+
+    fn update_session_work_dirs(
+        &self,
+        session_id: &acp::SessionId,
+        work_dirs: PathList,
+        cx: &mut App,
+    ) -> Task<Result<()>> {
+        let Some(workspace) = work_dirs.ordered_paths().next().cloned() else {
+            return Task::ready(Ok(()));
+        };
+
+        let mut record = None;
+        {
+            let mut sessions = self.state.sessions.borrow_mut();
+            let Some(session) = sessions.get_mut(session_id) else {
+                return Task::ready(Err(anyhow!("unknown Backboard session: {session_id}")));
+            };
+            if session.workspace == workspace {
+                return Task::ready(Ok(()));
+            }
+
+            log::info!(
+                "Backboard native session workspace changed: session_id={} previous_workspace={} workspace={}",
+                session_id,
+                session.workspace.display(),
+                workspace.display()
+            );
+            session.workspace = workspace.clone();
+            session.config_tx.send(()).ok();
+
+            if let (Some(assistant_id), Some(thread_id)) =
+                (session.assistant_id.clone(), session.thread_id.clone())
+            {
+                record = Some(session_store::SessionRecord {
+                    workspace: session.workspace.to_string_lossy().to_string(),
+                    assistant_id: Some(assistant_id),
+                    thread_id: Some(thread_id),
+                    provider: session.provider.clone(),
+                    model: session.model.clone(),
+                    title: session
+                        .workspace
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("Backboard")
+                        .to_string(),
+                    session_id: session_id.to_string(),
+                    updated_at: Utc::now().to_rfc3339(),
+                });
+            }
+        }
+
+        self.state
+            .prepare_workspace_and_start_indexing(workspace.clone(), cx);
+        if let Some(record) = record {
+            session_store::write_session_record(&session_id.to_string(), &record).ok();
+            session_store::write_workspace_record(&workspace, &record).ok();
+        }
+
+        Task::ready(Ok(()))
     }
 
     fn auth_methods(&self) -> &[acp::AuthMethod] {
@@ -1416,6 +1490,12 @@ impl BackboardNativeConnection {
             return Task::ready(Err(anyhow!("Working directory cannot be empty")));
         };
 
+        log::info!(
+            "Backboard native session load requested: session_id={} workspace={} replay_history={}",
+            session_id,
+            workspace.display(),
+            replay_history
+        );
         let record = session_store::record_for_session_or_workspace(&session_id, &workspace);
         let config = self.state.load_config();
         let (default_provider, default_model) =
@@ -2837,6 +2917,64 @@ description: Modern design guidance.
         assert_eq!(
             option_current_value(&google_options, "backboard_mcp_google").as_ref(),
             Some(&acp::SessionConfigValueId::new("on"))
+        );
+    }
+
+    #[gpui::test]
+    async fn updating_work_dirs_updates_native_session_workspace(cx: &mut gpui::TestAppContext) {
+        let old_workspace = tempfile::tempdir().expect("create old workspace");
+        let new_workspace = tempfile::tempdir().expect("create new workspace");
+        let connection =
+            BackboardNativeConnection::new(AgentId::new("backboard"), Some("free".into()));
+        let state = connection.state.clone();
+        let session_id = acp::SessionId::new("test-session");
+        let (config_tx, config_rx) = config_watch_channel();
+
+        state.sessions.borrow_mut().insert(
+            session_id.clone(),
+            NativeSession {
+                thread: WeakEntity::new_invalid(),
+                workspace: old_workspace.path().to_path_buf(),
+                assistant_id: None,
+                thread_id: None,
+                current_run_id: None,
+                provider: Some(DEFAULT_PROVIDER.to_string()),
+                model: Some(DEFAULT_MODEL.to_string()),
+                mode: acp::SessionModeId::new("free"),
+                intensity: DEFAULT_INTENSITY.to_string(),
+                feature_settings: FeatureSettings::default(),
+                rewound_history_context: None,
+                active_user_message_id: None,
+                native_snapshots: Vec::new(),
+                context_server_store: None,
+                mcp_tools: Vec::new(),
+                config_tx,
+                config_rx,
+                cancel_flag: Arc::new(AtomicBool::new(false)),
+                metrics: NativeTurnMetrics::default(),
+                context_window_tokens: None,
+                estimated_used_tokens: 0,
+                session_total_cost: 0.0,
+            },
+        );
+
+        cx.update(|cx| {
+            connection.update_session_work_dirs(
+                &session_id,
+                PathList::new(&[new_workspace.path()]),
+                cx,
+            )
+        })
+        .await
+        .expect("work dirs update should succeed");
+
+        assert_eq!(
+            state
+                .sessions
+                .borrow()
+                .get(&session_id)
+                .map(|session| session.workspace.clone()),
+            Some(new_workspace.path().to_path_buf())
         );
     }
 }

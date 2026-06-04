@@ -35,8 +35,9 @@ pub async fn run_prompt(
     state.begin_turn(&params.session_id, user_message_id);
     state.reset_turn_metrics(&params.session_id);
     log::info!(
-        "Backboard native prompt start: session_id={} provider={} model={} mode={} intensity={} path=rust-native",
+        "Backboard native prompt start: session_id={} workspace={} provider={} model={} mode={} intensity={} path=rust-native",
         params.session_id,
+        runtime.workspace.display(),
         runtime.provider,
         runtime.model,
         runtime.mode,

@@ -1695,18 +1695,24 @@ impl AgentPanel {
                 .read_with(cx, |workspace, _| workspace.database_id())
                 .ok()
                 .flatten();
+            let current_workspace_paths = workspace
+                .read_with(cx, |workspace, cx| {
+                    workspace.project().read(cx).default_path_list(cx)
+                })
+                .ok();
 
-            let (serialized_panel, global_last_used_agent) = cx
+            let (serialized_panel, serialized_panel_is_legacy, global_last_used_agent) = cx
                 .background_spawn(async move {
                     match kvp {
                         Some(kvp) => {
-                            let panel = workspace_id
-                                .and_then(|id| read_serialized_panel(id, &kvp))
-                                .or_else(|| read_legacy_serialized_panel(&kvp));
+                            let scoped_panel =
+                                workspace_id.and_then(|id| read_serialized_panel(id, &kvp));
+                            let panel_is_legacy = scoped_panel.is_none();
+                            let panel = scoped_panel.or_else(|| read_legacy_serialized_panel(&kvp));
                             let global_agent = read_global_last_used_agent(&kvp);
-                            (panel, global_agent)
+                            (panel, panel_is_legacy, global_agent)
                         }
-                        None => (None, None),
+                        None => (None, false, None),
                     }
                 })
                 .await;
@@ -1725,6 +1731,15 @@ impl AgentPanel {
                         primary
                             .or(fallback)
                             .filter(|entry| !entry.archived)
+                            .filter(|entry| {
+                                if !serialized_panel_is_legacy {
+                                    return true;
+                                }
+
+                                current_workspace_paths.as_ref().is_some_and(|paths| {
+                                    !paths.is_empty() && entry.folder_paths() == paths
+                                })
+                            })
                             .map(|entry| entry.thread_id)
                     });
                     match lookup {
@@ -1762,8 +1777,10 @@ impl AgentPanel {
 
                     if let Some(serialized_panel) = &serialized_panel {
                         panel.last_created_entry_kind = serialized_panel.last_created_entry_kind;
-                        panel.backboard_workspace_runs =
-                            serialized_panel.backboard_workspace_runs.clone();
+                        if !serialized_panel_is_legacy {
+                            panel.backboard_workspace_runs =
+                                serialized_panel.backboard_workspace_runs.clone();
+                        }
                     }
 
                     // The thread being restored may have been bound to an
@@ -1798,15 +1815,18 @@ impl AgentPanel {
                             cx,
                         );
                     }
-                    if let Some(new_draft_thread_id) = serialized_panel
-                        .as_ref()
-                        .and_then(|p| p.new_draft_thread_id)
+                    if !serialized_panel_is_legacy
+                        && let Some(new_draft_thread_id) = serialized_panel
+                            .as_ref()
+                            .and_then(|p| p.new_draft_thread_id)
                     {
                         panel.restore_new_draft(new_draft_thread_id, window, cx);
                     }
-                    panel.backboard_workspace_draft_thread_id = serialized_panel
-                        .as_ref()
-                        .and_then(|p| p.backboard_workspace_draft_thread_id);
+                    if !serialized_panel_is_legacy {
+                        panel.backboard_workspace_draft_thread_id = serialized_panel
+                            .as_ref()
+                            .and_then(|p| p.backboard_workspace_draft_thread_id);
+                    }
                     cx.notify();
                 });
 
@@ -7675,6 +7695,98 @@ mod tests {
             assert!(
                 panel.active_conversation_view().is_none(),
                 "workspace B should have no active thread when it had no prior conversation"
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_legacy_panel_restore_skips_thread_from_different_workspace(
+        cx: &mut TestAppContext,
+    ) {
+        init_test(cx);
+        cx.update(|cx| {
+            agent::ThreadStore::init_global(cx);
+            language_model::LanguageModelRegistry::test(cx);
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree("/project_a", json!({ "file.txt": "" }))
+            .await;
+        fs.insert_tree("/project_b", json!({ "main.txt": "" }))
+            .await;
+
+        let project_b = Project::test(fs, [Path::new("/project_b")], cx).await;
+        let project_a_paths = PathList::new(&[Path::new("/project_a")]);
+        let project_b_paths = PathList::new(&[Path::new("/project_b")]);
+        let thread_id = ThreadId::new();
+        let session_id = acp::SessionId::new("legacy-session-from-project-a");
+
+        cx.update(|cx| {
+            ThreadMetadataStore::global(cx).update(cx, |store, cx| {
+                store.save(
+                    ThreadMetadata {
+                        thread_id,
+                        session_id: Some(session_id.clone()),
+                        agent_id: agent::ZED_AGENT_ID.clone(),
+                        title: Some("Project A thread".into()),
+                        updated_at: Utc::now(),
+                        created_at: Some(Utc::now()),
+                        interacted_at: Some(Utc::now()),
+                        worktree_paths: project::WorktreePaths::from_folder_paths(&project_a_paths),
+                        remote_connection: None,
+                        archived: false,
+                    },
+                    cx,
+                );
+            });
+        });
+
+        let legacy_panel = SerializedAgentPanel {
+            selected_agent: Some(Agent::NativeAgent),
+            last_created_entry_kind: AgentPanelEntryKind::Thread,
+            last_active_thread: Some(SerializedActiveThread {
+                session_id: Some(session_id.to_string()),
+                thread_id: Some(thread_id),
+                agent_type: Agent::NativeAgent,
+                title: Some("Project A thread".to_string()),
+                work_dirs: Some(project_a_paths.serialize()),
+            }),
+            new_draft_thread_id: None,
+            backboard_workspace_draft_thread_id: None,
+            backboard_workspace_runs: HashMap::default(),
+        };
+        let kvp = cx.update(|cx| KeyValueStore::global(cx));
+        kvp.write_kvp(
+            AGENT_PANEL_KEY.to_string(),
+            serde_json::to_string(&legacy_panel).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let multi_workspace =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project_b.clone(), window, cx));
+        let workspace_b = multi_workspace
+            .read_with(cx, |multi_workspace, _cx| {
+                multi_workspace.workspace().clone()
+            })
+            .unwrap();
+
+        let mut cx = VisualTestContext::from_window(multi_workspace.into(), cx);
+        let async_cx = cx.update(|window, cx| window.to_async(cx));
+        let loaded = AgentPanel::load(workspace_b.downgrade(), async_cx)
+            .await
+            .expect("panel load should succeed");
+        cx.run_until_parked();
+
+        loaded.read_with(&cx, |panel, cx| {
+            assert!(
+                panel.active_conversation_view().is_none(),
+                "legacy panel state from project A should not auto-restore in project B"
+            );
+            assert_eq!(
+                panel.project.read(cx).default_path_list(cx),
+                project_b_paths,
+                "sanity: loaded panel should belong to project B"
             );
         });
     }

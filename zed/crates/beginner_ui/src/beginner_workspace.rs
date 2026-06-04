@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
@@ -16,7 +16,7 @@ use agent_ui::{
     BackboardAgentWorkspaceMode, BackboardAgentWorkspaceScope, ConversationView,
     ModelSelectorPopover,
 };
-use anyhow::{Context as AnyhowContext, bail};
+use anyhow::{Context as AnyhowContext, Result, bail};
 use db::kvp::KeyValueStore;
 use editor::actions::{Cancel as EditorCancel, Newline};
 use editor::{Editor, EditorEvent};
@@ -30,6 +30,7 @@ use gpui::{
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
 use project::Project;
+use serde_json::Value;
 use terminal_view::TerminalView;
 use ui::{
     Button, ButtonSize, ButtonStyle, Color, ContextMenu, ContextMenuEntry, DropdownMenu,
@@ -51,30 +52,120 @@ use crate::beginner_chat_feed::{
 use crate::file_changes_panel::{FileChangesPanel, FileChangesPanelEvent};
 use crate::simple_design as ds;
 
+struct CuratedSimpleModel {
+    provider_hint: &'static str,
+    model_hints: &'static [&'static str],
+    display_name: &'static str,
+}
+
 /// Provider/model ID hints for the curated simple-mode model list.
 /// Matched against live ACP model IDs returned by the Backboard catalog.
-/// Each entry is (provider_id, model_id_prefix, display_name).
-static CURATED_MODELS: &[(&str, &str, &str)] = &[
-    // ── Anthropic ──────────────────────────────────────────────────────
-    ("anthropic", "claude-opus-4", "Claude Opus 4"),
-    ("anthropic", "claude-sonnet-4", "Claude Sonnet 4"),
-    ("anthropic", "claude-haiku-4", "Claude Haiku 4"),
-    // ── OpenAI ─────────────────────────────────────────────────────────
-    ("openai", "o3", "o3"),
-    ("openai", "gpt-4o", "GPT-4o"),
-    ("openai", "o4-mini", "o4-mini"),
-    // ── Google ─────────────────────────────────────────────────────────
-    ("google", "gemini-2.5-pro", "Gemini 2.5 Pro"),
-    ("google", "gemini-2.5-flash", "Gemini 2.5 Flash"),
-    ("google", "gemini-2.0-flash", "Gemini 2.0 Flash"),
-    // ── DeepSeek ───────────────────────────────────────────────────────
-    ("deepseek", "deepseek-r1", "DeepSeek R1"),
-    ("deepseek", "deepseek-v3", "DeepSeek V3"),
-    ("deepseek", "deepseek-v2", "DeepSeek V2.5"),
-    // ── Qwen ───────────────────────────────────────────────────────────
-    ("qwen", "qwen3", "Qwen3"),
-    ("qwen", "qwen2.5-coder", "Qwen2.5 Coder"),
-    ("qwen", "qwen2.5", "Qwen2.5"),
+static CURATED_MODELS: &[CuratedSimpleModel] = &[
+    CuratedSimpleModel {
+        provider_hint: "anthropic",
+        model_hints: &["claude-opus-4", "claude-4-opus"],
+        display_name: "Claude Opus 4 (maximum reasoning)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "anthropic",
+        model_hints: &["claude-sonnet-4", "claude-4-sonnet"],
+        display_name: "Claude Sonnet 4 (balanced coding)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "anthropic",
+        model_hints: &["claude-haiku-4", "claude-4-haiku"],
+        display_name: "Claude Haiku 4 (fast)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "anthropic",
+        model_hints: &["claude-3-7-sonnet", "claude-3.7-sonnet"],
+        display_name: "Claude 3.7 Sonnet (reasoning)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "anthropic",
+        model_hints: &["claude-3-5-sonnet", "claude-3.5-sonnet"],
+        display_name: "Claude 3.5 Sonnet (fast coding)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "anthropic",
+        model_hints: &["claude-3-5-haiku", "claude-3.5-haiku"],
+        display_name: "Claude 3.5 Haiku (fast)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "openai",
+        model_hints: &["o3-pro"],
+        display_name: "o3-pro (deep reasoning)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "openai",
+        model_hints: &["o3"],
+        display_name: "o3 (reasoning)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "openai",
+        model_hints: &["o4-mini"],
+        display_name: "o4-mini (fast reasoning)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "openai",
+        model_hints: &["gpt-4.1", "gpt-4-1"],
+        display_name: "GPT-4.1 (coding)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "openai",
+        model_hints: &["gpt-4o-mini"],
+        display_name: "GPT-4o mini (fast general)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "openai",
+        model_hints: &["gpt-4o"],
+        display_name: "GPT-4o (general)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "google",
+        model_hints: &["gemini-2.5-pro", "gemini-2-5-pro"],
+        display_name: "Gemini 2.5 Pro (long-context reasoning)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "google",
+        model_hints: &["gemini-2.5-flash", "gemini-2-5-flash"],
+        display_name: "Gemini 2.5 Flash (fast multimodal)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "google",
+        model_hints: &["gemini-2.0-flash", "gemini-2-0-flash"],
+        display_name: "Gemini 2.0 Flash (fast)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "deepseek",
+        model_hints: &["deepseek-r1"],
+        display_name: "DeepSeek R1 (reasoning)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "deepseek",
+        model_hints: &["deepseek-v3", "deepseek-chat"],
+        display_name: "DeepSeek V3 (chat and coding)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "deepseek",
+        model_hints: &["deepseek-v2.5", "deepseek-v2-5"],
+        display_name: "DeepSeek V2.5 (legacy)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "qwen",
+        model_hints: &["qwen3"],
+        display_name: "Qwen3 (reasoning)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "qwen",
+        model_hints: &["qwen2.5-coder", "qwen2-5-coder"],
+        display_name: "Qwen2.5 Coder (coding)",
+    },
+    CuratedSimpleModel {
+        provider_hint: "qwen",
+        model_hints: &["qwen2.5", "qwen2-5"],
+        display_name: "Qwen2.5 (general)",
+    },
 ];
 
 const SIMPLE_LANDING_LOGO_PATH: &str = "images/animation_logo.png";
@@ -92,6 +183,44 @@ const CLOSED_CHATS_SIDEBAR_WIDTH_PX: f32 = 48.0;
 const FILES_SPLIT_MIN_DIRECTORY_WIDTH_PX: f32 = 160.0;
 const FILES_SPLIT_MIN_CODE_WIDTH_PX: f32 = 160.0;
 const MAX_UNTRACKED_DIFF_BYTES: u64 = 256 * 1024;
+const PROJECT_HISTORY_STOP_WORDS: &[&str] = &[
+    "a",
+    "an",
+    "the",
+    "make",
+    "build",
+    "create",
+    "add",
+    "set",
+    "up",
+    "me",
+    "my",
+    "i",
+    "want",
+    "please",
+    "can",
+    "you",
+    "that",
+    "this",
+    "it",
+    "some",
+    "just",
+    "something",
+    "new",
+    "simple",
+    "basic",
+    "cool",
+    "nice",
+    "good",
+    "great",
+    "modern",
+    "clean",
+    "help",
+    "do",
+    "write",
+    "give",
+    "project",
+];
 
 struct PreviewLaunch {
     folder: PathBuf,
@@ -111,13 +240,18 @@ fn curated_model_match_with_provider(
     let model_id = model_id_without_provider(model.id.0.as_ref());
     let model_name = model.name.to_lowercase();
 
-    CURATED_MODELS.iter().enumerate().find_map(
-        |(index, &(provider_hint, model_hint, display_name))| {
+    CURATED_MODELS
+        .iter()
+        .enumerate()
+        .find_map(|(index, model)| {
+            let provider_hint = canonical_simple_model_provider(model.provider_hint);
             (provider == provider_hint
-                && curated_model_id_matches(&model_id, model_hint, &model_name))
-            .then_some((index, display_name))
-        },
-    )
+                && model
+                    .model_hints
+                    .iter()
+                    .any(|model_hint| curated_model_id_matches(&model_id, model_hint, &model_name)))
+            .then_some((index, model.display_name))
+        })
 }
 
 fn model_provider_id(model: &AgentModelInfo, provider_hint: Option<&str>) -> String {
@@ -251,7 +385,7 @@ fn curated_or_live_model_list(model_list: AgentModelList) -> AgentModelList {
 }
 
 #[cfg(test)]
-mod tests {
+mod simple_mode_draft_tests {
     use super::*;
     use fs::FakeFs;
     use gpui::{TestAppContext, VisualTestContext};
@@ -444,7 +578,7 @@ mod tests {
         let multi_workspace_weak = multi_workspace
             .entity(cx)
             .expect("test multi-workspace window should have a root entity")
-            .weak_handle();
+            .downgrade();
         let mut cx = VisualTestContext::from_window(multi_workspace.into(), cx);
 
         let beginner_workspace = workspace.update_in(&mut cx, |workspace, window, cx| {
@@ -520,6 +654,69 @@ mod tests {
             assert_eq!(paths, vec![Path::new("/project").to_path_buf()]);
         });
     }
+}
+
+fn model_list_contains_id(model_list: &AgentModelList, model_id: &acp::ModelId) -> bool {
+    match model_list {
+        AgentModelList::Flat(models) => models.iter().any(|model| model.id == *model_id),
+        AgentModelList::Grouped(groups) => groups
+            .values()
+            .any(|models| models.iter().any(|model| model.id == *model_id)),
+    }
+}
+
+fn first_model_in_list(model_list: &AgentModelList) -> Option<AgentModelInfo> {
+    match model_list {
+        AgentModelList::Flat(models) => models.first().cloned(),
+        AgentModelList::Grouped(groups) => {
+            groups.values().find_map(|models| models.first()).cloned()
+        }
+    }
+}
+
+fn fallback_model_for_unsupported_simple_selection(
+    model_list: &AgentModelList,
+    selected_model: Option<&AgentModelInfo>,
+) -> Option<AgentModelInfo> {
+    if let Some(selected_model) = selected_model
+        && model_list_contains_id(model_list, &selected_model.id)
+    {
+        return None;
+    }
+
+    first_model_in_list(model_list)
+}
+
+fn ensure_selected_simple_model_is_supported(
+    selector: Rc<dyn AgentModelSelector>,
+    cx: &mut App,
+) -> Task<Result<()>> {
+    let selected_model_task = selector.selected_model(cx);
+    let model_list_task = selector.list_models(cx);
+    cx.spawn(async move |cx| {
+        let selected_model = selected_model_task.await.ok();
+        let model_list = curated_or_live_model_list(model_list_task.await?);
+
+        let Some(fallback_model) =
+            fallback_model_for_unsupported_simple_selection(&model_list, selected_model.as_ref())
+        else {
+            return Ok(());
+        };
+
+        let previous_model = selected_model
+            .as_ref()
+            .map(|model| model.id.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        log::warn!(
+            "Simple mode selected model is not in the live model list; switching model previous_model={} replacement_model={}",
+            previous_model,
+            fallback_model.id
+        );
+
+        cx.update(|cx| selector.select_model(fallback_model.id, cx))
+            .await?;
+        Ok(())
+    })
 }
 
 fn folder_display_name(folder: &Path) -> SharedString {
@@ -608,6 +805,7 @@ const BEGINNER_CHATS_KVP_KEY: &str = "beginner_chats_v1";
 const BEGINNER_OPEN_TABS_KVP_KEY: &str = "beginner_open_tabs_v1";
 const SIMPLE_COMPOSER_MIN_LINES: usize = 3;
 const SIMPLE_COMPOSER_MAX_LINES: usize = 12;
+const REMOTE_PROJECT_THREAD_SCAN_LIMIT: usize = 25;
 static SIMPLE_MODE_OPENED_THIS_PROCESS: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone)]
@@ -662,6 +860,415 @@ impl BeginnerChatRecord {
             SharedString::from(name)
         }
     }
+}
+
+fn project_history_terms(text: &str) -> HashSet<String> {
+    let mut terms = HashSet::new();
+    let mut current = String::new();
+
+    for character in text.chars() {
+        if character.is_alphanumeric() {
+            current.extend(character.to_lowercase());
+            continue;
+        }
+
+        if !current.is_empty() {
+            if !PROJECT_HISTORY_STOP_WORDS.contains(&current.as_str()) {
+                terms.insert(std::mem::take(&mut current));
+            } else {
+                current.clear();
+            }
+        }
+    }
+
+    if !current.is_empty() && !PROJECT_HISTORY_STOP_WORDS.contains(&current.as_str()) {
+        terms.insert(current);
+    }
+
+    terms
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProjectMatchConfidence {
+    Medium,
+    High,
+}
+
+impl ProjectMatchConfidence {
+    fn as_str(self) -> &'static str {
+        match self {
+            ProjectMatchConfidence::Medium => "medium",
+            ProjectMatchConfidence::High => "high",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ProjectMatchScore {
+    score: f32,
+    shared_terms: usize,
+    prompt_terms: usize,
+    record_terms: usize,
+    confidence: ProjectMatchConfidence,
+}
+
+fn score_project_history_match(
+    prompt_terms: &HashSet<String>,
+    record_terms: &HashSet<String>,
+) -> Option<ProjectMatchScore> {
+    if prompt_terms.len() < 2 || record_terms.is_empty() {
+        return None;
+    }
+
+    let shared_terms = prompt_terms.intersection(record_terms).count();
+    if shared_terms < 2 {
+        return None;
+    }
+
+    let smaller_set_coverage =
+        shared_terms as f32 / prompt_terms.len().min(record_terms.len()) as f32;
+    let prompt_coverage = shared_terms as f32 / prompt_terms.len() as f32;
+    let score = smaller_set_coverage.mul_add(0.7, prompt_coverage * 0.3);
+    let confidence = if score >= 0.78 && shared_terms >= 3 {
+        ProjectMatchConfidence::High
+    } else if score >= 0.62 {
+        ProjectMatchConfidence::Medium
+    } else {
+        return None;
+    };
+
+    Some(ProjectMatchScore {
+        score,
+        shared_terms,
+        prompt_terms: prompt_terms.len(),
+        record_terms: record_terms.len(),
+        confidence,
+    })
+}
+
+fn scored_similar_prior_project_match<'a>(
+    records: &'a [BeginnerChatRecord],
+    prompt: &str,
+    folder: &Path,
+) -> Option<(&'a BeginnerChatRecord, ProjectMatchScore)> {
+    let prompt_terms = project_history_terms(prompt);
+
+    records
+        .iter()
+        .filter(|record| record.folder() != folder)
+        .filter_map(|record| {
+            let record_terms = project_history_terms(&record.name);
+            score_project_history_match(&prompt_terms, &record_terms).map(|score| (record, score))
+        })
+        .max_by(|(record_a, score_a), (record_b, score_b)| {
+            score_a
+                .score
+                .total_cmp(&score_b.score)
+                .then_with(|| record_a.timestamp_ms.cmp(&record_b.timestamp_ms))
+        })
+}
+
+fn similar_prior_project_match<'a>(
+    records: &'a [BeginnerChatRecord],
+    prompt: &str,
+    folder: &Path,
+) -> Option<&'a BeginnerChatRecord> {
+    scored_similar_prior_project_match(records, prompt, folder).map(|(record, _)| record)
+}
+
+fn prompt_explicitly_requests_another_copy(prompt: &str) -> bool {
+    let prompt = prompt.to_lowercase();
+    [
+        "again",
+        "recreate",
+        "redo",
+        "from scratch",
+        "another copy",
+        "new copy",
+        "separate copy",
+        "build another",
+        "make another",
+    ]
+    .iter()
+    .any(|phrase| prompt.contains(phrase))
+}
+
+#[derive(Clone)]
+struct RemoteProjectRecord {
+    thread_id: String,
+    title: String,
+    workspace_path: Option<PathBuf>,
+    updated_at: Option<String>,
+    search_text: String,
+}
+
+fn remote_project_records_from_threads(threads: &[Value]) -> Vec<RemoteProjectRecord> {
+    threads
+        .iter()
+        .filter_map(remote_project_record_from_thread)
+        .collect()
+}
+
+fn remote_project_record_from_thread(thread: &Value) -> Option<RemoteProjectRecord> {
+    let thread_id = json_string(thread, &["thread_id", "id", "uuid"])?;
+    let title = json_string(thread, &["title", "name", "display_title"])
+        .or_else(|| nested_json_string(thread, &[&["metadata", "title"], &["thread", "title"]]));
+
+    let workspace_path = json_string(
+        thread,
+        &["workspace", "workspace_path", "folder_path", "project_path"],
+    )
+    .or_else(|| {
+        nested_json_string(
+            thread,
+            &[
+                &["metadata", "workspace"],
+                &["metadata", "workspace_path"],
+                &["thread", "workspace"],
+            ],
+        )
+    })
+    .map(PathBuf::from);
+
+    let mut search_parts = Vec::new();
+    if let Some(title) = title.as_deref() {
+        search_parts.push(title.to_string());
+    }
+    for value in [
+        json_string(
+            thread,
+            &["summary", "description", "last_message", "lastMessage"],
+        ),
+        nested_json_string(
+            thread,
+            &[
+                &["metadata", "summary"],
+                &["metadata", "description"],
+                &["thread", "summary"],
+                &["thread", "description"],
+            ],
+        ),
+        remote_thread_context(thread),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        search_parts.push(value);
+    }
+
+    let search_text = search_parts.join("\n\n");
+    if project_history_terms(&search_text).len() < 2 {
+        return None;
+    }
+
+    let title = title
+        .as_deref()
+        .map(str::trim)
+        .filter(|title| !title.is_empty() && *title != "Backboard")
+        .unwrap_or("Remembered Backboard project")
+        .to_string();
+
+    Some(RemoteProjectRecord {
+        thread_id,
+        title,
+        workspace_path,
+        updated_at: json_string(
+            thread,
+            &["updated_at", "updatedAt", "created_at", "createdAt"],
+        ),
+        search_text,
+    })
+}
+
+fn scored_similar_remote_project_match<'a>(
+    records: &'a [RemoteProjectRecord],
+    prompt: &str,
+) -> Option<(&'a RemoteProjectRecord, ProjectMatchScore)> {
+    let prompt_terms = project_history_terms(prompt);
+
+    records
+        .iter()
+        .filter_map(|record| {
+            let record_terms = project_history_terms(&record.search_text);
+            score_project_history_match(&prompt_terms, &record_terms).map(|score| (record, score))
+        })
+        .max_by(|(record_a, score_a), (record_b, score_b)| {
+            score_a
+                .score
+                .total_cmp(&score_b.score)
+                .then_with(|| record_a.updated_at.cmp(&record_b.updated_at))
+        })
+}
+
+fn similar_remote_project_match<'a>(
+    records: &'a [RemoteProjectRecord],
+    prompt: &str,
+) -> Option<&'a RemoteProjectRecord> {
+    scored_similar_remote_project_match(records, prompt).map(|(record, _)| record)
+}
+
+async fn load_remote_project_records(
+    client: backboard::BackboardClient,
+    prompt: &str,
+) -> Result<Vec<RemoteProjectRecord>> {
+    let threads = client.list_threads(None).await?;
+    let mut records = remote_project_records_from_threads(&threads);
+    if similar_remote_project_match(&records, prompt).is_some() {
+        return Ok(records);
+    }
+
+    for thread in threads.iter().take(REMOTE_PROJECT_THREAD_SCAN_LIMIT) {
+        let Some(thread_id) = json_string(thread, &["thread_id", "id", "uuid"]) else {
+            continue;
+        };
+        let detailed_thread = match client.get_thread(&thread_id).await {
+            Ok(thread) => thread,
+            Err(error) => {
+                log::debug!(
+                    "Simple mode remote project detail lookup failed: thread_id={} error={error:#}",
+                    thread_id
+                );
+                continue;
+            }
+        };
+        let Some(record) = remote_project_record_from_thread(&detailed_thread) else {
+            continue;
+        };
+        if let Some(existing) = records
+            .iter_mut()
+            .find(|existing| existing.thread_id == record.thread_id)
+        {
+            *existing = record;
+        } else {
+            records.push(record);
+        }
+    }
+
+    Ok(records)
+}
+
+fn json_string(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn nested_json_string(value: &Value, paths: &[&[&str]]) -> Option<String> {
+    paths.iter().find_map(|path| {
+        let mut current = value;
+        for key in *path {
+            current = current.get(*key)?;
+        }
+        current
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn remote_thread_context(thread: &Value) -> Option<String> {
+    let messages = thread
+        .get("messages")
+        .or_else(|| {
+            thread
+                .get("thread")
+                .and_then(|thread| thread.get("messages"))
+        })?
+        .as_array()?;
+    let mut context = String::new();
+    for message in messages.iter().rev().take(12).rev() {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("message");
+        let Some(content) = remote_message_content(message) else {
+            continue;
+        };
+        let content = strip_backboard_ide_context(&content);
+        if content.trim().is_empty() {
+            continue;
+        }
+        context.push_str(role);
+        context.push_str(": ");
+        context.push_str(content.trim());
+        context.push_str("\n\n");
+        if context.len() > 12_000 {
+            context.truncate(12_000);
+            context.push_str("\n[truncated]");
+            break;
+        }
+    }
+    (!context.trim().is_empty()).then_some(context)
+}
+
+fn remote_message_content(message: &Value) -> Option<String> {
+    let content = message.get("content")?;
+    if let Some(content) = content.as_str() {
+        return Some(content.to_string());
+    }
+
+    let parts = content.as_array()?;
+    let text = parts
+        .iter()
+        .filter_map(|part| {
+            part.get("text")
+                .and_then(Value::as_str)
+                .or_else(|| part.get("content").and_then(Value::as_str))
+                .or_else(|| {
+                    part.get("text")
+                        .and_then(|text| text.get("value"))
+                        .and_then(Value::as_str)
+                })
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    (!text.trim().is_empty()).then_some(text)
+}
+
+fn strip_backboard_ide_context(text: &str) -> String {
+    text.split("<backboard_ide_context>")
+        .next()
+        .unwrap_or(text)
+        .trim_end()
+        .to_string()
+}
+
+fn remote_build_on_top_message(
+    record: &RemoteProjectRecord,
+    prior_context: Option<&str>,
+    prompt: &str,
+) -> String {
+    let mut message = format!(
+        "Build on top of the previously remembered Backboard project \"{}\".\n\
+         Previous remote thread id: {}\n",
+        record.title, record.thread_id
+    );
+    if let Some(workspace_path) = record.workspace_path.as_ref() {
+        message.push_str(&format!(
+            "Previous workspace path when known: {}\n",
+            workspace_path.display()
+        ));
+    }
+    if let Some(updated_at) = record.updated_at.as_deref() {
+        message.push_str(&format!("Previous project updated at: {updated_at}\n"));
+    }
+    if let Some(prior_context) = prior_context.filter(|context| !context.trim().is_empty()) {
+        message.push_str("\nPrevious project conversation context:\n");
+        message.push_str(prior_context.trim());
+        message.push_str("\n");
+    }
+    message.push_str(
+        "\nUser's new request:\n\
+         ",
+    );
+    message.push_str(prompt);
+    message.push_str(
+        "\n\nIf the previous project files are not present in the active workspace, recreate the needed base from the remembered context before applying the new request.",
+    );
+    message
 }
 
 pub enum BeginnerWorkspaceEvent {
@@ -931,6 +1538,56 @@ struct ProjectSession {
     subscriptions: Vec<Subscription>,
 }
 
+enum SimilarProjectConfirmationAction {
+    InitialSubmit {
+        prompt: String,
+        agent_text: String,
+        folder: PathBuf,
+    },
+    ThreadComposer {
+        prompt: String,
+    },
+}
+
+impl SimilarProjectConfirmationAction {
+    fn prompt_text(&self) -> String {
+        match self {
+            SimilarProjectConfirmationAction::InitialSubmit { prompt, .. }
+            | SimilarProjectConfirmationAction::ThreadComposer { prompt } => prompt.clone(),
+        }
+    }
+}
+
+struct SimilarProjectConfirmation {
+    source: SimilarProjectConfirmationSource,
+    prior_project_name: SharedString,
+    prior_project_location: Option<PathBuf>,
+    target_folder: PathBuf,
+    match_score: ProjectMatchScore,
+    action: SimilarProjectConfirmationAction,
+}
+
+enum SimilarProjectConfirmationSource {
+    Local(BeginnerChatRecord),
+    Remote(RemoteProjectRecord),
+}
+
+impl SimilarProjectConfirmationSource {
+    fn kind(&self) -> &'static str {
+        match self {
+            SimilarProjectConfirmationSource::Local(_) => "local",
+            SimilarProjectConfirmationSource::Remote(_) => "remote",
+        }
+    }
+
+    fn id(&self) -> &str {
+        match self {
+            SimilarProjectConfirmationSource::Local(record) => &record.id,
+            SimilarProjectConfirmationSource::Remote(record) => &record.thread_id,
+        }
+    }
+}
+
 struct SidebarProjectGroup {
     folder_path: PathBuf,
     records: Vec<BeginnerChatRecord>,
@@ -1023,6 +1680,7 @@ pub struct BeginnerWorkspace {
     pending_chats_sidebar_hover_open: Option<Task<()>>,
     background_sessions: Vec<ProjectSession>,
     chat_history: Vec<BeginnerChatRecord>,
+    pending_similar_project_confirmation: Option<SimilarProjectConfirmation>,
     pending_open_tabs: Option<BeginnerOpenTabsState>,
     open_tabs_loaded: bool,
     open_tabs_restored: bool,
@@ -1159,6 +1817,7 @@ impl BeginnerWorkspace {
             return;
         }
 
+        self.pending_similar_project_confirmation = None;
         Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
         self.clear_current_preview_state();
 
@@ -1253,6 +1912,7 @@ impl BeginnerWorkspace {
         if ix >= self.background_sessions.len() {
             return;
         }
+        self.pending_similar_project_confirmation = None;
         Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
         self.clear_current_preview_state();
         let session = &mut self.background_sessions[ix];
@@ -1489,6 +2149,7 @@ impl BeginnerWorkspace {
             pending_chats_sidebar_hover_open: None,
             background_sessions: Vec::new(),
             chat_history: Vec::new(),
+            pending_similar_project_confirmation: None,
             pending_open_tabs: None,
             open_tabs_loaded: false,
             open_tabs_restored: false,
@@ -1528,6 +2189,7 @@ impl BeginnerWorkspace {
                 self.pending_conversation_view = None;
                 self.active_conversation_view = None;
                 self.queued_composer_submit = None;
+                self.pending_similar_project_confirmation = None;
                 self.file_changes_panel = None;
                 self.is_agent_running = false;
                 self.right_panel = RightPanel::Preview;
@@ -1955,6 +2617,257 @@ impl BeginnerWorkspace {
         self.save_open_tabs(cx);
     }
 
+    fn confirm_similar_project_if_needed(
+        &mut self,
+        prompt: &str,
+        folder: &Path,
+        action: SimilarProjectConfirmationAction,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if prompt_explicitly_requests_another_copy(prompt) {
+            self.pending_similar_project_confirmation = None;
+            return false;
+        }
+
+        let Some((record, match_score)) =
+            scored_similar_prior_project_match(&self.chat_history, prompt, folder)
+        else {
+            self.pending_similar_project_confirmation = None;
+            return false;
+        };
+        let record = record.clone();
+
+        log::info!(
+            "Simple mode found similar prior project before send: prompt={} prior_project={} prior_folder={} active_folder={} match_score={:.3} confidence={} shared_terms={} prompt_terms={} record_terms={}",
+            prompt,
+            record.name,
+            record.folder_path,
+            folder.display(),
+            match_score.score,
+            match_score.confidence.as_str(),
+            match_score.shared_terms,
+            match_score.prompt_terms,
+            match_score.record_terms
+        );
+
+        self.pending_similar_project_confirmation = Some(SimilarProjectConfirmation {
+            source: SimilarProjectConfirmationSource::Local(record.clone()),
+            prior_project_name: record.display_name(),
+            prior_project_location: Some(record.folder()),
+            target_folder: folder.to_path_buf(),
+            match_score,
+            action,
+        });
+        cx.notify();
+        true
+    }
+
+    fn continue_similar_project_confirmation(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(confirmation) = self.pending_similar_project_confirmation.take() else {
+            return;
+        };
+
+        log::info!(
+            "Simple mode similar project action selected: action=create_new source={} source_id={} target_folder={} match_score={:.3} confidence={}",
+            confirmation.source.kind(),
+            confirmation.source.id(),
+            confirmation.target_folder.display(),
+            confirmation.match_score.score,
+            confirmation.match_score.confidence.as_str()
+        );
+
+        self.continue_similar_project_action(confirmation.action, window, cx);
+    }
+
+    fn continue_similar_project_action(
+        &mut self,
+        action: SimilarProjectConfirmationAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            SimilarProjectConfirmationAction::InitialSubmit {
+                prompt,
+                agent_text,
+                folder,
+            } => {
+                self.submit_initial_project(prompt, agent_text, folder, window, cx);
+            }
+            SimilarProjectConfirmationAction::ThreadComposer { prompt } => {
+                self.prepare_thread_composer_send_confirmed(prompt, window, cx);
+            }
+        }
+    }
+
+    fn confirm_remote_similar_project_if_needed(
+        &mut self,
+        prompt: &str,
+        folder: &Path,
+        action: SimilarProjectConfirmationAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if prompt_explicitly_requests_another_copy(prompt) {
+            return false;
+        }
+
+        let config = backboard::BackboardConfig::load_or_default();
+        let Ok(client) = backboard::BackboardClient::from_config(config) else {
+            return false;
+        };
+
+        let prompt = prompt.to_string();
+        let folder = folder.to_path_buf();
+        log::info!(
+            "Simple mode loading remote project history before send: active_folder={}",
+            folder.display()
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            let lookup_prompt = prompt.clone();
+            let threads = gpui_tokio::Tokio::spawn_result(cx, async move {
+                load_remote_project_records(client, &lookup_prompt).await
+            })
+            .await;
+
+            this.update_in(cx, |this, window, cx| {
+                let records = match threads {
+                    Ok(records) => records,
+                    Err(error) => {
+                        log::warn!(
+                            "Simple mode remote project history lookup failed: active_folder={} error={error:#}",
+                            folder.display()
+                        );
+                        this.continue_similar_project_action(action, window, cx);
+                        return;
+                    }
+                };
+
+                let Some((record, match_score)) =
+                    scored_similar_remote_project_match(&records, &prompt)
+                else {
+                    this.continue_similar_project_action(action, window, cx);
+                    return;
+                };
+                let record = record.clone();
+
+                log::info!(
+                    "Simple mode found remote similar project before send: prompt={} prior_project={} thread_id={} active_folder={} match_score={:.3} confidence={} shared_terms={} prompt_terms={} record_terms={}",
+                    prompt,
+                    record.title,
+                    record.thread_id,
+                    folder.display(),
+                    match_score.score,
+                    match_score.confidence.as_str(),
+                    match_score.shared_terms,
+                    match_score.prompt_terms,
+                    match_score.record_terms
+                );
+
+                this.pending_similar_project_confirmation = Some(SimilarProjectConfirmation {
+                    source: SimilarProjectConfirmationSource::Remote(record.clone()),
+                    prior_project_name: SharedString::from(record.title.clone()),
+                    prior_project_location: record.workspace_path.clone(),
+                    target_folder: folder,
+                    match_score,
+                    action,
+                });
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+
+        true
+    }
+
+    fn build_on_previous_version_confirmation(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(confirmation) = self.pending_similar_project_confirmation.take() else {
+            return;
+        };
+        log::info!(
+            "Simple mode similar project action selected: action=build_on_top source={} source_id={} target_folder={} match_score={:.3} confidence={}",
+            confirmation.source.kind(),
+            confirmation.source.id(),
+            confirmation.target_folder.display(),
+            confirmation.match_score.score,
+            confirmation.match_score.confidence.as_str()
+        );
+        let prompt = confirmation.action.prompt_text();
+        match confirmation.source {
+            SimilarProjectConfirmationSource::Local(record) => {
+                let record_id = record.id.clone();
+
+                self.open_chat_record(record, window, cx);
+                if self.active_chat_record_id.as_deref() != Some(record_id.as_str()) {
+                    cx.notify();
+                    return;
+                }
+
+                self.queued_composer_submit = Some(prompt);
+                self.send_queued_composer_submit(window, cx);
+                cx.notify();
+            }
+            SimilarProjectConfirmationSource::Remote(record) => {
+                self.build_on_remote_previous_version(
+                    record,
+                    prompt,
+                    confirmation.target_folder,
+                    window,
+                    cx,
+                );
+            }
+        }
+    }
+
+    fn build_on_remote_previous_version(
+        &mut self,
+        record: RemoteProjectRecord,
+        prompt: String,
+        target_folder: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let config = backboard::BackboardConfig::load_or_default();
+        let client = backboard::BackboardClient::from_config(config).ok();
+        cx.spawn_in(window, async move |this, cx| {
+            let thread_context = if let Some(client) = client {
+                let thread_id = record.thread_id.clone();
+                match gpui_tokio::Tokio::spawn_result(cx, async move {
+                    client.get_thread(&thread_id).await
+                })
+                .await
+                {
+                    Ok(thread) => remote_thread_context(&thread),
+                    Err(error) => {
+                        log::warn!(
+                            "Simple mode remote project thread context lookup failed: thread_id={} error={error:#}",
+                            record.thread_id
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            this.update_in(cx, |this, window, cx| {
+                let agent_text =
+                    remote_build_on_top_message(&record, thread_context.as_deref(), &prompt);
+                this.submit_initial_project(prompt, agent_text, target_folder, window, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn pick_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
@@ -2037,6 +2950,46 @@ impl BeginnerWorkspace {
             }
         };
 
+        if self.confirm_similar_project_if_needed(
+            &text,
+            &folder,
+            SimilarProjectConfirmationAction::InitialSubmit {
+                prompt: text.clone(),
+                agent_text: agent_text.clone(),
+                folder: folder.clone(),
+            },
+            cx,
+        ) {
+            return;
+        }
+
+        if self.confirm_remote_similar_project_if_needed(
+            &text,
+            &folder,
+            SimilarProjectConfirmationAction::InitialSubmit {
+                prompt: text.clone(),
+                agent_text: agent_text.clone(),
+                folder: folder.clone(),
+            },
+            window,
+            cx,
+        ) {
+            return;
+        }
+
+        self.submit_initial_project(text, agent_text, folder, window, cx);
+    }
+
+    fn submit_initial_project(
+        &mut self,
+        text: String,
+        agent_text: String,
+        folder: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_similar_project_confirmation = None;
+        self.selected_folder = Some(folder.clone());
         let chat_name = generate_chat_name(&text);
         self.tab_name = SharedString::from(chat_name.clone());
         self.state = BeginnerState::ActiveProject;
@@ -2242,6 +3195,47 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.prepare_thread_composer_send_impl(
+            active_thread_id,
+            conversation_view,
+            text,
+            true,
+            window,
+            cx,
+        )
+    }
+
+    fn prepare_thread_composer_send_confirmed(
+        &mut self,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(conversation_view) = self.active_conversation_view.clone() else {
+            self.queued_composer_submit = Some(text);
+            self.ensure_composer_thread(window, cx);
+            return false;
+        };
+        let active_thread_id = conversation_view.read(cx).parent_id();
+        self.prepare_thread_composer_send_impl(
+            active_thread_id,
+            conversation_view,
+            &text,
+            false,
+            window,
+            cx,
+        )
+    }
+
+    fn prepare_thread_composer_send_impl(
+        &mut self,
+        active_thread_id: ThreadId,
+        conversation_view: Entity<ConversationView>,
+        text: &str,
+        check_similar_projects: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if !Self::has_backboard_api_key() {
             cx.notify();
             return false;
@@ -2256,6 +3250,35 @@ impl BeginnerWorkspace {
             self.pick_folder(window, cx);
             return false;
         };
+
+        if check_similar_projects
+            && matches!(self.state, BeginnerState::Landing)
+            && self.confirm_similar_project_if_needed(
+                text,
+                &folder,
+                SimilarProjectConfirmationAction::ThreadComposer {
+                    prompt: text.to_string(),
+                },
+                cx,
+            )
+        {
+            return false;
+        }
+
+        if check_similar_projects
+            && matches!(self.state, BeginnerState::Landing)
+            && self.confirm_remote_similar_project_if_needed(
+                text,
+                &folder,
+                SimilarProjectConfirmationAction::ThreadComposer {
+                    prompt: text.to_string(),
+                },
+                window,
+                cx,
+            )
+        {
+            return false;
+        }
 
         self.open_folder_as_worktree(folder.clone(), window, cx);
 
@@ -2317,25 +3340,23 @@ impl BeginnerWorkspace {
         self.open_live_preview_panel(cx);
         self.ensure_live_preview_started(cx);
         cx.notify();
-        true
-    }
-
-    fn send_text_to_conversation_view(
-        &self,
-        conversation_view: &Entity<ConversationView>,
-        text: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        conversation_view.update(cx, |conversation_view, cx| {
-            conversation_view.set_root_message_text(text.to_string(), window, cx)
-                && conversation_view.send_root_message_editor(window, cx)
-        })
+        self.send_conversation_message_after_model_check(
+            conversation_view,
+            text.to_string(),
+            window,
+            cx,
+        );
+        false
     }
 
     fn submit_follow_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !Self::has_backboard_api_key() {
             cx.notify();
+            return;
+        }
+
+        if self.thread.is_none() {
+            self.submit(window, cx);
             return;
         }
 
@@ -2349,17 +3370,15 @@ impl BeginnerWorkspace {
             return;
         }
         let agent_text = self.chat_mode.prepare_message(text);
-
-        if let Some(conversation_view) = self.active_conversation_view.clone() {
-            if self.send_text_to_conversation_view(&conversation_view, &agent_text, window, cx) {
-                self.chat_editor.update(cx, |editor, cx| {
-                    editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
-                    editor.set_text("", window, cx);
+        if let Some(folder) = self.selected_folder.clone() {
+            if let Some(thread) = self.thread.clone() {
+                thread.update(cx, |thread, cx| {
+                    thread.set_work_dirs(PathList::new(&[folder]), cx);
                 });
-            } else {
-                cx.notify();
             }
-            return;
+        }
+        if let Some(record_id) = self.active_chat_record_id.clone() {
+            self.touch_chat_record(&record_id, cx);
         }
 
         if self.pending_conversation_view.is_some() {
@@ -2376,12 +3395,37 @@ impl BeginnerWorkspace {
             return;
         }
 
-        self.queued_composer_submit = Some(agent_text);
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
             editor.set_text("", window, cx);
         });
-        self.start_agent_thread(String::new(), window, cx);
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+        self.clear_current_preview_state();
+        self.is_agent_running = true;
+        self.agent_finished = false;
+        self.open_live_preview_panel(cx);
+        self.ensure_live_preview_started(cx);
+        cx.notify();
+
+        if let Some(conversation_view) = self.active_conversation_view.clone() {
+            self.send_conversation_message_after_model_check(
+                conversation_view,
+                agent_text,
+                window,
+                cx,
+            );
+        } else if let Some(thread) = self.thread.clone() {
+            cx.spawn(async move |_this, cx| {
+                let future = thread.update(cx, |thread, cx| {
+                    thread.send(vec![agent_text.as_str().into()], cx)
+                });
+                future.await.log_err();
+            })
+            .detach();
+        } else {
+            self.queued_composer_submit = Some(agent_text);
+            self.start_agent_thread(String::new(), window, cx);
+        }
     }
 
     fn handle_file_panel_event(
@@ -2440,18 +3484,41 @@ impl BeginnerWorkspace {
         self.right_panel_closing = false;
     }
 
-    fn toggle_right_panel_expanded(&mut self, cx: &mut Context<Self>) {
+    fn focus_primary_composer(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(focus_handle) =
+            self.active_conversation_view
+                .as_ref()
+                .and_then(|conversation_view| {
+                    conversation_view
+                        .read(cx)
+                        .root_message_editor_focus_handle(cx)
+                })
+        {
+            window.focus(&focus_handle, cx);
+        } else {
+            let focus_handle = self.chat_editor.focus_handle(cx);
+            window.focus(&focus_handle, cx);
+        }
+    }
+
+    fn toggle_right_panel_expanded(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_right_panel();
         self.right_panel_expanded = !self.right_panel_expanded;
+        self.web_preview = None;
         self.right_panel_animation_generation =
             self.right_panel_animation_generation.saturating_add(1);
+        if !self.right_panel_expanded {
+            self.focus_primary_composer(window, cx);
+        }
         cx.notify();
     }
 
-    fn close_right_panel(&mut self, cx: &mut Context<Self>) {
+    fn close_right_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+        self.clear_current_preview_state();
+        self.focus_primary_composer(window, cx);
+
         if !self.right_panel_open {
-            Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
-            self.clear_current_preview_state();
             self.right_panel_closing = false;
             self.right_panel_expanded = false;
             cx.notify();
@@ -2475,8 +3542,6 @@ impl BeginnerWorkspace {
                     this.right_panel_open = false;
                     this.right_panel_closing = false;
                     this.right_panel_expanded = false;
-                    Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
-                    this.clear_current_preview_state();
                     cx.notify();
                 }
             })
@@ -2811,7 +3876,7 @@ impl BeginnerWorkspace {
                 Some(RightPanelOption::Files | RightPanelOption::Code | RightPanelOption::Terminal)
             )
         {
-            self.close_right_panel(cx);
+            self.close_right_panel(window, cx);
         }
         self.bottom_panel_open = true;
         self.bottom_panel_closing = false;
@@ -3747,6 +4812,7 @@ res.end(data);\
     #[allow(dead_code)]
     fn new_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+        self.pending_similar_project_confirmation = None;
         self.state = BeginnerState::Landing;
         self.active_chat_record_id = None;
         self.selected_folder = None;
@@ -3851,6 +4917,7 @@ res.end(data);\
 
     fn reset_current_session_for_record(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+        self.pending_similar_project_confirmation = None;
         self.chat_mode = ChatMode::Build;
         let (chat_editor, enter_sub) =
             Self::make_chat_editor(window, cx, self.chat_mode.placeholder());
@@ -4411,15 +5478,47 @@ res.end(data);\
             return;
         };
 
-        if !self.send_text_to_conversation_view(&conversation_view, &text, window, cx) {
-            self.chat_editor.update(cx, |editor, cx| {
-                editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
-                editor.set_text(text.as_str(), window, cx);
-            });
-            self.is_agent_running = false;
-            self.agent_finished = false;
-            cx.notify();
-        }
+        self.send_conversation_message_after_model_check(conversation_view, text, window, cx);
+    }
+
+    fn send_conversation_message_after_model_check(
+        &mut self,
+        conversation_view: Entity<ConversationView>,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selector = self
+            .thread
+            .as_ref()
+            .and_then(|thread| {
+                let thread = thread.read(cx);
+                thread.connection().model_selector(thread.session_id())
+            })
+            .map(|inner| Rc::new(CuratedModelSelector { inner }) as Rc<dyn AgentModelSelector>);
+
+        cx.spawn_in(window, async move |_this, cx| {
+            if let Some(selector) = selector {
+                match cx
+                    .update(|_window, cx| ensure_selected_simple_model_is_supported(selector, cx))
+                {
+                    Ok(task) => {
+                        task.await.log_err();
+                    }
+                    Err(error) => {
+                        log::warn!("failed to validate simple mode model selection: {error:#}");
+                    }
+                }
+            }
+
+            conversation_view
+                .update_in(cx, |conversation_view, window, cx| {
+                    conversation_view.seed_root_message_text_if_empty(text, window, cx);
+                    conversation_view.send_root_message_editor_without_before_send_hook(window, cx);
+                })
+                .ok();
+        })
+        .detach();
     }
 
     fn schedule_restore_timeout(
@@ -6502,6 +7601,131 @@ impl BeginnerWorkspace {
             )
     }
 
+    fn render_similar_project_confirmation(
+        &self,
+        confirmation: &SimilarProjectConfirmation,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let prior_location = confirmation
+            .prior_project_location
+            .as_ref()
+            .map(|folder| folder_display_name(folder))
+            .unwrap_or_else(|| SharedString::from("Backboard history"));
+        let target_folder = folder_display_name(&confirmation.target_folder);
+        let prior_project_name = confirmation.prior_project_name.as_ref();
+        let source_label = prior_location.clone();
+        let message = if prior_project_name == "Remembered Backboard project" {
+            format!("Continue from saved context, or start fresh in {target_folder}.")
+        } else {
+            format!(
+                "Continue from \"{}\", or start fresh in {}.",
+                confirmation.prior_project_name, target_folder
+            )
+        };
+
+        v_flex()
+            .w(px(560.))
+            .max_w(relative(1.))
+            .min_w_0()
+            .gap_2()
+            .rounded(px(10.))
+            .border_1()
+            .border_color(ds::soft_border(cx).opacity(0.82))
+            .bg(ds::field_background(cx).opacity(0.72))
+            .p_3()
+            .child(
+                h_flex()
+                    .gap_3()
+                    .items_start()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .size(px(30.))
+                            .flex_none()
+                            .rounded(px(8.))
+                            .bg(ds::accent(cx).opacity(0.12))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::Folder)
+                                    .size(IconSize::Small)
+                                    .color(Color::Custom(ds::accent(cx))),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_1()
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .min_w_0()
+                                    .child(
+                                        Label::new("Similar project found")
+                                            .size(LabelSize::Small)
+                                            .weight(FontWeight::SEMIBOLD)
+                                            .color(Color::Custom(ds::text(cx))),
+                                    )
+                                    .child(
+                                        div()
+                                            .max_w(px(180.))
+                                            .min_w_0()
+                                            .rounded(px(999.))
+                                            .border_1()
+                                            .border_color(ds::soft_border(cx).opacity(0.74))
+                                            .px_2()
+                                            .py_0p5()
+                                            .child(
+                                                Label::new(source_label)
+                                                    .size(LabelSize::XSmall)
+                                                    .color(Color::Custom(ds::text_muted(cx)))
+                                                    .truncate(),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .text_size(rems_from_px(13.))
+                                    .text_color(ds::text_muted(cx))
+                                    .line_height(relative(1.34))
+                                    .child(message),
+                            ),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_2()
+                    .flex_wrap()
+                    .pl(px(42.))
+                    .child(
+                        Button::new("similar-project-build-on-previous", "Build on top")
+                            .style(ButtonStyle::Filled)
+                            .size(ButtonSize::Compact)
+                            .label_size(LabelSize::XSmall)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.build_on_previous_version_confirmation(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("similar-project-build", "Create new project")
+                            .style(ButtonStyle::Outlined)
+                            .size(ButtonSize::Compact)
+                            .label_size(LabelSize::XSmall)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.continue_similar_project_confirmation(window, cx);
+                            })),
+                    ),
+            )
+    }
+
     fn render_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let draft_is_empty = self.chat_editor.read(cx).text(cx).trim().is_empty();
         let api_key_ready = Self::has_backboard_api_key();
@@ -6573,6 +7797,18 @@ impl BeginnerWorkspace {
                                                     .items_center()
                                                     .gap_6()
                                                     .child(self.render_empty_conversation(cx))
+                                                    .when_some(
+                                                        self.pending_similar_project_confirmation
+                                                            .as_ref(),
+                                                        |el, confirmation| {
+                                                            el.child(
+                                                                self.render_similar_project_confirmation(
+                                                                    confirmation,
+                                                                    cx,
+                                                                ),
+                                                            )
+                                                        },
+                                                    )
                                                     .child(self.render_input_bar(
                                                         false,
                                                         false,
@@ -7164,8 +8400,8 @@ impl BeginnerWorkspace {
                             .cursor_pointer()
                             .hover(move |el| el.bg(hover_background))
                             .tooltip(Tooltip::text("Close panel"))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_right_panel(cx);
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_right_panel(window, cx);
                             }))
                             .child(
                                 Icon::new(IconName::Close)
@@ -7492,8 +8728,8 @@ impl BeginnerWorkspace {
             .cursor_pointer()
             .hover(move |el| el.bg(hover_background))
             .tooltip(Tooltip::text(tooltip))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.toggle_right_panel_expanded(cx);
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.toggle_right_panel_expanded(window, cx);
             }))
             .child(
                 Icon::new(icon)
@@ -7537,8 +8773,8 @@ impl BeginnerWorkspace {
                             .cursor_pointer()
                             .hover(move |el| el.bg(hover_background))
                             .tooltip(Tooltip::text("Close panel"))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_right_panel(cx);
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_right_panel(window, cx);
                             }))
                             .child(
                                 Icon::new(IconName::Close)
@@ -7595,8 +8831,8 @@ impl BeginnerWorkspace {
                             .cursor_pointer()
                             .hover(move |el| el.bg(hover_background))
                             .tooltip(Tooltip::text("Close panel"))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_right_panel(cx);
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_right_panel(window, cx);
                             }))
                             .child(
                                 Icon::new(IconName::Close)
@@ -9140,8 +10376,8 @@ impl BeginnerWorkspace {
                             .cursor_pointer()
                             .hover(move |el| el.bg(hover_background))
                             .tooltip(Tooltip::text("Close panel"))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_right_panel(cx);
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_right_panel(window, cx);
                             }))
                             .child(
                                 Icon::new(IconName::Close)
@@ -9914,5 +11150,283 @@ impl BeginnerWorkspace {
                 )
             })
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn model(id: &str, name: &str, provider: &str) -> AgentModelInfo {
+        AgentModelInfo {
+            id: acp::ModelId::new(id),
+            name: SharedString::from(name),
+            description: Some(SharedString::from(provider)),
+            icon: None,
+            is_latest: false,
+            cost: None,
+        }
+    }
+
+    #[test]
+    fn fallback_model_for_unsupported_simple_selection_uses_first_live_model() {
+        let stale_model = model("deepseek/deepseek-r1", "DeepSeek R1", "deepseek");
+        let live_model = model(
+            "openrouter/000ADI/Qwen2.5-0.5B-Instruct-Gensyn-Swarm-grazing_bellowing_locust",
+            "Qwen2.5 Swarm",
+            "openrouter",
+        );
+        let model_list = AgentModelList::Flat(vec![live_model.clone()]);
+
+        let fallback =
+            fallback_model_for_unsupported_simple_selection(&model_list, Some(&stale_model))
+                .expect("stale model should pick a live fallback");
+
+        assert_eq!(fallback.id.to_string(), live_model.id.to_string());
+    }
+
+    #[test]
+    fn fallback_model_for_unsupported_simple_selection_keeps_supported_model() {
+        let live_model = model(
+            "openrouter/000ADI/Qwen2.5-0.5B-Instruct-Gensyn-Swarm-grazing_bellowing_locust",
+            "Qwen2.5 Swarm",
+            "openrouter",
+        );
+        let model_list = AgentModelList::Flat(vec![live_model.clone()]);
+
+        assert!(
+            fallback_model_for_unsupported_simple_selection(&model_list, Some(&live_model))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn curated_model_labels_distinguish_same_provider_variants() {
+        let model_list = AgentModelList::Flat(vec![
+            model("anthropic/claude-opus-4-20250514", "Claude", "anthropic"),
+            model("anthropic/claude-sonnet-4-20250514", "Claude", "anthropic"),
+            model("anthropic/claude-3-5-haiku-20241022", "Claude", "anthropic"),
+        ]);
+
+        let AgentModelList::Flat(models) = curated_or_live_model_list(model_list) else {
+            panic!("expected flat model list");
+        };
+        let names = models
+            .iter()
+            .map(|model| model.name.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "Claude Opus 4 (maximum reasoning)",
+                "Claude Sonnet 4 (balanced coding)",
+                "Claude 3.5 Haiku (fast)",
+            ]
+        );
+    }
+
+    #[test]
+    fn curated_model_labels_match_openrouter_model_prefixes() {
+        let model_list = AgentModelList::Flat(vec![model(
+            "openrouter/anthropic/claude-sonnet-4-20250514",
+            "Claude",
+            "openrouter",
+        )]);
+
+        let AgentModelList::Flat(models) = curated_or_live_model_list(model_list) else {
+            panic!("expected flat model list");
+        };
+
+        assert_eq!(
+            models[0].name.to_string(),
+            "Claude Sonnet 4 (balanced coding)"
+        );
+    }
+
+    #[test]
+    fn similar_prior_project_match_finds_project_in_another_folder() {
+        let records = vec![BeginnerChatRecord {
+            id: "project-a".to_string(),
+            name: "Mario kart game".to_string(),
+            folder_path: "/tmp/project-a".to_string(),
+            session_id: None,
+            timestamp_ms: 1,
+        }];
+
+        let matched =
+            similar_prior_project_match(&records, "make a Mario Kart game", Path::new("/tmp/b"));
+
+        assert_eq!(matched.map(|record| record.id.as_str()), Some("project-a"));
+    }
+
+    #[test]
+    fn project_history_terms_split_punctuation() {
+        let terms = project_history_terms("make a Mario-Kart game");
+
+        assert!(terms.contains("mario"));
+        assert!(terms.contains("kart"));
+        assert!(terms.contains("game"));
+    }
+
+    #[test]
+    fn similar_prior_project_match_ranks_best_project() {
+        let records = vec![
+            BeginnerChatRecord {
+                id: "weaker".to_string(),
+                name: "Mario game".to_string(),
+                folder_path: "/tmp/project-a".to_string(),
+                session_id: None,
+                timestamp_ms: 2,
+            },
+            BeginnerChatRecord {
+                id: "stronger".to_string(),
+                name: "Mario kart battle game".to_string(),
+                folder_path: "/tmp/project-b".to_string(),
+                session_id: None,
+                timestamp_ms: 1,
+            },
+        ];
+
+        let matched =
+            similar_prior_project_match(&records, "make a Mario Kart game", Path::new("/tmp/c"));
+
+        assert_eq!(matched.map(|record| record.id.as_str()), Some("stronger"));
+    }
+
+    #[test]
+    fn similar_prior_project_match_ignores_current_folder() {
+        let records = vec![BeginnerChatRecord {
+            id: "project-a".to_string(),
+            name: "Mario kart game".to_string(),
+            folder_path: "/tmp/project-a".to_string(),
+            session_id: None,
+            timestamp_ms: 1,
+        }];
+
+        let matched = similar_prior_project_match(
+            &records,
+            "make a Mario Kart game",
+            Path::new("/tmp/project-a"),
+        );
+
+        assert!(matched.is_none());
+    }
+
+    #[test]
+    fn similar_prior_project_match_ignores_generic_single_term_matches() {
+        let records = vec![BeginnerChatRecord {
+            id: "project-a".to_string(),
+            name: "Racing game".to_string(),
+            folder_path: "/tmp/project-a".to_string(),
+            session_id: None,
+            timestamp_ms: 1,
+        }];
+
+        let matched = similar_prior_project_match(&records, "make a game", Path::new("/tmp/b"));
+
+        assert!(matched.is_none());
+    }
+
+    #[test]
+    fn explicit_another_copy_prompt_skips_confirmation_gate() {
+        assert!(prompt_explicitly_requests_another_copy(
+            "make a Mario Kart game again in this folder"
+        ));
+    }
+
+    #[test]
+    fn remote_project_records_extract_durable_thread_metadata() {
+        let threads = vec![json!({
+            "id": "remote-thread-a",
+            "title": "Mario kart game",
+            "metadata": {
+                "workspace_path": "/Users/test/project-a"
+            },
+            "updated_at": "2026-06-03T12:00:00Z"
+        })];
+
+        let records = remote_project_records_from_threads(&threads);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].thread_id, "remote-thread-a");
+        assert_eq!(records[0].title, "Mario kart game");
+        assert_eq!(
+            records[0].workspace_path.as_deref(),
+            Some(Path::new("/Users/test/project-a"))
+        );
+    }
+
+    #[test]
+    fn similar_remote_project_match_uses_thread_content_not_session_id() {
+        let threads = vec![json!({
+            "thread_id": "remote-thread-a",
+            "title": "Backboard",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "make a Mario Kart racing game with drifting and item boxes"
+                }
+            ]
+        })];
+        let records = remote_project_records_from_threads(&threads);
+
+        let matched = similar_remote_project_match(&records, "make a Mario Kart game");
+
+        assert_eq!(
+            matched.map(|record| record.thread_id.as_str()),
+            Some("remote-thread-a")
+        );
+    }
+
+    #[test]
+    fn similar_remote_project_match_ranks_best_project_context() {
+        let threads = vec![
+            json!({
+                "thread_id": "remote-thread-a",
+                "title": "Mario game",
+            }),
+            json!({
+                "thread_id": "remote-thread-b",
+                "title": "Backboard",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "make a Mario Kart battle game with drifting"
+                    }
+                ]
+            }),
+        ];
+        let records = remote_project_records_from_threads(&threads);
+
+        let matched = similar_remote_project_match(&records, "make a Mario Kart game");
+
+        assert_eq!(
+            matched.map(|record| record.thread_id.as_str()),
+            Some("remote-thread-b")
+        );
+    }
+
+    #[test]
+    fn remote_build_on_top_message_includes_prior_thread_context() {
+        let record = RemoteProjectRecord {
+            thread_id: "remote-thread-a".to_string(),
+            title: "Mario kart game".to_string(),
+            workspace_path: Some(PathBuf::from("/Users/test/project-a")),
+            updated_at: None,
+            search_text: "Mario kart game".to_string(),
+        };
+
+        let message = remote_build_on_top_message(
+            &record,
+            Some("user: make a Mario Kart game\n\nassistant: created a racing prototype"),
+            "add a battle mode",
+        );
+
+        assert!(message.contains("remote-thread-a"));
+        assert!(message.contains("/Users/test/project-a"));
+        assert!(message.contains("created a racing prototype"));
+        assert!(message.contains("add a battle mode"));
     }
 }
