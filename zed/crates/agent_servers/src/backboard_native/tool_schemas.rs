@@ -1,7 +1,5 @@
 use serde_json::{Value, json};
 
-const UNAVAILABLE_NATIVE_TOOLS: &[&str] = &["task"];
-
 pub fn tool_definitions(mode: &str) -> Vec<Value> {
     let blocked = blocked_tools(mode);
     all_tool_definitions()
@@ -10,9 +8,29 @@ pub fn tool_definitions(mode: &str) -> Vec<Value> {
             tool.get("function")
                 .and_then(|function| function.get("name"))
                 .and_then(Value::as_str)
-                .is_none_or(|name| {
-                    !blocked.contains(&name) && !UNAVAILABLE_NATIVE_TOOLS.contains(&name)
-                })
+                .is_none_or(|name| !blocked.contains(&name))
+        })
+        .collect()
+}
+
+pub fn read_only_task_tool_definitions() -> Vec<Value> {
+    const READ_ONLY_TASK_TOOLS: &[&str] = &[
+        "read_file",
+        "glob",
+        "grep",
+        "codebase_search",
+        "list_dir",
+        "web_search",
+        "web_fetch",
+        "read_lints",
+    ];
+    all_tool_definitions()
+        .into_iter()
+        .filter(|tool| {
+            tool.get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+                .is_some_and(|name| READ_ONLY_TASK_TOOLS.contains(&name))
         })
         .collect()
 }
@@ -219,7 +237,7 @@ fn all_tool_definitions() -> Vec<Value> {
         ),
         function(
             "task",
-            "Launch a focused sub-agent task. Native Rust currently reports this as unavailable until subagents are ported.",
+            "Launch a focused read/search sub-agent task for parallel analysis. Use for broad repo questions, investigation, or independent research. The parent agent remains responsible for file edits.",
             json!({
                 "prompt": {"type": "string"},
                 "description": {"type": "string"}
@@ -358,13 +376,42 @@ mod tests {
     }
 
     #[test]
-    fn all_modes_hide_unavailable_task_tool() {
-        for mode in ["agent", "ask", "manual", "free"] {
+    fn full_access_advertises_task_tool() {
+        for mode in ["agent", "free"] {
+            let names = tool_names(mode);
+
+            assert!(names.contains(&"read_file".to_string()));
+            assert!(names.contains(&"task".to_string()));
+        }
+    }
+
+    #[test]
+    fn ask_and_manual_hide_task_tool() {
+        for mode in ["ask", "manual"] {
             let names = tool_names(mode);
 
             assert!(names.contains(&"read_file".to_string()));
             assert!(!names.contains(&"task".to_string()));
         }
+    }
+
+    #[test]
+    fn task_subagents_receive_read_only_tool_schema() {
+        let names = read_only_task_tool_definitions()
+            .into_iter()
+            .filter_map(|tool| {
+                tool.get("function")
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"read_file".to_string()));
+        assert!(names.contains(&"grep".to_string()));
+        assert!(names.contains(&"codebase_search".to_string()));
+        assert!(!names.contains(&"write".to_string()));
+        assert!(!names.contains(&"task".to_string()));
     }
 
     #[test]
@@ -390,6 +437,7 @@ mod tests {
                 "web_fetch",
                 "todo_write",
                 "read_lints",
+                "task",
                 "enter_plan_mode",
                 "exit_plan_mode",
                 "persistence_decide",

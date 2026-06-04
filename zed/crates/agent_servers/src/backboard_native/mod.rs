@@ -9,8 +9,9 @@ mod workspace;
 use std::{
     any::Any,
     cell::RefCell,
-    collections::BTreeSet,
+    collections::{BTreeSet, hash_map::DefaultHasher},
     fs,
+    hash::{Hash as _, Hasher as _},
     io::{ErrorKind, Read as _},
     path::{Path, PathBuf},
     rc::Rc,
@@ -88,6 +89,7 @@ pub(crate) struct BackboardNativeState {
     default_mode: acp::SessionModeId,
     sessions: RefCell<HashMap<acp::SessionId, NativeSession>>,
     indexing_workspaces: RefCell<BTreeSet<PathBuf>>,
+    client_cache: RefCell<Option<CachedBackboardClient>>,
     model_cache: RefCell<Option<Vec<AgentModelInfo>>>,
     model_context_windows: RefCell<HashMap<String, u64>>,
     model_pricing: RefCell<HashMap<String, BackboardModelPricing>>,
@@ -100,6 +102,8 @@ pub(crate) struct NativeSession {
     assistant_id: Option<String>,
     thread_id: Option<String>,
     current_run_id: Option<String>,
+    assistant_tools_hash: Option<u64>,
+    assistant_tools_synced: bool,
     provider: Option<String>,
     model: Option<String>,
     mode: acp::SessionModeId,
@@ -117,6 +121,13 @@ pub(crate) struct NativeSession {
     context_window_tokens: Option<u64>,
     estimated_used_tokens: u64,
     session_total_cost: f64,
+}
+
+#[derive(Clone)]
+struct CachedBackboardClient {
+    base_url: String,
+    api_key: String,
+    client: BackboardClient,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -303,6 +314,14 @@ fn rounded_number(value: f64) -> f64 {
     (value * 10.0).round() / 10.0
 }
 
+pub(crate) fn tool_definitions_hash(tools: &[Value]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    serde_json::to_string(tools)
+        .unwrap_or_else(|_| "[]".to_string())
+        .hash(&mut hasher);
+    hasher.finish()
+}
+
 fn round_cost(value: f64) -> f64 {
     (value * 1_000_000.0).round() / 1_000_000.0
 }
@@ -346,6 +365,7 @@ impl BackboardNativeConnection {
                 default_mode: default_mode.unwrap_or_else(|| acp::SessionModeId::new("free")),
                 sessions: RefCell::default(),
                 indexing_workspaces: RefCell::default(),
+                client_cache: RefCell::default(),
                 model_cache: RefCell::default(),
                 model_context_windows: RefCell::default(),
                 model_pricing: RefCell::default(),
@@ -369,8 +389,39 @@ impl BackboardNativeState {
 
     pub(crate) fn client(&self) -> Result<(BackboardConfig, BackboardClient)> {
         let config = BackboardConfig::load()?;
-        let client = BackboardClient::from_config(config.clone())?;
+        let base_url = config.base_url();
+        let api_key = config
+            .api_key()
+            .ok_or(::backboard::BackboardError::MissingApiKey)?;
+        if let Some(cache) = self.client_cache.borrow().as_ref()
+            && cache.base_url == base_url
+            && cache.api_key == api_key
+        {
+            return Ok((config, cache.client.clone()));
+        }
+
+        let client = BackboardClient::new(base_url.clone(), api_key.clone());
+        *self.client_cache.borrow_mut() = Some(CachedBackboardClient {
+            base_url,
+            api_key,
+            client: client.clone(),
+        });
         Ok((config, client))
+    }
+
+    fn warm_client(self: &Rc<Self>, cx: &mut App) {
+        let Ok((_config, client)) = self.client() else {
+            return;
+        };
+        cx.spawn(async move |cx| {
+            let result =
+                gpui_tokio::Tokio::spawn_result(cx, async move { client.warm_connection().await })
+                    .await;
+            if let Err(error) = result {
+                log::debug!("Backboard native connection preconnect failed: {error:#}");
+            }
+        })
+        .detach();
     }
 
     pub(crate) fn fallback_provider_model(config: &BackboardConfig) -> (String, String) {
@@ -568,8 +619,11 @@ impl BackboardNativeState {
             let session = sessions
                 .get_mut(session_id)
                 .with_context(|| format!("unknown Backboard session: {session_id}"))?;
+            session.assistant_id = None;
             session.thread_id = None;
             session.current_run_id = None;
+            session.assistant_tools_hash = None;
+            session.assistant_tools_synced = false;
             session.cancel_flag.store(true, Ordering::SeqCst);
             session.estimated_used_tokens = 0;
             session.rewound_history_context = rewound_history_context;
@@ -828,7 +882,45 @@ impl BackboardNativeState {
         title: Option<String>,
         cx: &mut gpui::AsyncApp,
     ) -> Result<String> {
-        if let Some(thread_id) = self.session_thread_id(session_id) {
+        let tools_hash = tool_definitions_hash(&tools);
+        let existing_binding = {
+            let sessions = self.sessions.borrow();
+            sessions.get(session_id).and_then(|session| {
+                Some((
+                    session.assistant_id.clone()?,
+                    session.thread_id.clone()?,
+                    session.assistant_tools_hash,
+                    session.assistant_tools_synced,
+                ))
+            })
+        };
+        if let Some((assistant_id, thread_id, synced_hash, tools_synced)) = existing_binding {
+            if tools_synced && synced_hash == Some(tools_hash) {
+                return Ok(thread_id);
+            }
+
+            let (_config, client) = self.client()?;
+            let request = ::backboard::UpdateAssistantRequest {
+                name: None,
+                description: Some(workspace::system_prompt(
+                    &self.runtime_for_session(session_id)?.workspace,
+                )),
+                tools: Some(tools),
+            };
+            log::info!(
+                "Backboard native endpoint call: PUT /assistants/{{assistant_id}} session_id={} thread_id={} path=rust-native",
+                session_id,
+                thread_id
+            );
+            gpui_tokio::Tokio::spawn_result(cx, async move {
+                client.update_assistant(&assistant_id, request).await?;
+                anyhow::Ok(())
+            })
+            .await?;
+            if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+                session.assistant_tools_hash = Some(tools_hash);
+                session.assistant_tools_synced = true;
+            }
             return Ok(thread_id);
         }
 
@@ -875,6 +967,8 @@ impl BackboardNativeState {
         if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
             session.assistant_id = Some(assistant_id);
             session.thread_id = Some(thread_id.clone());
+            session.assistant_tools_hash = Some(tools_hash);
+            session.assistant_tools_synced = true;
         }
 
         self.emit_update(
@@ -1122,6 +1216,8 @@ impl AgentConnection for BackboardNativeConnection {
                 assistant_id: None,
                 thread_id: None,
                 current_run_id: None,
+                assistant_tools_hash: None,
+                assistant_tools_synced: false,
                 provider: Some(provider),
                 model: Some(model),
                 mode,
@@ -1143,6 +1239,7 @@ impl AgentConnection for BackboardNativeConnection {
         );
         self.state
             .prepare_workspace_and_start_indexing(workspace, cx);
+        self.state.warm_client(cx);
 
         Task::ready(Ok(thread))
     }
@@ -1350,6 +1447,8 @@ impl BackboardNativeConnection {
                     .and_then(|record| record.assistant_id.clone()),
                 thread_id: record.as_ref().and_then(|record| record.thread_id.clone()),
                 current_run_id: None,
+                assistant_tools_hash: None,
+                assistant_tools_synced: false,
                 provider: record
                     .as_ref()
                     .and_then(|record| record.provider.clone())
@@ -1377,6 +1476,7 @@ impl BackboardNativeConnection {
         );
         self.state
             .prepare_workspace_and_start_indexing(workspace.clone(), cx);
+        self.state.warm_client(cx);
 
         if replay_history {
             let state = self.state.clone();
@@ -2399,6 +2499,8 @@ mod tests {
                 assistant_id: None,
                 thread_id: None,
                 current_run_id: None,
+                assistant_tools_hash: None,
+                assistant_tools_synced: false,
                 provider: Some(DEFAULT_PROVIDER.to_string()),
                 model: Some(DEFAULT_MODEL.to_string()),
                 mode: acp::SessionModeId::new("free"),
@@ -2468,6 +2570,10 @@ mod tests {
         assert_eq!(
             model.description.as_ref().map(|value| value.as_ref()),
             Some("anthropic")
+        );
+        assert_eq!(
+            model.icon,
+            Some(acp_thread::AgentModelIcon::Named(IconName::AiClaude))
         );
     }
 
@@ -2619,6 +2725,8 @@ description: Modern design guidance.
                 assistant_id: None,
                 thread_id: None,
                 current_run_id: None,
+                assistant_tools_hash: None,
+                assistant_tools_synced: false,
                 provider: Some(DEFAULT_PROVIDER.to_string()),
                 model: Some(DEFAULT_MODEL.to_string()),
                 mode: acp::SessionModeId::new("free"),

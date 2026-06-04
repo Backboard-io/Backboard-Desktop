@@ -75,8 +75,9 @@ use workspace::{MultiWorkspace, Toast, Workspace, notifications::NotificationId}
 use crate::agent_configuration::{ConfigureContextServerModal, ManageProfilesModal};
 pub use crate::agent_connection_store::{ActiveAcpConnection, AgentConnectionStore};
 pub use crate::agent_panel::{
-    AgentPanel, AgentPanelEvent, AgentPanelTerminalInfo, BackboardAgentWorkspaceKind,
-    BackboardAgentWorkspaceMode, BackboardAgentWorkspaceScope, MaxIdleRetainedThreads, TerminalId,
+    AgentPanel, AgentPanelEvent, AgentPanelTerminalInfo, BackboardAgentWorkspaceChatOptions,
+    BackboardAgentWorkspaceKind, BackboardAgentWorkspaceMode, BackboardAgentWorkspaceScope,
+    MaxIdleRetainedThreads, TerminalId,
 };
 use crate::agent_registry_ui::AgentRegistryPage;
 pub use crate::agent_skills_page::BackboardSkillsPage;

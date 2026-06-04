@@ -31,7 +31,7 @@ use gpui::{
     Action, Anchor, Animation, AnimationExt, AnyElement, App, Context, Element, Entity, Focusable,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, actions, div,
-    pulsating_between, px,
+    pulsating_between,
 };
 use onboarding_banner::OnboardingBanner;
 use project::{
@@ -1210,99 +1210,57 @@ impl TitleBar {
         } else {
             "Switch between Editor and Agents. Agents opens Agent Workspace."
         };
-        let colors = cx.theme().colors();
-        let pill_bg = colors
-            .element_background
-            .blend(colors.title_bar_background.opacity(0.32));
-        let pill_border = colors.border_variant.opacity(0.54);
-        let selected_bg = colors
-            .tab_active_background
-            .blend(colors.element_selected.opacity(0.34));
-        let hover_bg = colors.element_hover.opacity(0.68);
-        let code_label_color = Color::Custom(if agents_active {
-            colors.text_muted
-        } else {
-            colors.text
-        });
-        let agents_label_color = Color::Custom(if agents_active {
-            colors.text
-        } else {
-            colors.text_muted
-        });
         let multi_workspace = mw.downgrade();
+        let mut code_button = Button::new("tab-code-editor", "Open in Code Editor")
+            .style(ButtonStyle::Subtle)
+            .selected_style(ButtonStyle::Subtle)
+            .toggle_state(!agents_active)
+            .label_size(LabelSize::XSmall)
+            .size(ButtonSize::Compact)
+            .start_icon(Icon::new(IconName::Code).size(IconSize::XSmall))
+            .tooltip(Tooltip::text(mode_tooltip));
+        if agents_active {
+            let multi_workspace = multi_workspace.clone();
+            code_button = code_button.on_click(move |_, window, cx| {
+                multi_workspace
+                    .update(cx, |multi_workspace, cx| {
+                        multi_workspace.open_code_editor(window, cx);
+                        mark_mode_tip_seen(cx);
+                    })
+                    .log_err();
+            });
+        }
+
+        let mut agents_button = Button::new("tab-multi-agent", "Open in Agents")
+            .style(ButtonStyle::Subtle)
+            .selected_style(ButtonStyle::Subtle)
+            .toggle_state(agents_active)
+            .label_size(LabelSize::XSmall)
+            .size(ButtonSize::Compact)
+            .start_icon(Icon::new(IconName::ZedAgent).size(IconSize::XSmall))
+            .tooltip(Tooltip::text(mode_tooltip));
+        if !agents_active {
+            agents_button = agents_button.on_click(move |_, _window, cx| {
+                multi_workspace
+                    .update(cx, |multi_workspace, cx| {
+                        multi_workspace.multi_agent_expanded = true;
+                        mark_mode_tip_seen(cx);
+                        cx.notify();
+                    })
+                    .log_err();
+            });
+        }
+
         Some(
             h_flex()
                 .id("expert-toggle-pill")
                 .h_full()
                 .items_end()
-                .gap_1p5()
+                .gap_1()
                 .pl_1()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(
-                    h_flex()
-                        .id("tab-code-editor")
-                        .h(px(26.))
-                        .items_center()
-                        .justify_start()
-                        .px_2p5()
-                        .rounded_full()
-                        .border_1()
-                        .border_color(pill_border)
-                        .bg(if agents_active { pill_bg } else { selected_bg })
-                        .cursor_pointer()
-                        .when(agents_active, |el| {
-                            let multi_workspace = multi_workspace.clone();
-                            el.hover(move |style| style.bg(hover_bg)).on_click(
-                                move |_, window, cx| {
-                                    multi_workspace
-                                        .update(cx, |multi_workspace, cx| {
-                                            multi_workspace.open_code_editor(window, cx);
-                                            mark_mode_tip_seen(cx);
-                                        })
-                                        .log_err();
-                                },
-                            )
-                        })
-                        .tooltip(Tooltip::text(mode_tooltip))
-                        .child(
-                            Label::new("Open in Code Editor")
-                                .size(LabelSize::Small)
-                                .color(code_label_color),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .id("tab-multi-agent")
-                        .h(px(26.))
-                        .items_center()
-                        .justify_start()
-                        .px_2p5()
-                        .rounded_full()
-                        .border_1()
-                        .border_color(pill_border)
-                        .bg(if agents_active { selected_bg } else { pill_bg })
-                        .cursor_pointer()
-                        .when(!agents_active, |el| {
-                            let multi_workspace = multi_workspace.clone();
-                            el.hover(move |style| style.bg(hover_bg)).on_click(
-                                move |_, _window, cx| {
-                                    multi_workspace
-                                        .update(cx, |multi_workspace, cx| {
-                                            multi_workspace.multi_agent_expanded = true;
-                                            mark_mode_tip_seen(cx);
-                                            cx.notify();
-                                        })
-                                        .log_err();
-                                },
-                            )
-                        })
-                        .tooltip(Tooltip::text(mode_tooltip))
-                        .child(
-                            Label::new("Open in Agents")
-                                .size(LabelSize::Small)
-                                .color(agents_label_color),
-                        ),
-                ),
+                .child(code_button)
+                .child(agents_button),
         )
     }
 

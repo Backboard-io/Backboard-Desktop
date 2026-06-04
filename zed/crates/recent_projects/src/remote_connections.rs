@@ -320,10 +320,8 @@ pub async fn open_remote_project(
                                 RemoteConnectionOptions::Docker(_) => {
                                     "Failed to connect to Dev Container"
                                 }
-                                #[cfg(any(test, feature = "test-support"))]
-                                RemoteConnectionOptions::Mock(_) => {
-                                    "Failed to connect to mock server"
-                                }
+                                #[allow(unreachable_patterns)]
+                                _ => "Failed to connect to remote project",
                             },
                             Some(&format!("{e:#}")),
                             &["Retry", "Cancel"],
@@ -381,10 +379,8 @@ pub async fn open_remote_project(
                                 RemoteConnectionOptions::Docker(_) => {
                                     "Failed to connect to Dev Container"
                                 }
-                                #[cfg(any(test, feature = "test-support"))]
-                                RemoteConnectionOptions::Mock(_) => {
-                                    "Failed to connect to mock server"
-                                }
+                                #[allow(unreachable_patterns)]
+                                _ => "Failed to connect to remote project",
                             },
                             Some(&format!("{e:#}")),
                             &["Retry", "Cancel"],

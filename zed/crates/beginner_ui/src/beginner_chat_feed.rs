@@ -14,29 +14,13 @@ use crate::simple_design as ds;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ChatFeedDisplayMode {
-    Simple,
     LiveWork,
-}
-
-impl ChatFeedDisplayMode {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Simple => "Simple",
-            Self::LiveWork => "Live Work",
-        }
-    }
-
-    pub fn tooltip(self) -> &'static str {
-        match self {
-            Self::Simple => "Show concise chat summaries",
-            Self::LiveWork => "Show Backboard talking and working",
-        }
-    }
 }
 
 #[derive(Clone)]
 struct TaskItem {
     label: String,
+    detail_label: Option<String>,
     kind: TaskKind,
     done: bool,
     failed: bool,
@@ -170,7 +154,7 @@ impl Render for BeginnerChatFeed {
             .px_6()
             .pt_6()
             .pb(px(220.))
-            .gap_5()
+            .gap_3()
             .bg(ds::app_background(cx))
             .when(is_empty, |el| {
                 el.child(
@@ -276,6 +260,7 @@ fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
             AgentThreadEntry::ToolCall(call) => {
                 let raw_label = call.label.read(cx).source().to_string();
                 let label = translate_tool_label(&call.kind, &raw_label);
+                let detail_label = live_work_label(&raw_label);
                 let kind = task_kind(&call.kind);
                 let done = matches!(call.status, ToolCallStatus::Completed);
                 let failed = matches!(
@@ -284,6 +269,7 @@ fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
                 );
                 let task = TaskItem {
                     label,
+                    detail_label,
                     kind,
                     done,
                     failed,
@@ -300,9 +286,11 @@ fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
                 let mut tasks = entries
                     .iter()
                     .filter_map(|entry| {
-                        let label = simplify_plan_label(entry.content.read(cx).source());
+                        let raw_label = entry.content.read(cx).source();
+                        let label = simplify_plan_label(raw_label);
                         (!label.is_empty()).then_some(TaskItem {
                             label,
+                            detail_label: live_work_label(raw_label),
                             kind: TaskKind::Think,
                             done: true,
                             failed: false,
@@ -337,7 +325,10 @@ fn collect_items(thread: &Entity<AcpThread>, cx: &App) -> Vec<FriendlyItem> {
 }
 
 fn clean_user_text(text: &str) -> String {
-    let text = strip_visible_prompt_prefix(text).unwrap_or(text).trim();
+    let text = text.trim();
+    if let Some(text) = strip_visible_prompt_prefix(text) {
+        return text.trim().to_string();
+    }
 
     for prefix in [
         "Ask mode: answer without editing files or making project changes unless I explicitly ask you to switch to build mode.",
@@ -366,9 +357,39 @@ fn simplify_plan_label(raw: &str) -> String {
     }
 }
 
-fn strip_visible_prompt_prefix(text: &str) -> Option<&str> {
-    if text.starts_with("Simple build mode:") || text.starts_with("Ask mode:") {
-        return text.split_once("\n\n").map(|(_, rest)| rest.trim());
+fn strip_visible_prompt_prefix(text: &str) -> Option<String> {
+    for marker in ["Simple build mode:", "Simple mode:", "Ask mode:"] {
+        if !text.starts_with(marker) {
+            continue;
+        }
+
+        if let Some((_, rest)) = text.split_once("\n\n") {
+            return Some(rest.trim().to_string());
+        }
+
+        if marker == "Simple build mode:" {
+            let rest = text
+                .lines()
+                .skip_while(|line| {
+                    let line = line.trim();
+                    line.is_empty()
+                        || line.starts_with("Simple build mode:")
+                        || line.starts_with("- ")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Some(rest.trim().to_string());
+        }
+
+        if marker == "Ask mode:" {
+            let rest = text
+                .lines()
+                .skip(1)
+                .skip_while(|line| line.trim().starts_with("Ask focused clarifying questions"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Some(rest.trim().to_string());
+        }
     }
 
     None
@@ -395,17 +416,17 @@ fn translate_tool_label(kind: &acp::ToolKind, raw: &str) -> String {
                 return "Reworded text".to_string();
             }
             if let Some(filename) = quoted_filename(raw) {
-                return format!("Edited {}", filename);
+                return format!("Updated {}", filename);
             }
-            "Edited a file".to_string()
+            "Updated a file".to_string()
         }
         acp::ToolKind::Delete => quoted_filename(raw)
             .map(|filename| format!("Deleted {}", filename))
             .unwrap_or_else(|| "Deleted a file".to_string()),
         acp::ToolKind::Execute => command_task_label(raw),
-        acp::ToolKind::Fetch | acp::ToolKind::Read | acp::ToolKind::Search => {
-            "Read project context".to_string()
-        }
+        acp::ToolKind::Fetch => "Opened a reference".to_string(),
+        acp::ToolKind::Read => "Read project context".to_string(),
+        acp::ToolKind::Search => "Searched the project".to_string(),
         acp::ToolKind::Move => quoted_filename(raw)
             .map(|filename| format!("Moved {}", filename))
             .unwrap_or_else(|| "Moved a file".to_string()),
@@ -419,6 +440,15 @@ fn translate_tool_label(kind: &acp::ToolKind, raw: &str) -> String {
             }
         }
     }
+}
+
+fn live_work_label(raw: &str) -> Option<String> {
+    let cleaned = raw
+        .trim()
+        .trim_start_matches('-')
+        .trim_start_matches('*')
+        .trim();
+    (!cleaned.is_empty()).then(|| cleaned.to_string())
 }
 
 fn quoted_filename(raw: &str) -> Option<String> {
@@ -497,52 +527,56 @@ fn render_item(
             thought,
             tasks,
         } => {
-            let cleaned_text = text.and_then(|text| clean_assistant_text(&text, &tasks));
-            let cleaned_thought =
-                thought.and_then(|thought| clean_thought_text(&thought, display_mode));
+            let visible_text =
+                text.and_then(|text| visible_assistant_text(&text, &tasks, display_mode));
+            let visible_thought =
+                thought.and_then(|thought| visible_thought_text(&thought, display_mode));
             let can_show_feedback = !tasks.is_empty()
                 && preview_state == PreviewCardState::Ready
                 && !tasks.iter().any(|task| task.failed);
-            let work_expanded = work_card_is_expanded(
-                index,
-                &tasks,
-                display_mode,
-                expanded_work_cards,
-                collapsed_work_cards,
-            );
+            let work_expanded =
+                work_card_is_expanded(index, &tasks, expanded_work_cards, collapsed_work_cards);
             v_flex()
                 .id(index + 10_000)
                 .w_full()
                 .min_w_0()
                 .items_center()
-                .gap_3()
+                .gap_2()
                 .py_1()
                 .when(tasks.is_empty(), |el| {
                     el.when(display_mode == ChatFeedDisplayMode::LiveWork, |el| {
-                        el.when_some(cleaned_thought.clone(), |el, thought| {
+                        el.when_some(visible_thought.clone(), |el, thought| {
                             el.child(render_thought_block(thought, cx))
                         })
                     })
-                    .when_some(cleaned_text.clone(), |el, text| {
-                        el.child(render_message_bubble(text, MessageTone::Assistant, cx))
+                    .when_some(visible_text.clone(), |el, text| {
+                        el.child(render_assistant_message_row(text, cx))
                     })
                 })
                 .when(!tasks.is_empty(), |el| {
+                    let is_running = tasks.iter().any(|task| !task.done && !task.failed);
+                    let show_artifact = !is_running
+                        || preview_state == PreviewCardState::Ready
+                        || tasks.iter().any(|task| task.failed);
                     el.child(render_work_section(
                         index,
-                        cleaned_text,
-                        cleaned_thought,
+                        visible_thought,
                         &tasks,
                         work_expanded,
                         display_mode,
                         cx,
                     ))
-                    .child(render_artifact_card(
-                        &tasks,
-                        artifact_title,
-                        preview_state,
-                        cx,
-                    ))
+                    .when_some(visible_text.clone(), |el, text| {
+                        el.child(render_assistant_message_row(text, cx))
+                    })
+                    .when(show_artifact, |el| {
+                        el.child(render_artifact_card(
+                            &tasks,
+                            artifact_title,
+                            preview_state,
+                            cx,
+                        ))
+                    })
                 })
                 .when(can_show_feedback, |el| {
                     el.child(render_feedback_row(index, cx))
@@ -555,7 +589,6 @@ fn render_item(
 fn work_card_is_expanded(
     index: usize,
     tasks: &[TaskItem],
-    display_mode: ChatFeedDisplayMode,
     expanded_work_cards: &HashSet<usize>,
     collapsed_work_cards: &HashSet<usize>,
 ) -> bool {
@@ -567,16 +600,19 @@ fn work_card_is_expanded(
         return false;
     }
 
-    if display_mode == ChatFeedDisplayMode::LiveWork {
+    if tasks.iter().any(|task| !task.done && !task.failed) {
         return true;
     }
 
-    tasks.iter().any(|task| !task.done && !task.failed)
+    if tasks.iter().any(|task| task.failed) {
+        return true;
+    }
+
+    false
 }
 
 fn render_work_section(
     index: usize,
-    text: Option<String>,
     thought: Option<String>,
     tasks: &[TaskItem],
     is_expanded: bool,
@@ -585,26 +621,21 @@ fn render_work_section(
 ) -> impl IntoElement {
     let header_id = SharedString::from(format!("simple-work-card-{index}"));
     let is_running = tasks.iter().any(|task| !task.done && !task.failed);
-    let label = if is_running {
-        "Backboard is working"
-    } else {
-        "Work completed"
-    };
+    let label = work_status_label(tasks, is_running);
     let hover_background = ds::hover_background(cx);
     let file_changes = file_change_count(tasks);
     let changes_label = changed_files_label(file_changes);
-    let detailed = display_mode == ChatFeedDisplayMode::LiveWork;
 
     v_flex()
         .w_full()
         .min_w_0()
         .max_w(px(ds::CHAT_MAX_WIDTH))
-        .gap_3()
-        .when(detailed, |el| {
+        .gap_2()
+        .when(is_expanded, |el| {
             el.rounded(px(12.))
                 .border_1()
                 .border_color(ds::soft_border(cx))
-                .bg(ds::card_background(cx))
+                .bg(ds::field_background(cx).opacity(0.5))
                 .p_2()
         })
         .child(
@@ -616,12 +647,10 @@ fn render_work_section(
                 .justify_between()
                 .gap_2()
                 .px_2()
-                .py_2()
-                .when(!detailed, |el| {
-                    el.border_b_1().border_color(ds::separator(cx))
-                })
+                .py_1p5()
+                .rounded(px(8.))
                 .cursor_pointer()
-                .hover(move |el| el.bg(hover_background.opacity(0.35)))
+                .hover(move |el| el.bg(hover_background.opacity(0.28)))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if is_expanded {
                         this.expanded_work_cards.remove(&index);
@@ -698,13 +727,10 @@ fn render_work_section(
                 ),
         )
         .when(is_expanded, |el| {
-            el.when(detailed, |el| {
+            el.when(display_mode == ChatFeedDisplayMode::LiveWork, |el| {
                 el.when_some(thought, |el, thought| {
                     el.child(render_thought_block(thought, cx))
                 })
-            })
-            .when_some(text, |el, text| {
-                el.child(render_message_bubble(text, MessageTone::Assistant, cx))
             })
             .child(render_task_list(tasks, display_mode, cx))
         })
@@ -728,6 +754,32 @@ fn changed_files_label(file_changes: usize) -> SharedString {
         file_changes,
         if file_changes == 1 { "file" } else { "files" }
     ))
+}
+
+fn work_status_label(tasks: &[TaskItem], is_running: bool) -> SharedString {
+    if let Some(active_task) = tasks.iter().rev().find(|task| !task.done && !task.failed) {
+        return SharedString::from(active_task_status_label(active_task));
+    }
+
+    if is_running {
+        SharedString::from("Working in your project")
+    } else {
+        SharedString::from("Work completed")
+    }
+}
+
+fn active_task_status_label(task: &TaskItem) -> String {
+    match task.kind {
+        TaskKind::Edit => active_edit_title(task),
+        TaskKind::Delete => format!("Deleting {}", active_task_target(task)),
+        TaskKind::Execute => command_status_title(&task.label),
+        TaskKind::Fetch => "Opening a reference".to_string(),
+        TaskKind::Move => format!("Moving {}", active_task_target(task)),
+        TaskKind::Read => "Reading project context".to_string(),
+        TaskKind::Search => "Searching the project".to_string(),
+        TaskKind::Think => "Planning next step".to_string(),
+        TaskKind::Other => task.label.clone(),
+    }
 }
 
 fn work_summary_label(tasks: &[TaskItem]) -> SharedString {
@@ -828,6 +880,20 @@ fn render_task_row(
     };
     let kind_icon = task_kind_icon(task.kind);
     let detailed = display_mode == ChatFeedDisplayMode::LiveWork;
+    let label = if detailed {
+        task.detail_label.as_deref().unwrap_or(task.label.as_str())
+    } else {
+        task.label.as_str()
+    };
+    let label_element: AnyElement = if detailed {
+        render_chat_copy(chat_text_for_display(label), ds::text(cx), cx).into_any_element()
+    } else {
+        Label::new(SharedString::from(label.to_string()))
+            .size(LabelSize::Small)
+            .color(Color::Custom(ds::text(cx)))
+            .truncate()
+            .into_any_element()
+    };
 
     h_flex()
         .id(SharedString::from(format!("simple-task-row-{index}")))
@@ -843,6 +909,7 @@ fn render_task_row(
                 .bg(ds::field_background(cx).opacity(0.62))
                 .px_2()
                 .py_1()
+                .items_start()
         })
         .child(
             Icon::new(status_icon)
@@ -856,12 +923,7 @@ fn render_task_row(
                     .color(Color::Custom(ds::icon_muted(cx))),
             )
         })
-        .child(
-            Label::new(SharedString::from(task.label.clone()))
-                .size(LabelSize::Small)
-                .color(Color::Custom(ds::text(cx)))
-                .truncate(),
-        )
+        .child(label_element)
 }
 
 fn task_kind_icon(kind: TaskKind) -> IconName {
@@ -925,49 +987,55 @@ fn render_message_bubble(
     cx: &mut Context<BeginnerChatFeed>,
 ) -> impl IntoElement {
     let colors = cx.theme().colors().clone();
-    let speaker = match tone {
-        MessageTone::User => "You",
-        MessageTone::Assistant => "Assistant",
-    };
     let text = chat_text_for_display(&text);
 
     div()
         .min_w_0()
         .max_w(px(match tone {
             MessageTone::User => 640.,
-            MessageTone::Assistant => ds::CHAT_MAX_WIDTH,
+            MessageTone::Assistant => 720.,
         }))
-        .when(matches!(tone, MessageTone::Assistant), |el| el.w_full())
         .overflow_x_hidden()
-        .rounded(px(12.))
         .when(matches!(tone, MessageTone::User), |el| {
             el.bg(ds::field_background(cx))
                 .border_1()
                 .border_color(ds::soft_border(cx))
+                .rounded(px(12.))
+                .px_3()
+                .py_2()
         })
-        .px_3()
-        .py_2()
+        .when(matches!(tone, MessageTone::Assistant), |el| {
+            el.px_1().py_1()
+        })
         .child(
             v_flex()
                 .w_full()
                 .min_w_0()
                 .gap_1p5()
-                .child(
-                    Label::new(speaker)
-                        .size(LabelSize::XSmall)
-                        .color(Color::Custom(colors.text_muted)),
-                )
                 .child(render_chat_copy(text, colors.text, cx)),
         )
 }
 
-fn render_thought_block(text: String, cx: &mut Context<BeginnerChatFeed>) -> impl IntoElement {
-    let colors = cx.theme().colors().clone();
-    let text = chat_text_for_display(&text);
-    v_flex()
+fn render_assistant_message_row(
+    text: String,
+    cx: &mut Context<BeginnerChatFeed>,
+) -> impl IntoElement {
+    h_flex()
         .w_full()
         .min_w_0()
         .max_w(px(ds::CHAT_MAX_WIDTH))
+        .justify_start()
+        .child(render_message_bubble(text, MessageTone::Assistant, cx))
+}
+
+fn render_thought_block(text: String, cx: &mut Context<BeginnerChatFeed>) -> impl IntoElement {
+    let text = chat_text_for_display(&text);
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .max_w(px(ds::CHAT_MAX_WIDTH))
+        .min_h(px(36.))
+        .items_start()
         .gap_2()
         .rounded(px(10.))
         .border_1()
@@ -976,21 +1044,61 @@ fn render_thought_block(text: String, cx: &mut Context<BeginnerChatFeed>) -> imp
         .px_3()
         .py_2()
         .child(
-            h_flex()
-                .gap_1p5()
-                .items_center()
-                .child(
-                    Icon::new(IconName::QueueMessage)
-                        .size(IconSize::XSmall)
-                        .color(Color::Custom(ds::icon_muted(cx))),
-                )
-                .child(
-                    Label::new("Talking")
-                        .size(LabelSize::XSmall)
-                        .color(Color::Custom(colors.text_muted)),
-                ),
+            Icon::new(IconName::QueueMessage)
+                .size(IconSize::XSmall)
+                .color(Color::Custom(ds::icon_muted(cx))),
         )
-        .child(render_chat_copy(text, colors.text.opacity(0.86), cx))
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .child(render_chat_copy(text, ds::text_muted(cx), cx)),
+        )
+}
+
+fn visible_assistant_text(
+    text: &str,
+    tasks: &[TaskItem],
+    display_mode: ChatFeedDisplayMode,
+) -> Option<String> {
+    if display_mode == ChatFeedDisplayMode::LiveWork {
+        live_assistant_text(text)
+    } else {
+        clean_assistant_text(text, tasks)
+    }
+}
+
+fn visible_thought_text(text: &str, display_mode: ChatFeedDisplayMode) -> Option<String> {
+    if display_mode == ChatFeedDisplayMode::LiveWork {
+        live_thought_text(text)
+    } else {
+        clean_thought_text(text, display_mode)
+    }
+}
+
+fn live_assistant_text(text: &str) -> Option<String> {
+    live_feed_text(text)
+}
+
+fn live_thought_text(text: &str) -> Option<String> {
+    live_feed_text(text)
+}
+
+fn live_feed_text(text: &str) -> Option<String> {
+    let mut lines = Vec::new();
+    for raw_line in readable_paragraphs(text) {
+        let line = raw_line
+            .trim()
+            .replace("<thinking>", "")
+            .replace("</thinking>", "");
+        let line = line.trim();
+        if line.is_empty() || is_low_value_progress_line(line) {
+            continue;
+        }
+        push_unique_line(&mut lines, line.to_string());
+    }
+
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
@@ -1037,6 +1145,10 @@ fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
         }
     }
 
+    if let Some(summary) = conversational_feature_summary(&cleaned) {
+        return Some(summary);
+    }
+
     if cleaned.is_empty() {
         if tasks.is_empty() {
             None
@@ -1070,6 +1182,13 @@ fn clean_thought_text(text: &str, display_mode: ChatFeedDisplayMode) -> Option<S
             .trim_start_matches('-')
             .trim_start_matches('*')
             .trim();
+        if let Some(line) = friendly_progress_status_line(line) {
+            push_unique_line(&mut cleaned, line);
+            continue;
+        }
+        if is_low_value_progress_line(line) {
+            continue;
+        }
         if let Some(progress) = simplified_progress_line(line) {
             push_unique_line(&mut cleaned, progress);
             continue;
@@ -1087,7 +1206,7 @@ fn clean_thought_text(text: &str, display_mode: ChatFeedDisplayMode) -> Option<S
         }
     }
 
-    (!cleaned.is_empty()).then(|| cleaned.join("\n"))
+    cleaned.into_iter().last()
 }
 
 fn simple_mode_progress_rewrite(line: &str) -> Option<String> {
@@ -1112,6 +1231,205 @@ fn simple_mode_progress_rewrite(line: &str) -> Option<String> {
     }
 
     None
+}
+
+fn conversational_feature_summary(lines: &[String]) -> Option<String> {
+    if !looks_like_feature_report(lines) {
+        return None;
+    }
+
+    let intro = lines
+        .iter()
+        .find(|line| is_completion_intro(line))
+        .map(|line| sentence_from_line(line))
+        .unwrap_or_else(|| "It's ready.".to_string());
+
+    let features = lines
+        .iter()
+        .filter_map(|line| feature_report_item(line))
+        .filter(|item| !is_control_item(item))
+        .map(|item| chat_item_text(&item))
+        .take(6)
+        .collect::<Vec<_>>();
+    let controls = lines
+        .iter()
+        .filter_map(|line| feature_report_item(line))
+        .filter(|item| is_control_item(item))
+        .map(|item| chat_item_text(&item))
+        .take(3)
+        .collect::<Vec<_>>();
+
+    let mut sentences = vec![intro];
+    if !features.is_empty() {
+        sentences.push(format!("I added {}.", natural_join(&features)));
+    }
+    if !controls.is_empty() {
+        sentences.push(format!("Use {}.", natural_join(&controls)));
+    }
+
+    Some(sentences.join(" "))
+}
+
+fn looks_like_feature_report(lines: &[String]) -> bool {
+    let has_report_heading = lines.iter().any(|line| {
+        let lower = line.trim().trim_end_matches(':').to_lowercase();
+        lower == "the game features"
+            || lower == "features"
+            || lower == "controls"
+            || lower.ends_with(" features")
+    });
+    let item_count = lines
+        .iter()
+        .filter(|line| feature_report_item(line).is_some())
+        .count();
+
+    has_report_heading && item_count >= 3
+}
+
+fn feature_report_item(line: &str) -> Option<String> {
+    let (title, description) = line.split_once(':')?;
+    let title = title.trim();
+    if title.is_empty() || description.trim().is_empty() {
+        return None;
+    }
+
+    let lower = title.to_lowercase();
+    if lower == "features"
+        || lower == "the game features"
+        || lower.ends_with(" features")
+        || lower == "controls"
+    {
+        return None;
+    }
+
+    Some(title.to_string())
+}
+
+fn is_completion_intro(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    lower.contains("ready") || lower.contains("complete") || lower.contains("done")
+}
+
+fn sentence_from_line(line: &str) -> String {
+    let trimmed = line
+        .trim()
+        .trim_end_matches(|character: char| !character.is_alphanumeric() && character != ')')
+        .trim();
+    if trimmed.is_empty() {
+        return "It's ready.".to_string();
+    }
+
+    format!("{trimmed}.")
+}
+
+fn chat_item_text(text: &str) -> String {
+    text.split_whitespace()
+        .map(|word| {
+            let ascii_letters = word
+                .chars()
+                .filter(|character| character.is_ascii_alphabetic())
+                .collect::<String>();
+            if ascii_letters.len() > 1
+                && ascii_letters
+                    .chars()
+                    .all(|character| character.is_ascii_uppercase())
+            {
+                word.to_string()
+            } else {
+                word.to_lowercase()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn is_control_item(item: &str) -> bool {
+    let lower = item.to_lowercase();
+    lower.contains("key") || lower.contains("wasd") || lower.contains("spacebar")
+}
+
+fn natural_join(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [one, two] => format!("{one} and {two}"),
+        _ => {
+            let mut joined = items[..items.len() - 1].join(", ");
+            joined.push_str(", and ");
+            joined.push_str(&items[items.len() - 1]);
+            joined
+        }
+    }
+}
+
+fn friendly_progress_status_line(line: &str) -> Option<String> {
+    let trimmed = line.trim().trim_end_matches('.');
+    let lower = trimmed.to_lowercase();
+
+    if lower.starts_with("connected to model")
+        || lower.starts_with("sending to model")
+        || lower.starts_with("sending the task to the selected model")
+        || lower.starts_with("retrying request")
+    {
+        return Some("Thinking through it.".to_string());
+    }
+
+    if lower.starts_with("loading the backboard agent runtime") {
+        return Some("Starting Backboard.".to_string());
+    }
+
+    if lower.starts_with("preparing workspace context") {
+        return Some("Checking the project.".to_string());
+    }
+
+    if lower.starts_with("planning next step") {
+        return Some("Planning next step.".to_string());
+    }
+
+    if lower.starts_with("updating the visible task plan") {
+        return Some("Updating the plan.".to_string());
+    }
+
+    if lower.starts_with("backboard is running ") || lower.starts_with("running ") {
+        let tool_name = extract_progress_tool_name(trimmed).unwrap_or_default();
+        return Some(match tool_name.as_str() {
+            "bash" | "computer" | "repl" | "run_code" | "run_terminal_cmd" => {
+                "Running a command.".to_string()
+            }
+            "list_dir" | "read_file" | "read_lints" => "Reading project context.".to_string(),
+            "grep" | "find_path" | "find_references" | "go_to_definition" => {
+                "Searching the project.".to_string()
+            }
+            "write" | "edit" | "search_replace" => "Updating files.".to_string(),
+            "create_directory" => "Creating a folder.".to_string(),
+            "delete_file" => "Deleting a file.".to_string(),
+            "move_path" | "copy_path" => "Moving a file.".to_string(),
+            "web_search" | "fetch" => "Opening a reference.".to_string(),
+            "update_plan" => "Updating the plan.".to_string(),
+            "" => "Working in your project.".to_string(),
+            _ => "Working in your project.".to_string(),
+        });
+    }
+
+    None
+}
+
+fn extract_progress_tool_name(line: &str) -> Option<String> {
+    if let Some(start) = line.find('`') {
+        let rest = &line[start + 1..];
+        if let Some(end) = rest.find('`') {
+            return Some(rest[..end].to_string());
+        }
+    }
+
+    line.strip_prefix("Running ")
+        .map(str::trim)
+        .map(|tool| tool.trim_end_matches('.').to_string())
+}
+
+fn is_low_value_progress_line(line: &str) -> bool {
+    let lower = line.trim().to_lowercase();
+    lower.starts_with("generated media") || lower.starts_with("realtime voice enabled")
 }
 
 fn push_unique_line(lines: &mut Vec<String>, line: String) {
@@ -1406,13 +1724,14 @@ fn active_edit_title(task: &TaskItem) -> String {
     if task.label == "Reworded text" {
         "Rewording text".to_string()
     } else {
-        format!("Editing {}", active_task_target(task))
+        format!("Updating {}", active_task_target(task))
     }
 }
 
 fn active_task_target(task: &TaskItem) -> String {
     task.label
-        .strip_prefix("Edited ")
+        .strip_prefix("Updated ")
+        .or_else(|| task.label.strip_prefix("Edited "))
         .or_else(|| task.label.strip_prefix("Deleted "))
         .or_else(|| task.label.strip_prefix("Moved "))
         .unwrap_or(task.label.as_str())
@@ -1431,6 +1750,14 @@ fn command_status_title(label: &str) -> String {
     } else if lower.contains("install") {
         "Installing dependencies".to_string()
     } else if lower.contains("check") || lower.contains("test") || lower.contains("build") {
+        "Checking the project".to_string()
+    } else if lower == "ran a command" {
+        "Running a command".to_string()
+    } else if lower == "started app server" {
+        "Starting app server".to_string()
+    } else if lower == "installed dependencies" {
+        "Installing dependencies".to_string()
+    } else if lower == "checked the project" {
         "Checking the project".to_string()
     } else {
         label.to_string()
@@ -1547,4 +1874,112 @@ fn render_feedback_button(
                 .size(IconSize::XSmall)
                 .color(Color::Custom(ds::icon_muted(cx))),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleans_feature_report_as_chat_summary() {
+        let text = "\
+Your Mario Kart racing game is ready!
+
+The game features:
+
+Character Selection: Choose from Mario, Luigi, Princess Peach, or Yoshi
+Racing Mechanics: Use arrow keys to steer and accelerate around the track
+Power-ups: Collect bananas, fire flowers, stars, and rockets
+Lap System: Complete 3 laps to finish the race
+Backboard Opponents: Race against 3 computer-controlled racers
+Live Stats: Track your speed, lap progress, position, and race time
+
+Controls:
+
+Arrow keys (or WASD): Steer and accelerate
+Spacebar: Use collected power-ups
+";
+
+        assert_eq!(
+            clean_assistant_text(text, &[]).as_deref(),
+            Some(
+                "Your Mario Kart racing game is ready. I added character selection, racing mechanics, power-ups, lap system, backboard opponents, and live stats. Use arrow keys (or WASD) and spacebar."
+            )
+        );
+    }
+
+    #[test]
+    fn live_assistant_text_preserves_agent_details() {
+        let text = "\
+I'll inspect `src/App.tsx` first.
+
+```bash
+npm test
+```
+
+Then I'll update the layout.";
+
+        assert_eq!(
+            live_assistant_text(text).as_deref(),
+            Some(
+                "I'll inspect `src/App.tsx` first.\n```bash\nnpm test\n```\nThen I'll update the layout."
+            )
+        );
+    }
+
+    #[test]
+    fn live_thought_text_keeps_multiple_progress_lines() {
+        let text = "\
+<thinking>Preparing workspace context.</thinking>
+Sending to model.
+Backboard is running `read_file`.";
+
+        assert_eq!(
+            live_thought_text(text).as_deref(),
+            Some(
+                "Preparing workspace context.\nSending to model.\nBackboard is running `read_file`."
+            )
+        );
+    }
+
+    #[test]
+    fn work_card_expands_while_task_is_running() {
+        let tasks = vec![TaskItem {
+            label: "Read project context".to_string(),
+            detail_label: Some("Reading `src/App.tsx`".to_string()),
+            kind: TaskKind::Read,
+            done: false,
+            failed: false,
+        }];
+
+        assert!(work_card_is_expanded(
+            7,
+            &tasks,
+            &HashSet::default(),
+            &HashSet::default()
+        ));
+    }
+
+    #[test]
+    fn cleans_simple_mode_prompt_prefix_from_user_message() {
+        let text = "\
+Simple build mode: build or edit the project for a nontechnical user.
+- Default to creating a polished web app or page when the user asks for a product, app, page, dashboard, tool, game, or visual experience and does not specify another medium.
+- After creating or updating a runnable artifact, start or refresh the preview.
+
+Make a recipe app";
+
+        assert_eq!(clean_user_text(text), "Make a recipe app");
+    }
+
+    #[test]
+    fn cleans_simple_mode_prompt_prefix_without_blank_separator() {
+        let text = "\
+Simple build mode: build or edit the project for a nontechnical user.
+- Default to creating a polished web app or page when the user asks for a product, app, page, dashboard, tool, game, or visual experience and does not specify another medium.
+- After creating or updating a runnable artifact, start or refresh the preview.
+Make a recipe app";
+
+        assert_eq!(clean_user_text(text), "Make a recipe app");
+    }
 }

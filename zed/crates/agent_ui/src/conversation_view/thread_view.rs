@@ -2148,6 +2148,20 @@ impl ThreadView {
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<ContextMenu> {
+        ContextMenu::build(window, cx, move |menu, _window, cx| {
+            Self::populate_agent_options_context_menu(
+                menu.key_context("AgentOptionsMenu").header("Agent Options"),
+                config_options_view.clone(),
+                cx,
+            )
+        })
+    }
+
+    fn populate_agent_options_context_menu(
+        mut menu: ContextMenu,
+        config_options_view: Entity<ConfigOptionsView>,
+        cx: &mut Context<ContextMenu>,
+    ) -> ContextMenu {
         let options = config_options_view
             .read(cx)
             .option_summaries()
@@ -2155,66 +2169,62 @@ impl ThreadView {
             .filter(Self::is_agent_option_summary)
             .collect::<Vec<_>>();
 
-        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            menu = menu.key_context("AgentOptionsMenu").header("Agent Options");
+        if options.is_empty() {
+            return menu.label("No session options available.");
+        }
 
-            if options.is_empty() {
-                return menu.label("No session options available.");
-            }
+        for option in options {
+            let option_id = option.id.clone();
+            let submenu_label =
+                SharedString::from(format!("{}: {}", option.name, option.current_value_name));
+            let config_options_view = config_options_view.clone();
 
-            for option in options.clone() {
-                let option_id = option.id.clone();
-                let submenu_label =
-                    SharedString::from(format!("{}: {}", option.name, option.current_value_name));
-                let config_options_view = config_options_view.clone();
+            menu = menu.submenu_with_icon(
+                submenu_label,
+                IconName::Sliders,
+                move |mut menu, _window, cx| {
+                    let choices = config_options_view
+                        .read(cx)
+                        .option_value_summaries(&option_id);
 
-                menu = menu.submenu_with_icon(
-                    submenu_label,
-                    IconName::Sliders,
-                    move |mut menu, _window, cx| {
-                        let choices = config_options_view
-                            .read(cx)
-                            .option_value_summaries(&option_id);
+                    if choices.is_empty() {
+                        return menu.label("No values available.");
+                    }
 
-                        if choices.is_empty() {
-                            return menu.label("No values available.");
-                        }
-
-                        for choice in choices {
-                            let option_id_for_choice = option_id.clone();
-                            let value = choice.value.clone();
-                            let is_current = choice.is_current;
-                            let config_options_view = config_options_view.clone();
-                            let mut entry = ContextMenuEntry::new(choice.name)
-                                .toggle(IconPosition::End, is_current)
-                                .disabled(is_current)
-                                .handler(move |_window, cx| {
-                                    config_options_view.update(cx, |view, cx| {
-                                        view.set_option_value(
-                                            option_id_for_choice.clone(),
-                                            value.clone(),
-                                            cx,
-                                        );
-                                    });
+                    for choice in choices {
+                        let option_id_for_choice = option_id.clone();
+                        let value = choice.value.clone();
+                        let is_current = choice.is_current;
+                        let config_options_view = config_options_view.clone();
+                        let mut entry = ContextMenuEntry::new(choice.name)
+                            .toggle(IconPosition::End, is_current)
+                            .disabled(is_current)
+                            .handler(move |_window, cx| {
+                                config_options_view.update(cx, |view, cx| {
+                                    view.set_option_value(
+                                        option_id_for_choice.clone(),
+                                        value.clone(),
+                                        cx,
+                                    );
                                 });
+                            });
 
-                            if let Some(description) = choice.description {
-                                entry = entry.documentation_aside(
-                                    documentation_aside_side(cx),
-                                    move |_cx| Label::new(description.clone()).into_any_element(),
-                                );
-                            }
-
-                            menu = menu.item(entry);
+                        if let Some(description) = choice.description {
+                            entry = entry
+                                .documentation_aside(documentation_aside_side(cx), move |_cx| {
+                                    Label::new(description.clone()).into_any_element()
+                                });
                         }
 
-                        menu
-                    },
-                );
-            }
+                        menu = menu.item(entry);
+                    }
 
-            menu
-        })
+                    menu
+                },
+            );
+        }
+
+        menu
     }
 
     fn build_skills_context_menu(
@@ -2223,9 +2233,25 @@ impl ThreadView {
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<ContextMenu> {
+        ContextMenu::build(window, cx, move |menu, _window, cx| {
+            Self::populate_skills_context_menu(
+                menu.key_context("SkillsMenu").header("Skills"),
+                config_options_view.clone(),
+                workspace.clone(),
+                cx,
+            )
+        })
+    }
+
+    fn populate_skills_context_menu(
+        mut menu: ContextMenu,
+        config_options_view: Entity<ConfigOptionsView>,
+        workspace: WeakEntity<Workspace>,
+        _cx: &mut Context<ContextMenu>,
+    ) -> ContextMenu {
         let mut grouped_options = BTreeMap::new();
         for option in config_options_view
-            .read(cx)
+            .read(_cx)
             .option_summaries()
             .into_iter()
             .filter(|option| option.id.0.starts_with("backboard_skill:"))
@@ -2236,98 +2262,90 @@ impl ThreadView {
                 .push(option);
         }
 
-        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            let config_options_view_for_create = config_options_view.clone();
-            let workspace_for_create = workspace.clone();
-            menu = menu
-                .key_context("SkillsMenu")
-                .header("Skills")
-                .custom_entry(
-                    |_window, _cx| {
-                        Self::render_context_menu_status_row(
-                            "New Skill".into(),
-                            "Create".into(),
-                            IconName::Plus,
-                            Color::Muted,
-                            Color::Accent,
-                        )
-                    },
-                    move |window, cx| {
-                        Self::create_new_skill_from_context_menu(
-                            config_options_view_for_create.clone(),
-                            workspace_for_create.clone(),
-                            window,
-                            cx,
+        let config_options_view_for_create = config_options_view.clone();
+        let workspace_for_create = workspace.clone();
+        menu = menu.custom_entry(
+            |_window, _cx| {
+                Self::render_context_menu_status_row(
+                    "New Skill".into(),
+                    "Create".into(),
+                    IconName::Plus,
+                    Color::Muted,
+                    Color::Accent,
+                )
+            },
+            move |window, cx| {
+                Self::create_new_skill_from_context_menu(
+                    config_options_view_for_create.clone(),
+                    workspace_for_create.clone(),
+                    window,
+                    cx,
+                );
+            },
+        );
+
+        if grouped_options.is_empty() {
+            return menu.separator().label("No skills available.");
+        }
+
+        menu = menu.separator();
+
+        for (category, options) in grouped_options {
+            let config_options_view = config_options_view.clone();
+            let category_for_header = category.clone();
+            menu =
+                menu.submenu_with_icon(category, IconName::Box, move |mut menu, _window, _cx| {
+                    menu = menu.header(category_for_header.clone());
+
+                    for option in options.clone() {
+                        let option_id = option.id.clone();
+                        let label = SharedString::from(option.name);
+                        let status = SharedString::from(option.current_value_name);
+                        let enabled = status.to_string().eq_ignore_ascii_case("on");
+                        let description = option.description.clone();
+                        let preview_path = option
+                            .id
+                            .0
+                            .starts_with("backboard_skill:web/")
+                            .then(|| AgentOptionsMenu::skill_preview_path(&option.id))
+                            .flatten();
+                        let tooltip_id = format!("skill-preview-tooltip-{}", option.id.0);
+                        let config_options_view = config_options_view.clone();
+
+                        menu = menu.custom_entry(
+                            move |_window, _cx| {
+                                Self::render_skill_context_menu_row(
+                                    tooltip_id.clone(),
+                                    label.clone(),
+                                    status.clone(),
+                                    if enabled {
+                                        IconName::Check
+                                    } else {
+                                        IconName::Box
+                                    },
+                                    if enabled {
+                                        Color::Success
+                                    } else {
+                                        Color::Muted
+                                    },
+                                    if enabled { Color::Accent } else { Color::Muted },
+                                    preview_path.clone(),
+                                    description.clone(),
+                                )
+                            },
+                            move |_window, cx| {
+                                config_options_view.update(cx, |view, cx| {
+                                    view.cycle_option(&option_id, cx);
+                                });
+                            },
                         );
-                    },
-                );
+                    }
 
-            if grouped_options.is_empty() {
-                return menu.separator().label("No skills available.");
-            }
+                    menu
+                });
+        }
 
-            menu = menu.separator();
-
-            for (category, options) in grouped_options.clone() {
-                let config_options_view = config_options_view.clone();
-                let category_for_header = category.clone();
-                menu = menu.submenu_with_icon(
-                    category,
-                    IconName::Box,
-                    move |mut menu, _window, _cx| {
-                        menu = menu.header(category_for_header.clone());
-
-                        for option in options.clone() {
-                            let option_id = option.id.clone();
-                            let label = SharedString::from(option.name);
-                            let status = SharedString::from(option.current_value_name);
-                            let enabled = status.to_string().eq_ignore_ascii_case("on");
-                            let description = option.description.clone();
-                            let preview_path = option
-                                .id
-                                .0
-                                .starts_with("backboard_skill:web/")
-                                .then(|| AgentOptionsMenu::skill_preview_path(&option.id))
-                                .flatten();
-                            let tooltip_id = format!("skill-preview-tooltip-{}", option.id.0);
-                            let config_options_view = config_options_view.clone();
-
-                            menu = menu.custom_entry(
-                                move |_window, _cx| {
-                                    Self::render_skill_context_menu_row(
-                                        tooltip_id.clone(),
-                                        label.clone(),
-                                        status.clone(),
-                                        if enabled {
-                                            IconName::Check
-                                        } else {
-                                            IconName::Box
-                                        },
-                                        if enabled {
-                                            Color::Success
-                                        } else {
-                                            Color::Muted
-                                        },
-                                        if enabled { Color::Accent } else { Color::Muted },
-                                        preview_path.clone(),
-                                        description.clone(),
-                                    )
-                                },
-                                move |_window, cx| {
-                                    config_options_view.update(cx, |view, cx| {
-                                        view.cycle_option(&option_id, cx);
-                                    });
-                                },
-                            );
-                        }
-
-                        menu
-                    },
-                );
-            }
-
-            menu
-        })
+        menu
     }
 
     fn is_agent_option_summary(option: &ConfigOptionSummary) -> bool {
@@ -2782,10 +2800,14 @@ impl ThreadView {
     }
 
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.try_send(window, cx);
+    }
+
+    pub(crate) fn try_send(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let thread = &self.thread;
 
         if self.is_loading_contents {
-            return;
+            return false;
         }
 
         let message_editor = self.message_editor.clone();
@@ -2797,17 +2819,17 @@ impl ThreadView {
         if is_editor_empty && self.can_fast_track_queue && has_queued {
             self.can_fast_track_queue = false;
             self.send_queued_message_at_index(0, true, window, cx);
-            return;
+            return true;
         }
 
         if is_editor_empty {
-            return;
+            return false;
         }
 
         if is_generating {
             cx.emit(AcpThreadViewEvent::Interacted);
             self.queue_message(message_editor, window, cx);
-            return;
+            return true;
         }
 
         let text = message_editor.read(cx).text(cx);
@@ -2843,18 +2865,19 @@ impl ThreadView {
                     }
                 });
                 cx.notify();
-                return;
+                return true;
             }
         }
 
         if let Some(before_send_hook) = self.before_send_hook.clone()
             && !before_send_hook(text, window, cx)
         {
-            return;
+            return false;
         }
 
         cx.emit(AcpThreadViewEvent::Interacted);
-        self.send_impl(message_editor, window, cx)
+        self.send_impl(message_editor, window, cx);
+        true
     }
 
     pub fn send_impl(
@@ -5265,7 +5288,7 @@ impl ThreadView {
                                     .overflow_hidden()
                                     .items_center()
                                     .gap_1()
-                                    .child(self.render_add_context_button(cx))
+                                    .child(self.render_add_context_button(cx, !include_container))
                                     .map(|this| {
                                         if let Some(model_selector) = self.model_selector.clone() {
                                             this.child(model_selector)
@@ -5290,8 +5313,10 @@ impl ThreadView {
                                     .children(self.render_fast_mode_control(cx))
                                     .children(self.render_thinking_control(cx))
                                     .children(self.render_token_usage(cx))
-                                    .children(self.render_skills_options_button(cx))
-                                    .children(self.render_session_options_button(cx))
+                                    .when(include_container, |this| {
+                                        this.children(self.render_skills_options_button(cx))
+                                            .children(self.render_session_options_button(cx))
+                                    })
                                     .child(self.render_send_button(cx)),
                             ),
                     ),
@@ -6190,7 +6215,11 @@ impl ThreadView {
         }
     }
 
-    fn render_add_context_button(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_add_context_button(
+        &mut self,
+        cx: &mut Context<Self>,
+        include_composer_options: bool,
+    ) -> impl IntoElement {
         let focus_handle = self.message_editor.focus_handle(cx);
         let weak_self = cx.weak_entity();
 
@@ -6220,7 +6249,9 @@ impl ThreadView {
             })
             .menu(move |window, cx| {
                 weak_self
-                    .update(cx, |this, cx| this.build_add_context_menu(window, cx))
+                    .update(cx, |this, cx| {
+                        this.build_add_context_menu(window, cx, include_composer_options)
+                    })
                     .ok()
             })
     }
@@ -6229,10 +6260,16 @@ impl ThreadView {
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
+        include_composer_options: bool,
     ) -> Entity<ContextMenu> {
         let message_editor = self.message_editor.clone();
         let workspace = self.workspace.clone();
         let weak_self = cx.weak_entity();
+        let config_options_view_for_skills = self.config_options_view.clone();
+        let config_options_view_for_agent_options = self.config_options_view.clone();
+        let has_agent_options = self.config_options_view.is_some()
+            || self.profile_selector.is_some()
+            || self.mode_selector.is_some();
         let session_capabilities = self.session_capabilities.read();
         let supports_images = session_capabilities.supports_images();
         let supports_embedded_context = session_capabilities.supports_embedded_context();
@@ -6257,10 +6294,13 @@ impl ThreadView {
 
         let has_selection = has_editor_selection || has_terminal_selection;
 
-        ContextMenu::build(window, cx, move |menu, _window, _cx| {
+        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
             let weak_self_for_mcp = weak_self.clone();
+            let weak_self_for_agent_options = weak_self.clone();
+            let workspace_for_skills = workspace.clone();
 
-            menu.key_context("AddContextMenu")
+            menu = menu
+                .key_context("AddContextMenu")
                 .header("Context")
                 .submenu_with_colored_icon(
                     "MCP Servers",
@@ -6374,7 +6414,53 @@ impl ThreadView {
                                 });
                             }
                         }),
-                )
+                );
+
+            if include_composer_options {
+                menu = menu.separator().header("Agent");
+
+                if let Some(config_options_view) = config_options_view_for_skills.clone() {
+                    menu = menu.submenu_with_icon("Skills", IconName::Box, {
+                        let workspace = workspace_for_skills.clone();
+                        move |menu, _window, cx| {
+                            Self::populate_skills_context_menu(
+                                menu.header("Skills"),
+                                config_options_view.clone(),
+                                workspace.clone(),
+                                cx,
+                            )
+                        }
+                    });
+                }
+
+                if let Some(config_options_view) = config_options_view_for_agent_options.clone() {
+                    menu = menu.submenu_with_icon("Agent Options", IconName::Sliders, {
+                        move |menu, _window, cx| {
+                            Self::populate_agent_options_context_menu(
+                                menu.header("Agent Options"),
+                                config_options_view.clone(),
+                                cx,
+                            )
+                        }
+                    });
+                } else if has_agent_options {
+                    menu = menu.item(
+                        ContextMenuEntry::new("Agent Options")
+                            .icon(IconName::Sliders)
+                            .icon_color(Color::Muted)
+                            .icon_size(IconSize::XSmall)
+                            .handler(move |window, cx| {
+                                weak_self_for_agent_options
+                                    .update(cx, |this, cx| {
+                                        this.toggle_session_options(window, cx);
+                                    })
+                                    .ok();
+                            }),
+                    );
+                }
+            }
+
+            menu
         })
     }
 

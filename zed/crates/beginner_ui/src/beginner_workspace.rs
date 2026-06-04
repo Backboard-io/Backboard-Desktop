@@ -7,11 +7,15 @@ use std::time::Duration;
 
 use acp_thread::{
     AcpThread, AcpThreadEvent, AgentModelInfo, AgentModelList, AgentModelSelector,
-    SelectedPermissionOutcome, ThreadStatus, ToolCallStatus,
+    AssistantMessageChunk, SelectedPermissionOutcome, ThreadStatus, ToolCallStatus,
 };
 use agent_client_protocol::schema as acp;
-use agent_ui::thread_metadata_store::ThreadMetadataStore;
-use agent_ui::{AddContextServer, AgentPanel, ConversationView, ModelSelectorPopover};
+use agent_ui::thread_metadata_store::{ThreadId, ThreadMetadataStore};
+use agent_ui::{
+    AddContextServer, AgentPanel, BackboardAgentWorkspaceChatOptions, BackboardAgentWorkspaceKind,
+    BackboardAgentWorkspaceMode, BackboardAgentWorkspaceScope, ConversationView,
+    ModelSelectorPopover,
+};
 use anyhow::{Context as AnyhowContext, bail};
 use db::kvp::KeyValueStore;
 use editor::actions::{Cancel as EditorCancel, Newline};
@@ -33,7 +37,10 @@ use ui::{
     prelude::*,
 };
 use util::ResultExt;
-use workspace::{MultiWorkspace, PathList, Workspace, notifications::DetachAndPromptErr};
+use workspace::{
+    MultiWorkspace, OpenOptions, OpenVisible, PathList, Workspace,
+    notifications::DetachAndPromptErr,
+};
 use zed_actions::{ConfigureBackboardApiKey, OpenSettings, ResetOnboarding};
 
 use acp_thread::AgentThreadEntry;
@@ -73,6 +80,8 @@ static CURATED_MODELS: &[(&str, &str, &str)] = &[
 const SIMPLE_LANDING_LOGO_PATH: &str = "images/animation_logo.png";
 const SIMPLE_PREVIEW_PORT: u16 = 3000;
 const PANEL_OPEN_ANIMATION_MS: u64 = 210;
+const SIMPLE_SIDEBAR_HOVER_OPEN_DELAY_MS: u64 = 3000;
+const SIMPLE_SIDEBAR_HOVER_OPEN_POLL_MS: u64 = 100;
 const PANEL_OPEN_SLIDE_OFFSET_PX: f32 = 28.0;
 const RIGHT_PANEL_FADE_START_OPACITY: f32 = 0.94;
 const RIGHT_PANEL_CLOSED_WIDTH_PX: f32 = 44.0;
@@ -91,29 +100,112 @@ struct PreviewLaunch {
 }
 
 fn curated_model_match(model: &AgentModelInfo) -> Option<(usize, &'static str)> {
-    let model_id = model.id.0.as_ref().to_lowercase();
+    curated_model_match_with_provider(model, None)
+}
+
+fn curated_model_match_with_provider(
+    model: &AgentModelInfo,
+    provider_hint: Option<&str>,
+) -> Option<(usize, &'static str)> {
+    let provider = model_provider_id(model, provider_hint);
+    let model_id = model_id_without_provider(model.id.0.as_ref());
     let model_name = model.name.to_lowercase();
-    let description = model
+
+    CURATED_MODELS.iter().enumerate().find_map(
+        |(index, &(provider_hint, model_hint, display_name))| {
+            (provider == provider_hint
+                && curated_model_id_matches(&model_id, model_hint, &model_name))
+            .then_some((index, display_name))
+        },
+    )
+}
+
+fn model_provider_id(model: &AgentModelInfo, provider_hint: Option<&str>) -> String {
+    let model_id = model.id.0.as_ref().to_lowercase();
+    if let Some((provider, _)) = model_id.split_once('/') {
+        return canonical_simple_model_provider(provider);
+    }
+
+    if let Some(provider_hint) = provider_hint {
+        let provider = canonical_simple_model_provider(provider_hint);
+        if !provider.is_empty() {
+            return provider;
+        }
+    }
+
+    model
         .description
         .as_ref()
-        .map(|description| description.to_lowercase())
-        .unwrap_or_default();
-    let haystack = format!("{model_id} {model_name} {description}");
+        .map(|description| canonical_simple_model_provider(description.as_ref()))
+        .unwrap_or_default()
+}
 
-    CURATED_MODELS
-        .iter()
-        .enumerate()
-        .find_map(|(index, &(_, model_hint, display_name))| {
-            haystack
-                .contains(&model_hint.to_lowercase())
-                .then_some((index, display_name))
-        })
+fn canonical_simple_model_provider(provider: &str) -> String {
+    match provider.trim().to_lowercase().as_str() {
+        "google_ai" | "google ai" | "gemini" => "google".to_string(),
+        "x_ai" | "x ai" => "xai".to_string(),
+        "amazon" | "amazon bedrock" | "amazon-bedrock" | "aws" | "aws_bedrock" | "aws bedrock"
+        | "bedrock" => "aws-bedrock".to_string(),
+        provider => provider.to_string(),
+    }
+}
+
+fn model_id_without_provider(model_id: &str) -> String {
+    model_id
+        .split_once('/')
+        .map(|(_, model)| model)
+        .unwrap_or(model_id)
+        .to_lowercase()
+}
+
+fn curated_model_id_matches(model_id: &str, model_hint: &str, model_name: &str) -> bool {
+    let model_hint = model_hint.to_lowercase();
+    if model_id == model_hint || model_name == model_hint {
+        return true;
+    }
+
+    let Some(suffix) = model_id.strip_prefix(&model_hint) else {
+        return false;
+    };
+    let Some(suffix) = suffix
+        .strip_prefix('-')
+        .or_else(|| suffix.strip_prefix('_'))
+        .or_else(|| suffix.strip_prefix('.'))
+    else {
+        return false;
+    };
+
+    suffix
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_digit())
+        || suffix.starts_with("preview")
 }
 
 fn relabel_curated_model(mut model: AgentModelInfo) -> Option<(usize, AgentModelInfo)> {
     let (rank, display_name) = curated_model_match(&model)?;
     model.name = SharedString::from(display_name);
     Some((rank, model))
+}
+
+fn relabel_curated_model_with_provider(
+    mut model: AgentModelInfo,
+    provider_hint: Option<&str>,
+) -> Option<(usize, AgentModelInfo)> {
+    let (rank, display_name) = curated_model_match_with_provider(&model, provider_hint)?;
+    model.name = SharedString::from(display_name);
+    Some((rank, model))
+}
+
+fn dedupe_curated_models(models: Vec<(usize, AgentModelInfo)>) -> Vec<AgentModelInfo> {
+    let mut deduped_by_rank = IndexMap::new();
+    for (rank, model) in models {
+        deduped_by_rank.entry(rank).or_insert(model);
+    }
+
+    let mut deduped = deduped_by_rank.into_iter().collect::<Vec<_>>();
+    deduped.sort_by_key(|(rank, _)| *rank);
+    deduped.into_iter().map(|(_, model)| model).collect()
 }
 
 fn curated_or_live_model_list(model_list: AgentModelList) -> AgentModelList {
@@ -129,7 +221,7 @@ fn curated_or_live_model_list(model_list: AgentModelList) -> AgentModelList {
             }
 
             curated.sort_by_key(|(rank, _)| *rank);
-            AgentModelList::Flat(curated.into_iter().map(|(_, model)| model).collect())
+            AgentModelList::Flat(dedupe_curated_models(curated))
         }
         AgentModelList::Grouped(groups) => {
             let mut curated_groups = Vec::new();
@@ -137,17 +229,16 @@ fn curated_or_live_model_list(model_list: AgentModelList) -> AgentModelList {
                 let mut curated = models
                     .iter()
                     .cloned()
-                    .filter_map(relabel_curated_model)
+                    .filter_map(|model| {
+                        relabel_curated_model_with_provider(model, Some(group_name.0.as_ref()))
+                    })
                     .collect::<Vec<_>>();
                 if curated.is_empty() {
                     continue;
                 }
 
                 curated.sort_by_key(|(rank, _)| *rank);
-                curated_groups.push((
-                    group_name.clone(),
-                    curated.into_iter().map(|(_, model)| model).collect(),
-                ));
+                curated_groups.push((group_name.clone(), dedupe_curated_models(curated)));
             }
 
             if curated_groups.is_empty() {
@@ -156,6 +247,278 @@ fn curated_or_live_model_list(model_list: AgentModelList) -> AgentModelList {
                 AgentModelList::Grouped(curated_groups.into_iter().collect())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fs::FakeFs;
+    use gpui::{TestAppContext, VisualTestContext};
+    use language_model::LanguageModelRegistry;
+    use project::Project;
+    use serde_json::json;
+    use settings::SettingsStore;
+    use std::{path::Path, sync::atomic::AtomicUsize};
+
+    fn init_test(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            cx.set_global(acp_thread::StubSessionCounter(AtomicUsize::new(0)));
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+            release_channel::init("0.0.0".parse().expect("valid test release version"), cx);
+            agent::ThreadStore::init_global(cx);
+            agent_ui::thread_metadata_store::ThreadMetadataStore::init_global(cx);
+            LanguageModelRegistry::test(cx);
+        });
+    }
+
+    fn model_info(provider: &str, model: &str, name: &str) -> AgentModelInfo {
+        AgentModelInfo {
+            id: acp::ModelId::new(format!("{provider}/{model}")),
+            name: SharedString::from(name),
+            description: Some(SharedString::from(provider)),
+            icon: None,
+            is_latest: false,
+            cost: None,
+        }
+    }
+
+    fn unprefixed_model_info(model: &str, name: &str) -> AgentModelInfo {
+        AgentModelInfo {
+            id: acp::ModelId::new(model.to_string()),
+            name: SharedString::from(name),
+            description: None,
+            icon: None,
+            is_latest: false,
+            cost: None,
+        }
+    }
+
+    #[test]
+    fn curated_model_list_removes_duplicate_variants() {
+        let models = AgentModelList::Grouped(IndexMap::from_iter([
+            (
+                acp_thread::AgentModelGroupName(SharedString::from("OpenAI")),
+                vec![
+                    model_info("openai", "o3", "o3"),
+                    model_info("openai", "o3-2025-04-16", "o3"),
+                    model_info("openai", "o3-pro", "o3 Pro"),
+                    model_info("openai", "o3-mini", "o3 Mini"),
+                    model_info("openai", "gpt-4o", "GPT-4o"),
+                    model_info("openai", "gpt-4o-mini", "GPT-4o mini"),
+                ],
+            ),
+            (
+                acp_thread::AgentModelGroupName(SharedString::from("Google")),
+                vec![
+                    model_info("google", "gemini-2.5-flash", "Gemini 2.5 Flash"),
+                    model_info("google", "gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite"),
+                ],
+            ),
+        ]));
+
+        let AgentModelList::Grouped(groups) = curated_or_live_model_list(models) else {
+            panic!("curated list should remain grouped");
+        };
+        let names = groups
+            .values()
+            .flatten()
+            .map(|model| model.name.as_ref().to_string())
+            .collect::<Vec<_>>();
+        let ids = groups
+            .values()
+            .flatten()
+            .map(|model| model.id.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["o3", "GPT-4o", "Gemini 2.5 Flash"]);
+        assert_eq!(
+            ids,
+            vec!["openai/o3", "openai/gpt-4o", "google/gemini-2.5-flash"]
+        );
+    }
+
+    #[test]
+    fn curated_model_list_uses_provider_group_for_plain_model_ids() {
+        let models = AgentModelList::Grouped(IndexMap::from_iter([
+            (
+                acp_thread::AgentModelGroupName(SharedString::from("OpenAI")),
+                vec![
+                    unprefixed_model_info("o3", "o3"),
+                    unprefixed_model_info("o3-mini", "o3 Mini"),
+                    unprefixed_model_info("gpt-4o", "GPT-4o"),
+                    unprefixed_model_info("gpt-4o-mini", "GPT-4o mini"),
+                ],
+            ),
+            (
+                acp_thread::AgentModelGroupName(SharedString::from("Google")),
+                vec![
+                    unprefixed_model_info("gemini-2.5-flash", "Gemini 2.5 Flash"),
+                    unprefixed_model_info("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite"),
+                ],
+            ),
+        ]));
+
+        let AgentModelList::Grouped(groups) = curated_or_live_model_list(models) else {
+            panic!("curated list should remain grouped");
+        };
+        let names = groups
+            .values()
+            .flatten()
+            .map(|model| model.name.as_ref().to_string())
+            .collect::<Vec<_>>();
+        let ids = groups
+            .values()
+            .flatten()
+            .map(|model| model.id.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["o3", "GPT-4o", "Gemini 2.5 Flash"]);
+        assert_eq!(ids, vec!["o3", "gpt-4o", "gemini-2.5-flash"]);
+    }
+
+    #[test]
+    fn extracts_loopback_preview_urls_from_assistant_text() {
+        assert_eq!(
+            BeginnerWorkspace::preview_url_from_text("You can play it at http://localhost:8000")
+                .as_deref(),
+            Some("http://localhost:8000")
+        );
+        assert_eq!(
+            BeginnerWorkspace::preview_url_from_text("Preview: localhost:5173/game.").as_deref(),
+            Some("http://localhost:5173/game")
+        );
+        assert_eq!(
+            BeginnerWorkspace::preview_url_from_text(
+                "Open [the preview](http://127.0.0.1:3000/index.html)."
+            )
+            .as_deref(),
+            Some("http://127.0.0.1:3000/index.html")
+        );
+    }
+
+    #[test]
+    fn ignores_non_loopback_preview_urls() {
+        assert_eq!(
+            BeginnerWorkspace::preview_url_from_text("Published at https://example.com"),
+            None
+        );
+        assert_eq!(
+            BeginnerWorkspace::preview_url_from_text("Suspicious URL: http://localhost.evil.test"),
+            None
+        );
+    }
+
+    async fn setup_beginner_workspace(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<BeginnerWorkspace>,
+        Entity<Workspace>,
+        VisualTestContext,
+    ) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            "/project",
+            json!({
+                "src": {
+                    "main.rs": "fn main() {}"
+                }
+            }),
+        )
+        .await;
+        cx.update(|cx| <dyn fs::Fs>::set_global(fs.clone(), cx));
+
+        let project = Project::test(fs, [], cx).await;
+        let multi_workspace =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = multi_workspace
+            .read_with(cx, |multi_workspace, _cx| {
+                multi_workspace.workspace().clone()
+            })
+            .expect("test multi-workspace should have an active workspace");
+        let multi_workspace_weak = multi_workspace
+            .entity(cx)
+            .expect("test multi-workspace window should have a root entity")
+            .weak_handle();
+        let mut cx = VisualTestContext::from_window(multi_workspace.into(), cx);
+
+        let beginner_workspace = workspace.update_in(&mut cx, |workspace, window, cx| {
+            let workspace_weak = workspace.weak_handle();
+            cx.new(|cx| BeginnerWorkspace::new(workspace_weak, multi_workspace_weak, window, cx))
+        });
+
+        (beginner_workspace, workspace, cx)
+    }
+
+    fn visible_worktree_paths(workspace: &Workspace, cx: &App) -> Vec<PathBuf> {
+        workspace
+            .project()
+            .read(cx)
+            .visible_worktrees(cx)
+            .map(|worktree| worktree.read(cx).abs_path().to_path_buf())
+            .collect()
+    }
+
+    #[gpui::test]
+    async fn test_simple_open_folder_adds_code_editor_worktree(cx: &mut TestAppContext) {
+        let (beginner_workspace, workspace, mut cx) = setup_beginner_workspace(cx).await;
+        let folder = PathBuf::from("/project");
+
+        beginner_workspace.update_in(&mut cx, |beginner_workspace, window, cx| {
+            beginner_workspace.open_folder_as_worktree(folder.clone(), window, cx);
+        });
+        cx.run_until_parked();
+
+        workspace.read_with(&cx, |workspace, cx| {
+            assert_eq!(visible_worktree_paths(workspace, cx), vec![folder]);
+        });
+    }
+
+    #[gpui::test]
+    async fn test_simple_draft_uses_agent_panel_with_selected_folder(cx: &mut TestAppContext) {
+        let (beginner_workspace, workspace, mut cx) = setup_beginner_workspace(cx).await;
+        let folder = PathBuf::from("/project");
+
+        beginner_workspace.update_in(&mut cx, |beginner_workspace, window, cx| {
+            beginner_workspace.selected_folder = Some(folder.clone());
+            assert!(
+                beginner_workspace
+                    .create_simple_agent_draft(window, cx)
+                    .is_some()
+            );
+        });
+        cx.run_until_parked();
+
+        let Some(agent_panel) =
+            workspace.read_with(&cx, |workspace, cx| workspace.panel::<AgentPanel>(cx))
+        else {
+            panic!("simple draft should attach an AgentPanel");
+        };
+
+        beginner_workspace.read_with(&cx, |beginner_workspace, cx| {
+            assert_eq!(
+                beginner_workspace.active_conversation_thread_id(cx),
+                agent_panel
+                    .read(cx)
+                    .active_backboard_workspace_draft_thread_id(cx)
+            );
+        });
+
+        agent_panel.read_with(&cx, |agent_panel, cx| {
+            let Some(thread) = agent_panel.active_agent_thread(cx) else {
+                panic!("simple draft should create an active agent thread");
+            };
+            let Some(work_dirs) = thread.read(cx).work_dirs() else {
+                panic!("simple draft should pass selected folder work dirs");
+            };
+            let paths = work_dirs.ordered_paths().cloned().collect::<Vec<_>>();
+            assert_eq!(paths, vec![Path::new("/project").to_path_buf()]);
+        });
     }
 }
 
@@ -458,35 +821,6 @@ impl RightPanelOption {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum WorkspaceModeAction {
-    CodeEditor,
-    AgentWorkspace,
-}
-
-impl WorkspaceModeAction {
-    fn label(self) -> &'static str {
-        match self {
-            Self::CodeEditor => "Open in Code Editor",
-            Self::AgentWorkspace => "Open in Agents",
-        }
-    }
-
-    fn tooltip(self) -> &'static str {
-        match self {
-            Self::CodeEditor => "Open in Code Editor",
-            Self::AgentWorkspace => "Open in Agents",
-        }
-    }
-
-    fn id(self) -> &'static str {
-        match self {
-            Self::CodeEditor => "simple-open-code-editor",
-            Self::AgentWorkspace => "simple-open-agents",
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
 enum ChatMode {
     Ask,
     Build,
@@ -523,12 +857,20 @@ impl ChatMode {
                     "- Do not force a web app when the user explicitly asks for another artifact, such as docs, scripts, data work, configuration, terminal help, or repository cleanup.\n",
                     "- Ask focused clarifying questions before building when core product, audience, content, brand, data, platform, or style choices are missing. Prefer 1-3 short questions at a time, and state sensible defaults when proceeding would be better than waiting.\n",
                     "- Keep visible chat replies short, natural, and outcome-focused. Do not show code, filenames, commands, raw logs, markdown-heavy checklists, or implementation details unless the user asks.\n",
+                    "- When the work is done, reply like a chat message in 1-2 sentences. Avoid Features or Controls reports; mention the result and how to try it.\n",
                     "- Do not narrate implementation mechanics in chat. Avoid phrases like updating files, creating HTML/CSS/JavaScript files, editing components, running commands, or changing specific filenames. Say what user-facing experience is being built instead.\n",
                     "- Summarize edits as product changes. Let the UI expose file counts and read-only diffs separately, such as Backboard changed 3 files.\n",
                     "- Treat code and diffs as read-only review surfaces for the user.\n",
                     "- After creating or updating a runnable artifact, start or refresh the preview."
                 )
             }
+        }
+    }
+
+    fn agent_workspace_mode(self) -> BackboardAgentWorkspaceMode {
+        match self {
+            ChatMode::Ask => BackboardAgentWorkspaceMode::Ask,
+            ChatMode::Build => BackboardAgentWorkspaceMode::Free,
         }
     }
 
@@ -609,7 +951,6 @@ impl SidebarProjectGroup {
 
 pub struct BeginnerWorkspace {
     workspace: WeakEntity<Workspace>,
-    #[allow(dead_code)]
     multi_workspace: WeakEntity<MultiWorkspace>,
     project: Entity<Project>,
     focus_handle: FocusHandle,
@@ -675,12 +1016,11 @@ pub struct BeginnerWorkspace {
     // Embedded web preview. Created lazily in render() once we have both a
     // preview_url and the Window handle. None on Linux (unsupported).
     web_preview: Option<crate::web_preview::WebPreview>,
-    // Shows a notice when the user tries to open a 4th tab.
-    show_tab_limit_notice: bool,
     chats_sidebar_open: bool,
     chats_sidebar_closing: bool,
     chats_sidebar_animation_generation: u64,
     chats_sidebar_width: Pixels,
+    pending_chats_sidebar_hover_open: Option<Task<()>>,
     background_sessions: Vec<ProjectSession>,
     chat_history: Vec<BeginnerChatRecord>,
     pending_open_tabs: Option<BeginnerOpenTabsState>,
@@ -811,15 +1151,6 @@ impl BeginnerWorkspace {
             BeginnerState::ActiveProject => self.tab_name.clone(),
             BeginnerState::Landing => SharedString::from("Simple Page Builder"),
         }
-    }
-
-    fn project_tab_count(&self) -> usize {
-        usize::from(matches!(self.state, BeginnerState::ActiveProject))
-            + self
-                .background_sessions
-                .iter()
-                .filter(|session| matches!(session.state, BeginnerState::ActiveProject))
-                .count()
     }
 
     fn stash_current_session_and_reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1151,11 +1482,11 @@ impl BeginnerWorkspace {
             dev_server_port: None,
             dev_server_task: None,
             web_preview: None,
-            show_tab_limit_notice: false,
             chats_sidebar_open: true,
             chats_sidebar_closing: false,
             chats_sidebar_animation_generation: 0,
             chats_sidebar_width: px(ds::SIDEBAR_WIDTH),
+            pending_chats_sidebar_hover_open: None,
             background_sessions: Vec::new(),
             chat_history: Vec::new(),
             pending_open_tabs: None,
@@ -1223,6 +1554,114 @@ impl BeginnerWorkspace {
             }
             _ => {}
         }
+    }
+
+    fn ensure_agent_panel(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<AgentPanel>> {
+        let workspace = self.workspace.upgrade()?;
+        Some(workspace.update(cx, |workspace, cx| {
+            AgentPanel::ensure_attached(workspace, window, cx)
+        }))
+    }
+
+    fn agent_workspace_chat_options(&self) -> BackboardAgentWorkspaceChatOptions {
+        BackboardAgentWorkspaceChatOptions {
+            mode: self.chat_mode.agent_workspace_mode(),
+            work_dirs: self
+                .selected_folder
+                .as_ref()
+                .map(|folder| PathList::new(&[folder.clone()])),
+            focus: false,
+            source: "beginner_ui",
+            suppress_notifications: true,
+        }
+    }
+
+    fn active_conversation_thread_id(&self, cx: &App) -> Option<ThreadId> {
+        self.active_conversation_view
+            .as_ref()
+            .or(self.pending_conversation_view.as_ref())
+            .map(|conversation_view| conversation_view.read(cx).parent_id())
+    }
+
+    fn create_simple_agent_draft(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<ConversationView>> {
+        let options = self.agent_workspace_chat_options();
+        let panel = self.ensure_agent_panel(window, cx)?;
+        let conversation_view = panel.update(cx, |panel, cx| {
+            let thread_id =
+                panel.create_backboard_workspace_chat_with_options(options, window, cx)?;
+            panel.backboard_workspace_conversation_view(thread_id, cx)
+        })?;
+        self.bind_conversation_view(conversation_view.clone(), window, cx);
+        Some(conversation_view)
+    }
+
+    fn discard_simple_agent_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(panel) = self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).panel::<AgentPanel>(cx))
+        else {
+            return;
+        };
+        let Some(thread_id) = panel
+            .read(cx)
+            .active_backboard_workspace_draft_thread_id(cx)
+        else {
+            return;
+        };
+
+        panel.update(cx, |panel, cx| {
+            panel.remove_thread(thread_id, window, cx);
+        });
+        if self.active_conversation_thread_id(cx) == Some(thread_id) {
+            self.thread = None;
+            self.chat_feed = None;
+            self.file_changes_panel = None;
+            self.pending_conversation_view = None;
+            self.active_conversation_view = None;
+            self.queued_composer_submit = None;
+            self.model_selector = None;
+            self.is_agent_running = false;
+            self.agent_finished = false;
+        }
+    }
+
+    fn open_folder_as_worktree(
+        &mut self,
+        folder: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let task = workspace.update(cx, |workspace, cx| {
+            workspace.open_paths(
+                vec![folder],
+                OpenOptions {
+                    visible: Some(OpenVisible::All),
+                    focus: Some(false),
+                    ..Default::default()
+                },
+                None,
+                window,
+                cx,
+            )
+        });
+        self._tasks
+            .push(cx.spawn_in(window, async move |_this, _cx| {
+                for result in task.await.into_iter().flatten() {
+                    result.log_err();
+                }
+            }));
     }
 
     fn load_chat_history(workspace: WeakEntity<Workspace>, cx: &mut Context<Self>) -> Task<()> {
@@ -1532,7 +1971,8 @@ impl BeginnerWorkspace {
             };
             let conversation_view_to_send = this
                 .update_in(cx, |this, window, cx| {
-                    this.selected_folder = Some(folder);
+                    this.selected_folder = Some(folder.clone());
+                    this.open_folder_as_worktree(folder.clone(), window, cx);
                     this.refresh_composer_git_state_if_needed(cx);
                     if let (Some(thread), Some(folder)) =
                         (this.thread.clone(), this.selected_folder.clone())
@@ -1555,7 +1995,7 @@ impl BeginnerWorkspace {
                         this.active_conversation_view.clone()
                     } else {
                         if this.thread.is_none() {
-                            this.start_agent_thread(String::new(), window, cx);
+                            this.create_simple_agent_draft(window, cx);
                             this.is_agent_running = false;
                         }
                         cx.notify();
@@ -1619,10 +2059,10 @@ impl BeginnerWorkspace {
                 editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
                 editor.set_text("", window, cx);
             });
-            Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
-            self.clear_current_preview_state();
             self.is_agent_running = true;
             self.agent_finished = false;
+            self.open_live_preview_panel(cx);
+            self.ensure_live_preview_started(cx);
             self.send_queued_composer_submit(window, cx);
             cx.notify();
             return;
@@ -1656,18 +2096,18 @@ impl BeginnerWorkspace {
         self.terminal_working_directory = None;
         self.right_terminal_view = None;
         self.right_terminal_working_directory = None;
+        self.open_live_preview_panel(cx);
+        self.ensure_live_preview_started(cx);
         cx.notify();
 
-        let workspace = self.workspace.clone();
         let task = cx.spawn_in(window, async move |this, cx| {
-            Self::open_folder_and_start_agent(this, workspace, folder, agent_text, cx).await;
+            Self::open_folder_and_start_agent(this, folder, agent_text, cx).await;
         });
         self._tasks.push(task);
     }
 
     async fn open_folder_and_start_agent(
         this: WeakEntity<Self>,
-        workspace: WeakEntity<Workspace>,
         folder: PathBuf,
         text: String,
         cx: &mut AsyncWindowContext,
@@ -1683,42 +2123,28 @@ impl BeginnerWorkspace {
         this.update_in(cx, |bw, window, cx| {
             // Force a re-check of git state now that the repository is initialized.
             bw.composer_git_state_folder = None;
+            bw.open_folder_as_worktree(folder.clone(), window, cx);
             bw.refresh_composer_git_state_if_needed(cx);
             bw.start_agent_thread(text, window, cx);
         })
         .ok();
-
-        // Keep simple mode workspace-light: pass folder as thread workdir but do not
-        // auto-open it as an editor worktree.
-        let _ = (workspace, folder);
     }
 
     fn start_agent_thread(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(workspace) = self.workspace.upgrade() else {
+        if !text.trim().is_empty() {
+            self.queued_composer_submit = Some(text);
+        }
+
+        if self.create_simple_agent_draft(window, cx).is_none() {
             return;
-        };
-        let Some(agent_panel) = workspace.read(cx).panel::<AgentPanel>(cx) else {
-            return;
-        };
-
-        let work_dirs = self
-            .selected_folder
-            .as_ref()
-            .map(|folder| PathList::new(&[folder.clone()]));
-
-        // spawn_beginner_thread returns the ConversationView. The ACP server connects
-        // asynchronously, so root_thread() returns None until it's ready. Subscribe and
-        // create the feed once the thread actually becomes available.
-        let conversation_view = agent_panel.update(cx, |panel, cx| {
-            panel.spawn_beginner_thread(text, work_dirs, window, cx)
-        });
-
-        self.bind_conversation_view(conversation_view, window, cx);
+        }
 
         self.is_agent_running = true;
         self.agent_finished = false;
-        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
-        self.clear_current_preview_state();
+        if self.preview_url.is_none() && !self.is_preview_generating {
+            Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+            self.clear_current_preview_state();
+        }
         self.right_panel = RightPanel::Preview;
         self.code_diff_state = CodeDiffState::default();
         self.right_panel_open = false;
@@ -1739,6 +2165,8 @@ impl BeginnerWorkspace {
             editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
             editor.set_text("", window, cx);
         });
+        self.open_live_preview_panel(cx);
+        self.ensure_live_preview_started(cx);
         cx.notify();
     }
 
@@ -1751,21 +2179,7 @@ impl BeginnerWorkspace {
             return;
         }
 
-        let Some(workspace) = self.workspace.upgrade() else {
-            return;
-        };
-        let Some(agent_panel) = workspace.read(cx).panel::<AgentPanel>(cx) else {
-            return;
-        };
-
-        let work_dirs = self
-            .selected_folder
-            .as_ref()
-            .map(|folder| PathList::new(&[folder.clone()]));
-        let conversation_view = agent_panel.update(cx, |panel, cx| {
-            panel.spawn_beginner_thread(String::new(), work_dirs, window, cx)
-        });
-        self.bind_conversation_view(conversation_view, window, cx);
+        self.create_simple_agent_draft(window, cx);
     }
 
     fn configure_thread_composer(
@@ -1776,6 +2190,8 @@ impl BeginnerWorkspace {
     ) {
         let prompt_prefix = SharedString::from(self.chat_mode.prompt_prefix());
         let draft_text = self.chat_editor.read(cx).text(cx);
+        let thread_id = conversation_view.read(cx).parent_id();
+        let hook_conversation_view = conversation_view.clone();
         let workspace = cx.entity().downgrade();
         conversation_view.update(cx, |conversation_view, cx| {
             conversation_view.set_root_prompt_prefix(Some(prompt_prefix), cx);
@@ -1787,9 +2203,16 @@ impl BeginnerWorkspace {
             conversation_view.seed_root_message_text_if_empty(draft_text, window, cx);
             conversation_view.set_root_before_send_hook(
                 Some(Rc::new(move |text, window, cx| {
+                    let conversation_view = hook_conversation_view.clone();
                     workspace
                         .update(cx, |workspace, cx| {
-                            workspace.prepare_thread_composer_send(text, window, cx)
+                            workspace.prepare_thread_composer_send(
+                                thread_id,
+                                conversation_view,
+                                text,
+                                window,
+                                cx,
+                            )
                         })
                         .unwrap_or(false)
                 })),
@@ -1813,6 +2236,8 @@ impl BeginnerWorkspace {
 
     fn prepare_thread_composer_send(
         &mut self,
+        active_thread_id: ThreadId,
+        conversation_view: Entity<ConversationView>,
         text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1832,11 +2257,41 @@ impl BeginnerWorkspace {
             return false;
         };
 
+        self.open_folder_as_worktree(folder.clone(), window, cx);
+
         let work_dirs = PathList::new(&[folder.clone()]);
         if let Some(thread) = self.thread.clone() {
             thread.update(cx, |thread, cx| {
                 thread.set_work_dirs(work_dirs.clone(), cx);
             });
+        }
+
+        let panel = self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).panel::<AgentPanel>(cx));
+        if panel.as_ref().is_some_and(|panel| {
+            panel
+                .read(cx)
+                .is_unpromoted_backboard_workspace_draft_thread(active_thread_id)
+        }) {
+            let Some(panel) = panel else {
+                return false;
+            };
+            let promoted = panel.update(cx, |panel, cx| {
+                panel.promote_backboard_workspace_draft_thread(
+                    active_thread_id,
+                    conversation_view.clone(),
+                    text.to_string(),
+                    BackboardAgentWorkspaceScope::WholeProject,
+                    BackboardAgentWorkspaceKind::Build,
+                    self.chat_mode.agent_workspace_mode(),
+                    cx,
+                )
+            });
+            if promoted != Some(active_thread_id) {
+                return false;
+            }
         }
 
         if matches!(self.state, BeginnerState::Landing) {
@@ -1857,26 +2312,30 @@ impl BeginnerWorkspace {
             self.touch_chat_record(&record_id, cx);
         }
 
-        self.web_preview = None;
-        self.preview_url = None;
-        self.preview_visible = false;
-        self.is_preview_generating = false;
         self.is_agent_running = true;
         self.agent_finished = false;
+        self.open_live_preview_panel(cx);
+        self.ensure_live_preview_started(cx);
         cx.notify();
         true
+    }
+
+    fn send_text_to_conversation_view(
+        &self,
+        conversation_view: &Entity<ConversationView>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        conversation_view.update(cx, |conversation_view, cx| {
+            conversation_view.set_root_message_text(text.to_string(), window, cx)
+                && conversation_view.send_root_message_editor(window, cx)
+        })
     }
 
     fn submit_follow_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !Self::has_backboard_api_key() {
             cx.notify();
-            return;
-        }
-
-        // If no agent thread has started yet (e.g. app launched with a project
-        // already open), treat this as the initial submission.
-        if self.thread.is_none() {
-            self.submit(window, cx);
             return;
         }
 
@@ -1890,33 +2349,39 @@ impl BeginnerWorkspace {
             return;
         }
         let agent_text = self.chat_mode.prepare_message(text);
-        let Some(thread) = self.thread.clone() else {
+
+        if let Some(conversation_view) = self.active_conversation_view.clone() {
+            if self.send_text_to_conversation_view(&conversation_view, &agent_text, window, cx) {
+                self.chat_editor.update(cx, |editor, cx| {
+                    editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
+                    editor.set_text("", window, cx);
+                });
+            } else {
+                cx.notify();
+            }
             return;
-        };
-        if let Some(folder) = self.selected_folder.clone() {
-            thread.update(cx, |thread, cx| {
-                thread.set_work_dirs(PathList::new(&[folder]), cx);
-            });
-        }
-        if let Some(record_id) = self.active_chat_record_id.clone() {
-            self.touch_chat_record(&record_id, cx);
         }
 
+        if self.pending_conversation_view.is_some() {
+            self.queued_composer_submit = Some(agent_text);
+            self.chat_editor.update(cx, |editor, cx| {
+                editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
+                editor.set_text("", window, cx);
+            });
+            self.is_agent_running = true;
+            self.agent_finished = false;
+            self.open_live_preview_panel(cx);
+            self.ensure_live_preview_started(cx);
+            cx.notify();
+            return;
+        }
+
+        self.queued_composer_submit = Some(agent_text);
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
             editor.set_text("", window, cx);
         });
-        // Stop any old preview while the next response and preview are generated.
-        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
-        self.clear_current_preview_state();
-        self.is_agent_running = true;
-        cx.notify();
-
-        cx.spawn(async move |_this, cx| {
-            let future = thread.update(cx, |t, cx| t.send(vec![agent_text.as_str().into()], cx));
-            future.await.log_err();
-        })
-        .detach();
+        self.start_agent_thread(String::new(), window, cx);
     }
 
     fn handle_file_panel_event(
@@ -2022,6 +2487,7 @@ impl BeginnerWorkspace {
     }
 
     fn open_chats_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.pending_chats_sidebar_hover_open.take();
         if !self.chats_sidebar_open || self.chats_sidebar_closing {
             self.chats_sidebar_animation_generation =
                 self.chats_sidebar_animation_generation.saturating_add(1);
@@ -2031,7 +2497,67 @@ impl BeginnerWorkspace {
         cx.notify();
     }
 
+    fn mouse_is_in_collapsed_chats_sidebar(window: &Window) -> bool {
+        let mouse_position = window.mouse_position();
+        let viewport_size = window.viewport_size();
+
+        mouse_position.x >= px(0.)
+            && mouse_position.x <= px(CLOSED_CHATS_SIDEBAR_WIDTH_PX)
+            && mouse_position.y >= px(0.)
+            && mouse_position.y <= viewport_size.height
+    }
+
+    fn delay_open_chats_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.chats_sidebar_open && !self.chats_sidebar_closing {
+            return;
+        }
+
+        if self.pending_chats_sidebar_hover_open.is_some() {
+            return;
+        }
+
+        self.pending_chats_sidebar_hover_open = Some(cx.spawn_in(window, async move |this, cx| {
+            for _ in 0..(SIMPLE_SIDEBAR_HOVER_OPEN_DELAY_MS / SIMPLE_SIDEBAR_HOVER_OPEN_POLL_MS) {
+                cx.background_executor()
+                    .timer(Duration::from_millis(SIMPLE_SIDEBAR_HOVER_OPEN_POLL_MS))
+                    .await;
+
+                let should_continue = this
+                    .update_in(cx, |this, window, cx| {
+                        if this.pending_chats_sidebar_hover_open.is_none() {
+                            return false;
+                        }
+
+                        if !Self::mouse_is_in_collapsed_chats_sidebar(window) {
+                            this.pending_chats_sidebar_hover_open.take();
+                            cx.notify();
+                            return false;
+                        }
+
+                        true
+                    })
+                    .ok()
+                    .unwrap_or(false);
+
+                if !should_continue {
+                    return;
+                }
+            }
+
+            this.update_in(cx, |this, window, cx| {
+                this.pending_chats_sidebar_hover_open.take();
+                if Self::mouse_is_in_collapsed_chats_sidebar(window)
+                    && (!this.chats_sidebar_open || this.chats_sidebar_closing)
+                {
+                    this.open_chats_sidebar(cx);
+                }
+            })
+            .ok();
+        }));
+    }
+
     fn close_chats_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.pending_chats_sidebar_hover_open.take();
         if !self.chats_sidebar_open {
             self.chats_sidebar_closing = false;
             cx.notify();
@@ -2078,6 +2604,31 @@ impl BeginnerWorkspace {
         self.right_panel_tabs.clear();
         self.active_right_panel_tab = None;
         self.right_panel_option = RightPanelOption::Files;
+    }
+
+    fn open_live_preview_panel(&mut self, cx: &mut Context<Self>) {
+        if self.chat_mode != ChatMode::Build {
+            return;
+        }
+
+        self.right_panel = RightPanel::Preview;
+        self.activate_right_panel_tab(RightPanelOption::Design);
+        self.right_panel_mode = RightPanelMode::Artifact;
+        self.preview_visible = self.preview_url.is_some();
+        cx.notify();
+    }
+
+    fn ensure_live_preview_started(&mut self, cx: &mut Context<Self>) {
+        if self.chat_mode != ChatMode::Build {
+            return;
+        }
+
+        if self.selected_folder.is_some()
+            && self.preview_url.is_none()
+            && !self.is_preview_generating
+        {
+            self.open_web_app_if_present(cx);
+        }
     }
 
     fn close_right_panel_tab(
@@ -2256,6 +2807,14 @@ impl BeginnerWorkspace {
             self.bottom_panel_animation_generation =
                 self.bottom_panel_animation_generation.saturating_add(1);
         }
+        if self.right_panel_open
+            && matches!(
+                self.active_right_panel_tab,
+                Some(RightPanelOption::Files | RightPanelOption::Code | RightPanelOption::Terminal)
+            )
+        {
+            self.close_right_panel(cx);
+        }
         self.bottom_panel_open = true;
         self.bottom_panel_closing = false;
         self.ensure_bottom_terminal(window, cx);
@@ -2296,10 +2855,10 @@ impl BeginnerWorkspace {
     }
 
     fn preview_card_state(&self) -> PreviewCardState {
-        if self.preview_url.is_some() {
-            PreviewCardState::Ready
-        } else if self.is_preview_generating {
+        if self.is_preview_generating {
             PreviewCardState::Generating
+        } else if self.preview_url.is_some() {
+            PreviewCardState::Ready
         } else if self.agent_finished {
             PreviewCardState::Unavailable
         } else {
@@ -2659,6 +3218,21 @@ impl BeginnerWorkspace {
     }
 
     fn cancel_running_task(&mut self, cx: &mut Context<Self>) {
+        if let Some(thread_id) = self.active_conversation_thread_id(cx)
+            && let Some(panel) = self
+                .workspace
+                .upgrade()
+                .and_then(|workspace| workspace.read(cx).panel::<AgentPanel>(cx))
+        {
+            let canceled = panel.update(cx, |panel, cx| panel.cancel_thread(&thread_id, cx));
+            if canceled {
+                self.is_agent_running = false;
+                self.agent_finished = true;
+                cx.notify();
+                return;
+            }
+        }
+
         let Some(thread) = self.thread.clone() else {
             return;
         };
@@ -2672,7 +3246,6 @@ impl BeginnerWorkspace {
     }
 
     fn close_active_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.show_tab_limit_notice = false;
         let Some(next_ix) = self
             .background_sessions
             .iter()
@@ -2693,7 +3266,6 @@ impl BeginnerWorkspace {
     fn close_background_session(&mut self, ix: usize, cx: &mut Context<Self>) {
         if ix < self.background_sessions.len() {
             self.background_sessions.remove(ix);
-            self.show_tab_limit_notice = false;
             self.save_open_tabs(cx);
             cx.notify();
         }
@@ -2731,18 +3303,21 @@ impl BeginnerWorkspace {
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_placeholder_text(placeholder, window, cx);
         });
+        if self
+            .workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).panel::<AgentPanel>(cx))
+            .and_then(|panel| {
+                panel
+                    .read(cx)
+                    .active_backboard_workspace_draft_thread_id(cx)
+            })
+            .is_some()
+        {
+            self.discard_simple_agent_draft(window, cx);
+            self.ensure_composer_thread(window, cx);
+        }
         self.sync_thread_prompt_prefix(cx);
-        cx.notify();
-    }
-
-    fn set_chat_feed_display_mode(&mut self, mode: ChatFeedDisplayMode, cx: &mut Context<Self>) {
-        if self.chat_feed_display_mode == mode {
-            return;
-        }
-        self.chat_feed_display_mode = mode;
-        if let Some(feed) = self.chat_feed.as_ref() {
-            feed.update(cx, |feed, cx| feed.set_display_mode(mode, cx));
-        }
         cx.notify();
     }
 
@@ -3139,9 +3714,11 @@ res.end(data);\
 
     fn start_preview_server(&mut self, launch: PreviewLaunch, cx: &mut Context<Self>) {
         let port = SIMPLE_PREVIEW_PORT;
+        let url = format!("http://localhost:{port}{}", launch.url_path);
+        let browser_tab_active = self.active_right_panel_tab == Some(RightPanelOption::Design);
         self.dev_server_port = Some(port);
-        self.preview_url = None;
-        self.preview_visible = false;
+        self.preview_url = Some(url.clone());
+        self.preview_visible = browser_tab_active;
         self.is_preview_generating = true;
         self.web_preview = None;
         cx.notify();
@@ -3187,7 +3764,7 @@ res.end(data);\
                     .timer(std::time::Duration::from_millis(500))
                     .await;
                 if Self::is_http_preview_ready(port) {
-                    let url = format!("http://localhost:{port}{}", launch.url_path);
+                    let url = url.clone();
                     this.update(cx, |this, cx| {
                         let browser_tab_active =
                             this.active_right_panel_tab == Some(RightPanelOption::Design);
@@ -3290,13 +3867,6 @@ res.end(data);\
             && self.thread.is_none()
             && self.pending_conversation_view.is_none()
             && self.chat_editor.read(cx).text(cx).trim().is_empty();
-        let total_tabs = 1 + self.background_sessions.len();
-        if !active_is_empty_landing && total_tabs >= 3 {
-            self.show_tab_limit_notice = true;
-            cx.notify();
-            return;
-        }
-
         if !active_is_empty_landing {
             self.stash_current_session_and_reset(window, cx);
         }
@@ -3316,6 +3886,7 @@ res.end(data);\
         self.reset_current_session_for_record(window, cx);
         self.active_chat_record_id = Some(record.id.clone());
         self.selected_folder = Some(path.clone());
+        self.open_folder_as_worktree(path.clone(), window, cx);
         self.refresh_composer_git_state_if_needed(cx);
         self.tab_name = chat_name.clone();
         self.state = BeginnerState::ActiveProject;
@@ -3325,9 +3896,6 @@ res.end(data);\
         });
         self.restore_thread_for_folder(record.clone(), path.clone(), window, cx);
         cx.notify();
-
-        // Do not auto-add worktrees on resume; simple mode should stay uncluttered.
-        let _ = window;
     }
 
     fn reset_current_session_for_record(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3411,7 +3979,7 @@ res.end(data);\
             return;
         };
 
-        let path_list = PathList::new(&[path]);
+        let path_list = PathList::new(&[path.clone()]);
         let store_ref = store.read(cx);
         let metadata = record
             .session_id
@@ -3440,8 +4008,16 @@ res.end(data);\
 
         let thread_id = metadata.thread_id;
         let work_dirs = Some(path_list);
+        self.open_folder_as_worktree(path.clone(), window, cx);
+        let options = BackboardAgentWorkspaceChatOptions {
+            mode: self.chat_mode.agent_workspace_mode(),
+            work_dirs,
+            focus: false,
+            source: "beginner_ui",
+            suppress_notifications: true,
+        };
         let conversation_view = agent_panel.update(cx, |panel, cx| {
-            panel.spawn_beginner_thread_from_thread_id(thread_id, work_dirs, window, cx)
+            panel.open_backboard_workspace_chat_from_thread_id(thread_id, options, window, cx)
         });
         self.thread = None;
         self.chat_feed = None;
@@ -3462,7 +4038,11 @@ res.end(data);\
         thread: &Entity<AcpThread>,
         cx: &mut Context<Self>,
     ) {
-        if self.is_agent_running || self.preview_url.is_some() || self.is_preview_generating {
+        if self.restore_preview_url_from_thread(thread, cx) {
+            return;
+        }
+
+        if self.preview_url.is_some() || self.is_preview_generating {
             return;
         }
 
@@ -3477,6 +4057,229 @@ res.end(data);\
         }
 
         self.open_web_app_if_present(cx);
+    }
+
+    fn restore_preview_url_from_thread(
+        &mut self,
+        thread: &Entity<AcpThread>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(url) = Self::preview_url_from_thread(thread, cx) else {
+            return false;
+        };
+
+        let url_changed = self.preview_url.as_deref() != Some(url.as_str());
+        self.preview_url = Some(url.clone());
+        self.preview_visible = self.active_right_panel_tab == Some(RightPanelOption::Design);
+        self.is_preview_generating = false;
+        self.dev_server_port = None;
+        self.dev_server_task = None;
+        if url_changed {
+            self.web_preview = None;
+        }
+        cx.notify();
+        true
+    }
+
+    fn preview_url_from_thread(thread: &Entity<AcpThread>, cx: &App) -> Option<String> {
+        thread.read(cx).entries().iter().rev().find_map(|entry| {
+            let AgentThreadEntry::AssistantMessage(message) = entry else {
+                return None;
+            };
+            message.chunks.iter().rev().find_map(|chunk| {
+                let AssistantMessageChunk::Message { block } = chunk else {
+                    return None;
+                };
+                Self::preview_url_from_text(block.to_markdown(cx))
+            })
+        })
+    }
+
+    fn preview_url_from_text(text: &str) -> Option<String> {
+        for (start, _) in text.char_indices() {
+            let candidate = text.get(start..)?;
+            if !Self::starts_with_preview_url_prefix(candidate) {
+                continue;
+            }
+
+            let end = candidate
+                .char_indices()
+                .find_map(|(index, character)| {
+                    (index > 0 && Self::is_preview_url_hard_delimiter(character)).then_some(index)
+                })
+                .unwrap_or(candidate.len());
+            let candidate = &candidate[..end];
+            if let Some(url) = Self::loopback_preview_url_from_candidate(candidate) {
+                return Some(url);
+            }
+        }
+
+        None
+    }
+
+    fn starts_with_preview_url_prefix(candidate: &str) -> bool {
+        let lower = candidate.to_lowercase();
+        lower.starts_with("http://localhost")
+            || lower.starts_with("https://localhost")
+            || lower.starts_with("http://127.")
+            || lower.starts_with("https://127.")
+            || lower.starts_with("http://[::1]")
+            || lower.starts_with("https://[::1]")
+            || lower.starts_with("localhost:")
+            || lower.starts_with("127.")
+            || lower.starts_with("[::1]:")
+    }
+
+    fn is_preview_url_hard_delimiter(character: char) -> bool {
+        character.is_whitespace() || matches!(character, '<' | '>' | '"' | '\'' | '`')
+    }
+
+    fn loopback_preview_url_from_candidate(candidate: &str) -> Option<String> {
+        let candidate = Self::trim_preview_url_candidate(candidate);
+        let url = Self::normalize_browser_url(candidate.to_string())?;
+        Self::is_loopback_http_url(&url).then_some(url)
+    }
+
+    fn trim_preview_url_candidate(candidate: &str) -> &str {
+        let lower = candidate.to_lowercase();
+        let host_bracket_end = if lower.starts_with("http://[")
+            || lower.starts_with("https://[")
+            || lower.starts_with("[")
+        {
+            candidate.find(']').map(|index| index + 1).unwrap_or(0)
+        } else {
+            0
+        };
+
+        let mut candidate = if let Some(index) = candidate
+            .get(host_bracket_end..)
+            .and_then(|suffix| suffix.find(']').map(|index| host_bracket_end + index))
+        {
+            &candidate[..index]
+        } else {
+            candidate
+        };
+
+        candidate = candidate.trim_end_matches(|character| {
+            matches!(character, '.' | ',' | ';' | ':' | '!' | '?' | ')' | '}')
+        });
+        candidate
+    }
+
+    fn is_loopback_http_url(url: &str) -> bool {
+        let Some(rest) = Self::strip_http_scheme(url) else {
+            return false;
+        };
+
+        let Some((host, after_host)) = Self::split_url_host(rest) else {
+            return false;
+        };
+        if !Self::is_loopback_host(host) {
+            return false;
+        }
+
+        if after_host.is_empty() {
+            return true;
+        }
+
+        match after_host.chars().next() {
+            Some(':') => {
+                let port_end = after_host[1..]
+                    .char_indices()
+                    .find_map(|(index, character)| {
+                        (!character.is_ascii_digit()).then_some(index + 1)
+                    })
+                    .unwrap_or(after_host.len());
+                if port_end == 1 {
+                    return false;
+                }
+                after_host.get(port_end..).is_some_and(|after_port| {
+                    after_port.is_empty()
+                        || matches!(after_port.chars().next(), Some('/' | '?' | '#'))
+                })
+            }
+            Some('/' | '?' | '#') => true,
+            _ => false,
+        }
+    }
+
+    fn strip_http_scheme(url: &str) -> Option<&str> {
+        const HTTP: &str = "http://";
+        const HTTPS: &str = "https://";
+
+        if url
+            .get(..HTTP.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(HTTP))
+        {
+            url.get(HTTP.len()..)
+        } else if url
+            .get(..HTTPS.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(HTTPS))
+        {
+            url.get(HTTPS.len()..)
+        } else {
+            None
+        }
+    }
+
+    fn split_url_host(rest: &str) -> Option<(&str, &str)> {
+        if rest.starts_with('[') {
+            let host_end = rest.find(']')? + 1;
+            return Some((&rest[..host_end], &rest[host_end..]));
+        }
+
+        let host_end = rest
+            .char_indices()
+            .find_map(|(index, character)| {
+                matches!(character, ':' | '/' | '?' | '#').then_some(index)
+            })
+            .unwrap_or(rest.len());
+        if host_end == 0 {
+            return None;
+        }
+        Some((&rest[..host_end], &rest[host_end..]))
+    }
+
+    fn is_loopback_host(host: &str) -> bool {
+        host.eq_ignore_ascii_case("localhost")
+            || host == "[::1]"
+            || host
+                .parse::<std::net::Ipv4Addr>()
+                .is_ok_and(|address| address.octets()[0] == 127)
+    }
+
+    fn refresh_live_preview_after_tool_update(
+        &mut self,
+        thread: &Entity<AcpThread>,
+        entry_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if self.preview_url.is_none() {
+            return;
+        }
+
+        let should_refresh = thread
+            .read(cx)
+            .entries()
+            .get(entry_index)
+            .is_some_and(|entry| match entry {
+                AgentThreadEntry::ToolCall(call) => {
+                    matches!(call.status, ToolCallStatus::Completed)
+                        && matches!(
+                            call.kind,
+                            acp::ToolKind::Edit
+                                | acp::ToolKind::Delete
+                                | acp::ToolKind::Move
+                                | acp::ToolKind::Execute
+                        )
+                }
+                _ => false,
+            });
+
+        if should_refresh {
+            self.web_preview = None;
+            cx.notify();
+        }
     }
 
     fn bind_conversation_view(
@@ -3513,14 +4316,24 @@ res.end(data);\
                 AcpThreadEvent::Stopped(_) => {
                     this.is_agent_running = false;
                     this.agent_finished = true;
-                    if this.preview_url.is_none() {
+                    let restored_preview_url =
+                        this.restore_preview_url_from_thread(&thread_entity, cx);
+                    if !restored_preview_url && this.preview_url.is_none() {
                         this.open_web_app_if_present(cx);
+                    } else if !restored_preview_url {
+                        this.web_preview = None;
                     }
                     cx.notify();
                 }
-                AcpThreadEvent::NewEntry | AcpThreadEvent::EntryUpdated(_) => {
+                AcpThreadEvent::NewEntry => {
                     this.is_agent_running = thread_entity.read(cx).status() != ThreadStatus::Idle;
                     this.restore_preview_for_thread_if_present(&thread_entity, cx);
+                    cx.notify();
+                }
+                AcpThreadEvent::EntryUpdated(entry_index) => {
+                    this.is_agent_running = thread_entity.read(cx).status() != ThreadStatus::Idle;
+                    this.restore_preview_for_thread_if_present(&thread_entity, cx);
+                    this.refresh_live_preview_after_tool_update(&thread_entity, *entry_index, cx);
                     cx.notify();
                 }
                 AcpThreadEvent::Error => {
@@ -3558,6 +4371,11 @@ res.end(data);\
                 _ => {}
             });
             self.session_subscriptions.push(thread_sub);
+            if let Some(folder) = self.selected_folder.clone() {
+                thread.update(cx, |thread, cx| {
+                    thread.set_work_dirs(PathList::new(&[folder]), cx);
+                });
+            }
             let artifact_title = self.artifact_title();
             let feed =
                 cx.new(|cx| BeginnerChatFeed::new(thread.clone(), artifact_title.clone(), cx));
@@ -3635,13 +4453,22 @@ res.end(data);\
 
         let Some(conversation_view) = self.active_conversation_view.clone() else {
             self.queued_composer_submit = Some(text);
+            if self.pending_conversation_view.is_none() {
+                self.is_agent_running = false;
+                cx.notify();
+            }
             return;
         };
 
-        conversation_view.update(cx, |conversation_view, cx| {
-            conversation_view.seed_root_message_text_if_empty(text, window, cx);
-            conversation_view.send_root_message_editor(window, cx);
-        });
+        if !self.send_text_to_conversation_view(&conversation_view, &text, window, cx) {
+            self.chat_editor.update(cx, |editor, cx| {
+                editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
+                editor.set_text(text.as_str(), window, cx);
+            });
+            self.is_agent_running = false;
+            self.agent_finished = false;
+            cx.notify();
+        }
     }
 
     fn schedule_restore_timeout(
@@ -3783,9 +4610,6 @@ res.end(data);\
         for record_id in open_tabs.background_record_ids {
             if Some(record_id.as_str()) == active_record_id.as_deref() {
                 continue;
-            }
-            if self.background_sessions.len() >= 2 {
-                break;
             }
             if let Some(record) = find_record(&record_id, &self.chat_history) {
                 self.background_sessions
@@ -3941,38 +4765,6 @@ impl Render for BeginnerWorkspace {
 }
 
 impl BeginnerWorkspace {
-    fn render_tab_limit_notice(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .w_full()
-            .px_3()
-            .py_2()
-            .gap_2()
-            .items_center()
-            .bg(cx.theme().colors().surface_background)
-            .border_b_1()
-            .border_color(ds::separator(cx))
-            .child(
-                Icon::new(IconName::Warning)
-                    .size(IconSize::XSmall)
-                    .color(Color::Warning),
-            )
-            .child(
-                Label::new("You have 3 projects open — the maximum. Close or replace one to start a new project.")
-                    .size(LabelSize::Small)
-                    .color(Color::Default),
-            )
-            .child(div().flex_1())
-            .child(
-                IconButton::new("dismiss-limit-notice", IconName::Close)
-                    .icon_size(IconSize::XSmall)
-                    .icon_color(Color::Muted)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.show_tab_limit_notice = false;
-                        cx.notify();
-                    })),
-            )
-    }
-
     fn reset_simple_sidebar_width(&mut self, cx: &mut Context<Self>) {
         self.chats_sidebar_width = px(ds::SIDEBAR_WIDTH);
         cx.notify();
@@ -4009,7 +4801,6 @@ impl BeginnerWorkspace {
             .top_0()
             .h_full()
             .w(px(1.))
-            .bg(ds::panel_edge_line(cx))
             .child(
                 div()
                     .id("simple-sidebar-resize-handle")
@@ -4158,75 +4949,6 @@ impl BeginnerWorkspace {
         })
     }
 
-    fn render_workspace_mode_button(
-        &self,
-        action: WorkspaceModeAction,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let id = action.id();
-        let label = action.label();
-        let tooltip = action.tooltip();
-        let colors = cx.theme().colors();
-        let pill_bg = colors
-            .element_background
-            .blend(colors.panel_background.opacity(0.18));
-        let pill_border = ds::soft_border(cx);
-        let hover_bg = ds::hover_background(cx);
-
-        h_flex()
-            .id(id)
-            .h(px(26.))
-            .items_center()
-            .justify_start()
-            .px_2p5()
-            .rounded_full()
-            .border_1()
-            .border_color(pill_border)
-            .bg(pill_bg)
-            .cursor_pointer()
-            .hover(move |style| style.bg(hover_bg))
-            .tooltip(Tooltip::text(tooltip))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.multi_workspace
-                    .update(cx, |multi_workspace, cx| match action {
-                        WorkspaceModeAction::CodeEditor => {
-                            multi_workspace.open_code_editor(window, cx);
-                        }
-                        WorkspaceModeAction::AgentWorkspace => {
-                            multi_workspace.open_agent_workspace(window, cx);
-                        }
-                    })
-                    .log_err();
-            }))
-            .child(
-                Label::new(label)
-                    .size(LabelSize::Small)
-                    .color(Color::Custom(ds::text_muted(cx))),
-            )
-            .into_any_element()
-    }
-
-    fn render_workspace_mode_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .items_center()
-            .justify_end()
-            .gap_2()
-            .child(self.render_workspace_mode_button(WorkspaceModeAction::CodeEditor, cx))
-            .child(self.render_workspace_mode_button(WorkspaceModeAction::AgentWorkspace, cx))
-    }
-
-    fn render_workspace_mode_section_controls(
-        &self,
-        top: Pixels,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        div()
-            .absolute()
-            .top(top)
-            .right(px(24.))
-            .child(self.render_workspace_mode_buttons(cx))
-    }
-
     fn render_simple_sidebar_menu_button(
         &self,
         id: &'static str,
@@ -4262,23 +4984,27 @@ impl BeginnerWorkspace {
 
     fn render_chats_sidebar_slot(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if !self.chats_sidebar_open {
-            return self
-                .render_closed_chats_sidebar(window, cx)
+            return h_flex()
+                .id("simple-closed-sidebar-width-slot")
+                .h_full()
+                .w(px(CLOSED_CHATS_SIDEBAR_WIDTH_PX))
+                .flex_shrink_0()
+                .overflow_hidden()
+                .bg(ds::sidebar_background(cx))
+                .child(self.render_closed_chats_sidebar(window, cx))
                 .into_any_element();
         }
 
         let is_closing = self.chats_sidebar_closing;
         let target_width = self.chats_sidebar_width;
         let closed_width = px(CLOSED_CHATS_SIDEBAR_WIDTH_PX);
-        let overlap = px(ds::PANEL_OVERLAP);
 
         h_flex()
             .id("simple-sidebar-width-slot")
             .h_full()
-            .w(target_width + overlap)
+            .w(target_width)
             .flex_shrink_0()
             .overflow_hidden()
-            .mr(-overlap)
             .bg(ds::sidebar_background(cx))
             .child(self.render_chats_sidebar(window, cx))
             .with_animation(
@@ -4291,7 +5017,7 @@ impl BeginnerWorkspace {
                 move |slot, delta| {
                     let visible_progress = if is_closing { 1.0 - delta } else { delta };
                     let width = closed_width + (target_width - closed_width) * visible_progress;
-                    slot.w(width.max(closed_width) + overlap)
+                    slot.w(width.max(closed_width))
                 },
             )
             .into_any_element()
@@ -4423,13 +5149,13 @@ impl BeginnerWorkspace {
         };
 
         match self.right_panel_dock {
-            SimplePanelDock::Left | SimplePanelDock::Right => div()
+            SimplePanelDock::Right => div()
                 .id("simple-panel-resize-divider")
-                .relative()
+                .absolute()
+                .left_0()
+                .top_0()
                 .h_full()
                 .w(px(1.))
-                .flex_shrink_0()
-                .bg(ds::panel_edge_line(cx))
                 .child(drag_handle(
                     div()
                         .left(px(-ds::PANEL_RESIZE_HANDLE_WIDTH / 2.))
@@ -4439,16 +5165,48 @@ impl BeginnerWorkspace {
                     false,
                 ))
                 .into_any_element(),
-            SimplePanelDock::Top | SimplePanelDock::Bottom => div()
+            SimplePanelDock::Left => div()
                 .id("simple-panel-resize-divider")
-                .relative()
+                .absolute()
+                .right_0()
+                .top_0()
+                .h_full()
+                .w(px(1.))
+                .child(drag_handle(
+                    div()
+                        .right(px(-ds::PANEL_RESIZE_HANDLE_WIDTH / 2.))
+                        .top_0()
+                        .h_full()
+                        .w(px(ds::PANEL_RESIZE_HANDLE_WIDTH)),
+                    false,
+                ))
+                .into_any_element(),
+            SimplePanelDock::Bottom => div()
+                .id("simple-panel-resize-divider")
+                .absolute()
+                .top_0()
+                .left_0()
                 .w_full()
                 .h(px(1.))
-                .flex_shrink_0()
-                .bg(ds::panel_edge_line(cx))
                 .child(drag_handle(
                     div()
                         .top(px(-ds::PANEL_RESIZE_HANDLE_WIDTH / 2.))
+                        .left_0()
+                        .w_full()
+                        .h(px(ds::PANEL_RESIZE_HANDLE_WIDTH)),
+                    true,
+                ))
+                .into_any_element(),
+            SimplePanelDock::Top => div()
+                .id("simple-panel-resize-divider")
+                .absolute()
+                .bottom_0()
+                .left_0()
+                .w_full()
+                .h(px(1.))
+                .child(drag_handle(
+                    div()
+                        .bottom(px(-ds::PANEL_RESIZE_HANDLE_WIDTH / 2.))
                         .left_0()
                         .w_full()
                         .h(px(ds::PANEL_RESIZE_HANDLE_WIDTH)),
@@ -4476,6 +5234,7 @@ impl BeginnerWorkspace {
         let panel = match dock {
             SimplePanelDock::Right => h_flex()
                 .id("right-panel-slide-shell")
+                .relative()
                 .w(target_size)
                 .min_w(target_size)
                 .max_w(target_size)
@@ -4484,24 +5243,26 @@ impl BeginnerWorkspace {
                 .overflow_hidden()
                 .border_l_1()
                 .border_color(ds::panel_edge_line(cx))
-                .rounded_tl(px(ds::PANEL_CORNER_RADIUS))
-                .rounded_bl(px(ds::PANEL_CORNER_RADIUS))
-                .children(resize_handle)
-                .child(content),
+                .bg(ds::app_background(cx))
+                .child(content)
+                .children(resize_handle),
             SimplePanelDock::Left => h_flex()
                 .id("right-panel-slide-shell")
+                .relative()
                 .w(target_size)
                 .min_w(target_size)
                 .max_w(target_size)
                 .flex_shrink_0()
                 .h_full()
                 .overflow_hidden()
-                .rounded_tl(px(ds::PANEL_CORNER_RADIUS))
-                .rounded_bl(px(ds::PANEL_CORNER_RADIUS))
+                .border_r_1()
+                .border_color(ds::panel_edge_line(cx))
+                .bg(ds::app_background(cx))
                 .child(content)
                 .children(resize_handle),
             SimplePanelDock::Top => v_flex()
                 .id("right-panel-slide-shell")
+                .relative()
                 .h(target_size)
                 .min_h(target_size)
                 .max_h(target_size)
@@ -4512,6 +5273,7 @@ impl BeginnerWorkspace {
                 .children(resize_handle),
             SimplePanelDock::Bottom => v_flex()
                 .id("right-panel-slide-shell")
+                .relative()
                 .h(target_size)
                 .min_h(target_size)
                 .max_h(target_size)
@@ -4561,36 +5323,28 @@ impl BeginnerWorkspace {
         let closed_size = px(RIGHT_PANEL_CLOSED_WIDTH_PX);
 
         let slot = match dock {
-            SimplePanelDock::Left | SimplePanelDock::Right => {
-                let overlap = if dock == SimplePanelDock::Right {
-                    px(ds::PANEL_OVERLAP)
-                } else {
-                    px(0.)
-                };
-                let panel_width = target_size + overlap;
-
-                h_flex()
-                    .id("right-panel-width-slot")
-                    .h_full()
-                    .w(panel_width)
-                    .flex_shrink_0()
-                    .overflow_hidden()
-                    .ml(-overlap)
-                    .child(self.render_right_panel_slide_shell(
-                        is_running,
-                        preview_url,
-                        preview_dominant,
-                        panel_width,
-                        window,
-                        cx,
-                    ))
-            }
+            SimplePanelDock::Left | SimplePanelDock::Right => h_flex()
+                .id("right-panel-width-slot")
+                .h_full()
+                .w(target_size)
+                .flex_shrink_0()
+                .overflow_hidden()
+                .bg(ds::sidebar_background(cx))
+                .child(self.render_right_panel_slide_shell(
+                    is_running,
+                    preview_url,
+                    preview_dominant,
+                    target_size,
+                    window,
+                    cx,
+                )),
             SimplePanelDock::Top | SimplePanelDock::Bottom => v_flex()
                 .id("right-panel-width-slot")
                 .w_full()
                 .h(target_size)
                 .flex_shrink_0()
                 .overflow_hidden()
+                .bg(ds::sidebar_background(cx))
                 .child(self.render_right_panel_slide_shell(
                     is_running,
                     preview_url,
@@ -4610,12 +5364,7 @@ impl BeginnerWorkspace {
                 let size = closed_size + (target_size - closed_size) * visible_progress;
 
                 if dock.is_side() {
-                    let overlap = if dock == SimplePanelDock::Right {
-                        px(ds::PANEL_OVERLAP)
-                    } else {
-                        px(0.)
-                    };
-                    slot.w(size.max(closed_size) + overlap)
+                    slot.w(size.max(closed_size))
                 } else {
                     slot.h(size.max(closed_size))
                 }
@@ -4637,16 +5386,25 @@ impl BeginnerWorkspace {
             .flex_1()
             .min_h_0()
             .h_full()
-            .overflow_hidden()
-            .ml(px(-ds::PANEL_OVERLAP))
-            .border_l_1()
-            .border_color(ds::panel_edge_line(cx))
-            .bg(ds::app_background(cx))
-            .rounded_tl(px(ds::PANEL_CORNER_RADIUS))
-            .rounded_bl(px(ds::PANEL_CORNER_RADIUS))
+            .relative()
             .when_some(min_width, |el, min_width| el.min_w(min_width))
             .when(!has_min_width, |el| el.min_w_0())
-            .child(content)
+            .child(
+                div()
+                    .absolute()
+                    .left(px(-ds::PANEL_OVERLAP))
+                    .top_0()
+                    .right_0()
+                    .bottom_0()
+                    .overflow_hidden()
+                    .rounded_tl(px(ds::PANEL_CORNER_RADIUS))
+                    .rounded_bl(px(ds::PANEL_CORNER_RADIUS))
+                    .border_1()
+                    .border_color(ds::panel_edge_line(cx))
+                    .bg(ds::app_background(cx))
+                    .pl(px(ds::PANEL_OVERLAP))
+                    .child(content),
+            )
             .into_any_element()
     }
 
@@ -4674,6 +5432,7 @@ impl BeginnerWorkspace {
                 .flex_1()
                 .min_w_0()
                 .h_full()
+                .bg(ds::sidebar_background(cx))
                 .on_drag_move::<DraggedSimplePanelResize>(cx.listener(|this, event, _, cx| {
                     this.resize_simple_panels(event, cx);
                 }))
@@ -4686,6 +5445,7 @@ impl BeginnerWorkspace {
                 .flex_1()
                 .min_w_0()
                 .h_full()
+                .bg(ds::sidebar_background(cx))
                 .on_drag_move::<DraggedSimplePanelResize>(cx.listener(|this, event, _, cx| {
                     this.resize_simple_panels(event, cx);
                 }))
@@ -4696,6 +5456,7 @@ impl BeginnerWorkspace {
                 .flex_1()
                 .min_w_0()
                 .h_full()
+                .bg(ds::sidebar_background(cx))
                 .on_drag_move::<DraggedSimplePanelResize>(cx.listener(|this, event, _, cx| {
                     this.resize_simple_panels(event, cx);
                 }))
@@ -4707,6 +5468,7 @@ impl BeginnerWorkspace {
                 .min_w_0()
                 .min_h_0()
                 .h_full()
+                .bg(ds::sidebar_background(cx))
                 .on_drag_move::<DraggedSimplePanelResize>(cx.listener(|this, event, _, cx| {
                     this.resize_simple_panels(event, cx);
                 }))
@@ -4718,6 +5480,7 @@ impl BeginnerWorkspace {
                 .min_w_0()
                 .min_h_0()
                 .h_full()
+                .bg(ds::sidebar_background(cx))
                 .on_drag_move::<DraggedSimplePanelResize>(cx.listener(|this, event, _, cx| {
                     this.resize_simple_panels(event, cx);
                 }))
@@ -4750,18 +5513,45 @@ impl BeginnerWorkspace {
         let bottom_panel_height = self.target_bottom_panel_height(window);
 
         v_flex()
+            .relative()
             .flex_1()
             .min_w_0()
             .min_h_0()
             .h_full()
-            .child(main_content)
-            .child(self.render_bottom_terminal_slot(bottom_panel_height, cx))
+            .bg(ds::sidebar_background(cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(main_content),
+            )
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .h(bottom_panel_height)
+                    .flex_shrink_0()
+                    .bg(ds::sidebar_background(cx))
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(-ds::PANEL_OVERLAP))
+                            .right_0()
+                            .top_0()
+                            .bottom_0()
+                            .overflow_hidden()
+                            .rounded_tl(px(ds::PANEL_CORNER_RADIUS))
+                            .bg(ds::sidebar_background(cx))
+                            .child(self.render_bottom_terminal_slot(bottom_panel_height, cx)),
+                    ),
+            )
             .into_any_element()
     }
 
     fn render_bottom_terminal_slot(&self, height: Pixels, cx: &mut Context<Self>) -> AnyElement {
         let is_closing = self.bottom_panel_closing;
-        let closed_height = px(0.);
 
         v_flex()
             .id("simple-bottom-terminal-slot")
@@ -4769,23 +5559,24 @@ impl BeginnerWorkspace {
             .h(height)
             .flex_shrink_0()
             .overflow_hidden()
-            .mt(px(-ds::PANEL_OVERLAP))
-            .bg(ds::app_background(cx))
-            .child(self.render_bottom_terminal_panel(height, cx))
-            .with_animation(
-                (
-                    "bottom-panel-height",
-                    self.bottom_panel_animation_generation,
-                ),
-                Animation::new(Duration::from_millis(PANEL_OPEN_ANIMATION_MS))
-                    .with_easing(ease_out_quint()),
-                move |slot, delta| {
-                    let visible_progress = if is_closing { 1.0 - delta } else { delta };
-                    let animated_height =
-                        closed_height + (height - closed_height) * visible_progress;
-                    slot.h(animated_height.max(closed_height))
-                        .opacity(visible_progress)
-                },
+            .rounded_tl(px(ds::PANEL_CORNER_RADIUS))
+            .bg(ds::sidebar_background(cx))
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .h(height)
+                    .child(self.render_bottom_terminal_panel(height, cx))
+                    .with_animation(
+                        ("bottom-panel-slide", self.bottom_panel_animation_generation),
+                        Animation::new(Duration::from_millis(PANEL_OPEN_ANIMATION_MS))
+                            .with_easing(ease_out_quint()),
+                        move |panel, delta| {
+                            let visible_progress = if is_closing { 1.0 - delta } else { delta };
+                            let offset = height * (1.0 - visible_progress);
+                            panel.top(offset).opacity(visible_progress)
+                        },
+                    ),
             )
             .into_any_element()
     }
@@ -4799,16 +5590,14 @@ impl BeginnerWorkspace {
 
         v_flex()
             .id("simple-bottom-terminal-panel")
+            .relative()
             .h(height)
             .min_h(height)
             .max_h(height)
             .w_full()
             .flex_shrink_0()
             .overflow_hidden()
-            .border_t_1()
-            .border_color(ds::panel_edge_line(cx))
             .rounded_tl(px(ds::PANEL_CORNER_RADIUS))
-            .rounded_tr(px(ds::PANEL_CORNER_RADIUS))
             .bg(ds::app_background(cx))
             .child(
                 h_flex()
@@ -4878,6 +5667,15 @@ impl BeginnerWorkspace {
                     )
                     .into_any_element()
             })
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left(px(ds::PANEL_CORNER_RADIUS))
+                    .right(px(ds::PANEL_CORNER_RADIUS))
+                    .h(px(1.))
+                    .bg(ds::panel_edge_line(cx)),
+            )
     }
 
     fn render_open_artifact_panel_button(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -4907,6 +5705,7 @@ impl BeginnerWorkspace {
                 .w(px(44.))
                 .h_full()
                 .flex_shrink_0()
+                .overflow_hidden()
                 .when(self.right_panel_dock == SimplePanelDock::Left, |el| {
                     el.border_r_1()
                 })
@@ -5005,8 +5804,6 @@ impl BeginnerWorkspace {
     ) -> impl IntoElement {
         let action_hover = ds::sidebar_hover_background(cx);
         let api_key_ready = Self::has_backboard_api_key();
-        let can_start_new =
-            matches!(self.state, BeginnerState::Landing) || self.project_tab_count() < 3;
         let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
         let top_bar_offset = if traffic_lights { 8. } else { 0. };
         let search_query = self
@@ -5091,7 +5888,8 @@ impl BeginnerWorkspace {
             .child(
                 v_flex()
                     .flex_none()
-                    .px_2()
+                    .pl_2()
+                    .pr(px(ds::PANEL_OVERLAP + 8.))
                     .pb_1()
                     .gap_0p5()
                     .child(
@@ -5202,25 +6000,16 @@ impl BeginnerWorkspace {
                             .gap_2p5()
                             .items_center()
                             .rounded_lg()
-                            .when(api_key_ready && can_start_new, |el| {
+                            .when(api_key_ready, |el| {
                                 el.cursor_pointer()
                                     .hover(move |el| el.bg(action_hover))
                                     .on_click(cx.listener(|this, _, window, cx| {
-                                        this.show_tab_limit_notice = false;
                                         this.go_home(window, cx);
-                                    }))
-                            })
-                            .when(api_key_ready && !can_start_new, |el| {
-                                el.cursor_pointer()
-                                    .tooltip(Tooltip::text("3 project limit reached"))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.show_tab_limit_notice = true;
-                                        cx.notify();
                                     }))
                             })
                             .when(!api_key_ready, |el| el.opacity(0.35))
                             .child(Icon::new(IconName::Plus).size(IconSize::XSmall).color(
-                                if can_start_new && api_key_ready {
+                                if api_key_ready {
                                     Color::Custom(ds::sidebar_icon(cx))
                                 } else {
                                     Color::Disabled
@@ -5230,7 +6019,7 @@ impl BeginnerWorkspace {
                                 Label::new("New chat")
                                     .size(LabelSize::Default)
                                     .weight(FontWeight::SEMIBOLD)
-                                    .color(if can_start_new && api_key_ready {
+                                    .color(if api_key_ready {
                                         Color::Custom(ds::sidebar_emphasis_text(cx))
                                     } else {
                                         Color::Disabled
@@ -5342,7 +6131,8 @@ impl BeginnerWorkspace {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .px_2()
+                    .pl_2()
+                    .pr(px(ds::PANEL_OVERLAP + 8.))
                     .pb_2()
                     .gap_0p5()
                     .when(!api_key_ready, |el| {
@@ -5551,10 +6341,8 @@ impl BeginnerWorkspace {
             .flex_shrink_0()
             .opacity(sidebar_opacity)
             .bg(ds::sidebar_background(cx))
-            .on_mouse_move(cx.listener(|this, _, _, cx| {
-                if !this.chats_sidebar_open || this.chats_sidebar_closing {
-                    this.open_chats_sidebar(cx);
-                }
+            .on_mouse_move(cx.listener(|this, _, window, cx| {
+                this.delay_open_chats_sidebar(window, cx);
             }))
             .child(div().absolute().inset_0().bg(ds::sidebar_glow_wash(cx)))
             .child(div().absolute().inset_0().bg(ds::sidebar_edge_wash(cx)))
@@ -5578,6 +6366,8 @@ impl BeginnerWorkspace {
                     .child(
                         div()
                             .id("simple-sidebar-open")
+                            .relative()
+                            .left(px(-8.))
                             .size(px(28.))
                             .flex()
                             .items_center()
@@ -5603,68 +6393,51 @@ impl BeginnerWorkspace {
                 v_flex()
                     .flex_1()
                     .items_center()
-                    .child(self.render_simple_sidebar_menu_button(
-                        "simple-closed-sidebar-actions-menu",
-                        window,
-                        cx,
+                    .child(div().relative().left(px(-8.)).child(
+                        self.render_simple_sidebar_menu_button(
+                            "simple-closed-sidebar-actions-menu",
+                            window,
+                            cx,
+                        ),
                     ))
                     .child(div().flex_1().window_control_area(WindowControlArea::Drag)),
             )
     }
 
-    fn render_chat_feed_display_toggle(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let render_option = |mode: ChatFeedDisplayMode, cx: &mut Context<Self>| {
-            let is_selected = self.chat_feed_display_mode == mode;
-            let hover_background = ds::hover_background(cx);
-            let icon = match mode {
-                ChatFeedDisplayMode::Simple => IconName::EyeOff,
-                ChatFeedDisplayMode::LiveWork => IconName::QueueMessage,
-            };
-            let color = Color::Custom(if is_selected {
-                ds::text(cx)
-            } else {
-                ds::text_muted(cx)
-            });
-
-            h_flex()
-                .id(SharedString::from(format!(
-                    "simple-chat-display-{}",
-                    mode.label().to_lowercase().replace(' ', "-")
-                )))
-                .h(px(28.))
-                .px_2()
-                .gap_1p5()
-                .items_center()
-                .rounded(px(6.))
-                .tooltip(Tooltip::text(mode.tooltip()))
-                .when(is_selected, |el| el.bg(ds::selected_background(cx)))
-                .when(!is_selected, |el| {
-                    el.cursor_pointer()
-                        .hover(move |el| el.bg(hover_background))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.set_chat_feed_display_mode(mode, cx);
-                        }))
-                })
-                .child(Icon::new(icon).size(IconSize::XSmall).color(color))
-                .child(
-                    Label::new(mode.label())
-                        .size(LabelSize::XSmall)
-                        .color(color),
-                )
-        };
-
+    fn render_simple_mode_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
-            .id("simple-chat-display-toggle")
-            .h(px(32.))
-            .items_center()
-            .gap_0p5()
-            .rounded(px(8.))
-            .border_1()
-            .border_color(ds::soft_border(cx).opacity(0.76))
-            .bg(ds::field_background(cx).opacity(0.72))
-            .p_0p5()
-            .child(render_option(ChatFeedDisplayMode::LiveWork, cx))
-            .child(render_option(ChatFeedDisplayMode::Simple, cx))
+            .flex_none()
+            .gap_1()
+            .child(
+                Button::new("simple-open-code-editor", "Open in Code Editor")
+                    .style(ButtonStyle::Subtle)
+                    .size(ButtonSize::Compact)
+                    .label_size(LabelSize::XSmall)
+                    .start_icon(Icon::new(IconName::Code).size(IconSize::XSmall))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        persist_experience_level(ExperienceLevel::Developer, cx);
+                        this.multi_workspace
+                            .update(cx, |multi_workspace, cx| {
+                                multi_workspace.open_code_editor(window, cx);
+                            })
+                            .log_err();
+                    })),
+            )
+            .child(
+                Button::new("simple-open-agents", "Open in Agents")
+                    .style(ButtonStyle::Subtle)
+                    .size(ButtonSize::Compact)
+                    .label_size(LabelSize::XSmall)
+                    .start_icon(Icon::new(IconName::ZedAgent).size(IconSize::XSmall))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        persist_experience_level(ExperienceLevel::Developer, cx);
+                        this.multi_workspace
+                            .update(cx, |multi_workspace, cx| {
+                                multi_workspace.open_agent_workspace(window, cx);
+                            })
+                            .log_err();
+                    })),
+            )
     }
 
     fn render_simple_header(
@@ -5683,16 +6456,15 @@ impl BeginnerWorkspace {
             .bg(ds::app_background(cx))
             .border_b_1()
             .border_color(ds::separator(cx))
-            .child(self.render_chat_feed_display_toggle(cx))
             .child(
-                Label::new(title)
-                    .size(LabelSize::Custom(rems_from_px(13.)))
-                    .weight(FontWeight::SEMIBOLD)
-                    .color(Color::Custom(ds::text(cx)))
-                    .truncate(),
+                div().min_w_0().flex_1().child(
+                    Label::new(title)
+                        .size(LabelSize::Custom(rems_from_px(13.)))
+                        .weight(FontWeight::SEMIBOLD)
+                        .color(Color::Custom(ds::text(cx)))
+                        .truncate(),
+                ),
             )
-            .child(div().size(px(12.)).flex_none())
-            .child(div().flex_1())
             .when(is_running, |el| {
                 el.child(
                     Icon::new(IconName::LoadCircle)
@@ -5700,6 +6472,7 @@ impl BeginnerWorkspace {
                         .color(Color::Custom(ds::accent(cx))),
                 )
             })
+            .child(self.render_simple_mode_buttons(cx))
             .child(div().size(px(16.)).flex_none())
     }
 
@@ -5761,6 +6534,7 @@ impl BeginnerWorkspace {
         let api_key_ready = Self::has_backboard_api_key();
         let right_panel_expanded =
             api_key_ready && self.right_panel_open && self.right_panel_expanded;
+        let mode_buttons_top = if api_key_ready { 10. } else { 38. };
         if api_key_ready {
             self.ensure_composer_thread(window, cx);
         }
@@ -5777,14 +6551,13 @@ impl BeginnerWorkspace {
                 }
             }))
             .size_full()
-            .when(self.show_tab_limit_notice, |el| {
-                el.child(self.render_tab_limit_notice(cx))
-            })
+            .bg(ds::sidebar_background(cx))
             .child(
                 h_flex()
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
+                    .bg(ds::sidebar_background(cx))
                     .on_drag_move::<DraggedSimpleSidebarResize>(cx.listener(
                         |this, event, _, cx| {
                             this.resize_simple_sidebar(event, cx);
@@ -5798,6 +6571,7 @@ impl BeginnerWorkspace {
                             self.render_main_with_right_panel(
                                 v_flex()
                                     .flex_1()
+                                    .relative()
                                     .when(api_key_ready && self.right_panel_open, |el| {
                                         el.min_w(px(ds::CHAT_PANEL_MIN_WIDTH))
                                     })
@@ -5808,14 +6582,6 @@ impl BeginnerWorkspace {
                                     .h_full()
                                     .overflow_hidden()
                                     .bg(ds::app_background(cx))
-                                    .when(api_key_ready, |el| {
-                                        el.child(
-                                            self.render_workspace_mode_section_controls(
-                                                px(18.),
-                                                cx,
-                                            ),
-                                        )
-                                    })
                                     .when(!api_key_ready, |el| {
                                         el.child(self.render_api_status_banner(cx))
                                     })
@@ -5830,7 +6596,7 @@ impl BeginnerWorkspace {
                                             .child(
                                                 v_flex()
                                                     .w_full()
-                                                    .max_w(px(920.))
+                                                    .max_w(px(ds::CHAT_MAX_WIDTH))
                                                     .items_center()
                                                     .gap_6()
                                                     .child(self.render_empty_conversation(cx))
@@ -5868,6 +6634,13 @@ impl BeginnerWorkspace {
                                             ))
                                             .into_any_element()
                                     })
+                                    .child(
+                                        h_flex()
+                                            .absolute()
+                                            .top(px(mode_buttons_top))
+                                            .right(px(14.))
+                                            .child(self.render_simple_mode_buttons(cx)),
+                                    )
                                     .into_any_element(),
                                 false,
                                 None,
@@ -5910,20 +6683,19 @@ impl BeginnerWorkspace {
         v_flex()
             .relative()
             .size_full()
+            .bg(ds::sidebar_background(cx))
             .on_action(cx.listener(Self::handle_enter_submit))
             .on_action(cx.listener(|this, _: &EditorCancel, _, cx| {
                 if this.is_agent_running {
                     this.cancel_running_task(cx);
                 }
             }))
-            .when(self.show_tab_limit_notice, |el| {
-                el.child(self.render_tab_limit_notice(cx))
-            })
             .child(
                 h_flex()
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
+                    .bg(ds::sidebar_background(cx))
                     .on_drag_move::<DraggedSimpleSidebarResize>(cx.listener(
                         |this, event, _, cx| {
                             this.resize_simple_sidebar(event, cx);
@@ -5947,12 +6719,6 @@ impl BeginnerWorkspace {
                                     .h_full()
                                     .overflow_hidden()
                                     .bg(ds::app_background(cx))
-                                    .when(api_key_ready, |el| {
-                                        el.child(self.render_workspace_mode_section_controls(
-                                            px(ds::TOP_BAR_HEIGHT + 12.),
-                                            cx,
-                                        ))
-                                    })
                                     .child(self.render_simple_header(
                                         active_title.clone(),
                                         is_running || is_connecting,
@@ -6290,6 +7056,62 @@ impl BeginnerWorkspace {
             )
     }
 
+    fn render_browser_external_fallback(
+        &self,
+        preview_url: String,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let display_url = Self::browser_address_label(Some(&preview_url));
+        let preview_url_for_open = preview_url.clone();
+        v_flex()
+            .flex_1()
+            .items_center()
+            .justify_center()
+            .gap_3()
+            .p_4()
+            .child(self.render_artifact_illustration(ArtifactIllustrationState::Empty, cx))
+            .child(
+                Label::new("Preview running")
+                    .size(LabelSize::Custom(rems_from_px(15.)))
+                    .weight(FontWeight::SEMIBOLD)
+                    .color(Color::Custom(ds::text(cx))),
+            )
+            .child(
+                div()
+                    .w(px(280.))
+                    .text_center()
+                    .text_size(rems_from_px(13.))
+                    .text_color(ds::text_muted(cx))
+                    .line_height(relative(1.46))
+                    .child(format!("The app is serving at {}.", display_url.as_ref())),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Button::new("open-running-preview", "Open in browser")
+                            .style(ButtonStyle::Filled)
+                            .size(ButtonSize::Default)
+                            .label_size(LabelSize::XSmall)
+                            .on_click(move |_, _, cx| {
+                                cx.open_url(preview_url_for_open.as_str());
+                            }),
+                    )
+                    .child(
+                        Button::new("retry-running-preview", "Reload")
+                            .style(ButtonStyle::Subtle)
+                            .size(ButtonSize::Default)
+                            .label_size(LabelSize::XSmall)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.web_preview = None;
+                                this.preview_visible = this.preview_url.is_some();
+                                cx.notify();
+                            })),
+                    ),
+            )
+    }
+
     fn render_artifact_error_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .flex_1()
@@ -6330,7 +7152,7 @@ impl BeginnerWorkspace {
 
     fn render_artifact_browser_shell(
         &self,
-        _preview_url: Option<String>,
+        preview_url: Option<String>,
         content: AnyElement,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -6379,6 +7201,7 @@ impl BeginnerWorkspace {
                             ),
                     ),
             )
+            .child(self.render_browser_status_bar(preview_url, cx))
             .child(
                 v_flex()
                     .id("artifact-browser-page")
@@ -6389,6 +7212,140 @@ impl BeginnerWorkspace {
                     .bg(ds::app_background(cx))
                     .child(content),
             )
+    }
+
+    fn render_browser_status_bar(
+        &self,
+        preview_url: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let has_url = preview_url.is_some();
+        let address = Self::browser_address_label(preview_url.as_ref());
+        let (status_icon, status_label, status_color) = if self.is_preview_generating {
+            (
+                IconName::LoadCircle,
+                "Loading preview",
+                Color::Custom(ds::accent(cx)),
+            )
+        } else if self.web_preview.is_some() {
+            (
+                IconName::Check,
+                "Browser live",
+                Color::Custom(ds::accent(cx)),
+            )
+        } else if has_url {
+            (
+                IconName::ArrowUpRight,
+                "Open externally",
+                Color::Custom(ds::text_muted(cx)),
+            )
+        } else {
+            (
+                IconName::Circle,
+                "No preview URL",
+                Color::Custom(ds::text_muted(cx)),
+            )
+        };
+        let hover_background = ds::hover_background(cx);
+
+        h_flex()
+            .h(px(42.))
+            .flex_shrink_0()
+            .px_5()
+            .gap_2()
+            .items_center()
+            .bg(ds::app_background(cx))
+            .border_b_1()
+            .border_color(ds::separator(cx).opacity(0.34))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(28.))
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(7.))
+                    .border_1()
+                    .border_color(ds::soft_border(cx).opacity(0.62))
+                    .bg(ds::field_background(cx).opacity(0.58))
+                    .px_2()
+                    .child(
+                        Icon::new(IconName::Public)
+                            .size(IconSize::XSmall)
+                            .color(Color::Custom(ds::icon_muted(cx))),
+                    )
+                    .child(
+                        Label::new(address)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Custom(ds::text_muted(cx)))
+                            .truncate()
+                            .flex_1(),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .min_w(px(118.))
+                    .items_center()
+                    .justify_end()
+                    .gap_1p5()
+                    .child(
+                        Icon::new(status_icon)
+                            .size(IconSize::XSmall)
+                            .color(status_color),
+                    )
+                    .child(
+                        Label::new(status_label)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Custom(ds::text_muted(cx)))
+                            .truncate(),
+                    ),
+            )
+            .when_some(preview_url.clone(), |el, url| {
+                let url_for_open = url.clone();
+                el.child(
+                    div()
+                        .id("artifact-browser-reload")
+                        .size(px(26.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(6.))
+                        .cursor_pointer()
+                        .hover(move |el| el.bg(hover_background))
+                        .tooltip(Tooltip::text("Reload preview"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.preview_url = Some(url.clone());
+                            this.preview_visible = true;
+                            this.web_preview = None;
+                            cx.notify();
+                        }))
+                        .child(
+                            Icon::new(IconName::RotateCw)
+                                .size(IconSize::XSmall)
+                                .color(Color::Custom(ds::icon_muted(cx))),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("artifact-browser-open-external")
+                        .size(px(26.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(6.))
+                        .cursor_pointer()
+                        .hover(move |el| el.bg(hover_background))
+                        .tooltip(Tooltip::text("Open in browser"))
+                        .on_click(move |_, _, cx| {
+                            cx.open_url(url_for_open.as_str());
+                        })
+                        .child(
+                            Icon::new(IconName::ArrowUpRight)
+                                .size(IconSize::XSmall)
+                                .color(Color::Custom(ds::icon_muted(cx))),
+                        ),
+                )
+            })
     }
 
     fn right_panel_tab_menu(
@@ -8114,6 +9071,11 @@ impl BeginnerWorkspace {
                 .flex_1()
                 .w_full()
                 .into_any_element()
+            } else if let Some(preview_url) = preview_url.clone()
+                && !self.is_preview_generating
+            {
+                self.render_browser_external_fallback(preview_url, cx)
+                    .into_any_element()
             } else if is_running || self.is_preview_generating {
                 self.render_artifact_working_state(cx).into_any_element()
             } else {
@@ -8264,6 +9226,11 @@ impl BeginnerWorkspace {
                         .flex_1()
                         .w_full()
                         .into_any_element()
+                    } else if let Some(preview_url) = preview_url_for_browser.clone()
+                        && !self.is_preview_generating
+                    {
+                        self.render_browser_external_fallback(preview_url, cx)
+                            .into_any_element()
                     } else if is_running || self.is_preview_generating {
                         self.render_artifact_working_state(cx).into_any_element()
                     } else {
@@ -8754,7 +9721,7 @@ impl BeginnerWorkspace {
                 .into_any_element();
             let composer = v_flex()
                 .w_full()
-                .when(centered, |el| el.max_w(px(920.)))
+                .when(centered, |el| el.max_w(px(ds::CHAT_MAX_WIDTH)))
                 .gap_1()
                 .child(composer_shell)
                 .child(self.render_composer_footer(window, cx))
@@ -8815,7 +9782,7 @@ impl BeginnerWorkspace {
             .child(
                 v_flex()
                     .w_full()
-                    .when(centered, |el| el.max_w(px(920.)))
+                    .when(centered, |el| el.max_w(px(ds::CHAT_MAX_WIDTH)))
                     .child(
                         v_flex()
                             .w_full()

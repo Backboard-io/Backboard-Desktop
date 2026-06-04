@@ -12,7 +12,7 @@ pub const CHAT_PANEL_WIDTH: f32 = 540.;
 pub const CHAT_PANEL_MIN_WIDTH: f32 = 360.;
 pub const RIGHT_PANEL_MIN_WIDTH: f32 = 320.;
 pub const PANEL_RESIZE_HANDLE_WIDTH: f32 = 8.;
-pub const PANEL_CORNER_RADIUS: f32 = 18.;
+pub const PANEL_CORNER_RADIUS: f32 = 22.;
 pub const PANEL_OVERLAP: f32 = PANEL_CORNER_RADIUS;
 pub const CHAT_ROW_HEIGHT: f32 = 36.;
 pub const PROJECT_ROW_HEIGHT: f32 = 40.;
@@ -182,9 +182,9 @@ pub fn separator(cx: &App) -> Hsla {
 
 pub fn panel_edge_line(cx: &App) -> Hsla {
     if cx.theme().appearance().is_light() {
-        black().opacity(0.18)
+        black().opacity(0.12)
     } else {
-        white().opacity(0.22)
+        white().opacity(0.11)
     }
 }
 

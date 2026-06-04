@@ -434,8 +434,16 @@ impl BackboardClient {
     }
 
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
+        let client = Client::builder()
+            .http2_adaptive_window(true)
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(Some(Duration::from_secs(60)))
+            .tcp_keepalive(Some(Duration::from_secs(60)))
+            .connect_timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| Client::new());
         Self {
-            client: Client::new(),
+            client,
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key: api_key.into(),
         }
@@ -443,6 +451,17 @@ impl BackboardClient {
 
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    pub async fn warm_connection(&self) -> Result<()> {
+        let response = self
+            .client
+            .get(self.base_url.clone())
+            .header("X-API-Key", self.api_key_header()?)
+            .send()
+            .await?;
+        let _ = response.bytes().await;
+        Ok(())
     }
 
     pub async fn create_assistant(&self, request: CreateAssistantRequest) -> Result<Value> {
@@ -1236,6 +1255,32 @@ mod tests {
         assert_eq!(body["voice"]["tts"]["model"], "gpt-4o-mini-tts");
         assert!(body.get("provider").is_none());
         assert!(body.get("model").is_none());
+    }
+
+    #[test]
+    fn message_json_omits_tools_when_not_supplied() {
+        let request = SendMessageRequest {
+            thread_id: Some("thread_123".to_string()),
+            content: "say hello".to_string(),
+            tools: None,
+            ..SendMessageRequest::default()
+        };
+
+        let body = message_json(&request, true);
+
+        assert!(body.get("tools").is_none());
+    }
+
+    #[test]
+    fn submit_tool_outputs_omits_tools_when_not_supplied() {
+        let request = SubmitToolOutputsRequest {
+            tool_outputs: vec![json!({"tool_call_id": "call_1", "output": "{}"})],
+            tools: None,
+        };
+        let body = serde_json::to_value(&request).unwrap();
+
+        assert!(body.get("tool_outputs").is_some());
+        assert!(body.get("tools").is_none());
     }
 
     #[test]

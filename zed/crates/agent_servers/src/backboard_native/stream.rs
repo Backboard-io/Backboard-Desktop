@@ -92,8 +92,11 @@ pub async fn run_prompt(
             return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
         }
     };
+    let simple_fast_path = is_simple_message(&message_for_model, &runtime);
 
-    emit_progress(&state, &runtime, "Preparing workspace context.", cx)?;
+    if !simple_fast_path {
+        emit_progress(&state, &runtime, "Preparing workspace context.", cx)?;
+    }
 
     let runtime_load_started = Instant::now();
     let (config, client) = match state.client() {
@@ -105,17 +108,22 @@ pub async fn run_prompt(
     };
     state.record_turn_timing(&params.session_id, "runtime_load_ms", runtime_load_started);
 
-    let mcp_tools = match mcp::load_tools(&runtime, cx).await {
-        Ok(tools) => tools,
-        Err(error) => {
-            log::warn!(
-                "Backboard native failed to load MCP tools for session {}: {error:#}",
-                runtime.session_id
-            );
-            Vec::new()
-        }
+    let mcp_tools = if simple_fast_path {
+        state.mcp_tools(&params.session_id)
+    } else {
+        let mcp_tools = match mcp::load_tools(&runtime, cx).await {
+            Ok(tools) => tools,
+            Err(error) => {
+                log::warn!(
+                    "Backboard native failed to load MCP tools for session {}: {error:#}",
+                    runtime.session_id
+                );
+                Vec::new()
+            }
+        };
+        state.set_mcp_tools(&params.session_id, mcp_tools.clone());
+        mcp_tools
     };
-    state.set_mcp_tools(&params.session_id, mcp_tools.clone());
     let turn_tools = tool_definitions_for_turn(&runtime, &mcp_tools);
 
     let assistant_started = Instant::now();
@@ -131,7 +139,6 @@ pub async fn run_prompt(
     state.record_turn_timing(&params.session_id, "assistant_create_ms", assistant_started);
     let provider = Some(runtime.provider.clone());
     let model = Some(runtime.model.clone());
-    let tools = Some(turn_tools);
     let thinking = thinking_payload(&runtime.intensity, &runtime.provider, &runtime.model);
     let voice = voice_payload(&runtime.feature_settings);
     let audio_file = audio_attachment_for_voice(&runtime.feature_settings, &prompt_parts.audio);
@@ -165,12 +172,16 @@ pub async fn run_prompt(
         )?;
     }
     let context_pack_started = Instant::now();
-    let augmented = workspace::augment_prompt(
-        &message_for_model,
-        &runtime.workspace,
-        &runtime.mode.to_string(),
-        &runtime.feature_settings.selected_skills,
-    );
+    let augmented = if simple_fast_path {
+        message_for_model.clone()
+    } else {
+        workspace::augment_prompt(
+            &message_for_model,
+            &runtime.workspace,
+            &runtime.mode.to_string(),
+            &runtime.feature_settings.selected_skills,
+        )
+    };
     state.record_turn_timing(&params.session_id, "context_pack_ms", context_pack_started);
     state.set_estimated_used_tokens(&params.session_id, estimate_tokens(&augmented));
     emit_speed_update(&state, &runtime, cx).ok();
@@ -184,9 +195,9 @@ pub async fn run_prompt(
         content: augmented,
         provider,
         model,
-        memory: "Auto".to_string(),
+        memory: if simple_fast_path { "Off" } else { "Auto" }.to_string(),
         thinking,
-        tools,
+        tools: None,
         web_search: runtime.feature_settings.web_search.clone(),
         image_generation: (runtime.feature_settings.image_generation == "auto")
             .then(|| "auto".to_string()),
@@ -712,10 +723,7 @@ async fn submit_tools(
     let run_id = run_id.to_string();
     let request = SubmitToolOutputsRequest {
         tool_outputs: outputs,
-        tools: Some(tool_definitions_for_turn(
-            runtime,
-            &state.mcp_tools(&runtime.session_id),
-        )),
+        tools: None,
     };
     log::info!(
         "Backboard native endpoint call: POST /threads/{{thread_id}}/runs/{{run_id}}/submit-tool-outputs?stream=true session_id={} thread_id={} run_id={} path=rust-native",
@@ -1444,6 +1452,101 @@ fn should_wait_for_post_run_events(feature_settings: &super::FeatureSettings) ->
         || feature_settings.image_generation == "auto"
 }
 
+fn is_simple_message(message: &str, runtime: &SessionRuntime) -> bool {
+    if !runtime.feature_settings.selected_skills.is_empty()
+        || runtime.feature_settings.image_generation == "auto"
+        || !matches!(runtime.feature_settings.voice_mode.as_str(), "off" | "")
+        || runtime.feature_settings.live_voice == "on"
+        || runtime.feature_settings.mcp_figma == "on"
+        || runtime.feature_settings.mcp_notion == "on"
+        || runtime.feature_settings.mcp_google == "on"
+    {
+        return false;
+    }
+
+    let trimmed = message.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 180 || trimmed.lines().count() > 3 {
+        return false;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("simple build mode:")
+        || lower.starts_with("ask mode:")
+        || lower.starts_with("previous conversation context")
+        || lower.contains("<backboard_ide_context>")
+        || lower.contains("<selected_skills>")
+    {
+        return false;
+    }
+
+    let work_markers = [
+        "add ",
+        "analyze",
+        "build",
+        "change",
+        "check",
+        "create",
+        "debug",
+        "delete",
+        "edit ",
+        "explain",
+        "find ",
+        "fix",
+        "implement",
+        "inspect",
+        "make ",
+        "open ",
+        "read ",
+        "remove",
+        "rename",
+        "review",
+        "run ",
+        "search",
+        "show me",
+        "test",
+        "update",
+        "write",
+    ];
+    if work_markers.iter().any(|marker| lower.contains(marker)) {
+        return false;
+    }
+
+    let normalized = lower
+        .trim_matches(|ch: char| ch.is_ascii_punctuation() || ch.is_whitespace())
+        .to_string();
+    let simple_exact = [
+        "hi",
+        "hello",
+        "hey",
+        "yo",
+        "thanks",
+        "thank you",
+        "ok",
+        "okay",
+        "cool",
+        "nice",
+        "great",
+        "got it",
+        "sounds good",
+        "who are you",
+        "what can you do",
+    ];
+    if simple_exact.contains(&normalized.as_str()) {
+        return true;
+    }
+
+    lower.starts_with("thanks ")
+        || lower.starts_with("thanks,")
+        || lower.starts_with("thank you ")
+        || lower.starts_with("thank you,")
+        || lower.starts_with("hi ")
+        || lower.starts_with("hi,")
+        || lower.starts_with("hello ")
+        || lower.starts_with("hello,")
+        || lower.starts_with("hey ")
+        || lower.starts_with("hey,")
+}
+
 fn prompt_with_selected_skills(runtime: &SessionRuntime, message: &str) -> Result<String> {
     if runtime.feature_settings.selected_skills.is_empty() {
         return Ok(message.to_string());
@@ -1628,6 +1731,21 @@ fn strip_ide_context(text: &str) -> String {
 mod tests {
     use super::*;
 
+    fn test_runtime() -> SessionRuntime {
+        SessionRuntime {
+            session_id: acp::SessionId::new("test-session"),
+            thread: WeakEntity::new_invalid(),
+            workspace: std::path::PathBuf::from("/workspace"),
+            provider: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            mode: acp::SessionModeId::new("free"),
+            intensity: "fast".to_string(),
+            feature_settings: super::super::FeatureSettings::default(),
+            cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            context_server_store: None,
+        }
+    }
+
     #[test]
     fn prompt_title_uses_first_non_empty_line() {
         assert_eq!(
@@ -1644,6 +1762,38 @@ mod tests {
     #[test]
     fn fast_intensity_omits_thinking_payload() {
         assert_eq!(thinking_payload("fast", "openai", "gpt-4o"), None);
+    }
+
+    #[test]
+    fn simple_message_fast_path_accepts_short_chat() {
+        let runtime = test_runtime();
+
+        assert!(is_simple_message("hi", &runtime));
+        assert!(is_simple_message("thanks, that helps", &runtime));
+        assert!(is_simple_message("what can you do?", &runtime));
+    }
+
+    #[test]
+    fn simple_message_fast_path_rejects_work_requests() {
+        let runtime = test_runtime();
+
+        assert!(!is_simple_message("fix the failing tests", &runtime));
+        assert!(!is_simple_message(
+            "Simple build mode: build or edit the project\n\nthanks",
+            &runtime
+        ));
+        assert!(!is_simple_message(
+            "Can you inspect the CLI architecture and explain it?",
+            &runtime
+        ));
+    }
+
+    #[test]
+    fn simple_message_fast_path_rejects_selected_skills() {
+        let mut runtime = test_runtime();
+        runtime.feature_settings.selected_skills = vec!["web/modern".to_string()];
+
+        assert!(!is_simple_message("hi", &runtime));
     }
 
     #[test]

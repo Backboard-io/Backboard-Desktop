@@ -11,12 +11,15 @@ use std::{
     time::{Duration, Instant},
 };
 
+use ::backboard::{
+    BackboardClient, CreateAssistantRequest, SendMessageRequest, SubmitToolOutputsRequest,
+};
 use acp_thread::{
     AuthorizationKind, PermissionOptions, RequestPermissionOutcome, TerminalProviderEvent,
 };
 use agent_client_protocol::schema as acp;
 use anyhow::{Context as _, Result, anyhow, bail};
-use futures::future::join_all;
+use futures::{StreamExt as _, future::join_all};
 use globset::{Glob, GlobSetBuilder};
 use gpui::{AppContext as _, AsyncApp};
 use regex::RegexBuilder;
@@ -25,7 +28,9 @@ use terminal::TerminalBuilder;
 use terminal::terminal_settings::{AlternateScroll, CursorShape};
 use walkdir::WalkDir;
 
-use super::{BackboardNativeState, SessionRuntime, index, mcp, rounded_ms};
+use super::{
+    BackboardNativeState, SessionRuntime, index, mcp, rounded_ms, tool_schemas, workspace,
+};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_SEARCH_RESULTS: usize = 120;
@@ -37,12 +42,36 @@ const CHECK_COMMAND_TIMEOUT: Duration = Duration::from_secs(90);
 const INSTALL_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 const DEV_SERVER_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_COMMAND_TIMEOUT: Duration = Duration::from_secs(180);
+const MAX_PARALLEL_TASK_SUBAGENTS: usize = 5;
+const SUBAGENT_MAX_TOOL_ROUNDS: usize = 8;
+const SUBAGENT_INLINE_RESULT_CHARS: usize = 8_000;
 
 #[derive(Clone, Debug)]
 pub struct ToolCallRequest {
     pub id: String,
     pub name: String,
     pub args: Value,
+}
+
+#[derive(Clone)]
+struct SubagentRuntime {
+    workspace: PathBuf,
+    provider: String,
+    model: String,
+    web_search: String,
+    cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl From<&SessionRuntime> for SubagentRuntime {
+    fn from(runtime: &SessionRuntime) -> Self {
+        Self {
+            workspace: runtime.workspace.clone(),
+            provider: runtime.provider.clone(),
+            model: runtime.model.clone(),
+            web_search: runtime.feature_settings.web_search.clone(),
+            cancel_flag: runtime.cancel_flag.clone(),
+        }
+    }
 }
 
 pub async fn execute_tool_batch(
@@ -71,7 +100,19 @@ pub async fn execute_tool_batch(
     let mut index = 0;
 
     while index < calls.len() {
-        if is_parallel_read_only(&calls[index]) {
+        if is_task_tool(&calls[index]) {
+            let start = index;
+            while index < calls.len()
+                && is_task_tool(&calls[index])
+                && index - start < MAX_PARALLEL_TASK_SUBAGENTS
+            {
+                index += 1;
+            }
+            let group = &calls[start..index];
+            let group_outputs =
+                execute_task_group(state.clone(), runtime, group.to_vec(), cx).await?;
+            outputs.extend(group_outputs);
+        } else if is_parallel_read_only(&calls[index]) {
             let start = index;
             while index < calls.len() && is_parallel_read_only(&calls[index]) {
                 index += 1;
@@ -149,6 +190,116 @@ async fn execute_timed_tool_call(
     output
 }
 
+async fn execute_task_group(
+    state: Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    calls: Vec<ToolCallRequest>,
+    cx: &mut AsyncApp,
+) -> Result<Vec<Value>> {
+    if calls.is_empty() {
+        return Ok(Vec::new());
+    }
+    if calls.len() > 1 {
+        emit_progress(
+            state.clone(),
+            runtime,
+            format!(
+                "Backboard is launching {} focused sub-agent tasks in parallel.",
+                calls.len()
+            ),
+            cx,
+        )?;
+    }
+
+    if runtime.mode.to_string() == "ask" || runtime.mode.to_string() == "manual" {
+        let mut outputs = Vec::with_capacity(calls.len());
+        for call in calls {
+            let output = json!({
+                "success": false,
+                "error": format!("{} is disabled in {} mode.", call.name, runtime.mode),
+            });
+            emit_tool_result(state.clone(), runtime, &call, &output, cx)?;
+            outputs.push(tool_output_payload(&call, output));
+        }
+        return Ok(outputs);
+    }
+
+    let client = match state.client() {
+        Ok((_config, client)) => client,
+        Err(error) => {
+            let mut outputs = Vec::with_capacity(calls.len());
+            for call in calls {
+                let output = json!({"success": false, "error": error.to_string()});
+                emit_tool_result(state.clone(), runtime, &call, &output, cx)?;
+                outputs.push(tool_output_payload(&call, output));
+            }
+            return Ok(outputs);
+        }
+    };
+
+    let mut running = Vec::with_capacity(calls.len());
+    for call in calls {
+        emit_task_start(state.clone(), runtime, &call, cx)?;
+        let started_at = Instant::now();
+        let runtime_for_task = SubagentRuntime::from(runtime);
+        let client_for_task = client.clone();
+        let call_for_task = call.clone();
+        let task = gpui_tokio::Tokio::spawn_result(cx, async move {
+            run_task_subagent(client_for_task, runtime_for_task, call_for_task).await
+        });
+        running.push(async move { (call, started_at, task.await) });
+    }
+
+    let mut outputs = Vec::new();
+    for (call, started_at, result) in join_all(running).await {
+        let duration_ms = rounded_ms(started_at.elapsed());
+        state.record_tool_duration_ms(&runtime.session_id, &call.name, duration_ms);
+        let output = result.unwrap_or_else(|error| {
+            json!({
+                "success": false,
+                "error": error.to_string(),
+            })
+        });
+        let status = if output
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            acp::ToolCallStatus::Completed
+        } else {
+            acp::ToolCallStatus::Failed
+        };
+        emit_tool_update(
+            state.clone(),
+            runtime,
+            &call,
+            status,
+            vec![text_content(value_to_text(&output))],
+            Some(output.clone()),
+            cx,
+        )?;
+        outputs.push(tool_output_payload(&call, output));
+    }
+
+    Ok(outputs)
+}
+
+async fn execute_task_tool(
+    state: Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    call: &ToolCallRequest,
+    cx: &mut AsyncApp,
+) -> Result<Value> {
+    let outputs = execute_task_group(state, runtime, vec![call.clone()], cx).await?;
+    let output = outputs
+        .first()
+        .and_then(|payload| payload.get("output"))
+        .and_then(Value::as_str)
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .unwrap_or_else(|| json!({"success": false, "error": "task did not return output"}));
+    Ok(output)
+}
+
 pub fn parse_tool_call(value: Value) -> Result<ToolCallRequest> {
     let id = tool_call_id(&value);
     let function = value.get("function").and_then(Value::as_object);
@@ -212,6 +363,10 @@ fn is_parallel_read_only(call: &ToolCallRequest) -> bool {
     )
 }
 
+fn is_task_tool(call: &ToolCallRequest) -> bool {
+    call.name == "task"
+}
+
 async fn execute_tool_call(
     state: Rc<BackboardNativeState>,
     runtime: &SessionRuntime,
@@ -231,7 +386,7 @@ async fn execute_tool_call(
         emit_tool_result(state, runtime, &call, &output, cx)?;
         return Ok(output);
     }
-    if runtime.mode.to_string() == "manual" && is_shell_tool(&call.name) {
+    if runtime.mode.to_string() == "manual" && (is_shell_tool(&call.name) || call.name == "task") {
         let output = json!({"success": false, "error": format!("{} is disabled in Manual mode.", call.name)});
         emit_tool_result(state, runtime, &call, &output, cx)?;
         return Ok(output);
@@ -259,8 +414,9 @@ async fn execute_tool_call(
         "bash" | "run_terminal_cmd" => execute_shell_tool(state, runtime, &call, cx).await,
         "run_code" | "repl" => execute_code_tool(state, runtime, &call, cx).await,
         "todo_write" => execute_todo_write(state, runtime, &call, cx),
-        "enter_plan_mode" | "exit_plan_mode" | "persistence_decide" | "sleep" | "task"
-        | "computer" | "ask_user_question" => execute_flow_tool(state, runtime, &call, cx).await,
+        "task" => execute_task_tool(state, runtime, &call, cx).await,
+        "enter_plan_mode" | "exit_plan_mode" | "persistence_decide" | "sleep" | "computer"
+        | "ask_user_question" => execute_flow_tool(state, runtime, &call, cx).await,
         _ => {
             let output = json!({"success": false, "error": format!("Unsupported native Backboard IDE tool `{}`.", call.name)});
             emit_tool_result(state, runtime, &call, &output, cx)?;
@@ -741,7 +897,7 @@ async fn execute_flow_tool(
         }
         "task" => json!({
             "success": false,
-            "error": "Native sub-agent task execution is not wired yet. Use direct read/search/edit tools in this session."
+            "error": "Native sub-agent task execution is handled by the dedicated task executor."
         }),
         "computer" => json!({
             "success": false,
@@ -755,6 +911,340 @@ async fn execute_flow_tool(
     };
     emit_tool_result(state, runtime, call, &output, cx)?;
     Ok(output)
+}
+
+async fn run_task_subagent(
+    client: BackboardClient,
+    runtime: SubagentRuntime,
+    call: ToolCallRequest,
+) -> Result<Value> {
+    let prompt = task_prompt(&call).context("task needs prompt or description")?;
+    let description = task_description(&call, &prompt);
+    let assistant = client
+        .create_assistant(CreateAssistantRequest {
+            name: format!("Backboard IDE Subagent: {}", truncate(&description, 80)),
+            description: subagent_system_prompt(&runtime),
+            tools: Some(tool_schemas::read_only_task_tool_definitions()),
+            custom_fact_extraction_prompt: None,
+            custom_update_memory_prompt: None,
+        })
+        .await?;
+    let assistant_id = json_string(&assistant, &["assistant_id", "id"])
+        .context("subagent create assistant response did not include assistant_id")?;
+    let thread = client.create_thread(&assistant_id).await?;
+    let thread_id = json_string(&thread, &["thread_id", "id"])
+        .context("subagent create thread response did not include thread_id")?;
+
+    let content = workspace::augment_prompt(
+        &format!(
+            "Focused read-only sub-agent task:\n\n{prompt}\n\nReturn concise findings for the parent agent. Include file paths and line numbers when useful. Do not edit files or run mutating commands."
+        ),
+        &runtime.workspace,
+        "ask",
+        &[],
+    );
+    let request = SendMessageRequest {
+        thread_id: None,
+        assistant_id: None,
+        content,
+        provider: Some(runtime.provider.clone()),
+        model: Some(runtime.model.clone()),
+        memory: "Off".to_string(),
+        thinking: None,
+        tools: None,
+        web_search: runtime.web_search.clone(),
+        image_generation: None,
+        image_model_provider: None,
+        image_model_name: None,
+        voice: None,
+        send_to_llm: None,
+        mcp_calls: None,
+        max_tokens: None,
+        audio_file: None,
+    };
+    let mut stream = client.send_message_stream(&thread_id, request).await?;
+    let mut content = String::new();
+    let mut current_run_id = None::<String>;
+    let mut tool_rounds = 0usize;
+
+    loop {
+        let mut next_stream = None;
+        while let Some(chunk) = stream.next().await {
+            if runtime
+                .cancel_flag
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return Ok(json!({
+                    "success": false,
+                    "cancelled": true,
+                    "description": description,
+                    "message": "Sub-agent task was cancelled."
+                }));
+            }
+
+            let chunk = chunk?;
+            let chunk_type = chunk
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            match chunk_type {
+                "run_started" => {
+                    current_run_id = chunk
+                        .get("run_id")
+                        .or_else(|| chunk.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                }
+                "content_streaming" => {
+                    if let Some(text) = subagent_chunk_text(&chunk) {
+                        content.push_str(&text);
+                    }
+                }
+                "tool_submit_required" => {
+                    let run_id = chunk
+                        .get("run_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .or_else(|| current_run_id.clone())
+                        .context("subagent tool_submit_required did not include a run id")?;
+                    let tool_calls = chunk
+                        .get("tool_calls")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    tool_rounds += 1;
+                    let outputs = if tool_rounds > SUBAGENT_MAX_TOOL_ROUNDS {
+                        subagent_tool_error_outputs(
+                            tool_calls,
+                            "Sub-agent tool round limit reached.",
+                        )
+                    } else {
+                        subagent_tool_outputs(&runtime.workspace, tool_calls).await
+                    };
+                    next_stream = Some(
+                        client
+                            .submit_tool_outputs_stream(
+                                &thread_id,
+                                &run_id,
+                                SubmitToolOutputsRequest {
+                                    tool_outputs: outputs,
+                                    tools: None,
+                                },
+                            )
+                            .await?,
+                    );
+                    break;
+                }
+                "run_ended" => {
+                    if chunk.get("status").and_then(Value::as_str) == Some("requires_action")
+                        && chunk.get("tool_calls").is_some()
+                    {
+                        let run_id = chunk
+                            .get("run_id")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .or_else(|| current_run_id.clone())
+                            .context("subagent requires_action did not include a run id")?;
+                        let tool_calls = chunk
+                            .get("tool_calls")
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default();
+                        tool_rounds += 1;
+                        let outputs = if tool_rounds > SUBAGENT_MAX_TOOL_ROUNDS {
+                            subagent_tool_error_outputs(
+                                tool_calls,
+                                "Sub-agent tool round limit reached.",
+                            )
+                        } else {
+                            subagent_tool_outputs(&runtime.workspace, tool_calls).await
+                        };
+                        next_stream = Some(
+                            client
+                                .submit_tool_outputs_stream(
+                                    &thread_id,
+                                    &run_id,
+                                    SubmitToolOutputsRequest {
+                                        tool_outputs: outputs,
+                                        tools: None,
+                                    },
+                                )
+                                .await?,
+                        );
+                        break;
+                    }
+                    return subagent_success_output(&runtime.workspace, &description, &content);
+                }
+                "run_failed" | "error" => {
+                    let message = chunk
+                        .get("error")
+                        .or_else(|| chunk.get("message"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("Sub-agent run failed.");
+                    return Ok(json!({
+                        "success": false,
+                        "description": description,
+                        "error": message,
+                        "partial_content": truncate(content.trim(), 2_000),
+                    }));
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(continuation) = next_stream {
+            stream = continuation;
+        } else {
+            break;
+        }
+    }
+
+    subagent_success_output(&runtime.workspace, &description, &content)
+}
+
+fn emit_task_start(
+    state: Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    call: &ToolCallRequest,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let tool_call = acp::ToolCall::new(call.id.clone(), tool_title(call))
+        .kind(acp::ToolKind::Think)
+        .status(acp::ToolCallStatus::InProgress)
+        .content(vec![text_content(
+            "Running a focused read-only sub-agent investigation.",
+        )])
+        .raw_input(Some(call.args.clone()))
+        .meta(meta_with_tool_name(&call.name));
+    emit_tool_call(state, runtime, tool_call, cx)
+}
+
+fn subagent_system_prompt(runtime: &SubagentRuntime) -> String {
+    format!(
+        "{}\n\nSub-agent constraints:\n- You are a focused child agent.\n- Use only read/search tools.\n- Do not edit files, create files, delete files, run mutating commands, or ask the user questions.\n- Return concise findings to the parent agent.",
+        workspace::system_prompt(&runtime.workspace)
+    )
+}
+
+fn task_prompt(call: &ToolCallRequest) -> Option<String> {
+    string_arg(
+        &call.args,
+        &["prompt", "task", "instructions", "description"],
+    )
+}
+
+fn task_description(call: &ToolCallRequest, prompt: &str) -> String {
+    string_arg(&call.args, &["description", "title"])
+        .unwrap_or_else(|| prompt.lines().next().unwrap_or(prompt).trim().to_string())
+}
+
+async fn subagent_tool_outputs(workspace: &Path, tool_calls: Vec<Value>) -> Vec<Value> {
+    let tasks = tool_calls.into_iter().map(|raw_call| {
+        let workspace = workspace.to_path_buf();
+        async move {
+            let call = match parse_tool_call(raw_call.clone()) {
+                Ok(call) => call,
+                Err(error) => {
+                    let call = malformed_tool_call(raw_call, error);
+                    let output = json!({
+                        "success": false,
+                        "error": "Sub-agent received a malformed tool call.",
+                    });
+                    return tool_output_payload(&call, output);
+                }
+            };
+            let output = if is_parallel_read_only(&call) {
+                execute_read_only_tool(&workspace, &call)
+                    .await
+                    .unwrap_or_else(|error| json!({"success": false, "error": error.to_string()}))
+            } else {
+                json!({
+                    "success": false,
+                    "error": format!("{} is not available to read-only sub-agents.", call.name),
+                })
+            };
+            tool_output_payload(&call, output)
+        }
+    });
+    join_all(tasks).await
+}
+
+fn subagent_tool_error_outputs(tool_calls: Vec<Value>, error: &str) -> Vec<Value> {
+    tool_calls
+        .into_iter()
+        .map(|raw_call| {
+            let call = parse_tool_call(raw_call.clone())
+                .unwrap_or_else(|parse_error| malformed_tool_call(raw_call, parse_error));
+            tool_output_payload(&call, json!({"success": false, "error": error}))
+        })
+        .collect()
+}
+
+fn subagent_success_output(workspace: &Path, description: &str, content: &str) -> Result<Value> {
+    let content = content.trim();
+    if content.chars().count() > SUBAGENT_INLINE_RESULT_CHARS {
+        let path = persist_subagent_result(workspace, description, content)?;
+        return Ok(json!({
+            "success": true,
+            "description": description,
+            "content": truncate(content, 2_000),
+            "result_path": path,
+            "message": "Sub-agent completed. Full result was saved to result_path.",
+        }));
+    }
+
+    Ok(json!({
+        "success": true,
+        "description": description,
+        "content": if content.is_empty() {
+            "Sub-agent completed without additional text."
+        } else {
+            content
+        },
+    }))
+}
+
+fn persist_subagent_result(workspace: &Path, description: &str, content: &str) -> Result<String> {
+    let dir = workspace.join(".backboard").join("agent_results");
+    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let file_name = format!("subagent-{}.md", uuid::Uuid::new_v4().simple());
+    let path = dir.join(file_name);
+    fs::write(
+        &path,
+        format!("# Sub-agent result\n\nTask: {description}\n\n{content}\n"),
+    )
+    .with_context(|| format!("writing {}", path.display()))?;
+    Ok(path
+        .strip_prefix(workspace)
+        .unwrap_or(path.as_path())
+        .to_string_lossy()
+        .to_string())
+}
+
+fn subagent_chunk_text(chunk: &Value) -> Option<String> {
+    for key in ["text", "delta", "content", "message"] {
+        if let Some(text) = chunk.get(key).and_then(Value::as_str)
+            && !text.is_empty()
+        {
+            return Some(text.to_string());
+        }
+    }
+    chunk
+        .get("content")
+        .and_then(|content| content.get("text"))
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
+fn json_string(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
 }
 
 fn emit_progress(
@@ -1788,6 +2278,10 @@ fn tool_title(call: &ToolCallRequest) -> String {
             string_arg(&call.args, &["description"])
                 .unwrap_or_else(|| string_arg(&call.args, &["command"]).unwrap_or_default())
         }
+        "task" => task_description(
+            call,
+            &task_prompt(call).unwrap_or_else(|| "Focused sub-agent task".to_string()),
+        ),
         other => other.to_string(),
     }
 }

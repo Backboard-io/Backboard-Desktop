@@ -248,6 +248,27 @@ impl BackboardAgentWorkspaceMode {
     }
 }
 
+#[derive(Clone)]
+pub struct BackboardAgentWorkspaceChatOptions {
+    pub mode: BackboardAgentWorkspaceMode,
+    pub work_dirs: Option<PathList>,
+    pub focus: bool,
+    pub source: &'static str,
+    pub suppress_notifications: bool,
+}
+
+impl Default for BackboardAgentWorkspaceChatOptions {
+    fn default() -> Self {
+        Self {
+            mode: BackboardAgentWorkspaceMode::Free,
+            work_dirs: None,
+            focus: true,
+            source: "agent_workspace",
+            suppress_notifications: false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BackboardAgentRunStatus {
     Queued,
@@ -1648,6 +1669,17 @@ impl AgentPanel {
         }));
     }
 
+    fn defer_serialize(cx: &mut Context<Self>) {
+        let panel = cx.weak_entity();
+        cx.defer(move |cx| {
+            panel
+                .update(cx, |panel, cx| {
+                    panel.serialize(cx);
+                })
+                .ok();
+        });
+    }
+
     pub fn load(
         workspace: WeakEntity<Workspace>,
         mut cx: AsyncWindowContext,
@@ -1782,6 +1814,18 @@ impl AgentPanel {
             })?;
 
             Ok(panel)
+        })
+    }
+
+    pub fn ensure_attached(
+        workspace: &mut Workspace,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) -> Entity<Self> {
+        workspace.panel::<Self>(cx).unwrap_or_else(|| {
+            let panel = cx.new(|cx| Self::new(workspace, None, window, cx));
+            workspace.add_panel(panel.clone(), window, cx);
+            panel
         })
     }
 
@@ -4023,8 +4067,23 @@ impl AgentPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<ThreadId> {
+        self.create_backboard_workspace_chat_with_options(
+            BackboardAgentWorkspaceChatOptions::default(),
+            window,
+            cx,
+        )
+    }
+
+    pub fn create_backboard_workspace_chat_with_options(
+        &mut self,
+        options: BackboardAgentWorkspaceChatOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<ThreadId> {
         if let Some(thread_id) = self.active_backboard_workspace_draft_thread_id(cx) {
-            self.focus_handle(cx).focus(window, cx);
+            if options.focus {
+                self.focus_handle(cx).focus(window, cx);
+            }
             return Some(thread_id);
         }
 
@@ -4038,21 +4097,26 @@ impl AgentPanel {
             Agent::NativeAgent,
             Rc::new(BackboardAgentServer::with_default_mode(
                 AgentId::new(BACKBOARD_AGENT_ID),
-                BackboardAgentWorkspaceMode::Free.session_mode_id(),
+                options.mode.session_mode_id(),
             )),
         );
         let thread = self.create_agent_thread_with_server(
             agent.clone(),
             Some(server_override),
             None,
+            options.work_dirs,
             None,
             None,
-            None,
-            "agent_workspace",
+            options.source,
             window,
             cx,
         );
         let conversation_view = thread.conversation_view;
+        if options.suppress_notifications {
+            conversation_view.update(cx, |conversation_view, _cx| {
+                conversation_view.set_suppress_notifications(true);
+            });
+        }
         let thread_id = conversation_view.read(cx).parent_id();
         self.selected_agent = agent;
         self.draft_thread = Some(conversation_view.clone());
@@ -4060,29 +4124,100 @@ impl AgentPanel {
         self.observe_draft_editor(&conversation_view, cx);
         self.set_base_view(
             BaseView::AgentThread { conversation_view },
-            true,
+            options.focus,
             window,
             cx,
         );
-        self.set_last_created_entry_kind(AgentPanelEntryKind::Thread, cx);
-        self.serialize(cx);
+        self.last_created_entry_kind = AgentPanelEntryKind::Thread;
+        Self::defer_serialize(cx);
         cx.notify();
         Some(thread_id)
     }
 
-    pub fn active_backboard_workspace_draft_thread_id(&self, cx: &App) -> Option<ThreadId> {
-        let conversation_view = self.active_conversation_view()?;
-        self.is_unpromoted_backboard_workspace_draft(conversation_view, cx)
-            .then(|| conversation_view.read(cx).parent_id())
+    pub fn open_backboard_workspace_chat_from_thread_id(
+        &mut self,
+        thread_id: ThreadId,
+        options: BackboardAgentWorkspaceChatOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<ConversationView>> {
+        if let Some(store) = ThreadMetadataStore::try_global(cx) {
+            store.update(cx, |store, cx| {
+                store.unarchive(thread_id, cx);
+            });
+        }
+
+        if let Some(conversation_view) = self.backboard_workspace_conversation_view(thread_id, cx) {
+            if self.active_thread_id(cx) != Some(thread_id) {
+                self.activate_retained_thread(thread_id, options.focus, window, cx);
+            } else {
+                self.clear_overlay_state();
+                cx.emit(AgentPanelEvent::ActiveViewChanged);
+            }
+
+            if options.suppress_notifications {
+                conversation_view.update(cx, |conversation_view, _cx| {
+                    conversation_view.set_suppress_notifications(true);
+                });
+            }
+            return Some(conversation_view);
+        }
+
+        let metadata = ThreadMetadataStore::try_global(cx)
+            .and_then(|store| store.read(cx).entry(thread_id).cloned())?;
+        let title = metadata.title.clone();
+
+        #[cfg(any(test, feature = "test-support"))]
+        let (agent, server_override): (Agent, Rc<dyn AgentServer>) = (
+            Agent::Stub,
+            Rc::new(crate::test_support::StubAgentServer::default_response()),
+        );
+        #[cfg(not(any(test, feature = "test-support")))]
+        let (agent, server_override): (Agent, Rc<dyn AgentServer>) = (
+            Agent::from(metadata.agent_id.clone()),
+            Rc::new(BackboardAgentServer::with_default_mode(
+                AgentId::new(BACKBOARD_AGENT_ID),
+                options.mode.session_mode_id(),
+            )),
+        );
+
+        let thread = self.create_agent_thread_with_server(
+            agent.clone(),
+            Some(server_override),
+            Some(thread_id),
+            options.work_dirs,
+            title,
+            None,
+            options.source,
+            window,
+            cx,
+        );
+        let conversation_view = thread.conversation_view;
+        if options.suppress_notifications {
+            conversation_view.update(cx, |conversation_view, _cx| {
+                conversation_view.set_suppress_notifications(true);
+            });
+        }
+        self.selected_agent = agent;
+        self.set_base_view(
+            BaseView::AgentThread {
+                conversation_view: conversation_view.clone(),
+            },
+            options.focus,
+            window,
+            cx,
+        );
+        Some(conversation_view)
     }
 
-    fn is_unpromoted_backboard_workspace_draft(
-        &self,
-        conversation_view: &Entity<ConversationView>,
-        cx: &App,
-    ) -> bool {
-        let conversation = conversation_view.read(cx);
-        let thread_id = conversation.parent_id();
+    pub fn active_backboard_workspace_draft_thread_id(&self, cx: &App) -> Option<ThreadId> {
+        let conversation_view = self.active_conversation_view()?;
+        let thread_id = conversation_view.read(cx).parent_id();
+        self.is_unpromoted_backboard_workspace_draft_thread(thread_id)
+            .then_some(thread_id)
+    }
+
+    pub fn is_unpromoted_backboard_workspace_draft_thread(&self, thread_id: ThreadId) -> bool {
         if self.backboard_workspace_runs.contains_key(&thread_id) {
             return false;
         }
@@ -4092,6 +4227,29 @@ impl AgentPanel {
 
     pub fn promote_active_backboard_workspace_draft(
         &mut self,
+        prompt: String,
+        scope: BackboardAgentWorkspaceScope,
+        kind: BackboardAgentWorkspaceKind,
+        mode: BackboardAgentWorkspaceMode,
+        cx: &mut Context<Self>,
+    ) -> Option<ThreadId> {
+        let conversation_view = self.active_conversation_view()?.clone();
+        let thread_id = conversation_view.read(cx).parent_id();
+        self.promote_backboard_workspace_draft_thread(
+            thread_id,
+            conversation_view,
+            prompt,
+            scope,
+            kind,
+            mode,
+            cx,
+        )
+    }
+
+    pub fn promote_backboard_workspace_draft_thread(
+        &mut self,
+        thread_id: ThreadId,
+        conversation_view: Entity<ConversationView>,
         prompt: String,
         scope: BackboardAgentWorkspaceScope,
         kind: BackboardAgentWorkspaceKind,
@@ -4112,12 +4270,10 @@ impl AgentPanel {
             return None;
         }
 
-        let conversation_view = self.active_conversation_view()?.clone();
-        if !self.is_unpromoted_backboard_workspace_draft(&conversation_view, cx) {
+        if !self.is_unpromoted_backboard_workspace_draft_thread(thread_id) {
             return None;
         }
 
-        let thread_id = conversation_view.read(cx).parent_id();
         let title = workspace_agent_prompt_title(&prompt);
         let batch_id = workspace_agent_batch_id();
         let workspace_path = current_workspace_agent_path(self.project.read(cx), cx);
@@ -4161,8 +4317,8 @@ impl AgentPanel {
             batch_id,
             auto_select: false,
         });
-        self.set_last_created_entry_kind(AgentPanelEntryKind::Thread, cx);
-        self.serialize(cx);
+        self.last_created_entry_kind = AgentPanelEntryKind::Thread;
+        Self::defer_serialize(cx);
         cx.notify();
         Some(thread_id)
     }
@@ -5312,22 +5468,23 @@ impl AgentPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Subscription> {
+        let conversation_view = server_view.clone();
+        let thread_id = server_view.read(cx).parent_id();
         server_view.read(cx).root_thread_view().map(|tv| {
+            let message_editor = tv.read(cx).message_editor.clone();
             cx.subscribe_in(
                 &tv,
                 window,
-                |this, view, event: &AcpThreadViewEvent, window, cx| match event {
+                move |this, _view, event: &AcpThreadViewEvent, window, cx| match event {
                     AcpThreadViewEvent::Interacted => {
-                        let Some(thread_id) = this.active_thread_id(cx) else {
-                            return;
-                        };
                         if this.agent_workspace_page_visible(window, cx)
-                            && this.active_backboard_workspace_draft_thread_id(cx)
-                                == Some(thread_id)
+                            && this.is_unpromoted_backboard_workspace_draft_thread(thread_id)
                         {
-                            let prompt = view.read(cx).message_editor.read(cx).text(cx);
+                            let prompt = message_editor.read(cx).text(cx);
                             if this
-                                .promote_active_backboard_workspace_draft(
+                                .promote_backboard_workspace_draft_thread(
+                                    thread_id,
+                                    conversation_view.clone(),
                                     prompt,
                                     BackboardAgentWorkspaceScope::WholeProject,
                                     BackboardAgentWorkspaceKind::Build,
@@ -8661,6 +8818,96 @@ mod tests {
         assert_eq!(metadata.batch_size, 0);
         assert_eq!(metadata.mode, BackboardAgentWorkspaceMode::Free);
         assert!(!metadata.current_workspace);
+    }
+
+    #[gpui::test]
+    async fn test_workspace_chat_options_promote_and_restore_thread(cx: &mut TestAppContext) {
+        let (panel, mut cx) = setup_panel(cx).await;
+        let work_dirs = PathList::new(&[PathBuf::from("/project")]);
+
+        let thread_id = panel
+            .update_in(&mut cx, |panel, window, cx| {
+                panel.create_backboard_workspace_chat_with_options(
+                    BackboardAgentWorkspaceChatOptions {
+                        mode: BackboardAgentWorkspaceMode::Ask,
+                        work_dirs: Some(work_dirs.clone()),
+                        focus: false,
+                        source: "beginner_ui",
+                        suppress_notifications: true,
+                    },
+                    window,
+                    cx,
+                )
+            })
+            .expect("options should create a Backboard workspace draft");
+        cx.run_until_parked();
+
+        panel.read_with(&cx, |panel, cx| {
+            assert_eq!(
+                panel.active_backboard_workspace_draft_thread_id(cx),
+                Some(thread_id)
+            );
+            assert!(panel.backboard_agent_run_summaries(cx).is_empty());
+            let thread = panel
+                .active_agent_thread(cx)
+                .expect("draft should expose a root thread");
+            let paths = thread
+                .read(cx)
+                .work_dirs()
+                .expect("draft should receive configured work dirs")
+                .ordered_paths()
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(paths, vec![PathBuf::from("/project")]);
+        });
+
+        panel.update(&mut cx, |panel, cx| {
+            assert_eq!(
+                panel.promote_active_backboard_workspace_draft(
+                    "build the simple page".to_string(),
+                    BackboardAgentWorkspaceScope::WholeProject,
+                    BackboardAgentWorkspaceKind::Build,
+                    BackboardAgentWorkspaceMode::Ask,
+                    cx,
+                ),
+                Some(thread_id)
+            );
+        });
+
+        panel.read_with(&cx, |panel, cx| {
+            assert!(panel.is_retained_thread(&thread_id));
+            let summary = panel
+                .backboard_agent_run_summaries(cx)
+                .into_iter()
+                .find(|summary| summary.thread_id == thread_id)
+                .expect("promoted draft should appear as a Backboard workspace run");
+            assert_eq!(summary.command.as_ref(), "build the simple page");
+        });
+
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.create_backboard_workspace_chat(window, cx);
+            panel.open_backboard_workspace_chat_from_thread_id(
+                thread_id,
+                BackboardAgentWorkspaceChatOptions {
+                    mode: BackboardAgentWorkspaceMode::Ask,
+                    work_dirs: Some(work_dirs),
+                    focus: false,
+                    source: "beginner_ui",
+                    suppress_notifications: true,
+                },
+                window,
+                cx,
+            )
+        });
+
+        panel.read_with(&cx, |panel, cx| {
+            assert_eq!(panel.active_thread_id(cx), Some(thread_id));
+            assert!(
+                panel
+                    .backboard_workspace_conversation_view(thread_id, cx)
+                    .is_some()
+            );
+        });
     }
 
     #[gpui::test]

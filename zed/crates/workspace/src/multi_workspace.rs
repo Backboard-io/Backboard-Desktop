@@ -2717,6 +2717,14 @@ impl MultiWorkspace {
         }
     }
 
+    fn workspace_mode_target_icon(target: WorkspaceModeTarget) -> IconName {
+        match target {
+            WorkspaceModeTarget::Simple => IconName::Sparkle,
+            WorkspaceModeTarget::CodeEditor => IconName::Code,
+            WorkspaceModeTarget::AgentWorkspace => IconName::ZedAgent,
+        }
+    }
+
     fn open_workspace_mode_target(
         &mut self,
         target: WorkspaceModeTarget,
@@ -2745,34 +2753,16 @@ impl MultiWorkspace {
         let id = Self::workspace_mode_target_id(target);
         let label = Self::workspace_mode_target_label(target);
         let tooltip = Self::workspace_mode_target_tooltip(target);
-        let colors = cx.theme().colors();
-        let pill_bg = colors
-            .element_background
-            .blend(colors.panel_background.opacity(0.18));
-        let pill_border = colors.border_variant.opacity(0.56);
-        let hover_bg = colors.element_hover.opacity(0.68);
 
-        h_flex()
-            .id(id)
-            .h(px(26.))
-            .items_center()
-            .justify_start()
-            .px_2p5()
-            .rounded_full()
-            .border_1()
-            .border_color(pill_border)
-            .bg(pill_bg)
-            .cursor_pointer()
-            .hover(move |style| style.bg(hover_bg))
+        Button::new(id, label)
+            .style(ButtonStyle::Subtle)
+            .size(ButtonSize::Compact)
+            .label_size(LabelSize::XSmall)
+            .start_icon(Icon::new(Self::workspace_mode_target_icon(target)).size(IconSize::XSmall))
             .tooltip(Tooltip::text(tooltip))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_workspace_mode_target(target, window, cx);
             }))
-            .child(
-                Label::new(label)
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-            )
             .into_any_element()
     }
 

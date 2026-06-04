@@ -609,6 +609,31 @@ impl ConversationView {
         });
     }
 
+    pub fn set_root_message_text(
+        &self,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if text.trim().is_empty() {
+            return false;
+        }
+
+        let Some(root_thread) = self.root_thread_view() else {
+            return false;
+        };
+        root_thread.update(cx, |thread, cx| {
+            thread.message_editor.update(cx, |editor, cx| {
+                editor.set_message(
+                    vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
+                    window,
+                    cx,
+                );
+            });
+        });
+        true
+    }
+
     pub fn root_message_editor_is_empty(&self, cx: &App) -> Option<bool> {
         let root_thread = self.root_thread_view()?;
         Some(root_thread.read(cx).message_editor.read(cx).is_empty(cx))
@@ -627,10 +652,7 @@ impl ConversationView {
         let Some(root_thread) = self.root_thread_view() else {
             return false;
         };
-        root_thread.update(cx, |thread, cx| {
-            thread.send(window, cx);
-        });
-        true
+        root_thread.update(cx, |thread, cx| thread.try_send(window, cx))
     }
 
     pub fn set_root_prompt_prefix(
