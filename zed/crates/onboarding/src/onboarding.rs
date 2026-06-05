@@ -3,10 +3,10 @@ use anyhow::Context as _;
 use db::kvp::KeyValueStore;
 use fs::Fs;
 use gpui::{
-    Action, Animation, AnimationExt as _, AnyElement, App, AppContext, AsyncWindowContext, Context,
-    DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Global, IntoElement, KeyContext,
-    MouseButton, ObjectFit, Render, ScrollHandle, SharedString, Subscription, Task, TaskExt as _,
-    WeakEntity, Window, actions, img, pulsating_between,
+    Action, AnyElement, App, AppContext, AsyncWindowContext, Context, DismissEvent, Entity,
+    EventEmitter, FocusHandle, Focusable, Global, IntoElement, KeyContext, MouseButton, ObjectFit,
+    Render, ScrollHandle, SharedString, Subscription, Task, TaskExt as _, WeakEntity, Window,
+    actions, img,
 };
 use notifications::status_toast::StatusToast;
 use schemars::JsonSchema;
@@ -15,7 +15,7 @@ use settings::{SettingsStore, VsCodeSettingsSource};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use ui::{
     Divider, IconName, IconSize, KeyBinding, ParentElement as _, StatefulInteractiveElement,
@@ -60,9 +60,6 @@ pub const EXPERIENCE_LEVEL_KVP_KEY: &str = "backboard_experience_level";
 const BACKBOARD_DASHBOARD_URL: &str = "https://app.backboard.io/dashboard";
 const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
 const TOUR_TEST_PROMPT: &str = "In this sample repo, add a completed-task counter to the app. Update the tests and run `npm test`.";
-const SPLASH_LOGO_PATH: &str = "images/animation_logo.png";
-const SPLASH_LOGO_SIZE: f32 = 280.;
-const WELCOME_LOGO_SIZE: f32 = 184.;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ExperienceLevel {
@@ -95,7 +92,6 @@ impl ExperienceLevel {
 
 #[derive(Clone, Copy)]
 enum OnboardingStep {
-    Splash,
     Welcome,
     ExperiencePicker,
     Setup(ExperienceLevel),
@@ -336,8 +332,7 @@ fn open_onboarding(reset_to_start: bool, cx: &mut App) {
                 if let Some(existing) = existing {
                     if reset_to_start {
                         existing.update(cx, |existing, cx| {
-                            existing.restart_splash(cx);
-                            cx.notify();
+                            existing.reset_to_start(cx);
                         });
                     }
                     workspace.activate_item(&existing, true, true, window, cx);
@@ -407,26 +402,10 @@ struct Onboarding {
     focus_handle: FocusHandle,
     scroll_handle: ScrollHandle,
     step: OnboardingStep,
-    splash_frame: usize,
-    _splash_task: Option<Task<()>>,
     _settings_subscription: Subscription,
 }
 
 impl Onboarding {
-    const SPLASH_LINES: [&'static str; 11] = [
-        "                 ████",
-        "                 ████",
-        "            ███  ████",
-        "            ███  ████",
-        "       ███  ███  ████",
-        "       ███  ███  ████",
-        "  ███  ███  ███  ████     ███  ███",
-        "  ███  ███  ███  ████     ███  ███",
-        "                 ████     ███  ███",
-        "                 ████     ███",
-        "                 ████",
-    ];
-
     fn new(_workspace: &Workspace, _window: &mut Window, cx: &mut App) -> Entity<Self> {
         let font_family_cache = theme::FontFamilyCache::global(cx);
 
@@ -434,8 +413,6 @@ impl Onboarding {
         Self::preload_onboarding_assets(cx);
 
         cx.new(|cx| {
-            let splash_task = Self::spawn_splash_task(cx);
-
             cx.spawn(async move |this, cx| {
                 font_family_cache.prefetch(cx).await;
                 this.update(cx, |_, cx| {
@@ -447,9 +424,7 @@ impl Onboarding {
             Self {
                 focus_handle: cx.focus_handle(),
                 scroll_handle: ScrollHandle::new(),
-                step: OnboardingStep::Splash,
-                splash_frame: 0,
-                _splash_task: Some(splash_task),
+                step: OnboardingStep::Welcome,
                 _settings_subscription: cx
                     .observe_global::<SettingsStore>(move |_, cx| cx.notify()),
             }
@@ -462,7 +437,6 @@ impl Onboarding {
             "onboarding/simple_dark.png",
             "onboarding/dev.png",
             "onboarding/dev_dark.png",
-            SPLASH_LOGO_PATH,
             "onboarding/Visual_Studio_Code_1.35_icon.svg.png",
             "onboarding/cursor-logo-png_seeklogo-611587.png",
         ] {
@@ -472,36 +446,9 @@ impl Onboarding {
         }
     }
 
-    fn spawn_splash_task(cx: &mut Context<Self>) -> Task<()> {
-        cx.spawn(async move |this, cx| {
-            for frame in 1..=Self::SPLASH_LINES.len() {
-                cx.background_executor()
-                    .timer(Duration::from_millis(150))
-                    .await;
-                this.update(cx, |this, cx| {
-                    this.splash_frame = frame;
-                    cx.notify();
-                })
-                .ok();
-            }
-
-            cx.background_executor()
-                .timer(Duration::from_millis(850))
-                .await;
-            this.update(cx, |this, cx| {
-                if matches!(this.step, OnboardingStep::Splash) {
-                    this.step = OnboardingStep::Welcome;
-                    cx.notify();
-                }
-            })
-            .ok();
-        })
-    }
-
-    fn restart_splash(&mut self, cx: &mut Context<Self>) {
-        self.step = OnboardingStep::Splash;
-        self.splash_frame = 0;
-        self._splash_task = Some(Self::spawn_splash_task(cx));
+    fn reset_to_start(&mut self, cx: &mut Context<Self>) {
+        self.step = OnboardingStep::Welcome;
+        cx.notify();
     }
 
     fn on_finish(&mut self, _: &Finish, window: &mut Window, cx: &mut Context<Self>) {
@@ -513,9 +460,7 @@ impl Onboarding {
             }
             OnboardingStep::ImportSettings(level) => level,
             OnboardingStep::Setup(level) => level,
-            OnboardingStep::Splash | OnboardingStep::Welcome | OnboardingStep::ExperiencePicker => {
-                return;
-            }
+            OnboardingStep::Welcome | OnboardingStep::ExperiencePicker => return,
         };
 
         self.finish_setup(level, window, cx);
@@ -758,9 +703,7 @@ console.log("sample app tests passed");
         match self.step {
             OnboardingStep::Setup(level) if Self::shows_import_settings_step(level) => "Continue",
             OnboardingStep::ImportSettings(_) | OnboardingStep::Setup(_) => "Finish Setup",
-            OnboardingStep::Splash | OnboardingStep::Welcome | OnboardingStep::ExperiencePicker => {
-                "Finish Setup"
-            }
+            OnboardingStep::Welcome | OnboardingStep::ExperiencePicker => "Finish Setup",
         }
     }
 
@@ -775,7 +718,6 @@ console.log("sample app tests passed");
 
     fn render_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
         match self.step {
-            OnboardingStep::Splash => self.render_splash(cx),
             OnboardingStep::Welcome => self.render_welcome(cx),
             OnboardingStep::ExperiencePicker => self.render_experience_picker(cx),
             OnboardingStep::Setup(level) => {
@@ -785,38 +727,6 @@ console.log("sample app tests passed");
                 crate::import_settings_page::render_import_settings_page(cx).into_any_element()
             }
         }
-    }
-
-    fn render_pulsing_logo(&self, size: f32, animation_id: &'static str) -> impl IntoElement {
-        img(SPLASH_LOGO_PATH)
-            .size(px(size))
-            .object_fit(ObjectFit::Contain)
-            .with_fallback(move || div().size(px(size)).into_any_element())
-            .with_animation(
-                animation_id,
-                Animation::new(Duration::from_millis(1600))
-                    .repeat()
-                    .with_easing(pulsating_between(0.72, 1.)),
-                |logo, opacity| logo.opacity(opacity),
-            )
-    }
-
-    fn render_splash_logo(&self) -> impl IntoElement {
-        self.render_pulsing_logo(SPLASH_LOGO_SIZE, "onboarding-splash-logo-pulse")
-    }
-
-    fn render_splash(&mut self, _cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                v_flex()
-                    .items_center()
-                    .child(div().child(self.render_splash_logo())),
-            )
-            .into_any_element()
     }
 
     fn render_welcome(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -832,12 +742,6 @@ console.log("sample app tests passed");
                     .max_w(rems_from_px(420.))
                     .items_center()
                     .gap_6()
-                    .child(div().mb_1().child(
-                        self.render_pulsing_logo(
-                            WELCOME_LOGO_SIZE,
-                            "onboarding-welcome-logo-pulse",
-                        ),
-                    ))
                     .child(
                         v_flex()
                             .w_full()
@@ -1034,7 +938,6 @@ console.log("sample app tests passed");
                     "onboarding/simple_dark.png",
                     "onboarding/dev.png",
                     "onboarding/dev_dark.png",
-                    SPLASH_LOGO_PATH,
                     "onboarding/Visual_Studio_Code_1.35_icon.svg.png",
                     "onboarding/cursor-logo-png_seeklogo-611587.png",
                 ]
@@ -1054,8 +957,7 @@ impl Render for Onboarding {
             self.step,
             OnboardingStep::Setup(_) | OnboardingStep::ImportSettings(_)
         );
-        let is_splash = matches!(self.step, OnboardingStep::Splash);
-        let is_intro = matches!(self.step, OnboardingStep::Splash | OnboardingStep::Welcome);
+        let is_intro = matches!(self.step, OnboardingStep::Welcome);
         let is_experience_picker = matches!(self.step, OnboardingStep::ExperiencePicker);
         let primary_setup_action_label = self.primary_setup_action_label();
 
@@ -1100,9 +1002,6 @@ impl Render for Onboarding {
                             .mx_auto()
                             .p_12()
                             .gap_6()
-                            .when(is_splash, |this| {
-                                this.size_full().max_w_full().p_0().gap_0()
-                            })
                             .when(!is_intro, |this| {
                                 this.child(
                                     h_flex()

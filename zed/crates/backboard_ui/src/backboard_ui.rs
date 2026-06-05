@@ -235,6 +235,7 @@ pub struct BackboardPanel {
     model_picker_open: bool,
     selected_provider: Option<String>,
     selected_model: Option<String>,
+    thread_id: Option<String>,
     configuring_api_key: bool,
     is_zoomed: bool,
     _workspace_subscription: Option<Subscription>,
@@ -267,6 +268,7 @@ enum BackboardUiEvent {
     Append { index: usize, text: String },
     Activity(String),
     FileChange(FileChange),
+    ThreadBound(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -935,8 +937,8 @@ impl BackboardPanel {
         let config = backboard::BackboardConfig::load_or_default();
         let api_ready = config.api_key().is_some();
         let status = Self::status_for_config(&config, api_ready);
-        let selected_provider = config.default_provider;
-        let selected_model = config.default_model;
+        let selected_provider = None;
+        let selected_model = None;
 
         let api_key_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
@@ -1013,6 +1015,7 @@ impl BackboardPanel {
             model_picker_open: api_ready && selected_model.is_none(),
             selected_provider,
             selected_model,
+            thread_id: None,
             configuring_api_key: false,
             is_zoomed: false,
             _workspace_subscription: workspace_subscription,
@@ -1050,6 +1053,7 @@ impl BackboardPanel {
         self.file_changes.clear();
         self.files_changed_open = true;
         self.activity_open = false;
+        self.thread_id = None;
         cx.notify();
     }
 
@@ -1057,8 +1061,6 @@ impl BackboardPanel {
         let config = backboard::BackboardConfig::load_or_default();
         self.api_ready = config.api_key().is_some();
         self.status = Self::status_for_config(&config, self.api_ready);
-        self.selected_provider = config.default_provider;
-        self.selected_model = config.default_model;
         if !self.api_ready {
             self.configuring_api_key = false;
             self.model_picker_open = false;
@@ -1194,17 +1196,10 @@ impl BackboardPanel {
     }
 
     fn select_model(&mut self, provider: String, model: String, cx: &mut Context<Self>) {
-        match backboard::BackboardConfig::save_model_selection(provider.clone(), model.clone()) {
-            Ok(_) => {
-                self.selected_provider = Some(provider.clone());
-                self.selected_model = Some(model.clone());
-                self.model_status = format!("Using {provider}/{model}");
-                self.model_picker_open = false;
-            }
-            Err(error) => {
-                self.model_status = format!("Could not save model: {error:#}");
-            }
-        }
+        self.selected_provider = Some(provider.clone());
+        self.selected_model = Some(model.clone());
+        self.model_status = format!("Using {provider}/{model}");
+        self.model_picker_open = false;
         cx.notify();
     }
 
@@ -1243,6 +1238,7 @@ impl BackboardPanel {
         let workspace_root = self.workspace_root(cx);
         let selected_provider = self.selected_provider.clone();
         let selected_model = self.selected_model.clone();
+        let thread_id = self.thread_id.clone();
         let response_index = self.messages.len() + 1;
 
         self.messages
@@ -1300,6 +1296,7 @@ impl BackboardPanel {
                 prompt,
                 selected_provider,
                 selected_model,
+                thread_id,
                 workspace_root,
                 response_index,
                 tx,
@@ -1319,6 +1316,9 @@ impl BackboardPanel {
                         }
                         BackboardUiEvent::FileChange(file_change) => {
                             this.record_file_change(file_change);
+                        }
+                        BackboardUiEvent::ThreadBound(thread_id) => {
+                            this.thread_id = Some(thread_id);
                         }
                     }
                     cx.notify();
@@ -2608,16 +2608,16 @@ async fn send_backboard_prompt(
     prompt: String,
     provider: Option<String>,
     model: Option<String>,
+    existing_thread_id: Option<String>,
     workspace_root: Option<PathBuf>,
     response_index: usize,
     tx: async_channel::Sender<BackboardUiEvent>,
 ) -> Result<()> {
     let config = backboard::BackboardConfig::load()?;
-    let client = backboard::BackboardClient::from_config(config.clone())?;
-    let (assistant_id, thread_id) = ensure_session(&client, config).await?;
-    backboard::BackboardConfig::save_session(Some(assistant_id), Some(thread_id.clone()))?;
+    let client = backboard::BackboardClient::from_config(config)?;
 
     let request = backboard::SendMessageRequest {
+        thread_id: existing_thread_id.clone(),
         content: prompt,
         provider,
         model,
@@ -2626,9 +2626,22 @@ async fn send_backboard_prompt(
     };
 
     let mut current_run_id = None;
-    let mut stream = client.send_message_stream(&thread_id, request).await?;
+    let mut thread_id = existing_thread_id;
+    let mut stream = client.send_message_stream(request).await?;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
+        if let Some(returned_thread_id) = backboard::message_thread_id(&chunk) {
+            if thread_id.as_deref() != Some(returned_thread_id.as_str()) {
+                thread_id = Some(returned_thread_id.clone());
+                if tx
+                    .send(BackboardUiEvent::ThreadBound(returned_thread_id))
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+            }
+        }
         if let Some(run_id) = run_id_from_chunk(&chunk) {
             current_run_id = Some(run_id);
         }
@@ -2639,6 +2652,14 @@ async fn send_backboard_prompt(
                 push_activity_event(
                     &tx,
                     "Backboard requested tools but did not include a run id.",
+                )
+                .await;
+                continue;
+            };
+            let Some(thread_id) = thread_id.clone() else {
+                push_activity_event(
+                    &tx,
+                    "Backboard requested tools before returning a thread id.",
                 )
                 .await;
                 continue;
@@ -2654,7 +2675,13 @@ async fn send_backboard_prompt(
                 push_activity_event(&tx, activity).await;
             }
             for file_change in file_changes {
-                let _ = tx.send(BackboardUiEvent::FileChange(file_change)).await;
+                if tx
+                    .send(BackboardUiEvent::FileChange(file_change))
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
             }
             push_activity_event(
                 &tx,
@@ -2673,50 +2700,23 @@ async fn send_backboard_prompt(
                 .await?;
             while let Some(chunk) = tool_stream.next().await {
                 let chunk = chunk?;
+                if let Some(returned_thread_id) = backboard::message_thread_id(&chunk) {
+                    if thread_id.as_str() != returned_thread_id.as_str() {
+                        if tx
+                            .send(BackboardUiEvent::ThreadBound(returned_thread_id))
+                            .await
+                            .is_err()
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
                 handle_stream_text(&tx, response_index, &chunk).await;
             }
         }
     }
 
     Ok(())
-}
-
-async fn ensure_session(
-    client: &backboard::BackboardClient,
-    config: backboard::BackboardConfig,
-) -> Result<(String, String)> {
-    let assistant_id = if let Some(assistant_id) = config.assistant_id.clone() {
-        assistant_id
-    } else {
-        let assistant = client
-            .create_assistant(backboard::CreateAssistantRequest {
-                name: "Backboard IDE".into(),
-                description: "Backboard running inside the Backboard Studio agent panel.".into(),
-                tools: Some(file_tools()),
-                ..Default::default()
-            })
-            .await?;
-        extract_id(&assistant).context("Backboard create_assistant did not return an id")?
-    };
-
-    let thread_id = if let Some(thread_id) = config.thread_id.clone() {
-        thread_id
-    } else {
-        let thread = client.create_thread(&assistant_id).await?;
-        extract_id(&thread).context("Backboard create_thread did not return an id")?
-    };
-
-    Ok((assistant_id, thread_id))
-}
-
-fn extract_id(value: &Value) -> Option<String> {
-    value
-        .get("id")
-        .or_else(|| value.pointer("/assistant/id"))
-        .or_else(|| value.pointer("/thread/id"))
-        .or_else(|| value.pointer("/data/id"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
 }
 
 async fn handle_stream_text(
@@ -2731,19 +2731,29 @@ async fn handle_stream_text(
         return;
     };
 
-    let _ = tx
+    if tx
         .send(BackboardUiEvent::Append {
             index: response_index,
             text,
         })
-        .await;
+        .await
+        .is_err()
+    {
+        return;
+    }
 }
 
 async fn push_activity_event(
     tx: &async_channel::Sender<BackboardUiEvent>,
     activity: impl Into<String>,
 ) {
-    let _ = tx.send(BackboardUiEvent::Activity(activity.into())).await;
+    if tx
+        .send(BackboardUiEvent::Activity(activity.into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
 }
 
 fn text_from_chunk(chunk: &Value) -> Option<String> {

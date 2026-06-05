@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File},
+    fs,
     io::{BufRead, BufReader},
     net::{IpAddr, ToSocketAddrs},
     path::{Component, Path, PathBuf},
@@ -11,9 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ::backboard::{
-    BackboardClient, CreateAssistantRequest, SendMessageRequest, SubmitToolOutputsRequest,
-};
+use ::backboard::{BackboardClient, SendMessageRequest, SubmitToolOutputsRequest};
 use acp_thread::{
     AuthorizationKind, PermissionOptions, RequestPermissionOutcome, TerminalProviderEvent,
 };
@@ -28,9 +26,7 @@ use terminal::TerminalBuilder;
 use terminal::terminal_settings::{AlternateScroll, CursorShape};
 use walkdir::WalkDir;
 
-use super::{
-    BackboardNativeState, SessionRuntime, index, mcp, rounded_ms, tool_schemas, workspace,
-};
+use super::{BackboardNativeState, SessionRuntime, mcp, rounded_ms, tool_schemas, workspace};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_SEARCH_RESULTS: usize = 120;
@@ -920,24 +916,10 @@ async fn run_task_subagent(
 ) -> Result<Value> {
     let prompt = task_prompt(&call).context("task needs prompt or description")?;
     let description = task_description(&call, &prompt);
-    let assistant = client
-        .create_assistant(CreateAssistantRequest {
-            name: format!("Backboard IDE Subagent: {}", truncate(&description, 80)),
-            description: subagent_system_prompt(&runtime),
-            tools: Some(tool_schemas::read_only_task_tool_definitions()),
-            custom_fact_extraction_prompt: None,
-            custom_update_memory_prompt: None,
-        })
-        .await?;
-    let assistant_id = json_string(&assistant, &["assistant_id", "id"])
-        .context("subagent create assistant response did not include assistant_id")?;
-    let thread = client.create_thread(&assistant_id).await?;
-    let thread_id = json_string(&thread, &["thread_id", "id"])
-        .context("subagent create thread response did not include thread_id")?;
-
     let content = workspace::augment_prompt(
         &format!(
-            "Focused read-only sub-agent task:\n\n{prompt}\n\nReturn concise findings for the parent agent. Include file paths and line numbers when useful. Do not edit files or run mutating commands."
+            "{}\n\nFocused read-only sub-agent task:\n\n{prompt}\n\nReturn concise findings for the parent agent. Include file paths and line numbers when useful. Do not edit files or run mutating commands.",
+            subagent_system_prompt(&runtime)
         ),
         &runtime.workspace,
         "ask",
@@ -951,7 +933,7 @@ async fn run_task_subagent(
         model: Some(runtime.model.clone()),
         memory: "Off".to_string(),
         thinking: None,
-        tools: None,
+        tools: Some(tool_schemas::read_only_task_tool_definitions()),
         web_search: runtime.web_search.clone(),
         image_generation: None,
         image_model_provider: None,
@@ -962,8 +944,9 @@ async fn run_task_subagent(
         max_tokens: None,
         audio_file: None,
     };
-    let mut stream = client.send_message_stream(&thread_id, request).await?;
+    let mut stream = client.send_message_stream(request).await?;
     let mut content = String::new();
+    let mut thread_id = None::<String>;
     let mut current_run_id = None::<String>;
     let mut tool_rounds = 0usize;
 
@@ -983,6 +966,9 @@ async fn run_task_subagent(
             }
 
             let chunk = chunk?;
+            if thread_id.is_none() {
+                thread_id = ::backboard::message_thread_id(&chunk);
+            }
             let chunk_type = chunk
                 .get("type")
                 .and_then(Value::as_str)
@@ -1021,6 +1007,9 @@ async fn run_task_subagent(
                     } else {
                         subagent_tool_outputs(&runtime.workspace, tool_calls).await
                     };
+                    let thread_id = thread_id.clone().context(
+                        "subagent tool_submit_required arrived before Backboard returned thread_id",
+                    )?;
                     next_stream = Some(
                         client
                             .submit_tool_outputs_stream(
@@ -1059,6 +1048,9 @@ async fn run_task_subagent(
                         } else {
                             subagent_tool_outputs(&runtime.workspace, tool_calls).await
                         };
+                        let thread_id = thread_id.clone().context(
+                            "subagent requires_action arrived before Backboard returned thread_id",
+                        )?;
                         next_stream = Some(
                             client
                                 .submit_tool_outputs_stream(
@@ -1180,16 +1172,14 @@ fn subagent_tool_error_outputs(tool_calls: Vec<Value>, error: &str) -> Vec<Value
         .collect()
 }
 
-fn subagent_success_output(workspace: &Path, description: &str, content: &str) -> Result<Value> {
+fn subagent_success_output(_workspace: &Path, description: &str, content: &str) -> Result<Value> {
     let content = content.trim();
     if content.chars().count() > SUBAGENT_INLINE_RESULT_CHARS {
-        let path = persist_subagent_result(workspace, description, content)?;
         return Ok(json!({
             "success": true,
             "description": description,
-            "content": truncate(content, 2_000),
-            "result_path": path,
-            "message": "Sub-agent completed. Full result was saved to result_path.",
+            "content": truncate(content, SUBAGENT_INLINE_RESULT_CHARS),
+            "message": "Sub-agent completed. Result was truncated to the inline output limit.",
         }));
     }
 
@@ -1202,23 +1192,6 @@ fn subagent_success_output(workspace: &Path, description: &str, content: &str) -
             content
         },
     }))
-}
-
-fn persist_subagent_result(workspace: &Path, description: &str, content: &str) -> Result<String> {
-    let dir = workspace.join(".backboard").join("agent_results");
-    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let file_name = format!("subagent-{}.md", uuid::Uuid::new_v4().simple());
-    let path = dir.join(file_name);
-    fs::write(
-        &path,
-        format!("# Sub-agent result\n\nTask: {description}\n\n{content}\n"),
-    )
-    .with_context(|| format!("writing {}", path.display()))?;
-    Ok(path
-        .strip_prefix(workspace)
-        .unwrap_or(path.as_path())
-        .to_string_lossy()
-        .to_string())
 }
 
 fn subagent_chunk_text(chunk: &Value) -> Option<String> {
@@ -1235,16 +1208,6 @@ fn subagent_chunk_text(chunk: &Value) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|text| !text.is_empty())
         .map(str::to_string)
-}
-
-fn json_string(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        value
-            .get(*key)
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
 }
 
 fn emit_progress(
@@ -1653,14 +1616,6 @@ fn grep_files_with_walkdir(workspace: &Path, args: &Value) -> Result<Value> {
 fn codebase_search(workspace: &Path, args: &Value) -> Result<Value> {
     let query = string_arg(args, &["query"]).context("codebase_search needs query")?;
     let limit = int_arg(args, "num_results").unwrap_or(15).clamp(1, 15) as usize;
-    if let Ok(Some(results)) = index::search_index(workspace, &query, limit) {
-        return Ok(json!({
-            "success": true,
-            "query": query,
-            "results": results,
-        }));
-    }
-
     let terms = query
         .split_whitespace()
         .map(|term| term.to_lowercase())
@@ -2172,11 +2127,6 @@ fn run_shell_command(command: &str, cwd: &Path, timeout: Duration) -> Result<She
 }
 
 fn run_background_command(command: &str, cwd: &Path) -> Result<Value> {
-    let output_dir = cwd.join(".backboard").join("background");
-    fs::create_dir_all(&output_dir)?;
-    let output_file = output_dir.join(format!("{}.log", uuid::Uuid::new_v4().simple()));
-    let stdout = File::create(&output_file)?;
-    let stderr = stdout.try_clone()?;
     let mut command_builder = if cfg!(target_os = "windows") {
         let mut command_builder = Command::new("cmd");
         command_builder.arg("/C").arg(command);
@@ -2190,14 +2140,13 @@ fn run_background_command(command: &str, cwd: &Path) -> Result<Value> {
         .current_dir(cwd)
         .env("PATH", shell_path())
         .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()?;
     Ok(json!({
         "success": true,
         "pid": child.id(),
-        "output_file": output_file,
-        "message": format!("Background process started (PID: {}). Output: {}", child.id(), output_file.display())
+        "message": format!("Background process started (PID: {}). Output is not persisted by the native runtime.", child.id())
     }))
 }
 
@@ -2774,7 +2723,7 @@ mod tests {
     }
 
     #[test]
-    fn codebase_search_uses_index_and_ignores_backboard_artifacts() {
+    fn codebase_search_ignores_backboard_artifacts_without_creating_local_stores() {
         let tempdir = tempfile::tempdir().unwrap();
         let workspace = tempdir.path();
         fs::create_dir_all(workspace.join("src")).unwrap();
@@ -2795,7 +2744,6 @@ mod tests {
             "indexed_marker hidden",
         )
         .unwrap();
-        index::build_workspace_index(workspace).unwrap();
 
         let output = codebase_search(workspace, &json!({"query": "indexed marker"})).unwrap();
 
@@ -2807,6 +2755,11 @@ mod tests {
                 .and_then(Value::as_str)
                 .unwrap()
                 .ends_with("src/main.rs")
+        );
+        assert!(
+            !workspace
+                .join(".backboard_index/codebase_index.json")
+                .exists()
         );
     }
 }

@@ -111,14 +111,6 @@ pub struct BackboardConfig {
     #[serde(default)]
     pub api_url: Option<String>,
     #[serde(default)]
-    pub default_provider: Option<String>,
-    #[serde(default)]
-    pub default_model: Option<String>,
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    #[serde(default)]
-    pub assistant_id: Option<String>,
-    #[serde(default)]
     pub env_keys: HashMap<String, String>,
 }
 
@@ -168,29 +160,6 @@ impl BackboardConfig {
         Ok(config)
     }
 
-    pub fn save_model_selection(
-        provider: impl Into<String>,
-        model: impl Into<String>,
-    ) -> Result<Self> {
-        let mut config = Self::load_or_default();
-        config.default_provider = Some(provider.into());
-        config.default_model = Some(model.into());
-        config.save()?;
-        Ok(config)
-    }
-
-    pub fn save_session(assistant_id: Option<String>, thread_id: Option<String>) -> Result<Self> {
-        let mut config = Self::load_or_default();
-        if assistant_id.is_some() {
-            config.assistant_id = assistant_id;
-        }
-        if thread_id.is_some() {
-            config.thread_id = thread_id;
-        }
-        config.save()?;
-        Ok(config)
-    }
-
     pub fn save(&self) -> Result<()> {
         let path = config_path()?;
         let dir = path
@@ -205,7 +174,12 @@ impl BackboardConfig {
         #[cfg(unix)]
         {
             let permissions = std::fs::Permissions::from_mode(0o600);
-            let _ = std::fs::set_permissions(&path, permissions);
+            std::fs::set_permissions(&path, permissions).with_context(|| {
+                format!(
+                    "setting permissions on Backboard config at {}",
+                    path.display()
+                )
+            })?;
         }
 
         Ok(())
@@ -260,18 +234,14 @@ impl Default for BackboardConfig {
             env: default_env(),
             api_key: None,
             api_url: None,
-            default_provider: None,
-            default_model: None,
-            thread_id: None,
-            assistant_id: None,
             env_keys: HashMap::default(),
         }
     }
 }
 
 pub fn config_path() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").context("HOME is not set")?;
-    Ok(PathBuf::from(home).join(".backboard").join("config.json"))
+    let home = dirs::home_dir().context("failed to determine user profile directory")?;
+    Ok(home.join(".backboard").join("config.json"))
 }
 
 #[derive(Debug, Error)]
@@ -394,6 +364,12 @@ pub struct SubmitToolOutputsRequest {
     pub tools: Option<Vec<Value>>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct MessageThreadBinding {
+    pub thread_id: Option<String>,
+    pub assistant_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct RecentUsageQuery {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -460,7 +436,7 @@ impl BackboardClient {
             .header("X-API-Key", self.api_key_header()?)
             .send()
             .await?;
-        let _ = response.bytes().await;
+        response.bytes().await?;
         Ok(())
     }
 
@@ -538,22 +514,23 @@ impl BackboardClient {
         .await
     }
 
-    pub async fn send_message(
-        &self,
-        thread_id: &str,
-        request: SendMessageRequest,
-    ) -> Result<Value> {
-        let request = request.with_thread_id(thread_id);
+    pub async fn send_message(&self, request: SendMessageRequest) -> Result<Value> {
         self.json(self.message_request_builder(self.url("/threads/messages"), request, false)?)
             .await
     }
 
-    pub async fn send_message_stream(
+    pub async fn send_message_in_thread(
         &self,
         thread_id: &str,
         request: SendMessageRequest,
+    ) -> Result<Value> {
+        self.send_message(request.with_thread_id(thread_id)).await
+    }
+
+    pub async fn send_message_stream(
+        &self,
+        request: SendMessageRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<Value>> + Send>>> {
-        let request = request.with_thread_id(thread_id);
         validate_message_request(&request, true)?;
         let client = self.client.clone();
         let url = self.url("/threads/messages");
@@ -567,6 +544,15 @@ impl BackboardClient {
                 true,
             )
         }))
+    }
+
+    pub async fn send_message_stream_in_thread(
+        &self,
+        thread_id: &str,
+        request: SendMessageRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<Value>> + Send>>> {
+        self.send_message_stream(request.with_thread_id(thread_id))
+            .await
     }
 
     pub fn realtime_voice_url(&self) -> String {
@@ -806,6 +792,64 @@ impl SendMessageRequest {
     }
 }
 
+pub fn message_thread_binding(value: &Value) -> MessageThreadBinding {
+    MessageThreadBinding {
+        thread_id: message_thread_id(value),
+        assistant_id: message_assistant_id(value),
+    }
+}
+
+pub fn message_thread_id(value: &Value) -> Option<String> {
+    json_string_at(
+        value,
+        &[
+            &["thread_id"],
+            &["threadId"],
+            &["thread", "id"],
+            &["thread", "thread_id"],
+            &["data", "thread_id"],
+            &["data", "threadId"],
+            &["data", "thread", "id"],
+            &["message", "thread_id"],
+            &["message", "threadId"],
+            &["run", "thread_id"],
+            &["run", "threadId"],
+        ],
+    )
+}
+
+pub fn message_assistant_id(value: &Value) -> Option<String> {
+    json_string_at(
+        value,
+        &[
+            &["assistant_id"],
+            &["assistantId"],
+            &["assistant", "id"],
+            &["assistant", "assistant_id"],
+            &["data", "assistant_id"],
+            &["data", "assistantId"],
+            &["data", "assistant", "id"],
+            &["message", "assistant_id"],
+            &["message", "assistantId"],
+            &["run", "assistant_id"],
+            &["run", "assistantId"],
+        ],
+    )
+}
+
+fn json_string_at(value: &Value, paths: &[&[&str]]) -> Option<String> {
+    paths.iter().find_map(|path| {
+        let mut current = value;
+        for key in path.iter().copied() {
+            current = current.get(key)?;
+        }
+        current
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+    })
+}
+
 async fn parse_json_response<T: serde::de::DeserializeOwned>(response: Response) -> Result<T> {
     let text = response.text().await?;
     Ok(serde_json::from_str(&text)?)
@@ -946,7 +990,7 @@ fn validate_message_request(request: &SendMessageRequest, stream: bool) -> Resul
     if request.audio_file.is_some() {
         message_multipart_form(request.clone(), stream).map(|_| ())
     } else {
-        let _ = message_json(request, stream);
+        message_json(request, stream);
         Ok(())
     }
 }
@@ -1187,6 +1231,27 @@ mod tests {
     }
 
     #[test]
+    fn config_serializes_only_api_access_fields() {
+        let config = BackboardConfig {
+            env: "local".to_string(),
+            api_key: Some("bb-key".to_string()),
+            api_url: Some("http://localhost:8000".to_string()),
+            env_keys: HashMap::from([("local".to_string(), "bb-key".to_string())]),
+        };
+
+        let value = serde_json::to_value(config).unwrap();
+
+        assert_eq!(value["env"], "local");
+        assert_eq!(value["api_key"], "bb-key");
+        assert_eq!(value["api_url"], "http://localhost:8000");
+        assert_eq!(value["env_keys"]["local"], "bb-key");
+        assert!(value.get("assistant_id").is_none());
+        assert!(value.get("thread_id").is_none());
+        assert!(value.get("default_provider").is_none());
+        assert!(value.get("default_model").is_none());
+    }
+
+    #[test]
     fn backboard_model_accepts_catalog_aliases() {
         let model: BackboardModel = serde_json::from_value(json!({
             "provider": "deepseek",
@@ -1269,6 +1334,38 @@ mod tests {
         assert_eq!(body["voice"]["tts"]["model"], "gpt-4o-mini-tts");
         assert!(body.get("provider").is_none());
         assert!(body.get("model").is_none());
+    }
+
+    #[test]
+    fn message_json_omits_ids_for_first_turn_request() {
+        let request = SendMessageRequest {
+            content: "start a new task".to_string(),
+            provider: Some("openai".to_string()),
+            model: Some("gpt-4o".to_string()),
+            ..SendMessageRequest::default()
+        };
+
+        let body = message_json(&request, true);
+
+        assert_eq!(body["stream"], true);
+        assert!(body.get("thread_id").is_none());
+        assert!(body.get("assistant_id").is_none());
+    }
+
+    #[test]
+    fn message_thread_binding_extracts_returned_ids() {
+        let chunk = json!({
+            "type": "run_started",
+            "data": {
+                "thread": {"id": "thread_123"},
+                "assistant_id": "assistant_456"
+            }
+        });
+
+        let binding = message_thread_binding(&chunk);
+
+        assert_eq!(binding.thread_id.as_deref(), Some("thread_123"));
+        assert_eq!(binding.assistant_id.as_deref(), Some("assistant_456"));
     }
 
     #[test]

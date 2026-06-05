@@ -1,4 +1,4 @@
-use std::{cmp::Reverse, rc::Rc, sync::Arc};
+use std::{cmp::Reverse, rc::Rc, sync::Arc, time::Duration};
 
 use acp_thread::{AgentModelIcon, AgentModelInfo, AgentModelList, AgentModelSelector};
 use agent_client_protocol::schema as acp;
@@ -31,6 +31,8 @@ use crate::ui::{
 };
 
 pub type ModelSelector = Picker<ModelPickerDelegate>;
+
+const MODEL_LIST_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
 pub fn acp_model_selector(
     selector: Rc<dyn AgentModelSelector>,
@@ -89,7 +91,7 @@ impl ModelPickerDelegate {
                     async fn refresh(
                         this: &WeakEntity<Picker<ModelPickerDelegate>>,
                         cx: &mut AsyncWindowContext,
-                    ) -> Result<()> {
+                    ) -> Result<bool> {
                         let (models_task, selected_model_task) = this.update(cx, |this, cx| {
                             (
                                 this.delegate.selector.list_models(cx),
@@ -97,24 +99,41 @@ impl ModelPickerDelegate {
                             )
                         })?;
 
-                        let selected_model = selected_model_task.await;
+                        let selected_model = selected_model_task.await.warn_on_err();
                         this.update_in(cx, |this, window, cx| {
-                            this.delegate.selected_model = selected_model.ok();
+                            this.delegate.selected_model = selected_model;
                             this.refresh(window, cx)
                         })?;
 
-                        let models = models_task.await;
+                        let models = models_task.await.warn_on_err();
+                        let has_models =
+                            models.as_ref().map_or(false, model_list_has_visible_models);
                         this.update_in(cx, |this, window, cx| {
-                            this.delegate.models = models.ok();
+                            this.delegate.models = models;
                             this.refresh(window, cx)
-                        })
+                        })?;
+
+                        Ok(has_models)
                     }
 
-                    refresh(&this, cx).await.log_err();
-                    if let Some(mut rx) = rx {
-                        while let Ok(()) = rx.recv().await {
-                            refresh(&this, cx).await.log_err();
+                    let mut rx = rx;
+                    let mut has_models = refresh(&this, cx).await.log_err().unwrap_or(false);
+                    loop {
+                        if !has_models {
+                            cx.background_executor()
+                                .timer(MODEL_LIST_RETRY_INTERVAL)
+                                .await;
+                            has_models = refresh(&this, cx).await.log_err().unwrap_or(false);
+                            continue;
                         }
+
+                        let Some(rx) = rx.as_mut() else {
+                            break;
+                        };
+                        if rx.recv().await.is_err() {
+                            break;
+                        }
+                        has_models = refresh(&this, cx).await.log_err().unwrap_or(false);
                     }
                 }
             })
@@ -303,6 +322,18 @@ impl PickerDelegate for ModelPickerDelegate {
 
     fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
         "Select a model…".into()
+    }
+
+    fn no_matches_text(&self, _window: &mut Window, _cx: &mut App) -> Option<SharedString> {
+        if self
+            .models
+            .as_ref()
+            .map_or(true, |models| !model_list_has_visible_models(models))
+        {
+            Some("Temporary Issue: Please Try Again".into())
+        } else {
+            Some("No matches".into())
+        }
     }
 
     fn render_editor(
@@ -730,6 +761,16 @@ fn info_list_to_picker_entries(
     }
 
     entries
+}
+
+fn model_list_has_visible_models(model_list: &AgentModelList) -> bool {
+    match model_list {
+        AgentModelList::Flat(models) => models.iter().any(|model| !is_featherless_model(model)),
+        AgentModelList::Grouped(groups) => groups
+            .values()
+            .flatten()
+            .any(|model| !is_featherless_model(model)),
+    }
 }
 
 fn provider_filter_list_item(
