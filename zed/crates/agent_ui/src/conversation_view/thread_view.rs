@@ -1158,77 +1158,39 @@ fn encode_wav_pcm16(samples: &[f32], channels: u16, sample_rate: u32) -> Vec<u8>
 #[cfg(feature = "audio")]
 async fn transcribe_backboard_dictation(wav: Vec<u8>) -> anyhow::Result<String> {
     use agent_servers::backboard::{
-        AudioAttachment, BackboardClient, BackboardConfig, CreateAssistantRequest,
-        SendMessageRequest,
+        AudioAttachment, BackboardClient, BackboardConfig, SendMessageRequest,
     };
     use anyhow::{Context as _, anyhow};
     use serde_json::json;
 
     let config = BackboardConfig::load().context("loading Backboard config")?;
-    let client =
-        BackboardClient::from_config(config.clone()).context("creating Backboard client")?;
-
-    let thread_id = if let Some(thread_id) = config.thread_id.clone() {
-        thread_id
-    } else {
-        let assistant_id = if let Some(assistant_id) = config.assistant_id.clone() {
-            assistant_id
-        } else {
-            let assistant = client
-                .create_assistant(CreateAssistantRequest {
-                    name: "Backboard Dictation".to_string(),
-                    description:
-                        "Transcribes short microphone dictation clips for the Backboard IDE."
-                            .to_string(),
-                    tools: None,
-                    custom_fact_extraction_prompt: None,
-                    custom_update_memory_prompt: None,
-                })
-                .await?;
-            json_string(&assistant, &["assistant_id", "id"])
-                .context("Backboard create assistant response did not include assistant_id")?
-        };
-
-        let thread = client.create_thread(&assistant_id).await?;
-        json_string(&thread, &["thread_id", "id"])
-            .context("Backboard create thread response did not include thread_id")?
-    };
+    let client = BackboardClient::from_config(config).context("creating Backboard client")?;
 
     let response = client
-        .send_message(
-            &thread_id,
-            SendMessageRequest {
-                content: "Transcribe this dictation audio. Return only the transcript text."
-                    .to_string(),
-                voice: Some(json!({
-                    "stt": {
-                        "provider": "openai",
-                        "model": "gpt-4o-mini-transcribe",
-                        "language": "en",
-                    }
-                })),
-                send_to_llm: Some(false),
-                audio_file: Some(AudioAttachment {
-                    data: wav,
-                    file_name: "backboard-dictation.wav".to_string(),
-                    mime_type: "audio/wav".to_string(),
-                }),
-                ..SendMessageRequest::default()
-            },
-        )
+        .send_message(SendMessageRequest {
+            content: "Transcribe this dictation audio. Return only the transcript text."
+                .to_string(),
+            voice: Some(json!({
+                "stt": {
+                    "provider": "openai",
+                    "model": "gpt-4o-mini-transcribe",
+                    "language": "en",
+                }
+            })),
+            send_to_llm: Some(false),
+            audio_file: Some(AudioAttachment {
+                data: wav,
+                file_name: "backboard-dictation.wav".to_string(),
+                mime_type: "audio/wav".to_string(),
+            }),
+            ..SendMessageRequest::default()
+        })
         .await?;
 
     transcript_from_response(&response)
         .map(|transcript| transcript.trim().to_string())
         .filter(|transcript| !transcript.is_empty())
         .ok_or_else(|| anyhow!("Backboard did not return a transcript"))
-}
-
-#[cfg(feature = "audio")]
-fn json_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| value.get(*key).and_then(serde_json::Value::as_str))
-        .map(str::to_string)
 }
 
 #[cfg(feature = "audio")]

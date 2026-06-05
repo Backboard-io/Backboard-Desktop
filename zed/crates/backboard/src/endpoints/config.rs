@@ -19,14 +19,6 @@ pub struct BackboardConfig {
     #[serde(default)]
     pub api_url: Option<String>,
     #[serde(default)]
-    pub default_provider: Option<String>,
-    #[serde(default)]
-    pub default_model: Option<String>,
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    #[serde(default)]
-    pub assistant_id: Option<String>,
-    #[serde(default)]
     pub env_keys: HashMap<String, String>,
 }
 
@@ -74,29 +66,6 @@ impl BackboardConfig {
         Ok(config)
     }
 
-    pub fn save_model_selection(
-        provider: impl Into<String>,
-        model: impl Into<String>,
-    ) -> Result<Self> {
-        let mut config = Self::load_or_default();
-        config.default_provider = Some(provider.into());
-        config.default_model = Some(model.into());
-        config.save()?;
-        Ok(config)
-    }
-
-    pub fn save_session(assistant_id: Option<String>, thread_id: Option<String>) -> Result<Self> {
-        let mut config = Self::load_or_default();
-        if assistant_id.is_some() {
-            config.assistant_id = assistant_id;
-        }
-        if thread_id.is_some() {
-            config.thread_id = thread_id;
-        }
-        config.save()?;
-        Ok(config)
-    }
-
     pub fn save(&self) -> Result<()> {
         let path = config_path()?;
         let dir = path
@@ -111,7 +80,12 @@ impl BackboardConfig {
         #[cfg(unix)]
         {
             let permissions = std::fs::Permissions::from_mode(0o600);
-            let _ = std::fs::set_permissions(&path, permissions);
+            std::fs::set_permissions(&path, permissions).with_context(|| {
+                format!(
+                    "setting permissions on Backboard config at {}",
+                    path.display()
+                )
+            })?;
         }
 
         Ok(())
@@ -166,16 +140,12 @@ impl Default for BackboardConfig {
             env: default_env(),
             api_key: None,
             api_url: None,
-            default_provider: None,
-            default_model: None,
-            thread_id: None,
-            assistant_id: None,
             env_keys: HashMap::default(),
         }
     }
 }
 
 pub fn config_path() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").context("HOME is not set")?;
-    Ok(PathBuf::from(home).join(".backboard").join("config.json"))
+    let home = dirs::home_dir().context("failed to determine user profile directory")?;
+    Ok(home.join(".backboard").join("config.json"))
 }

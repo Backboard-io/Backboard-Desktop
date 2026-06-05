@@ -1441,7 +1441,7 @@
   "disable_ai": false,
   // Automatically update Backboard Studio. This setting may be ignored on Linux if
   // installed through a package manager.
-  "auto_update": false,
+  "auto_update": true,
   // How to render LSP `textDocument/documentColor` colors in the editor.
   //
   // Possible values:

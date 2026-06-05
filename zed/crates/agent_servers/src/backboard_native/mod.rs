@@ -1,6 +1,4 @@
-mod index;
 mod mcp;
-mod session_store;
 mod stream;
 mod tool_schemas;
 mod tools;
@@ -9,9 +7,8 @@ mod workspace;
 use std::{
     any::Any,
     cell::RefCell,
-    collections::{BTreeSet, hash_map::DefaultHasher},
+    collections::BTreeSet,
     fs,
-    hash::{Hash as _, Hasher as _},
     io::{ErrorKind, Read as _},
     path::{Path, PathBuf},
     rc::Rc,
@@ -25,13 +22,12 @@ use std::{
 use ::backboard::{BackboardClient, BackboardConfig, BackboardModel};
 use acp_thread::{
     AcpThread, AgentConnection, AgentModelInfo, AgentModelList, AgentSessionConfigOptions,
-    AgentSessionInfo, AgentSessionList, AgentSessionListRequest, AgentSessionListResponse,
-    AgentSessionModes, AgentSessionTruncate, AuthRequired, UserMessageId,
+    AgentSessionList, AgentSessionListRequest, AgentSessionListResponse, AgentSessionModes,
+    AgentSessionTruncate, AuthRequired, UserMessageId,
 };
 use action_log::ActionLog;
 use agent_client_protocol::schema as acp;
 use anyhow::{Context as _, Result, anyhow};
-use chrono::Utc;
 use collections::{HashMap, IndexMap};
 use gpui::{App, AppContext as _, Entity, SharedString, Task, WeakEntity};
 use language_model::icon_for_model_identifiers;
@@ -47,7 +43,6 @@ const DEFAULT_PROVIDER: &str = "openai";
 const DEFAULT_MODEL: &str = "gpt-4o";
 const DEFAULT_INTENSITY: &str = "fast";
 const DEFAULT_CONTEXT_WINDOW: u64 = 258_000;
-const HISTORY_REPLAY_MAX_MESSAGES: usize = 80;
 const BACKBOARD_SKILL_CONFIG_PREFIX: &str = "backboard_skill:";
 const MODEL_CATALOG_PROVIDERS: &[&str] = &[
     "anthropic",
@@ -88,7 +83,6 @@ pub(crate) struct BackboardNativeState {
     agent_id: AgentId,
     default_mode: acp::SessionModeId,
     sessions: RefCell<HashMap<acp::SessionId, NativeSession>>,
-    indexing_workspaces: RefCell<BTreeSet<PathBuf>>,
     client_cache: RefCell<Option<CachedBackboardClient>>,
     model_cache: RefCell<Option<Vec<AgentModelInfo>>>,
     model_context_windows: RefCell<HashMap<String, u64>>,
@@ -102,8 +96,6 @@ pub(crate) struct NativeSession {
     assistant_id: Option<String>,
     thread_id: Option<String>,
     current_run_id: Option<String>,
-    assistant_tools_hash: Option<u64>,
-    assistant_tools_synced: bool,
     provider: Option<String>,
     model: Option<String>,
     mode: acp::SessionModeId,
@@ -314,14 +306,6 @@ fn rounded_number(value: f64) -> f64 {
     (value * 10.0).round() / 10.0
 }
 
-pub(crate) fn tool_definitions_hash(tools: &[Value]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    serde_json::to_string(tools)
-        .unwrap_or_else(|_| "[]".to_string())
-        .hash(&mut hasher);
-    hasher.finish()
-}
-
 fn round_cost(value: f64) -> f64 {
     (value * 1_000_000.0).round() / 1_000_000.0
 }
@@ -359,12 +343,13 @@ impl BackboardNativeConnection {
         log::info!(
             "Backboard native runtime initialized; Python ACP/CLI bridge is not in the active path"
         );
+        #[cfg(not(test))]
+        cleanup_obsolete_home_session_store();
         Self {
             state: Rc::new(BackboardNativeState {
                 agent_id,
                 default_mode: default_mode.unwrap_or_else(|| acp::SessionModeId::new("free")),
                 sessions: RefCell::default(),
-                indexing_workspaces: RefCell::default(),
                 client_cache: RefCell::default(),
                 model_cache: RefCell::default(),
                 model_context_windows: RefCell::default(),
@@ -424,17 +409,8 @@ impl BackboardNativeState {
         .detach();
     }
 
-    pub(crate) fn fallback_provider_model(config: &BackboardConfig) -> (String, String) {
-        (
-            config
-                .default_provider
-                .clone()
-                .unwrap_or_else(|| DEFAULT_PROVIDER.to_string()),
-            config
-                .default_model
-                .clone()
-                .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-        )
+    pub(crate) fn fallback_provider_model(_config: &BackboardConfig) -> (String, String) {
+        (DEFAULT_PROVIDER.to_string(), DEFAULT_MODEL.to_string())
     }
 
     pub(crate) fn runtime_for_session(
@@ -508,6 +484,29 @@ impl BackboardNativeState {
             .borrow()
             .get(session_id)
             .and_then(|session| session.thread_id.clone())
+    }
+
+    pub(crate) fn record_message_thread_binding(
+        &self,
+        session_id: &acp::SessionId,
+        binding: ::backboard::MessageThreadBinding,
+    ) -> Option<String> {
+        let mut sessions = self.sessions.borrow_mut();
+        let session = sessions.get_mut(session_id)?;
+        if let Some(assistant_id) = binding.assistant_id {
+            session.assistant_id = Some(assistant_id);
+        }
+        if let Some(thread_id) = binding.thread_id {
+            if session.thread_id.as_deref() != Some(thread_id.as_str()) {
+                log::info!(
+                    "Backboard native session bound to remote thread: session_id={} thread_id={}",
+                    session_id,
+                    thread_id
+                );
+            }
+            session.thread_id = Some(thread_id);
+        }
+        session.thread_id.clone()
     }
 
     pub(crate) fn set_current_run_id(&self, session_id: &acp::SessionId, run_id: Option<String>) {
@@ -614,41 +613,20 @@ impl BackboardNativeState {
             (!context.trim().is_empty()).then_some(context)
         });
 
-        let (record, native_restore_paths) = {
+        let native_restore_paths = {
             let mut sessions = self.sessions.borrow_mut();
             let session = sessions
                 .get_mut(session_id)
                 .with_context(|| format!("unknown Backboard session: {session_id}"))?;
-            session.assistant_id = None;
-            session.thread_id = None;
             session.current_run_id = None;
-            session.assistant_tools_hash = None;
-            session.assistant_tools_synced = false;
             session.cancel_flag.store(true, Ordering::SeqCst);
             session.estimated_used_tokens = 0;
             session.rewound_history_context = rewound_history_context;
             session.active_user_message_id = None;
-            let native_restore_paths = take_native_restore_paths(session, message_id);
-
-            (
-                session_store::SessionRecord {
-                    workspace: session.workspace.to_string_lossy().to_string(),
-                    assistant_id: None,
-                    thread_id: None,
-                    provider: session.provider.clone(),
-                    model: session.model.clone(),
-                    title: native_session_record_title(session, cx),
-                    session_id: session_id.to_string(),
-                    updated_at: Utc::now().to_rfc3339(),
-                },
-                native_restore_paths,
-            )
+            take_native_restore_paths(session, message_id)
         };
 
         restore_native_paths(native_restore_paths)?;
-        session_store::write_session_record(&session_id.to_string(), &record).ok();
-        session_store::write_workspace_record(PathBuf::from(&record.workspace).as_path(), &record)
-            .ok();
 
         Ok(())
     }
@@ -826,49 +804,9 @@ impl BackboardNativeState {
             .map(|session| session.session_total_cost)
     }
 
-    fn prepare_workspace_and_start_indexing(self: &Rc<Self>, workspace: PathBuf, cx: &mut App) {
-        let workspace_key = index::workspace_key(&workspace);
-        if !self
-            .indexing_workspaces
-            .borrow_mut()
-            .insert(workspace_key.clone())
-        {
-            return;
-        }
-
-        let state = self.clone();
-        log::debug!(
-            "Backboard native workspace indexing started: workspace={}",
-            workspace.display()
-        );
-        cx.spawn(async move |cx| {
-            let workspace_for_task = workspace.clone();
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    index::prepare_workspace(&workspace_for_task)?;
-                    index::build_workspace_index(&workspace_for_task)?;
-                    anyhow::Ok(())
-                })
-                .await;
-
-            state
-                .indexing_workspaces
-                .borrow_mut()
-                .remove(&workspace_key);
-            if let Err(error) = result {
-                log::debug!(
-                    "Backboard native workspace indexing failed for {}: {error:#}",
-                    workspace.display()
-                );
-            } else {
-                log::debug!(
-                    "Backboard native workspace indexing finished: workspace={}",
-                    workspace.display()
-                );
-            }
-        })
-        .detach();
+    fn cleanup_obsolete_workspace_storage(&self, workspace: &Path) {
+        cleanup_obsolete_path(workspace.join(".backboard"));
+        cleanup_obsolete_path(workspace.join(".backboard_index"));
     }
 
     pub(crate) fn emit_update(
@@ -883,125 +821,6 @@ impl BackboardNativeState {
             .map_err(|err| anyhow!(err))?
             .map_err(|err| anyhow!("{err:?}"))
     }
-
-    async fn ensure_thread_binding(
-        self: Rc<Self>,
-        session_id: &acp::SessionId,
-        tools: Vec<Value>,
-        title: Option<String>,
-        cx: &mut gpui::AsyncApp,
-    ) -> Result<String> {
-        let tools_hash = tool_definitions_hash(&tools);
-        let existing_binding = {
-            let sessions = self.sessions.borrow();
-            sessions.get(session_id).and_then(|session| {
-                Some((
-                    session.assistant_id.clone()?,
-                    session.thread_id.clone()?,
-                    session.assistant_tools_hash,
-                    session.assistant_tools_synced,
-                ))
-            })
-        };
-        if let Some((assistant_id, thread_id, synced_hash, tools_synced)) = existing_binding {
-            if tools_synced && synced_hash == Some(tools_hash) {
-                return Ok(thread_id);
-            }
-
-            let (_config, client) = self.client()?;
-            let request = ::backboard::UpdateAssistantRequest {
-                name: None,
-                description: Some(workspace::system_prompt(
-                    &self.runtime_for_session(session_id)?.workspace,
-                )),
-                tools: Some(tools),
-            };
-            log::info!(
-                "Backboard native endpoint call: PUT /assistants/{{assistant_id}} session_id={} thread_id={} path=rust-native",
-                session_id,
-                thread_id
-            );
-            gpui_tokio::Tokio::spawn_result(cx, async move {
-                client.update_assistant(&assistant_id, request).await?;
-                anyhow::Ok(())
-            })
-            .await?;
-            if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
-                session.assistant_tools_hash = Some(tools_hash);
-                session.assistant_tools_synced = true;
-            }
-            return Ok(thread_id);
-        }
-
-        let runtime = self.runtime_for_session(session_id)?;
-        let (_config, client) = self.client()?;
-        let request = ::backboard::CreateAssistantRequest {
-            name: "Backboard IDE Agent".to_string(),
-            description: workspace::system_prompt(&runtime.workspace),
-            tools: Some(tools),
-            custom_fact_extraction_prompt: None,
-            custom_update_memory_prompt: None,
-        };
-        log::info!(
-            "Backboard native endpoint call: POST /assistants then POST /assistants/{{assistant_id}}/threads session_id={} provider={} model={} mode={}",
-            session_id,
-            runtime.provider,
-            runtime.model,
-            runtime.mode
-        );
-        let (assistant_id, thread_id) = gpui_tokio::Tokio::spawn_result(cx, async move {
-            let assistant = client.create_assistant(request).await?;
-            let assistant_id = json_string(&assistant, &["assistant_id", "id"])
-                .context("Backboard create assistant response did not include assistant_id")?;
-            let thread = client.create_thread(&assistant_id).await?;
-            let thread_id = json_string(&thread, &["thread_id", "id"])
-                .context("Backboard create thread response did not include thread_id")?;
-            anyhow::Ok((assistant_id, thread_id))
-        })
-        .await?;
-
-        let record = session_store::SessionRecord {
-            workspace: runtime.workspace.to_string_lossy().to_string(),
-            assistant_id: Some(assistant_id.clone()),
-            thread_id: Some(thread_id.clone()),
-            provider: Some(runtime.provider.clone()),
-            model: Some(runtime.model.clone()),
-            title: title.unwrap_or_else(|| "Backboard".to_string()),
-            session_id: session_id.to_string(),
-            updated_at: Utc::now().to_rfc3339(),
-        };
-        session_store::write_session_record(&session_id.to_string(), &record).ok();
-        session_store::write_workspace_record(&runtime.workspace, &record).ok();
-
-        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
-            session.assistant_id = Some(assistant_id);
-            session.thread_id = Some(thread_id.clone());
-            session.assistant_tools_hash = Some(tools_hash);
-            session.assistant_tools_synced = true;
-        }
-
-        self.emit_update(
-            &runtime,
-            acp::SessionUpdate::SessionInfoUpdate(
-                acp::SessionInfoUpdate::new()
-                    .title(record.title)
-                    .updated_at(record.updated_at),
-            ),
-            cx,
-        )
-        .ok();
-
-        Ok(thread_id)
-    }
-}
-
-fn native_session_record_title(session: &NativeSession, cx: &App) -> String {
-    session
-        .thread
-        .upgrade()
-        .and_then(|thread| thread.read(cx).title().map(|title| title.to_string()))
-        .filter(|title| !title.trim().is_empty())
-        .unwrap_or_else(|| "Backboard".to_string())
 }
 
 fn active_native_snapshot_mut(session: &mut NativeSession) -> Option<&mut NativeTurnSnapshot> {
@@ -1168,6 +987,53 @@ fn config_watch_channel() -> (watch::Sender<()>, watch::Receiver<()>) {
     watch::channel(())
 }
 
+#[cfg(not(test))]
+fn cleanup_obsolete_home_session_store() {
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    cleanup_obsolete_path(
+        PathBuf::from(home)
+            .join(".backboard")
+            .join("ide_sessions.json"),
+    );
+}
+
+fn cleanup_obsolete_path(path: PathBuf) {
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => return,
+        Err(error) => {
+            log::warn!(
+                "Backboard native could not inspect obsolete local store {}: {error:#}",
+                path.display()
+            );
+            return;
+        }
+    };
+
+    let result = if metadata.is_dir() {
+        fs::remove_dir_all(&path)
+    } else {
+        fs::remove_file(&path)
+    };
+    match result {
+        Ok(()) => {
+            log::info!(
+                "Backboard native removed obsolete local store: {}",
+                path.display()
+            );
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => {
+            log::warn!(
+                "Backboard native could not remove obsolete local store {}: {error:#}",
+                path.display()
+            );
+        }
+    }
+}
+
 impl AgentConnection for BackboardNativeConnection {
     fn agent_id(&self) -> AgentId {
         self.state.agent_id.clone()
@@ -1230,8 +1096,6 @@ impl AgentConnection for BackboardNativeConnection {
                 assistant_id: None,
                 thread_id: None,
                 current_run_id: None,
-                assistant_tools_hash: None,
-                assistant_tools_synced: false,
                 provider: Some(provider),
                 model: Some(model),
                 mode,
@@ -1251,8 +1115,7 @@ impl AgentConnection for BackboardNativeConnection {
                 session_total_cost: 0.0,
             },
         );
-        self.state
-            .prepare_workspace_and_start_indexing(workspace, cx);
+        self.state.cleanup_obsolete_workspace_storage(&workspace);
         self.state.warm_client(cx);
 
         Task::ready(Ok(thread))
@@ -1305,13 +1168,12 @@ impl AgentConnection for BackboardNativeConnection {
         &self,
         session_id: &acp::SessionId,
         work_dirs: PathList,
-        cx: &mut App,
+        _cx: &mut App,
     ) -> Task<Result<()>> {
         let Some(workspace) = work_dirs.ordered_paths().next().cloned() else {
             return Task::ready(Ok(()));
         };
 
-        let mut record = None;
         {
             let mut sessions = self.state.sessions.borrow_mut();
             let Some(session) = sessions.get_mut(session_id) else {
@@ -1328,35 +1190,13 @@ impl AgentConnection for BackboardNativeConnection {
                 workspace.display()
             );
             session.workspace = workspace.clone();
+            session.assistant_id = None;
+            session.thread_id = None;
+            session.current_run_id = None;
             session.config_tx.send(()).ok();
-
-            if let (Some(assistant_id), Some(thread_id)) =
-                (session.assistant_id.clone(), session.thread_id.clone())
-            {
-                record = Some(session_store::SessionRecord {
-                    workspace: session.workspace.to_string_lossy().to_string(),
-                    assistant_id: Some(assistant_id),
-                    thread_id: Some(thread_id),
-                    provider: session.provider.clone(),
-                    model: session.model.clone(),
-                    title: session
-                        .workspace
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("Backboard")
-                        .to_string(),
-                    session_id: session_id.to_string(),
-                    updated_at: Utc::now().to_rfc3339(),
-                });
-            }
         }
 
-        self.state
-            .prepare_workspace_and_start_indexing(workspace.clone(), cx);
-        if let Some(record) = record {
-            session_store::write_session_record(&session_id.to_string(), &record).ok();
-            session_store::write_workspace_record(&workspace, &record).ok();
-        }
+        self.state.cleanup_obsolete_workspace_storage(&workspace);
 
         Task::ready(Ok(()))
     }
@@ -1404,7 +1244,13 @@ impl AgentConnection for BackboardNativeConnection {
                 run_id
             );
             gpui_tokio::Tokio::spawn_result(cx, async move {
-                let _ = client.cancel_run(&thread_id, &run_id).await;
+                if let Err(error) = client.cancel_run(&thread_id, &run_id).await {
+                    log::warn!(
+                        "Backboard native cancel_run failed: thread_id={} run_id={} error={error:#}",
+                        thread_id,
+                        run_id
+                    );
+                }
                 anyhow::Ok(())
             })
             .detach();
@@ -1496,7 +1342,6 @@ impl BackboardNativeConnection {
             workspace.display(),
             replay_history
         );
-        let record = session_store::record_for_session_or_workspace(&session_id, &workspace);
         let config = self.state.load_config();
         let (default_provider, default_model) =
             BackboardNativeState::fallback_provider_model(&config);
@@ -1522,21 +1367,11 @@ impl BackboardNativeConnection {
             NativeSession {
                 thread: thread.downgrade(),
                 workspace: workspace.clone(),
-                assistant_id: record
-                    .as_ref()
-                    .and_then(|record| record.assistant_id.clone()),
-                thread_id: record.as_ref().and_then(|record| record.thread_id.clone()),
+                assistant_id: None,
+                thread_id: None,
                 current_run_id: None,
-                assistant_tools_hash: None,
-                assistant_tools_synced: false,
-                provider: record
-                    .as_ref()
-                    .and_then(|record| record.provider.clone())
-                    .or(Some(default_provider)),
-                model: record
-                    .as_ref()
-                    .and_then(|record| record.model.clone())
-                    .or(Some(default_model)),
+                provider: Some(default_provider),
+                model: Some(default_model),
                 mode: self.state.default_mode.clone(),
                 intensity: DEFAULT_INTENSITY.to_string(),
                 feature_settings: FeatureSettings::default(),
@@ -1554,19 +1389,8 @@ impl BackboardNativeConnection {
                 session_total_cost: 0.0,
             },
         );
-        self.state
-            .prepare_workspace_and_start_indexing(workspace.clone(), cx);
+        self.state.cleanup_obsolete_workspace_storage(&workspace);
         self.state.warm_client(cx);
-
-        if replay_history {
-            let state = self.state.clone();
-            let thread_entity = thread.clone();
-            cx.spawn(async move |cx| {
-                stream::replay_history(state, &session_id, thread_entity.downgrade(), cx).await?;
-                anyhow::Ok(())
-            })
-            .detach();
-        }
 
         Task::ready(Ok(thread))
     }
@@ -1916,7 +1740,7 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
         })
     }
 
-    fn select_model(&self, model_id: acp::ModelId, cx: &mut App) -> Task<Result<()>> {
+    fn select_model(&self, model_id: acp::ModelId, _cx: &mut App) -> Task<Result<()>> {
         let model_id = model_id.to_string();
         let (provider, model) = split_model_id(&model_id);
         if let Some(session) = self.state.sessions.borrow_mut().get_mut(&self.session_id) {
@@ -1928,24 +1752,7 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                 .borrow()
                 .get(&model_context_key(&provider, &model))
                 .copied();
-            if let (Some(assistant_id), Some(thread_id)) =
-                (session.assistant_id.clone(), session.thread_id.clone())
-            {
-                let record = session_store::SessionRecord {
-                    workspace: session.workspace.to_string_lossy().to_string(),
-                    assistant_id: Some(assistant_id),
-                    thread_id: Some(thread_id),
-                    provider: Some(provider.clone()),
-                    model: Some(model.clone()),
-                    title: native_session_record_title(session, cx),
-                    session_id: self.session_id.to_string(),
-                    updated_at: Utc::now().to_rfc3339(),
-                };
-                session_store::write_session_record(&self.session_id.to_string(), &record).ok();
-                session_store::write_workspace_record(&session.workspace, &record).ok();
-            }
         }
-        BackboardConfig::save_model_selection(provider, model).ok();
         Task::ready(Ok(()))
     }
 
@@ -2021,19 +1828,10 @@ struct BackboardSessionList {
 impl AgentSessionList for BackboardSessionList {
     fn list_sessions(
         &self,
-        request: AgentSessionListRequest,
+        _request: AgentSessionListRequest,
         _cx: &mut App,
     ) -> Task<Result<AgentSessionListResponse>> {
-        let sessions = session_store::workspace_records(request.cwd.as_deref())
-            .into_iter()
-            .map(|record| {
-                let mut info = AgentSessionInfo::new(record.session_id);
-                info.title = Some(record.title.into());
-                info.work_dirs = Some(PathList::new(&[std::path::PathBuf::from(record.workspace)]));
-                info
-            })
-            .collect();
-        Task::ready(Ok(AgentSessionListResponse::new(sessions)))
+        Task::ready(Ok(AgentSessionListResponse::new(Vec::new())))
     }
 
     fn notify_refresh(&self) {
@@ -2059,8 +1857,9 @@ fn non_empty_work_dirs_or_project_default(
 
 fn supported_modes() -> Vec<acp::SessionMode> {
     vec![
-        acp::SessionMode::new("agent", "Agent")
-            .description("Autonomous edits, terminal commands, indexing, and memories."),
+        acp::SessionMode::new("agent", "Agent").description(
+            "Autonomous edits, terminal commands, and memory isolated to this remote thread.",
+        ),
         acp::SessionMode::new("ask", "Ask")
             .description("Read, search, and explain without file writes or shell mutation."),
         acp::SessionMode::new("manual", "Manual")
@@ -2084,7 +1883,7 @@ fn config_options(
             mode.to_string(),
             vec![
                 acp::SessionConfigSelectOption::new("agent", "Agent")
-                    .description("Autonomous edits, terminal commands, indexing, and memories."),
+                    .description("Autonomous edits, terminal commands, and thread-scoped memory."),
                 acp::SessionConfigSelectOption::new("ask", "Ask").description(
                     "Read, search, and explain without file writes or shell mutation.",
                 ),
@@ -2536,13 +2335,6 @@ fn split_model_id(model_id: &str) -> (String, String) {
         .unwrap_or_else(|| (DEFAULT_PROVIDER.to_string(), model_id.to_string()))
 }
 
-fn json_string(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| value.get(*key).and_then(Value::as_str))
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
 pub(crate) fn missing_api_key_message() -> String {
     "Please enter a Backboard API key to use AI features, including agents and Simple Mode. The editor remains available without AI.".to_string()
 }
@@ -2593,8 +2385,6 @@ mod tests {
                 assistant_id: None,
                 thread_id: None,
                 current_run_id: None,
-                assistant_tools_hash: None,
-                assistant_tools_synced: false,
                 provider: Some(DEFAULT_PROVIDER.to_string()),
                 model: Some(DEFAULT_MODEL.to_string()),
                 mode: acp::SessionModeId::new("free"),
@@ -2650,24 +2440,40 @@ mod tests {
     }
 
     #[test]
-    fn fallback_agent_model_uses_configured_default() {
-        let config = BackboardConfig {
-            default_provider: Some("anthropic".to_string()),
-            default_model: Some("claude-sonnet-4-5".to_string()),
-            ..BackboardConfig::default()
-        };
+    fn cleanup_obsolete_workspace_storage_removes_backboard_local_dirs() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let workspace = temp_dir.path();
+        fs::create_dir_all(workspace.join(".backboard/scratchpad")).expect("create backboard dir");
+        fs::create_dir_all(workspace.join(".backboard_index")).expect("create index dir");
+        fs::write(workspace.join(".backboard/config.txt"), "obsolete").expect("write artifact");
+        fs::write(workspace.join("config.json"), "preserve").expect("write normal file");
+
+        cleanup_obsolete_path(workspace.join(".backboard"));
+        cleanup_obsolete_path(workspace.join(".backboard_index"));
+
+        assert!(!workspace.join(".backboard").exists());
+        assert!(!workspace.join(".backboard_index").exists());
+        assert_eq!(
+            fs::read_to_string(workspace.join("config.json")).unwrap(),
+            "preserve"
+        );
+    }
+
+    #[test]
+    fn fallback_agent_model_uses_builtin_default() {
+        let config = BackboardConfig::default();
 
         let model = fallback_agent_model_info(&config);
 
-        assert_eq!(model.id, acp::ModelId::new("anthropic/claude-sonnet-4-5"));
-        assert_eq!(model.name, "claude-sonnet-4-5");
+        assert_eq!(model.id, acp::ModelId::new("openai/gpt-4o"));
+        assert_eq!(model.name, "gpt-4o");
         assert_eq!(
             model.description.as_ref().map(|value| value.as_ref()),
-            Some("anthropic")
+            Some("openai")
         );
         assert_eq!(
             model.icon,
-            Some(acp_thread::AgentModelIcon::Named(IconName::AiClaude))
+            Some(acp_thread::AgentModelIcon::Named(IconName::AiOpenAi))
         );
     }
 
@@ -2850,8 +2656,6 @@ description: Modern design guidance.
                 assistant_id: None,
                 thread_id: None,
                 current_run_id: None,
-                assistant_tools_hash: None,
-                assistant_tools_synced: false,
                 provider: Some(DEFAULT_PROVIDER.to_string()),
                 model: Some(DEFAULT_MODEL.to_string()),
                 mode: acp::SessionModeId::new("free"),
@@ -2983,8 +2787,6 @@ description: Modern design guidance.
                 assistant_id: None,
                 thread_id: None,
                 current_run_id: None,
-                assistant_tools_hash: None,
-                assistant_tools_synced: false,
                 provider: Some(DEFAULT_PROVIDER.to_string()),
                 model: Some(DEFAULT_MODEL.to_string()),
                 mode: acp::SessionModeId::new("free"),

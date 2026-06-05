@@ -72,7 +72,7 @@ fn all_tool_definitions() -> Vec<Value> {
                 "description": {"type": "string", "description": "Short description of what this command does"},
                 "timeout": {"type": "integer", "description": "Timeout in milliseconds"},
                 "working_directory": {"type": "string", "description": "Directory to run the command in. Defaults to workspace root."},
-                "is_background": {"type": "boolean", "description": "Accepted for compatibility; native runtime captures bounded output"}
+                "is_background": {"type": "boolean", "description": "Accepted for compatibility; native runtime starts the process without persisting output"}
             }),
             &["command"],
         ),
@@ -86,7 +86,7 @@ fn all_tool_definitions() -> Vec<Value> {
                 "timeout": {"type": "integer", "description": "Timeout in milliseconds"},
                 "working_directory": {"type": "string", "description": "Directory to run the command in. Defaults to workspace root."},
                 "cwd": {"type": "string", "description": "Alias for working_directory"},
-                "is_background": {"type": "boolean", "description": "Run as a background process and return startup output"}
+                "is_background": {"type": "boolean", "description": "Run as a background process and return startup status without persisted logs"}
             }),
             &["command"],
         ),

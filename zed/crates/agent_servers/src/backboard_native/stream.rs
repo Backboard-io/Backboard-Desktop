@@ -8,17 +8,15 @@ use std::{
 use ::backboard::{
     AudioAttachment, RecentUsageQuery, SendMessageRequest, SubmitToolOutputsRequest,
 };
-use acp_thread::{AcpThread, UserMessageId};
+use acp_thread::UserMessageId;
 use agent_client_protocol::schema as acp;
-use anyhow::{Context as _, Result, anyhow};
+use anyhow::{Context as _, Result};
 use base64::Engine as _;
 use futures::{Stream, StreamExt as _};
-use gpui::{AsyncApp, WeakEntity};
+use gpui::AsyncApp;
 use serde_json::{Value, json};
 
-use super::{
-    BackboardNativeState, HISTORY_REPLAY_MAX_MESSAGES, SessionRuntime, missing_api_key_message,
-};
+use super::{BackboardNativeState, SessionRuntime, missing_api_key_message};
 use crate::backboard_native::{mcp, tool_schemas, tools, workspace};
 
 const STREAM_TEXT_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
@@ -100,7 +98,7 @@ pub async fn run_prompt(
     }
 
     let runtime_load_started = Instant::now();
-    let (config, client) = match state.client() {
+    let (_config, client) = match state.client() {
         Ok(parts) => parts,
         Err(_) => {
             emit_agent_text(&state, &runtime, &missing_api_key_message(), cx)?;
@@ -127,17 +125,13 @@ pub async fn run_prompt(
     };
     let turn_tools = tool_definitions_for_turn(&runtime, &mcp_tools);
 
-    let assistant_started = Instant::now();
-    let thread_id = state
-        .clone()
-        .ensure_thread_binding(
-            &params.session_id,
-            turn_tools.clone(),
-            prompt_title(&message),
-            cx,
-        )
-        .await?;
-    state.record_turn_timing(&params.session_id, "assistant_create_ms", assistant_started);
+    let thread_binding_started = Instant::now();
+    let thread_id = state.session_thread_id(&params.session_id);
+    state.record_turn_timing(
+        &params.session_id,
+        "thread_binding_ms",
+        thread_binding_started,
+    );
     let provider = Some(runtime.provider.clone());
     let model = Some(runtime.model.clone());
     let thinking = thinking_payload(&runtime.intensity, &runtime.provider, &runtime.model);
@@ -158,19 +152,27 @@ pub async fn run_prompt(
     }
     if runtime.feature_settings.live_voice == "on" {
         let realtime_url = client.realtime_voice_url();
-        let setup = realtime_voice_setup(&thread_id, &runtime);
-        log::info!(
-            "Backboard native realtime voice prepared: session_id={} endpoint={} setup={}",
-            params.session_id,
-            realtime_url,
-            setup
-        );
-        emit_progress(
-            &state,
-            &runtime,
-            &format!("Realtime voice enabled for {realtime_url}."),
-            cx,
-        )?;
+        if let Some(thread_id) = thread_id.as_deref() {
+            let setup = realtime_voice_setup(thread_id, &runtime);
+            log::info!(
+                "Backboard native realtime voice prepared: session_id={} endpoint={} setup={}",
+                params.session_id,
+                realtime_url,
+                setup
+            );
+            emit_progress(
+                &state,
+                &runtime,
+                &format!("Realtime voice enabled for {realtime_url}."),
+                cx,
+            )?;
+        } else {
+            log::info!(
+                "Backboard native realtime voice deferred until first remote thread is created: session_id={} endpoint={}",
+                params.session_id,
+                realtime_url
+            );
+        }
     }
     let context_pack_started = Instant::now();
     let augmented = if simple_fast_path {
@@ -191,14 +193,14 @@ pub async fn run_prompt(
 
     let mcp_calls = mcp_calls_payload(&runtime.feature_settings, &message_for_model);
     let request = SendMessageRequest {
-        thread_id: None,
+        thread_id: thread_id.clone(),
         assistant_id: None,
         content: augmented,
         provider,
         model,
         memory: if simple_fast_path { "Off" } else { "Auto" }.to_string(),
         thinking,
-        tools: None,
+        tools: Some(turn_tools),
         web_search: runtime.feature_settings.web_search.clone(),
         image_generation: (runtime.feature_settings.image_generation == "auto")
             .then(|| "auto".to_string()),
@@ -212,162 +214,22 @@ pub async fn run_prompt(
         max_tokens: None,
         audio_file,
     };
-    let thread_id_for_request = thread_id.clone();
     log::info!(
-        "Backboard native endpoint call: POST /threads/{{thread_id}}/messages?stream=true session_id={} thread_id={} provider={} model={}",
+        "Backboard native endpoint call: POST /threads/messages?stream=true session_id={} thread_id={} provider={} model={}",
         params.session_id,
-        thread_id_for_request,
+        thread_id.as_deref().unwrap_or("<new>"),
         runtime.provider,
         runtime.model
     );
-    let stream = gpui_tokio::Tokio::spawn_result(cx, async move {
-        client
-            .send_message_stream(&thread_id_for_request, request)
-            .await
-    })
-    .await?;
+    let stream =
+        gpui_tokio::Tokio::spawn_result(
+            cx,
+            async move { client.send_message_stream(request).await },
+        )
+        .await?;
 
     let stop = consume_stream(state, runtime, thread_id, stream, cx).await?;
-    if config.default_model.is_none() || config.default_provider.is_none() {
-        // The API call succeeded using the configured/fallback model. Do not
-        // force-write defaults here; selecting a model in the UI owns config persistence.
-    }
     Ok(acp::PromptResponse::new(stop))
-}
-
-pub async fn replay_history(
-    state: Rc<BackboardNativeState>,
-    session_id: &acp::SessionId,
-    thread: WeakEntity<AcpThread>,
-    cx: &mut AsyncApp,
-) -> Result<()> {
-    let Some(thread_id) = state.session_thread_id(session_id) else {
-        return Ok(());
-    };
-    log::info!(
-        "Backboard native endpoint call: GET /threads/{{thread_id}} session_id={} thread_id={} path=rust-native",
-        session_id,
-        thread_id
-    );
-    let (_config, client) = match state.client() {
-        Ok(parts) => parts,
-        Err(_) => return Ok(()),
-    };
-    let data =
-        gpui_tokio::Tokio::spawn_result(cx, async move { client.get_thread(&thread_id).await })
-            .await?;
-    let messages = data
-        .get("messages")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let start = messages.len().saturating_sub(HISTORY_REPLAY_MAX_MESSAGES);
-
-    for message in messages.into_iter().skip(start) {
-        let role = message
-            .get("role")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let text = message
-            .get("content")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if text.is_empty() {
-            continue;
-        }
-        let text = strip_ide_context(text);
-        let updates = match role {
-            "user" => vec![acp::SessionUpdate::UserMessageChunk(replay_content_chunk(
-                text, true,
-            ))],
-            "assistant" => replay_assistant_updates(&text),
-            _ => continue,
-        };
-        for update in updates {
-            thread
-                .update(cx, |thread, cx| thread.handle_session_update(update, cx))
-                .map_err(|err| anyhow!(err))?
-                .map_err(|err| anyhow!("{err:?}"))?;
-        }
-    }
-
-    Ok(())
-}
-
-enum ReplayAssistantSegment {
-    Message(String),
-    Thought(String),
-}
-
-fn replay_content_chunk(text: impl Into<String>, message_start: bool) -> acp::ContentChunk {
-    let mut chunk = acp::ContentChunk::new(acp::ContentBlock::from(text.into()));
-    if message_start {
-        let mut meta = acp::Meta::new();
-        meta.insert("historyReplayMessageStart".to_string(), true.into());
-        chunk = chunk.meta(meta);
-    }
-    chunk
-}
-
-fn replay_assistant_updates(text: &str) -> Vec<acp::SessionUpdate> {
-    split_replayed_assistant_content(text)
-        .into_iter()
-        .enumerate()
-        .map(|(ix, segment)| {
-            let message_start = ix == 0;
-            match segment {
-                ReplayAssistantSegment::Message(text) => {
-                    acp::SessionUpdate::AgentMessageChunk(replay_content_chunk(text, message_start))
-                }
-                ReplayAssistantSegment::Thought(text) => {
-                    acp::SessionUpdate::AgentThoughtChunk(replay_content_chunk(text, message_start))
-                }
-            }
-        })
-        .collect()
-}
-
-fn split_replayed_assistant_content(text: &str) -> Vec<ReplayAssistantSegment> {
-    const THINKING_OPEN: &str = "<thinking>";
-    const THINKING_CLOSE: &str = "</thinking>";
-
-    let mut remaining = text;
-    let mut segments = Vec::new();
-
-    while let Some(open_ix) = remaining.find(THINKING_OPEN) {
-        let before = &remaining[..open_ix];
-        if !before.trim().is_empty() {
-            segments.push(ReplayAssistantSegment::Message(before.to_string()));
-        }
-
-        let thought_start = open_ix + THINKING_OPEN.len();
-        let after_open = &remaining[thought_start..];
-        if let Some(close_ix) = after_open.find(THINKING_CLOSE) {
-            let thought = &after_open[..close_ix];
-            if !thought.trim().is_empty() {
-                segments.push(ReplayAssistantSegment::Thought(thought.trim().to_string()));
-            }
-            remaining = &after_open[close_ix + THINKING_CLOSE.len()..];
-        } else {
-            if !after_open.trim().is_empty() {
-                segments.push(ReplayAssistantSegment::Thought(
-                    after_open.trim().to_string(),
-                ));
-            }
-            remaining = "";
-            break;
-        }
-    }
-
-    if !remaining.trim().is_empty() {
-        segments.push(ReplayAssistantSegment::Message(remaining.to_string()));
-    }
-
-    if segments.is_empty() && !text.is_empty() {
-        segments.push(ReplayAssistantSegment::Message(text.to_string()));
-    }
-
-    segments
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -432,7 +294,7 @@ impl StreamTextCoalescer {
 async fn consume_stream(
     state: Rc<BackboardNativeState>,
     runtime: SessionRuntime,
-    thread_id: String,
+    mut thread_id: Option<String>,
     mut stream: Pin<Box<dyn Stream<Item = Result<Value>> + Send>>,
     cx: &mut AsyncApp,
 ) -> Result<acp::StopReason> {
@@ -453,6 +315,10 @@ async fn consume_stream(
             }
 
             let chunk = chunk?;
+            let binding = ::backboard::message_thread_binding(&chunk);
+            if binding.thread_id.is_some() || binding.assistant_id.is_some() {
+                thread_id = state.record_message_thread_binding(&runtime.session_id, binding);
+            }
             let chunk_type = chunk
                 .get("type")
                 .and_then(Value::as_str)
@@ -563,6 +429,12 @@ async fn consume_stream(
                         .and_then(Value::as_array)
                         .cloned()
                         .unwrap_or_default();
+                    let thread_id = thread_id
+                        .clone()
+                        .or_else(|| state.session_thread_id(&runtime.session_id))
+                        .context(
+                            "tool_submit_required arrived before Backboard returned thread_id",
+                        )?;
                     next_stream = Some(
                         submit_tools(state.clone(), &runtime, &thread_id, &run_id, tool_calls, cx)
                             .await?,
@@ -590,6 +462,10 @@ async fn consume_stream(
                             .and_then(Value::as_array)
                             .cloned()
                             .unwrap_or_default();
+                        let thread_id = thread_id
+                            .clone()
+                            .or_else(|| state.session_thread_id(&runtime.session_id))
+                            .context("requires_action run_ended arrived before Backboard returned thread_id")?;
                         next_stream = Some(
                             submit_tools(
                                 state.clone(),
@@ -1343,14 +1219,6 @@ fn prompt_parts(blocks: &[acp::ContentBlock]) -> PromptParts {
     PromptParts { text, audio }
 }
 
-fn prompt_title(prompt: &str) -> Option<String> {
-    prompt
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(|line| util::truncate_and_trailoff(line, 200))
-}
-
 fn audio_attachment_from_block(block: &acp::ContentBlock) -> Option<AudioAttachment> {
     let acp::ContentBlock::Audio(audio) = block else {
         return None;
@@ -1720,17 +1588,10 @@ fn anthropic_budget_tokens(effort: &str) -> u64 {
     }
 }
 
-fn strip_ide_context(text: &str) -> String {
-    text.split("<backboard_ide_context>")
-        .next()
-        .unwrap_or(text)
-        .trim_end()
-        .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::WeakEntity;
 
     fn test_runtime() -> SessionRuntime {
         SessionRuntime {
@@ -1745,19 +1606,6 @@ mod tests {
             cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             context_server_store: None,
         }
-    }
-
-    #[test]
-    fn prompt_title_uses_first_non_empty_line() {
-        assert_eq!(
-            prompt_title("\n\n  Fix the right panel title\nand keep going").as_deref(),
-            Some("Fix the right panel title")
-        );
-    }
-
-    #[test]
-    fn prompt_title_ignores_empty_prompt() {
-        assert_eq!(prompt_title("  \n\t").as_deref(), None);
     }
 
     #[test]
