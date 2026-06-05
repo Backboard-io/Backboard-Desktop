@@ -1061,6 +1061,10 @@ fn visible_assistant_text(
     tasks: &[TaskItem],
     display_mode: ChatFeedDisplayMode,
 ) -> Option<String> {
+    if is_internal_mode_response(text) {
+        return None;
+    }
+
     if display_mode == ChatFeedDisplayMode::LiveWork {
         live_assistant_text(text)
     } else {
@@ -1085,6 +1089,10 @@ fn live_thought_text(text: &str) -> Option<String> {
 }
 
 fn live_feed_text(text: &str) -> Option<String> {
+    if is_internal_mode_response(text) {
+        return None;
+    }
+
     let mut lines = Vec::new();
     for raw_line in readable_paragraphs(text) {
         let line = raw_line
@@ -1102,6 +1110,10 @@ fn live_feed_text(text: &str) -> Option<String> {
 }
 
 fn clean_assistant_text(text: &str, tasks: &[TaskItem]) -> Option<String> {
+    if is_internal_mode_response(text) {
+        return None;
+    }
+
     let mut cleaned = Vec::new();
     let mut in_code_block = false;
     for raw_line in readable_paragraphs(text) {
@@ -1182,11 +1194,11 @@ fn clean_thought_text(text: &str, display_mode: ChatFeedDisplayMode) -> Option<S
             .trim_start_matches('-')
             .trim_start_matches('*')
             .trim();
-        if let Some(line) = friendly_progress_status_line(line) {
-            push_unique_line(&mut cleaned, line);
+        if is_low_value_progress_line(line) {
             continue;
         }
-        if is_low_value_progress_line(line) {
+        if let Some(line) = friendly_progress_status_line(line) {
+            push_unique_line(&mut cleaned, line);
             continue;
         }
         if let Some(progress) = simplified_progress_line(line) {
@@ -1429,7 +1441,31 @@ fn extract_progress_tool_name(line: &str) -> Option<String> {
 
 fn is_low_value_progress_line(line: &str) -> bool {
     let lower = line.trim().to_lowercase();
-    lower.starts_with("generated media") || lower.starts_with("realtime voice enabled")
+    lower.starts_with("connected to model")
+        || lower.starts_with("sending to model")
+        || lower.starts_with("sending the task to the selected model")
+        || lower.starts_with("retrying request")
+        || lower.starts_with("generated media")
+        || lower.starts_with("realtime voice enabled")
+}
+
+fn is_internal_mode_response(text: &str) -> bool {
+    let lower = text.trim().to_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+
+    (lower.contains("simple build mode")
+        || lower.contains("simple mode guidelines")
+        || lower.contains("build mode guidelines")
+        || lower.contains("nontechnical user"))
+        && (lower.starts_with("got it")
+            || lower.starts_with("i understand")
+            || lower.starts_with("i'm ready")
+            || lower.starts_with("i’m ready")
+            || lower.contains("what would you like to build"))
+        || (lower.starts_with("it looks like the workspace is empty")
+            && lower.contains("provide more details"))
 }
 
 fn push_unique_line(lines: &mut Vec<String>, line: String) {
@@ -1981,5 +2017,21 @@ Simple build mode: build or edit the project for a nontechnical user.
 Make a recipe app";
 
         assert_eq!(clean_user_text(text), "Make a recipe app");
+    }
+
+    #[test]
+    fn hides_simple_mode_instruction_acknowledgement() {
+        let text = "Got it—I understand the simple build mode guidelines. I'm ready to help you create or edit a project for a nontechnical user, focusing on web apps and polished experiences.\n\nWhat would you like to build?";
+
+        assert_eq!(
+            visible_assistant_text(text, &[], ChatFeedDisplayMode::LiveWork),
+            None
+        );
+    }
+
+    #[test]
+    fn hides_connection_progress_in_live_feed() {
+        assert_eq!(live_feed_text("Connected to model."), None);
+        assert_eq!(live_feed_text("Sending to model."), None);
     }
 }
