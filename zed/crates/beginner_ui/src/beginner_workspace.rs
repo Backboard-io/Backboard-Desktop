@@ -2272,10 +2272,6 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<ConversationView>> {
-        if self.selected_folder.is_none() {
-            return None;
-        }
-
         let options = self.agent_workspace_chat_options();
         let panel = self.ensure_agent_panel(window, cx)?;
         let conversation_view = panel.update(cx, |panel, cx| {
@@ -3147,7 +3143,6 @@ impl BeginnerWorkspace {
 
     fn ensure_composer_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !Self::has_backboard_api_key()
-            || self.selected_folder.is_none()
             || self.thread.is_some()
             || self.pending_conversation_view.is_some()
             || self.active_conversation_view.is_some()
