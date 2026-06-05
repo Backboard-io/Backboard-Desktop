@@ -151,9 +151,10 @@ impl Render for BeginnerChatFeed {
             .w_full()
             .overflow_y_scroll()
             .items_center()
+            .justify_start()
             .px_6()
             .pt_6()
-            .pb(px(220.))
+            .pb(px(132.))
             .gap_3()
             .bg(ds::app_background(cx))
             .when(is_empty, |el| {
@@ -1061,7 +1062,7 @@ fn visible_assistant_text(
     tasks: &[TaskItem],
     display_mode: ChatFeedDisplayMode,
 ) -> Option<String> {
-    if is_internal_mode_response(text) {
+    if is_internal_mode_response(text) || is_unhelpful_simple_mode_clarification(text) {
         return None;
     }
 
@@ -1468,6 +1469,13 @@ fn is_internal_mode_response(text: &str) -> bool {
             && lower.contains("provide more details"))
 }
 
+fn is_unhelpful_simple_mode_clarification(text: &str) -> bool {
+    let lower = text.trim().to_lowercase();
+    lower.contains("could you specify what aspects of the ui")
+        || lower.contains("what aspects of the ui you'd like improved")
+        || lower.contains("what aspects of the ui you’d like improved")
+}
+
 fn push_unique_line(lines: &mut Vec<String>, line: String) {
     if lines.last().is_some_and(|last| last == &line) {
         return;
@@ -1502,6 +1510,7 @@ fn render_chat_copy(text: SharedString, color: Hsla, cx: &App) -> impl IntoEleme
         .w_full()
         .min_w_0()
         .overflow_x_hidden()
+        .whitespace_normal()
         .text_ui_sm(cx)
         .line_height(relative(1.42))
         .text_color(color)
@@ -2022,6 +2031,16 @@ Make a recipe app";
     #[test]
     fn hides_simple_mode_instruction_acknowledgement() {
         let text = "Got it—I understand the simple build mode guidelines. I'm ready to help you create or edit a project for a nontechnical user, focusing on web apps and polished experiences.\n\nWhat would you like to build?";
+
+        assert_eq!(
+            visible_assistant_text(text, &[], ChatFeedDisplayMode::LiveWork),
+            None
+        );
+    }
+
+    #[test]
+    fn hides_unhelpful_simple_mode_ui_clarification() {
+        let text = "Could you specify what aspects of the UI you'd like improved? For example, are you thinking about layout, color scheme, font style, or overall design feel?";
 
         assert_eq!(
             visible_assistant_text(text, &[], ChatFeedDisplayMode::LiveWork),
