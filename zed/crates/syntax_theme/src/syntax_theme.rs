@@ -216,11 +216,11 @@ mod bundled_themes {
     }
 
     impl SyntaxTheme {
-        /// Load the "One Dark" syntax theme from the bundled theme JSON.
+        /// Load the "Backboard Midnight" syntax theme from the bundled theme JSON.
         pub fn one_dark() -> Arc<Self> {
             load_theme(
                 include_str!("../../../assets/themes/one/one.json"),
-                "One Dark",
+                "Backboard Midnight",
             )
         }
     }

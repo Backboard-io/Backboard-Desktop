@@ -1688,7 +1688,7 @@ struct InlineAssistTabBarButton {
 impl Render for InlineAssistTabBarButton {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let focus_handle = self.focus_handle.clone();
-        IconButton::new("terminal_inline_assistant", IconName::ZedAssistant)
+        IconButton::new("terminal_inline_assistant", IconName::BackboardAssistant)
             .icon_size(IconSize::Small)
             .on_click(cx.listener(|_, _, window, cx| {
                 window.dispatch_action(InlineAssist::default().boxed_clone(), cx);

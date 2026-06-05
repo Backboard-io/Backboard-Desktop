@@ -6536,7 +6536,7 @@ impl Editor {
     ) -> edit_prediction_types::EditPredictionIconSet {
         match provider {
             Some(provider) => provider.provider.icons(cx),
-            None => edit_prediction_types::EditPredictionIconSet::new(IconName::ZedPredict),
+            None => edit_prediction_types::EditPredictionIconSet::new(IconName::BackboardPredict),
         }
     }
 

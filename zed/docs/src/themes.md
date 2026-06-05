@@ -38,8 +38,8 @@ You can set the mode to `"dark"` or `"light"` to ignore the current system mode.
 {
   "theme": {
     "mode": "system",
-    "light": "One Light",
-    "dark": "One Dark"
+    "light": "Backboard Daylight",
+    "dark": "Backboard Midnight"
   }
 }
 ```
@@ -62,8 +62,8 @@ the first toggle converts it to dynamic theme selection with default themes:
 {
   "theme": {
     "mode": "system",
-    "light": "One Light",
-    "dark": "One Dark"
+    "light": "Backboard Daylight",
+    "dark": "Backboard Midnight"
   }
 }
 ```
@@ -83,7 +83,7 @@ For example, add the following to your `settings.json` if you wish to override t
 ```json [settings]
 {
   "theme_overrides": {
-    "One Dark": {
+    "Backboard Midnight": {
       "editor.background": "#333",
       "syntax": {
         "comment": {
@@ -109,7 +109,7 @@ For example, add the following to your `settings.json` if you wish to override t
 To see a comprehensive list of captures (like `comment` and `comment.doc`) see [Language Extensions: Syntax highlighting](./extensions/languages.md#syntax-highlighting).
 
 To see a list of available theme attributes look at the JSON file for your theme.
-For example, [assets/themes/one/one.json](https://github.com/backboard/ide/blob/main/assets/themes/one/one.json) for the default One Dark and One Light themes.
+For example, [assets/themes/one/one.json](https://github.com/backboard/ide/blob/main/assets/themes/one/one.json) for the default Backboard Midnight and Backboard Daylight themes.
 
 ## Local Themes {#local-themes}
 

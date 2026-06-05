@@ -365,7 +365,7 @@ fn render_conflict_buttons(
                 Button::new("resolve-with-agent", "Resolve with Agent")
                     .label_size(LabelSize::Small)
                     .start_icon(
-                        Icon::new(IconName::ZedAssistant)
+                        Icon::new(IconName::BackboardAssistant)
                             .size(IconSize::Small)
                             .color(Color::Muted),
                     )

@@ -1,10 +1,10 @@
 {
   "$schema": "https://app.backboard.io/schema/themes/v0.2.0.json",
-  "name": "One",
+  "name": "Backboard Core",
   "author": "Backboard",
   "themes": [
     {
-      "name": "One Dark",
+      "name": "Backboard Midnight",
       "appearance": "dark",
       "style": {
         "border": "#464b57ff",
@@ -418,7 +418,7 @@
       }
     },
     {
-      "name": "One Light",
+      "name": "Backboard Daylight",
       "appearance": "light",
       "style": {
         "border": "#c9c9caff",

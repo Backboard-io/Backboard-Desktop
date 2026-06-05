@@ -1012,7 +1012,7 @@ mod test_support {
                     id: acp::ModelId::new("visual-test-model"),
                     name: "Visual Test Model".into(),
                     description: Some("A stub model for visual testing".into()),
-                    icon: Some(AgentModelIcon::Named(ui::IconName::ZedAssistant)),
+                    icon: Some(AgentModelIcon::Named(ui::IconName::BackboardAssistant)),
                     is_latest: false,
                     cost: None,
                 })),

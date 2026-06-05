@@ -19,8 +19,8 @@ pub enum VectorName {
     ProTrialStamp,
     ProUserStamp,
     StudentStamp,
-    ZedLogo,
-    ZedXCopilot,
+    BackboardMark,
+    BackboardXCopilot,
 }
 
 impl VectorName {

@@ -17,7 +17,7 @@ You can preview/choose amongst your installed themes and icon themes with {#acti
 
 ```json [settings]
 {
-  "theme": "One Dark",
+  "theme": "Backboard Midnight",
   "icon_theme": "Backboard Studio (Default)"
 }
 ```
@@ -27,8 +27,8 @@ If you would like to use distinct themes for light mode/dark mode that can be se
 ```json [settings]
 {
   "theme": {
-    "dark": "One Dark",
-    "light": "One Light",
+    "dark": "Backboard Midnight",
+    "light": "Backboard Daylight",
     // Mode to use (dark, light) or "system" to follow the OS's light/dark mode (default)
     "mode": "system"
   },

@@ -268,7 +268,7 @@ pub enum IconOrSvg {
 
 impl Default for IconOrSvg {
     fn default() -> Self {
-        Self::Icon(IconName::ZedAssistant)
+        Self::Icon(IconName::BackboardAssistant)
     }
 }
 
@@ -416,7 +416,7 @@ fn icon_for_provider_family(text: &str) -> Option<IconName> {
 #[derive(Default, Clone, PartialEq, Eq)]
 pub enum ConfigurationViewTargetAgent {
     #[default]
-    ZedAgent,
+    BackboardAgent,
     Other(SharedString),
 }
 

@@ -451,17 +451,17 @@ impl<T: ButtonBuilder, const COLS: usize, const ROWS: usize> Component
                                 [
                                     ToggleButtonWithIcon::new(
                                         "First",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Second",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Third",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                 ],
@@ -494,34 +494,34 @@ impl<T: ButtonBuilder, const COLS: usize, const ROWS: usize> Component
                                 [
                                     ToggleButtonWithIcon::new(
                                         "First",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Second",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Third",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                 ],
                                 [
                                     ToggleButtonWithIcon::new(
                                         "Fourth",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Fifth",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Sixth",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                 ],
@@ -555,17 +555,17 @@ impl<T: ButtonBuilder, const COLS: usize, const ROWS: usize> Component
                                 [
                                     ToggleButtonWithIcon::new(
                                         "First",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Second",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Third",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                 ],
@@ -600,34 +600,34 @@ impl<T: ButtonBuilder, const COLS: usize, const ROWS: usize> Component
                                 [
                                     ToggleButtonWithIcon::new(
                                         "First",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Second",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Third",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                 ],
                                 [
                                     ToggleButtonWithIcon::new(
                                         "Fourth",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Fifth",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Sixth",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                 ],
@@ -662,17 +662,17 @@ impl<T: ButtonBuilder, const COLS: usize, const ROWS: usize> Component
                                 [
                                     ToggleButtonWithIcon::new(
                                         "First",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Second",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Third",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                 ],
@@ -708,34 +708,34 @@ impl<T: ButtonBuilder, const COLS: usize, const ROWS: usize> Component
                                 [
                                     ToggleButtonWithIcon::new(
                                         "First",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Second",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Third",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                 ],
                                 [
                                     ToggleButtonWithIcon::new(
                                         "Fourth",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Fifth",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                     ToggleButtonWithIcon::new(
                                         "Sixth",
-                                        IconName::AiZed,
+                                        IconName::AiBackboard,
                                         |_, _, _| {},
                                     ),
                                 ],

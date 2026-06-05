@@ -1,10 +1,10 @@
 {
   "$schema": "https://app.backboard.io/schema/themes/v0.2.0.json",
-  "name": "Gruvbox",
+  "name": "Backboard Earth",
   "author": "Backboard",
   "themes": [
     {
-      "name": "Gruvbox Dark",
+      "name": "Backboard Hearth",
       "appearance": "dark",
       "style": {
         "accents": ["#cc241dff", "#98971aff", "#d79921ff", "#458588ff", "#b16286ff", "#689d6aff", "#d65d0eff"],
@@ -421,7 +421,7 @@
       }
     },
     {
-      "name": "Gruvbox Dark Hard",
+      "name": "Backboard Hearth High",
       "appearance": "dark",
       "style": {
         "accents": ["#cc241dff", "#98971aff", "#d79921ff", "#458588ff", "#b16286ff", "#689d6aff", "#d65d0eff"],
@@ -838,7 +838,7 @@
       }
     },
     {
-      "name": "Gruvbox Dark Soft",
+      "name": "Backboard Hearth Low",
       "appearance": "dark",
       "style": {
         "accents": ["#cc241dff", "#98971aff", "#d79921ff", "#458588ff", "#b16286ff", "#689d6aff", "#d65d0eff"],
@@ -1255,7 +1255,7 @@
       }
     },
     {
-      "name": "Gruvbox Light",
+      "name": "Backboard Wheat",
       "appearance": "light",
       "style": {
         "accents": ["#cc241dff", "#98971aff", "#d79921ff", "#458588ff", "#b16286ff", "#689d6aff", "#d65d0eff"],
@@ -1672,7 +1672,7 @@
       }
     },
     {
-      "name": "Gruvbox Light Hard",
+      "name": "Backboard Wheat High",
       "appearance": "light",
       "style": {
         "accents": ["#cc241dff", "#98971aff", "#d79921ff", "#458588ff", "#b16286ff", "#689d6aff", "#d65d0eff"],
@@ -2089,7 +2089,7 @@
       }
     },
     {
-      "name": "Gruvbox Light Soft",
+      "name": "Backboard Wheat Low",
       "appearance": "light",
       "style": {
         "accents": ["#cc241dff", "#98971aff", "#d79921ff", "#458588ff", "#b16286ff", "#689d6aff", "#d65d0eff"],

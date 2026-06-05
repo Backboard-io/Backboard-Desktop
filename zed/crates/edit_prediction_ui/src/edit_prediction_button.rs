@@ -1538,7 +1538,7 @@ fn default_icon_set_for_provider(
         EditPredictionProvider::Mercury => {
             edit_prediction_types::EditPredictionIconSet::new(IconName::Inception)
         }
-        _ => edit_prediction_types::EditPredictionIconSet::new(IconName::ZedPredict),
+        _ => edit_prediction_types::EditPredictionIconSet::new(IconName::BackboardPredict),
     }
 }
 

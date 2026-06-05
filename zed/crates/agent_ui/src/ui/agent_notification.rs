@@ -98,7 +98,7 @@ impl Render for AgentNotification {
         };
         let has_caption = self.caption.is_some();
         let has_metadata = self.project_name.is_some() || self.caption.is_some();
-        let notification_icon = if self.icon == IconName::ZedAssistant {
+        let notification_icon = if self.icon == IconName::BackboardAssistant {
             svg()
                 .path(BACKBOARD_LOGO_PATH)
                 .h(px(30.))

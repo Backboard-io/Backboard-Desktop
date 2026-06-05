@@ -3185,13 +3185,13 @@ Examples:
       "settings": {
         "buffer_font_size": 20,
         "ui_font_size": 18,
-        "theme": "One Light"
+        "theme": "Backboard Daylight"
       }
     },
     "Clean Slate": {
       "base": "default",
       "settings": {
-        "theme": "Ayu Dark"
+        "theme": "Backboard Ember"
       }
     }
   }
@@ -4708,7 +4708,7 @@ Example command to set the title: `echo -e "\e]2;New Title\007";`
 
 - Description: The theme setting can be specified in two forms - either as the name of a theme or as an object containing the `mode`, `dark`, and `light` themes for the Backboard Studio UI.
 - Setting: `theme`
-- Default: `One Dark`
+- Default: `Backboard Midnight`
 
 ### Theme Object
 
@@ -4720,8 +4720,8 @@ Example command to set the title: `echo -e "\e]2;New Title\007";`
 {
   "theme": {
     "mode": "system",
-    "dark": "One Dark",
-    "light": "One Light"
+    "dark": "Backboard Midnight",
+    "light": "Backboard Daylight"
   }
 }
 ```
@@ -4740,8 +4740,8 @@ Example command to set the title: `echo -e "\e]2;New Title\007";`
 {
   "theme": {
     "mode": "dark",
-    "dark": "One Dark",
-    "light": "One Light"
+    "dark": "Backboard Midnight",
+    "light": "Backboard Daylight"
   }
 }
 ```
@@ -4752,8 +4752,8 @@ Example command to set the title: `echo -e "\e]2;New Title\007";`
 {
   "theme": {
     "mode": "light",
-    "dark": "One Dark",
-    "light": "One Light"
+    "dark": "Backboard Midnight",
+    "light": "Backboard Daylight"
   }
 }
 ```
@@ -4764,8 +4764,8 @@ Example command to set the title: `echo -e "\e]2;New Title\007";`
 {
   "theme": {
     "mode": "system",
-    "dark": "One Dark",
-    "light": "One Light"
+    "dark": "Backboard Midnight",
+    "light": "Backboard Daylight"
   }
 }
 ```
@@ -4774,7 +4774,7 @@ Example command to set the title: `echo -e "\e]2;New Title\007";`
 
 - Description: The name of the dark Backboard Studio theme to use for the UI.
 - Setting: `dark`
-- Default: `One Dark`
+- Default: `Backboard Midnight`
 
 **Options**
 
@@ -4784,7 +4784,7 @@ Run the {#action theme_selector::Toggle} action in the command palette to see a 
 
 - Description: The name of the light Backboard Studio theme to use for the UI.
 - Setting: `light`
-- Default: `One Light`
+- Default: `Backboard Daylight`
 
 **Options**
 
@@ -5581,7 +5581,7 @@ Example:
       "settings": {
         "agent_buffer_font_size": 18.0,
         "buffer_font_size": 18.0,
-        "theme": "One Dark",
+        "theme": "Backboard Midnight",
         "ui_font_size": 18.0
       }
     },
@@ -5589,7 +5589,7 @@ Example:
       "settings": {
         "agent_buffer_font_size": 18.0,
         "buffer_font_size": 18.0,
-        "theme": "One Light",
+        "theme": "Backboard Daylight",
         "ui_font_size": 18.0
       }
     },

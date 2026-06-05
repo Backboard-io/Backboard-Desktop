@@ -326,7 +326,7 @@ async fn test_extension_store(cx: &mut TestAppContext) {
                 "Monokai Light",
                 "Monokai Pro Dark",
                 "Monokai Pro Light",
-                "One Dark",
+                "Backboard Midnight",
             ]
         );
     });
@@ -339,16 +339,16 @@ async fn test_extension_store(cx: &mut TestAppContext) {
                 "name": "Zed Gruvbox",
                 "version": "1.0.0",
                 "themes": {
-                    "Gruvbox": "themes/gruvbox.json"
+                    "Backboard Earth": "themes/gruvbox.json"
                 }
             }"#,
             "themes": {
                 "gruvbox.json": r#"{
-                    "name": "Gruvbox",
+                    "name": "Backboard Earth",
                     "author": "Someone Else",
                     "themes": [
                         {
-                            "name": "Gruvbox",
+                            "name": "Backboard Earth",
                             "appearance": "dark",
                             "style": {}
                         }
@@ -389,7 +389,7 @@ async fn test_extension_store(cx: &mut TestAppContext) {
         },
     );
     expected_index.themes.insert(
-        "Gruvbox".into(),
+        "Backboard Earth".into(),
         ExtensionIndexThemeEntry {
             extension: "zed-gruvbox".into(),
             path: "themes/gruvbox.json".into(),
@@ -418,12 +418,12 @@ async fn test_extension_store(cx: &mut TestAppContext) {
         assert_eq!(
             theme_registry.list_names(),
             [
-                "Gruvbox",
+                "Backboard Earth",
                 "Monokai Dark",
                 "Monokai Light",
                 "Monokai Pro Dark",
                 "Monokai Pro Light",
-                "One Dark",
+                "Backboard Midnight",
             ]
         );
     });
@@ -483,12 +483,12 @@ async fn test_extension_store(cx: &mut TestAppContext) {
         assert_eq!(
             theme_registry.list_names(),
             [
-                "Gruvbox",
+                "Backboard Earth",
                 "Monokai Dark",
                 "Monokai Light",
                 "Monokai Pro Dark",
                 "Monokai Pro Light",
-                "One Dark",
+                "Backboard Midnight",
             ]
         );
 

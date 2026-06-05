@@ -1,10 +1,10 @@
 {
   "$schema": "https://app.backboard.io/schema/themes/v0.2.0.json",
-  "name": "Ayu",
+  "name": "Backboard Ember",
   "author": "Backboard",
   "themes": [
     {
-      "name": "Ayu Dark",
+      "name": "Backboard Ember",
       "appearance": "dark",
       "style": {
         "border": "#3f4043ff",
@@ -406,7 +406,7 @@
       }
     },
     {
-      "name": "Ayu Light",
+      "name": "Backboard Pearl",
       "appearance": "light",
       "style": {
         "border": "#cfd1d2ff",
@@ -808,7 +808,7 @@
       }
     },
     {
-      "name": "Ayu Mirage",
+      "name": "Backboard Mirage",
       "appearance": "dark",
       "style": {
         "border": "#53565dff",

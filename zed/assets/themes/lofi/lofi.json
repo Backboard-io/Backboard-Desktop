@@ -1,10 +1,10 @@
 {
   "$schema": "https://app.backboard.io/schema/themes/v0.2.0.json",
-  "name": "Lofi",
+  "name": "Backboard Calm",
   "author": "Erin Tomorri",
   "themes": [
     {
-      "name": "Lofi White",
+      "name": "Backboard Paper",
       "appearance": "light",
       "style": {
         "border": "#c9d4e2ff",
@@ -406,7 +406,7 @@
       }
     },
     {
-      "name": "Lofi White Dark",
+      "name": "Backboard Paper Dark",
       "appearance": "dark",
       "style": {
         "border": "#344155ff",
@@ -808,7 +808,7 @@
       }
     },
     {
-      "name": "Lofi Pink",
+      "name": "Backboard Rose",
       "appearance": "light",
       "style": {
         "border": "#efd4e1ff",
@@ -1210,7 +1210,7 @@
       }
     },
     {
-      "name": "Lofi Pink Dark",
+      "name": "Backboard Rose Dark",
       "appearance": "dark",
       "style": {
         "border": "#5b4050ff",

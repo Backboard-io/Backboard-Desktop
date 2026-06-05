@@ -357,7 +357,7 @@ impl BackboardAgentPortalWindow {
                     .child(self.render_rail_icon(IconName::Split, true, "Agent workspace"))
                     .child(self.render_rail_icon(IconName::MagnifyingGlass, false, "Search"))
                     .child(self.render_rail_icon(IconName::GitBranch, false, "Branches"))
-                    .child(self.render_rail_icon(IconName::ZedAgent, false, "Agents"))
+                    .child(self.render_rail_icon(IconName::BackboardAgent, false, "Agents"))
                     .child(self.render_rail_icon(IconName::Box, false, "Artifacts")),
             )
             .child(self.render_rail_icon(IconName::Settings, false, "Settings"))
@@ -436,7 +436,7 @@ impl BackboardAgentPortalWindow {
                             .bg(cx.theme().colors().text_accent),
                     )
                     .child(
-                        Icon::new(IconName::ZedAgent)
+                        Icon::new(IconName::BackboardAgent)
                             .size(IconSize::Small)
                             .color(Color::Muted),
                     )
@@ -831,7 +831,7 @@ impl BackboardAgentPortalWindow {
                             .gap_2()
                             .child(div().size(px(7.)).rounded_full().bg(status_color))
                             .child(
-                                Icon::new(IconName::ZedAgent)
+                                Icon::new(IconName::BackboardAgent)
                                     .size(IconSize::Small)
                                     .color(Color::Muted),
                             )

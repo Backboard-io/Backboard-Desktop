@@ -4639,7 +4639,7 @@ mod tests {
                     "profiles": {
                         "Presenting": {
                             "buffer_font_size": 20,
-                            "theme": "One Light"
+                            "theme": "Backboard Daylight"
                         },
                         "Minimal": {
                             "vim_mode": true
@@ -4656,7 +4656,7 @@ mod tests {
                         "Presenting": {
                             "settings": {
                                 "buffer_font_size": 20,
-                                "theme": "One Light"
+                                "theme": "Backboard Daylight"
                             }
                         },
                         "Minimal": {
@@ -5407,7 +5407,7 @@ mod tests {
         );
 
         // No title_bar key — should be unchanged
-        assert_migrate_settings(&r#"{ "theme": "One Dark" }"#.unindent(), None);
+        assert_migrate_settings(&r#"{ "theme": "Backboard Midnight" }"#.unindent(), None);
 
         // title_bar without show_branch_icon — should be unchanged
         assert_migrate_settings(

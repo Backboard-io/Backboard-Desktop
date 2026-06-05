@@ -33,7 +33,7 @@ pub const POPOVER_Y_PADDING: Pixels = px(8.);
 /// positioned relative the element that was clicked, and clicking an item in the
 /// dropdown should change the value of the element that was clicked.
 ///
-/// Example: A theme select control. Displays "One Dark", clicking it opens a list of themes.
+/// Example: A theme select control. Displays "Backboard Midnight", clicking it opens a list of themes.
 /// When one is selected, the theme select control displays the selected theme.
 #[derive(IntoElement)]
 pub struct Popover {

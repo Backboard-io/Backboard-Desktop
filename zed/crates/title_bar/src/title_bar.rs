@@ -1237,7 +1237,7 @@ impl TitleBar {
             .toggle_state(agents_active)
             .label_size(LabelSize::XSmall)
             .size(ButtonSize::Compact)
-            .start_icon(Icon::new(IconName::ZedAgent).size(IconSize::XSmall))
+            .start_icon(Icon::new(IconName::BackboardAgent).size(IconSize::XSmall))
             .tooltip(Tooltip::text(mode_tooltip));
         if !agents_active {
             agents_button = agents_button.on_click(move |_, _window, cx| {

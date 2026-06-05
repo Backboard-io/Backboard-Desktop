@@ -2001,7 +2001,7 @@ mod tests {
         // This test reproduces the exact issue from the bug report
         // where white ANSI text on white background should be adjusted
 
-        // Simulate One Light theme colors
+        // Simulate Backboard Daylight theme colors
         let white_fg = gpui::Hsla {
             h: 0.0,
             s: 0.0,

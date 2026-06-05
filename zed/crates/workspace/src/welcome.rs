@@ -343,7 +343,7 @@ impl WelcomePage {
                 h_flex()
                     .gap_1p5()
                     .child(
-                        Icon::new(IconName::ZedAssistant)
+                        Icon::new(IconName::BackboardAssistant)
                             .color(Color::Muted)
                             .size(IconSize::Small),
                     )

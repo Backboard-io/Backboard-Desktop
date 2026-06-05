@@ -35,8 +35,8 @@ Backboard Studio supports separate themes for light and dark mode with automatic
 {
   "theme": {
     "mode": "system",
-    "light": "One Light",
-    "dark": "One Dark"
+    "light": "Backboard Daylight",
+    "dark": "Backboard Midnight"
   }
 }
 ```

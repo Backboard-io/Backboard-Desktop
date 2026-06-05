@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_one_light_theme_exact_colors() {
-        // Test with exact colors from One Light theme
+        // Test with exact colors from Backboard Daylight theme
         // terminal.background and terminal.ansi.white are both #fafafaff
         let fafafa = hsla_from_hex(0xfafafa);
 

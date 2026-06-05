@@ -73,7 +73,7 @@ where
     C: 'static + AgentConnection + Send + Clone,
 {
     fn logo(&self) -> ui::IconName {
-        ui::IconName::ZedAgent
+        ui::IconName::BackboardAgent
     }
 
     fn agent_id(&self) -> AgentId {

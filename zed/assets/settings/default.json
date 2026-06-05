@@ -8,8 +8,8 @@
   // - "dark": Use the theme indicated by the "dark" field
   "theme": {
     "mode": "light",
-    "light": "Lofi White",
-    "dark": "Lofi White",
+    "light": "Backboard Paper",
+    "dark": "Backboard Paper",
   },
   "icon_theme": "Backboard Studio (Default)",
   // The name of a base set of key bindings to use.
@@ -2500,12 +2500,12 @@
   // Settings overrides to use when using Backboard Studio Preview.
   // Mostly useful for developers who are managing multiple instances of Backboard Studio.
   "preview": {
-    // "theme": "Andromeda"
+    // "theme": "Backboard Nebula"
   },
   // Settings overrides to use when using Backboard Studio Nightly.
   // Mostly useful for developers who are managing multiple instances of Backboard Studio.
   "nightly": {
-    // "theme": "Andromeda"
+    // "theme": "Backboard Nebula"
     "instrumentation": {
       "performance_profiler": {
         "enabled": true,
@@ -2515,12 +2515,12 @@
   // Settings overrides to use when using Backboard Studio Stable.
   // Mostly useful for developers who are managing multiple instances of Backboard Studio.
   "stable": {
-    // "theme": "Andromeda"
+    // "theme": "Backboard Nebula"
   },
   // Settings overrides to use when using Backboard Studio Dev.
   // Mostly useful for developers who are managing multiple instances of Backboard Studio.
   "dev": {
-    // "theme": "Andromeda"
+    // "theme": "Backboard Nebula"
     "instrumentation": {
       "performance_profiler": {
         "enabled": true,
@@ -2624,7 +2624,7 @@
   //     "settings": {
   //       "agent_ui_font_size": 20.0,
   //       "buffer_font_size": 20.0,
-  //       "theme": "One Light",
+  //       "theme": "Backboard Daylight",
   //       "ui_font_size": 20.0
   //     }
   //   },

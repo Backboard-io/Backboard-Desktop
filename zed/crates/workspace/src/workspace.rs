@@ -16178,7 +16178,7 @@ mod tests {
         workspace.update_in(cx, |_workspace, _window, cx| {
             *SystemAppearance::global_mut(cx) = SystemAppearance(theme::Appearance::Light);
             settings::update_settings_file(settings_fs.clone(), cx, |settings, _cx| {
-                settings.theme.theme = Some(ThemeSelection::Static(ThemeName("One Light".into())));
+                settings.theme.theme = Some(ThemeSelection::Static(ThemeName("Backboard Daylight".into())));
             });
         });
         cx.executor().advance_clock(Duration::from_millis(200));
@@ -16187,7 +16187,7 @@ mod tests {
         // Confirm the initial persisted settings contain the static theme
         // we just wrote before any toggling happens.
         let settings_text = SettingsStore::load_settings(&settings_fs).await.unwrap();
-        assert!(settings_text.contains(r#""theme": "One Light""#));
+        assert!(settings_text.contains(r#""theme": "Backboard Daylight""#));
 
         // Toggle once. This should migrate the persisted theme settings
         // into light/dark slots and enable system mode.
@@ -16205,8 +16205,8 @@ mod tests {
             parsed["theme"],
             serde_json::json!({
                 "mode": "system",
-                "light": "One Light",
-                "dark": "One Dark"
+                "light": "Backboard Daylight",
+                "dark": "Backboard Midnight"
             })
         );
 

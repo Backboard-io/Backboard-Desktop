@@ -411,7 +411,7 @@ This example makes comments italic and changes the color of strings:
 
 ```json [settings]
 "theme_overrides": {
-  "One Dark": {
+  "Backboard Midnight": {
     "syntax": {
       "comment": {
         "font_style": "italic"
@@ -434,7 +434,7 @@ Change your theme:
 ```json [settings]
 "theme": {
   "mode": "dark",
-  "dark": "One Dark",
+  "dark": "Backboard Midnight",
   "light": "GitHub Light"
 }
 ```

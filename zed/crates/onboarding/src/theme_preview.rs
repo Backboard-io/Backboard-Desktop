@@ -322,10 +322,10 @@ impl Component for ThemePreviewTile {
     fn preview(_window: &mut Window, cx: &mut App) -> Option<AnyElement> {
         let theme_registry = ThemeRegistry::global(cx);
 
-        let one_dark = theme_registry.get("One Dark");
-        let one_light = theme_registry.get("One Light");
-        let gruvbox_dark = theme_registry.get("Gruvbox Dark");
-        let gruvbox_light = theme_registry.get("Gruvbox Light");
+        let one_dark = theme_registry.get("Backboard Midnight");
+        let one_light = theme_registry.get("Backboard Daylight");
+        let gruvbox_dark = theme_registry.get("Backboard Hearth");
+        let gruvbox_light = theme_registry.get("Backboard Wheat");
 
         let themes_to_preview = vec![
             one_dark.clone().ok(),
