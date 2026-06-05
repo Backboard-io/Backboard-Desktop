@@ -248,7 +248,7 @@ pub fn init(client: Arc<Client>, cx: &mut App) {
         let updater = AutoUpdater::new(version, client, cx);
 
         let poll_for_updates = ReleaseChannel::try_global(cx)
-            .map(|channel| channel.poll_for_updates())
+            .map(should_poll_for_updates)
             .unwrap_or(false);
 
         if option_env!("BACKBOARD_UPDATE_EXPLANATION").is_none()
@@ -292,7 +292,7 @@ pub fn check(_: &Check, window: &mut Window, cx: &mut App) {
     }
 
     if !ReleaseChannel::try_global(cx)
-        .map(|channel| channel.poll_for_updates())
+        .map(should_poll_for_updates)
         .unwrap_or(false)
     {
         return;
@@ -876,12 +876,7 @@ fn bbide_update_manifest_url(
         return None;
     }
 
-    if let Some(manifest_url) = env::var("BBIDE_UPDATE_MANIFEST_URL")
-        .or_else(|_| env::var("BACKBOARD_UPDATE_MANIFEST_URL"))
-        .ok()
-        .map(|url| url.trim().to_string())
-        .filter(|url| !url.is_empty())
-    {
+    if let Some(manifest_url) = bbide_update_manifest_url_override() {
         return Some(manifest_url);
     }
 
@@ -901,6 +896,18 @@ fn bbide_update_manifest_url(
         os,
         arch
     ))
+}
+
+fn bbide_update_manifest_url_override() -> Option<String> {
+    env::var("BBIDE_UPDATE_MANIFEST_URL")
+        .or_else(|_| env::var("BACKBOARD_UPDATE_MANIFEST_URL"))
+        .ok()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+}
+
+fn should_poll_for_updates(release_channel: ReleaseChannel) -> bool {
+    release_channel.poll_for_updates() || bbide_update_manifest_url_override().is_some()
 }
 
 async fn fetch_release_asset_url(
