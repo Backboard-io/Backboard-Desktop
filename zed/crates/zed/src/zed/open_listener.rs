@@ -1059,7 +1059,8 @@ mod tests {
     }
 
     fn agent_url_with_prompt(prompt: &str) -> String {
-        let mut serializer = url::form_urlencoded::Serializer::new("backboard://agent?".to_string());
+        let mut serializer =
+            url::form_urlencoded::Serializer::new("backboard://agent?".to_string());
         serializer.append_pair("prompt", prompt);
         serializer.finish()
     }

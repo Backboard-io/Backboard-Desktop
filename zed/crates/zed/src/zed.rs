@@ -2200,6 +2200,10 @@ fn init_cursor_hide_mode(cx: &mut App) {
 
 pub fn watch_settings_files(fs: Arc<dyn fs::Fs>, cx: &mut App) {
     MigrationNotification::set_global(cx.new(|_| MigrationNotification), cx);
+    cx.background_spawn(settings::SettingsStore::cleanup_stale_user_settings_header(
+        fs.clone(),
+    ))
+    .detach_and_log_err(cx);
 
     SettingsStore::update_global(cx, move |store, cx| {
         store.watch_settings_files(fs, cx, |settings_file, result, cx| {
@@ -5897,8 +5901,12 @@ mod tests {
         // 5. Critical: Verify .backboard is actually excluded from worktree
         let worktree = cx.update(|cx| project.read(cx).worktrees(cx).next().unwrap());
 
-        let has_zed_entry =
-            cx.update(|cx| worktree.read(cx).entry_for_path(rel_path(".backboard")).is_some());
+        let has_zed_entry = cx.update(|cx| {
+            worktree
+                .read(cx)
+                .entry_for_path(rel_path(".backboard"))
+                .is_some()
+        });
 
         eprintln!(
             "Is .backboard directory visible in worktree after exclusion: {}",

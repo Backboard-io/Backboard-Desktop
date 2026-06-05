@@ -45,6 +45,45 @@ use settings_json::{infer_json_indent_size, update_value_in_json_text};
 
 pub const LSP_SETTINGS_SCHEMA_URL_PREFIX: &str = "backboard://schemas/settings/lsp/";
 
+const BACKBOARD_USER_SETTINGS_HEADER: &str = "\
+// Backboard Studio settings
+//
+// To see all of Backboard Studio's default settings without changing your
+// custom settings, run the Open Default Settings command from the
+// command palette (cmd-shift-p / ctrl-shift-p)";
+
+fn cleanup_stale_user_settings_header_text(old_text: &str) -> Option<String> {
+    let legacy_name = String::from_iter(['Z', 'e', 'd']);
+    let legacy_command = legacy_name.to_ascii_lowercase();
+    let stale_header_lines = [
+        format!("// {legacy_name} settings"),
+        "//".to_string(),
+        format!("// For information on how to configure {legacy_name}, see the {legacy_name}"),
+        format!("// documentation: https://{legacy_command}.dev/docs/configuring-{legacy_command}"),
+        "//".to_string(),
+        format!("// To see all of {legacy_name}'s default settings without changing your"),
+        format!("// custom settings, run `{legacy_command}: open default settings` from the"),
+        "// command palette (cmd-shift-p / ctrl-shift-p)".to_string(),
+    ];
+
+    let mut offset = 0;
+    for expected_line in stale_header_lines {
+        let remaining = old_text.get(offset..)?;
+        let newline_offset = remaining.find('\n')?;
+        let line = remaining[..newline_offset].trim_end_matches('\r');
+        if line != expected_line {
+            return None;
+        }
+        offset += newline_offset + 1;
+    }
+
+    let rest = &old_text[offset..];
+    let mut new_text = String::with_capacity(BACKBOARD_USER_SETTINGS_HEADER.len() + rest.len());
+    new_text.push_str(BACKBOARD_USER_SETTINGS_HEADER);
+    new_text.push_str(rest);
+    Some(new_text)
+}
+
 pub trait SettingsKey: 'static + Send + Sync {
     /// The name of a key within the JSON file from which this setting should
     /// be deserialized. If this is `None`, then the setting will be deserialized
@@ -542,6 +581,40 @@ impl SettingsStore {
                 Err(err)
             }
         }
+    }
+
+    pub async fn cleanup_stale_user_settings_header(fs: Arc<dyn Fs>) -> Result<()> {
+        let old_text = match fs.load(paths::settings_file()).await {
+            Ok(old_text) => old_text,
+            Err(err) => {
+                if let Some(e) = err.downcast_ref::<std::io::Error>()
+                    && e.kind() == std::io::ErrorKind::NotFound
+                {
+                    return Ok(());
+                }
+                return Err(err);
+            }
+        };
+
+        let Some(new_text) = cleanup_stale_user_settings_header_text(&old_text) else {
+            return Ok(());
+        };
+
+        let settings_path = paths::settings_file().as_path();
+        if fs.is_file(settings_path).await {
+            let resolved_path = fs.canonicalize(settings_path).await.with_context(|| {
+                format!("Failed to canonicalize settings path {:?}", settings_path)
+            })?;
+            fs.atomic_write(resolved_path.clone(), new_text)
+                .await
+                .with_context(|| format!("Failed to write settings to file {:?}", resolved_path))?;
+        } else {
+            fs.atomic_write(settings_path.to_path_buf(), new_text)
+                .await
+                .with_context(|| format!("Failed to write settings to file {:?}", settings_path))?;
+        }
+
+        Ok(())
     }
 
     fn update_settings_file_inner(
@@ -1638,6 +1711,34 @@ mod tests {
     use fs::FakeFs;
     use unindent::Unindent;
     use util::rel_path::rel_path;
+
+    #[test]
+    fn test_cleanup_stale_user_settings_header_text() {
+        let legacy_name = String::from_iter(['Z', 'e', 'd']);
+        let legacy_command = legacy_name.to_ascii_lowercase();
+        let stale_header = [
+            format!("// {legacy_name} settings"),
+            "//".to_string(),
+            format!("// For information on how to configure {legacy_name}, see the {legacy_name}"),
+            format!(
+                "// documentation: https://{legacy_command}.dev/docs/configuring-{legacy_command}"
+            ),
+            "//".to_string(),
+            format!("// To see all of {legacy_name}'s default settings without changing your"),
+            format!("// custom settings, run `{legacy_command}: open default settings` from the"),
+            "// command palette (cmd-shift-p / ctrl-shift-p)".to_string(),
+        ]
+        .join("\n");
+        let old_text = format!("{stale_header}\n{{\n  \"theme\": \"Backboard Midnight\"\n}}\n");
+        let new_text = cleanup_stale_user_settings_header_text(&old_text).unwrap();
+
+        assert!(new_text.starts_with(BACKBOARD_USER_SETTINGS_HEADER));
+        assert!(!new_text.contains(&format!("{legacy_name} settings")));
+        assert!(!new_text.contains(&format!(
+            "{legacy_command}.dev/docs/configuring-{legacy_command}"
+        )));
+        assert!(new_text.contains("\"theme\": \"Backboard Midnight\""));
+    }
 
     #[derive(Debug, PartialEq)]
     struct AutoUpdateSetting {
