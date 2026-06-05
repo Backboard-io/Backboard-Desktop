@@ -231,7 +231,6 @@
       "i": "vim::InsertBefore",
       "a": "vim::InsertAfter",
       "ctrl-[": "editor::Cancel",
-      ":": "command_palette::Toggle",
       "c": "vim::PushChange",
       "shift-c": "vim::ChangeToEndOfLine",
       "d": "vim::PushDelete",
@@ -358,7 +357,6 @@
       "ctrl-x": null,
       "ctrl-x ctrl-o": "editor::ShowCompletions",
       "ctrl-x ctrl-a": "assistant::InlineAssist", // backboard specific
-      "ctrl-x ctrl-c": "editor::ShowEditPrediction", // backboard specific
       "ctrl-x ctrl-l": "editor::ToggleCodeActions", // backboard specific
       "ctrl-x ctrl-z": "editor::Cancel",
       "ctrl-x ctrl-e": "vim::LineDown",
@@ -540,7 +538,6 @@
       "space /": "pane::DeploySearch",
 
       // Other
-      ":": "command_palette::Toggle",
       "m": "vim::PushHelixMatch",
       "]": ["vim::PushHelixNext", { "around": true }],
       "[": ["vim::PushHelixPrevious", { "around": true }],
@@ -928,7 +925,6 @@
   {
     "context": "!Editor && !Terminal",
     "bindings": {
-      ":": "command_palette::Toggle",
       "g /": "pane::DeploySearch",
       "] b": "pane::ActivateNextItem",
       "[ b": "pane::ActivatePreviousItem",
@@ -948,7 +944,6 @@
     // netrw compatibility
     "context": "ProjectPanel && not_editing",
     "bindings": {
-      ":": "command_palette::Toggle",
       "%": "project_panel::NewFile",
       "/": "project_panel::NewSearchInDirectory",
       "d": "project_panel::NewDirectory",
@@ -1100,14 +1095,6 @@
     "bindings": {
       "ctrl-c": "menu::Cancel",
       "escape": "menu::Cancel",
-    },
-  },
-  {
-    "context": "Editor && edit_prediction && edit_prediction_mode == eager && !showing_completions",
-    "bindings": {
-      // This is identical to the binding in the base keymap, but the vim bindings above to
-      // "vim::Tab" shadow it, so it needs to be bound again.
-      "tab": "editor::AcceptEditPrediction",
     },
   },
   {

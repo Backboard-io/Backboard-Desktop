@@ -12,6 +12,8 @@ use workspace::Workspace;
 /// Initializes the command palette hooks.
 pub fn init(cx: &mut App) {
     let mut filter = CommandPaletteFilter::default();
+    filter.hide_namespace("app_menu");
+    filter.hide_namespace("client");
     filter.hide_namespace("collab");
     filter.hide_namespace("collab_panel");
     filter.hide_namespace("channel_modal");
@@ -26,6 +28,27 @@ pub fn init(cx: &mut App) {
     filter.hide_namespace("zed");
     filter.hide_namespace("zed_actions");
     filter.hide_namespace("zed_predict_onboarding");
+    filter.hide_action_names([
+        "backboard_predict_onboarding::OpenBackboardPredictOnboarding",
+        "edit_prediction::CaptureExample",
+        "edit_prediction::ClearHistory",
+        "edit_prediction::RatePredictions",
+        "edit_prediction::ResetOnboarding",
+        "edit_prediction::ToggleMenu",
+        "editor::AcceptEditPrediction",
+        "editor::AcceptNextLineEditPrediction",
+        "editor::AcceptNextWordEditPrediction",
+        "editor::NextEditPrediction",
+        "editor::PreviousEditPrediction",
+        "editor::ShowEditPrediction",
+        "editor::ToggleEditPrediction",
+        "zeta::FocusPredictions",
+        "zeta::NextEdit",
+        "zeta::PreviewPrediction",
+        "zeta::PreviousEdit",
+        "zeta::ThumbsDownActivePrediction",
+        "zeta::ThumbsUpActivePrediction",
+    ]);
     cx.set_global(GlobalCommandPaletteFilter(filter));
 }
 
@@ -33,6 +56,7 @@ pub fn init(cx: &mut App) {
 #[derive(Default)]
 pub struct CommandPaletteFilter {
     hidden_namespaces: HashSet<&'static str>,
+    hidden_action_names: HashSet<&'static str>,
     hidden_action_types: HashSet<TypeId>,
     /// Actions that have explicitly been shown. These should be shown even if
     /// they are in a hidden namespace.
@@ -81,12 +105,24 @@ impl CommandPaletteFilter {
     /// Returns whether the given action name is hidden by namespace.
     pub fn is_hidden_name(&self, name: &str) -> bool {
         let namespace = name.split("::").next().unwrap_or("malformed action name");
-        self.hidden_namespaces.contains(namespace)
+        self.hidden_action_names.contains(name) || self.hidden_namespaces.contains(namespace)
     }
 
     /// Hides all actions in the given namespace.
     pub fn hide_namespace(&mut self, namespace: &'static str) {
         self.hidden_namespaces.insert(namespace);
+    }
+
+    /// Hides the given fully-qualified actions by name.
+    pub fn hide_action_names(&mut self, action_names: impl IntoIterator<Item = &'static str>) {
+        self.hidden_action_names.extend(action_names);
+    }
+
+    /// Shows the given fully-qualified actions by name.
+    pub fn show_action_names(&mut self, action_names: impl IntoIterator<Item = &'static str>) {
+        for action_name in action_names {
+            self.hidden_action_names.remove(action_name);
+        }
     }
 
     /// Shows all actions in the given namespace.

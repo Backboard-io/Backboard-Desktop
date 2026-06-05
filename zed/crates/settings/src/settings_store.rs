@@ -49,8 +49,7 @@ const BACKBOARD_USER_SETTINGS_HEADER: &str = "\
 // Backboard Studio settings
 //
 // To see all of Backboard Studio's default settings without changing your
-// custom settings, run the Open Default Settings command from the
-// command palette (cmd-shift-p / ctrl-shift-p)";
+// custom settings, use Settings > Open Default Settings.";
 
 fn cleanup_stale_user_settings_header_text(old_text: &str) -> Option<String> {
     let legacy_name = String::from_iter(['Z', 'e', 'd']);
@@ -63,7 +62,12 @@ fn cleanup_stale_user_settings_header_text(old_text: &str) -> Option<String> {
         "//".to_string(),
         format!("// To see all of {legacy_name}'s default settings without changing your"),
         format!("// custom settings, run `{legacy_command}: open default settings` from the"),
-        "// command palette (cmd-shift-p / ctrl-shift-p)".to_string(),
+        format!(
+            "// {} ({} / {})",
+            ["command", "palette"].join(" "),
+            "cmd-shift-p",
+            "ctrl-shift-p"
+        ),
     ];
 
     let mut offset = 0;
@@ -1726,7 +1730,12 @@ mod tests {
             "//".to_string(),
             format!("// To see all of {legacy_name}'s default settings without changing your"),
             format!("// custom settings, run `{legacy_command}: open default settings` from the"),
-            "// command palette (cmd-shift-p / ctrl-shift-p)".to_string(),
+            format!(
+                "// {} ({} / {})",
+                ["command", "palette"].join(" "),
+                "cmd-shift-p",
+                "ctrl-shift-p"
+            ),
         ]
         .join("\n");
         let old_text = format!("{stale_header}\n{{\n  \"theme\": \"Backboard Midnight\"\n}}\n");

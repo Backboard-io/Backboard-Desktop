@@ -1,8 +1,7 @@
 // Backboard Studio settings
 //
 // To see all of Backboard Studio's default settings without changing your
-// custom settings, run the Open Default Settings command from the
-// command palette (cmd-shift-p / ctrl-shift-p)
+// custom settings, use Settings > Open Default Settings.
 {
   "ui_font_family": "Inter",
   "ui_font_size": 16,

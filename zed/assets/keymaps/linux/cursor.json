@@ -65,14 +65,6 @@
     },
   },
   {
-    "context": "Editor && mode == full && edit_prediction",
-    "use_key_equivalents": true,
-    "bindings": {
-      "ctrl-right": "editor::AcceptNextWordEditPrediction",
-      "ctrl-down": "editor::AcceptNextLineEditPrediction",
-    },
-  },
-  {
     "context": "Terminal",
     "use_key_equivalents": true,
     "bindings": {

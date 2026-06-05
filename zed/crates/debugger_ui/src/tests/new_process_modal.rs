@@ -111,8 +111,11 @@ async fn test_debug_session_substitutes_variables_and_relativizes_paths(
                             input_path
                         );
 
-                        let expected_other_field = if input_path.contains("$BACKBOARD_WORKTREE_ROOT") {
-                            input_path.replace("$BACKBOARD_WORKTREE_ROOT", path!("/test/worktree/path"))
+                        let expected_other_field = if input_path
+                            .contains("$BACKBOARD_WORKTREE_ROOT")
+                        {
+                            input_path
+                                .replace("$BACKBOARD_WORKTREE_ROOT", path!("/test/worktree/path"))
                         } else {
                             input_path.to_string()
                         };

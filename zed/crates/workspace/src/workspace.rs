@@ -16178,7 +16178,9 @@ mod tests {
         workspace.update_in(cx, |_workspace, _window, cx| {
             *SystemAppearance::global_mut(cx) = SystemAppearance(theme::Appearance::Light);
             settings::update_settings_file(settings_fs.clone(), cx, |settings, _cx| {
-                settings.theme.theme = Some(ThemeSelection::Static(ThemeName("Backboard Daylight".into())));
+                settings.theme.theme = Some(ThemeSelection::Static(ThemeName(
+                    "Backboard Daylight".into(),
+                )));
             });
         });
         cx.executor().advance_clock(Duration::from_millis(200));

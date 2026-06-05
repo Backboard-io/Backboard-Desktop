@@ -107,7 +107,7 @@ actions!(
     backboard,
     [
         /// Opens the element inspector for debugging UI.
-        #[action(deprecated_aliases = ["zed::DebugElements"])]
+        #[action(no_register, deprecated_aliases = ["zed::DebugElements"])]
         DebugElements,
         /// Hides the application window.
         #[action(deprecated_aliases = ["zed::Hide"])]
@@ -149,10 +149,10 @@ actions!(
         #[action(deprecated_aliases = ["zed::Zoom"])]
         Zoom,
         /// Triggers a test panic for debugging.
-        #[action(deprecated_aliases = ["zed::TestPanic"])]
+        #[action(no_register, deprecated_aliases = ["zed::TestPanic"])]
         TestPanic,
         /// Triggers a hard crash for debugging.
-        #[action(deprecated_aliases = ["zed::TestCrash"])]
+        #[action(no_register, deprecated_aliases = ["zed::TestCrash"])]
         TestCrash,
     ]
 );
@@ -270,7 +270,7 @@ pub fn init(cx: &mut App) {
     })
     .on_action(|_: &OpenAccountSettings, cx| {
         with_active_or_new_workspace(cx, |_, _, cx| {
-            cx.open_url(&zed_urls::account_url(cx));
+            cx.open_url(zed_urls::dashboard_url());
         });
     })
     .on_action(|_: &OpenTasks, cx| {
@@ -634,22 +634,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             }
         }
 
-        let edit_prediction_menu_handle = PopoverMenuHandle::default();
-        let edit_prediction_ui = cx.new(|cx| {
-            edit_prediction_ui::EditPredictionButton::new(
-                app_state.fs.clone(),
-                app_state.user_store.clone(),
-                edit_prediction_menu_handle.clone(),
-                workspace.project().clone(),
-                cx,
-            )
-        });
-        workspace.register_action({
-            move |_, _: &edit_prediction_ui::ToggleMenu, window, cx| {
-                edit_prediction_menu_handle.toggle(window, cx);
-            }
-        });
-
         let search_button = cx.new(|_| search::search_status_button::SearchButton::new());
         let active_file_name = cx.new(|_| workspace::active_file_name::ActiveFileName::new());
         let activity_indicator = activity_indicator::ActivityIndicator::new(
@@ -690,7 +674,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             status_bar.add_left_item(active_file_name, window, cx);
             status_bar.add_left_item(merge_conflict_indicator, window, cx);
             status_bar.add_left_item(activity_indicator, window, cx);
-            status_bar.add_right_item(edit_prediction_ui, window, cx);
             status_bar.add_right_item(active_buffer_encoding, window, cx);
             status_bar.add_right_item(active_buffer_language, window, cx);
             status_bar.add_right_item(active_toolchain_language, window, cx);

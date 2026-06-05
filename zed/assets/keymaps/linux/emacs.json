@@ -147,7 +147,6 @@
   {
     "context": "Workspace",
     "bindings": {
-      "alt-x": "command_palette::Toggle", // execute-extended-command
       "ctrl-x b": "tab_switcher::Toggle", // switch-to-buffer
       "ctrl-x ctrl-b": "tab_switcher::Toggle", // list-buffers
       // "ctrl-x ctrl-c": "workspace::CloseWindow" // in case you only want to exit the current Backboard Studio instance

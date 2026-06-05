@@ -9,8 +9,8 @@ use util::serde::default_true;
 use util::{ResultExt, truncate_and_remove_front};
 
 use crate::{
-    AttachRequest, ResolvedTask, RevealTarget, Shell, SpawnInTerminal, TaskContext, TaskId,
-    VariableName, BACKBOARD_VARIABLE_NAME_PREFIX, serde_helpers::non_empty_string_vec,
+    AttachRequest, BACKBOARD_VARIABLE_NAME_PREFIX, ResolvedTask, RevealTarget, Shell,
+    SpawnInTerminal, TaskContext, TaskId, VariableName, serde_helpers::non_empty_string_vec,
 };
 
 /// A template definition of a Backboard Studio task to run.
@@ -1066,7 +1066,10 @@ mod tests {
             ..TaskTemplate::default()
         };
 
-        assert_eq!(task.unknown_variables(), vec!["BACKBOARD_UNKNOWN".to_string()]);
+        assert_eq!(
+            task.unknown_variables(),
+            vec!["BACKBOARD_UNKNOWN".to_string()]
+        );
 
         // Variable names starting with `BACKBOARD_CUSTOM_` should never be reported,
         // as those are dynamically provided by extensions.
@@ -1090,7 +1093,10 @@ mod tests {
             ..TaskTemplate::default()
         };
 
-        assert_eq!(task.unknown_variables(), vec!["BACKBOARD_UNKNOWN".to_string()]);
+        assert_eq!(
+            task.unknown_variables(),
+            vec!["BACKBOARD_UNKNOWN".to_string()]
+        );
 
         // Valid variable names are not reported.
         let label = "test custom variables".to_string();

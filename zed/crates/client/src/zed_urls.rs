@@ -18,6 +18,11 @@ pub fn account_url(cx: &App) -> String {
     format!("{server_url}/account", server_url = server_url(cx))
 }
 
+/// Returns the URL to Backboard Studio's dashboard.
+pub fn dashboard_url() -> &'static str {
+    "https://app.backboard.io/dashboard"
+}
+
 /// Returns the URL to the start trial page on app.backboard.io.
 pub fn start_trial_url(cx: &App) -> String {
     format!(

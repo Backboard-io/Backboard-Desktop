@@ -50,7 +50,9 @@ impl WgpuContext {
     ) -> anyhow::Result<Self> {
         let device_id_filter = match std::env::var("BACKBOARD_DEVICE_ID") {
             Ok(val) => parse_pci_id(&val)
-                .context("Failed to parse device ID from `BACKBOARD_DEVICE_ID` environment variable")
+                .context(
+                    "Failed to parse device ID from `BACKBOARD_DEVICE_ID` environment variable",
+                )
                 .log_err(),
             Err(std::env::VarError::NotPresent) => None,
             err => {

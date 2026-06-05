@@ -599,18 +599,26 @@ pub fn init(
                   _: &OpenBackboardAgentWorkspace,
                   window: &mut Window,
                   cx: &mut Context<Workspace>| {
-                if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
-                    multi_workspace.update(cx, |multi_workspace, cx| {
-                        multi_workspace.set_multi_agent_expanded(true, window, cx);
-                    });
-                } else if let Some(multi_workspace) = workspace
-                    .multi_workspace()
-                    .and_then(|handle| handle.upgrade())
-                {
-                    multi_workspace.update(cx, |multi_workspace, cx| {
-                        multi_workspace.set_multi_agent_expanded(true, window, cx);
+                let multi_workspace = window.root::<MultiWorkspace>().flatten().or_else(|| {
+                    workspace
+                        .multi_workspace()
+                        .and_then(|handle| handle.upgrade())
+                });
+
+                let Some(multi_workspace) = multi_workspace else {
+                    return;
+                };
+
+                if multi_workspace.read(cx).agent_workspace_view.is_none() {
+                    let page = BackboardAgentWorkspacePage::new(workspace, window, cx);
+                    multi_workspace.update(cx, |multi_workspace, _| {
+                        multi_workspace.agent_workspace_view = Some(page.into());
                     });
                 }
+
+                multi_workspace.update(cx, |multi_workspace, cx| {
+                    multi_workspace.open_agent_workspace(window, cx);
+                });
             },
         );
     })
@@ -864,6 +872,66 @@ fn update_command_palette_filter(cx: &mut App) {
             TypeId::of::<PreviousEditPrediction>(),
             TypeId::of::<ToggleEditPrediction>(),
         ];
+        let context_only_agent_actions = [
+            TypeId::of::<AllowAlways>(),
+            TypeId::of::<AllowOnce>(),
+            TypeId::of::<ArchiveSelectedThread>(),
+            TypeId::of::<ChatWithFollow>(),
+            TypeId::of::<ClearMessageQueue>(),
+            TypeId::of::<CopyThreadToClipboard>(),
+            TypeId::of::<CycleFavoriteModels>(),
+            TypeId::of::<CycleModeSelector>(),
+            TypeId::of::<CycleNextInlineAssist>(),
+            TypeId::of::<CyclePreviousInlineAssist>(),
+            TypeId::of::<CycleThinkingEffort>(),
+            TypeId::of::<EditFirstQueuedMessage>(),
+            TypeId::of::<ExpandMessageEditor>(),
+            TypeId::of::<FocusDown>(),
+            TypeId::of::<FocusLeft>(),
+            TypeId::of::<FocusRight>(),
+            TypeId::of::<FocusUp>(),
+            TypeId::of::<Follow>(),
+            TypeId::of::<ImportThreadsFromOtherChannels>(),
+            TypeId::of::<Keep>(),
+            TypeId::of::<KeepAll>(),
+            TypeId::of::<LoadThreadFromClipboard>(),
+            TypeId::of::<OpenActiveThreadAsMarkdown>(),
+            TypeId::of::<OpenAddContextMenu>(),
+            TypeId::of::<OpenAgentDiff>(),
+            TypeId::of::<OpenBackboardPortal>(),
+            TypeId::of::<OpenPermissionDropdown>(),
+            TypeId::of::<Reject>(),
+            TypeId::of::<RejectAll>(),
+            TypeId::of::<RejectOnce>(),
+            TypeId::of::<RemoveFirstQueuedMessage>(),
+            TypeId::of::<RemoveSelectedThread>(),
+            TypeId::of::<ResetTrialEndUpsell>(),
+            TypeId::of::<ResetTrialUpsell>(),
+            TypeId::of::<ScrollOutputLineDown>(),
+            TypeId::of::<ScrollOutputLineUp>(),
+            TypeId::of::<ScrollOutputPageDown>(),
+            TypeId::of::<ScrollOutputPageUp>(),
+            TypeId::of::<ScrollOutputToBottom>(),
+            TypeId::of::<ScrollOutputToNextMessage>(),
+            TypeId::of::<ScrollOutputToPreviousMessage>(),
+            TypeId::of::<ScrollOutputToTop>(),
+            TypeId::of::<SendImmediately>(),
+            TypeId::of::<SendNextQueuedMessage>(),
+            TypeId::of::<ToggleFastMode>(),
+            TypeId::of::<ToggleNewThreadMenu>(),
+            TypeId::of::<ToggleOptionsMenu>(),
+            TypeId::of::<ToggleProfileSelector>(),
+            TypeId::of::<ToggleThinkingEffortMenu>(),
+            TypeId::of::<ToggleThinkingMode>(),
+            TypeId::of::<UndoLastReject>(),
+        ];
+        let legacy_cloud_agent_actions = [
+            TypeId::of::<zed_actions::agent::ReauthenticateAgent>(),
+            TypeId::of::<zed_actions::agent::ResetOnboarding>(),
+        ];
+
+        filter.hide_action_types(&context_only_agent_actions);
+        filter.hide_action_types(&legacy_cloud_agent_actions);
 
         if disable_ai {
             filter.hide_namespace("agent");

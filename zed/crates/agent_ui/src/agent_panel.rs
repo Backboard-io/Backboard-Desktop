@@ -1,4 +1,5 @@
 use std::{
+    cmp::Reverse,
     fmt,
     io::Write,
     path::{Path, PathBuf},
@@ -91,8 +92,8 @@ use terminal::{Event as TerminalEvent, terminal_settings::TerminalSettings};
 use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use theme_settings::ThemeSettings;
 use ui::{
-    ContextMenu, ContextMenuEntry, IconButton, PopoverMenu, PopoverMenuHandle, Tab, Tooltip,
-    prelude::*, utils::WithRemSize,
+    ContextMenu, ContextMenuEntry, IconButton, IconButtonShape, PopoverMenu, PopoverMenuHandle,
+    Tab, Tooltip, prelude::*, utils::WithRemSize,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -106,6 +107,8 @@ const AGENT_PANEL_KEY: &str = "agent_panel";
 const MIN_PANEL_WIDTH: Pixels = px(300.);
 const LAST_USED_AGENT_KEY: &str = "agent_panel__last_used_external_agent";
 const THREAD_HISTORY_MENU_ENTRY_LIMIT: usize = 24;
+const LIVE_THREAD_TAB_LIMIT: usize = 5;
+const THREAD_TAB_LABEL_CHAR_LIMIT: usize = 48;
 
 /// Maximum number of idle threads kept in the agent panel's retained list.
 /// Set as a GPUI global to override; otherwise defaults to 5.
@@ -3014,6 +3017,66 @@ impl AgentPanel {
             }
             _ => None,
         }
+    }
+
+    pub fn close_live_thread_tab(
+        &mut self,
+        id: ThreadId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.retained_threads.remove(&id).is_some() {
+            if self
+                .draft_thread
+                .as_ref()
+                .is_some_and(|draft| draft.read(cx).thread_id == id)
+            {
+                self.draft_thread = None;
+                self._draft_editor_observation = None;
+            }
+            self.serialize(cx);
+            cx.notify();
+            return;
+        }
+
+        if self.active_thread_id(cx) != Some(id) {
+            return;
+        }
+
+        let next_thread_id = self
+            .retained_threads
+            .iter()
+            .filter(|(thread_id, _)| **thread_id != id)
+            .max_by_key(|(_, conversation_view)| conversation_view.read(cx).updated_at(cx))
+            .map(|(thread_id, _)| *thread_id);
+
+        self.clear_overlay_state();
+        let old_view = std::mem::replace(&mut self.base_view, BaseView::Uninitialized);
+        drop(old_view);
+
+        if self
+            .draft_thread
+            .as_ref()
+            .is_some_and(|draft| draft.read(cx).thread_id == id)
+        {
+            self.draft_thread = None;
+            self._draft_editor_observation = None;
+        }
+
+        if let Some(next_thread_id) = next_thread_id {
+            if let Some(conversation_view) = self.retained_threads.remove(&next_thread_id) {
+                self.base_view = BaseView::AgentThread { conversation_view };
+                self.refresh_base_view_subscriptions(window, cx);
+                self.focus_handle(cx).focus(window, cx);
+                cx.emit(AgentPanelEvent::ActiveViewChanged);
+                cx.notify();
+                return;
+            }
+        }
+
+        self.activate_draft(true, "agent_panel", window, cx);
+        cx.emit(AgentPanelEvent::ActiveViewChanged);
+        cx.notify();
     }
 
     /// Drops a thread — retained or the active ephemeral draft — from
@@ -6514,31 +6577,149 @@ impl AgentPanel {
         metadata.interacted_at.unwrap_or(metadata.updated_at)
     }
 
-    fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let agent_server_store = self.project.read(cx).agent_server_store().clone();
+    fn live_thread_tabs(&self, cx: &App) -> Vec<(ThreadId, Entity<ConversationView>, bool)> {
+        let active_thread_id = self.active_thread_id(cx);
+        let mut tabs = Vec::new();
 
+        if let Some(active_thread_id) = active_thread_id
+            && let Some(conversation_view) = self.active_conversation_view()
+        {
+            tabs.push((active_thread_id, conversation_view.clone(), true));
+        }
+
+        let mut retained_threads = self
+            .retained_threads
+            .iter()
+            .filter(|(thread_id, _)| Some(**thread_id) != active_thread_id)
+            .map(|(thread_id, conversation_view)| {
+                (
+                    *thread_id,
+                    conversation_view.clone(),
+                    conversation_view.read(cx).updated_at(cx),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        retained_threads.sort_unstable_by_key(|(_, _, updated_at)| Reverse(*updated_at));
+
+        let remaining_slots = LIVE_THREAD_TAB_LIMIT.saturating_sub(tabs.len());
+        tabs.extend(
+            retained_threads
+                .into_iter()
+                .take(remaining_slots)
+                .map(|(thread_id, conversation_view, _)| (thread_id, conversation_view, false)),
+        );
+
+        tabs
+    }
+
+    fn thread_tab_label(
+        &self,
+        conversation_view: &Entity<ConversationView>,
+        cx: &App,
+    ) -> SharedString {
+        if let Some(thread_view) = conversation_view.read(cx).root_thread_view() {
+            let thread_view = thread_view.read(cx);
+            let thread = thread_view.thread.read(cx);
+
+            if let Some(label) = thread.entries().iter().find_map(|entry| {
+                let message = entry.user_message()?;
+                Self::tab_label_from_text(message.content.to_markdown(cx))
+            }) {
+                return label.into();
+            }
+
+            let draft = thread_view.message_editor.read(cx).text(cx);
+            if let Some(label) = Self::tab_label_from_text(&draft) {
+                return label.into();
+            }
+        }
+
+        let title = conversation_view.read(cx).title(cx);
+        if title.as_ref().trim().is_empty()
+            || title.as_ref() == crate::DEFAULT_THREAD_TITLE
+            || title.as_ref() == "Backboard"
+        {
+            SharedString::from("New chat")
+        } else {
+            title
+        }
+    }
+
+    fn tab_label_from_text(text: &str) -> Option<String> {
+        let label = text
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())?
+            .split_whitespace()
+            .join(" ");
+
+        if label.is_empty() {
+            return None;
+        }
+
+        let mut chars = label.chars();
+        let truncated = chars
+            .by_ref()
+            .take(THREAD_TAB_LABEL_CHAR_LIMIT)
+            .collect::<String>();
+        if chars.next().is_some() {
+            Some(format!("{truncated}..."))
+        } else {
+            Some(truncated)
+        }
+    }
+
+    fn render_thread_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+        h_flex()
+            .id("agent-thread-tabs")
+            .min_w_0()
+            .flex_1()
+            .gap_0p5()
+            .overflow_x_hidden()
+            .children(self.live_thread_tabs(cx).into_iter().map(
+                |(thread_id, conversation_view, is_active)| {
+                    let label = self.thread_tab_label(&conversation_view, cx);
+                    let close_button = IconButton::new(
+                        format!("close-agent-thread-tab-{}", thread_id.to_key_string()),
+                        IconName::Close,
+                    )
+                    .shape(IconButtonShape::Square)
+                    .size(ButtonSize::None)
+                    .style(ButtonStyle::Transparent)
+                    .icon_size(IconSize::XSmall)
+                    .icon_color(Color::Muted)
+                    .tooltip(Tooltip::text("Close chat"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.close_live_thread_tab(thread_id, window, cx);
+                    }));
+                    Tab::new(format!("agent-thread-tab-{}", thread_id.to_key_string()))
+                        .toggle_state(is_active)
+                        .end_slot(close_button)
+                        .child(
+                            div()
+                                .min_w_0()
+                                .max_w(px(164.))
+                                .child(Label::new(label).truncate()),
+                        )
+                        .tooltip({
+                            let label = self.thread_tab_label(&conversation_view, cx);
+                            move |_, cx| Tooltip::with_meta(label.clone(), None, "Agent Chat", cx)
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if this.active_thread_id(cx) != Some(thread_id) {
+                                this.activate_retained_thread(thread_id, true, window, cx);
+                            }
+                        }))
+                },
+            ))
+            .into_any()
+    }
+
+    fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let focus_handle = self.focus_handle(cx);
         let showing_terminal = matches!(self.visible_surface(), VisibleSurface::Terminal(_));
-        let (selected_agent_custom_icon, selected_agent_label) = if showing_terminal {
-            (None, SharedString::from("Terminal"))
-        } else if let Agent::Custom { id, .. } = &self.selected_agent {
-            let store = agent_server_store.read(cx);
-            let icon = store.agent_icon(&id);
-
-            let label = store
-                .agent_display_name(&id)
-                .unwrap_or_else(|| self.selected_agent.label());
-            (icon, label)
-        } else if matches!(self.selected_agent, Agent::NativeAgent) {
-            (
-                Some(SharedString::from(
-                    ui::VectorName::BackboardLogo.path().to_string(),
-                )),
-                self.selected_agent.label(),
-            )
-        } else {
-            (None, self.selected_agent.label())
-        };
 
         let active_thread = match &self.base_view {
             BaseView::AgentThread { conversation_view } => {
@@ -6584,14 +6765,12 @@ impl AgentPanel {
                             }
                         })
                         .item(
-                            ContextMenuEntry::new("Backboard")
+                            ContextMenuEntry::new("New chat")
                                 .when(
                                     !showing_terminal && is_agent_selected(Agent::NativeAgent),
                                     |this| this.action(Box::new(NewThread)),
                                 )
-                                .custom_icon_svg(SharedString::from(
-                                    ui::VectorName::BackboardLogo.path().to_string(),
-                                ))
+                                .icon(IconName::Plus)
                                 .icon_color(Color::Muted)
                                 .handler({
                                     let workspace = workspace.clone();
@@ -6618,57 +6797,6 @@ impl AgentPanel {
                         )
                 }))
             })
-        };
-
-        let is_thread_loading = self
-            .active_conversation_view()
-            .map(|thread| thread.read(cx).is_loading())
-            .unwrap_or(false);
-
-        let has_custom_icon = selected_agent_custom_icon.is_some();
-        let selected_agent_custom_icon_for_button = selected_agent_custom_icon.clone();
-        let selected_agent_builtin_icon = if showing_terminal {
-            Some(IconName::Terminal)
-        } else {
-            self.selected_agent.icon()
-        };
-        let selected_agent_label_for_tooltip = selected_agent_label.clone();
-
-        let selected_agent = div()
-            .id("selected_agent_icon")
-            .when_some(selected_agent_custom_icon, |this, icon_path| {
-                this.px_1().child(
-                    Icon::from_external_svg(icon_path)
-                        .color(Color::Muted)
-                        .size(IconSize::Small),
-                )
-            })
-            .when(!has_custom_icon, |this| {
-                this.when_some(selected_agent_builtin_icon, |this, icon| {
-                    this.px_1().child(Icon::new(icon).color(Color::Muted))
-                })
-            })
-            .tooltip(move |_, cx| {
-                Tooltip::with_meta(
-                    selected_agent_label_for_tooltip.clone(),
-                    None,
-                    "Selected Agent",
-                    cx,
-                )
-            });
-
-        let selected_agent = if is_thread_loading {
-            selected_agent
-                .with_animation(
-                    "pulsating-icon",
-                    Animation::new(Duration::from_secs(1))
-                        .repeat()
-                        .with_easing(pulsating_between(0.2, 0.6)),
-                    |icon, delta| icon.opacity(delta),
-                )
-                .into_any_element()
-        } else {
-            selected_agent.into_any_element()
         };
 
         enum ToolbarMode {
@@ -6707,6 +6835,35 @@ impl AgentPanel {
 
         let max_content_width = AgentSettings::get_global(cx).max_content_width;
 
+        let new_thread_menu = PopoverMenu::new("new_thread_menu")
+            .trigger_with_tooltip(
+                IconButton::new("new_thread_menu_btn", IconName::Plus).icon_size(IconSize::Small),
+                {
+                    let focus_handle = focus_handle.clone();
+                    move |_window, cx| {
+                        Tooltip::for_action_in(
+                            "New Thread\u{2026}",
+                            &ToggleNewThreadMenu,
+                            &focus_handle,
+                            cx,
+                        )
+                    }
+                },
+            )
+            .anchor(Anchor::TopRight)
+            .with_handle(self.new_thread_menu_handle.clone())
+            .menu(move |window, cx| new_thread_menu_builder(window, cx));
+
+        let view_in_agents_button = IconButton::new("view-in-agents", IconName::BackboardAgent)
+            .shape(IconButtonShape::Square)
+            .size(ButtonSize::Compact)
+            .style(ButtonStyle::Subtle)
+            .icon_size(IconSize::Small)
+            .tooltip(Tooltip::text("Open in Agents"))
+            .on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(OpenBackboardAgentWorkspace), cx);
+            });
+
         let base_container = h_flex()
             .size_full()
             .when(
@@ -6717,36 +6874,14 @@ impl AgentPanel {
             .justify_between()
             .gap_2();
 
-        let toolbar_content = if matches!(mode, ToolbarMode::EmptyThread | ToolbarMode::Terminal) {
-            let agent_icon = if let Some(icon_path) = selected_agent_custom_icon_for_button {
-                Icon::from_external_svg(icon_path)
-                    .size(IconSize::Small)
-                    .color(Color::Muted)
-            } else {
-                let icon_name = selected_agent_builtin_icon.unwrap_or(IconName::Sparkle);
-                Icon::new(icon_name)
-                    .size(IconSize::Small)
-                    .color(Color::Muted)
-            };
-
-            let agent_label = h_flex()
-                .id("selected-agent-label")
-                .min_w_0()
-                .gap_1()
-                .items_center()
-                .child(agent_icon)
-                .child(Label::new(selected_agent_label).truncate());
-
-            base_container
+        let toolbar_content = match mode {
+            ToolbarMode::Terminal => base_container
                 .child(
                     h_flex()
                         .size_full()
                         .gap(DynamicSpacing::Base04.rems(cx))
                         .pl(DynamicSpacing::Base04.rems(cx))
-                        .child(agent_label)
-                        .when(matches!(mode, ToolbarMode::Terminal), |this| {
-                            this.child(self.render_title_view(window, cx))
-                        }),
+                        .child(self.render_title_view(window, cx)),
                 )
                 .child(
                     h_flex()
@@ -6759,38 +6894,14 @@ impl AgentPanel {
                         .child(self.render_thread_history_menu(window, cx))
                         .child(self.render_panel_options_menu(window, cx)),
                 )
-                .into_any_element()
-        } else {
-            let new_thread_menu = PopoverMenu::new("new_thread_menu")
-                .trigger_with_tooltip(
-                    IconButton::new("new_thread_menu_btn", IconName::Plus)
-                        .icon_size(IconSize::Small),
-                    {
-                        move |_window, cx| {
-                            Tooltip::for_action_in(
-                                "New Thread\u{2026}",
-                                &ToggleNewThreadMenu,
-                                &focus_handle,
-                                cx,
-                            )
-                        }
-                    },
-                )
-                .anchor(Anchor::TopRight)
-                .with_handle(self.new_thread_menu_handle.clone())
-                .menu(move |window, cx| new_thread_menu_builder(window, cx));
-
-            base_container
+                .into_any_element(),
+            ToolbarMode::Overlay => base_container
                 .child(
                     h_flex()
                         .size_full()
                         .gap(DynamicSpacing::Base04.rems(cx))
                         .pl(DynamicSpacing::Base04.rems(cx))
-                        .child(if matches!(mode, ToolbarMode::Overlay) {
-                            self.render_toolbar_back_button(cx).into_any_element()
-                        } else {
-                            selected_agent.into_any_element()
-                        })
+                        .child(self.render_toolbar_back_button(cx))
                         .child(self.render_title_view(window, cx)),
                 )
                 .child(
@@ -6805,7 +6916,30 @@ impl AgentPanel {
                         .child(self.render_thread_history_menu(window, cx))
                         .child(self.render_panel_options_menu(window, cx)),
                 )
-                .into_any_element()
+                .into_any_element(),
+            ToolbarMode::EmptyThread | ToolbarMode::ActiveThread => base_container
+                .child(
+                    h_flex()
+                        .size_full()
+                        .min_w_0()
+                        .gap(DynamicSpacing::Base04.rems(cx))
+                        .pl(DynamicSpacing::Base04.rems(cx))
+                        .child(self.render_thread_tabs(cx)),
+                )
+                .child(
+                    h_flex()
+                        .h_full()
+                        .flex_none()
+                        .gap_1()
+                        .pl_1()
+                        .pr_1()
+                        .child(view_in_agents_button)
+                        .child(new_thread_menu)
+                        .child(full_screen_button)
+                        .child(self.render_thread_history_menu(window, cx))
+                        .child(self.render_panel_options_menu(window, cx)),
+                )
+                .into_any_element(),
         };
 
         h_flex()

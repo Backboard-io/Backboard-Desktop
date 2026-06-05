@@ -1004,7 +1004,8 @@ pub struct ProtocolVersion(u32);
 impl Header for ProtocolVersion {
     fn name() -> &'static HeaderName {
         static BACKBOARD_PROTOCOL_VERSION: OnceLock<HeaderName> = OnceLock::new();
-        BACKBOARD_PROTOCOL_VERSION.get_or_init(|| HeaderName::from_static("x-backboard-protocol-version"))
+        BACKBOARD_PROTOCOL_VERSION
+            .get_or_init(|| HeaderName::from_static("x-backboard-protocol-version"))
     }
 
     fn decode<'i, I>(values: &mut I) -> Result<Self, axum::headers::Error>
@@ -1060,7 +1061,8 @@ pub struct ReleaseChannelHeader(String);
 impl Header for ReleaseChannelHeader {
     fn name() -> &'static HeaderName {
         static BACKBOARD_RELEASE_CHANNEL: OnceLock<HeaderName> = OnceLock::new();
-        BACKBOARD_RELEASE_CHANNEL.get_or_init(|| HeaderName::from_static("x-backboard-release-channel"))
+        BACKBOARD_RELEASE_CHANNEL
+            .get_or_init(|| HeaderName::from_static("x-backboard-release-channel"))
     }
 
     fn decode<'i, I>(values: &mut I) -> Result<Self, axum::headers::Error>

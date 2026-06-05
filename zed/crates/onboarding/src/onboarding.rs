@@ -29,7 +29,7 @@ use workspace::{
     item::{Item, ItemEvent},
     open_new, open_paths, register_serializable_item, with_active_or_new_workspace,
 };
-use zed_actions::{OpenAccountSettings, OpenOnboarding, ResetOnboarding};
+use zed_actions::{OpenOnboarding, ResetOnboarding};
 
 mod base_keymap_picker;
 mod basics_page;
@@ -261,9 +261,7 @@ pub fn init(cx: &mut App) {
     });
 
     cx.on_action(|_: &OpenAccount, cx| {
-        with_active_or_new_workspace(cx, |_, window, cx| {
-            window.dispatch_action(OpenAccountSettings.boxed_clone(), cx);
-        });
+        cx.open_url(BACKBOARD_DASHBOARD_URL);
     });
 
     cx.on_action(|_: &SwitchMode, cx| {

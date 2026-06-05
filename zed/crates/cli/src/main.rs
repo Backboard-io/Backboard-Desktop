@@ -1028,7 +1028,8 @@ mod flatpak {
             let mut args = vec!["/usr/bin/flatpak-spawn".into(), "--host".into()];
             args.append(&mut get_xdg_env_args());
             args.push(
-                "--env=BACKBOARD_UPDATE_EXPLANATION=Please use flatpak to update Backboard Studio".into(),
+                "--env=BACKBOARD_UPDATE_EXPLANATION=Please use flatpak to update Backboard Studio"
+                    .into(),
             );
             args.push(
                 format!(

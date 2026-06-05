@@ -63,7 +63,7 @@ actions!(
         #[action(deprecated_aliases = ["zed::ConfigureBackboardApiKey"])]
         ConfigureBackboardApiKey,
         /// Opens server settings.
-        #[action(deprecated_aliases = ["zed::OpenServerSettings"])]
+        #[action(no_register, deprecated_aliases = ["zed::OpenServerSettings"])]
         OpenServerSettings,
         /// Quits the application.
         #[action(deprecated_aliases = ["zed::Quit"])]
@@ -72,7 +72,7 @@ actions!(
         #[action(deprecated_aliases = ["zed::About"])]
         About,
         /// Opens the documentation website.
-        #[action(deprecated_aliases = ["zed::OpenDocs"])]
+        #[action(no_register, deprecated_aliases = ["zed::OpenDocs"])]
         OpenDocs,
         /// Views open source licenses.
         #[action(deprecated_aliases = ["zed::OpenLicenses"])]
@@ -93,7 +93,7 @@ actions!(
         #[action(deprecated_aliases = ["zed::SwitchInterfaceMode"])]
         SwitchInterfaceMode,
         /// Shows the auto-update notification for testing.
-        #[action(deprecated_aliases = ["zed::ShowUpdateNotification"])]
+        #[action(no_register, deprecated_aliases = ["zed::ShowUpdateNotification"])]
         ShowUpdateNotification,
     ]
 );
@@ -381,6 +381,7 @@ pub mod command_palette {
         command_palette,
         [
             /// Toggles the command palette.
+            #[action(no_register)]
             Toggle,
         ]
     );
