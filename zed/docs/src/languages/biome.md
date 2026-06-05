@@ -5,8 +5,8 @@ description: "Configure Biome language support in Backboard Studio, including la
 
 # Biome
 
-[Biome](https://biomejs.dev/) support in Backboard Studio is provided by the community-maintained [Biome extension](https://github.com/biomejs/biome-zed).
-Report issues to: [https://github.com/biomejs/biome-zed/issues](https://github.com/biomejs/biome-zed/issues)
+[Biome](https://biomejs.dev/) support in Backboard Studio is provided by the community-maintained [Biome extension](https://github.com/biomejs/biome-backboard).
+Report issues to: [https://github.com/biomejs/biome-backboard/issues](https://github.com/biomejs/biome-backboard/issues)
 
 - Language Server: [biomejs/biome](https://github.com/biomejs/biome)
 
@@ -37,4 +37,4 @@ By default, the `biome.json` file is required to be in the root of the workspace
 
 For a full list of `biome.json` options see [Biome Configuration](https://biomejs.dev/reference/configuration/) documentation.
 
-See the [Biome Backboard Studio Extension README](https://github.com/biomejs/biome-zed) for a complete list of features and configuration options.
+See the [Biome Backboard Studio Extension README](https://github.com/biomejs/biome-backboard) for a complete list of features and configuration options.

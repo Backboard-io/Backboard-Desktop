@@ -9,7 +9,7 @@ description: "Get the latest stable builds via the download page. If you want to
 
 Get the latest stable builds via [the download page](https://app.backboard.io/download). If you want to download our preview build, you can find it on its [releases page](https://app.backboard.io/releases/preview). After the first manual installation, Backboard Studio will periodically check for install updates.
 
-You can also build zed from source, see [these docs](https://app.backboard.io/docs/development/windows) for instructions.
+You can also build backboard from source, see [these docs](https://app.backboard.io/docs/development/windows) for instructions.
 
 ### Package managers
 

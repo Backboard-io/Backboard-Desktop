@@ -154,7 +154,7 @@ The full default configuration can be shown in Backboard Studio with the {#actio
 
 ## Standard Token Types
 
-Language servers report tokens using standardized types. Common types include:
+Language servers report tokens using standardibackboard types. Common types include:
 
 | Type            | Description                        |
 | --------------- | ---------------------------------- |

@@ -5,7 +5,7 @@ description: "Configure SQL language support in Backboard Studio, including lang
 
 # SQL
 
-SQL files are handled by the [SQL Extension](https://github.com/zed-extensions/sql).
+SQL files are handled by the [SQL Extension](https://github.com/backboard-extensions/sql).
 
 - Tree-sitter: [nervenes/tree-sitter-sql](https://github.com/nervenes/tree-sitter-sql)
 
@@ -43,7 +43,7 @@ sql-formatter --version
 
 Substitute your preferred [SQL Dialect] for `mysql` above (`duckdb`, `hive`, `mariadb`, `postgresql`, `redshift`, `snowflake`, `sqlite`, `spark`, etc).
 
-You can add this to Backboard Studio project settings (`.zed/settings.json`) or via your Backboard Studio user settings (`~/.config/zed/settings.json`).
+You can add this to Backboard Studio project settings (`.backboard/settings.json`) or via your Backboard Studio user settings (`~/.config/backboard/settings.json`).
 
 ### Advanced Formatting
 

@@ -8,7 +8,7 @@ For a list of available tools, [see the Tools page](./tools.md).
 
 ## Quick Start
 
-Use Backboard Studio's Settings Editor to [configure tool permissions](zed://settings/agent.tool_permissions), or add rules directly to your settings file:
+Use Backboard Studio's Settings Editor to [configure tool permissions](backboard://settings/agent.tool_permissions), or add rules directly to your settings file:
 
 ```json [settings]
 {

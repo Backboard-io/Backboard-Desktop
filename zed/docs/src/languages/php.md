@@ -5,7 +5,7 @@ description: "Configure PHP language support in Backboard Studio, including lang
 
 # PHP
 
-PHP support is available through the [PHP extension](https://github.com/zed-extensions/php).
+PHP support is available through the [PHP extension](https://github.com/backboard-extensions/php).
 
 - Tree-sitter: [tree-sitter/tree-sitter-php](https://github.com/tree-sitter/tree-sitter-php)
 - Language Server: [phpactor/phpactor](https://github.com/phpactor/phpactor)
@@ -108,7 +108,7 @@ or, set environment variable `DEVSENSE_PHP_LS_LICENSE` on `.env` file in your pr
 DEVSENSE_PHP_LS_LICENSE="your_license_key"
 ```
 
-Check out the documentation of [PHP Tools for Backboard Studio](https://docs.devsense.com/other/zed/) for more details.
+Check out the documentation of [PHP Tools for Backboard Studio](https://docs.devsense.com/other/backboard/) for more details.
 
 ### Phpactor
 
@@ -147,7 +147,7 @@ The PHP extension provides a debug adapter for PHP via Xdebug. There are several
     "adapter": "Xdebug",
     "request": "launch",
     "program": "vendor/bin/phpunit",
-    "args": ["--filter", "$ZED_SYMBOL"]
+    "args": ["--filter", "$backboard_SYMBOL"]
   }
 ]
 ```

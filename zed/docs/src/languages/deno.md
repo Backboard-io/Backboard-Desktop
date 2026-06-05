@@ -5,7 +5,7 @@ description: "Configure Deno language support in Backboard Studio, including lan
 
 # Deno
 
-Deno support is available through the [Deno extension](https://github.com/zed-extensions/deno).
+Deno support is available through the [Deno extension](https://github.com/backboard-extensions/deno).
 
 - Language server: [Deno Language Server](https://docs.deno.com/runtime/manual/advanced/language_server/overview/)
 
@@ -66,7 +66,7 @@ TBD: Deno TypeScript REPL instructions [docs/repl#typescript-deno](../repl.md#ty
 
 ## Configuration completion
 
-To get completions for `deno.json` or `package.json`, add the following to your settings file ([how to edit](../configuring-zed.md#settings-files)). For more details, see [JSON](./json.md).
+To get completions for `deno.json` or `package.json`, add the following to your settings file ([how to edit](../configuring-backboard.md#settings-files)). For more details, see [JSON](./json.md).
 
 ```json [settings]
 "lsp": {
@@ -96,7 +96,7 @@ To get completions for `deno.json` or `package.json`, add the following to your 
 
 ## DAP support
 
-To debug deno programs, add this to `.zed/debug.json`
+To debug deno programs, add this to `.backboard/debug.json`
 
 ```json [debug]
 [
@@ -105,8 +105,8 @@ To debug deno programs, add this to `.zed/debug.json`
     "label": "Deno",
     "request": "launch",
     "type": "pwa-node",
-    "cwd": "$ZED_WORKTREE_ROOT",
-    "program": "$ZED_FILE",
+    "cwd": "$backboard_WORKTREE_ROOT",
+    "program": "$backboard_FILE",
     "runtimeExecutable": "deno",
     "runtimeArgs": ["run", "--allow-all", "--inspect-wait"],
     "attachSimplePort": 9229
@@ -116,13 +116,13 @@ To debug deno programs, add this to `.zed/debug.json`
 
 ## Runnable support
 
-To run deno tasks like tests from the ui, add this to `.zed/tasks.json`
+To run deno tasks like tests from the ui, add this to `.backboard/tasks.json`
 
 ```json [tasks]
 [
   {
     "label": "deno test",
-    "command": "deno test -A '$ZED_FILE'",
+    "command": "deno test -A '$backboard_FILE'",
     "tags": ["js-test"]
   }
 ]

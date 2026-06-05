@@ -365,7 +365,7 @@ pub fn build_window_options(display_uuid: Option<Uuid>, cx: &mut App) -> WindowO
             .find(|display| display.uuid().ok() == Some(uuid))
     });
     let app_id = ReleaseChannel::global(cx).app_id();
-    let window_decorations = match std::env::var("ZED_WINDOW_DECORATIONS") {
+    let window_decorations = match std::env::var("BACKBOARD_WINDOW_DECORATIONS") {
         Ok(val) if val == "server" => gpui::WindowDecorations::Server,
         Ok(val) if val == "client" => gpui::WindowDecorations::Client,
         _ => match WorkspaceSettings::get_global(cx).window_decorations {
@@ -774,7 +774,7 @@ fn show_software_emulation_warning_if_needed(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    if specs.is_software_emulated && std::env::var("ZED_ALLOW_EMULATED_GPU").is_err() {
+    if specs.is_software_emulated && std::env::var("BACKBOARD_ALLOW_EMULATED_GPU").is_err() {
         let graphics_api = if cfg!(target_os = "windows") {
             "DirectX"
         } else {
@@ -787,7 +787,7 @@ fn show_software_emulation_warning_if_needed(
             Currently you are using a software emulated GPU ({}) which
             will result in awful performance.
 
-            Set ZED_ALLOW_EMULATED_GPU=1 env var to permanently override.
+            Set BACKBOARD_ALLOW_EMULATED_GPU=1 env var to permanently override.
             "#},
             graphics_api, specs.device_name
         );
@@ -1429,7 +1429,7 @@ fn register_actions(
                         Toast::new(
                             NotificationId::unique::<RegisterBackboardScheme>(),
                             format!(
-                                "zed:// links will now open in {}.",
+                                "backboard:// links will now open in {}.",
                                 ReleaseChannel::global(cx).display_name()
                             ),
                         ),
@@ -1439,7 +1439,7 @@ fn register_actions(
                 Ok(())
             })
             .detach_and_prompt_err(
-                "Error registering zed:// scheme",
+                "Error registering backboard:// scheme",
                 window,
                 cx,
                 |_, _, _| None,
@@ -5853,14 +5853,14 @@ mod tests {
             .insert_tree(
                 Path::new("/root"),
                 json!({
-                    ".zed": {
+                    ".backboard": {
                         "settings.json": settings_init
                     }
                 }),
             )
             .await;
 
-        eprintln!("Created project with .zed/settings.json containing UNIQUEVALUE");
+        eprintln!("Created project with .backboard/settings.json containing UNIQUEVALUE");
 
         // 2. Create a project with the file system and load it
         let project = Project::test(app_state.fs.clone(), [Path::new("/root")], cx).await;
@@ -5868,7 +5868,7 @@ mod tests {
         // Save original settings content for comparison
         let original_settings = app_state
             .fs
-            .load(Path::new("/root/.zed/settings.json"))
+            .load(Path::new("/root/.backboard/settings.json"))
             .await
             .unwrap();
 
@@ -5881,35 +5881,35 @@ mod tests {
             "Test setup failed - settings file doesn't contain our marker"
         );
 
-        // 3. Add .zed to file scan exclusions in user settings
+        // 3. Add .backboard to file scan exclusions in user settings
         cx.update_global::<SettingsStore, _>(|store, cx| {
             store.update_user_settings(cx, |worktree_settings| {
                 worktree_settings.project.worktree.file_scan_exclusions =
-                    Some(vec![".zed".to_string()]);
+                    Some(vec![".backboard".to_string()]);
             });
         });
 
-        eprintln!("Added .zed to file_scan_exclusions in settings");
+        eprintln!("Added .backboard to file_scan_exclusions in settings");
 
         // 4. Run tasks to apply settings
         cx.background_executor.run_until_parked();
 
-        // 5. Critical: Verify .zed is actually excluded from worktree
+        // 5. Critical: Verify .backboard is actually excluded from worktree
         let worktree = cx.update(|cx| project.read(cx).worktrees(cx).next().unwrap());
 
         let has_zed_entry =
-            cx.update(|cx| worktree.read(cx).entry_for_path(rel_path(".zed")).is_some());
+            cx.update(|cx| worktree.read(cx).entry_for_path(rel_path(".backboard")).is_some());
 
         eprintln!(
-            "Is .zed directory visible in worktree after exclusion: {}",
+            "Is .backboard directory visible in worktree after exclusion: {}",
             has_zed_entry
         );
 
         // This assertion verifies the test is set up correctly to show the bug
-        // If .zed is not excluded, the test will fail here
+        // If .backboard is not excluded, the test will fail here
         assert!(
             !has_zed_entry,
-            "Test precondition failed: .zed directory should be excluded but was found in worktree"
+            "Test precondition failed: .backboard directory should be excluded but was found in worktree"
         );
 
         // 6. Create workspace and trigger the actual function that causes the bug
@@ -5934,7 +5934,7 @@ mod tests {
         // 8. Verify file contents after calling function
         let new_content = app_state
             .fs
-            .load(Path::new("/root/.zed/settings.json"))
+            .load(Path::new("/root/.backboard/settings.json"))
             .await
             .unwrap();
 

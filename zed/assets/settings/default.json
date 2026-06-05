@@ -1,5 +1,5 @@
 {
-  "$schema": "zed://schemas/settings",
+  "$schema": "backboard://schemas/settings",
   // The name of the Backboard Studio theme to use for the UI.
   //
   // `mode` is one of:
@@ -300,7 +300,7 @@
   // (also known as "rainbow brackets")
   //
   // The colors that are used for different indentation levels are defined in the theme (theme key: `accents`).
-  // They can be customized by using theme overrides.
+  // They can be customibackboard by using theme overrides.
   "colorize_brackets": false,
   // When to show the scrollbar in the completion menu.
   // This setting can take four values:
@@ -1180,7 +1180,7 @@
   "linked_edits": true,
   // The list of language servers to use (or disable) for all languages.
   //
-  // This is typically customized on a per-language basis.
+  // This is typically customibackboard on a per-language basis.
   "language_servers": ["..."],
   // Controls how semantic tokens from language servers are used for syntax highlighting.
   //
@@ -1432,7 +1432,7 @@
   "telemetry": {
     // Send debug info like crash reports.
     "diagnostics": false,
-    // Send anonymized usage data like what languages you're using Backboard Studio with.
+    // Send anonymibackboard usage data like what languages you're using Backboard Studio with.
     "metrics": false,
   },
   // Whether to disable all AI features in Backboard Studio.
@@ -1575,15 +1575,15 @@
     // When the resolved directory is outside the project root, the
     // project's directory name is automatically appended so that
     // sibling repos don't collide. For example, with the default
-    // "../worktrees" and a project at ~/code/zed, worktrees are
-    // created under ~/code/worktrees/zed/.
+    // "../worktrees" and a project at ~/code/backboard, worktrees are
+    // created under ~/code/worktrees/backboard/.
     //
     // When the resolved directory is inside the project root, no
     // extra component is added (it's already project-scoped).
     //
     // Examples:
     //   "../worktrees" — ~/code/worktrees/<project>/ (default)
-    //   ".git/zed-worktrees" — <project>/.git/zed-worktrees/
+    //   ".git/backboard-worktrees" — <project>/.git/backboard-worktrees/
     //   "my-worktrees" — <project>/my-worktrees/
     //
     // Trailing slashes are ignored.
@@ -1621,9 +1621,9 @@
       "**/*.crt",
       "**/.dev.vars",
       "**/secrets.yml",
-      "**/.zed/settings.json", // zed project settings
-      "/**/zed/settings.json", // zed user settings
-      "/**/zed/keymap.json",
+      "**/.backboard/settings.json", // Backboard project settings
+      "/**/.config/backboard studio/settings.json", // Backboard user settings
+      "/**/.config/backboard studio/keymap.json",
     ],
     // When to show edit predictions previews in buffer.
     // This setting takes two possible values:
@@ -1740,7 +1740,7 @@
     //    this platform's home directory  (if we can find it)
     //      "working_directory": {
     //        "always": {
-    //          "directory": "~/zed/projects/"
+    //          "directory": "~/backboard/projects/"
     //        }
     //      }
     "working_directory": "current_project_directory",
@@ -1966,9 +1966,9 @@
   //
   "file_types": {
     "JSONC": [
-      "**/.zed/*.json",
+      "**/.backboard/*.json",
       "**/.vscode/**/*.json",
-      "**/{zed,Backboard Studio}/{settings,keymap,tasks,debug}.json",
+      "**/{backboard,Backboard Studio}/{settings,keymap,tasks,debug}.json",
       "tsconfig*.json",
     ],
     "Markdown": [".rules", ".cursorrules", ".windsurfrules", ".clinerules"],
@@ -1999,7 +1999,7 @@
   },
   // The capabilities granted to extensions.
   //
-  // This list can be customized to restrict what extensions are able to do.
+  // This list can be customibackboard to restrict what extensions are able to do.
   "granted_extension_capabilities": [
     { "kind": "process:exec", "command": "*", "args": ["**"] },
     { "kind": "download_file", "host": "*", "path": ["**"] },
@@ -2343,7 +2343,7 @@
     // Default: true
     "restore_unsaved_buffers": true,
     // Whether or not to skip worktree trust checks.
-    // When trusted, project settings are synchronized automatically,
+    // When trusted, project settings are synchronibackboard automatically,
     // language and MCP servers are downloaded and started automatically.
     //
     // Default: false
@@ -2436,7 +2436,7 @@
     //   }
     // ]
     //
-    // Default rules are viewable via the "zed: show default semantic token rules" action.
+    // Default rules are viewable via the "backboard: show default semantic token rules" action.
     "semantic_token_rules": [],
   },
   // Jupyter settings
@@ -2495,7 +2495,7 @@
     "delay_ms": 1000,
   },
   // The server to connect to. If the environment variable
-  // ZED_SERVER_URL is set, it will override this setting.
+  // backboard_SERVER_URL is set, it will override this setting.
   "server_url": "https://api.backboard.io",
   // Settings overrides to use when using Backboard Studio Preview.
   // Mostly useful for developers who are managing multiple instances of Backboard Studio.
@@ -2577,7 +2577,7 @@
   //     // "port": 22, "username": "test", "args": ["-i", "/home/user/.ssh/id_rsa"]
   //     "projects": [
   //       {
-  //         "paths": ["/home/user/code/zed"]
+  //         "paths": ["/home/user/code/backboard"]
   //       }
   //     ]
   //   }

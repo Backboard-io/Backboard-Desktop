@@ -301,7 +301,7 @@ There's a way to get custom completion items from rust-analyzer, that will trans
 
 Backboard Studio supports debugging Rust binaries and tests out of the box with `CodeLLDB` and `GDB`. Run {#action debugger::Start} ({#kb debugger::Start}) to launch one of these preconfigured debug tasks.
 
-For more control, you can add debug configurations to `.zed/debug.json`. See the examples below.
+For more control, you can add debug configurations to `.backboard/debug.json`. See the examples below.
 
 - [CodeLLDB configuration documentation](https://github.com/vadimcn/codelldb/blob/master/MANUAL.md#starting-a-new-debug-session)
 - [GDB configuration documentation](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Debugger-Adapter-Protocol.html)
@@ -316,7 +316,7 @@ For more control, you can add debug configurations to `.zed/debug.json`. See the
       "command": "cargo",
       "args": ["build"]
     },
-    "program": "$ZED_WORKTREE_ROOT/target/debug/binary",
+    "program": "$backboard_WORKTREE_ROOT/target/debug/binary",
     // sourceLanguages is required for CodeLLDB (not GDB) when using Rust
     "sourceLanguages": ["rust"],
     "request": "launch",

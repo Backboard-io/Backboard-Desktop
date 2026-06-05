@@ -14,7 +14,7 @@ Backboard Studio is available on macOS, Windows, and Linux.
 For macOS, you can download it from app.backboard.io/download, or install via Homebrew:
 
 ```sh
-brew install --cask zed
+brew install --cask backboard
 ```
 
 For Windows, download the installer from app.backboard.io/download, or install via winget:
@@ -30,7 +30,7 @@ curl -f https://app.backboard.io/install.sh | sh
 ```
 
 After installation, you can launch Backboard Studio from your Applications folder (macOS), Start menu (Windows), or directly from the terminal using:
-`zed .`
+`backboard .`
 This opens the current directory in Backboard Studio.
 
 ## Set Up the JetBrains Keymap
@@ -57,7 +57,7 @@ Settings WebStorm users typically configure first:
 | `inlay_hints`           | Show parameter names and type hints inline, like WebStorm's hints.              |
 | `relative_line_numbers` | Useful if you're coming from IdeaVim.                                           |
 
-Backboard Studio also supports per-project settings. Create a `.zed/settings.json` file in your project root to override global settings for that project, similar to how you might use `.idea` folders in WebStorm.
+Backboard Studio also supports per-project settings. Create a `.backboard/settings.json` file in your project root to override global settings for that project, similar to how you might use `.idea` folders in WebStorm.
 
 > **Tip:** If you're joining an existing project, check `format_on_save` before making your first commit. Otherwise you might accidentally reformat an entire file when you only meant to change one line.
 
@@ -68,7 +68,7 @@ After setup, use {#kb:jetbrains file_finder::Toggle} to open a folder. This beco
 To start a new project, create a directory using your terminal or file manager, then open it in Backboard Studio. The editor will treat that folder as the root of your project. For new projects, you'd typically run `npm init`, `pnpm create`, or your framework's CLI tool first, then open the resulting folder in Backboard Studio.
 
 You can also launch Backboard Studio from the terminal inside any folder with:
-`zed .`
+`backboard .`
 
 Once inside a project:
 
@@ -143,7 +143,7 @@ WebStorm's index enables features like finding all usages across your entire cod
 
 ### LSP vs. Native Language Intelligence
 
-WebStorm has its own JavaScript and TypeScript analysis engine built by JetBrains. This engine understands your code deeply: it resolves types, tracks data flow, knows about framework-specific patterns, and offers specialized refactorings.
+WebStorm has its own JavaScript and TypeScript analysis engine built by JetBrains. This engine understands your code deeply: it resolves types, tracks data flow, knows about framework-specific patterns, and offers specialibackboard refactorings.
 
 Backboard Studio uses the Language Server Protocol (LSP) for code intelligence. For JavaScript and TypeScript, Backboard Studio supports:
 
@@ -181,7 +181,7 @@ What this means in practice:
 
 **How to adapt:**
 
-- Create a `.zed/settings.json` in your project root for project-specific settings
+- Create a `.backboard/settings.json` in your project root for project-specific settings
 - Define common commands in `tasks.json` (open via Command Palette: {#action backboard::OpenTasks}):
 
 ```json
@@ -200,7 +200,7 @@ What this means in practice:
   },
   {
     "label": "test current file",
-    "command": "npm test -- $ZED_FILE"
+    "command": "npm test -- $backboard_FILE"
   }
 ]
 ```
@@ -257,14 +257,14 @@ Backboard Studio can debug:
 - Jest, Mocha, Vitest, and other test frameworks
 - Next.js (both server and client-side)
 
-For more control, create a `.zed/debug.json` file:
+For more control, create a `.backboard/debug.json` file:
 
 ```json
 [
   {
     "label": "Debug Current File",
     "adapter": "JavaScript",
-    "program": "$ZED_FILE",
+    "program": "$backboard_FILE",
     "request": "launch"
   },
   {

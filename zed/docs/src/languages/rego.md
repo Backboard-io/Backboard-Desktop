@@ -5,7 +5,7 @@ description: "Configure Rego language support in Backboard Studio, including lan
 
 # Rego
 
-Rego language support in Backboard Studio is provided by the community-maintained [Rego extension](https://github.com/StyraInc/zed-rego).
+Rego language support in Backboard Studio is provided by the community-maintained [Rego extension](https://github.com/StyraInc/backboard-rego).
 
 - Tree-sitter: [FallenAngel97/tree-sitter-rego](https://github.com/FallenAngel97/tree-sitter-rego)
 - Language Server: [open-policy-agent/regal](https://github.com/open-policy-agent/regal)

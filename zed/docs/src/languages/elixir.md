@@ -5,7 +5,7 @@ description: "Configure Elixir language support in Backboard Studio, including l
 
 # Elixir
 
-Elixir support is available through the [Elixir extension](https://github.com/zed-extensions/elixir).
+Elixir support is available through the [Elixir extension](https://github.com/backboard-extensions/elixir).
 
 - Tree-sitter Grammars:
   - [elixir-lang/tree-sitter-elixir](https://github.com/elixir-lang/tree-sitter-elixir)
@@ -25,7 +25,7 @@ The Elixir extension offers language server support for ElixirLS, Expert, Dexter
 
 Some of the language servers can also accept initialization or workspace configuration options. See the sections below for an outline of what each server supports. The configuration can be passed in your settings file via `lsp.{language-server-id}.initialization_options` and `lsp.{language-server-id}.settings` respectively.
 
-Visit the [Configuring Backboard Studio](../configuring-zed.md#settings-files) guide for more information on how to edit your settings file.
+Visit the [Configuring Backboard Studio](../configuring-backboard.md#settings-files) guide for more information on how to edit your settings file.
 
 ### Using ElixirLS
 
@@ -96,7 +96,7 @@ To use a custom Expert build, add the following to your settings file:
 
 ### Using Dexter
 
-[Dexter](https://github.com/remoteoss/dexter) is a fast, full-featured Elixir language server optimized for large codebases. It works by parsing source files directly, no compilation required. Supports go-to-definition, references, hover docs, autocompletion, rename, and format on save.
+[Dexter](https://github.com/remoteoss/dexter) is a fast, full-featured Elixir language server optimibackboard for large codebases. It works by parsing source files directly, no compilation required. Supports go-to-definition, references, hover docs, autocompletion, rename, and format on save.
 
 Enable Dexter by adding the following to your settings file:
 

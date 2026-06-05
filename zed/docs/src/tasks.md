@@ -74,8 +74,8 @@ Keep `"use_new_terminal": false` and set `"allow_concurrent_runs": true` to allo
 
 Tasks can be defined:
 
-- in the global `tasks.json` file; such tasks are available in all Backboard Studio projects you work on. This file is usually located in `~/.config/zed/tasks.json`. You can edit them by using the {#action backboard::OpenTasks} action.
-- in the worktree-specific (local) `.zed/tasks.json` file; such tasks are available only when working on a project with that worktree included. You can edit worktree-specific tasks by using the {#action backboard::OpenProjectTasks} action.
+- in the global `tasks.json` file; such tasks are available in all Backboard Studio projects you work on. This file is usually located in `~/.config/backboard/tasks.json`. You can edit them by using the {#action backboard::OpenTasks} action.
+- in the worktree-specific (local) `.backboard/tasks.json` file; such tasks are available only when working on a project with that worktree included. You can edit worktree-specific tasks by using the {#action backboard::OpenProjectTasks} action.
 - on the fly with [oneshot tasks](#oneshot-tasks). These tasks are project-specific and do not persist across sessions.
 - by language extension.
 
@@ -84,31 +84,31 @@ Tasks can be defined:
 Backboard Studio tasks act just like your shell; that also means that you can reference environmental variables via sh-esque `$VAR_NAME` syntax. A couple of additional environmental variables are set for your convenience.
 These variables allow you to pull information from the current editor and use it in your tasks. The following variables are available:
 
-- `ZED_COLUMN`: current line column
-- `ZED_ROW`: current line row
-- `ZED_FILE`: absolute path of the currently opened file (e.g. `/Users/my-user/path/to/project/src/main.rs`)
-- `ZED_FILENAME`: filename of the currently opened file (e.g. `main.rs`)
-- `ZED_DIRNAME`: absolute path of the currently opened file with file name stripped (e.g. `/Users/my-user/path/to/project/src`)
-- `ZED_RELATIVE_FILE`: path of the currently opened file, relative to `ZED_WORKTREE_ROOT` (e.g. `src/main.rs`)
-- `ZED_RELATIVE_DIR`: path of the currently opened file's directory, relative to `ZED_WORKTREE_ROOT` (e.g. `src`)
-- `ZED_STEM`: stem (filename without extension) of the currently opened file (e.g. `main`)
-- `ZED_SYMBOL`: currently selected symbol; should match the last symbol shown in a symbol breadcrumb (e.g. `mod tests > fn test_task_contexts`)
-- `ZED_SELECTED_TEXT`: currently selected text
-- `ZED_LANGUAGE`: language of the currently opened buffer (e.g. `Rust`, `Python`, `Shell Script`)
-- `ZED_WORKTREE_ROOT`: absolute path to the root of the current worktree. (e.g. `/Users/my-user/path/to/project`)
-- `ZED_MAIN_GIT_WORKTREE`: absolute path to the main git worktree's working directory. For normal checkouts this equals `ZED_WORKTREE_ROOT`; for linked git worktrees this is the original repository's working directory.
-- `ZED_CUSTOM_RUST_PACKAGE`: (Rust-specific) name of the parent package of $ZED_FILE source file.
+- `backboard_COLUMN`: current line column
+- `backboard_ROW`: current line row
+- `backboard_FILE`: absolute path of the currently opened file (e.g. `/Users/my-user/path/to/project/src/main.rs`)
+- `backboard_FILENAME`: filename of the currently opened file (e.g. `main.rs`)
+- `backboard_DIRNAME`: absolute path of the currently opened file with file name stripped (e.g. `/Users/my-user/path/to/project/src`)
+- `backboard_RELATIVE_FILE`: path of the currently opened file, relative to `backboard_WORKTREE_ROOT` (e.g. `src/main.rs`)
+- `backboard_RELATIVE_DIR`: path of the currently opened file's directory, relative to `backboard_WORKTREE_ROOT` (e.g. `src`)
+- `backboard_STEM`: stem (filename without extension) of the currently opened file (e.g. `main`)
+- `backboard_SYMBOL`: currently selected symbol; should match the last symbol shown in a symbol breadcrumb (e.g. `mod tests > fn test_task_contexts`)
+- `backboard_SELECTED_TEXT`: currently selected text
+- `backboard_LANGUAGE`: language of the currently opened buffer (e.g. `Rust`, `Python`, `Shell Script`)
+- `backboard_WORKTREE_ROOT`: absolute path to the root of the current worktree. (e.g. `/Users/my-user/path/to/project`)
+- `backboard_MAIN_GIT_WORKTREE`: absolute path to the main git worktree's working directory. For normal checkouts this equals `backboard_WORKTREE_ROOT`; for linked git worktrees this is the original repository's working directory.
+- `backboard_CUSTOM_RUST_PACKAGE`: (Rust-specific) name of the parent package of $backboard_FILE source file.
 
 To use a variable in a task, prefix it with a dollar sign (`$`):
 
 ```json [tasks]
 {
   "label": "echo current file's path",
-  "command": "echo $ZED_FILE"
+  "command": "echo $backboard_FILE"
 }
 ```
 
-You can also use verbose syntax that allows specifying a default if a given variable is not available: `${ZED_FILE:default_value}`
+You can also use verbose syntax that allows specifying a default if a given variable is not available: `${backboard_FILE:default_value}`
 
 These environmental variables can also be used in tasks' `cwd`, `args`, and `label` fields.
 
@@ -121,7 +121,7 @@ For example, instead of this (which will fail if the path has a space):
 ```json [tasks]
 {
   "label": "stat current file",
-  "command": "stat $ZED_FILE"
+  "command": "stat $backboard_FILE"
 }
 ```
 
@@ -131,7 +131,7 @@ Provide the following:
 {
   "label": "stat current file",
   "command": "stat",
-  "args": ["$ZED_FILE"]
+  "args": ["$backboard_FILE"]
 }
 ```
 
@@ -140,7 +140,7 @@ Or explicitly include escaped quotes like so:
 ```json [tasks]
 {
   "label": "stat current file",
-  "command": "stat \"$ZED_FILE\""
+  "command": "stat \"$backboard_FILE\""
 }
 ```
 
@@ -152,7 +152,7 @@ For example, the following task will appear in the spawn modal only if there is 
 ```json [tasks]
 {
   "label": "selected text",
-  "command": "echo \"$ZED_SELECTED_TEXT\""
+  "command": "echo \"$backboard_SELECTED_TEXT\""
 }
 ```
 
@@ -161,7 +161,7 @@ Set default values to such variables to have such tasks always displayed:
 ```json [tasks]
 {
   "label": "selected text with default",
-  "command": "echo \"${ZED_SELECTED_TEXT:no text selected}\""
+  "command": "echo \"${backboard_SELECTED_TEXT:no text selected}\""
 }
 ```
 
@@ -213,7 +213,7 @@ This could be useful for launching a terminal application that you want to use i
 // In tasks.json
 {
   "label": "start lazygit",
-  "command": "lazygit -p $ZED_WORKTREE_ROOT"
+  "command": "lazygit -p $backboard_WORKTREE_ROOT"
 }
 ```
 
@@ -236,7 +236,7 @@ In addition to being spawned manually, tasks can be configured to run automatica
 
 The following hooks are currently supported:
 
-- `create_worktree` — runs after Backboard Studio creates a new linked Git worktree, either directly through the CLI or from the [worktree picker](./git.md#git-worktrees). The task is spawned with `ZED_WORKTREE_ROOT` pointing at the newly created worktree and `ZED_MAIN_GIT_WORKTREE` pointing at the original repository's working directory, which makes these hooks well-suited to copying untracked files (such as `.env` files) or running per-worktree setup commands.
+- `create_worktree` — runs after Backboard Studio creates a new linked Git worktree, either directly through the CLI or from the [worktree picker](./git.md#git-worktrees). The task is spawned with `backboard_WORKTREE_ROOT` pointing at the newly created worktree and `backboard_MAIN_GIT_WORKTREE` pointing at the original repository's working directory, which makes these hooks well-suited to copying untracked files (such as `.env` files) or running per-worktree setup commands.
 
 Hook tasks are resolved from the same global and worktree-local `tasks.json` files as manually spawned tasks, and multiple tasks may register for the same hook; they all run when the hook fires. A hook task still benefits from the usual task configuration fields — `cwd`, `env`, `reveal`, `hide`, and so on — so you can control how much of the terminal UI is shown while it runs.
 
@@ -245,7 +245,7 @@ Hook tasks are resolved from the same global and worktree-local `tasks.json` fil
   {
     "label": "copy .env into new worktree",
     "command": "cp",
-    "args": ["$ZED_MAIN_GIT_WORKTREE/.env", "$ZED_WORKTREE_ROOT/.env"],
+    "args": ["$backboard_MAIN_GIT_WORKTREE/.env", "$backboard_WORKTREE_ROOT/.env"],
     "hooks": ["create_worktree"],
     "reveal": "no_focus",
     "hide": "on_success"
@@ -297,7 +297,7 @@ To tag a task, add the runnable tag name to the `tags` field on the task templat
 ```json [tasks]
 {
   "label": "echo current file's path",
-  "command": "echo $ZED_FILE",
+  "command": "echo $backboard_FILE",
   "tags": ["rust-test"]
 }
 ```
@@ -320,7 +320,7 @@ To run a bash script:
 
 Bash scripts are tagged with `bash-script`, allowing you to filter or reference them in task configurations.
 
-If you need to pass arguments or customize the execution environment, add a task configuration in your `.zed/tasks.json`:
+If you need to pass arguments or customize the execution environment, add a task configuration in your `.backboard/tasks.json`:
 
 ```json
 [

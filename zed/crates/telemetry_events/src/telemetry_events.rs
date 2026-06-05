@@ -1,4 +1,4 @@
-//! See [Telemetry in Zed](https://zed.dev/docs/telemetry) for additional information.
+//! See [Telemetry in Zed](https://backboard.io/docs/telemetry) for additional information.
 
 use semver::Version;
 use serde::{Deserialize, Serialize};

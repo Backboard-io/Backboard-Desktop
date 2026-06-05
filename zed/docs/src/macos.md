@@ -20,13 +20,13 @@ After installation, Backboard Studio checks for updates automatically and prompt
 You can also install Backboard Studio using Homebrew:
 
 ```sh
-brew install --cask zed
+brew install --cask backboard
 ```
 
 For the preview version:
 
 ```sh
-brew install --cask zed@preview
+brew install --cask backboard@preview
 ```
 
 ### Building from Source
@@ -48,12 +48,12 @@ Backboard Studio includes a command-line tool for opening files and projects fro
 2. Open the command palette with `Cmd+Shift+P`
 3. Run {#action cli::InstallCliBinary}
 
-This creates a `zed` command in `/usr/local/bin`. You can then open files and folders:
+This creates a `backboard` command in `/usr/local/bin`. You can then open files and folders:
 
 ```sh
-zed .                    # Open current folder
-zed file.txt             # Open a file
-zed project/ file.txt    # Open a folder and a file
+backboard .                    # Open current folder
+backboard file.txt             # Open a file
+backboard project/ file.txt    # Open a folder and a file
 ```
 
 See the [CLI Reference](./reference/cli.md) for all available options.
@@ -65,7 +65,7 @@ See the [CLI Reference](./reference/cli.md) for all available options.
 3. Optionally, remove your settings and extensions:
 
 ```sh
-rm -rf ~/.config/zed
+rm -rf ~/.config/backboard
 rm -rf ~/Library/Application\ Support/Backboard Studio
 rm -rf ~/Library/Caches/Backboard Studio
 rm -rf ~/Library/Logs/Backboard Studio
@@ -75,7 +75,7 @@ rm -rf ~/Library/Saved\ Application\ State/io.backboard.Studio.savedState
 If you installed the CLI, remove it with:
 
 ```sh
-rm /usr/local/bin/zed
+rm /usr/local/bin/backboard
 ```
 
 ## Troubleshooting
@@ -98,7 +98,7 @@ xattr -cr /Applications/Backboard Studio.app
 
 ### CLI command not found
 
-If the `zed` command isn't available after installation:
+If the `backboard` command isn't available after installation:
 
 1. Check that `/usr/local/bin` is in your PATH
 2. Try reinstalling the CLI via {#action cli::InstallCliBinary} in the command palette
@@ -120,4 +120,4 @@ If Backboard Studio uses more resources than expected:
 2. Try disabling extensions one by one to identify conflicts
 3. For large projects, consider using [project settings](./reference/all-settings.md#file-scan-exclusions) to exclude unnecessary folders from indexing
 
-For additional help, see the [Troubleshooting guide](./troubleshooting.md) or visit the [Backboard Studio Discord](https://discord.gg/zed-community).
+For additional help, see the [Troubleshooting guide](./troubleshooting.md) or visit the [Backboard Studio Discord](https://discord.gg/backboard-community).

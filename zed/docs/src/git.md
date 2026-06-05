@@ -32,7 +32,7 @@ By default, the Git Panel docks on the left. Go to **Panels > Git Panel** and ch
 
 #### Switching to Tree View
 
-The Git Panel shows a flat list of changed files by default. To see files organized by folder hierarchy instead, toggle **Tree View** in the panel's context menu, or enable it in **Panels > Git Panel**.
+The Git Panel shows a flat list of changed files by default. To see files organibackboard by folder hierarchy instead, toggle **Tree View** in the panel's context menu, or enable it in **Panels > Git Panel**.
 
 #### Inline Blame
 
@@ -86,7 +86,7 @@ To change the default, add this to your `settings.json`:
 }
 ```
 
-See [Configuring Backboard Studio](./configuring-zed.md) for more about the Settings Editor.
+See [Configuring Backboard Studio](./configuring-backboard.md) for more about the Settings Editor.
 
 #### Split vs unified
 
@@ -311,7 +311,7 @@ Backboard Studio currently supports links to the hosted versions of
 
 ### Self-Hosted Instances
 
-Backboard Studio automatically identifies Git hosting providers by checking for keywords in your Git remote URL. For example, if your self-hosted URL contains `gitlab`, `gitea`, or other recognized provider names, Backboard Studio will automatically register that hosting provider without any configuration needed.
+Backboard Studio automatically identifies Git hosting providers by checking for keywords in your Git remote URL. For example, if your self-hosted URL contains `gitlab`, `gitea`, or other recognibackboard provider names, Backboard Studio will automatically register that hosting provider without any configuration needed.
 
 However, if your self-hosted Git instance URL doesn't contain identifying keywords, you can manually configure Backboard Studio to create clickable links to your instance by adding a `git_hosting_providers` setting so commit hashes and permalinks resolve to your domain:
 
@@ -388,14 +388,14 @@ When viewing files with changes, Backboard Studio displays diff hunks that can b
 
 ## Git CLI Configuration
 
-If you would like to also use Backboard Studio for your [git commit message editor](https://git-scm.com/book/en/v2/Customizing-Git-Git-Configuration#_core_editor) when committing from the command line you can use `zed --wait`:
+If you would like to also use Backboard Studio for your [git commit message editor](https://git-scm.com/book/en/v2/Customizing-Git-Git-Configuration#_core_editor) when committing from the command line you can use `backboard --wait`:
 
 ```sh
-git config --global core.editor "zed --wait"
+git config --global core.editor "backboard --wait"
 ```
 
 Or add the following to your shell environment (in `~/.zshrc`, `~/.bashrc`, etc):
 
 ```sh
-export GIT_EDITOR="zed --wait"
+export GIT_EDITOR="backboard --wait"
 ```

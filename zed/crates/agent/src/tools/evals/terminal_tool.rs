@@ -172,7 +172,7 @@ impl TerminalToolTest {
         });
 
         let agent_model = SelectedModel::from_str(
-            &std::env::var("ZED_AGENT_MODEL")
+            &std::env::var("BACKBOARD_AGENT_MODEL")
                 .unwrap_or("anthropic/claude-sonnet-4-6-latest".into()),
         )
         .unwrap();

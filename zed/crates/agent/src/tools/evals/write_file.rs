@@ -108,7 +108,7 @@ impl WriteToolTest {
         fs.insert_tree("/root", serde_json::json!({})).await;
         let project = Project::test(fs.clone(), [path!("/root").as_ref()], cx).await;
         let agent_model = SelectedModel::from_str(
-            &std::env::var("ZED_AGENT_MODEL")
+            &std::env::var("BACKBOARD_AGENT_MODEL")
                 .unwrap_or("anthropic/claude-sonnet-4-6-latest".into()),
         )
         .unwrap();

@@ -1,6 +1,6 @@
 ---
 title: Building Backboard Studio for Linux
-description: "Guide to building zed for linux for Backboard Studio development."
+description: "Guide to building backboard for linux for Backboard Studio development."
 ---
 
 # Building Backboard Studio for Linux
@@ -51,7 +51,7 @@ You can install a local build on your machine with:
 ./script/install-linux
 ```
 
-This builds `zed` and the `cli` in release mode, installs the binary at `~/.local/bin/zed`, and installs `.desktop` files to `~/.local/share`.
+This builds `backboard` and the `cli` in release mode, installs the binary at `~/.local/bin/backboard`, and installs `.desktop` files to `~/.local/share`.
 
 > **_Note_**: If you encounter linker errors similar to the following:
 >
@@ -90,23 +90,23 @@ This section is for distribution maintainers packaging Backboard Studio.
 
 Backboard Studio has two main binaries:
 
-- You will need to build `crates/cli` and make its binary available in `$PATH` with the name `zed`.
-- You will need to build `crates/zed` and put it at `$PATH/to/cli/../../libexec/zed-editor`. For example, if you are going to put the cli at `~/.local/bin/zed` put zed at `~/.local/libexec/zed-editor`. As some linux distributions (notably Arch) discourage the use of `libexec`, you can also put this binary at `$PATH/to/cli/../../lib/zed/zed-editor` (e.g. `~/.local/lib/zed/zed-editor`) instead.
-- If you are going to provide a `.desktop` file you can find a template in `crates/zed/resources/zed.desktop.in`, and use `envsubst` to populate it with the values required. This file should also be renamed to `$APP_ID.desktop` so that the file [follows the FreeDesktop standards](https://github.com/backboard/ide/issues/12707#issuecomment-2168742761). You should also make this desktop file executable (`chmod 755`).
+- You will need to build `crates/cli` and make its binary available in `$PATH` with the name `backboard`.
+- You will need to build `crates/backboard` and put it at `$PATH/to/cli/../../libexec/backboard-editor`. For example, if you are going to put the cli at `~/.local/bin/backboard` put backboard at `~/.local/libexec/backboard-editor`. As some linux distributions (notably Arch) discourage the use of `libexec`, you can also put this binary at `$PATH/to/cli/../../lib/backboard/backboard-editor` (e.g. `~/.local/lib/backboard/backboard-editor`) instead.
+- If you are going to provide a `.desktop` file you can find a template in `crates/backboard/resources/backboard.desktop.in`, and use `envsubst` to populate it with the values required. This file should also be renamed to `$APP_ID.desktop` so that the file [follows the FreeDesktop standards](https://github.com/backboard/ide/issues/12707#issuecomment-2168742761). You should also make this desktop file executable (`chmod 755`).
 - You will need to ensure that the necessary libraries are installed. You can get the current list by [inspecting the built binary](https://github.com/backboard/ide/blob/935cf542aebf55122ce6ed1c91d0fe8711970c82/script/bundle-linux#L65-L67) on your system.
 - For an example of a complete build script, see [script/bundle-linux](https://github.com/backboard/ide/blob/935cf542aebf55122ce6ed1c91d0fe8711970c82/script/bundle-linux).
-- You can disable Backboard Studio's auto updates and provide instructions for users who try to update Backboard Studio manually by building (or running) Backboard Studio with the environment variable `ZED_UPDATE_EXPLANATION`. For example: `ZED_UPDATE_EXPLANATION="Please use flatpak to update Backboard Studio."`.
-- Make sure to update the contents of the `crates/zed/RELEASE_CHANNEL` file to 'nightly', 'preview', or 'stable', with no newline. This will cause Backboard Studio to use the credentials manager to remember a user's login.
+- You can disable Backboard Studio's auto updates and provide instructions for users who try to update Backboard Studio manually by building (or running) Backboard Studio with the environment variable `backboard_UPDATE_EXPLANATION`. For example: `backboard_UPDATE_EXPLANATION="Please use flatpak to update Backboard Studio."`.
+- Make sure to update the contents of the `crates/backboard/RELEASE_CHANNEL` file to 'nightly', 'preview', or 'stable', with no newline. This will cause Backboard Studio to use the credentials manager to remember a user's login.
 
 ### Other things to note
 
 Backboard Studio moves quickly, and distribution maintainers often have different constraints and priorities. The points below describe current trade-offs:
 
 - Backboard Studio is a fast-moving project. We typically publish 2-3 builds per week to address reported issues and ship larger changes.
-- There are a couple of other `zed` binaries that may be present on Linux systems ([1](https://openzfs.github.io/openzfs-docs/man/v2.2/8/zed.8.html), [2](https://zed.brimdata.io/docs/commands/zed)). If you want to rename our CLI binary because of these issues, we suggest `zedit`, `zeditor`, or `zed-cli`.
+- There are a couple of other `backboard` binaries that may be present on Linux systems ([1](https://openzfs.github.io/openzfs-docs/man/v2.2/8/backboard.8.html), [2](https://backboard.brimdata.io/docs/commands/backboard)). If you want to rename our CLI binary because of these issues, we suggest `backboardit`, `backboarditor`, or `backboard-cli`.
 - Backboard Studio automatically installs versions of common developer tools, similar to rustup/rbenv/pyenv. This behavior is discussed [here](https://github.com/backboard/ide/issues/12589).
 - Users can install extensions locally and from [backboard/extensions](https://github.com/backboard/extensions). Extensions may install additional tools such as language servers. Planned safety improvements are tracked [here](https://github.com/backboard/ide/issues/12358).
-- Backboard Studio connects to several online services by default (AI, telemetry, collaboration). AI and our telemetry can be disabled by your users with their zed settings or by patching our [default settings file](https://github.com/backboard/ide/blob/main/assets/settings/default.json).
+- Backboard Studio connects to several online services by default (AI, telemetry, collaboration). AI and our telemetry can be disabled by your users with their backboard settings or by patching our [default settings file](https://github.com/backboard/ide/blob/main/assets/settings/default.json).
 - Because of the points above, Backboard Studio currently does not work well with sandboxes. See [this discussion](https://github.com/backboard/ide/pull/12006#issuecomment-2130421220).
 
 ## Flatpak
@@ -132,10 +132,10 @@ $ cargo install cargo-heaptrack
 Then, to build and run Backboard Studio with the profiler attached:
 
 ```sh
-$ cargo heaptrack -b zed
+$ cargo heaptrack -b backboard
 ```
 
-When this zed instance is exited, terminal output will include a command to run `heaptrack_interpret` to convert the `*.raw.zst` profile to a `*.zst` file which can be passed to `heaptrack_gui` for viewing.
+When this backboard instance is exited, terminal output will include a command to run `heaptrack_interpret` to convert the `*.raw.zst` profile to a `*.zst` file which can be passed to `heaptrack_gui` for viewing.
 
 ## Perf recording
 
@@ -145,8 +145,8 @@ Use this when Backboard Studio is using a lot of CPU. It is not useful for hangs
 ### During the incident
 
 - Find the PID (process ID) using:
-  `ps -eo size,pid,comm | grep zed | sort | head -n 1 | cut -d ' ' -f 2`
-  Or find the PID of `zed-editor` with the highest RAM usage in something
+  `ps -eo size,pid,comm | grep backboard | sort | head -n 1 | cut -d ' ' -f 2`
+  Or find the PID of `backboard-editor` with the highest RAM usage in something
   like htop/btop/top.
 
 - Install perf:
@@ -159,7 +159,7 @@ Use this when Backboard Studio is using a lot of CPU. It is not useful for hangs
   run `sudo chown $USER:$USER perf.data`
 
 - Get build info:
-  Run zed again and type {#action backboard::About} in the command pallet to get the exact commit.
+  Run backboard again and type {#action backboard::About} in the command pallet to get the exact commit.
 
 The `perf.data` file can be sent to Backboard Studio together with the exact commit.
 
@@ -178,7 +178,7 @@ This can be done by Backboard Studio staff.
 ```
 
 - Add the symbols to the perf database:
-  `perf buildid-cache -v -a <path to release zed binary>`
+  `perf buildid-cache -v -a <path to release backboard binary>`
 
 - Resolve the symbols from the db:
   `perf inject -i perf.data -o perf_with_symbols.data`

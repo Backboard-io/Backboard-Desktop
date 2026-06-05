@@ -174,7 +174,7 @@ impl MentionUri {
                     })
                 }
             }
-            "zed" => {
+            "backboard" | "zed" => {
                 if let Some(thread_id) = path.strip_prefix("/agent/thread/") {
                     let name = single_query_param(&url, "name")?.context("Missing thread name")?;
                     Ok(Self::Thread {
@@ -262,7 +262,7 @@ impl MentionUri {
                     let file_path = single_query_param(&url, "path")?.unwrap_or_default();
                     Ok(Self::MergeConflict { file_path })
                 } else {
-                    bail!("invalid zed url: {:?}", input);
+                    bail!("invalid Backboard url: {:?}", input);
                 }
             }
             "http" | "https" => Ok(MentionUri::Fetch { url }),
@@ -373,7 +373,7 @@ impl MentionUri {
                 url
             }
             MentionUri::PastedImage { name } => {
-                let mut url = Url::parse("zed:///agent/pasted-image").unwrap();
+                let mut url = Url::parse("backboard:///agent/pasted-image").unwrap();
                 url.query_pairs_mut().append_pair("name", name);
                 url
             }
@@ -410,7 +410,7 @@ impl MentionUri {
                     url.set_path(&path.to_string_lossy());
                     url
                 } else {
-                    let mut url = Url::parse("zed:///").unwrap();
+                    let mut url = Url::parse("backboard:///").unwrap();
                     url.set_path("/agent/untitled-buffer");
                     url
                 };
@@ -422,13 +422,13 @@ impl MentionUri {
                 url
             }
             MentionUri::Thread { name, id } => {
-                let mut url = Url::parse("zed:///").unwrap();
+                let mut url = Url::parse("backboard:///").unwrap();
                 url.set_path(&format!("/agent/thread/{id}"));
                 url.query_pairs_mut().append_pair("name", name);
                 url
             }
             MentionUri::Rule { name, id } => {
-                let mut url = Url::parse("zed:///").unwrap();
+                let mut url = Url::parse("backboard:///").unwrap();
                 url.set_path(&format!("/agent/rule/{id}"));
                 url.query_pairs_mut().append_pair("name", name);
                 url
@@ -437,7 +437,7 @@ impl MentionUri {
                 include_errors,
                 include_warnings,
             } => {
-                let mut url = Url::parse("zed:///").unwrap();
+                let mut url = Url::parse("backboard:///").unwrap();
                 url.set_path("/agent/diagnostics");
                 if *include_warnings {
                     url.query_pairs_mut()
@@ -450,18 +450,18 @@ impl MentionUri {
             }
             MentionUri::Fetch { url } => url.clone(),
             MentionUri::TerminalSelection { line_count } => {
-                let mut url = Url::parse("zed:///agent/terminal-selection").unwrap();
+                let mut url = Url::parse("backboard:///agent/terminal-selection").unwrap();
                 url.query_pairs_mut()
                     .append_pair("lines", &line_count.to_string());
                 url
             }
             MentionUri::GitDiff { base_ref } => {
-                let mut url = Url::parse("zed:///agent/git-diff").unwrap();
+                let mut url = Url::parse("backboard:///agent/git-diff").unwrap();
                 url.query_pairs_mut().append_pair("base", base_ref);
                 url
             }
             MentionUri::MergeConflict { file_path } => {
-                let mut url = Url::parse("zed:///agent/merge-conflict").unwrap();
+                let mut url = Url::parse("backboard:///agent/merge-conflict").unwrap();
                 url.query_pairs_mut().append_pair("path", file_path);
                 url
             }
@@ -659,7 +659,7 @@ mod tests {
 
     #[test]
     fn test_parse_untitled_selection_uri() {
-        let selection_uri = uri!("zed:///agent/untitled-buffer#L1:10");
+        let selection_uri = uri!("backboard:///agent/untitled-buffer#L1:10");
         let parsed = MentionUri::parse(selection_uri, PathStyle::local()).unwrap();
         match &parsed {
             MentionUri::Selection {
@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_parse_thread_uri() {
-        let thread_uri = "zed:///agent/thread/session123?name=Thread+name";
+        let thread_uri = "backboard:///agent/thread/session123?name=Thread+name";
         let parsed = MentionUri::parse(thread_uri, PathStyle::local()).unwrap();
         match &parsed {
             MentionUri::Thread {
@@ -693,7 +693,8 @@ mod tests {
 
     #[test]
     fn test_parse_rule_uri() {
-        let rule_uri = "zed:///agent/rule/d8694ff2-90d5-4b6f-be33-33c1763acd52?name=Some+rule";
+        let rule_uri =
+            "backboard:///agent/rule/d8694ff2-90d5-4b6f-be33-33c1763acd52?name=Some+rule";
         let parsed = MentionUri::parse(rule_uri, PathStyle::local()).unwrap();
         match &parsed {
             MentionUri::Rule { id, name } => {
@@ -733,7 +734,7 @@ mod tests {
 
     #[test]
     fn test_parse_diagnostics_uri() {
-        let uri = "zed:///agent/diagnostics?include_warnings=true";
+        let uri = "backboard:///agent/diagnostics?include_warnings=true";
         let parsed = MentionUri::parse(uri, PathStyle::local()).unwrap();
         match &parsed {
             MentionUri::Diagnostics {
@@ -750,7 +751,7 @@ mod tests {
 
     #[test]
     fn test_parse_diagnostics_uri_warnings_only() {
-        let uri = "zed:///agent/diagnostics?include_warnings=true&include_errors=false";
+        let uri = "backboard:///agent/diagnostics?include_warnings=true&include_errors=false";
         let parsed = MentionUri::parse(uri, PathStyle::local()).unwrap();
         match &parsed {
             MentionUri::Diagnostics {
@@ -773,9 +774,9 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_zed_path() {
-        assert!(MentionUri::parse("zed:///invalid/path", PathStyle::local()).is_err());
-        assert!(MentionUri::parse("zed:///agent/unknown/test", PathStyle::local()).is_err());
+    fn test_invalid_backboard_path() {
+        assert!(MentionUri::parse("backboard:///invalid/path", PathStyle::local()).is_err());
+        assert!(MentionUri::parse("backboard:///agent/unknown/test", PathStyle::local()).is_err());
     }
 
     #[test]
@@ -977,7 +978,7 @@ mod tests {
 
     #[test]
     fn test_parse_terminal_selection_uri() {
-        let terminal_uri = "zed:///agent/terminal-selection?lines=42";
+        let terminal_uri = "backboard:///agent/terminal-selection?lines=42";
         let parsed = MentionUri::parse(terminal_uri, PathStyle::local()).unwrap();
         match &parsed {
             MentionUri::TerminalSelection { line_count } => {
@@ -989,7 +990,7 @@ mod tests {
         assert_eq!(parsed.name(), "Terminal (42 lines)");
 
         // Test single line
-        let single_line_uri = "zed:///agent/terminal-selection?lines=1";
+        let single_line_uri = "backboard:///agent/terminal-selection?lines=1";
         let parsed_single = MentionUri::parse(single_line_uri, PathStyle::local()).unwrap();
         assert_eq!(parsed_single.name(), "Terminal (1 line)");
     }

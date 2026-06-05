@@ -76,12 +76,12 @@ pub trait Watcher: Send + Sync {
 /// Returns `true` for filesystem types where inotify/FSEvents/ReadDirectoryChanges
 /// silently fail to deliver events: 9P (WSL drvfs), NFS, CIFS/SMB, FUSE (sshfs), etc.
 ///
-/// Can be overridden with the `ZED_FILE_WATCHER_MODE` environment variable:
+/// Can be overridden with the `BACKBOARD_FILE_WATCHER_MODE` environment variable:
 /// - `native` — always use native OS watcher
 /// - `poll` — always use polling
 /// - `auto` (default) — auto-detect based on filesystem type
 pub fn requires_poll_watcher(path: &Path) -> bool {
-    match std::env::var("ZED_FILE_WATCHER_MODE")
+    match std::env::var("BACKBOARD_FILE_WATCHER_MODE")
         .as_deref()
         .unwrap_or("auto")
     {
@@ -984,7 +984,7 @@ impl Fs for RealFs {
         smol::unblock(move || {
             // Use the directory of the destination as temp dir to avoid
             // invalid cross-device link error, and XDG_CACHE_DIR for fallback.
-            // See https://github.com/zed-industries/zed/pull/8437 for more details.
+            // See https://github.com/backboard/ide/pull/8437 for more details.
             let mut tmp_file =
                 tempfile::NamedTempFile::new_in(path.parent().unwrap_or(paths::temp_dir()))?;
             tmp_file.write_all(data.as_bytes())?;
@@ -1010,7 +1010,7 @@ impl Fs for RealFs {
             // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew#remarks
             //
             // So we use the directory of the destination as a temp dir to avoid it.
-            // https://github.com/zed-industries/zed/issues/16571
+            // https://github.com/backboard/ide/issues/16571
             let temp_dir = TempDir::new_in(path.parent().unwrap_or(paths::temp_dir()))?;
             let temp_file = {
                 let temp_file_path = temp_dir.path().join("temp_file");

@@ -5,7 +5,7 @@ description: "Configure Svelte language support in Backboard Studio, including l
 
 # Svelte
 
-Svelte support is available through the [Svelte extension](https://github.com/zed-extensions/svelte).
+Svelte support is available through the [Svelte extension](https://github.com/backboard-extensions/svelte).
 
 - Tree-sitter: [tree-sitter-grammars/tree-sitter-svelte](https://github.com/tree-sitter-grammars/tree-sitter-svelte)
 - Language Server: [sveltejs/language-tools](https://github.com/sveltejs/language-tools)

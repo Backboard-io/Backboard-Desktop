@@ -22,7 +22,7 @@ schema_path = "relative/path/to/schema.json"
 Then, in the Rust code for your extension, implement the `get_dap_binary` method on your extension:
 
 ```rust
-impl zed::Extension for MyExtension {
+impl backboard::Extension for MyExtension {
     fn get_dap_binary(
         &mut self,
         adapter_name: String,
@@ -41,7 +41,7 @@ You must also implement `dap_request_kind`. This function is used to determine w
 We also use it to determine that a given debug scenario requires running a _locator_.
 
 ```rust
-impl zed::Extension for MyExtension {
+impl backboard::Extension for MyExtension {
     fn dap_request_kind(
         &mut self,
         _adapter_name: String,
@@ -53,7 +53,7 @@ impl zed::Extension for MyExtension {
 These two functions are sufficient to expose your debug adapter in `debug.json`-based user workflows, but you should strongly consider implementing `dap_config_to_scenario` as well.
 
 ```rust
-impl zed::Extension for MyExtension {
+impl backboard::Extension for MyExtension {
     fn dap_config_to_scenario(
         &mut self,
         _adapter_name: DebugConfig,
@@ -84,7 +84,7 @@ Locators have two components.
 First, each locator is ran on each available task to figure out if any of the available locators can provide a debug scenario for a given task. This is done by calling `dap_locator_create_scenario`.
 
 ```rust
-impl zed::Extension for MyExtension {
+impl backboard::Extension for MyExtension {
     fn dap_locator_create_scenario(
         &mut self,
         _locator_name: String,
@@ -99,7 +99,7 @@ This function should return `Some` debug scenario when that scenario defines a d
 Note that a `DebugScenario` can include a [build task](../debugger.md#build-tasks). If there is one, we will execute `run_dap_locator` after a build task is finished successfully.
 
 ```rust
-impl zed::Extension for MyExtension {
+impl backboard::Extension for MyExtension {
     fn run_dap_locator(
         &mut self,
         _locator_name: String,

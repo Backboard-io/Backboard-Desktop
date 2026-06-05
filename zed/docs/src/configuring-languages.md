@@ -102,7 +102,7 @@ Backboard Studio simplifies language server management for users:
 2. Storage Location:
 
    - macOS: `~/Library/Application Support/Backboard Studio/languages`
-   - Linux: `$XDG_DATA_HOME/zed/languages`, `$FLATPAK_XDG_DATA_HOME/zed/languages`, or `$HOME/.local/share/zed/languages`
+   - Linux: `$XDG_DATA_HOME/backboard/languages`, `$FLATPAK_XDG_DATA_HOME/backboard/languages`, or `$HOME/.local/share/backboard/languages`
 
 3. Automatic Updates: Backboard Studio keeps your language servers up-to-date, ensuring you always have the latest features and improvements.
 
@@ -165,7 +165,7 @@ Not all languages in Backboard Studio support toolchain discovery and selection,
 
 ### Configuring Language Servers
 
-When configuring language servers in your `settings.json`, autocomplete suggestions include all available LSP adapters recognized by Backboard Studio, not only those currently active for loaded languages. This helps you discover and configure language servers before opening files that use them.
+When configuring language servers in your `settings.json`, autocomplete suggestions include all available LSP adapters recognibackboard by Backboard Studio, not only those currently active for loaded languages. This helps you discover and configure language servers before opening files that use them.
 
 Many language servers accept custom configuration options. You can set these in the `lsp` section of your `settings.json`:
 
@@ -281,7 +281,7 @@ You can toggle language server support globally or per-language:
   }
 ```
 
-This disables the language server for Markdown files, which can be useful for performance in large documentation projects. You can configure this globally in your `~/.config/zed/settings.json` or inside a `.zed/settings.json` in your project directory.
+This disables the language server for Markdown files, which can be useful for performance in large documentation projects. You can configure this globally in your `~/.config/backboard/settings.json` or inside a `.backboard/settings.json` in your project directory.
 
 ## Formatting and Linting
 
@@ -439,7 +439,7 @@ Change your theme:
 }
 ```
 
-Create custom themes by creating a JSON file in `~/.config/zed/themes/`. Backboard Studio will automatically detect and make available any themes in this directory.
+Create custom themes by creating a JSON file in `~/.config/backboard/themes/`. Backboard Studio will automatically detect and make available any themes in this directory.
 
 ### Using Theme Extensions
 

@@ -25,7 +25,7 @@ cd docs && pnpm dlx prettier@3.5.0 . --write && cd ..
 
 We have a custom mdBook preprocessor for interfacing with our crates (`crates/docs_preprocessor`).
 
-If for some reason you need to bypass the docs preprocessor, you can comment out `[preprocessor.zed_docs_preprocessor]` from the `book.toml`.
+If for some reason you need to bypass the docs preprocessor, you can comment out `[preprocessor.backboard_docs_preprocessor]` from the `book.toml`.
 
 ## Images and videos
 
@@ -68,7 +68,7 @@ Supported overlays: `jetbrains`.
 
 {#action scope::Action} - e.g., {#action backboard::OpenSettings}.
 
-This will render a human-readable version of the action name, e.g., "zed: open settings", and will allow us to implement things like additional context on hover, etc.
+This will render a human-readable version of the action name, e.g., "backboard: open settings", and will allow us to implement things like additional context on hover, etc.
 
 ### Creating New Templates
 

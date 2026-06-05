@@ -1,6 +1,6 @@
 ---
 title: Building Backboard Studio for Windows
-description: "Guide to building zed for windows for Backboard Studio development."
+description: "Guide to building backboard for windows for Backboard Studio development."
 ---
 
 # Building Backboard Studio for Windows
@@ -117,9 +117,9 @@ cargo test --workspace
 
 ## Installing from msys2
 
-Backboard Studio does not support unofficial MSYS2 Backboard Studio packages built for Mingw-w64. Please report any issues you may have with [mingw-w64-zed](https://packages.msys2.org/base/mingw-w64-zed) to [msys2/MINGW-packages/issues](https://github.com/msys2/MINGW-packages/issues?q=is%3Aissue+is%3Aopen+zed).
+Backboard Studio does not support unofficial MSYS2 Backboard Studio packages built for Mingw-w64. Please report any issues you may have with [mingw-w64-backboard](https://packages.msys2.org/base/mingw-w64-backboard) to [msys2/MINGW-packages/issues](https://github.com/msys2/MINGW-packages/issues?q=is%3Aissue+is%3Aopen+backboard).
 
-Please refer to [MSYS2 documentation](https://www.msys2.org/docs/ides-editors/#zed) first.
+Please refer to [MSYS2 documentation](https://www.msys2.org/docs/ides-editors/#backboard) first.
 
 ## Troubleshooting
 
@@ -156,7 +156,7 @@ Or, create a new `.cargo/config.toml` in the parent directory of the Backboard S
 upper_dir
 ├── .cargo          // <-- Make this folder
 │   └── config.toml // <-- Make this file
-└── zed
+└── backboard
     ├── .cargo
     │   └── config.toml
     └── crates
@@ -188,13 +188,13 @@ See this issue for more information [#12041](https://github.com/backboard/ide/is
 Sometimes, depending on the security rules applied to your laptop, you may get the following error while compiling Backboard Studio:
 
 ```
-error: failed to run custom build command for `zed(C:\Users\USER\src\zed\crates\zed)`
+error: failed to run custom build command for `backboard(C:\Users\USER\src\backboard\crates\backboard)`
 
 Caused by:
-  process didn't exit successfully: `C:\Users\USER\src\zed\target\debug\build\zed-b24f1e9300107efc\build-script-build` (exit code: 1)
+  process didn't exit successfully: `C:\Users\USER\src\backboard\target\debug\build\backboard-b24f1e9300107efc\build-script-build` (exit code: 1)
   --- stdout
   cargo:rerun-if-changed=../../.git/logs/HEAD
-  cargo:rustc-env=ZED_COMMIT_SHA=25e2e9c6727ba9b77415588cfa11fd969612adb7
+  cargo:rustc-env=backboard_COMMIT_SHA=25e2e9c6727ba9b77415588cfa11fd969612adb7
   cargo:rustc-link-arg=/stack:8388608
   cargo:rerun-if-changed=resources/windows/app-icon.ico
   package.metadata.winresource does not exist
@@ -205,7 +205,7 @@ Caused by:
 warning: build failed, waiting for other jobs to finish...
 ```
 
-To fix this issue, manually set the `ZED_RC_TOOLKIT_PATH` environment variable to the RC toolkit path. Usually this is:
+To fix this issue, manually set the `backboard_RC_TOOLKIT_PATH` environment variable to the RC toolkit path. Usually this is:
 `C:\Program Files (x86)\Windows Kits\10\bin\<SDK_version>\x64`.
 
 See this [issue](https://github.com/backboard/ide/issues/18393) for more information.
@@ -215,7 +215,7 @@ See this [issue](https://github.com/backboard/ide/issues/18393) for more informa
 You may receive an error like the following when building
 
 ```
-error: failed to get `pet` as a dependency of package `languages v0.1.0 (D:\a\zed-windows-builds\zed-windows-builds\crates\languages)`
+error: failed to get `pet` as a dependency of package `languages v0.1.0 (D:\a\backboard-windows-builds\backboard-windows-builds\crates\languages)`
 
 Caused by:
   failed to load source for dependency `pet`

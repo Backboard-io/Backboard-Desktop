@@ -5,8 +5,8 @@ description: "Configure Kotlin language support in Backboard Studio, including l
 
 # Kotlin
 
-Kotlin language support in Backboard Studio is provided by the community-maintained [Kotlin extension](https://github.com/zed-extensions/kotlin).
-Report issues to: [https://github.com/zed-extensions/kotlin/issues](https://github.com/zed-extensions/kotlin/issues)
+Kotlin language support in Backboard Studio is provided by the community-maintained [Kotlin extension](https://github.com/backboard-extensions/kotlin).
+Report issues to: [https://github.com/backboard-extensions/kotlin/issues](https://github.com/backboard-extensions/kotlin/issues)
 
 - Tree-sitter: [fwcd/tree-sitter-kotlin](https://github.com/fwcd/tree-sitter-kotlin)
 - Language Server: [fwcd/kotlin-language-server](https://github.com/fwcd/kotlin-language-server)

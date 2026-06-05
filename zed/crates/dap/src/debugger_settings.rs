@@ -7,7 +7,7 @@ pub struct DebuggerSettings {
     ///
     /// Default: line
     pub stepping_granularity: SteppingGranularity,
-    /// Whether the breakpoints should be reused across Zed sessions.
+    /// Whether the breakpoints should be reused across Backboard sessions.
     ///
     /// Default: true
     pub save_breakpoints: bool,

@@ -72,7 +72,7 @@ This cleanup spec recommends how Backboard Studio should present, hide, preserve
 
 Current status: the settings UI now hides collaboration/calls/audio, collaboration panel rows, which-key rows, telemetry rows, auto-update, scoped settings, internal `server_url`, LSP/language-server controls, and the public `disable_ai` toggle. The underlying settings remain available for compatibility.
 
-Command palette/keybindings status: the command palette and keybindings editor now hide removed or internal namespaces including `collab`, `collab_panel`, `channel_modal`, `dev`, `feedback`, `journal`, `lsp_tool`, `notebook`, `remote_debug`, `repl`, and `settings_profile_selector`. User-facing action labels also render `zed::...` and `zed_*::...` namespaces as Backboard-facing names while preserving the raw action IDs for keymap JSON compatibility.
+Command palette/keybindings status: the command palette and keybindings editor now hide removed or internal namespaces including `collab`, `collab_panel`, `channel_modal`, `dev`, `feedback`, `journal`, `lsp_tool`, `notebook`, `remote_debug`, `repl`, and `settings_profile_selector`. User-facing action labels also render `backboard::...` and `backboard_*::...` namespaces as Backboard-facing names while preserving the raw action IDs for keymap JSON compatibility.
 
 ### Phase 2: Product Decisions
 

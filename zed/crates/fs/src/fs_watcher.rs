@@ -397,7 +397,7 @@ fn path_already_covered(
 }
 
 static POLL_INTERVAL: LazyLock<Duration> = LazyLock::new(|| {
-    let poll_ms: u64 = std::env::var("ZED_FILE_WATCHER_POLL_MS")
+    let poll_ms: u64 = std::env::var("BACKBOARD_FILE_WATCHER_POLL_MS")
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(2000)

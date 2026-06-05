@@ -7,7 +7,7 @@ description: "Configure Java language support in Backboard Studio, including lan
 
 Java language support in Backboard Studio is provided by:
 
-- Backboard Studio Java: [zed-extensions/java](https://github.com/zed-extensions/java)
+- Backboard Studio Java: [backboard-extensions/java](https://github.com/backboard-extensions/java)
 - Tree-sitter: [tree-sitter/tree-sitter-java](https://github.com/tree-sitter/tree-sitter-java)
 - Language Server: [eclipse-jdtls/eclipse.jdt.ls](https://github.com/eclipse-jdtls/eclipse.jdt.ls)
 
@@ -71,7 +71,7 @@ To get started with Java, click the `edit debug.json` button in the Debug menu, 
     // this effectively sets a breakpoint at your program entry:
     "stopOnEntry": true,
     // the working directory for the debug process
-    "cwd": "$ZED_WORKTREE_ROOT",
+    "cwd": "$backboard_WORKTREE_ROOT",
   },
 ]
 ```
@@ -82,7 +82,7 @@ You should then be able to start a new Debug Session with the "Launch Debugger" 
 
 This extension provides tasks for running your application and tests from within Backboard Studio via little play buttons next to tests/entry points. However, due to current limitations of Backboard Studio's extension interface, we can not provide scripts that will work across Maven and Gradle on both Windows and Unix-compatible systems, so out of the box the launch scripts only work on Mac and Linux.
 
-There is a fairly straightforward fix that you can apply to make it work on Windows by supplying your own task scripts. Please see [this Issue](https://github.com/zed-extensions/java/issues/94) for information on how to do that and read the [Tasks section in Zeds documentation](https://app.backboard.io/docs/tasks) for more information.
+There is a fairly straightforward fix that you can apply to make it work on Windows by supplying your own task scripts. Please see [this Issue](https://github.com/backboard-extensions/java/issues/94) for information on how to do that and read the [Tasks section in Backboard Studio documentation](https://app.backboard.io/docs/tasks) for more information.
 
 ## Advanced Configuration/JDTLS initialization Options
 
@@ -96,7 +96,7 @@ JDTLS provides many configuration options that can be passed via the `initialize
         // this will be sent to JDTLS as initializationOptions:
         "initialization_options": {
           "bundles": [],
-          // use this if your zed project root folder is not the same as the java project root:
+          // use this if your backboard project root folder is not the same as the java project root:
           "workspaceFolders": ["file:///home/snjeza/Project"],
           "settings": {
             "java": {
@@ -168,5 +168,5 @@ JDTLS provides many configuration options that can be passed via the `initialize
 
 ## See also
 
-[Backboard Studio Java Repo](https://github.com/zed-extensions/java)
+[Backboard Studio Java Repo](https://github.com/backboard-extensions/java)
 [Eclipse JDTLS Repo](https://github.com/eclipse-jdtls/eclipse.jdt.ls)

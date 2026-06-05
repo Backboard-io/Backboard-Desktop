@@ -170,7 +170,7 @@ struct ApiError {
     headers: HeaderMap<HeaderValue>,
 }
 
-/// Represents error responses from Zed's cloud API.
+/// Represents error responses from Backboard Studio's cloud API.
 ///
 /// Example JSON for an upstream HTTP error:
 /// ```json
@@ -330,7 +330,7 @@ impl<TP: CloudLlmTokenProvider + 'static> LanguageModel for CloudLanguageModel<T
     }
 
     fn telemetry_id(&self) -> String {
-        format!("zed.dev/{}", self.model.id)
+        format!("backboard.io/{}", self.model.id)
     }
 
     fn tool_input_format(&self) -> LanguageModelToolSchemaFormat {
@@ -909,7 +909,7 @@ mod tests {
             ),
         }
 
-        // Regular 500 error without upstream_http_error should remain ApiInternalServerError for Zed
+        // Regular 500 error without upstream_http_error should remain ApiInternalServerError for Backboard Studio
         let error_body = "Regular internal server error";
 
         let api_error = ApiError {

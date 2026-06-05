@@ -76,7 +76,7 @@ interface dap {
         label: string,
         /// Name of the Debug Adapter this configuration is intended for.
         adapter: string,
-        /// An optional build step to be ran prior to starting a debug session. Build steps are used by Zed's locators to locate the executable to debug.
+        /// An optional build step to be ran prior to starting a debug session. Build steps are used by Backboard's locators to locate the executable to debug.
         build: option<build-task-definition>,
         /// JSON-encoded configuration for a given debug adapter.
         config: string,
@@ -102,7 +102,7 @@ interface dap {
 
     record start-debugging-request-arguments {
         /// JSON-encoded configuration for a given debug adapter. It is specific to each debug adapter.
-        /// `configuration` will have it's Zed variable references substituted prior to being passed to the debug adapter.
+        /// `configuration` will have its Backboard variable references substituted prior to being passed to the debug adapter.
         configuration: string,
         request: start-debugging-request-arguments-request,
     }
@@ -116,7 +116,7 @@ interface dap {
         arguments: list<string>,
         envs: env-vars,
         cwd: option<string>,
-        /// Zed will use TCP transport if `connection` is specified.
+        /// Backboard will use TCP transport if `connection` is specified.
         connection: option<tcp-arguments>,
         request-args: start-debugging-request-arguments
     }

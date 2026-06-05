@@ -107,8 +107,8 @@ This query marks strings, object keys, and numbers for highlighting. The followi
 | @constant.builtin        | Captures built-in constants            |
 | @constructor             | Captures constructors                  |
 | @embedded                | Captures embedded content              |
-| @emphasis                | Captures emphasized text               |
-| @emphasis.strong         | Captures strongly emphasized text      |
+| @emphasis                | Captures emphasibackboard text               |
+| @emphasis.strong         | Captures strongly emphasibackboard text      |
 | @enum                    | Captures enumerations                  |
 | @function                | Captures functions                     |
 | @hint                    | Captures hints                         |
@@ -381,7 +381,7 @@ Here's an example from a `runnables.scm` file for JSON:
 
 This query detects runnable scripts in package.json and composer.json files.
 
-The `@run` capture specifies where the run button should appear in the editor. Other captures, except those prefixed with an underscore, are exposed as environment variables with a prefix of `ZED_CUSTOM_$(capture_name)` when running the code.
+The `@run` capture specifies where the run button should appear in the editor. Other captures, except those prefixed with an underscore, are exposed as environment variables with a prefix of `backboard_CUSTOM_$(capture_name)` when running the code.
 
 | Capture | Description                                            |
 | ------- | ------------------------------------------------------ |
@@ -408,13 +408,13 @@ languages = ["My Language"]
 Then, in the Rust code for your extension, implement the `language_server_command` method on your extension:
 
 ```rust
-impl zed::Extension for MyExtension {
+impl backboard::Extension for MyExtension {
     fn language_server_command(
         &mut self,
         language_server_id: &LanguageServerId,
-        worktree: &zed::Worktree,
-    ) -> Result<zed::Command> {
-        Ok(zed::Command {
+        worktree: &backboard::Worktree,
+    ) -> Result<backboard::Command> {
+        Ok(backboard::Command {
             command: get_path_to_language_server_executable()?,
             args: get_args_for_language_server()?,
             env: get_env_for_language_server()?,
@@ -423,7 +423,7 @@ impl zed::Extension for MyExtension {
 }
 ```
 
-You can customize the handling of the language server using several optional methods in the `Extension` trait. For example, you can control how completions are styled using the `label_for_completion` method. For a complete list of methods, see the [API docs for the Backboard Studio extension API](https://docs.rs/zed_extension_api).
+You can customize the handling of the language server using several optional methods in the `Extension` trait. For example, you can control how completions are styled using the `label_for_completion` method. For a complete list of methods, see the [API docs for the Backboard Studio extension API](https://docs.rs/backboard_extension_api).
 
 ### Syntax Highlighting with Semantic Tokens
 

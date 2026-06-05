@@ -5,7 +5,7 @@ description: "Configure Racket language support in Backboard Studio, including l
 
 # Racket
 
-Racket support is available through the [Racket extension](https://github.com/zed-extensions/racket).
+Racket support is available through the [Racket extension](https://github.com/backboard-extensions/racket).
 
 - Tree-sitter: [backboard/tree-sitter-racket](https://github.com/backboard/tree-sitter-racket)
 

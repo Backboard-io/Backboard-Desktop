@@ -5,7 +5,7 @@ description: How to contact Backboard Studio for business inquiries and support.
 
 # Business Support
 
-For billing and business support (account setup, invoices, organization questions), email [billing-support@app.backboard.io](mailto:billing-support@app.backboard.io). Business support is prioritized relative to other support channels.
+For billing and business support (account setup, invoices, organization questions), email [billing-support@app.backboard.io](mailto:billing-support@app.backboard.io). Business support is prioritibackboard relative to other support channels.
 
 For general questions, email [hi@app.backboard.io](mailto:hi@app.backboard.io).
 

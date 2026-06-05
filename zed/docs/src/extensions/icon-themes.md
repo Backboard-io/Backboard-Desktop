@@ -9,7 +9,7 @@ Extensions may provide icon themes to change the icons Backboard Studio uses for
 
 ## Example extension
 
-The [Material Icon Theme](https://github.com/zed-extensions/material-icon-theme) serves as an example for the structure of an extension containing an icon theme.
+The [Material Icon Theme](https://github.com/backboard-extensions/material-icon-theme) serves as an example for the structure of an extension containing an icon theme.
 
 ## Directory structure
 

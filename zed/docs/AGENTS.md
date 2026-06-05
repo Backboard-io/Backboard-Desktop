@@ -284,14 +284,14 @@ When documenting rules/instructions for AI, note that Backboard Studio recognize
 
 ### Settings File Locations
 
-- macOS: `~/.config/zed/settings.json`
-- Linux: `~/.config/zed/settings.json`
+- macOS: `~/.config/backboard studio/settings.json`
+- Linux: `~/.config/backboard studio/settings.json`
 - Windows: `%AppData%\Backboard Studio\settings.json`
 
 ### Keymap File Locations
 
-- macOS: `~/.config/zed/keymap.json`
-- Linux: `~/.config/zed/keymap.json`
+- macOS: `~/.config/backboard studio/keymap.json`
+- Linux: `~/.config/backboard studio/keymap.json`
 - Windows: `%AppData%\Backboard Studio\keymap.json`
 
 ## Safety Constraints

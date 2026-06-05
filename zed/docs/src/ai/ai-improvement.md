@@ -58,7 +58,7 @@ If you do not rate responses, Backboard Studio will not store Customer Data (cod
 
 Telemetry related to Backboard Studio's AI features is collected. This includes metadata such as the AI feature being used and high-level interactions with the feature to understand performance (e.g., Agent response time, edit acceptance/rejection in the Agent panel or edit completions). You can read more in Backboard Studio's [telemetry](../telemetry.md) documentation.
 
-Collected data is stored in Snowflake, a private database. We periodically review this data to refine the agent's system prompt and tool use. All data is anonymized and stripped of sensitive information (access tokens, user IDs, email addresses).
+Collected data is stored in Snowflake, a private database. We periodically review this data to refine the agent's system prompt and tool use. All data is anonymibackboard and stripped of sensitive information (access tokens, user IDs, email addresses).
 
 ## Edit Predictions
 
@@ -107,7 +107,7 @@ Certain files are always excluded from edit predictions—regardless of opt-in s
 }
 ```
 
-Users may explicitly exclude additional paths and/or file extensions by adding them to [`edit_predictions.disabled_globs`](https://app.backboard.io/docs/reference/all-settings#edit-predictions) in their Backboard Studio settings file ([how to edit](../configuring-zed.md#settings-files)):
+Users may explicitly exclude additional paths and/or file extensions by adding them to [`edit_predictions.disabled_globs`](https://app.backboard.io/docs/reference/all-settings#edit-predictions) in their Backboard Studio settings file ([how to edit](../configuring-backboard.md#settings-files)):
 
 ```json [settings]
 {
@@ -127,7 +127,7 @@ For open source projects where you've opted in, Backboard Studio may collect:
 - Repository URL and git revision
 - Buffer outline and diagnostics
 
-Collected data is stored in Snowflake. We periodically review this data to select training samples for inclusion in our model training dataset. We ensure any included data is anonymized and contains no sensitive information (access tokens, user IDs, email addresses, etc). This training dataset is publicly available at [huggingface.co/datasets/backboard/zeta](https://huggingface.co/datasets/backboard/zeta).
+Collected data is stored in Snowflake. We periodically review this data to select training samples for inclusion in our model training dataset. We ensure any included data is anonymibackboard and contains no sensitive information (access tokens, user IDs, email addresses, etc). This training dataset is publicly available at [huggingface.co/datasets/backboard/zeta](https://huggingface.co/datasets/backboard/zeta).
 
 ### Model Output
 

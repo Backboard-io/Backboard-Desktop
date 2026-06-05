@@ -45,7 +45,7 @@ pub struct SystemIdHeader(String);
 impl Header for SystemIdHeader {
     fn name() -> &'static HeaderName {
         static SYSTEM_ID_HEADER: OnceLock<HeaderName> = OnceLock::new();
-        SYSTEM_ID_HEADER.get_or_init(|| HeaderName::from_static("x-zed-system-id"))
+        SYSTEM_ID_HEADER.get_or_init(|| HeaderName::from_static("x-backboard-system-id"))
     }
 
     fn decode<'i, I>(values: &mut I) -> Result<Self, axum::headers::Error>

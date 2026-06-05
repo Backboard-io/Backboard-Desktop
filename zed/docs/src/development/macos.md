@@ -1,6 +1,6 @@
 ---
 title: Building Backboard Studio for macOS
-description: "Guide to building zed for macos for Backboard Studio development."
+description: "Guide to building backboard for macos for Backboard Studio development."
 ---
 
 # Building Backboard Studio for macOS
@@ -74,12 +74,12 @@ You must grant Screen Recording permission to your terminal:
 ### Running Visual Tests
 
 ```sh
-cargo run -p zed --bin zed_visual_test_runner --features visual-tests
+cargo run -p backboard --bin backboard_visual_test_runner --features visual-tests
 ```
 
 ### Baseline Images
 
-Baseline images are stored in `crates/zed/test_fixtures/visual_tests/` but are
+Baseline images are stored in `crates/backboard/test_fixtures/visual_tests/` but are
 **gitignored** to avoid bloating the repository. You must generate them locally
 before running tests.
 
@@ -89,7 +89,7 @@ Before making any UI changes, generate baseline images from a known-good state:
 
 ```sh
 git checkout origin/main
-UPDATE_BASELINE=1 cargo run -p zed --bin zed_visual_test_runner --features visual-tests
+UPDATE_BASELINE=1 cargo run -p backboard --bin backboard_visual_test_runner --features visual-tests
 git checkout -
 ```
 
@@ -100,7 +100,7 @@ This creates baselines that reflect the current expected UI.
 When UI changes are intentional, update the baseline images after your changes:
 
 ```sh
-UPDATE_BASELINE=1 cargo run -p zed --bin zed_visual_test_runner --features visual-tests
+UPDATE_BASELINE=1 cargo run -p backboard --bin backboard_visual_test_runner --features visual-tests
 ```
 
 > **Note:** In the future, baselines may be stored externally. For now, they
@@ -111,7 +111,7 @@ UPDATE_BASELINE=1 cargo run -p zed --bin zed_visual_test_runner --features visua
 ### Error compiling metal shaders
 
 ```sh
-error: failed to run custom build command for gpui v0.1.0 (/Users/path/to/zed)`**
+error: failed to run custom build command for gpui v0.1.0 (/Users/path/to/backboard)`**
 
 xcrun: error: unable to find utility "metal", not a developer tool or in PATH
 ```

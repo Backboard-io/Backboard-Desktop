@@ -33,7 +33,7 @@ pub struct LanguageConfig {
     /// The name of this language for a Markdown code fence block
     pub code_fence_block_name: Option<Arc<str>>,
     /// Alternative language names that Jupyter kernels may report for this language.
-    /// Used when a kernel's `language` field differs from Zed's language name.
+    /// Used when a kernel's `language` field differs from Backboard's language name.
     /// For example, the Nu extension would set this to `["nushell"]`.
     #[serde(default)]
     pub kernel_language_names: Vec<Arc<str>>,
@@ -99,7 +99,7 @@ pub struct LanguageConfig {
     /// A list of additional regex patterns that should be treated as prefixes
     /// for creating boundaries during rewrapping, ensuring content from one
     /// prefixed section doesn't merge with another (e.g., markdown list items).
-    /// By default, Zed treats as paragraph and comment prefixes as boundaries.
+    /// By default, Backboard treats as paragraph and comment prefixes as boundaries.
     #[serde(default, deserialize_with = "deserialize_regex_vec")]
     #[schemars(schema_with = "regex_vec_json_schema")]
     pub rewrap_prefixes: Vec<Regex>,
@@ -108,7 +108,7 @@ pub struct LanguageConfig {
     pub scope_opt_in_language_servers: Vec<LanguageServerName>,
     #[serde(default)]
     pub overrides: HashMap<String, LanguageConfigOverride>,
-    /// A list of characters that Zed should treat as word characters for the
+    /// A list of characters that Backboard should treat as word characters for the
     /// purpose of features that operate on word boundaries, like 'move to next word end'
     /// or a whole-word search in buffer search.
     #[serde(default)]
@@ -138,10 +138,10 @@ pub struct LanguageConfig {
     /// If configured, this language contains JSX style tags, and should support auto-closing of those tags.
     #[serde(default)]
     pub jsx_tag_auto_close: Option<JsxTagAutoCloseConfig>,
-    /// A list of characters that Zed should treat as word characters for completion queries.
+    /// A list of characters that Backboard should treat as word characters for completion queries.
     #[serde(default)]
     pub completion_query_characters: HashSet<char>,
-    /// A list of characters that Zed should treat as word characters for linked edit operations.
+    /// A list of characters that Backboard should treat as word characters for linked edit operations.
     #[serde(default)]
     pub linked_edit_characters: HashSet<char>,
     /// A list of preferred debuggers for this language.

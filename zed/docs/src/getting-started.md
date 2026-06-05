@@ -22,7 +22,7 @@ To reopen the welcome page, close all items in the center pane or use the comman
 Open a folder from the command line:
 
 ```sh
-zed ~/projects/my-app
+backboard ~/projects/my-app
 ```
 
 Or use `Cmd+O` (macOS) / `Ctrl+O` (Linux/Windows) to open a folder from within Backboard Studio.
@@ -85,6 +85,6 @@ You can also enable familiar keybindings:
 
 Backboard Studio is open source. Join us on GitHub or in Discord to contribute code, report bugs, or suggest features.
 
-- [Discord](https://discord.com/invite/zedindustries)
+- [Discord](https://discord.com/invite/backboardindustries)
 - [GitHub Discussions](https://github.com/backboard/ide/discussions)
-- [Backboard Studio Reddit](https://www.reddit.com/r/ZedEditor)
+- [Backboard Studio Reddit](https://www.reddit.com/r/backboardEditor)

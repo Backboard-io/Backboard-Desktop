@@ -53,12 +53,8 @@ impl OpenUrlModal {
             return;
         }
 
-        // Handle Backboard/Zed internal URLs without handing them to the OS.
-        if url.starts_with("backboard://")
-            || url.starts_with("backboard-cli://")
-            || url.starts_with("zed://")
-            || url.starts_with("zed-cli://")
-        {
+        // Handle Backboard internal URLs without handing them to the OS.
+        if url.starts_with("backboard://") || url.starts_with("backboard-cli://") {
             OpenListener::global(cx).open(RawOpenRequest {
                 urls: vec![url],
                 ..Default::default()

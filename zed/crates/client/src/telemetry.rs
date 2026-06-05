@@ -79,20 +79,20 @@ const FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 
 #[cfg(not(debug_assertions))]
 const FLUSH_INTERVAL: Duration = Duration::from_secs(60 * 5);
-static ZED_CLIENT_CHECKSUM_SEED: LazyLock<Option<Vec<u8>>> = LazyLock::new(|| {
-    option_env!("ZED_CLIENT_CHECKSUM_SEED")
+static BACKBOARD_CLIENT_CHECKSUM_SEED: LazyLock<Option<Vec<u8>>> = LazyLock::new(|| {
+    option_env!("BACKBOARD_CLIENT_CHECKSUM_SEED")
         .map(|s| s.as_bytes().into())
         .or_else(|| {
-            env::var("ZED_CLIENT_CHECKSUM_SEED")
+            env::var("BACKBOARD_CLIENT_CHECKSUM_SEED")
                 .ok()
                 .map(|s| s.as_bytes().into())
         })
 });
 
 pub static MINIDUMP_ENDPOINT: LazyLock<Option<String>> = LazyLock::new(|| {
-    option_env!("ZED_MINIDUMP_ENDPOINT")
+    option_env!("BACKBOARD_MINIDUMP_ENDPOINT")
         .map(str::to_string)
-        .or_else(|| env::var("ZED_MINIDUMP_ENDPOINT").ok())
+        .or_else(|| env::var("BACKBOARD_MINIDUMP_ENDPOINT").ok())
 });
 
 static DOTNET_PROJECT_FILES_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -354,7 +354,7 @@ impl Telemetry {
     }
 
     pub fn has_checksum_seed(&self) -> bool {
-        ZED_CLIENT_CHECKSUM_SEED.is_some()
+        BACKBOARD_CLIENT_CHECKSUM_SEED.is_some()
     }
 
     pub fn start(
@@ -602,7 +602,7 @@ impl Telemetry {
                     .as_ref(),
             )
             .header("Content-Type", "application/json")
-            .header("x-zed-checksum", checksum)
+            .header("x-backboard-checksum", checksum)
             .body(json_bytes.into())?)
     }
 
@@ -666,7 +666,7 @@ impl Telemetry {
 }
 
 pub fn calculate_json_checksum(json: &impl AsRef<[u8]>) -> Option<String> {
-    let checksum_seed = ZED_CLIENT_CHECKSUM_SEED.as_ref()?;
+    let checksum_seed = BACKBOARD_CLIENT_CHECKSUM_SEED.as_ref()?;
 
     let mut summer = Sha256::new();
     summer.update(checksum_seed);

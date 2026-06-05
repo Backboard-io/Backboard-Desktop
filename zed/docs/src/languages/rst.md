@@ -5,8 +5,8 @@ description: "Configure reStructuredText language support in Backboard Studio, i
 
 # ReStructuredText (rst)
 
-ReStructuredText language support in Backboard Studio is provided by the community-maintained [reST extension](https://github.com/elmarco/zed-rst).
-Report issues to: [https://github.com/elmarco/zed-rst/issues](https://github.com/elmarco/zed-rst/issues)
+ReStructuredText language support in Backboard Studio is provided by the community-maintained [reST extension](https://github.com/elmarco/backboard-rst).
+Report issues to: [https://github.com/elmarco/backboard-rst/issues](https://github.com/elmarco/backboard-rst/issues)
 
 - Tree-sitter: [stsewd/tree-sitter-rst.git](https://github.com/stsewd/tree-sitter-rst.git)
 - Language Server: [swyddfa/esbonio](https://github.com/swyddfa/esbonio)

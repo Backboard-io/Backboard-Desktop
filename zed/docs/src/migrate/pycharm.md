@@ -14,7 +14,7 @@ Backboard Studio is available on macOS, Windows, and Linux.
 For macOS, you can download it from app.backboard.io/download, or install via Homebrew:
 
 ```sh
-brew install --cask zed
+brew install --cask backboard
 ```
 
 For Windows, download the installer from app.backboard.io/download, or install via winget:
@@ -30,7 +30,7 @@ curl -f https://app.backboard.io/install.sh | sh
 ```
 
 After installation, you can launch Backboard Studio from your Applications folder (macOS), Start menu (Windows), or directly from the terminal using:
-`zed .`
+`backboard .`
 This opens the current directory in Backboard Studio.
 
 ## Set Up the JetBrains Keymap
@@ -57,7 +57,7 @@ Settings PyCharm users typically configure first:
 | `inlay_hints`           | Show parameter names and type hints inline, like PyCharm's hints.               |
 | `relative_line_numbers` | Useful if you're coming from IdeaVim.                                           |
 
-Backboard Studio also supports per-project settings. Create a `.zed/settings.json` file in your project root to override global settings for that project, similar to how you might use `.idea` folders in PyCharm.
+Backboard Studio also supports per-project settings. Create a `.backboard/settings.json` file in your project root to override global settings for that project, similar to how you might use `.idea` folders in PyCharm.
 
 > **Tip:** If you're joining an existing project, check `format_on_save` before making your first commit. Otherwise you might accidentally reformat an entire file when you only meant to change one line.
 
@@ -68,7 +68,7 @@ After setup, press `Cmd+Shift+O` (with JetBrains keymap) to open a folder. This 
 To start a new project, create a directory using your terminal or file manager, then open it in Backboard Studio. The editor will treat that folder as the root of your project.
 
 You can also launch Backboard Studio from the terminal inside any folder with:
-`zed .`
+`backboard .`
 
 Once inside a project:
 
@@ -150,7 +150,7 @@ PyCharm's index powers features like finding all usages across your entire codeb
 
 ### LSP vs. Native Language Intelligence
 
-PyCharm has its own language analysis engine built specifically for Python. This engine understands your code deeply: it resolves types without annotations, tracks data flow, knows about Django models and Flask routes, and offers specialized refactorings.
+PyCharm has its own language analysis engine built specifically for Python. This engine understands your code deeply: it resolves types without annotations, tracks data flow, knows about Django models and Flask routes, and offers specialibackboard refactorings.
 
 Backboard Studio uses the Language Server Protocol (LSP) for code intelligence. For Python, Backboard Studio provides several language servers out of the box:
 
@@ -210,7 +210,7 @@ This means:
 
 **How to adapt:**
 
-- Create a `.zed/settings.json` in your project root for project-specific settings
+- Create a `.backboard/settings.json` in your project root for project-specific settings
 - Define common commands in `tasks.json` (open via Command Palette: {#action backboard::OpenTasks}):
 
 ```json
@@ -225,7 +225,7 @@ This means:
   },
   {
     "label": "test current file",
-    "command": "pytest $ZED_FILE"
+    "command": "pytest $backboard_FILE"
   }
 ]
 ```
@@ -278,14 +278,14 @@ Backboard Studio can automatically detect debuggable entry points. Press `F4` to
 - Modules
 - pytest tests
 
-For more control, create a `.zed/debug.json` file:
+For more control, create a `.backboard/debug.json` file:
 
 ```json
 [
   {
     "label": "Debug Current File",
     "adapter": "Debugpy",
-    "program": "$ZED_FILE",
+    "program": "$backboard_FILE",
     "request": "launch"
   },
   {

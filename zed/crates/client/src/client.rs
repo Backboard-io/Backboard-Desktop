@@ -61,28 +61,29 @@ pub use telemetry_events::Event;
 pub use user::*;
 
 static ZED_SERVER_URL: LazyLock<Option<String>> =
-    LazyLock::new(|| std::env::var("ZED_SERVER_URL").ok());
-static ZED_RPC_URL: LazyLock<Option<String>> = LazyLock::new(|| std::env::var("ZED_RPC_URL").ok());
+    LazyLock::new(|| std::env::var("BACKBOARD_SERVER_URL").ok());
+static ZED_RPC_URL: LazyLock<Option<String>> =
+    LazyLock::new(|| std::env::var("BACKBOARD_RPC_URL").ok());
 
 pub static IMPERSONATE_LOGIN: LazyLock<Option<String>> = LazyLock::new(|| {
-    std::env::var("ZED_IMPERSONATE")
+    std::env::var("BACKBOARD_IMPERSONATE")
         .ok()
         .and_then(|s| if s.is_empty() { None } else { Some(s) })
 });
 
-pub static USE_WEB_LOGIN: LazyLock<bool> = LazyLock::new(|| std::env::var("ZED_WEB_LOGIN").is_ok());
+pub static USE_WEB_LOGIN: LazyLock<bool> = LazyLock::new(|| std::env::var("BACKBOARD_WEB_LOGIN").is_ok());
 
 pub static ADMIN_API_TOKEN: LazyLock<Option<String>> = LazyLock::new(|| {
-    std::env::var("ZED_ADMIN_API_TOKEN")
+    std::env::var("BACKBOARD_ADMIN_API_TOKEN")
         .ok()
         .and_then(|s| if s.is_empty() { None } else { Some(s) })
 });
 
 pub static ZED_APP_PATH: LazyLock<Option<PathBuf>> =
-    LazyLock::new(|| std::env::var("ZED_APP_PATH").ok().map(PathBuf::from));
+    LazyLock::new(|| std::env::var("BACKBOARD_APP_PATH").ok().map(PathBuf::from));
 
 pub static ZED_ALWAYS_ACTIVE: LazyLock<bool> =
-    LazyLock::new(|| std::env::var("ZED_ALWAYS_ACTIVE").is_ok_and(|e| !e.is_empty()));
+    LazyLock::new(|| std::env::var("BACKBOARD_ALWAYS_ACTIVE").is_ok_and(|e| !e.is_empty()));
 
 pub const INITIAL_RECONNECTION_DELAY: Duration = Duration::from_millis(500);
 pub const MAX_RECONNECTION_DELAY: Duration = Duration::from_secs(30);
@@ -1338,22 +1339,28 @@ impl Client {
                 HeaderValue::from_str(&credentials.authorization_header())?,
             );
             request_headers.insert(
-                "x-zed-protocol-version",
+                "x-backboard-protocol-version",
                 HeaderValue::from_str(&rpc::PROTOCOL_VERSION.to_string())?,
             );
-            request_headers.insert("x-zed-app-version", HeaderValue::from_str(&app_version)?);
             request_headers.insert(
-                "x-zed-release-channel",
+                "x-backboard-app-version",
+                HeaderValue::from_str(&app_version)?,
+            );
+            request_headers.insert(
+                "x-backboard-release-channel",
                 HeaderValue::from_str(release_channel.map(|r| r.dev_name()).unwrap_or("unknown"))?,
             );
             if let Some(user_agent) = user_agent {
                 request_headers.insert(http::header::USER_AGENT, user_agent);
             }
             if let Some(system_id) = system_id {
-                request_headers.insert("x-zed-system-id", HeaderValue::from_str(&system_id)?);
+                request_headers.insert("x-backboard-system-id", HeaderValue::from_str(&system_id)?);
             }
             if let Some(metrics_id) = metrics_id {
-                request_headers.insert("x-zed-metrics-id", HeaderValue::from_str(&metrics_id)?);
+                request_headers.insert(
+                    "x-backboard-metrics-id",
+                    HeaderValue::from_str(&metrics_id)?,
+                );
             }
 
             let (stream, _) = async_tungstenite::tokio::client_async_tls_with_connector_and_config(
@@ -1392,7 +1399,7 @@ impl Client {
                 .clone()
                 .spawn(async move {
                     // Generate a pair of asymmetric encryption keys. The public key will be used by the
-                    // zed server to encrypt the user's access token, so that it can'be intercepted by
+                    // the server to encrypt the user's access token, so that it can't be intercepted by
                     // any other app running on the user's device.
                     let (public_key, private_key) =
                         rpc::auth::keypair().context("failed to generate keypair for auth")?;
@@ -1847,13 +1854,14 @@ impl ProtoClient for Client {
     }
 }
 
-/// prefix for the zed:// url scheme
-pub const ZED_URL_SCHEME: &str = "zed";
+/// Prefix for the Backboard Studio URL scheme.
+pub const BACKBOARD_URL_SCHEME: &str = "backboard";
+pub const ZED_URL_SCHEME: &str = BACKBOARD_URL_SCHEME;
 
 /// A parsed Backboard Studio link that can be handled internally by the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZedLink {
-    /// Join a channel: `app.backboard.io/channel/channel-name-123` or `zed://channel/channel-name-123`
+    /// Join a channel: `app.backboard.io/channel/channel-name-123` or `backboard://channel/channel-name-123`
     Channel { channel_id: u64 },
     /// Open channel notes: `app.backboard.io/channel/channel-name-123/notes` or with heading `notes#heading`
     ChannelNotes {

@@ -5,7 +5,7 @@ description: "Configure Haskell language support in Backboard Studio, including 
 
 # Haskell
 
-Haskell support is available through the [Haskell extension](https://github.com/zed-extensions/haskell).
+Haskell support is available through the [Haskell extension](https://github.com/backboard-extensions/haskell).
 
 - Tree-sitter: [tree-sitter-haskell](https://github.com/tree-sitter/tree-sitter-haskell)
 - Language Server: [haskell-language-server](https://github.com/haskell/haskell-language-server)

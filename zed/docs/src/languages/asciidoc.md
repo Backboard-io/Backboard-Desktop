@@ -5,7 +5,7 @@ description: "Configure AsciiDoc language support in Backboard Studio, including
 
 # AsciiDoc
 
-AsciiDoc language support in Backboard Studio is provided by the community-maintained [AsciiDoc extension](https://github.com/andreicek/zed-asciidoc).
-Report issues to: [https://github.com/andreicek/zed-asciidoc/issues](https://github.com/andreicek/zed-asciidoc/issues)
+AsciiDoc language support in Backboard Studio is provided by the community-maintained [AsciiDoc extension](https://github.com/andreicek/backboard-asciidoc).
+Report issues to: [https://github.com/andreicek/backboard-asciidoc/issues](https://github.com/andreicek/backboard-asciidoc/issues)
 
 - Tree-sitter: [cathaysia/tree-sitter-asciidoc](https://github.com/cathaysia/tree-sitter-asciidoc)

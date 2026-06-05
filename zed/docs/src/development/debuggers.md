@@ -81,8 +81,8 @@ If you are new to these tools, see the `gdb` docs [here](https://www.gnu.org/sof
 After enabling full debug info and building with `cargo build`, run `rust-gdb` or `rust-lldb` against the compiled Backboard Studio binary:
 
 ```
-rust-gdb target/debug/zed
-rust-lldb target/debug/zed
+rust-gdb target/debug/backboard
+rust-lldb target/debug/backboard
 ```
 
 You can also attach to a running Backboard Studio process (for example, one started with `cargo run`):
@@ -96,7 +96,7 @@ rust-lldb -p <pid>
 
 To find the PID, use your system's process tools, such as Task Manager on Windows or Activity Monitor on macOS.
 
-You can also run `ps aux | grep zed` on macOS and Linux, or `Get-Process | Select-Object Id, ProcessName` in PowerShell on Windows.
+You can also run `ps aux | grep backboard` on macOS and Linux, or `Get-Process | Select-Object Id, ProcessName` in PowerShell on Windows.
 
 #### Debugging Panics and Crashes
 

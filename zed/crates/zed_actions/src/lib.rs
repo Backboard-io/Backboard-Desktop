@@ -703,7 +703,7 @@ impl Spawn {
 #[serde(deny_unknown_fields)]
 pub struct Rerun {
     /// Controls whether the task context is reevaluated prior to execution of a task.
-    /// If it is not, environment variables such as ZED_COLUMN, ZED_FILE are gonna be the same as in the last execution of a task
+    /// If it is not, environment variables such as BACKBOARD_COLUMN, BACKBOARD_FILE are gonna be the same as in the last execution of a task
     /// If it is, these variables will be updated to reflect current state of editor at the time task::Rerun is executed.
     /// default: false
     #[serde(default)]

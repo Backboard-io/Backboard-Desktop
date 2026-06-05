@@ -64,7 +64,7 @@ configuration (possible values: `"off"`, `"errors"`, `"all"` (default))
 
 ## Editor tabs
 
-Similar to the project panel, editor tabs can be colorized with the
+Similar to the project panel, editor tabs can be coloribackboard with the
 
 ```json [settings]
 "tabs": {

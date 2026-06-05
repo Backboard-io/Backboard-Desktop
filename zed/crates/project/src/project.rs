@@ -336,7 +336,7 @@ pub enum Event {
     LanguageServerRemoved(LanguageServerId),
     LanguageServerLog(LanguageServerId, LanguageServerLogType, String),
     // [`lsp::notification::DidOpenTextDocument`] was sent to this server using the buffer data.
-    // Zed's buffer-related data is updated accordingly.
+    // Backboard Studio's buffer-related data is updated accordingly.
     LanguageServerBufferRegistered {
         server_id: LanguageServerId,
         buffer_id: BufferId,
@@ -1080,7 +1080,7 @@ pub enum PulledDiagnostics {
     },
 }
 
-/// Whether to disable all AI features in Zed.
+/// Whether to disable all AI features in Backboard Studio.
 ///
 /// Default: false
 #[derive(Copy, Clone, Debug, RegisterSetting)]
@@ -1100,7 +1100,7 @@ impl DisableAiSettings {
     /// Returns whether AI is disabled for the given file.
     ///
     /// This checks the project-level settings for the file's worktree,
-    /// allowing `disable_ai` to be configured per-project in `.zed/settings.json`.
+    /// allowing `disable_ai` to be configured per-project in `.backboard/settings.json`.
     pub fn is_ai_disabled_for_buffer(buffer: Option<&Entity<Buffer>>, cx: &App) -> bool {
         Self::is_ai_disabled_for_file(buffer.and_then(|buffer| buffer.read(cx).file()), cx)
     }

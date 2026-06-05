@@ -17,13 +17,13 @@ This document audits the inherited Backboard Studio settings surface as it exist
 
 - **E00**: Schema metadata in `assets/settings/default.json`; parsed by settings file helpers in `crates/settings/src/settings_file.rs`.
 - **E01**: Theme flattening in `crates/settings_content/src/theme.rs::ThemeSettingsContent`; runtime reads in `crates/theme_settings/src/settings.rs::ThemeSettings::from_settings`, `agent_ui_font_size`, and `agent_buffer_font_size`.
-- **E02**: Workspace flattening in `crates/settings_content/src/workspace.rs::WorkspaceSettingsContent`; runtime reads in `crates/workspace/src/workspace_settings.rs::WorkspaceSettings::from_settings` and launch behavior in `crates/zed/src/main.rs` around `restore_on_startup`.
+- **E02**: Workspace flattening in `crates/settings_content/src/workspace.rs::WorkspaceSettingsContent`; runtime reads in `crates/workspace/src/workspace_settings.rs::WorkspaceSettings::from_settings` and launch behavior in `crates/backboard/src/main.rs` around `restore_on_startup`.
 - **E03**: Agent flattening in `crates/settings_content/src/agent.rs::AgentSettingsContent`; runtime reads in `crates/agent_settings/src/agent_settings.rs::AgentSettings::from_settings`, `crates/agent/src/thread.rs`, `crates/agent/src/tool_permissions.rs`, and `crates/agent_ui/src/conversation_view/thread_view.rs`.
-- **E04**: Backboard API/client routing in `crates/client/src/client.rs::ClientSettings::from_settings`, `ProxySettings::from_settings`, and `crates/client/src/zed_urls.rs`.
+- **E04**: Backboard API/client routing in `crates/client/src/client.rs::ClientSettings::from_settings`, `ProxySettings::from_settings`, and `crates/client/src/backboard_urls.rs`.
 - **E05**: Model provider settings in `crates/language_models/src/settings.rs::AllLanguageModelSettings::from_settings` and provider reads in `crates/language_models/src/provider/*`.
 - **E06**: Edit prediction defaults in `crates/settings_content/src/language.rs::EditPredictionSettingsContent` and UI reads in `crates/edit_prediction_ui/src/*`.
 - **E08**: Terminal settings in `crates/settings_content/src/terminal.rs::TerminalSettingsContent`; runtime reads in `crates/terminal/src/terminal_settings.rs` and `crates/terminal/src/terminal.rs`.
-- **E09**: Node settings in `crates/settings_content/src/project.rs::NodeBinarySettings`; runtime reads in `crates/zed/src/main.rs` and project tooling.
+- **E09**: Node settings in `crates/settings_content/src/project.rs::NodeBinarySettings`; runtime reads in `crates/backboard/src/main.rs` and project tooling.
 - **E10**: Git panel settings in `crates/git_ui/src/git_panel_settings.rs::GitPanelSettings::from_settings` and reads in `crates/git_ui/src/project_diff.rs` and `commit_modal.rs`.
 - **E11**: Project Git/worktree settings in `crates/settings_content/src/project.rs::ProjectSettingsContent`; reads in `crates/project/src/git_store.rs`, `crates/editor/src/element.rs`, and `crates/agent_ui/src/thread_worktree_archive.rs`.
 - **E12**: Compatibility flattening in `crates/settings_content/src/settings_content.rs::SettingsContent`, `UserSettingsContent`, release-channel overrides, platform overrides, feature flags, logging, and instrumentation.

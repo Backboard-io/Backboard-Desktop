@@ -5,7 +5,7 @@ description: "Configure Erlang language support in Backboard Studio, including l
 
 # Erlang
 
-Erlang support is available through the [Erlang extension](https://github.com/zed-extensions/erlang).
+Erlang support is available through the [Erlang extension](https://github.com/backboard-extensions/erlang).
 
 - Tree-sitter: [WhatsApp/tree-sitter-erlang](https://github.com/WhatsApp/tree-sitter-erlang)
 - Language Servers:

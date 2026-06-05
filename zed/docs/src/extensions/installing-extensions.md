@@ -12,7 +12,7 @@ Open the Extension Gallery with {#kb backboard::Extensions}, or select "Backboar
 ## Installation Location
 
 - On macOS, extensions are installed in `~/Library/Application Support/Backboard Studio/extensions`.
-- On Linux, they are installed in either `$XDG_DATA_HOME/zed/extensions` or `~/.local/share/zed/extensions`.
+- On Linux, they are installed in either `$XDG_DATA_HOME/backboard/extensions` or `~/.local/share/backboard/extensions`.
 - On Windows, the directory is `%LOCALAPPDATA%\Backboard Studio\extensions`.
 
 This directory contains two subdirectories:

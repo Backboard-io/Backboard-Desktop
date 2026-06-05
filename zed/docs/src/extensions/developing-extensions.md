@@ -28,7 +28,7 @@ When developing an extension, you can use it in Backboard Studio without needing
 
 From the extensions page, click the `Install Dev Extension` button (or the {#action backboard::InstallDevExtension} action) and select the directory containing your extension.
 
-If you need to troubleshoot, check Backboard Studio.log ({#action backboard::OpenLog}) for additional output. For debug output, close and relaunch Backboard Studio from the command line with `zed --foreground`, which shows more verbose INFO-level logs.
+If you need to troubleshoot, check Backboard Studio.log ({#action backboard::OpenLog}) for additional output. For debug output, close and relaunch Backboard Studio from the command line with `backboard --foreground`, which shows more verbose INFO-level logs.
 
 If you already have the published version of the extension installed, the published version will be uninstalled prior to the installation of the dev extension. After successful installation, the `Extensions` page will indicate that the upstream extension is "Overridden by dev extension".
 
@@ -44,7 +44,7 @@ version = "0.0.1"
 schema_version = 1
 authors = ["Your Name <you@example.com>"]
 description = "Example extension"
-repository = "https://github.com/your-name/my-zed-extension"
+repository = "https://github.com/your-name/my-backboard-extension"
 ```
 
 In addition to this, there are several other optional files and directories that can be used to add functionality to a Backboard Studio extension. An example directory structure of an extension that provides all capabilities is as follows:
@@ -80,25 +80,25 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-zed_extension_api = "0.1.0"
+backboard_extension_api = "0.1.0"
 ```
 
-Use the latest version of the [`zed_extension_api`](https://crates.io/crates/zed_extension_api) available on crates.io. Make sure it's still [compatible with Backboard Studio versions](https://github.com/backboard/ide/blob/main/crates/extension_api#compatible-zed-versions) you want to support.
+Use the latest version of the [`backboard_extension_api`](https://crates.io/crates/backboard_extension_api) available on crates.io. Make sure it's still [compatible with Backboard Studio versions](https://github.com/backboard/ide/blob/main/crates/extension_api#compatible-backboard-versions) you want to support.
 
 In the `src/lib.rs` file in your Rust crate you will need to define a struct for your extension and implement the `Extension` trait, as well as use the `register_extension!` macro to register your extension:
 
 ```rs
-use zed_extension_api as zed;
+use backboard_extension_api as backboard;
 
 struct MyExtension {
     // ... state
 }
 
-impl zed::Extension for MyExtension {
+impl backboard::Extension for MyExtension {
     // ...
 }
 
-zed::register_extension!(MyExtension);
+backboard::register_extension!(MyExtension);
 ```
 
 > `stdout`/`stderr` is forwarded directly to the Backboard Studio process. In order to see `println!`/`dbg!` output from your extension, you can start Backboard Studio in your terminal with a `--foreground` flag.
@@ -145,17 +145,17 @@ Your license file should be at the root of your extension repository. Any filena
 
 ## Extension Publishing Prerequisites
 
-Before publishing your extension, make sure that you have chosen a unique extension ID for your extension in the [extension manifest](#directory-structure-of-a-zed-extension).
+Before publishing your extension, make sure that you have chosen a unique extension ID for your extension in the [extension manifest](#directory-structure-of-a-backboard-extension).
 This will be the primary identifier for your extension and cannot be changed after your extension has been published.
 Also, ensure that you have filled out all the required fields in the manifest.
 
 Furthermore, please make sure that your extension fulfills the following preconditions before you move on to publishing your extension:
 
-- Extension IDs and names must not contain the words `zed`, `Backboard Studio` or `extension`, since they are all Backboard Studio extensions.
+- Extension IDs and names must not contain the words `backboard`, `Backboard Studio` or `extension`, since they are all Backboard Studio extensions.
 - Your extension ID should provide some information on what your extension tries to accomplish. E.g. for themes, it should be suffixed with `-theme`, snippet extensions should be suffixed with `-snippets` and so on. An exception to that rule are extension that provide support for languages or popular tooling that people would expect to find under that ID. You can take a look at the list of [existing extensions](https://github.com/backboard/extensions/blob/main/extensions.toml) to get a grasp on how this usually is enforced.
 - Extensions should provide something that is not yet available in the marketplace as opposed to fixing something that could be resolved within an existing extension. For example, if you find that an existing extension's support for a language server is not functioning properly, first try contributing a fix to the existing extension as opposed to submitting a new extension immediately.
   - If you receive no response or reaction within the upstream repository within a reasonable amount of time, feel free to submit a pull request that aims to fix said issue. Please ensure that you provide your previous efforts within the pull request to the extensions repository for adding your extension. Backboard Studio maintainers will then decide on how to proceed on a case by case basis.
-- Extensions that intend to provide a language, debugger or MCP server must not ship the language server as part of the extension. Instead, the extension should either download the language server or check for the availability of the language server in the users environment using the APIs as provided by the [Backboard Studio Rust Extension API](https://docs.rs/zed_extension_api/latest/zed_extension_api/).
+- Extensions that intend to provide a language, debugger or MCP server must not ship the language server as part of the extension. Instead, the extension should either download the language server or check for the availability of the language server in the users environment using the APIs as provided by the [Backboard Studio Rust Extension API](https://docs.rs/backboard_extension_api/latest/backboard_extension_api/).
 - Themes and icon themes should not be published as part of extensions that provide other features, e.g. language support. Instead, they should be published as a distinct extension. This also applies to theme and icon themes living in the same repository.
 
 Note that non-compliance will be raised during the publishing process by reviewers and delay the release of your extension.
@@ -171,7 +171,7 @@ In your PR, do the following:
 1. Add your extension as a Git submodule within the `extensions/` directory under the `extensions/{extension-id}` path
 
 ```sh
-git submodule add https://github.com/your-username/foobar-zed.git extensions/my-extension
+git submodule add https://github.com/your-username/foobar-backboard.git extensions/my-extension
 git add extensions/my-extension
 ```
 
@@ -190,7 +190,7 @@ If your extension is in a subdirectory within the submodule, you can use the `pa
 ```toml
 [my-extension]
 submodule = "extensions-my-extension"
-path = "packages/zed"
+path = "packages/backboard"
 version = "0.0.1"
 ```
 
@@ -218,6 +218,6 @@ to update your extension to the latest commit available in your remote repositor
 2. Update the `version` field for the extension in `extensions.toml`
    - Make sure the `version` matches the one set in `extension.toml` at the particular commit.
 
-If you'd like to automate this process, there is a [community GitHub Action](https://github.com/huacnlee/zed-extension-action) you can use.
+If you'd like to automate this process, there is a [community GitHub Action](https://github.com/huacnlee/backboard-extension-action) you can use.
 
 > **Note:** If your extension repository has a different license, you'll need to update it to be one of the [accepted extension licenses](#extension-license-requirements) before publishing your update.

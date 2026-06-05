@@ -15,14 +15,14 @@ The default provider is [Zeta, an open source model developed by Backboard Studi
 To use Zeta, [sign in](../authentication.md#what-features-require-signing-in).
 Once signed in, predictions appear as you type.
 
-You can confirm that Zeta is properly configured by opening the [Settings Editor](zed://settings/edit_predictions.providers) (`Cmd+,` on macOS or `Ctrl+,` on Linux/Windows) and searching for `edit_predictions`. The `provider` field should be set to `Backboard AI`.
+You can confirm that Zeta is properly configured by opening the [Settings Editor](backboard://settings/edit_predictions.providers) (`Cmd+,` on macOS or `Ctrl+,` on Linux/Windows) and searching for `edit_predictions`. The `provider` field should be set to `Backboard AI`.
 
 Or verify this in your settings.json:
 
 ```json [settings]
 {
   "edit_predictions": {
-    "provider": "zed"
+    "provider": "backboard"
   }
 }
 ```
@@ -150,7 +150,7 @@ Alternatively, consider [using Subtle Mode](#switching-modes).
 
 ### On Buffers
 
-To not have predictions appear automatically as you type, set this in your settings file ([how to edit](../configuring-zed.md#settings-files)):
+To not have predictions appear automatically as you type, set this in your settings file ([how to edit](../configuring-backboard.md#settings-files)):
 
 ```json [settings]
 {
@@ -163,7 +163,7 @@ Still, you can trigger edit predictions manually by executing {#action editor::S
 
 ### For Specific Languages
 
-To not have predictions appear automatically as you type when working with a specific language, set this in your settings file ([how to edit](../configuring-zed.md#settings-files)):
+To not have predictions appear automatically as you type when working with a specific language, set this in your settings file ([how to edit](../configuring-backboard.md#settings-files)):
 
 ```json [settings]
 {
@@ -177,12 +177,12 @@ To not have predictions appear automatically as you type when working with a spe
 
 ### In Specific Directories
 
-To disable edit predictions for specific directories or files, set this in your settings file ([how to edit](../configuring-zed.md#settings-files)):
+To disable edit predictions for specific directories or files, set this in your settings file ([how to edit](../configuring-backboard.md#settings-files)):
 
 ```json [settings]
 {
   "edit_predictions": {
-    "disabled_globs": ["~/.config/zed/settings.json"]
+    "disabled_globs": ["~/.config/backboard/settings.json"]
   }
 }
 ```
@@ -205,7 +205,7 @@ Edit Prediction also works with other providers.
 
 ### GitHub Copilot {#github-copilot}
 
-To use GitHub Copilot as your provider, set this in your settings file ([how to edit](../configuring-zed.md#settings-files)):
+To use GitHub Copilot as your provider, set this in your settings file ([how to edit](../configuring-backboard.md#settings-files)):
 
 ```json [settings]
 {
@@ -219,7 +219,7 @@ To sign in to GitHub Copilot, click on the Copilot icon in the status bar. A pop
 
 #### Using GitHub Copilot Enterprise
 
-If your organization uses GitHub Copilot Enterprise, you can configure Backboard Studio to use your enterprise instance by specifying the enterprise URI in your settings file ([how to edit](../configuring-zed.md#settings-files)):
+If your organization uses GitHub Copilot Enterprise, you can configure Backboard Studio to use your enterprise instance by specifying the enterprise URI in your settings file ([how to edit](../configuring-backboard.md#settings-files)):
 
 ```json [settings]
 {

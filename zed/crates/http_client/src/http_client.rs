@@ -210,12 +210,12 @@ impl HttpClientWithUrl {
         format!("{}{}", self.base_url(), path)
     }
 
-    /// Builds a Zed API URL using the given path.
+    /// Builds a Backboard Studio API URL using the given path.
     pub fn build_zed_api_url(&self, path: &str, query: &[(&str, &str)]) -> Result<Url> {
         let base_url = self.base_url();
         let base_api_url = match base_url.as_ref() {
-            "https://zed.dev" => "https://api.zed.dev",
-            "https://staging.zed.dev" => "https://api-staging.zed.dev",
+            "https://backboard.io" => "https://api.backboard.io",
+            "https://staging.backboard.io" => "https://api-staging.backboard.io",
             "http://localhost:3000" => "http://localhost:8080",
             other => other,
         };
@@ -226,12 +226,12 @@ impl HttpClientWithUrl {
         )?)
     }
 
-    /// Builds a Zed Cloud URL using the given path.
+    /// Builds a Backboard Studio Cloud URL using the given path.
     pub fn build_zed_cloud_url(&self, path: &str) -> Result<Url> {
         let base_url = self.base_url();
         let base_api_url = match base_url.as_ref() {
-            "https://zed.dev" => "https://cloud.zed.dev",
-            "https://staging.zed.dev" => "https://cloud.zed.dev",
+            "https://backboard.io" => "https://cloud.backboard.io",
+            "https://staging.backboard.io" => "https://cloud.backboard.io",
             "http://localhost:3000" => "http://localhost:8787",
             other => other,
         };
@@ -239,12 +239,12 @@ impl HttpClientWithUrl {
         Ok(Url::parse(&format!("{}{}", base_api_url, path))?)
     }
 
-    /// Builds a Zed Cloud URL using the given path and query params.
+    /// Builds a Backboard Studio Cloud URL using the given path and query params.
     pub fn build_zed_cloud_url_with_query(&self, path: &str, query: impl Serialize) -> Result<Url> {
         let base_url = self.base_url();
         let base_api_url = match base_url.as_ref() {
-            "https://zed.dev" => "https://cloud.zed.dev",
-            "https://staging.zed.dev" => "https://cloud.zed.dev",
+            "https://backboard.io" => "https://cloud.backboard.io",
+            "https://staging.backboard.io" => "https://cloud.backboard.io",
             "http://localhost:3000" => "http://localhost:8787",
             other => other,
         };
@@ -252,12 +252,12 @@ impl HttpClientWithUrl {
         Ok(Url::parse(&format!("{}{}?{}", base_api_url, path, query))?)
     }
 
-    /// Builds a Zed LLM URL using the given path.
+    /// Builds a Backboard Studio LLM URL using the given path.
     pub fn build_zed_llm_url(&self, path: &str, query: &[(&str, &str)]) -> Result<Url> {
         let base_url = self.base_url();
         let base_api_url = match base_url.as_ref() {
-            "https://zed.dev" => "https://cloud.zed.dev",
-            "https://staging.zed.dev" => "https://llm-staging.zed.dev",
+            "https://backboard.io" => "https://cloud.backboard.io",
+            "https://staging.backboard.io" => "https://llm-staging.backboard.io",
             "http://localhost:3000" => "http://localhost:8787",
             other => other,
         };

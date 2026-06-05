@@ -4,7 +4,7 @@ description = "Model Context Protocol Server for Figma"
 version = "0.2.0"
 schema_version = 1
 authors = ["Jeffrey Guenther <guenther.jeffrey@gmail.com>"]
-repository = "https://github.com/LoamStudios/zed-mcp-server-figma"
+repository = "https://app.backboard.io"
 
 [context_servers.mcp-server-figma]
 name = "Framelink Figma MCP Server"

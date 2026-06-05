@@ -9,7 +9,7 @@ pub trait ToLspPosition {
 
 /// Context provided to LSP adapters when a user responds to a ShowMessageRequest prompt.
 /// This allows adapters to intercept preference selections (like "Always" or "Never")
-/// and potentially persist them to Zed's settings.
+/// and potentially persist them to Backboard's settings.
 #[derive(Debug, Clone)]
 pub struct PromptResponseContext {
     /// The original message shown to the user

@@ -5,14 +5,14 @@ description: "Configure OCaml language support in Backboard Studio, including la
 
 # OCaml
 
-OCaml support is available through the [OCaml extension](https://github.com/zed-extensions/ocaml).
+OCaml support is available through the [OCaml extension](https://github.com/backboard-extensions/ocaml).
 
 - Tree-sitter: [tree-sitter/tree-sitter-ocaml](https://github.com/tree-sitter/tree-sitter-ocaml)
 - Language Server: [ocaml/ocaml-lsp](https://github.com/ocaml/ocaml-lsp)
 
 ## Setup Instructions
 
-If you have the development environment already setup, you can skip to [Launching Backboard Studio](#launching-zed)
+If you have the development environment already setup, you can skip to [Launching Backboard Studio](#launching-backboard)
 
 ### Using Opam
 
@@ -35,7 +35,7 @@ With that aside, we can now launch Backboard Studio. Given how the OCaml package
 Once you have the cli, simply from a terminal, navigate to your project and run
 
 ```sh
-zed .
+backboard .
 ```
 
 You should now have Backboard Studio running with OCaml support, with no additional setup required.

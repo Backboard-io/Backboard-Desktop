@@ -5,7 +5,7 @@ description: "Configure C# language support in Backboard Studio, including langu
 
 # C#
 
-C# support is available through the [C# extension](https://github.com/zed-extensions/csharp).
+C# support is available through the [C# extension](https://github.com/backboard-extensions/csharp).
 
 - Tree-sitter: [tree-sitter/tree-sitter-c-sharp](https://github.com/tree-sitter/tree-sitter-c-sharp)
 - Language Servers:

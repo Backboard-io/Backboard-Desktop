@@ -18,22 +18,22 @@ To make the best use of these features, it helps to understand where Backboard S
 
 ## Where does Backboard Studio get its environment variables from?
 
-How Backboard Studio starts affects which environment variables it can use. That includes launching from the macOS Dock, a Linux window manager, or the `zed` CLI.
+How Backboard Studio starts affects which environment variables it can use. That includes launching from the macOS Dock, a Linux window manager, or the `backboard` CLI.
 
 ### Launched from the CLI
 
-If Backboard Studio is opened via the CLI (`zed`), it will inherit the environment variables from the surrounding shell session.
+If Backboard Studio is opened via the CLI (`backboard`), it will inherit the environment variables from the surrounding shell session.
 
 That means if you do
 
 ```
 $ export MY_ENV_VAR=hello
-$ zed .
+$ backboard .
 ```
 
 the environment variable `MY_ENV_VAR` is now available inside Backboard Studio. For example, in the built-in terminal.
 
-Starting with Backboard Studio 0.152.0, the CLI `zed` will _always_ pass along its environment to Backboard Studio, regardless of whether a Backboard Studio instance was previously running or not. Prior to Backboard Studio 0.152.0 this was not the case and only the first Backboard Studio instance would inherit the environment variables.
+Starting with Backboard Studio 0.152.0, the CLI `backboard` will _always_ pass along its environment to Backboard Studio, regardless of whether a Backboard Studio instance was previously running or not. Prior to Backboard Studio 0.152.0 this was not the case and only the first Backboard Studio instance would inherit the environment variables.
 
 ### Launched via window manager, Dock, or launcher
 

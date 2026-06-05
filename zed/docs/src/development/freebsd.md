@@ -1,6 +1,6 @@
 ---
 title: Building Backboard Studio for FreeBSD
-description: "Guide to building zed for freebsd for Backboard Studio development."
+description: "Guide to building backboard for freebsd for Backboard Studio development."
 ---
 
 # Building Backboard Studio for FreeBSD

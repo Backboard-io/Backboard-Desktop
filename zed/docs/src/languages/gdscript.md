@@ -5,8 +5,8 @@ description: "Configure GDScript language support in Backboard Studio, including
 
 # GDScript
 
-Godot [GDScript](https://gdscript.com/) language support in Backboard Studio is provided by the community-maintained [GDScript extension](https://github.com/GDQuest/zed-gdscript).
-Report issues to: [https://github.com/GDQuest/zed-gdscript/issues](https://github.com/GDQuest/zed-gdscript/issues)
+Godot [GDScript](https://gdscript.com/) language support in Backboard Studio is provided by the community-maintained [GDScript extension](https://github.com/GDQuest/backboard-gdscript).
+Report issues to: [https://github.com/GDQuest/backboard-gdscript/issues](https://github.com/GDQuest/backboard-gdscript/issues)
 
 - Tree-sitter: [PrestonKnopp/tree-sitter-gdscript](https://github.com/PrestonKnopp/tree-sitter-gdscript) and [PrestonKnopp/tree-sitter-godot-resource](https://github.com/PrestonKnopp/tree-sitter-godot-resource)
 - Language Server: [gdscript-language-server](https://github.com/godotengine/godot)
@@ -21,7 +21,7 @@ You will need:
 ## Setup
 
 1. Inside your Godot editor, open Editor Settings, look for `Text Editor -> External` and set the following options:
-   - Exec Path: `/path/to/zed`
+   - Exec Path: `/path/to/backboard`
    - Exec Flags: `{project} {file}:{line}:{col}`
    - Use External Editor: "✅ On"
 2. Open any \*.gd file through Godot and Backboard Studio will launch.

@@ -17,7 +17,7 @@ Navigating through the theme list by moving up and down will change the theme in
 
 You can find hundreds of different theme options in Backboard Studio's extensions store, which you can access via the command palette with {#action backboard::Extensions} or the [Backboard Studio website](https://app.backboard.io/extensions?filter=themes).
 
-Many popular themes have been ported to Backboard Studio, and if you're struggling to choose one, visit [zed-themes.com](https://zed-themes.com), a third-party gallery with visible previews for many of them.
+Many popular themes have been ported to Backboard Studio, and if you're struggling to choose one, visit [backboard-themes.com](https://backboard-themes.com), a third-party gallery with visible previews for many of them.
 
 ## Build Your Theme
 
@@ -113,7 +113,7 @@ For example, [assets/themes/one/one.json](https://github.com/backboard/ide/blob/
 
 ## Local Themes {#local-themes}
 
-Store new themes locally by placing them in the `~/.config/zed/themes` directory (macOS and Linux) or `%USERPROFILE%\AppData\Roaming\Backboard Studio\themes\` (Windows).
+Store new themes locally by placing them in the `~/.config/backboard/themes` directory (macOS and Linux) or `%USERPROFILE%\AppData\Roaming\Backboard Studio\themes\` (Windows).
 
 For example, to create a new theme called `my-cool-theme`, create a file called `my-cool-theme.json` in that directory.
 It will be available in the theme selector the next time Backboard Studio loads.

@@ -7,12 +7,12 @@ description: "Configure R language support in Backboard Studio, including langua
 
 R support is available via multiple R Backboard Studio extensions:
 
-- [ocsmit/zed-r](https://github.com/ocsmit/zed-r)
+- [ocsmit/backboard-r](https://github.com/ocsmit/backboard-r)
 
   - Tree-sitter: [r-lib/tree-sitter-r](https://github.com/r-lib/tree-sitter-r)
   - Language-Server: [REditorSupport/languageserver](https://github.com/REditorSupport/languageserver)
 
-- [posit-dev/air](https://github.com/posit-dev/air/tree/main/editors/zed)
+- [posit-dev/air](https://github.com/posit-dev/air/tree/main/editors/backboard)
   - Formatter: [posit-dev/air](https://posit-dev.github.io/air/)
 
 ## Installation
@@ -25,7 +25,7 @@ install.packages("languageserver")
 install.packages("lintr")
 ```
 
-3. Install the [R](https://github.com/ocsmit/zed-r) extension through Backboard Studio's extensions manager for basic R language support (syntax highlighting, tree-sitter support) and for [REditorSupport/languageserver](https://github.com/REditorSupport/languageserver) support.
+3. Install the [R](https://github.com/ocsmit/backboard-r) extension through Backboard Studio's extensions manager for basic R language support (syntax highlighting, tree-sitter support) and for [REditorSupport/languageserver](https://github.com/REditorSupport/languageserver) support.
 
 4. Install the [Air](https://posit-dev.github.io/air/) extension through Backboard Studio's extensions manager for R code formatting via Air.
 
@@ -57,9 +57,9 @@ See [Using lintr](https://lintr.r-lib.org/articles/lintr.html) for a complete li
 
 ### Air
 
-[Air](https://posit-dev.github.io/air/) provides code formatting for R, including support for format-on-save. The [Air documentation for Backboard Studio](https://posit-dev.github.io/air/editor-zed.html) contains the most up-to-date advice for running Air in Backboard Studio.
+[Air](https://posit-dev.github.io/air/) provides code formatting for R, including support for format-on-save. The [Air documentation for Backboard Studio](https://posit-dev.github.io/air/editor-backboard.html) contains the most up-to-date advice for running Air in Backboard Studio.
 
-Ensure that you have installed both the [ocsmit/zed-r](https://github.com/ocsmit/zed-r) extension (for general R language awareness in Backboard Studio) and the [Air](https://posit-dev.github.io/air/) extension.
+Ensure that you have installed both the [ocsmit/backboard-r](https://github.com/ocsmit/backboard-r) extension (for general R language awareness in Backboard Studio) and the [Air](https://posit-dev.github.io/air/) extension.
 
 Configure language servers in Settings ({#kb backboard::OpenSettings}) under Languages > R, or add to your settings file:
 
@@ -111,7 +111,7 @@ TBD: Get this working
 
 ### REditorSupport/languageserver Configuration
 
-You can configure the [R languageserver settings](https://github.com/REditorSupport/languageserver#settings) via Backboard Project Settings `.zed/settings.json` or Backboard Studio User Settings `~/.config/zed/settings.json`:
+You can configure the [R languageserver settings](https://github.com/REditorSupport/languageserver#settings) via Backboard Project Settings `.backboard/settings.json` or Backboard Studio User Settings `~/.config/backboard/settings.json`:
 
 For example to disable Lintr linting and suppress code snippet suggestions (both enabled by default):
 

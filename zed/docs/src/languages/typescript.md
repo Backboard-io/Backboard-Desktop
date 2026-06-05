@@ -250,7 +250,7 @@ Run {#action debugger::Start} ({#kb debugger::Start}) to see a contextual list o
 
 As for all languages, configurations from `.vscode/launch.json` are also available for debugging in Backboard Studio.
 
-If your use-case isn't covered by any of these, you can take full control by adding debug configurations to `.zed/debug.json`. See below for example configurations.
+If your use-case isn't covered by any of these, you can take full control by adding debug configurations to `.backboard/debug.json`. See below for example configurations.
 
 ### Configuring JavaScript debug tasks
 
@@ -270,8 +270,8 @@ Given an externally-ran web server (e.g., with `npx serve` or `npx live-server`)
     "type": "chrome",
     "request": "launch",
     "url": "http://localhost:5500",
-    "program": "$ZED_FILE",
-    "webRoot": "${ZED_WORKTREE_ROOT}",
+    "program": "$backboard_FILE",
+    "webRoot": "${backboard_WORKTREE_ROOT}",
     "build": {
       "command": "npx",
       "args": ["tsc"]

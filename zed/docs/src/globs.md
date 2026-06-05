@@ -63,7 +63,7 @@ Globs in Backboard Studio are case-sensitive, so `*.c` will not match `main.C` (
 
 ### Matching directories
 
-If you wanted to search the [zed repository](https://github.com/backboard/ide) for examples of [Configuring Language Servers](https://app.backboard.io/docs/configuring-languages#configuring-language-servers) (under `"lsp"` in Backboard Studio settings.json) you could search for `"lsp"` and in the "Include" filter specify `docs/**/*.md`. This would only match files whose path was under the `docs` directory or any nested subdirectories `**/` of that folder with a filename that ends in `.md`.
+If you wanted to search the [backboard repository](https://github.com/backboard/ide) for examples of [Configuring Language Servers](https://app.backboard.io/docs/configuring-languages#configuring-language-servers) (under `"lsp"` in Backboard Studio settings.json) you could search for `"lsp"` and in the "Include" filter specify `docs/**/*.md`. This would only match files whose path was under the `docs` directory or any nested subdirectories `**/` of that folder with a filename that ends in `.md`.
 
 If instead you wanted to restrict yourself only to [Backboard Studio Language-Specific Documentation](https://app.backboard.io/docs/languages) pages you could define a narrower pattern of: `docs/src/languages/*.md` this would match [`docs/src/languages/rust.md`](https://github.com/backboard/ide/blob/main/docs/src/languages/rust.md) and [`docs/src/languages/cpp.md`](https://github.com/backboard/ide/blob/main/docs/src/languages/cpp.md) but not [`docs/src/configuring-languages.md`](https://github.com/backboard/ide/blob/main/docs/src/configuring-languages.md).
 

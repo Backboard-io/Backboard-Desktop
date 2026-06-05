@@ -95,7 +95,7 @@ impl PythonDebugAdapter {
 
         let mut configuration = task_definition.config.clone();
         if let Ok(console) = configuration.dot_get_mut("console") {
-            // Use built-in Zed terminal if user did not explicitly provide a setting for console.
+            // Use built-in Backboard Studio terminal if user did not explicitly provide a setting for console.
             if console.is_null() {
                 *console = Value::String("integratedTerminal".into());
             }
@@ -558,7 +558,7 @@ impl DebugAdapter for PythonDebugAdapter {
                         "label": "Path mapping",
                         "properties": {
                             "localRoot": {
-                                "default": "${ZED_WORKTREE_ROOT}",
+                                "default": "${BACKBOARD_WORKTREE_ROOT}",
                                 "label": "Local source root.",
                                 "type": "string"
                             },
@@ -720,7 +720,7 @@ impl DebugAdapter for PythonDebugAdapter {
                                 ]
                             },
                             "cwd": {
-                                "default": "${ZED_WORKTREE_ROOT}",
+                                "default": "${BACKBOARD_WORKTREE_ROOT}",
                                 "description": "Absolute path to the working directory of the program being debugged. Default is the root directory of the file (leave empty).",
                                 "type": "string"
                             },
@@ -738,7 +738,7 @@ impl DebugAdapter for PythonDebugAdapter {
                                 "type": "object"
                             },
                             "envFile": {
-                                "default": "${ZED_WORKTREE_ROOT}/.env",
+                                "default": "${BACKBOARD_WORKTREE_ROOT}/.env",
                                 "description": "Absolute path to a file containing environment variable definitions.",
                                 "type": "string"
                             },
@@ -753,7 +753,7 @@ impl DebugAdapter for PythonDebugAdapter {
                                 "type": "string"
                             },
                             "program": {
-                                "default": "${ZED_FILE}",
+                                "default": "${BACKBOARD_FILE}",
                                 "description": "Absolute path to the program.",
                                 "type": "string"
                             },
@@ -854,7 +854,7 @@ impl DebugAdapter for PythonDebugAdapter {
             })
             .chain(
                 // While Debugpy's wiki saids absolute paths are required, but it actually supports relative paths when cwd is passed in.
-                // (Which should always be the case because Zed defaults to the cwd worktree root)
+                // (Which should always be the case because Backboard Studio defaults to the cwd worktree root)
                 // So we want to check that these relative paths find toolchains as well. Otherwise, they won't be checked
                 // because the strip prefix in the iteration above will return an error
                 config

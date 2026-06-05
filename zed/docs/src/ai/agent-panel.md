@@ -149,7 +149,7 @@ Copying an image and pasting it is also supported.
 
 Backboard Studio surfaces how many tokens you are consuming for your currently active thread near the profile selector in the panel's message editor.
 
-Once you approach the model's context window, a banner appears above the message editor suggesting to start a new thread with the current one summarized and added as context.
+Once you approach the model's context window, a banner appears above the message editor suggesting to start a new thread with the current one summaribackboard and added as context.
 You can also do this at any time with an ongoing thread via the "Agent Options" menu on the top right, where you'll see a "New from Summary" button, as well as simply @-mentioning a past thread in a new one..
 
 ## Changing Models {#changing-models}

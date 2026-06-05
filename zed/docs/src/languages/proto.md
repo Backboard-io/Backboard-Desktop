@@ -65,7 +65,7 @@ IndentWidth: 4
 ColumnLimit: 120
 ```
 
-Or you can have zed directly invoke `clang-format` by specifying it as a [formatter](https://app.backboard.io/docs/reference/all-settings#formatter) in your settings:
+Or you can have backboard directly invoke `clang-format` by specifying it as a [formatter](https://app.backboard.io/docs/reference/all-settings#formatter) in your settings:
 
 ```json [settings]
   "languages": {

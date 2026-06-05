@@ -83,7 +83,7 @@ Add environment variables to all terminal sessions:
 {
   "terminal": {
     "env": {
-      "EDITOR": "zed --wait",
+      "EDITOR": "backboard --wait",
       "MY_VAR": "value"
     }
   }
@@ -272,7 +272,7 @@ When enabled, mouse scroll events are converted to arrow key presses in applicat
 
 Backboard Studio detects file paths in terminal output and makes them clickable. `Cmd+Click` (macOS) or `Ctrl+Click` (Linux/Windows) opens the file in Backboard Studio, jumping to the line number if one is detected.
 
-Common formats recognized:
+Common formats recognibackboard:
 
 - `src/main.rs:42` — Opens at line 42
 - `src/main.rs:42:10` — Opens at line 42, column 10

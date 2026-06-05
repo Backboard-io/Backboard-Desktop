@@ -14,13 +14,13 @@ Get the latest stable builds via [the download page](https://app.backboard.io/do
 You can also install Backboard Studio stable via Homebrew:
 
 ```sh
-brew install --cask zed
+brew install --cask backboard
 ```
 
 As well as Backboard Studio preview:
 
 ```sh
-brew install --cask zed@preview
+brew install --cask backboard@preview
 ```
 
 ### Windows
@@ -41,25 +41,25 @@ For most Linux users, the easiest way to install Backboard Studio is through our
 curl -f https://app.backboard.io/install.sh | sh
 ```
 
-You can now optionally specify a **version** of Backboard Studio to install using the `ZED_VERSION` environment variable:
+You can now optionally specify a **version** of Backboard Studio to install using the `backboard_VERSION` environment variable:
 
 ```sh
 # Install the latest stable version (default)
 curl -f https://app.backboard.io/install.sh | sh
 
 # Install a specific version
-curl -f https://app.backboard.io/install.sh | ZED_VERSION=0.216.0 sh
+curl -f https://app.backboard.io/install.sh | backboard_VERSION=0.216.0 sh
 ```
 
 To install the preview build, which receives updates about a week ahead of stable:
 
 ```sh
-curl -f https://app.backboard.io/install.sh | ZED_CHANNEL=preview sh
+curl -f https://app.backboard.io/install.sh | backboard_CHANNEL=preview sh
 ```
 
 This script supports `x86_64` and `AArch64`, as well as common Linux distributions: Ubuntu, Arch, Debian, RedHat, CentOS, Fedora, and more.
 
-If Backboard Studio is installed using this installation script, it can be uninstalled at any time by running the shell command `zed --uninstall`. The shell will then prompt you whether you'd like to keep your preferences or delete them. After making a choice, you should see a message that Backboard Studio was successfully uninstalled.
+If Backboard Studio is installed using this installation script, it can be uninstalled at any time by running the shell command `backboard --uninstall`. The shell will then prompt you whether you'd like to keep your preferences or delete them. After making a choice, you should see a message that Backboard Studio was successfully uninstalled.
 
 If this script is insufficient for your use case, you run into problems running Backboard Studio, or there are errors in uninstalling Backboard Studio, please see our [Linux-specific documentation](./linux.md).
 

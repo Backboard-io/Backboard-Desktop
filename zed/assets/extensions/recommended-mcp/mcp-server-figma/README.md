@@ -4,8 +4,8 @@ This extension integrates [Framelink Figma MCP Server](https://github.com/GLips/
 as a context server for Backboard Studio's Agent Panel.
 
 To install navigate to: **Backboard Studio** > **Extensions**. Or use the command palette
-([macOS](https://github.com/zed-industries/zed/blob/main/assets/keymaps/default-macos.json#L581),
-[Linux](https://github.com/zed-industries/zed/blob/main/assets/keymaps/default-linux.json#L459))
+([macOS](https://github.com/backboard/ide/blob/main/assets/keymaps/default-macos.json#L581),
+[Linux](https://github.com/backboard/ide/blob/main/assets/keymaps/default-linux.json#L459))
 to search `extensions`.
 
 You'll need to grab a Figma access token for your account.

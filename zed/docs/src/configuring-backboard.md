@@ -30,8 +30,8 @@ Your user settings apply globally across all projects. Open the file with {#kb b
 
 The file is located at:
 
-- macOS: `~/.config/zed/settings.json`
-- Linux: `~/.config/zed/settings.json` (or `$XDG_CONFIG_HOME/zed/settings.json`)
+- macOS: `~/.config/backboard/settings.json`
+- Linux: `~/.config/backboard/settings.json` (or `$XDG_CONFIG_HOME/backboard/settings.json`)
 - Windows: `%APPDATA%\Backboard Studio\settings.json`
 
 The syntax is JSON with support for `//` comments.
@@ -42,12 +42,12 @@ To see all available settings with their default values, run {#action backboard:
 
 ### Project Settings
 
-Override user settings for a specific project by creating a `.zed/settings.json` file in your project root. Run {#action backboard::OpenProjectSettings} to create this file.
+Override user settings for a specific project by creating a `.backboard/settings.json` file in your project root. Run {#action backboard::OpenProjectSettings} to create this file.
 
 Project settings take precedence over user settings for that project only.
 
 ```json [settings]
-// .zed/settings.json
+// .backboard/settings.json
 {
   "tab_size": 2,
   "formatter": "prettier",
@@ -104,9 +104,9 @@ Changes made in the Settings Editor apply across all channels.
 Backboard Studio supports deep links that open specific settings directly:
 
 ```
-zed://settings/theme
-zed://settings/vim_mode
-zed://settings/buffer_font_size
+backboard://settings/theme
+backboard://settings/vim_mode
+backboard://settings/buffer_font_size
 ```
 
 These are useful for sharing configuration tips or linking from documentation.

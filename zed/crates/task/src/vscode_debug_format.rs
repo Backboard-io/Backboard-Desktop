@@ -129,7 +129,7 @@ mod tests {
         "#;
         let parsed: VsCodeDebugTaskFile =
             serde_json_lenient::from_str(raw).expect("deserializing launch.json");
-        let zed = DebugTaskFile::try_from(parsed).expect("converting to Zed debug templates");
+        let zed = DebugTaskFile::try_from(parsed).expect("converting to Backboard Studio debug templates");
         pretty_assertions::assert_eq!(
             zed,
             DebugTaskFile(vec![DebugScenario {
@@ -137,14 +137,14 @@ mod tests {
                 adapter: "JavaScript".into(),
                 config: json!({
                     "request": "launch",
-                    "program": "${ZED_WORKTREE_ROOT}/xyz.js",
+                    "program": "${BACKBOARD_WORKTREE_ROOT}/xyz.js",
                     "showDevDebugOutput": false,
                     "stopOnEntry": true,
                     "args": [
                         "--foo",
-                        "${ZED_WORKTREE_ROOT}/thing",
+                        "${BACKBOARD_WORKTREE_ROOT}/thing",
                     ],
-                    "cwd": "${ZED_WORKTREE_ROOT}/${FOO}/sub",
+                    "cwd": "${BACKBOARD_WORKTREE_ROOT}/${FOO}/sub",
                     "env": {
                         "X": "Y",
                     },
@@ -174,7 +174,7 @@ mod tests {
         "#;
         let parsed: VsCodeDebugTaskFile =
             serde_json_lenient::from_str(raw).expect("deserializing launch.json");
-        let zed = DebugTaskFile::try_from(parsed).expect("converting to Zed debug templates");
+        let zed = DebugTaskFile::try_from(parsed).expect("converting to Backboard Studio debug templates");
 
         let expected_placeholder = format!("${{{}}}", VariableName::PickProcessId);
         pretty_assertions::assert_eq!(

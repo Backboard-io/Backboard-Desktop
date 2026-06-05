@@ -1,4 +1,4 @@
-//! Provides access to Zed settings.
+//! Provides access to Backboard settings.
 
 #[path = "../wit/since_v0.8.0/settings.rs"]
 mod types;

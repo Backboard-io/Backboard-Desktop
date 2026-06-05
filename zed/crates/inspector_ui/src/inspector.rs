@@ -139,7 +139,7 @@ fn render_inspector_id(inspector_id: &InspectorElementId, cx: &App) -> Div {
                 .font_buffer(cx)
                 .text_xs()
                 .child(source_location_string)
-                .tooltip(Tooltip::text("Click to open by running Zed CLI"))
+                .tooltip(Tooltip::text("Click to open by running Backboard CLI"))
                 .on_click(move |_, _window, cx| {
                     cx.background_spawn(open_zed_source_location(source_location))
                         .detach_and_log_err(cx);
@@ -169,15 +169,15 @@ async fn open_zed_source_location(
         location.column()
     );
 
-    let output = new_command("zed")
+    let output = new_command("backboard")
         .arg(&path_arg)
         .output()
         .await
-        .with_context(|| format!("running zed to open {path_arg} failed"))?;
+        .with_context(|| format!("running Backboard CLI to open {path_arg} failed"))?;
 
     if !output.status.success() {
         Err(anyhow!(
-            "running zed to open {path_arg} failed with stderr: {}",
+            "running Backboard CLI to open {path_arg} failed with stderr: {}",
             String::from_utf8_lossy(&output.stderr)
         ))
     } else {

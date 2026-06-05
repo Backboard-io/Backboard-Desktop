@@ -248,7 +248,7 @@ async fn test_attach_with_pick_pid_variable(executor: BackgroundExecutor, cx: &m
 
     assert!(
         attach_modal.is_some(),
-        "Attach modal should open when config contains ZED_PICK_PID"
+        "Attach modal should open when config contains BACKBOARD_PICK_PID"
     );
 
     let attach_modal = attach_modal.unwrap();

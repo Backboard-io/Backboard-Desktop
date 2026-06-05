@@ -5,7 +5,7 @@ Backboard Studio's Agent Panel.
 
 To install navigate to: **Backboard Studio** > **Extensions**. Or use the command palette to search `extensions`.
 
-You'll need to [create a PAT with `repo` permissions](https://github.com/settings/tokens/new?description=zed-mcp-server-github&scopes=repo).
+You'll need to [create a PAT with `repo` permissions](https://github.com/settings/tokens/new?description=backboard-mcp-server-github&scopes=repo).
 
 ```json
 "context_servers": {

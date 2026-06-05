@@ -5,8 +5,8 @@ description: "Configure Fish language support in Backboard Studio, including lan
 
 # Fish
 
-Fish language support in Backboard Studio is provided by the community-maintained [Fish extension](https://github.com/hasit/zed-fish).
-Report issues to: [https://github.com/hasit/zed-fish/issues](https://github.com/hasit/zed-fish/issues)
+Fish language support in Backboard Studio is provided by the community-maintained [Fish extension](https://github.com/hasit/backboard-fish).
+Report issues to: [https://github.com/hasit/backboard-fish/issues](https://github.com/hasit/backboard-fish/issues)
 
 - Tree-sitter: [ram02z/tree-sitter-fish](https://github.com/ram02z/tree-sitter-fish)
 

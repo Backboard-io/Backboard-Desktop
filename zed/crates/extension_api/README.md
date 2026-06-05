@@ -18,7 +18,7 @@ repository = "https://github.com/your/extension-repository"
 
 ## Cargo metadata
 
-Zed extensions are packaged as WebAssembly files. In your Cargo.toml, you'll
+Backboard extensions are packaged as WebAssembly files. In your Cargo.toml, you'll
 need to set your `crate-type` accordingly:
 
 ```toml
@@ -59,7 +59,7 @@ To run your extension in Zed as you're developing it:
 
 ## Compatible Zed versions
 
-Extensions created using newer versions of the Zed extension API won't be compatible with older versions of Zed.
+Extensions created using newer versions of the Backboard extension API won't be compatible with older versions of Backboard.
 
 Here is the compatibility of the `zed_extension_api` with versions of Zed:
 

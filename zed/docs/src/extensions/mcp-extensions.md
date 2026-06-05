@@ -19,13 +19,13 @@ Each MCP server must be registered in the `extension.toml`:
 Then, in the Rust code for your extension, implement the `context_server_command` method on your extension:
 
 ```rust
-impl zed::Extension for MyExtension {
+impl backboard::Extension for MyExtension {
     fn context_server_command(
         &mut self,
         context_server_id: &ContextServerId,
-        project: &zed::Project,
-    ) -> Result<zed::Command> {
-        Ok(zed::Command {
+        project: &backboard::Project,
+    ) -> Result<backboard::Command> {
+        Ok(backboard::Command {
             command: get_path_to_context_server_executable()?,
             args: get_args_for_context_server()?,
             env: get_env_for_context_server()?,

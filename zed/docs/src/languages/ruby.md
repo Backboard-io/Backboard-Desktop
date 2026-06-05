@@ -5,7 +5,7 @@ description: "Configure Ruby language support in Backboard Studio, including lan
 
 # Ruby
 
-Ruby support is available through the [Ruby extension](https://github.com/zed-extensions/ruby).
+Ruby support is available through the [Ruby extension](https://github.com/backboard-extensions/ruby).
 
 - Tree-sitters:
   - [tree-sitter-ruby](https://github.com/tree-sitter/tree-sitter-ruby)
@@ -39,7 +39,7 @@ When configuring a language server, it helps to open the LSP Logs window using t
 
 ## Configuring a language server
 
-The [Ruby extension](https://github.com/zed-extensions/ruby) offers both `solargraph` and `ruby-lsp` language server support.
+The [Ruby extension](https://github.com/backboard-extensions/ruby) offers both `solargraph` and `ruby-lsp` language server support.
 
 ### Language Server Activation
 
@@ -169,7 +169,7 @@ You can pass Ruby LSP configuration to `initialization_options`, e.g.
 
 For full configuration options, see the [Ruby LSP website](https://shopify.github.io/ruby-lsp/editors.html).
 
-LSP `settings` and `initialization_options` can also be project-specific. For example to use [standardrb/standard](https://github.com/standardrb/standard) as a formatter and linter for a particular project, add this to a `.zed/settings.json` inside your project repo:
+LSP `settings` and `initialization_options` can also be project-specific. For example to use [standardrb/standard](https://github.com/standardrb/standard) as a formatter and linter for a particular project, add this to a `.backboard/settings.json` inside your project repo:
 
 ```json [settings]
 {
@@ -302,22 +302,22 @@ end
 
 ## Running tests
 
-To run tests in your Ruby project, you can set up custom tasks in your local `.zed/tasks.json` configuration file. These tasks can be defined to work with different test frameworks like Minitest, RSpec, quickdraw, and tldr. Below are some examples of how to set up these tasks to run your tests from within your editor.
+To run tests in your Ruby project, you can set up custom tasks in your local `.backboard/tasks.json` configuration file. These tasks can be defined to work with different test frameworks like Minitest, RSpec, quickdraw, and tldr. Below are some examples of how to set up these tasks to run your tests from within your editor.
 
 ### Minitest with Rails
 
 ```json [tasks]
 [
   {
-    "label": "test $ZED_RELATIVE_FILE -n /$ZED_CUSTOM_RUBY_TEST_NAME/",
+    "label": "test $backboard_RELATIVE_FILE -n /$backboard_CUSTOM_RUBY_TEST_NAME/",
     "command": "bin/rails",
     "args": [
       "test",
-      "$ZED_RELATIVE_FILE",
+      "$backboard_RELATIVE_FILE",
       "-n",
-      "\"$ZED_CUSTOM_RUBY_TEST_NAME\""
+      "\"$backboard_CUSTOM_RUBY_TEST_NAME\""
     ],
-    "cwd": "$ZED_WORKTREE_ROOT",
+    "cwd": "$backboard_WORKTREE_ROOT",
     "tags": ["ruby-test"]
   }
 ]
@@ -325,22 +325,22 @@ To run tests in your Ruby project, you can set up custom tasks in your local `.z
 
 ### Minitest
 
-Plain minitest does not support running tests by line number, only by name, so we need to use `$ZED_CUSTOM_RUBY_TEST_NAME` instead:
+Plain minitest does not support running tests by line number, only by name, so we need to use `$backboard_CUSTOM_RUBY_TEST_NAME` instead:
 
 ```json [tasks]
 [
   {
-    "label": "-Itest $ZED_RELATIVE_FILE -n /$ZED_CUSTOM_RUBY_TEST_NAME/",
+    "label": "-Itest $backboard_RELATIVE_FILE -n /$backboard_CUSTOM_RUBY_TEST_NAME/",
     "command": "bundle",
     "args": [
       "exec",
       "ruby",
       "-Itest",
-      "$ZED_RELATIVE_FILE",
+      "$backboard_RELATIVE_FILE",
       "-n",
-      "\"$ZED_CUSTOM_RUBY_TEST_NAME\""
+      "\"$backboard_CUSTOM_RUBY_TEST_NAME\""
     ],
-    "cwd": "$ZED_WORKTREE_ROOT",
+    "cwd": "$backboard_WORKTREE_ROOT",
     "tags": ["ruby-test"]
   }
 ]
@@ -351,10 +351,10 @@ Plain minitest does not support running tests by line number, only by name, so w
 ```json [tasks]
 [
   {
-    "label": "test $ZED_RELATIVE_FILE:$ZED_ROW",
+    "label": "test $backboard_RELATIVE_FILE:$backboard_ROW",
     "command": "bundle",
-    "args": ["exec", "rspec", "\"$ZED_RELATIVE_FILE:$ZED_ROW\""],
-    "cwd": "$ZED_WORKTREE_ROOT",
+    "args": ["exec", "rspec", "\"$backboard_RELATIVE_FILE:$backboard_ROW\""],
+    "cwd": "$backboard_WORKTREE_ROOT",
     "tags": ["ruby-test"]
   }
 ]
@@ -376,8 +376,8 @@ The Ruby extension provides a debug adapter for debugging Ruby code. Backboard S
     "label": "Debug current file",
     "adapter": "rdbg",
     "request": "launch",
-    "script": "$ZED_FILE",
-    "cwd": "$ZED_WORKTREE_ROOT"
+    "script": "$backboard_FILE",
+    "cwd": "$backboard_WORKTREE_ROOT"
   }
 ]
 ```
@@ -392,7 +392,7 @@ The Ruby extension provides a debug adapter for debugging Ruby code. Backboard S
     "request": "launch",
     "command": "./bin/rails",
     "args": ["server"],
-    "cwd": "$ZED_WORKTREE_ROOT",
+    "cwd": "$backboard_WORKTREE_ROOT",
     "env": {
       "RUBY_DEBUG_OPEN": "true"
     }

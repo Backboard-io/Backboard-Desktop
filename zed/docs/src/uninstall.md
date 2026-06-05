@@ -23,13 +23,13 @@ If you installed Backboard Studio by downloading it from the website:
 If you installed Backboard Studio using Homebrew, use the following command:
 
 ```sh
-brew uninstall --cask zed
+brew uninstall --cask backboard
 ```
 
 Or for the preview version:
 
 ```sh
-brew uninstall --cask zed@preview
+brew uninstall --cask backboard@preview
 ```
 
 ### Removing User Data (Optional)
@@ -44,7 +44,7 @@ To completely remove all Backboard Studio configuration files and data:
    - `~/Library/Logs/Backboard Studio`
    - `~/Library/Caches/io.backboard.Studio`
    - `~/Library/Caches/Backboard Studio`
-   - `~/.config/zed`
+   - `~/.config/backboard`
    - `~/.local/state/Backboard Studio`
 
 ## Linux
@@ -54,21 +54,21 @@ To completely remove all Backboard Studio configuration files and data:
 If Backboard Studio was installed using the default installation script, run:
 
 ```sh
-zed --uninstall
+backboard --uninstall
 ```
 
 You'll be prompted whether to keep or delete your preferences. After making a choice, you should see a message that Backboard Studio was successfully uninstalled.
 
-If the `zed` command is not found in your PATH, try:
+If the `backboard` command is not found in your PATH, try:
 
 ```sh
-$HOME/.local/bin/zed --uninstall
+$HOME/.local/bin/backboard --uninstall
 ```
 
 or:
 
 ```sh
-$HOME/.local/zed.app/bin/zed --uninstall
+$HOME/.local/backboard.app/bin/backboard --uninstall
 ```
 
 ### Package Manager
@@ -79,9 +79,9 @@ If you installed Backboard Studio using a package manager (such as Flatpak, Snap
 
 If the uninstall command fails or Backboard Studio was installed to a custom location, you can manually remove:
 
-- Installation directory: `~/.local/zed.app` (or your custom installation path)
-- Binary symlink: `~/.local/bin/zed`
-- Configuration and data: `~/.config/zed`
+- Installation directory: `~/.local/backboard.app` (or your custom installation path)
+- Binary symlink: `~/.local/bin/backboard`
+- Configuration and data: `~/.config/backboard`
 
 ## Windows
 

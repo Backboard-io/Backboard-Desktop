@@ -115,7 +115,7 @@ impl From<IconName> for Icon {
 /// The source of an icon.
 #[derive(Clone)]
 enum IconSource {
-    /// An SVG embedded in the Zed binary.
+    /// An SVG embedded in the Backboard binary.
     Embedded(SharedString),
     /// An image file located at the specified path.
     ///
@@ -123,7 +123,7 @@ enum IconSource {
     ///
     /// In order to support icon themes, we render the icons as images instead.
     External(Arc<Path>),
-    /// An SVG not embedded in the Zed binary.
+    /// An SVG not embedded in the Backboard binary.
     ExternalSvg(SharedString),
 }
 

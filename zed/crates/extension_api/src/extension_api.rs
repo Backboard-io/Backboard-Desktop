@@ -1,4 +1,4 @@
-//! The Zed Rust Extension API allows you write extensions for [Zed](https://zed.dev/) in Rust.
+//! The Backboard Rust Extension API allows you write extensions for Backboard in Rust.
 
 pub mod http_client;
 pub mod process;
@@ -54,7 +54,7 @@ pub mod lsp {
     };
 }
 
-/// A result returned from a Zed extension.
+/// A result returned from a Backboard extension.
 pub type Result<T, E = String> = core::result::Result<T, E>;
 
 /// Updates the installation status for the given language server.
@@ -65,7 +65,7 @@ pub fn set_language_server_installation_status(
     wit::set_language_server_installation_status(&language_server_id.0, status)
 }
 
-/// A Zed extension.
+/// A Backboard extension.
 pub trait Extension: Send + Sync {
     /// Returns a new instance of the extension.
     fn new() -> Self
@@ -245,10 +245,10 @@ pub trait Extension: Send + Sync {
         Err("`dap_config_to_scenario` not implemented".to_string())
     }
 
-    /// Locators are entities that convert a Zed task into a debug scenario.
+    /// Locators are entities that convert a Backboard task into a debug scenario.
     ///
     /// They can be provided even by extensions that don't provide a debug adapter.
-    /// For all tasks applicable to a given buffer, Zed will query all locators to find one that can turn the task into a debug scenario.
+    /// For all tasks applicable to a given buffer, Backboard will query all locators to find one that can turn the task into a debug scenario.
     /// A converted debug scenario can include a build task (it shouldn't contain any configuration in such case); a build task result will later
     /// be resolved with [`Extension::run_dap_locator`].
     ///
@@ -283,7 +283,7 @@ pub trait Extension: Send + Sync {
     }
 }
 
-/// Registers the provided type as a Zed extension.
+/// Registers the provided type as a Backboard extension.
 ///
 /// The type must implement the [`Extension`] trait.
 #[macro_export]

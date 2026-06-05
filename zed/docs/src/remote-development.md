@@ -29,7 +29,7 @@ On your local machine, Backboard Studio runs its UI, talks to language models, u
 1. Once the Backboard Studio server is running, you will be prompted to choose a path to open on the remote server.
    > **Note:** Backboard Studio does not currently handle opening very large directories (for example, `/` or `~` that may have >100,000 files) very well. We are working on improving this, but suggest in the meantime opening only specific projects, or subfolders of very large mono-repos.
 
-For simple cases where you don't need any SSH arguments, you can run `zed ssh://[<user>@]<host>[:<port>]/<path>` to open a remote folder/file directly. If you'd like to hotlink into an SSH project, use a link of the format: `zed://ssh/[<user>@]<host>[:<port>]/<path>`.
+For simple cases where you don't need any SSH arguments, you can run `backboard ssh://[<user>@]<host>[:<port>]/<path>` to open a remote folder/file directly. If you'd like to hotlink into an SSH project, use a link of the format: `backboard://ssh/[<user>@]<host>[:<port>]/<path>`.
 
 ## Supported platforms
 
@@ -48,7 +48,7 @@ The list of remote servers is stored in your settings file {#kb backboard::OpenS
   "ssh_connections": [
     {
       "host": "192.168.1.10",
-      "projects": [{ "paths": ["~/code/zed/zed"] }]
+      "projects": [{ "paths": ["~/code/backboard/backboard"] }]
     }
   ]
 }
@@ -61,7 +61,7 @@ Backboard Studio shells out to the `ssh` on your path, and so it will inherit an
   "ssh_connections": [
     {
       "host": "192.168.1.10",
-      "projects": [{ "paths": ["~/code/zed/zed"] }],
+      "projects": [{ "paths": ["~/code/backboard/backboard"] }],
       // any argument to pass to the ssh master process
       "args": ["-i", "~/.ssh/work_id_file"],
       "port": 22, // defaults to 22
@@ -79,7 +79,7 @@ There are two additional Backboard Studio-specific options per connection, `uplo
   "ssh_connections": [
     {
       "host": "192.168.1.10",
-      "projects": [{ "paths": ["~/code/zed/zed"] }],
+      "projects": [{ "paths": ["~/code/backboard/backboard"] }],
       // by default Backboard Studio will download the server binary from the internet on the remote.
       // When this is true, it'll be downloaded to your laptop and uploaded over SSH.
       // This is useful when your remote server has restricted internet access.
@@ -91,9 +91,9 @@ There are two additional Backboard Studio-specific options per connection, `uplo
 }
 ```
 
-If you use the command line to open a connection to a host by doing `zed ssh://192.168.1.10/~/.vimrc`, then extra options are read from your settings file by finding the first connection that matches the host/username/port of the URL on the command line.
+If you use the command line to open a connection to a host by doing `backboard ssh://192.168.1.10/~/.vimrc`, then extra options are read from your settings file by finding the first connection that matches the host/username/port of the URL on the command line.
 
-Additionally it's worth noting that while you can pass a password on the command line `zed ssh://user:password@host/~`, we do not support writing a password to your settings file. If you're connecting repeatedly to the same host, you should configure key-based authentication.
+Additionally it's worth noting that while you can pass a password on the command line `backboard ssh://user:password@host/~`, we do not support writing a password to your settings file. If you're connecting repeatedly to the same host, you should configure key-based authentication.
 
 ## Remote Development on Windows (SSH)
 
@@ -176,9 +176,9 @@ These ports also default to the `localhost` interface on the remote host. If you
 
 When opening a remote project there are three relevant settings locations:
 
-- The local Backboard Studio settings (in `~/.zed/settings.json` on macOS or `~/.config/zed/settings.json` on Linux) on your local machine.
+- The local Backboard Studio settings (in `~/.backboard/settings.json` on macOS or `~/.config/backboard/settings.json` on Linux) on your local machine.
 - The server Backboard Studio settings (in the same place) on the remote server.
-- The project settings (in `.zed/settings.json` or `.editorconfig` of your project)
+- The project settings (in `.backboard/settings.json` or `.editorconfig` of your project)
 
 Both the local Backboard Studio and the server Backboard Studio read the project settings, but they are not aware of the other's main settings file.
 
@@ -204,7 +204,7 @@ export https_proxy="http://proxy.example.com:8080"
 export no_proxy="localhost,127.0.0.1"
 ```
 
-Alternatively, you can configure the proxy in the remote machine's `~/.config/zed/settings.json` (Linux) or `~/.zed/settings.json` (macOS):
+Alternatively, you can configure the proxy in the remote machine's `~/.config/backboard/settings.json` (Linux) or `~/.backboard/settings.json` (macOS):
 
 ```json
 {
@@ -220,15 +220,15 @@ Once you provide the SSH options, Backboard Studio shells out to `ssh` on your l
 
 Any prompts that SSH needs will be shown in the UI, so you can verify host keys, type key passwords, etc.
 
-Once the master connection is established, Backboard Studio will check to see if the remote server binary is present in `~/.zed_server` on the remote, and that its version matches the current version of Backboard Studio that you're using.
+Once the master connection is established, Backboard Studio will check to see if the remote server binary is present in `~/.backboard_server` on the remote, and that its version matches the current version of Backboard Studio that you're using.
 
 If it is not there or the version mismatches, Backboard Studio will try to download the latest version. By default, it will download from `https://app.backboard.io` directly, but if you set: `{"upload_binary_over_ssh":true}` in your settings for that server, it will download the binary to your local machine and then upload it to the remote server.
 
-If you'd like to maintain the server binary yourself you can. You can either download our prebuilt versions from [GitHub](https://github.com/backboard/ide/releases), or [build your own](https://app.backboard.io/docs/development) with `cargo build -p remote_server --release`. If you do this, you must upload it to `~/.zed_server/zed-remote-server-{RELEASE_CHANNEL}-{VERSION}` on the server, for example `~/.zed_server/zed-remote-server-stable-0.217.3+stable.105.80433cb239e868271457ac376673a5f75bc4adb1`. The version must exactly match the version of Backboard Studio itself you are using.
+If you'd like to maintain the server binary yourself you can. You can either download our prebuilt versions from [GitHub](https://github.com/backboard/ide/releases), or [build your own](https://app.backboard.io/docs/development) with `cargo build -p remote_server --release`. If you do this, you must upload it to `~/.backboard_server/backboard-remote-server-{RELEASE_CHANNEL}-{VERSION}` on the server, for example `~/.backboard_server/backboard-remote-server-stable-0.217.3+stable.105.80433cb239e868271457ac376673a5f75bc4adb1`. The version must exactly match the version of Backboard Studio itself you are using.
 
 ## Maintaining the SSH connection
 
-Once the server is initialized. Backboard Studio will create new SSH connections (reusing the existing ControlMaster) to run the remote development server.
+Once the server is initialibackboard. Backboard Studio will create new SSH connections (reusing the existing ControlMaster) to run the remote development server.
 
 Each connection tries to run the development server in proxy mode. This mode will start the daemon if it is not running, and reconnect to it if it is. This way when your connection drops and is restarted, you can continue to work without interruption.
 
@@ -256,7 +256,7 @@ Note that we deliberately disallow some options (for example `-t` or `-T`) that 
 
 ## Known Limitations
 
-- You can't open files from the remote Terminal by typing the `zed` command.
+- You can't open files from the remote Terminal by typing the `backboard` command.
 
 ## See also
 
@@ -265,8 +265,8 @@ Note that we deliberately disallow some options (for example `-t` or `-T`) that 
 - [Git Worktrees](./git.md#git-worktrees): Create and switch between linked
   Git worktrees. Backboard Studio supports the worktree picker in remote projects when the
   remote connection is active.
-- [Configuring Backboard Studio](./configuring-zed.md): Manage shared and project settings,
-  including `.zed/settings.json`.
+- [Configuring Backboard Studio](./configuring-backboard.md): Manage shared and project settings,
+  including `.backboard/settings.json`.
 - [Agent Panel](./ai/agent-panel.md): Use AI workflows in remote projects.
 - [Remote Development on app.backboard.io](https://app.backboard.io/remote-development): Product
   overview and release updates.

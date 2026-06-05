@@ -40,7 +40,7 @@ Anything that you end up doing on the keymap editor also gets reflected on the `
 
 The keymap file is stored in the following locations for each platform:
 
-- macOS/Linux: `~/.config/zed/keymap.json`
+- macOS/Linux: `~/.config/backboard/keymap.json`
 - Windows: `~\AppData\Roaming\Backboard Studio/keymap.json`
 
 You can open the keymap with the {#action backboard::OpenKeymapFile} action from the command palette.
@@ -281,7 +281,7 @@ There are some limitations to this, notably:
 - Other examples of asynchronous things are: opening the command palette, communicating with a language server, changing the language of a buffer, anything that hits the network.
 - There is a limit of 100 simulated keys at a time.
 
-The argument to `SendKeystrokes` is a space-separated list of keystrokes (using the same syntax as above). Due to the way that keystrokes are parsed, any segment that is not recognized as a keypress will be sent verbatim to the currently focused input field.
+The argument to `SendKeystrokes` is a space-separated list of keystrokes (using the same syntax as above). Due to the way that keystrokes are parsed, any segment that is not recognibackboard as a keypress will be sent verbatim to the currently focused input field.
 
 If the argument to `SendKeystrokes` contains the binding used to trigger it, it will use the next-highest-precedence definition of that binding. This allows you to extend the default behavior of a key binding.
 

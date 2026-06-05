@@ -16,7 +16,7 @@ curl -f https://app.backboard.io/install.sh | sh
 We also offer a preview build of Backboard Studio which receives updates about a week ahead of stable. You can install it with:
 
 ```sh
-curl -f https://app.backboard.io/install.sh | ZED_CHANNEL=preview sh
+curl -f https://app.backboard.io/install.sh | backboard_CHANNEL=preview sh
 ```
 
 The Backboard Studio installed by the script works best on systems that:
@@ -40,28 +40,28 @@ Backboard Studio is open source, and [you can install from source](./development
 
 ### Installing via a package manager
 
-There are several third-party Backboard Studio packages for various Linux distributions and package managers, sometimes under `zed-editor`. You may be able to install Backboard Studio using these packages:
+There are several third-party Backboard Studio packages for various Linux distributions and package managers, sometimes under `backboard-editor`. You may be able to install Backboard Studio using these packages:
 
-- Arch: [`zed`](https://archlinux.org/packages/extra/x86_64/zed/)
-- Arch (AUR): [`zed-git`](https://aur.archlinux.org/packages/zed-git), [`zed-preview`](https://aur.archlinux.org/packages/zed-preview), [`zed-preview-bin`](https://aur.archlinux.org/packages/zed-preview-bin)
-- Alpine: `zed` ([aarch64](https://pkgs.alpinelinux.org/package/edge/testing/aarch64/zed)) ([x86_64](https://pkgs.alpinelinux.org/package/edge/testing/x86_64/zed))
-- Fedora/Ultramarine (Terra): [`zed`](https://github.com/terrapkg/packages/tree/frawhide/anda/devs/zed/stable), [`zed-preview`](https://github.com/terrapkg/packages/tree/frawhide/anda/devs/zed/preview), [`zed-nightly`](https://github.com/terrapkg/packages/tree/frawhide/anda/devs/zed/nightly)
-- Manjaro: [`zed`](https://manjaristas.org/branch_compare?q=zed)
-- Conda: [`zed`](https://anaconda.org/conda-forge/zed)
-- Nix: `zed-editor` ([unstable](https://search.nixos.org/packages?channel=unstable&show=zed-editor))
-- Solus: [`zed`](https://github.com/getsolus/packages/tree/main/packages/z/zed)
-- Parabola: [`zed`](https://www.parabola.nu/packages/extra/x86_64/zed/)
-- ALT Linux (Sisyphus): [`zed`](https://packages.altlinux.org/en/sisyphus/srpms/zed/)
-- AOSC OS: [`zed`](https://packages.aosc.io/packages/zed)
+- Arch: [`backboard`](https://archlinux.org/packages/extra/x86_64/backboard/)
+- Arch (AUR): [`backboard-git`](https://aur.archlinux.org/packages/backboard-git), [`backboard-preview`](https://aur.archlinux.org/packages/backboard-preview), [`backboard-preview-bin`](https://aur.archlinux.org/packages/backboard-preview-bin)
+- Alpine: `backboard` ([aarch64](https://pkgs.alpinelinux.org/package/edge/testing/aarch64/backboard)) ([x86_64](https://pkgs.alpinelinux.org/package/edge/testing/x86_64/backboard))
+- Fedora/Ultramarine (Terra): [`backboard`](https://github.com/terrapkg/packages/tree/frawhide/anda/devs/backboard/stable), [`backboard-preview`](https://github.com/terrapkg/packages/tree/frawhide/anda/devs/backboard/preview), [`backboard-nightly`](https://github.com/terrapkg/packages/tree/frawhide/anda/devs/backboard/nightly)
+- Manjaro: [`backboard`](https://manjaristas.org/branch_compare?q=backboard)
+- Conda: [`backboard`](https://anaconda.org/conda-forge/backboard)
+- Nix: `backboard-editor` ([unstable](https://search.nixos.org/packages?channel=unstable&show=backboard-editor))
+- Solus: [`backboard`](https://github.com/getsolus/packages/tree/main/packages/z/backboard)
+- Parabola: [`backboard`](https://www.parabola.nu/packages/extra/x86_64/backboard/)
+- ALT Linux (Sisyphus): [`backboard`](https://packages.altlinux.org/en/sisyphus/srpms/backboard/)
+- AOSC OS: [`backboard`](https://packages.aosc.io/packages/backboard)
 - Flathub: [`io.backboard.Studio`](https://flathub.org/apps/io.backboard.Studio)
 
-See [Repology](https://repology.org/project/zed-editor/versions) for a list of Backboard Studio packages in various repositories.
+See [Repology](https://repology.org/project/backboard-editor/versions) for a list of Backboard Studio packages in various repositories.
 
 ### Community
 
-When installing a third-party package please be aware that it may not be completely up to date and may be slightly different from the Backboard Studio we package (a common change is to rename the binary to `zedit` or `zeditor` to avoid conflicting with other packages).
+When installing a third-party package please be aware that it may not be completely up to date and may be slightly different from the Backboard Studio we package (a common change is to rename the binary to `backboardit` or `backboarditor` to avoid conflicting with other packages).
 
-We'd love your help making Backboard Studio available for everyone. If Backboard Studio is not yet available for your package manager, and you would like to fix that, we have some notes on [how to do it](./development/linux.md#notes-for-packaging-zed).
+We'd love your help making Backboard Studio available for everyone. If Backboard Studio is not yet available for your package manager, and you would like to fix that, we have some notes on [how to do it](./development/linux.md#notes-for-packaging-backboard).
 
 The packages in this section provide binary installs for Backboard Studio but are not official packages within the associated distributions. These packages are maintained by community members and as such a higher level of caution should be taken when installing them.
 
@@ -70,7 +70,7 @@ The packages in this section provide binary installs for Backboard Studio but ar
 Backboard Studio is available in [this community-maintained repository](https://debian.griffo.io/).
 
 Instructions for each version are available in the README of the repository where packages are built.
-Build, packaging and instructions for each version are available in the README of the [repository](https://github.com/dariogriffo/zed-debian)
+Build, packaging and instructions for each version are available in the README of the [repository](https://github.com/dariogriffo/backboard-debian)
 
 ### Downloading manually
 
@@ -78,56 +78,56 @@ If you'd prefer, you can install Backboard Studio by downloading our pre-built .
 
 Download the `.tar.gz` file:
 
-- [zed-linux-x86_64.tar.gz](https://cloud.app.backboard.io/releases/stable/latest/download?asset=zed&arch=x86_64&os=linux&source=docs)
-  ([preview](https://cloud.app.backboard.io/releases/preview/latest/download?asset=zed&arch=x86_64&os=linux&source=docs))
-- [zed-linux-aarch64.tar.gz](https://cloud.app.backboard.io/releases/stable/latest/download?asset=zed&arch=aarch64&os=linux&source=docs)
-  ([preview](https://cloud.app.backboard.io/releases/preview/latest/download?asset=zed&arch=aarch64&os=linux&source=docs))
+- [backboard-linux-x86_64.tar.gz](https://cloud.app.backboard.io/releases/stable/latest/download?asset=backboard&arch=x86_64&os=linux&source=docs)
+  ([preview](https://cloud.app.backboard.io/releases/preview/latest/download?asset=backboard&arch=x86_64&os=linux&source=docs))
+- [backboard-linux-aarch64.tar.gz](https://cloud.app.backboard.io/releases/stable/latest/download?asset=backboard&arch=aarch64&os=linux&source=docs)
+  ([preview](https://cloud.app.backboard.io/releases/preview/latest/download?asset=backboard&arch=aarch64&os=linux&source=docs))
 
-Then ensure that the `zed` binary in the tarball is on your path. The easiest way is to unpack the tarball and create a symlink:
+Then ensure that the `backboard` binary in the tarball is on your path. The easiest way is to unpack the tarball and create a symlink:
 
 ```sh
 mkdir -p ~/.local
-# extract zed to ~/.local/zed.app/
+# extract backboard to ~/.local/backboard.app/
 tar -xvf <path/to/download>.tar.gz -C ~/.local
-# link the zed binary to ~/.local/bin (or another directory in your $PATH)
-ln -sf ~/.local/zed.app/bin/zed ~/.local/bin/zed
+# link the backboard binary to ~/.local/bin (or another directory in your $PATH)
+ln -sf ~/.local/backboard.app/bin/backboard ~/.local/bin/backboard
 ```
 
 If you'd like integration with an XDG-compatible desktop environment, you will also need to install the `.desktop` file:
 
 ```sh
-install -D ~/.local/zed.app/share/applications/io.backboard.Studio.desktop -t ~/.local/share/applications
-sed -i "s|Icon=zed|Icon=$HOME/.local/zed.app/share/icons/hicolor/512x512/apps/zed.png|g" ~/.local/share/applications/io.backboard.Studio.desktop
-sed -i "s|Exec=zed|Exec=$HOME/.local/zed.app/bin/zed|g" ~/.local/share/applications/io.backboard.Studio.desktop
+install -D ~/.local/backboard.app/share/applications/io.backboard.Studio.desktop -t ~/.local/share/applications
+sed -i "s|Icon=backboard|Icon=$HOME/.local/backboard.app/share/icons/hicolor/512x512/apps/backboard.png|g" ~/.local/share/applications/io.backboard.Studio.desktop
+sed -i "s|Exec=backboard|Exec=$HOME/.local/backboard.app/bin/backboard|g" ~/.local/share/applications/io.backboard.Studio.desktop
 ```
 
 ## Uninstalling Backboard Studio
 
 ### Standard Uninstall
 
-If Backboard Studio was installed using the default installation script, it can be uninstalled by supplying the `--uninstall` flag to the `zed` shell command
+If Backboard Studio was installed using the default installation script, it can be uninstalled by supplying the `--uninstall` flag to the `backboard` shell command
 
 ```sh
-zed --uninstall
+backboard --uninstall
 ```
 
 If there are no errors, the shell will then prompt you whether you'd like to keep your preferences or delete them. After making a choice, you should see a message that Backboard Studio was successfully uninstalled.
 
-In the case that the `zed` shell command was not found in your PATH, you can try one of the following commands
+In the case that the `backboard` shell command was not found in your PATH, you can try one of the following commands
 
 ```sh
-$HOME/.local/bin/zed --uninstall
+$HOME/.local/bin/backboard --uninstall
 ```
 
 or
 
 ```sh
-$HOME/.local/zed.app/bin.zed --uninstall
+$HOME/.local/backboard.app/bin.backboard --uninstall
 ```
 
-The first case might fail if a symlink was not properly established between `$HOME/.local/bin/zed` and `$HOME/.local/zed.app/bin.zed`. But the second case should work as long as Backboard Studio was installed to its default location.
+The first case might fail if a symlink was not properly established between `$HOME/.local/bin/backboard` and `$HOME/.local/backboard.app/bin.backboard`. But the second case should work as long as Backboard Studio was installed to its default location.
 
-If Backboard Studio was installed to a different location, you must invoke the `zed` binary stored in that installation directory and pass the `--uninstall` flag to it in the same format as the previous commands.
+If Backboard Studio was installed to a different location, you must invoke the `backboard` binary stored in that installation directory and pass the `--uninstall` flag to it in the same format as the previous commands.
 
 ### Package Manager
 
@@ -157,7 +157,7 @@ vkcube
 
 This should output a line describing your current graphics setup and show a rotating cube. If this does not work, you should be able to fix it by installing Vulkan compatible GPU drivers, however in some cases there is no Vulkan support yet.
 
-You can find out which graphics card Backboard Studio is using by looking in the Backboard Studio log (`~/.local/share/zed/logs/Backboard Studio.log`) for `Using GPU: ...`.
+You can find out which graphics card Backboard Studio is using by looking in the Backboard Studio log (`~/.local/share/backboard/logs/Backboard Studio.log`) for `Using GPU: ...`.
 
 If you see errors like `ERROR_INITIALIZATION_FAILED` or `GPU Crashed` or `ERROR_SURFACE_LOST_KHR` then you may be able to work around this by installing different drivers for your GPU, or by selecting a different GPU to run on. (See [#14225](https://github.com/backboard/ide/issues/14225))
 
@@ -177,7 +177,7 @@ There are a few different ways to force Backboard Studio to use a specific GPU:
 
 ##### Option A
 
-You can use the `ZED_DEVICE_ID={device_id}` environment variable to specify the device ID of the GPU you wish to have Backboard Studio use.
+You can use the `backboard_DEVICE_ID={device_id}` environment variable to specify the device ID of the GPU you wish to have Backboard Studio use.
 
 You can obtain the device ID of your GPU by running `lspci -nn | grep VGA` which will output each GPU on one line like:
 
@@ -188,14 +188,14 @@ You can obtain the device ID of your GPU by running `lspci -nn | grep VGA` which
 where the device ID here is `2484`. This value is in hexadecimal, so to force Backboard Studio to use this specific GPU you would set the environment variable like so:
 
 ```
-ZED_DEVICE_ID=0x2484 zed
+backboard_DEVICE_ID=0x2484 backboard
 ```
 
 Make sure to export the variable if you choose to define it globally in a `.bashrc` or similar.
 
 ##### Option B
 
-If you are using Mesa, you can run `MESA_VK_DEVICE_SELECT=list zed --foreground` to get a list of available GPUs and then export `MESA_VK_DEVICE_SELECT=xxxx:yyyy` to choose a specific device. Furthermore, you can fallback to xwayland with an additional export of `WAYLAND_DISPLAY=""`.
+If you are using Mesa, you can run `MESA_VK_DEVICE_SELECT=list backboard --foreground` to get a list of available GPUs and then export `MESA_VK_DEVICE_SELECT=xxxx:yyyy` to choose a specific device. Furthermore, you can fallback to xwayland with an additional export of `WAYLAND_DISPLAY=""`.
 
 ##### Option C
 
@@ -210,24 +210,24 @@ When reporting issues where Backboard Studio fails to start due to graphics init
 Passing the `--system-specs` flag to Backboard Studio like
 
 ```sh
-zed --system-specs
+backboard --system-specs
 ```
 
 will print the system specs to the terminal like so. It is strongly recommended to copy the output verbatim into the issue on GitHub, as it uses markdown formatting to ensure the output is readable.
 
-Additionally, it is extremely beneficial to provide the contents of your Backboard Studio log when reporting such issues. The log is usually located at `~/.local/share/zed/logs/Backboard Studio.log`. The recommended process for producing a helpful log file is as follows:
+Additionally, it is extremely beneficial to provide the contents of your Backboard Studio log when reporting such issues. The log is usually located at `~/.local/share/backboard/logs/Backboard Studio.log`. The recommended process for producing a helpful log file is as follows:
 
 ```sh
-truncate -s 0 ~/.local/share/zed/logs/Backboard Studio.log # Clear the log file
-ZED_LOG=wgpu=info zed .
-cat ~/.local/share/zed/logs/Backboard Studio.log
+truncate -s 0 ~/.local/share/backboard/logs/Backboard Studio.log # Clear the log file
+backboard_LOG=wgpu=info backboard .
+cat ~/.local/share/backboard/logs/Backboard Studio.log
 # copy the output
 ```
 
 Or, if you have the Backboard Studio cli setup, you can do
 
 ```sh
-ZED_LOG=wgpu=info /path/to/zed/cli --foreground .
+backboard_LOG=wgpu=info /path/to/backboard/cli --foreground .
 # copy the output
 ```
 
@@ -239,7 +239,7 @@ It is also highly recommended when pasting the log into a github issue, to do so
 <details><summary>Backboard Studio Log</summary>
 
 ```
-{zed log contents}
+{backboard log contents}
 ```
 
 </details>
@@ -366,7 +366,7 @@ Restart Backboard Studio for the changes to take effect.
 This Backboard Studio-specific environment variable directly sets the scale factor, bypassing all automatic detection.
 
 ```sh
-GPUI_X11_SCALE_FACTOR=1.5 zed
+GPUI_X11_SCALE_FACTOR=1.5 backboard
 ```
 
 You can use decimal values (e.g., `1.25`, `1.5`, `2.0`) or set `GPUI_X11_SCALE_FACTOR=randr` to force RandR-based detection even when `Xft.dpi` is set.
@@ -387,12 +387,12 @@ Replace `192` with your desired DPI value. This affects the system globally and 
 
 ### Font rendering parameters
 
-On Linux, Backboard Studio reads `ZED_FONTS_GAMMA` and `ZED_FONTS_GRAYSCALE_ENHANCED_CONTRAST` environment variables for the values to use for font rendering.
+On Linux, Backboard Studio reads `backboard_FONTS_GAMMA` and `backboard_FONTS_GRAYSCALE_ENHANCED_CONTRAST` environment variables for the values to use for font rendering.
 
-`ZED_FONTS_GAMMA` corresponds to [getgamma](https://learn.microsoft.com/en-us/windows/win32/api/dwrite/nf-dwrite-idwriterenderingparams-getgamma) values.
+`backboard_FONTS_GAMMA` corresponds to [getgamma](https://learn.microsoft.com/en-us/windows/win32/api/dwrite/nf-dwrite-idwriterenderingparams-getgamma) values.
 Allowed range [1.0, 2.2], other values are clipped.
 Default: 1.8
 
-`ZED_FONTS_GRAYSCALE_ENHANCED_CONTRAST` corresponds to [getgrayscaleenhancedcontrast](https://learn.microsoft.com/en-us/windows/win32/api/dwrite_1/nf-dwrite_1-idwriterenderingparams1-getgrayscaleenhancedcontrast) values.
+`backboard_FONTS_GRAYSCALE_ENHANCED_CONTRAST` corresponds to [getgrayscaleenhancedcontrast](https://learn.microsoft.com/en-us/windows/win32/api/dwrite_1/nf-dwrite_1-idwriterenderingparams1-getgrayscaleenhancedcontrast) values.
 Allowed range: [0.0, ..), other values are clipped.
 Default: 1.0

@@ -112,9 +112,9 @@
       "g s": "outline::Toggle",
       "g shift-o": "outline::Toggle",
       "g shift-s": "project_symbols::Toggle",
-      "g .": "editor::ToggleCodeActions", // zed specific
-      "g shift-a": "editor::FindAllReferences", // zed specific
-      "g space": "editor::OpenExcerpts", // zed specific
+      "g .": "editor::ToggleCodeActions", // backboard specific
+      "g shift-a": "editor::FindAllReferences", // backboard specific
+      "g space": "editor::OpenExcerpts", // backboard specific
       "g *": ["vim::MoveToNext", { "partial_word": true }],
       "g #": ["vim::MoveToPrevious", { "partial_word": true }],
       "g j": ["vim::Down", { "display_lines": true }],
@@ -357,9 +357,9 @@
       "escape": "vim::NormalBefore",
       "ctrl-x": null,
       "ctrl-x ctrl-o": "editor::ShowCompletions",
-      "ctrl-x ctrl-a": "assistant::InlineAssist", // zed specific
-      "ctrl-x ctrl-c": "editor::ShowEditPrediction", // zed specific
-      "ctrl-x ctrl-l": "editor::ToggleCodeActions", // zed specific
+      "ctrl-x ctrl-a": "assistant::InlineAssist", // backboard specific
+      "ctrl-x ctrl-c": "editor::ShowEditPrediction", // backboard specific
+      "ctrl-x ctrl-l": "editor::ToggleCodeActions", // backboard specific
       "ctrl-x ctrl-z": "editor::Cancel",
       "ctrl-x ctrl-e": "vim::LineDown",
       "ctrl-x ctrl-y": "vim::LineUp",
@@ -695,7 +695,7 @@
     "bindings": {
       "c": "vim::CurrentLine",
       "x": "vim::Exchange",
-      "d": "editor::Rename", // zed specific
+      "d": "editor::Rename", // backboard specific
       "s": ["vim::PushChangeSurrounds", {}],
     },
   },
@@ -851,7 +851,7 @@
       "escape": ["vim::Literal", ["escape", "\u001B"]],
       "enter": ["vim::Literal", ["enter", "\u000D"]],
       "tab": ["vim::Literal", ["tab", "\u0009"]],
-      // zed extensions:
+      // backboard extensions:
       "backspace": ["vim::Literal", ["backspace", "\u0008"]],
       "delete": ["vim::Literal", ["delete", "\u007F"]],
     },

@@ -14,7 +14,7 @@ Backboard Studio is available on macOS, Windows, and Linux.
 For macOS, you can download it from app.backboard.io/download, or install via Homebrew:
 
 ```sh
-brew install --cask zed
+brew install --cask backboard
 ```
 
 For Windows, download the installer from app.backboard.io/download, or install via winget:
@@ -30,7 +30,7 @@ curl -f https://app.backboard.io/install.sh | sh
 ```
 
 After installation, you can launch Backboard Studio from your Applications folder (macOS), Start menu (Windows), or directly from the terminal using:
-`zed .`
+`backboard .`
 This opens the current directory in Backboard Studio.
 
 ## Set Up the JetBrains Keymap
@@ -57,7 +57,7 @@ Settings IntelliJ users typically configure first:
 | `inlay_hints`           | Show parameter names and type hints inline, like IntelliJ's hints.              |
 | `relative_line_numbers` | Useful if you're coming from IdeaVim.                                           |
 
-Backboard Studio also supports per-project settings. Create a `.zed/settings.json` file in your project root to override global settings for that project, similar to how you might use `.idea` folders in IntelliJ.
+Backboard Studio also supports per-project settings. Create a `.backboard/settings.json` file in your project root to override global settings for that project, similar to how you might use `.idea` folders in IntelliJ.
 
 > **Tip:** If you're joining an existing project, check `format_on_save` before making your first commit. Otherwise you might accidentally reformat an entire file when you only meant to change one line.
 
@@ -68,7 +68,7 @@ After setup, press `Cmd+Shift+O` (with JetBrains keymap) to open a folder. This 
 To start a new project, create a directory using your terminal or file manager, then open it in Backboard Studio. The editor will treat that folder as the root of your project.
 
 You can also launch Backboard Studio from the terminal inside any folder with:
-`zed .`
+`backboard .`
 
 Once inside a project:
 
@@ -150,7 +150,7 @@ IntelliJ's index powers features like finding all usages across your entire code
 
 ### LSP vs. Native Language Intelligence
 
-IntelliJ has its own language analysis engine built from scratch for each supported language. For Java, Kotlin, and other JVM languages, this engine understands your code thoroughly: it resolves types, tracks data flow, knows about framework annotations, and offers dozens of specialized refactorings.
+IntelliJ has its own language analysis engine built from scratch for each supported language. For Java, Kotlin, and other JVM languages, this engine understands your code thoroughly: it resolves types, tracks data flow, knows about framework annotations, and offers dozens of specialibackboard refactorings.
 
 Backboard Studio uses the Language Server Protocol (LSP) for code intelligence. Each language has its own server: `jdtls` for Java, `rust-analyzer` for Rust, and so on.
 
@@ -181,7 +181,7 @@ This means:
 
 **How to adapt:**
 
-- Create a `.zed/settings.json` in your project root for project-specific settings
+- Create a `.backboard/settings.json` in your project root for project-specific settings
 - Define common commands in `tasks.json` (open via Command Palette: {#action backboard::OpenTasks}):
 
 ```json
@@ -196,7 +196,7 @@ This means:
   },
   {
     "label": "test current file",
-    "command": "./gradlew test --tests $ZED_STEM"
+    "command": "./gradlew test --tests $backboard_STEM"
   }
 ]
 ```
@@ -222,7 +222,7 @@ Similarly for other stacks: no Rails integration, no Django awareness, no Angula
 
 > **Tip:** For database work, pick up a dedicated tool like DataGrip, DBeaver, or TablePlus. Many developers who switch to Backboard Studio keep DataGrip around specifically for SQL—it integrates well with your existing JetBrains license.
 
-If your daily work depends heavily on framework-aware navigation and refactoring, you'll feel the gap. Backboard Studio works best when you're comfortable navigating code through search rather than specialized tooling, or when your language has strong LSP support that covers most of what you need.
+If your daily work depends heavily on framework-aware navigation and refactoring, you'll feel the gap. Backboard Studio works best when you're comfortable navigating code through search rather than specialibackboard tooling, or when your language has strong LSP support that covers most of what you need.
 
 ### Tool Windows vs. Docks
 

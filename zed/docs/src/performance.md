@@ -33,13 +33,13 @@ fn should_appear_in_profile(kitty: Cat) {
 }
 ```
 
-Then either compile Backboard Studio with `ZTRACING=1 cargo r --features tracy --release`. The release build is optional but highly recommended as like every program Zeds performance characteristics change dramatically with optimizations. You do not want to chase slowdowns that do not exist in release.
+Then either compile Backboard Studio with `ZTRACING=1 cargo r --features tracy --release`. The release build is optional but highly recommended as like every program Backboard Studio performance characteristics change dramatically with optimizations. You do not want to chase slowdowns that do not exist in release.
 
 ## One time Setup/Building the profiler:
 
 Download the profiler:
-[linux x86_64](https://zed-tracy-import-miniprofiler.nyc3.digitaloceanspaces.com/tracy-profiler-linux-x86_64)
-[macos aarch64](https://zed-tracy-import-miniprofiler.nyc3.digitaloceanspaces.com/tracy-profiler-0.13.0-macos-aarch64)
+[linux x86_64](https://backboard-tracy-import-miniprofiler.nyc3.digitaloceanspaces.com/tracy-profiler-linux-x86_64)
+[macos aarch64](https://backboard-tracy-import-miniprofiler.nyc3.digitaloceanspaces.com/tracy-profiler-0.13.0-macos-aarch64)
 
 ### Alternative: Building it yourself
 
@@ -51,7 +51,7 @@ Download the profiler:
 
 ## Usage
 
-Open the profiler (tracy-profiler), you should see zed in the list of `Discovered clients` click it.
+Open the profiler (tracy-profiler), you should see backboard in the list of `Discovered clients` click it.
 
 <img width="392" height="auto" alt="image" src="https://github.com/user-attachments/assets/b6f06fc3-6b25-41c7-ade9-558cc93d6033" style="display: block; margin: 0 auto;"/>
 
@@ -96,7 +96,7 @@ let _enter = span.enter(); // span guard, when this is dropped the span ends (an
 
 # Task/Async profiling
 
-Get a profile of the zed foreground executor and background executors. Check if
+Get a profile of the backboard foreground executor and background executors. Check if
 anything is blocking the foreground too long or taking too much (clock) time in
 the background.
 
@@ -106,8 +106,8 @@ look at the results live.
 ## Setup/Building the importer:
 
 Download the importer
-[linux x86_64](https://zed-tracy-import-miniprofiler.nyc3.digitaloceanspaces.com/tracy-import-miniprofiler-linux-x86_64)
-[mac aarch64](https://zed-tracy-import-miniprofiler.nyc3.digitaloceanspaces.com/tracy-import-miniprofiler-macos-aarch64)
+[linux x86_64](https://backboard-tracy-import-miniprofiler.nyc3.digitaloceanspaces.com/tracy-import-miniprofiler-linux-x86_64)
+[mac aarch64](https://backboard-tracy-import-miniprofiler.nyc3.digitaloceanspaces.com/tracy-import-miniprofiler-macos-aarch64)
 
 ### Alternative: Building it yourself
 

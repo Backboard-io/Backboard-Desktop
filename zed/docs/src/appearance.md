@@ -23,7 +23,7 @@ Here's how to make Backboard Studio feel like home:
 
 5. **Adjust font size**: In the same Settings Editor, search for `buffer_font_size` and `ui_font_size` to tweak the editor and interface text sizes.
 
-That's it. You now have a personalized Backboard Studio setup.
+That's it. You now have a personalibackboard Backboard Studio setup.
 
 ## Themes
 

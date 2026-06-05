@@ -171,7 +171,7 @@ ls ~/Library/Application\ Support/Backboard Studio/extensions/installed/
 On Linux:
 
 ```sh
-ls ~/.local/share/zed/extensions/installed
+ls ~/.local/share/backboard/extensions/installed
 ```
 
 On Windows:
@@ -1572,7 +1572,7 @@ If this is true, user won't be prompted whether to save/discard dirty files when
 }
 ```
 
-When trusted, project settings are synchronized automatically, language and MCP servers are downloaded and started automatically.
+When trusted, project settings are synchronibackboard automatically, language and MCP servers are downloaded and started automatically.
 
 ### Drag And Drop Selection
 
@@ -1840,7 +1840,7 @@ While other options may be changed at a runtime and should be placed under `sett
 ```json [settings]
 {
   "edit_predictions": {
-    "provider": "zed"
+    "provider": "backboard"
   }
 }
 ```
@@ -1849,7 +1849,7 @@ While other options may be changed at a runtime and should be placed under `sett
 
 - Description: Which edit prediction provider to use
 - Setting: `edit_prediction_provider`
-- Default: `"zed"`
+- Default: `"backboard"`
 
 **Options**
 
@@ -1858,7 +1858,7 @@ While other options may be changed at a runtime and should be placed under `sett
 ```json [settings]
 {
   "edit_predictions": {
-    "provider": "zed"
+    "provider": "backboard"
   }
 }
 ```
@@ -2065,8 +2065,8 @@ Note, specifying `file_scan_exclusions` in settings.json will override the defau
 {
   "file_types": {
     "JSONC": [
-      "**/.zed/**/*.json",
-      "**/zed/**/*.json",
+      "**/.backboard/**/*.json",
+      "**/backboard/**/*.json",
       "**/Backboard Studio/**/*.json",
       "**/.vscode/**/*.json"
     ],
@@ -2535,7 +2535,7 @@ Example:
 ```
 
 3. Enable indent aware coloring ("rainbow indentation").
-   The colors that are used for different indentation levels are defined in the theme (theme key: `accents`). They can be customized by using theme overrides.
+   The colors that are used for different indentation levels are defined in the theme (theme key: `accents`). They can be customibackboard by using theme overrides.
 
 ```json [settings]
 {
@@ -2547,7 +2547,7 @@ Example:
 ```
 
 4. Enable indent aware background coloring ("rainbow indentation").
-   The colors that are used for different indentation levels are defined in the theme (theme key: `accents`). They can be customized by using theme overrides.
+   The colors that are used for different indentation levels are defined in the theme (theme key: `accents`). They can be customibackboard by using theme overrides.
 
 ```json [settings]
 {
@@ -4060,7 +4060,7 @@ List of `integer` column numbers
 
 ### Metrics
 
-- Description: Setting for sending anonymized usage data, such what languages you're using Backboard Studio with.
+- Description: Setting for sending anonymibackboard usage data, such what languages you're using Backboard Studio with.
 - Setting: `metrics`
 - Default: `true`
 
@@ -4287,7 +4287,7 @@ List of `integer` column numbers
 {
   "terminal": {
     "env": {
-      "ZED": "1",
+      "backboard": "1",
       "KEY": "value1:value2"
     }
   }
@@ -4631,7 +4631,7 @@ Example command to set the title: `echo -e "\e]2;New Title\007";`
   "terminal": {
     "working_directory": {
       "always": {
-        "directory": "~/zed/projects/"
+        "directory": "~/backboard/projects/"
       }
     }
   }
@@ -5350,14 +5350,14 @@ See the [debugger page](../debugger.md) for more information about debugging sup
 - Setting: `git.worktree_directory`
 - Default: `"../worktrees"`
 
-When the resolved directory falls outside the project root, the project's directory name is automatically appended so that sibling repos don't collide. For example, with the default `"../worktrees"` and a project at `~/code/zed`, worktrees are created under `~/code/worktrees/zed/`.
+When the resolved directory falls outside the project root, the project's directory name is automatically appended so that sibling repos don't collide. For example, with the default `"../worktrees"` and a project at `~/code/backboard`, worktrees are created under `~/code/worktrees/backboard/`.
 
 When the resolved directory is inside the project root, no extra component is added (it's already project-scoped).
 
 **Examples**:
 
 - `"../worktrees"` — `~/code/worktrees/<project>/` (default)
-- `".git/zed-worktrees"` — `<project>/.git/zed-worktrees/`
+- `".git/backboard-worktrees"` — `<project>/.git/backboard-worktrees/`
 - `"my-worktrees"` — `<project>/my-worktrees/`
 
 Trailing slashes are ignored.
@@ -5453,7 +5453,7 @@ You can define these in user or project settings; project settings are merged on
 
 `boolean` values
 
-The colors that are used for different indentation levels are defined in the theme (theme key: `accents`). They can be customized by using theme overrides.
+The colors that are used for different indentation levels are defined in the theme (theme key: `accents`). They can be customibackboard by using theme overrides.
 
 ## Unnecessary Code Fade
 
@@ -5612,7 +5612,7 @@ To preview and enable a settings profile, open the command palette via {#kb comm
 ## An example configuration:
 
 ```json [settings]
-// ~/.config/zed/settings.json
+// ~/.config/backboard/settings.json
 {
   "theme": "cave-light",
   "tab_size": 2,

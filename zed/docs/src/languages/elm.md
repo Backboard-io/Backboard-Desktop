@@ -5,7 +5,7 @@ description: "Configure Elm language support in Backboard Studio, including lang
 
 # Elm
 
-Elm support is available through the [Elm extension](https://github.com/zed-extensions/elm).
+Elm support is available through the [Elm extension](https://github.com/backboard-extensions/elm).
 
 - Tree-sitter: [elm-tooling/tree-sitter-elm](https://github.com/elm-tooling/tree-sitter-elm)
 - Language Server: [elm-tooling/elm-language-server](https://github.com/elm-tooling/elm-language-server)

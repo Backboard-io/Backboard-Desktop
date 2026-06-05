@@ -251,8 +251,8 @@ pub fn init(client: Arc<Client>, cx: &mut App) {
             .map(|channel| channel.poll_for_updates())
             .unwrap_or(false);
 
-        if option_env!("ZED_UPDATE_EXPLANATION").is_none()
-            && env::var("ZED_UPDATE_EXPLANATION").is_err()
+        if option_env!("BACKBOARD_UPDATE_EXPLANATION").is_none()
+            && env::var("BACKBOARD_UPDATE_EXPLANATION").is_err()
             && poll_for_updates
         {
             let mut update_subscription = AutoUpdateSetting::get_global(cx)
@@ -277,9 +277,9 @@ pub fn init(client: Arc<Client>, cx: &mut App) {
 }
 
 pub fn check(_: &Check, window: &mut Window, cx: &mut App) {
-    if let Some(message) = option_env!("ZED_UPDATE_EXPLANATION")
+    if let Some(message) = option_env!("BACKBOARD_UPDATE_EXPLANATION")
         .map(ToOwned::to_owned)
-        .or_else(|| env::var("ZED_UPDATE_EXPLANATION").ok())
+        .or_else(|| env::var("BACKBOARD_UPDATE_EXPLANATION").ok())
     {
         drop(window.prompt(
             gpui::PromptLevel::Info,
@@ -877,7 +877,7 @@ fn bbide_update_manifest_url(
     }
 
     if let Some(manifest_url) = env::var("BBIDE_UPDATE_MANIFEST_URL")
-        .or_else(|_| env::var("ZED_UPDATE_MANIFEST_URL"))
+        .or_else(|_| env::var("BACKBOARD_UPDATE_MANIFEST_URL"))
         .ok()
         .map(|url| url.trim().to_string())
         .filter(|url| !url.is_empty())
@@ -886,7 +886,7 @@ fn bbide_update_manifest_url(
     }
 
     let manifest_base_url = env::var("BBIDE_UPDATE_MANIFEST_BASE_URL")
-        .or_else(|_| env::var("ZED_UPDATE_MANIFEST_BASE_URL"))
+        .or_else(|_| env::var("BACKBOARD_UPDATE_MANIFEST_BASE_URL"))
         .unwrap_or_else(|_| DEFAULT_BBIDE_UPDATE_MANIFEST_BASE_URL.to_string());
     let manifest_base_url = manifest_base_url.trim().trim_end_matches('/');
     if manifest_base_url.is_empty() {

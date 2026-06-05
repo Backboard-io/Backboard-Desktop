@@ -15,7 +15,7 @@ pub use crate::known_or_unknown::*;
 pub use crate::plan::*;
 pub use crate::timestamp::Timestamp;
 
-pub const ZED_SYSTEM_ID_HEADER_NAME: &str = "x-zed-system-id";
+pub const ZED_SYSTEM_ID_HEADER_NAME: &str = "x-backboard-system-id";
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct GetAuthenticatedUserResponse {

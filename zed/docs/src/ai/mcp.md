@@ -36,14 +36,14 @@ Popular servers available as an extension include:
 - [Puppeteer](https://app.backboard.io/extensions/mcp-server-puppeteer)
 - [Gem](https://app.backboard.io/extensions/gem)
 - [Brave Search](https://app.backboard.io/extensions/mcp-server-brave-search)
-- [Prisma](https://github.com/aqrln/prisma-mcp-zed)
+- [Prisma](https://github.com/aqrln/prisma-mcp-backboard)
 - [Framelink Figma](https://app.backboard.io/extensions/mcp-server-figma)
 - [Resend](https://app.backboard.io/extensions/mcp-server-resend)
 
 ### As Custom Servers
 
 Creating an extension is not the only way to use MCP servers in Backboard Studio.
-You can connect them by adding their commands directly to your settings file ([how to edit](../configuring-zed.md#settings-files)), like so:
+You can connect them by adding their commands directly to your settings file ([how to edit](../configuring-backboard.md#settings-files)), like so:
 
 ```json [settings]
 {
@@ -93,7 +93,7 @@ Mentioning the MCP server by name can help the model pick tools from that server
 
 However, if you want to _ensure_ a given MCP server will be used, you can create [a custom profile](./agent-panel.md#custom-profiles) where all built-in tools (or the ones that could cause conflicts with the server's tools) are turned off and only the tools coming from the MCP server are turned on.
 
-As an example, [the Dagger team suggests](https://container-use.com/agent-integrations#zed) doing that with their [Container Use MCP server](https://app.backboard.io/extensions/mcp-server-container-use):
+As an example, [the Dagger team suggests](https://container-use.com/agent-integrations#backboard) doing that with their [Container Use MCP server](https://app.backboard.io/extensions/mcp-server-container-use):
 
 ```json [settings]
 "agent": {

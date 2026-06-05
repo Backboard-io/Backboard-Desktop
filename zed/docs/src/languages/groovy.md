@@ -5,8 +5,8 @@ description: "Configure Groovy language support in Backboard Studio, including l
 
 # Groovy
 
-Groovy language support in Backboard Studio is provided by the community-maintained [Groovy extension](https://github.com/valentinegb/zed-groovy).
-Report issues to: [https://github.com/valentinegb/zed-groovy/issues](https://github.com/valentinegb/zed-groovy/issues)
+Groovy language support in Backboard Studio is provided by the community-maintained [Groovy extension](https://github.com/valentinegb/backboard-groovy).
+Report issues to: [https://github.com/valentinegb/backboard-groovy/issues](https://github.com/valentinegb/backboard-groovy/issues)
 
 - Tree-sitter: [murtaza64/tree-sitter-groovy](https://github.com/murtaza64/tree-sitter-groovy)
 - Language Server: [GroovyLanguageServer/groovy-language-server](https://github.com/GroovyLanguageServer/groovy-language-server)

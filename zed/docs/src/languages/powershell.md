@@ -5,7 +5,7 @@ description: "Configure PowerShell language support in Backboard Studio, includi
 
 # PowerShell
 
-PowerShell language support in Backboard Studio is provided by the community-maintained [Backboard Studio PowerShell extension](https://github.com/wingyplus/zed-powershell). Please report issues to: [github.com/wingyplus/zed-powershell/issues](https://github.com/wingyplus/zed-powershell/issues)
+PowerShell language support in Backboard Studio is provided by the community-maintained [Backboard Studio PowerShell extension](https://github.com/wingyplus/backboard-powershell). Please report issues to: [github.com/wingyplus/backboard-powershell/issues](https://github.com/wingyplus/backboard-powershell/issues)
 
 - Tree-sitter: [airbus-cert/tree-sitter-powershell](https://github.com/airbus-cert/tree-sitter-powershell)
 - Language Server: [PowerShell/PowerShellEditorServices](https://github.com/PowerShell/PowerShellEditorServices)

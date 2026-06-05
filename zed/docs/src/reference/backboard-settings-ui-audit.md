@@ -59,7 +59,7 @@ This is the current one-by-one decision list for the AI page. The visible page s
 
 | Setting | Path | Surface | Evidence | Decision |
 |---|---|---|---|---|
-| Disable AI | `disable_ai` | Internal global kill switch | Read by `crates/zed/src/zed.rs`, `crates/workspace/src/multi_workspace.rs`, `crates/project/src/context_server_store.rs`, and `crates/copilot/src/copilot.rs`. | Removed from user-facing AI page; keep parser/runtime support internally. |
+| Disable AI | `disable_ai` | Internal global kill switch | Read by `crates/backboard/src/backboard.rs`, `crates/workspace/src/multi_workspace.rs`, `crates/project/src/context_server_store.rs`, and `crates/copilot/src/copilot.rs`. | Removed from user-facing AI page; keep parser/runtime support internally. |
 | Threads Sidebar Side | `agent.sidebar_side` | Backboard side panel / thread sidebar | Read by `crates/workspace/src/multi_workspace.rs`, `crates/sidebar/src/sidebar.rs`, `crates/agent_ui/src/conversation_view.rs`, and `crates/agent_ui/src/threads_archive_view.rs`. | Keep public. |
 | Tool Permissions | `agent.tool_permissions` | Native agent workspace tool approvals | Rendered by `crates/settings_ui/src/pages/tool_permissions_setup.rs`; applied in agent tool permission flow. | Keep public. |
 | Single File Review | `agent.single_file_review` | Agent edit review UX | Read by `crates/agent_ui/src/agent_diff.rs`. | Keep public. |
@@ -88,7 +88,7 @@ This is the current one-by-one decision list for the AI page. The visible page s
 | Command palette | `lsp_tool::*` | Hidden from user view | Backboard edit predictions do not use LSP completions or language-server context. |
 | Keybindings editor | `lsp_tool::*` | Hidden from user view | The keybindings editor now applies the command palette visibility filter before listing mapped or unmapped actions. |
 | Command palette and keybindings editor | `collab::*`, `collab_panel::*`, `channel_modal::*`, `repl::*`, `journal::*`, `notebook::*`, `settings_profile_selector::*`, `feedback::*`, `remote_debug::*`, `dev::*` | Hidden from user view | These are removed, internal, Backboard Studio-specific, or non-Backboard product surfaces. |
-| Command palette and keybindings editor | `zed::...`, `zed_*::...` display labels | Reworded for Backboard | `command_palette::humanize_action_name` now renders these as Backboard-facing labels while retaining raw action IDs for keymap JSON compatibility. |
+| Command palette and keybindings editor | `backboard::...`, `backboard_*::...` display labels | Reworded for Backboard | `command_palette::humanize_action_name` now renders these as Backboard-facing labels while retaining raw action IDs for keymap JSON compatibility. |
 
 ## Pre-Cleanup User-Facing Inventory
 

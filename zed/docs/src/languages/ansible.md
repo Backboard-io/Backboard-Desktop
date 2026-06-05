@@ -5,7 +5,7 @@ description: "Configure Ansible language support in Backboard Studio, including 
 
 # Ansible
 
-Support for Ansible in Backboard Studio is provided via a community-maintained [Ansible extension](https://github.com/kartikvashistha/zed-ansible).
+Support for Ansible in Backboard Studio is provided via a community-maintained [Ansible extension](https://github.com/kartikvashistha/backboard-ansible).
 
 - Tree-sitter: [backboard/tree-sitter-yaml](https://github.com/backboard/tree-sitter-yaml)
 - Language Server: [ansible/vscode-ansible](https://github.com/ansible/vscode-ansible/tree/main/packages/ansible-language-server)
@@ -16,7 +16,7 @@ Support for Ansible in Backboard Studio is provided via a community-maintained [
 
 To avoid mishandling non-Ansible YAML files, the Ansible Language is not associated with any file extensions by default.
 
-To change this behavior, you can add a `"file_types"` section to Backboard Studio settings inside your project (`.zed/settings.json`) or your Backboard Studio user settings (`~/.config/zed/settings.json`) to match your folder/naming conventions. For example:
+To change this behavior, you can add a `"file_types"` section to Backboard Studio settings inside your project (`.backboard/settings.json`) or your Backboard Studio user settings (`~/.config/backboard/settings.json`) to match your folder/naming conventions. For example:
 
 ```json [settings]
 {

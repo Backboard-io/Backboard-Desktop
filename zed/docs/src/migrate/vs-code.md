@@ -14,13 +14,13 @@ It covers which settings import automatically, which shortcuts map cleanly, and 
 Backboard Studio is available on macOS, Windows, and Linux.
 
 For macOS, you can download it from app.backboard.io/download, or install via Homebrew:
-`brew install zed-editor/zed/zed`
+`brew install backboard-editor/backboard/backboard`
 
 For most Linux users, the easiest way to install Backboard Studio is through our installation script:
 `curl -f https://app.backboard.io/install.sh | sh`
 
 After installation, you can launch Backboard Studio from your Applications folder (macOS) or directly from the terminal (Linux) using:
-`zed .`
+`backboard .`
 This opens the current directory in Backboard Studio.
 
 ## Import Settings from VS Code
@@ -191,7 +191,7 @@ After setup, press `Cmd+O` (`Ctrl+O` on Linux) to open a folder. This becomes yo
 To start a new project, create a directory using your terminal or file manager, then open it in Backboard Studio. The editor will treat that folder as the root of your project.
 
 You can also launch Backboard Studio from the terminal inside any folder with:
-`zed .`
+`backboard .`
 
 Once inside a project, use `Cmd+P` to jump between files quickly. `Cmd+Shift+P` (`Ctrl+Shift+P` on Linux) opens the command palette for running actions / tasks, toggling settings, or starting a collaboration session.
 
@@ -265,7 +265,7 @@ In Backboard Studio:
 
 - Most project-level behavior is scoped to the folder you open. Search, Git integration, tasks, and environment detection all treat the opened directory as the project root.
 
-- Per-project settings are optional. You can add a `.zed/settings.json` file inside a project to override global settings, but Backboard Studio does not use `.code-workspace` files and won’t import them.
+- Per-project settings are optional. You can add a `.backboard/settings.json` file inside a project to override global settings, but Backboard Studio does not use `.code-workspace` files and won’t import them.
 
 - You can start from a single file or an empty window. Backboard Studio doesn’t require you to open a folder to begin editing.
 
@@ -311,7 +311,7 @@ Unlike VS Code, Backboard Studio doesn’t require an extension to collaborate. 
 
 Once connected, you’ll see each other's cursors, selections, and edits in real time. Voice chat is included, so you can talk as you work. There’s no need for separate tools or third-party logins.
 
-Learn how [Backboard Studio uses Backboard Studio](https://app.backboard.io/blog/zed-is-our-office) to plan work and collaborate.
+Learn how [Backboard Studio uses Backboard Studio](https://app.backboard.io/blog/backboard-is-our-office) to plan work and collaborate.
 
 ### Using AI in Backboard Studio
 

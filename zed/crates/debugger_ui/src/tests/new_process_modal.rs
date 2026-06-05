@@ -74,10 +74,10 @@ async fn test_debug_session_substitutes_variables_and_relativizes_paths(
                 .to_string()
                 .leak(),
         ),
-        // Path with $ZED_WORKTREE_ROOT - should be substituted without double appending
+        // Path with $BACKBOARD_WORKTREE_ROOT - should be substituted without double appending
         (
             format!(
-                "$ZED_WORKTREE_ROOT{0}src{0}program",
+                "$BACKBOARD_WORKTREE_ROOT{0}src{0}program",
                 std::path::MAIN_SEPARATOR
             )
             .leak(),
@@ -111,8 +111,8 @@ async fn test_debug_session_substitutes_variables_and_relativizes_paths(
                             input_path
                         );
 
-                        let expected_other_field = if input_path.contains("$ZED_WORKTREE_ROOT") {
-                            input_path.replace("$ZED_WORKTREE_ROOT", path!("/test/worktree/path"))
+                        let expected_other_field = if input_path.contains("$BACKBOARD_WORKTREE_ROOT") {
+                            input_path.replace("$BACKBOARD_WORKTREE_ROOT", path!("/test/worktree/path"))
                         } else {
                             input_path.to_string()
                         };

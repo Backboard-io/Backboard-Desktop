@@ -5,8 +5,8 @@ description: "Configure Nim language support in Backboard Studio, including lang
 
 # Nim
 
-Nim language support in Backboard Studio is provided by the community-maintained [Nim extension](https://github.com/foxoman/zed-nim).
-Report issues to: [https://github.com/foxoman/zed-nim/issues](https://github.com/foxoman/zed-nim/issues)
+Nim language support in Backboard Studio is provided by the community-maintained [Nim extension](https://github.com/foxoman/backboard-nim).
+Report issues to: [https://github.com/foxoman/backboard-nim/issues](https://github.com/foxoman/backboard-nim/issues)
 
 - Tree-sitter: [alaviss/tree-sitter-nim](https://github.com/alaviss/tree-sitter-nim)
 - Language Server: [nim-lang/langserver](https://github.com/nim-lang/langserver)

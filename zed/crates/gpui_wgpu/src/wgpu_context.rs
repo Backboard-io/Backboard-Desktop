@@ -48,13 +48,13 @@ impl WgpuContext {
         compositor_gpu: Option<CompositorGpuHint>,
         reject_software: bool,
     ) -> anyhow::Result<Self> {
-        let device_id_filter = match std::env::var("ZED_DEVICE_ID") {
+        let device_id_filter = match std::env::var("BACKBOARD_DEVICE_ID") {
             Ok(val) => parse_pci_id(&val)
-                .context("Failed to parse device ID from `ZED_DEVICE_ID` environment variable")
+                .context("Failed to parse device ID from `BACKBOARD_DEVICE_ID` environment variable")
                 .log_err(),
             Err(std::env::VarError::NotPresent) => None,
             err => {
-                err.context("Failed to read value of `ZED_DEVICE_ID` environment variable")
+                err.context("Failed to read value of `BACKBOARD_DEVICE_ID` environment variable")
                     .log_err();
                 None
             }
@@ -232,12 +232,12 @@ impl WgpuContext {
         }
 
         if let Some(device_id) = device_id_filter {
-            log::info!("ZED_DEVICE_ID filter: {:#06x}", device_id);
+            log::info!("BACKBOARD_DEVICE_ID filter: {:#06x}", device_id);
         }
 
         // Sort adapters into a single priority order. Tiers (from highest to lowest):
         //
-        // 1. ZED_DEVICE_ID match — explicit user override
+        // 1. BACKBOARD_DEVICE_ID match — explicit user override
         // 2. Compositor GPU match — the GPU the display server is rendering on
         // 3. Device type (Discrete > Integrated > Other > Virtual > Cpu).
         //    "Other" ranks above "Virtual" because OpenGL seems to count as "Other".

@@ -5,8 +5,8 @@ description: "Configure Scala language support in Backboard Studio, including la
 
 # Scala
 
-Scala language support in Backboard Studio is provided by the community-maintained [Scala extension](https://github.com/scalameta/metals-zed).
-Report issues to: [https://github.com/scalameta/metals-zed/issues](https://github.com/scalameta/metals-zed/issues)
+Scala language support in Backboard Studio is provided by the community-maintained [Scala extension](https://github.com/scalameta/metals-backboard).
+Report issues to: [https://github.com/scalameta/metals-backboard/issues](https://github.com/scalameta/metals-backboard/issues)
 
 - Tree-sitter: [tree-sitter/tree-sitter-scala](https://github.com/tree-sitter/tree-sitter-scala)
 - Language Server: [scalameta/metals](https://github.com/scalameta/metals)

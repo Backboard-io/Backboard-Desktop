@@ -115,7 +115,7 @@ See [gopls code lenses documentation](https://go.dev/gopls/codelenses) for more 
 
 Backboard Studio supports zero-configuration debugging of Go tests and entry points (`func main`) using Delve. Run {#action debugger::Start} ({#kb debugger::Start}) to see a contextual list of these preconfigured debug tasks.
 
-For more control, you can add debug configurations to `.zed/debug.json`. See below for examples.
+For more control, you can add debug configurations to `.backboard/debug.json`. See below for examples.
 
 - [Delve configuration documentation](https://github.com/go-delve/delve/blob/master/Documentation/api/dap/README.md#launch-and-attach-configurations)
 
@@ -128,7 +128,7 @@ To debug a specific package, you can do so by setting the Delve mode to "debug".
   {
     "label": "Go (Delve)",
     "adapter": "Delve",
-    "program": "$ZED_FILE",
+    "program": "$backboard_FILE",
     "request": "launch",
     "mode": "debug"
   },
@@ -160,7 +160,7 @@ The "program" is still the package name, and you can use the "buildFlags" to do 
     "program": ".",
     "buildFlags": ["-tags", "integration"]
     // To filter down to just the test your cursor is in:
-    // "args": ["-test.run", "$ZED_SYMBOL"]
+    // "args": ["-test.run", "$backboard_SYMBOL"]
   }
 ]
 ```
@@ -177,8 +177,8 @@ and the "build" command should build that.
     "adapter": "Delve",
     "request": "launch",
     "mode": "exec",
-    "program": "${ZED_WORKTREE_ROOT}/__debug_unit",
-    "args": ["-test.v", "-test.run=${ZED_SYMBOL}"],
+    "program": "${backboard_WORKTREE_ROOT}/__debug_unit",
+    "args": ["-test.v", "-test.run=${backboard_SYMBOL}"],
     "build": {
       "command": "go",
       "args": [
@@ -205,8 +205,8 @@ You might find yourself needing to connect to an existing instance of Delve that
   {
     "adapter": "Delve",
     "label": "Connect to a running Delve instance",
-    "program": "/Users/zed/Projects/language_repositories/golang/hello/hello",
-    "cwd": "/Users/zed/Projects/language_repositories/golang/hello",
+    "program": "/Users/backboard/Projects/language_repositories/golang/hello/hello",
+    "cwd": "/Users/backboard/Projects/language_repositories/golang/hello",
     "args": [],
     "env": {},
     "request": "launch",

@@ -141,24 +141,24 @@ impl OpenRequest {
 
         for url in request.urls {
             let url = normalize_backboard_url(url);
-            if let Some(server_name) = url.strip_prefix("zed-cli://") {
+            if let Some(server_name) = url.strip_prefix("backboard-cli://") {
                 this.kind = Some(OpenRequestKind::CliConnection(connect_to_cli(server_name)?));
-            } else if let Some(action_index) = url.strip_prefix("zed-dock-action://") {
+            } else if let Some(action_index) = url.strip_prefix("backboard-dock-action://") {
                 this.kind = Some(OpenRequestKind::DockMenuAction {
                     index: action_index.parse()?,
                 });
             } else if let Some(file) = url.strip_prefix("file://") {
                 this.parse_file_path(file)
-            } else if let Some(file) = url.strip_prefix("zed://file") {
+            } else if let Some(file) = url.strip_prefix("backboard://file") {
                 this.parse_file_path(file)
-            } else if let Some(file) = url.strip_prefix("zed://ssh") {
+            } else if let Some(file) = url.strip_prefix("backboard://ssh") {
                 let ssh_url = "ssh:/".to_string() + file;
                 this.parse_ssh_file_path(&ssh_url, cx)?
-            } else if let Some(extension_id) = url.strip_prefix("zed://extension/") {
+            } else if let Some(extension_id) = url.strip_prefix("backboard://extension/") {
                 this.kind = Some(OpenRequestKind::Extension {
                     extension_id: extension_id.to_string(),
                 });
-            } else if let Some(session_id_str) = url.strip_prefix("zed://agent/shared/") {
+            } else if let Some(session_id_str) = url.strip_prefix("backboard://agent/shared/") {
                 if uuid::Uuid::parse_str(session_id_str).is_ok() {
                     this.kind = Some(OpenRequestKind::SharedAgentThread {
                         session_id: session_id_str.to_string(),
@@ -166,21 +166,21 @@ impl OpenRequest {
                 } else {
                     log::error!("Invalid session ID in URL: {}", session_id_str);
                 }
-            } else if let Some(agent_path) = url.strip_prefix("zed://agent") {
+            } else if let Some(agent_path) = url.strip_prefix("backboard://agent") {
                 this.parse_agent_url(agent_path)
-            } else if let Some(schema_path) = url.strip_prefix("zed://schemas/") {
+            } else if let Some(schema_path) = url.strip_prefix("backboard://schemas/") {
                 this.kind = Some(OpenRequestKind::BuiltinJsonSchema {
                     schema_path: schema_path.to_string(),
                 });
-            } else if url == "zed://settings" || url == "zed://settings/" {
+            } else if url == "backboard://settings" || url == "backboard://settings/" {
                 this.kind = Some(OpenRequestKind::Setting { setting_path: None });
-            } else if let Some(setting_path) = url.strip_prefix("zed://settings/") {
+            } else if let Some(setting_path) = url.strip_prefix("backboard://settings/") {
                 this.kind = Some(OpenRequestKind::Setting {
                     setting_path: Some(setting_path.to_string()),
                 });
-            } else if let Some(clone_path) = url.strip_prefix("zed://git/clone") {
+            } else if let Some(clone_path) = url.strip_prefix("backboard://git/clone") {
                 this.parse_git_clone_url(clone_path)?
-            } else if let Some(commit_path) = url.strip_prefix("zed://git/commit/") {
+            } else if let Some(commit_path) = url.strip_prefix("backboard://git/commit/") {
                 this.parse_git_commit_url(commit_path)?
             } else if url.starts_with("ssh://") {
                 this.parse_ssh_file_path(&url, cx)?
@@ -296,13 +296,7 @@ impl OpenRequest {
 }
 
 fn normalize_backboard_url(url: String) -> String {
-    if let Some(rest) = url.strip_prefix("backboard-cli://") {
-        format!("zed-cli://{rest}")
-    } else if let Some(rest) = url.strip_prefix("backboard://") {
-        format!("zed://{rest}")
-    } else {
-        url
-    }
+    url
 }
 
 #[derive(Clone)]
@@ -823,7 +817,7 @@ async fn open_local_workspace(
     // When only diff paths are provided (no regular paths), add the CLI's
     // working directory so the workspace opens with the right context.
     // Note: must use the CLI process's cwd (forwarded via `cli_cwd`), not
-    // `std::env::current_dir()`, since the Zed app process's cwd is typically
+    // `std::env::current_dir()`, since the Backboard Studio app process's cwd is typically
     // `/` on macOS bundles or the launch dir of an already-running instance.
     if !user_provided_paths
         && !diff_paths.is_empty()
@@ -1046,7 +1040,7 @@ mod tests {
         let request = cx.update(|cx| {
             OpenRequest::parse(
                 RawOpenRequest {
-                    urls: vec!["zed://agent".into()],
+                    urls: vec!["backboard://agent".into()],
                     ..Default::default()
                 },
                 cx,
@@ -1065,7 +1059,7 @@ mod tests {
     }
 
     fn agent_url_with_prompt(prompt: &str) -> String {
-        let mut serializer = url::form_urlencoded::Serializer::new("zed://agent?".to_string());
+        let mut serializer = url::form_urlencoded::Serializer::new("backboard://agent?".to_string());
         serializer.append_pair("prompt", prompt);
         serializer.finish()
     }
@@ -1134,7 +1128,7 @@ mod tests {
         let request = cx.update(|cx| {
             OpenRequest::parse(
                 RawOpenRequest {
-                    urls: vec![format!("zed://agent/shared/{session_id}")],
+                    urls: vec![format!("backboard://agent/shared/{session_id}")],
                     ..Default::default()
                 },
                 cx,
@@ -1159,7 +1153,7 @@ mod tests {
         let request = cx.update(|cx| {
             OpenRequest::parse(
                 RawOpenRequest {
-                    urls: vec!["zed://agent/shared/not-a-uuid".into()],
+                    urls: vec!["backboard://agent/shared/not-a-uuid".into()],
                     ..Default::default()
                 },
                 cx,
@@ -1178,7 +1172,7 @@ mod tests {
         let request = cx.update(|cx| {
             OpenRequest::parse(
                 RawOpenRequest {
-                    urls: vec!["zed://git/commit/abc123?repo=path/to/repo".into()],
+                    urls: vec!["backboard://git/commit/abc123?repo=path/to/repo".into()],
                     ..Default::default()
                 },
                 cx,
@@ -1199,7 +1193,7 @@ mod tests {
         let request = cx.update(|cx| {
             OpenRequest::parse(
                 RawOpenRequest {
-                    urls: vec!["zed://git/commit/def456?repo=path%20with%20spaces".into()],
+                    urls: vec!["backboard://git/commit/def456?repo=path%20with%20spaces".into()],
                     ..Default::default()
                 },
                 cx,
@@ -1220,7 +1214,7 @@ mod tests {
             assert!(
                 OpenRequest::parse(
                     RawOpenRequest {
-                        urls: vec!["zed://git/commit/abc123?repo=".into()],
+                        urls: vec!["backboard://git/commit/abc123?repo=".into()],
                         ..Default::default()
                     },
                     cx,
@@ -1235,7 +1229,7 @@ mod tests {
         let result = cx.update(|cx| {
             OpenRequest::parse(
                 RawOpenRequest {
-                    urls: vec!["zed://git/commit/abc123?foo=bar".into()],
+                    urls: vec!["backboard://git/commit/abc123?foo=bar".into()],
                     ..Default::default()
                 },
                 cx,
@@ -1404,7 +1398,7 @@ mod tests {
             .unwrap();
 
         // Test case 2: Open a single file that does not exist yet,
-        // but tell Zed to add it to the current workspace
+        // but tell Backboard Studio to add it to the current workspace
         open_workspace_file(
             path!("/root/file6.txt"),
             workspace::OpenOptions {
@@ -1427,7 +1421,7 @@ mod tests {
             .unwrap();
 
         // Test case 3: Open a single file that does not exist yet,
-        // but tell Zed to NOT add it to the current workspace
+        // but tell Backboard Studio to NOT add it to the current workspace
         open_workspace_file(
             path!("/root/file7.txt"),
             workspace::OpenOptions {
@@ -1597,7 +1591,7 @@ mod tests {
             OpenRequest::parse(
                 RawOpenRequest {
                     urls: vec![
-                        "zed://git/clone/?repo=https://github.com/zed-industries/zed.git".into(),
+                        "backboard://git/clone/?repo=https://github.com/backboard/ide.git".into(),
                     ],
                     ..Default::default()
                 },
@@ -1608,7 +1602,7 @@ mod tests {
 
         match request.kind {
             Some(OpenRequestKind::GitClone { repo_url }) => {
-                assert_eq!(repo_url, "https://github.com/zed-industries/zed.git");
+                assert_eq!(repo_url, "https://github.com/backboard/ide.git");
             }
             _ => panic!("Expected GitClone kind"),
         }
@@ -1622,7 +1616,7 @@ mod tests {
             OpenRequest::parse(
                 RawOpenRequest {
                     urls: vec![
-                        "zed://git/clone?repo=https://github.com/zed-industries/zed.git".into(),
+                        "backboard://git/clone?repo=https://github.com/backboard/ide.git".into(),
                     ],
                     ..Default::default()
                 },
@@ -1633,7 +1627,7 @@ mod tests {
 
         match request.kind {
             Some(OpenRequestKind::GitClone { repo_url }) => {
-                assert_eq!(repo_url, "https://github.com/zed-industries/zed.git");
+                assert_eq!(repo_url, "https://github.com/backboard/ide.git");
             }
             _ => panic!("Expected GitClone kind"),
         }
@@ -1647,7 +1641,7 @@ mod tests {
             OpenRequest::parse(
                 RawOpenRequest {
                     urls: vec![
-                        "zed://git/clone/?repo=https%3A%2F%2Fgithub.com%2Fzed-industries%2Fzed.git"
+                        "backboard://git/clone/?repo=https%3A%2F%2Fgithub.com%2Fbackboard%2Fide.git"
                             .into(),
                     ],
                     ..Default::default()
@@ -1659,7 +1653,7 @@ mod tests {
 
         match request.kind {
             Some(OpenRequestKind::GitClone { repo_url }) => {
-                assert_eq!(repo_url, "https://github.com/zed-industries/zed.git");
+                assert_eq!(repo_url, "https://github.com/backboard/ide.git");
             }
             _ => panic!("Expected GitClone kind"),
         }
@@ -1967,7 +1961,7 @@ mod tests {
     }
 
     /// Runs the real [`cli::run_cli_response_loop`] on an OS thread against
-    /// the Zed-side `handle_cli_connection` on the GPUI foreground executor,
+    /// the Backboard Studio-side `handle_cli_connection` on the GPUI foreground executor,
     /// using `allow_parking` so the test scheduler tolerates cross-thread
     /// wakeups.
     ///

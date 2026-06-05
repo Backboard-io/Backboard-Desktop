@@ -91,7 +91,7 @@ impl CloudApiClient {
             .build_zed_cloud_url("/")
             .ok()
             .and_then(|url| url.host_str().map(String::from))
-            .unwrap_or_else(|| "cloud.zed.dev".into())
+            .unwrap_or_else(|| "cloud.backboard.io".into())
     }
 
     fn build_request(

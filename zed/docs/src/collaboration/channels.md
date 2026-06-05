@@ -24,7 +24,7 @@ You can keep both work and side-project channels in the Collaboration Panel.
 
 Joining a channel adds you to a shared room where you can work on projects together.
 
-_Join [our channel tree](https://app.backboard.io/channel/zed-283) to get an idea of how you can organize yours._
+_Join [our channel tree](https://app.backboard.io/channel/backboard-283) to get an idea of how you can organize yours._
 
 ## Inviting People
 

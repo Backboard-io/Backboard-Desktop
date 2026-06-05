@@ -81,7 +81,7 @@ If you'd like to bind this to a keyboard shortcut, you can do so by editing your
 ### Authentication
 
 As of version `0.202.7`, authentication to Backboard Studio's Claude Agent installation is decoupled entirely from Backboard Studio's agent.
-That is to say, an Anthropic API key added via the [Backboard Studio Agent's settings](./llm-providers.md#anthropic) will _not_ be utilized by Claude Agent for authentication and billing.
+That is to say, an Anthropic API key added via the [Backboard Studio Agent's settings](./llm-providers.md#anthropic) will _not_ be utilibackboard by Claude Agent for authentication and billing.
 
 To ensure you're using your billing method of choice, [open a new Claude Agent thread](./agent-panel.md#new-thread).
 Then, run `/login`, and authenticate either via API key, or via `Log in with Claude Code` to use a Claude Pro/Max subscription.
@@ -153,7 +153,7 @@ If you'd like to bind this to a keyboard shortcut, you can do so by editing your
 ### Authentication
 
 Authentication to Backboard Studio's Codex installation is decoupled entirely from Backboard Studio's agent.
-That is to say, an OpenAI API key added via the [Backboard Studio Agent's settings](./llm-providers.md#openai) will _not_ be utilized by Codex for authentication and billing.
+That is to say, an OpenAI API key added via the [Backboard Studio Agent's settings](./llm-providers.md#openai) will _not_ be utilibackboard by Codex for authentication and billing.
 
 To ensure you're using your billing method of choice, [open a new Codex thread](./agent-panel.md#new-thread).
 The first time you will be prompted to authenticate with one of three methods:
@@ -216,7 +216,7 @@ From there, you can click to install your preferred agent and it will become ava
 
 ### Custom Agents
 
-You can also add agents through your settings file ([how to edit](../configuring-zed.md#settings-files)) by specifying certain fields under `agent_servers`, like so:
+You can also add agents through your settings file ([how to edit](../configuring-backboard.md#settings-files)) by specifying certain fields under `agent_servers`, like so:
 
 ```json [settings]
 {

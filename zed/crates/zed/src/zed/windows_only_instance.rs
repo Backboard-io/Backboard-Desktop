@@ -110,7 +110,7 @@ fn retrieve_message_from_pipe_inner(pipe: HANDLE) -> anyhow::Result<String> {
 // This part of code is mostly from crates/cli/src/main.rs
 fn send_args_to_instance(args: &Args) -> anyhow::Result<()> {
     if let Some(dock_menu_action_idx) = args.dock_action {
-        let url = format!("zed-dock-action://{}", dock_menu_action_idx);
+        let url = format!("backboard-dock-action://{}", dock_menu_action_idx);
         return write_message_to_instance_pipe(url.as_bytes());
     }
 
@@ -128,7 +128,6 @@ fn send_args_to_instance(args: &Args) -> anyhow::Result<()> {
                 Err(error) => {
                     if path.starts_with("backboard://")
                         || path.starts_with("backboard-cli://")
-                        || path.starts_with("zed://")
                         || path.starts_with("http://")
                         || path.starts_with("https://")
                         || path.starts_with("file://")

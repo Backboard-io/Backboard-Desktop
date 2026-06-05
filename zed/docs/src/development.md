@@ -35,19 +35,19 @@ If you need to test something out using the real system keychain in a
 development build, run Backboard Studio with the following environment variable set:
 
 ```
-ZED_DEVELOPMENT_USE_KEYCHAIN=1
+backboard_DEVELOPMENT_USE_KEYCHAIN=1
 ```
 
 ## Performance Measurements
 
 Backboard Studio includes a frame time measurement system that can be used to profile how long it takes to render each frame. This is particularly useful when comparing rendering performance between different versions or when optimizing frame rendering code.
 
-### Using ZED_MEASUREMENTS
+### Using backboard_MEASUREMENTS
 
-To enable performance measurements, set the `ZED_MEASUREMENTS` environment variable:
+To enable performance measurements, set the `backboard_MEASUREMENTS` environment variable:
 
 ```sh
-export ZED_MEASUREMENTS=1
+export backboard_MEASUREMENTS=1
 ```
 
 When enabled, Backboard Studio will print frame rendering timing information to stderr, showing how long each frame takes to render.
@@ -59,7 +59,7 @@ Here's a typical workflow for comparing frame rendering performance between diff
 1. **Enable measurements:**
 
    ```sh
-   export ZED_MEASUREMENTS=1
+   export backboard_MEASUREMENTS=1
    ```
 
 2. **Test the first version:**
@@ -96,8 +96,8 @@ ETW recordings may contain personally identifiable or security-sensitive informa
 
 Open the command palette and run one of the following:
 
-- `zed: record etw trace`: records CPU, GPU, memory, and I/O activity
-- `zed: record etw trace with heap tracing`: includes heap allocation data for the Backboard Studio process
+- `backboard: record etw trace`: records CPU, GPU, memory, and I/O activity
+- `backboard: record etw trace with heap tracing`: includes heap allocation data for the Backboard Studio process
 
 Backboard Studio will prompt you to choose a save location for the `.etl` file, then request administrator permission. Once granted, recording will begin.
 
@@ -105,8 +105,8 @@ Backboard Studio will prompt you to choose a save location for the `.etl` file, 
 
 While a trace is recording, open the command palette and run one of the following:
 
-- `zed: save etw trace`: stops recording and saves the trace to disk
-- `zed: cancel etw trace`: stops recording without saving
+- `backboard: save etw trace`: stops recording and saves the trace to disk
+- `backboard: cancel etw trace`: stops recording without saving
 
 Recordings automatically save after 60 seconds if not stopped manually.
 
