@@ -15,6 +15,7 @@ pub const PANEL_RESIZE_HANDLE_WIDTH: f32 = 8.;
 pub const PANEL_CORNER_RADIUS: f32 = 22.;
 pub const PANEL_OVERLAP: f32 = PANEL_CORNER_RADIUS;
 pub const CHAT_ROW_HEIGHT: f32 = 36.;
+pub const SIDEBAR_ROW_ICON_SLOT_WIDTH: f32 = 20.;
 pub const PROJECT_ROW_HEIGHT: f32 = 40.;
 pub const CHAT_MAX_WIDTH: f32 = 880.;
 

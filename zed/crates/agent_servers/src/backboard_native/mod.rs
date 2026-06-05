@@ -1838,6 +1838,7 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                     let models = models
                         .into_iter()
                         .filter(|model| !model.provider.is_empty() && !model.name.is_empty())
+                        .filter(|model| !is_featherless_backboard_model(model))
                         .map(|model| {
                             if let Some(context_limit) = model.context_limit {
                                 state.remember_model_context_window(
@@ -1987,6 +1988,19 @@ fn fallback_agent_model_info(config: &BackboardConfig) -> AgentModelInfo {
         is_latest: false,
         cost: None,
     }
+}
+
+fn is_featherless_backboard_model(model: &BackboardModel) -> bool {
+    let provider = model.provider.to_lowercase();
+    let name = model.name.to_lowercase();
+    let display_name = model
+        .display_name
+        .as_deref()
+        .unwrap_or_default()
+        .to_lowercase();
+    provider.contains("featherless")
+        || name.contains("featherless")
+        || display_name.contains("featherless")
 }
 
 fn model_icon(
@@ -2658,6 +2672,37 @@ mod tests {
     }
 
     #[test]
+    fn featherless_models_are_filtered_from_backboard_catalog() {
+        let featherless_provider = BackboardModel {
+            provider: "featherless".to_string(),
+            name: "qwen3-next-80b".to_string(),
+            ..BackboardModel::default()
+        };
+        let featherless_name = BackboardModel {
+            provider: "openrouter".to_string(),
+            name: "featherless/qwen3-next-80b".to_string(),
+            ..BackboardModel::default()
+        };
+        let featherless_display_name = BackboardModel {
+            provider: "openrouter".to_string(),
+            name: "qwen3-next-80b".to_string(),
+            display_name: Some("Featherless Qwen3 Next 80B".to_string()),
+            ..BackboardModel::default()
+        };
+        let non_featherless_model = BackboardModel {
+            provider: "mistral".to_string(),
+            name: "mistral-large-latest".to_string(),
+            display_name: Some("Mistral Large".to_string()),
+            ..BackboardModel::default()
+        };
+
+        assert!(is_featherless_backboard_model(&featherless_provider));
+        assert!(is_featherless_backboard_model(&featherless_name));
+        assert!(is_featherless_backboard_model(&featherless_display_name));
+        assert!(!is_featherless_backboard_model(&non_featherless_model));
+    }
+
+    #[test]
     fn config_options_include_media_and_search_chips() {
         let settings = FeatureSettings {
             web_search: "Auto".to_string(),
@@ -2938,6 +2983,8 @@ description: Modern design guidance.
                 assistant_id: None,
                 thread_id: None,
                 current_run_id: None,
+                assistant_tools_hash: None,
+                assistant_tools_synced: false,
                 provider: Some(DEFAULT_PROVIDER.to_string()),
                 model: Some(DEFAULT_MODEL.to_string()),
                 mode: acp::SessionModeId::new("free"),

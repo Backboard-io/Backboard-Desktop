@@ -409,11 +409,11 @@ pub struct RecentUsageQuery {
 pub struct BackboardModel {
     #[serde(default)]
     pub provider: String,
-    #[serde(default)]
+    #[serde(default, alias = "id", alias = "model_id")]
     pub name: String,
     #[serde(default)]
     pub display_name: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "context_window", alias = "max_context_tokens")]
     pub context_limit: Option<u64>,
     #[serde(default)]
     pub supports_thinking: Option<bool>,
@@ -1184,6 +1184,20 @@ mod tests {
             .insert("prod".to_string(), "  bb-env-key  ".to_string());
 
         assert_eq!(config.api_key().as_deref(), Some("bb-env-key"));
+    }
+
+    #[test]
+    fn backboard_model_accepts_catalog_aliases() {
+        let model: BackboardModel = serde_json::from_value(json!({
+            "provider": "deepseek",
+            "id": "deepseek-chat",
+            "context_window": 64000,
+        }))
+        .expect("model aliases should deserialize");
+
+        assert_eq!(model.provider, "deepseek");
+        assert_eq!(model.name, "deepseek-chat");
+        assert_eq!(model.context_limit, Some(64000));
     }
 
     #[test]

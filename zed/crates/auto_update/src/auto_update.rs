@@ -31,6 +31,8 @@ use util::command::new_command;
 use workspace::Workspace;
 
 const SHOULD_SHOW_UPDATE_NOTIFICATION_KEY: &str = "auto-updater-should-show-updated-notification";
+const DEFAULT_BBIDE_UPDATE_MANIFEST_BASE_URL: &str =
+    "https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases";
 
 #[derive(Debug)]
 struct MissingDependencyError(String);
@@ -606,6 +608,14 @@ impl AutoUpdater {
             (None, None, None)
         };
 
+        let http_client = client.http_client();
+        if let Some(manifest_url) =
+            bbide_update_manifest_url(release_channel, version.as_ref(), asset, os, arch)
+        {
+            log::info!("Auto Update: fetching BBIDE update manifest from S3");
+            return fetch_release_asset_url(http_client, &manifest_url).await;
+        }
+
         let version = if let Some(mut version) = version {
             version.pre = semver::Prerelease::EMPTY;
             version.build = semver::BuildMetadata::EMPTY;
@@ -613,7 +623,6 @@ impl AutoUpdater {
         } else {
             "latest".to_string()
         };
-        let http_client = client.http_client();
 
         let path = format!("/releases/{}/{}/asset", release_channel.dev_name(), version,);
         let url = http_client.build_zed_cloud_url_with_query(
@@ -628,24 +637,7 @@ impl AutoUpdater {
             },
         )?;
 
-        let mut response = http_client
-            .get(url.as_str(), Default::default(), true)
-            .await?;
-        let mut body = Vec::new();
-        response.body_mut().read_to_end(&mut body).await?;
-
-        anyhow::ensure!(
-            response.status().is_success(),
-            "failed to fetch release: {:?}",
-            String::from_utf8_lossy(&body),
-        );
-
-        serde_json::from_slice(body.as_slice()).with_context(|| {
-            format!(
-                "error deserializing release {:?}",
-                String::from_utf8_lossy(&body),
-            )
-        })
+        fetch_release_asset_url(http_client, url.as_str()).await
     }
 
     async fn update(this: Entity<Self>, cx: &mut AsyncApp) -> Result<()> {
@@ -871,6 +863,68 @@ impl AutoUpdater {
             Ok(kvp.read_kvp(SHOULD_SHOW_UPDATE_NOTIFICATION_KEY)?.is_some())
         })
     }
+}
+
+fn bbide_update_manifest_url(
+    release_channel: ReleaseChannel,
+    version: Option<&Version>,
+    asset: &str,
+    os: &str,
+    arch: &str,
+) -> Option<String> {
+    if asset != "bbide" || version.is_some() {
+        return None;
+    }
+
+    if let Some(manifest_url) = env::var("BBIDE_UPDATE_MANIFEST_URL")
+        .or_else(|_| env::var("ZED_UPDATE_MANIFEST_URL"))
+        .ok()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+    {
+        return Some(manifest_url);
+    }
+
+    let manifest_base_url = env::var("BBIDE_UPDATE_MANIFEST_BASE_URL")
+        .or_else(|_| env::var("ZED_UPDATE_MANIFEST_BASE_URL"))
+        .unwrap_or_else(|_| DEFAULT_BBIDE_UPDATE_MANIFEST_BASE_URL.to_string());
+    let manifest_base_url = manifest_base_url.trim().trim_end_matches('/');
+    if manifest_base_url.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "{}/{}/latest/{}/{}-{}.json",
+        manifest_base_url,
+        release_channel.dev_name(),
+        asset,
+        os,
+        arch
+    ))
+}
+
+async fn fetch_release_asset_url(
+    http_client: Arc<HttpClientWithUrl>,
+    url: &str,
+) -> Result<ReleaseAsset> {
+    let mut response = http_client.get(url, Default::default(), true).await?;
+    let mut body = Vec::new();
+    response.body_mut().read_to_end(&mut body).await?;
+
+    anyhow::ensure!(
+        response.status().is_success(),
+        "failed to fetch release from {}: {:?}",
+        url,
+        String::from_utf8_lossy(&body),
+    );
+
+    serde_json::from_slice(body.as_slice()).with_context(|| {
+        format!(
+            "error deserializing release from {}: {:?}",
+            url,
+            String::from_utf8_lossy(&body),
+        )
+    })
 }
 
 async fn download_remote_server_binary(
@@ -1260,7 +1314,9 @@ mod tests {
                 let release_available = release_available.clone();
                 async move {
                     let release_available = release_available.load(atomic::Ordering::Relaxed);
-                    if req.uri().path() == "/releases/stable/latest/asset" {
+                    if req.uri().path()
+                        == "/ide-releases/stable/latest/bbide/macos-aarch64.json"
+                    {
                         if release_available {
                             return Ok(Response::builder().status(200).body(
                                 r#"{"version":"0.100.1","url":"https://test.example/new-download","sha256":"c4eab9d5d7696df8189f650980dcf86b511a6f0ced8645b445785733e610f245","size_bytes":19}"#.into()
@@ -1325,6 +1381,38 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(path).unwrap(),
             "<fake-bbide-update>"
+        );
+    }
+
+    #[test]
+    fn test_bbide_update_manifest_url_uses_s3_for_app_releases() {
+        assert_eq!(
+            bbide_update_manifest_url(ReleaseChannel::Stable, None, "bbide", "macos", "aarch64")
+                .as_deref(),
+            Some(
+                "https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases/stable/latest/bbide/macos-aarch64.json"
+            )
+        );
+
+        assert!(
+            bbide_update_manifest_url(
+                ReleaseChannel::Stable,
+                Some(&semver::Version::new(0, 100, 1)),
+                "bbide",
+                "macos",
+                "aarch64"
+            )
+            .is_none()
+        );
+        assert!(
+            bbide_update_manifest_url(
+                ReleaseChannel::Stable,
+                None,
+                "bbide-remote-server",
+                "macos",
+                "aarch64"
+            )
+            .is_none()
         );
     }
 

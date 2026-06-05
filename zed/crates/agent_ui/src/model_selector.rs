@@ -966,15 +966,10 @@ fn apply_model_filters(
 ) -> AgentModelList {
     match model_list {
         AgentModelList::Flat(list) => {
-            let original = list.clone();
             let base: Vec<_> = list
                 .into_iter()
                 .filter(|model| !is_featherless_model(model))
                 .collect();
-
-            if base.is_empty() {
-                return AgentModelList::Flat(original);
-            }
 
             if selected_providers.is_empty() {
                 return AgentModelList::Flat(base);
@@ -986,8 +981,6 @@ fn apply_model_filters(
                 .cloned()
                 .collect();
 
-            // If provider matching fails due upstream id format inconsistencies,
-            // keep the Featherless-stripped list instead of blanking the picker.
             if filtered.is_empty() {
                 AgentModelList::Flat(base)
             } else {
@@ -995,7 +988,6 @@ fn apply_model_filters(
             }
         }
         AgentModelList::Grouped(index_map) => {
-            let original_map = index_map.clone();
             let base_map =
                 IndexMap::from_iter(index_map.into_iter().filter_map(|(group_name, models)| {
                     let base: Vec<_> = models
@@ -1008,10 +1000,6 @@ fn apply_model_filters(
                         Some((group_name, base))
                     }
                 }));
-
-            if base_map.is_empty() {
-                return AgentModelList::Grouped(original_map);
-            }
 
             if selected_providers.is_empty() {
                 return AgentModelList::Grouped(base_map);
@@ -1399,6 +1387,26 @@ mod tests {
             e,
             ModelPickerEntry::Separator(s) if s == "All"
         )));
+    }
+
+    #[gpui::test]
+    fn test_featherless_models_are_removed_from_picker_entries(_cx: &mut TestAppContext) {
+        let models = create_model_list(vec![
+            (
+                "OpenRouter",
+                vec![
+                    "openrouter/openai/gpt-5",
+                    "openrouter/featherless/qwen3-next-80b",
+                ],
+            ),
+            ("Featherless", vec!["featherless/qwen3-next-80b"]),
+        ]);
+        let favorites = create_favorites(vec![]);
+
+        let entries = info_list_to_picker_entries(models, &favorites);
+        let model_ids = get_entry_model_ids(&entries);
+
+        assert_eq!(model_ids, vec!["openrouter/openai/gpt-5"]);
     }
 
     #[gpui::test]

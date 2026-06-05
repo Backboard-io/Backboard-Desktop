@@ -1745,6 +1745,8 @@ impl BeginnerWorkspace {
             let mut editor = Editor::single_line(window, cx);
             let mut text_style = Self::simple_mode_editor_text_style(cx);
             text_style.color = Some(ds::sidebar_emphasis_text(cx));
+            text_style.font_size = Some(rems_from_px(14.).into());
+            text_style.font_weight = Some(FontWeight::MEDIUM);
             editor.set_text_style_refinement(text_style);
             editor.set_show_gutter(false, cx);
             editor.set_show_wrap_guides(false, cx);
@@ -5907,14 +5909,12 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) -> Entity<ContextMenu> {
         let beginner_workspace = cx.entity().downgrade();
-        let multi_workspace = self.multi_workspace.clone();
         let sidebar_is_open = self.chats_sidebar_open && !self.chats_sidebar_closing;
 
         ContextMenu::build(window, cx, move |menu, _window, _cx| {
             let toggle_sidebar = beginner_workspace.clone();
             let show_panel_options = beginner_workspace.clone();
             let open_terminal = beginner_workspace.clone();
-            let reset_animation = multi_workspace.clone();
 
             menu.item(
                 ContextMenuEntry::new(if sidebar_is_open {
@@ -5990,18 +5990,6 @@ impl BeginnerWorkspace {
                     }),
             )
             .item(
-                ContextMenuEntry::new("Reset Animation")
-                    .icon(IconName::HistoryRerun)
-                    .icon_position(IconPosition::Start)
-                    .handler(move |_window, cx| {
-                        reset_animation
-                            .update(cx, |multi_workspace, cx| {
-                                multi_workspace.replay_startup_loading_animation(cx);
-                            })
-                            .log_err();
-                    }),
-            )
-            .item(
                 ContextMenuEntry::new("Reset Onboarding")
                     .icon(IconName::RotateCcw)
                     .icon_position(IconPosition::Start)
@@ -6029,6 +6017,27 @@ impl BeginnerWorkspace {
         .style(DropdownStyle::Ghost)
         .trigger_size(ButtonSize::Compact)
         .no_chevron()
+    }
+
+    fn render_simple_sidebar_row_icon(icon_name: IconName, color: Color) -> impl IntoElement {
+        div()
+            .w(px(ds::SIDEBAR_ROW_ICON_SLOT_WIDTH))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(Icon::new(icon_name).size(IconSize::Small).color(color))
+    }
+
+    fn render_simple_sidebar_row_label(
+        label: impl Into<SharedString>,
+        color: Color,
+    ) -> impl IntoElement {
+        Label::new(label)
+            .size(LabelSize::Custom(rems_from_px(14.)))
+            .weight(FontWeight::MEDIUM)
+            .color(color)
+            .truncate()
     }
 
     fn reset_simple_panel_width(&mut self, cx: &mut Context<Self>) {
@@ -6574,32 +6583,6 @@ impl BeginnerWorkspace {
         }
 
         let bottom_panel_height = self.target_bottom_panel_height(window);
-        let reserve_side_panel =
-            api_key_ready && !self.right_panel_expanded && self.right_panel_dock.is_side();
-        let reserved_side_panel_width = if reserve_side_panel {
-            if self.right_panel_open || self.right_panel_closing {
-                self.target_right_panel_width(window)
-            } else {
-                px(RIGHT_PANEL_CLOSED_WIDTH_PX)
-            }
-        } else {
-            px(0.)
-        };
-        let reserve_left_panel =
-            reserve_side_panel && self.right_panel_dock == SimplePanelDock::Left;
-        let reserve_right_panel =
-            reserve_side_panel && self.right_panel_dock == SimplePanelDock::Right;
-        let terminal_left_inset = if reserve_left_panel {
-            reserved_side_panel_width
-        } else {
-            px(0.)
-        };
-        let terminal_right_inset = if reserve_right_panel {
-            reserved_side_panel_width
-        } else {
-            px(0.)
-        };
-
         v_flex()
             .relative()
             .flex_1()
@@ -6621,18 +6604,18 @@ impl BeginnerWorkspace {
                     .w_full()
                     .h(bottom_panel_height)
                     .flex_shrink_0()
+                    .overflow_hidden()
+                    .rounded_t(px(ds::PANEL_CORNER_RADIUS))
                     .bg(ds::sidebar_background(cx))
                     .child(
                         div()
                             .absolute()
-                            .left(terminal_left_inset)
-                            .right(terminal_right_inset)
+                            .left_0()
+                            .right_0()
                             .top_0()
                             .bottom_0()
                             .overflow_hidden()
-                            .when(reserve_left_panel, |el| el.border_l_1())
-                            .when(reserve_right_panel, |el| el.border_r_1())
-                            .border_color(ds::panel_edge_line(cx))
+                            .rounded_t(px(ds::PANEL_CORNER_RADIUS))
                             .bg(ds::sidebar_background(cx))
                             .child(self.render_bottom_terminal_slot(bottom_panel_height, cx)),
                     ),
@@ -6649,12 +6632,15 @@ impl BeginnerWorkspace {
             .h(height)
             .flex_shrink_0()
             .overflow_hidden()
+            .rounded_t(px(ds::PANEL_CORNER_RADIUS))
             .bg(ds::sidebar_background(cx))
             .child(
                 div()
                     .relative()
                     .w_full()
                     .h(height)
+                    .overflow_hidden()
+                    .rounded_t(px(ds::PANEL_CORNER_RADIUS))
                     .child(self.render_bottom_terminal_panel(height, cx))
                     .with_animation(
                         ("bottom-panel-slide", self.bottom_panel_animation_generation),
@@ -6686,6 +6672,7 @@ impl BeginnerWorkspace {
             .w_full()
             .flex_shrink_0()
             .overflow_hidden()
+            .rounded_t(px(ds::PANEL_CORNER_RADIUS))
             .bg(ds::app_background(cx))
             .child(
                 h_flex()
@@ -6755,15 +6742,6 @@ impl BeginnerWorkspace {
                     )
                     .into_any_element()
             })
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left(px(ds::PANEL_CORNER_RADIUS))
-                    .right(px(ds::PANEL_CORNER_RADIUS))
-                    .h(px(1.))
-                    .bg(ds::panel_edge_line(cx)),
-            )
     }
 
     fn render_open_artifact_panel_button(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -6977,7 +6955,7 @@ impl BeginnerWorkspace {
             .child(
                 v_flex()
                     .flex_none()
-                    .pl_2()
+                    .pl_1()
                     .pr(px(ds::PANEL_OVERLAP + 8.))
                     .pb_1()
                     .gap_0p5()
@@ -7059,8 +7037,8 @@ impl BeginnerWorkspace {
                             .id("simple-sidebar-settings")
                             .h(px(ds::CHAT_ROW_HEIGHT))
                             .mt(px(6.))
-                            .px_3()
-                            .gap_2p5()
+                            .px_2()
+                            .gap_1p5()
                             .items_center()
                             .rounded_lg()
                             .cursor_pointer()
@@ -7069,24 +7047,21 @@ impl BeginnerWorkspace {
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(OpenSettings), cx);
                             })
-                            .child(
-                                Icon::new(IconName::Settings)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Custom(ds::sidebar_icon(cx))),
-                            )
-                            .child(
-                                Label::new("Settings")
-                                    .size(LabelSize::Default)
-                                    .weight(FontWeight::SEMIBOLD)
-                                    .color(Color::Custom(ds::sidebar_emphasis_text(cx))),
-                            ),
+                            .child(Self::render_simple_sidebar_row_icon(
+                                IconName::Settings,
+                                Color::Custom(ds::sidebar_icon(cx)),
+                            ))
+                            .child(Self::render_simple_sidebar_row_label(
+                                "Settings",
+                                Color::Custom(ds::sidebar_emphasis_text(cx)),
+                            )),
                     )
                     .child(
                         h_flex()
                             .id("simple-sidebar-new-chat")
                             .h(px(ds::CHAT_ROW_HEIGHT))
-                            .px_3()
-                            .gap_2p5()
+                            .px_2()
+                            .gap_1p5()
                             .items_center()
                             .rounded_lg()
                             .when(api_key_ready, |el| {
@@ -7097,30 +7072,29 @@ impl BeginnerWorkspace {
                                     }))
                             })
                             .when(!api_key_ready, |el| el.opacity(0.35))
-                            .child(Icon::new(IconName::Plus).size(IconSize::XSmall).color(
+                            .child(Self::render_simple_sidebar_row_icon(
+                                IconName::Plus,
                                 if api_key_ready {
                                     Color::Custom(ds::sidebar_icon(cx))
                                 } else {
                                     Color::Disabled
                                 },
                             ))
-                            .child(
-                                Label::new("New chat")
-                                    .size(LabelSize::Default)
-                                    .weight(FontWeight::SEMIBOLD)
-                                    .color(if api_key_ready {
-                                        Color::Custom(ds::sidebar_emphasis_text(cx))
-                                    } else {
-                                        Color::Disabled
-                                    }),
-                            ),
+                            .child(Self::render_simple_sidebar_row_label(
+                                "New chat",
+                                if api_key_ready {
+                                    Color::Custom(ds::sidebar_emphasis_text(cx))
+                                } else {
+                                    Color::Disabled
+                                },
+                            )),
                     )
                     .child(
                         h_flex()
                             .id("simple-sidebar-chat-search")
                             .h(px(ds::CHAT_ROW_HEIGHT))
-                            .px_3()
-                            .gap_2p5()
+                            .px_2()
+                            .gap_1p5()
                             .items_center()
                             .rounded_lg()
                             .when(api_key_ready, |el| el.hover(move |el| el.bg(action_hover)))
@@ -7131,11 +7105,10 @@ impl BeginnerWorkspace {
                                     window.focus(&search_focus_handle, cx);
                                 }
                             })
-                            .child(
-                                Icon::new(IconName::MagnifyingGlass)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Custom(ds::sidebar_icon(cx))),
-                            )
+                            .child(Self::render_simple_sidebar_row_icon(
+                                IconName::MagnifyingGlass,
+                                Color::Custom(ds::sidebar_icon(cx)),
+                            ))
                             .child(
                                 div()
                                     .relative()
@@ -7156,8 +7129,10 @@ impl BeginnerWorkspace {
                                                     .items_center()
                                                     .child(
                                                         Label::new("Search chats")
-                                                            .size(LabelSize::Default)
-                                                            .weight(FontWeight::SEMIBOLD)
+                                                            .size(LabelSize::Custom(rems_from_px(
+                                                                14.,
+                                                            )))
+                                                            .weight(FontWeight::MEDIUM)
                                                             .color(Color::Custom(
                                                                 ds::sidebar_emphasis_text(cx),
                                                             ))
@@ -7169,49 +7144,31 @@ impl BeginnerWorkspace {
                             ),
                     )
                     .child(
-                        v_flex()
-                            .id("simple-sidebar-mcp-section")
+                        h_flex()
+                            .id("simple-sidebar-connect-mcp")
+                            .h(px(ds::CHAT_ROW_HEIGHT))
                             .mt(px(6.))
                             .px_2()
-                            .gap_0p5()
-                            .child(
-                                h_flex().h(px(22.)).px_1().items_center().child(
-                                    Label::new("MCP")
-                                        .size(LabelSize::XSmall)
-                                        .weight(FontWeight::SEMIBOLD)
-                                        .color(Color::Custom(ds::sidebar_text_muted(cx))),
-                                ),
-                            )
-                            .child(
-                                h_flex()
-                                    .id("simple-sidebar-connect-mcp")
-                                    .h(px(ds::CHAT_ROW_HEIGHT))
-                                    .px_3()
-                                    .gap_2p5()
-                                    .items_center()
-                                    .rounded_lg()
-                                    .cursor_pointer()
-                                    .hover({
-                                        let action_hover = action_hover;
-                                        move |el| el.bg(action_hover)
-                                    })
-                                    .tooltip(Tooltip::text("Connect an MCP server"))
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(Box::new(AddContextServer), cx);
-                                    })
-                                    .child(
-                                        Icon::new(IconName::Server)
-                                            .size(IconSize::XSmall)
-                                            .color(Color::Custom(ds::sidebar_icon(cx))),
-                                    )
-                                    .child(
-                                        Label::new("Connect MCP server")
-                                            .size(LabelSize::Default)
-                                            .weight(FontWeight::SEMIBOLD)
-                                            .color(Color::Custom(ds::sidebar_emphasis_text(cx)))
-                                            .truncate(),
-                                    ),
-                            ),
+                            .gap_1p5()
+                            .items_center()
+                            .rounded_lg()
+                            .cursor_pointer()
+                            .hover({
+                                let action_hover = action_hover;
+                                move |el| el.bg(action_hover)
+                            })
+                            .tooltip(Tooltip::text("Connect an MCP server"))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(AddContextServer), cx);
+                            })
+                            .child(Self::render_simple_sidebar_row_icon(
+                                IconName::Server,
+                                Color::Custom(ds::sidebar_icon(cx)),
+                            ))
+                            .child(Self::render_simple_sidebar_row_label(
+                                "Connect MCP server",
+                                Color::Custom(ds::sidebar_emphasis_text(cx)),
+                            )),
                     ),
             )
             .child(
@@ -7220,7 +7177,7 @@ impl BeginnerWorkspace {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .pl_2()
+                    .pl_1()
                     .pr(px(ds::PANEL_OVERLAP + 8.))
                     .pb_2()
                     .gap_0p5()
@@ -7231,8 +7188,8 @@ impl BeginnerWorkspace {
                         el.child(
                             h_flex().h(px(28.)).px_1().items_center().child(
                                 Label::new("Projects")
-                                    .size(LabelSize::XSmall)
-                                    .weight(FontWeight::SEMIBOLD)
+                                    .size(LabelSize::Default)
+                                    .weight(FontWeight::MEDIUM)
                                     .color(Color::Custom(ds::sidebar_text_muted(cx))),
                             ),
                         )
@@ -7245,62 +7202,50 @@ impl BeginnerWorkspace {
                                 .gap_0p5()
                                 .child(
                                     Label::new(empty_project_title)
-                                        .size(LabelSize::Small)
+                                        .size(LabelSize::Default)
                                         .color(Color::Custom(ds::sidebar_text_subtle(cx))),
                                 )
                                 .child(
                                     Label::new(empty_project_subtitle)
-                                        .size(LabelSize::XSmall)
+                                        .size(LabelSize::Small)
                                         .color(Color::Custom(ds::sidebar_text_subtle(cx))),
                                 ),
                         )
                     })
                     .children(project_groups.into_iter().map(|project_group| {
                         let folder_name = folder_display_name(&project_group.folder_path);
-                        let parent_name = folder_parent_display_name(&project_group.folder_path);
 
                         v_flex()
                             .w_full()
                             .pt_1p5()
                             .child(
                                 h_flex()
-                                    .h(px(30.))
+                                    .h(px(ds::CHAT_ROW_HEIGHT))
                                     .px_2()
-                                    .gap_2()
+                                    .gap_1p5()
                                     .items_center()
-                                    .child(
-                                        Icon::new(IconName::Folder)
-                                            .size(IconSize::Small)
-                                            .color(Color::Custom(ds::sidebar_icon(cx))),
-                                    )
+                                    .child(Self::render_simple_sidebar_row_icon(
+                                        IconName::Folder,
+                                        Color::Custom(ds::sidebar_icon(cx)),
+                                    ))
                                     .child(
                                         Label::new(folder_name)
-                                            .size(LabelSize::Small)
+                                            .size(LabelSize::Custom(rems_from_px(14.)))
                                             .weight(FontWeight::SEMIBOLD)
                                             .color(Color::Custom(ds::sidebar_emphasis_text(cx)))
                                             .truncate(),
-                                    )
-                                    .when_some(parent_name, |el, parent_name| {
-                                        el.child(
-                                            Label::new(parent_name)
-                                                .size(LabelSize::XSmall)
-                                                .color(Color::Custom(
-                                                    ds::sidebar_emphasis_text(cx).opacity(0.72),
-                                                ))
-                                                .truncate(),
-                                        )
-                                    }),
+                                    ),
                             )
                             .when(project_group.records.is_empty(), |el| {
                                 el.child(
                                     h_flex()
                                         .h(px(ds::CHAT_ROW_HEIGHT))
-                                        .pl(px(32.))
+                                        .pl(px(34.))
                                         .pr_3()
                                         .items_center()
                                         .child(
                                             Label::new("No chats")
-                                                .size(LabelSize::Small)
+                                                .size(LabelSize::Default)
                                                 .color(Color::Custom(ds::sidebar_text_subtle(cx))),
                                         ),
                                 )
@@ -7323,8 +7268,8 @@ impl BeginnerWorkspace {
                                 h_flex()
                                     .id(SharedString::from(format!("chat-{record_id}")))
                                     .group(row_group.clone())
-                                    .h(px(34.))
-                                    .pl(px(32.))
+                                    .h(px(ds::CHAT_ROW_HEIGHT))
+                                    .pl(px(34.))
                                     .pr_3()
                                     .gap_2()
                                     .rounded_lg()
@@ -7339,7 +7284,7 @@ impl BeginnerWorkspace {
                                     .child(
                                         v_flex().flex_1().min_w_0().child(
                                             Label::new(name)
-                                                .size(LabelSize::Small)
+                                                .size(LabelSize::Custom(rems_from_px(14.)))
                                                 .color(Color::Custom(ds::sidebar_text(cx)))
                                                 .truncate(),
                                         ),
