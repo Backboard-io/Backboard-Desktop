@@ -347,12 +347,32 @@ fn general_page(cx: &App) -> SettingsPage {
         ]
     }
 
+    fn update_settings_section() -> [SettingsPageItem; 2] {
+        [
+            SettingsPageItem::SectionHeader("Updates"),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Automatic Updates",
+                description: "Automatically check for Backboard Studio updates and prompt to restart when an update is ready.",
+                field: Box::new(SettingField {
+                    json_path: Some("auto_update"),
+                    pick: |settings_content| settings_content.auto_update.as_ref(),
+                    write: |settings_content, value, _| {
+                        settings_content.auto_update = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+        ]
+    }
+
     SettingsPage {
         title: "General",
         items: concat_sections!(
             @vec,
             general_settings_section(cx),
             security_section(),
+            update_settings_section(),
             workspace_restoration_section(),
         )
         .into(),
