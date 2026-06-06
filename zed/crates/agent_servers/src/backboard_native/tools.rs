@@ -1,4 +1,5 @@
 use std::{
+    cmp::Reverse,
     collections::{BTreeMap, BTreeSet},
     fs,
     io::{BufRead, BufReader},
@@ -39,6 +40,7 @@ const INSTALL_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 const DEV_SERVER_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_COMMAND_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_PARALLEL_TASK_SUBAGENTS: usize = 5;
+const MAX_LINT_COMMANDS: usize = 4;
 const SUBAGENT_MAX_TOOL_ROUNDS: usize = 8;
 const SUBAGENT_INLINE_RESULT_CHARS: usize = 8_000;
 
@@ -353,7 +355,6 @@ fn is_parallel_read_only(call: &ToolCallRequest) -> bool {
             | "glob_file_search"
             | "grep"
             | "codebase_search"
-            | "read_lints"
             | "web_search"
             | "web_fetch"
     )
@@ -387,7 +388,6 @@ async fn execute_tool_call(
         emit_tool_result(state, runtime, &call, &output, cx)?;
         return Ok(output);
     }
-
     if let Some(mcp_tool) = state.mcp_tool_for_name(&runtime.session_id, &call.name) {
         let output = mcp::execute_tool(runtime, &mcp_tool, &call.args, cx)
             .await
@@ -398,7 +398,7 @@ async fn execute_tool_call(
 
     match call.name.as_str() {
         "read_file" | "list_dir" | "glob" | "glob_file_search" | "grep" | "codebase_search"
-        | "read_lints" | "web_search" | "web_fetch" => {
+        | "web_search" | "web_fetch" => {
             let output = execute_read_only_tool(&runtime.workspace, &call).await?;
             emit_tool_result(state, runtime, &call, &output, cx)?;
             Ok(output)
@@ -408,6 +408,7 @@ async fn execute_tool_call(
         }
         "create_directory" => execute_create_directory(state, runtime, &call, cx).await,
         "bash" | "run_terminal_cmd" => execute_shell_tool(state, runtime, &call, cx).await,
+        "read_lints" => execute_read_lints_tool(state, runtime, &call, cx).await,
         "run_code" | "repl" => execute_code_tool(state, runtime, &call, cx).await,
         "todo_write" => execute_todo_write(state, runtime, &call, cx),
         "task" => execute_task_tool(state, runtime, &call, cx).await,
@@ -428,10 +429,6 @@ async fn execute_read_only_tool(workspace: &Path, call: &ToolCallRequest) -> Res
         "glob" | "glob_file_search" => glob_files(workspace, &call.args),
         "grep" => grep_files(workspace, &call.args),
         "codebase_search" => codebase_search(workspace, &call.args),
-        "read_lints" => Ok(json!({
-            "success": true,
-            "message": "Native lint diagnostics are not wired yet; run the relevant test or lint command if exact diagnostics are needed."
-        })),
         "web_search" => web_search(workspace, &call.args),
         "web_fetch" => web_fetch(workspace, &call.args),
         _ => bail!("{} is not a read-only native tool", call.name),
@@ -787,6 +784,117 @@ async fn execute_shell_tool(
     Ok(output)
 }
 
+async fn execute_read_lints_tool(
+    state: Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    call: &ToolCallRequest,
+    cx: &mut AsyncApp,
+) -> Result<Value> {
+    let cwd = string_arg(&call.args, &["working_directory", "cwd"])
+        .map(|path| resolve_workspace_path(&runtime.workspace, path))
+        .transpose()?
+        .unwrap_or_else(|| runtime.workspace.clone());
+    let timeout = duration_arg(&call.args, "timeout")
+        .unwrap_or(CHECK_COMMAND_TIMEOUT)
+        .min(MAX_COMMAND_TIMEOUT);
+    let commands = lint_commands(&cwd, &call.args);
+    let paths = string_list_arg(&call.args, &["paths"]);
+
+    if commands.is_empty() {
+        let output = json!({
+            "success": true,
+            "commands": [],
+            "paths": paths,
+            "cwd": cwd,
+            "message": "No lint command was supplied or detected for this workspace."
+        });
+        emit_tool_result(state, runtime, call, &output, cx)?;
+        return Ok(output);
+    }
+
+    let listed_commands = commands
+        .iter()
+        .map(|command| format!("- {command}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tool_call = acp::ToolCall::new(call.id.clone(), tool_title(call))
+        .kind(acp::ToolKind::Execute)
+        .status(acp::ToolCallStatus::InProgress)
+        .content(vec![text_content(format!(
+            "Running lint checks from `{}`:\n{listed_commands}",
+            cwd.display()
+        ))])
+        .raw_input(Some(call.args.clone()))
+        .meta(meta_with_tool_name(&call.name));
+    emit_tool_call(state.clone(), runtime, tool_call, cx)?;
+
+    let mut results = Vec::with_capacity(commands.len());
+    let mut all_passed = true;
+    for command in commands {
+        let result = match run_shell_command(&command, &cwd, timeout) {
+            Ok(result) => {
+                let passed = result.exit_code == Some(0) && !result.timed_out;
+                all_passed &= passed;
+                json!({
+                    "command": command,
+                    "success": passed,
+                    "exit_code": result.exit_code,
+                    "timed_out": result.timed_out,
+                    "stdout": truncate(&result.stdout, MAX_OUTPUT_CHARS),
+                    "stderr": truncate(&result.stderr, 4000),
+                    "output": truncate(&result.output, MAX_OUTPUT_CHARS),
+                })
+            }
+            Err(error) => {
+                all_passed = false;
+                json!({
+                    "command": command,
+                    "success": false,
+                    "error": error.to_string(),
+                })
+            }
+        };
+        results.push(result);
+    }
+
+    let failed_count = results
+        .iter()
+        .filter(|result| {
+            !result
+                .get("success")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .count();
+    let output = json!({
+        "success": all_passed,
+        "cwd": cwd,
+        "paths": paths,
+        "timeout_ms": timeout.as_millis(),
+        "results": results,
+        "message": if all_passed {
+            "All lint checks passed."
+        } else {
+            "One or more lint checks failed."
+        },
+        "failed_count": failed_count,
+    });
+    emit_tool_update(
+        state,
+        runtime,
+        call,
+        if all_passed {
+            acp::ToolCallStatus::Completed
+        } else {
+            acp::ToolCallStatus::Failed
+        },
+        vec![text_content(value_to_text(&output))],
+        Some(output.clone()),
+        cx,
+    )?;
+    Ok(output)
+}
+
 fn execute_todo_write(
     state: Rc<BackboardNativeState>,
     runtime: &SessionRuntime,
@@ -973,6 +1081,33 @@ async fn run_task_subagent(
                 .get("type")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            if let Some(tool_calls) = subagent_tool_calls_required_by_chunk(&chunk) {
+                let run_id = subagent_run_id_from_chunk(&chunk)
+                    .or_else(|| current_run_id.clone())
+                    .context("subagent tool request did not include a run id")?;
+                tool_rounds += 1;
+                let outputs = if tool_rounds > SUBAGENT_MAX_TOOL_ROUNDS {
+                    subagent_tool_error_outputs(tool_calls, "Sub-agent tool round limit reached.")
+                } else {
+                    subagent_tool_outputs(&runtime.workspace, tool_calls).await
+                };
+                let thread_id = thread_id
+                    .clone()
+                    .context("subagent tool request arrived before Backboard returned thread_id")?;
+                next_stream = Some(
+                    client
+                        .submit_tool_outputs_stream(
+                            &thread_id,
+                            &run_id,
+                            SubmitToolOutputsRequest {
+                                tool_outputs: outputs,
+                                tools: None,
+                            },
+                        )
+                        .await?,
+                );
+                break;
+            }
             match chunk_type {
                 "run_started" => {
                     current_run_id = chunk
@@ -986,85 +1121,7 @@ async fn run_task_subagent(
                         content.push_str(&text);
                     }
                 }
-                "tool_submit_required" => {
-                    let run_id = chunk
-                        .get("run_id")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                        .or_else(|| current_run_id.clone())
-                        .context("subagent tool_submit_required did not include a run id")?;
-                    let tool_calls = chunk
-                        .get("tool_calls")
-                        .and_then(Value::as_array)
-                        .cloned()
-                        .unwrap_or_default();
-                    tool_rounds += 1;
-                    let outputs = if tool_rounds > SUBAGENT_MAX_TOOL_ROUNDS {
-                        subagent_tool_error_outputs(
-                            tool_calls,
-                            "Sub-agent tool round limit reached.",
-                        )
-                    } else {
-                        subagent_tool_outputs(&runtime.workspace, tool_calls).await
-                    };
-                    let thread_id = thread_id.clone().context(
-                        "subagent tool_submit_required arrived before Backboard returned thread_id",
-                    )?;
-                    next_stream = Some(
-                        client
-                            .submit_tool_outputs_stream(
-                                &thread_id,
-                                &run_id,
-                                SubmitToolOutputsRequest {
-                                    tool_outputs: outputs,
-                                    tools: None,
-                                },
-                            )
-                            .await?,
-                    );
-                    break;
-                }
                 "run_ended" => {
-                    if chunk.get("status").and_then(Value::as_str) == Some("requires_action")
-                        && chunk.get("tool_calls").is_some()
-                    {
-                        let run_id = chunk
-                            .get("run_id")
-                            .and_then(Value::as_str)
-                            .map(str::to_string)
-                            .or_else(|| current_run_id.clone())
-                            .context("subagent requires_action did not include a run id")?;
-                        let tool_calls = chunk
-                            .get("tool_calls")
-                            .and_then(Value::as_array)
-                            .cloned()
-                            .unwrap_or_default();
-                        tool_rounds += 1;
-                        let outputs = if tool_rounds > SUBAGENT_MAX_TOOL_ROUNDS {
-                            subagent_tool_error_outputs(
-                                tool_calls,
-                                "Sub-agent tool round limit reached.",
-                            )
-                        } else {
-                            subagent_tool_outputs(&runtime.workspace, tool_calls).await
-                        };
-                        let thread_id = thread_id.clone().context(
-                            "subagent requires_action arrived before Backboard returned thread_id",
-                        )?;
-                        next_stream = Some(
-                            client
-                                .submit_tool_outputs_stream(
-                                    &thread_id,
-                                    &run_id,
-                                    SubmitToolOutputsRequest {
-                                        tool_outputs: outputs,
-                                        tools: None,
-                                    },
-                                )
-                                .await?,
-                        );
-                        break;
-                    }
                     return subagent_success_output(&runtime.workspace, &description, &content);
                 }
                 "run_failed" | "error" => {
@@ -1092,6 +1149,41 @@ async fn run_task_subagent(
     }
 
     subagent_success_output(&runtime.workspace, &description, &content)
+}
+
+fn subagent_tool_calls_required_by_chunk(chunk: &Value) -> Option<Vec<Value>> {
+    let chunk_type = chunk
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let requires_action = chunk.get("status").and_then(Value::as_str) == Some("requires_action");
+    if chunk_type != "tool_submit_required" && !requires_action {
+        return None;
+    }
+
+    subagent_tool_calls_from_chunk(chunk).filter(|tool_calls| !tool_calls.is_empty())
+}
+
+fn subagent_tool_calls_from_chunk(chunk: &Value) -> Option<Vec<Value>> {
+    chunk
+        .get("tool_calls")
+        .or_else(|| chunk.pointer("/required_action/submit_tool_outputs/tool_calls"))
+        .or_else(|| chunk.pointer("/data/required_action/submit_tool_outputs/tool_calls"))
+        .or_else(|| chunk.pointer("/run/required_action/submit_tool_outputs/tool_calls"))
+        .and_then(Value::as_array)
+        .cloned()
+}
+
+fn subagent_run_id_from_chunk(chunk: &Value) -> Option<String> {
+    chunk
+        .get("run_id")
+        .or_else(|| chunk.get("id"))
+        .or_else(|| chunk.pointer("/run/id"))
+        .or_else(|| chunk.pointer("/data/run_id"))
+        .or_else(|| chunk.pointer("/data/id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
 }
 
 fn emit_task_start(
@@ -1451,7 +1543,7 @@ fn glob_files(workspace: &Path, args: &Value) -> Result<Value> {
             matches.push((modified, entry.path().to_path_buf()));
         }
     }
-    matches.sort_by(|left, right| right.0.cmp(&left.0));
+    matches.sort_by_key(|(modified, _)| Reverse(*modified));
     let files = matches
         .into_iter()
         .take(MAX_GLOB_RESULTS)
@@ -1469,6 +1561,7 @@ fn grep_files(workspace: &Path, args: &Value) -> Result<Value> {
     grep_files_with_walkdir(workspace, args)
 }
 
+#[allow(clippy::disallowed_methods)]
 fn grep_files_with_rg(workspace: &Path, args: &Value) -> Result<Value> {
     let pattern = string_arg(args, &["pattern"]).context("grep needs pattern")?;
     let root = string_arg(args, &["path"])
@@ -1652,7 +1745,7 @@ fn codebase_search(workspace: &Path, args: &Value) -> Result<Value> {
             }),
         ));
     }
-    hits.sort_by(|left, right| right.0.cmp(&left.0));
+    hits.sort_by_key(|(score, _)| Reverse(*score));
     Ok(json!({
         "success": true,
         "query": query,
@@ -1722,6 +1815,87 @@ fn web_search(workspace: &Path, args: &Value) -> Result<Value> {
         "results": results,
         "message": if results.is_empty() { "No instant results found. Try web_fetch with a specific documentation URL." } else { "" },
     }))
+}
+
+fn lint_commands(cwd: &Path, args: &Value) -> Vec<String> {
+    let mut commands = string_list_arg(args, &["commands"]);
+    commands.extend(string_arg(args, &["command", "cmd"]));
+    if commands.is_empty() {
+        commands = discover_lint_commands(cwd);
+    }
+    dedupe_commands(commands)
+        .into_iter()
+        .take(MAX_LINT_COMMANDS)
+        .collect()
+}
+
+fn discover_lint_commands(cwd: &Path) -> Vec<String> {
+    let mut commands = Vec::new();
+
+    if cwd.join("script").join("clippy").is_file() {
+        commands.push("./script/clippy".to_string());
+    }
+
+    commands.extend(package_lint_commands(cwd));
+
+    if cwd.join("Cargo.toml").is_file() {
+        commands.push("cargo clippy --all-targets --all-features -- -D warnings".to_string());
+    }
+
+    if cwd.join("ruff.toml").is_file()
+        || cwd.join(".ruff.toml").is_file()
+        || cwd.join("pyproject.toml").is_file()
+    {
+        commands.push("ruff check .".to_string());
+    }
+
+    if cwd.join("go.mod").is_file() {
+        commands.push("go vet ./...".to_string());
+    }
+
+    commands
+}
+
+fn package_lint_commands(cwd: &Path) -> Vec<String> {
+    let package_json_path = cwd.join("package.json");
+    let Ok(package_json) = fs::read_to_string(&package_json_path) else {
+        return Vec::new();
+    };
+    let Ok(package_json) = serde_json::from_str::<Value>(&package_json) else {
+        return Vec::new();
+    };
+    let Some(scripts) = package_json.get("scripts").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+
+    let runner = package_manager_runner(cwd);
+    ["lint", "typecheck", "check"]
+        .into_iter()
+        .filter(|script| scripts.contains_key(*script))
+        .map(|script| format!("{runner} run {script}"))
+        .collect()
+}
+
+fn package_manager_runner(cwd: &Path) -> &'static str {
+    if cwd.join("pnpm-lock.yaml").is_file() {
+        "pnpm"
+    } else if cwd.join("yarn.lock").is_file() {
+        "yarn"
+    } else if cwd.join("bun.lockb").is_file() || cwd.join("bun.lock").is_file() {
+        "bun"
+    } else {
+        "npm"
+    }
+}
+
+fn dedupe_commands(commands: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    commands
+        .into_iter()
+        .map(|command| command.trim().to_string())
+        .filter(|command| !command.is_empty())
+        .filter(|command| seen.insert(command.clone()))
+        .collect()
 }
 
 fn ssrf_block_reason(url: &str) -> Option<String> {
@@ -1936,6 +2110,7 @@ fn spawn_shell_command(
     event_rx
 }
 
+#[allow(clippy::disallowed_methods)]
 fn run_shell_command_with_events(
     command: &str,
     cwd: &Path,
@@ -2071,6 +2246,7 @@ fn shell_command_builder(command: &str) -> Command {
     }
 }
 
+#[allow(clippy::disallowed_methods)]
 fn run_shell_command(command: &str, cwd: &Path, timeout: Duration) -> Result<ShellResult> {
     let started = Instant::now();
     let mut command_builder = shell_command_builder(command);
@@ -2126,6 +2302,7 @@ fn run_shell_command(command: &str, cwd: &Path, timeout: Duration) -> Result<She
     })
 }
 
+#[allow(clippy::disallowed_methods)]
 fn run_background_command(command: &str, cwd: &Path) -> Result<Value> {
     let mut command_builder = if cfg!(target_os = "windows") {
         let mut command_builder = Command::new("cmd");
@@ -2227,6 +2404,7 @@ fn tool_title(call: &ToolCallRequest) -> String {
             string_arg(&call.args, &["description"])
                 .unwrap_or_else(|| string_arg(&call.args, &["command"]).unwrap_or_default())
         }
+        "read_lints" => "Checking lints".to_string(),
         "task" => task_description(
             call,
             &task_prompt(call).unwrap_or_else(|| "Focused sub-agent task".to_string()),
@@ -2237,13 +2415,15 @@ fn tool_title(call: &ToolCallRequest) -> String {
 
 fn tool_kind(name: &str) -> acp::ToolKind {
     match name {
-        "read_file" | "list_dir" | "read_lints" => acp::ToolKind::Read,
+        "read_file" | "list_dir" => acp::ToolKind::Read,
         "glob" | "glob_file_search" | "grep" | "codebase_search" | "web_search" | "web_fetch" => {
             acp::ToolKind::Search
         }
         "write" | "edit" | "search_replace" | "create_directory" => acp::ToolKind::Edit,
         "delete_file" => acp::ToolKind::Delete,
-        "bash" | "run_terminal_cmd" | "run_code" | "repl" | "computer" => acp::ToolKind::Execute,
+        "bash" | "run_terminal_cmd" | "read_lints" | "run_code" | "repl" | "computer" => {
+            acp::ToolKind::Execute
+        }
         "todo_write" | "enter_plan_mode" | "exit_plan_mode" | "persistence_decide" | "task" => {
             acp::ToolKind::Think
         }
@@ -2261,6 +2441,7 @@ fn is_mutating_tool(name: &str) -> bool {
             | "create_directory"
             | "bash"
             | "run_terminal_cmd"
+            | "read_lints"
             | "run_code"
             | "repl"
             | "computer"
@@ -2271,7 +2452,7 @@ fn is_mutating_tool(name: &str) -> bool {
 fn is_shell_tool(name: &str) -> bool {
     matches!(
         name,
-        "bash" | "run_terminal_cmd" | "run_code" | "repl" | "computer"
+        "bash" | "run_terminal_cmd" | "read_lints" | "run_code" | "repl" | "computer"
     )
 }
 
@@ -2594,6 +2775,35 @@ fn string_arg(args: &Value, keys: &[&str]) -> Option<String> {
     })
 }
 
+fn string_list_arg(args: &Value, keys: &[&str]) -> Vec<String> {
+    keys.iter()
+        .find_map(|key| {
+            let value = args.get(*key)?;
+            if let Some(array) = value.as_array() {
+                return Some(
+                    array
+                        .iter()
+                        .filter_map(|value| match value {
+                            Value::String(text) => {
+                                (!text.trim().is_empty()).then(|| text.trim().to_string())
+                            }
+                            Value::Number(number) => Some(number.to_string()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+            match value {
+                Value::String(text) => {
+                    Some((!text.trim().is_empty()).then(|| vec![text.trim().to_string()])?)
+                }
+                Value::Number(number) => Some(vec![number.to_string()]),
+                _ => None,
+            }
+        })
+        .unwrap_or_default()
+}
+
 fn bool_arg(args: &Value, key: &str) -> bool {
     args.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
@@ -2689,6 +2899,47 @@ mod tests {
         assert_eq!(path_arg(&args).as_deref(), Some("src/main.rs"));
         assert_eq!(int_arg(&args, "offset"), Some(12));
         assert_eq!(int_arg(&args, "limit"), Some(30));
+    }
+
+    #[test]
+    fn lint_commands_accept_explicit_command_shapes() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let commands = lint_commands(
+            tempdir.path(),
+            &json!({
+                "commands": [" npm run lint ", "npm run lint", ""],
+                "cmd": "cargo clippy --all-targets"
+            }),
+        );
+
+        assert_eq!(commands, vec!["npm run lint", "cargo clippy --all-targets"]);
+    }
+
+    #[test]
+    fn lint_commands_discover_common_project_checks() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let workspace = tempdir.path();
+        fs::create_dir_all(workspace.join("script")).unwrap();
+        fs::write(workspace.join("script").join("clippy"), "#!/bin/sh\n").unwrap();
+        fs::write(
+            workspace.join("package.json"),
+            r#"{"scripts":{"lint":"eslint .","typecheck":"tsc --noEmit"}}"#,
+        )
+        .unwrap();
+        fs::write(workspace.join("pnpm-lock.yaml"), "").unwrap();
+        fs::write(workspace.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+
+        let commands = lint_commands(workspace, &json!({}));
+
+        assert_eq!(
+            commands,
+            vec![
+                "./script/clippy",
+                "pnpm run lint",
+                "pnpm run typecheck",
+                "cargo clippy --all-targets --all-features -- -D warnings",
+            ]
+        );
     }
 
     #[test]

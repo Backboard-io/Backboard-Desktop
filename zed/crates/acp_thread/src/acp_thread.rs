@@ -1333,6 +1333,54 @@ impl Display for LoadError {
 
 impl Error for LoadError {}
 
+fn visible_message_content_blocks(message: &[acp::ContentBlock]) -> Vec<acp::ContentBlock> {
+    let mut visible_message = message.to_vec();
+    for block in &mut visible_message {
+        if let acp::ContentBlock::Text(text) = block
+            && let Some(visible_text) = strip_backboard_mode_prompt_prefix(&text.text)
+        {
+            text.text = visible_text;
+            break;
+        }
+    }
+    visible_message
+}
+
+fn strip_backboard_mode_prompt_prefix(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    for marker in ["Simple build mode:", "Simple mode:", "Ask mode:"] {
+        if !trimmed.starts_with(marker) {
+            continue;
+        }
+
+        if let Some((_, user_message)) = trimmed.split_once("\n\n") {
+            return Some(user_message.trim().to_string());
+        }
+
+        let mut user_message = Vec::new();
+        let mut collecting_user_message = false;
+        for line in trimmed.lines() {
+            let line_text = line.trim();
+            let is_instruction_line = line_text.is_empty()
+                || line_text.starts_with(marker)
+                || line_text.starts_with("- ")
+                || (marker == "Ask mode:"
+                    && line_text.starts_with("Ask focused clarifying questions"));
+
+            if !collecting_user_message && is_instruction_line {
+                continue;
+            }
+
+            collecting_user_message = true;
+            user_message.push(line);
+        }
+
+        return Some(user_message.join("\n").trim().to_string());
+    }
+
+    None
+}
+
 impl AcpThread {
     pub fn new(
         parent_session_id: Option<acp::SessionId>,
@@ -2556,8 +2604,9 @@ impl AcpThread {
         message: Vec<acp::ContentBlock>,
         cx: &mut Context<Self>,
     ) -> BoxFuture<'static, Result<Option<acp::PromptResponse>>> {
+        let visible_message = visible_message_content_blocks(&message);
         let block = ContentBlock::new_combined(
-            message.clone(),
+            visible_message.clone(),
             self.project.read(cx).languages().clone(),
             self.project.read(cx).path_style(cx),
             cx,
@@ -2573,7 +2622,7 @@ impl AcpThread {
                     AgentThreadEntry::UserMessage(UserMessage {
                         id: Some(message_id.clone()),
                         content: block,
-                        chunks: message,
+                        chunks: visible_message,
                         checkpoint: None,
                         indented: false,
                     }),
@@ -3423,6 +3472,22 @@ mod tests {
             let settings_store = SettingsStore::test(cx);
             cx.set_global(settings_store);
         });
+    }
+
+    #[test]
+    fn strips_backboard_mode_prefix_from_visible_message() {
+        let message = vec![acp::ContentBlock::Text(acp::TextContent::new(
+            "Simple build mode: build or edit the project for a nontechnical user.\n\
+             - Keep visible chat replies short and natural.\n\n\
+             Build a recipe app",
+        ))];
+
+        let visible_message = visible_message_content_blocks(&message);
+
+        let [acp::ContentBlock::Text(visible_text)] = visible_message.as_slice() else {
+            panic!("expected text content");
+        };
+        assert_eq!(visible_text.text, "Build a recipe app");
     }
 
     #[gpui::test]

@@ -2533,6 +2533,9 @@
   "macos": {},
   // Settings overrides to use when using Windows.
   "windows": {
+    "title_bar": {
+      "show_menus": true,
+    },
     "languages": {
       "PHP": {
         "language_servers": ["intelephense", "!phpactor", "!phptools", "..."],

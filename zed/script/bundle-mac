@@ -83,6 +83,18 @@ else
     exit 1
 fi
 
+dmg_target_directory="target/${target_triple}/${target_dir}"
+dmg_source_directory="${dmg_target_directory}/dmg"
+dmg_file_path="${dmg_target_directory}/Backboard-Studio-${arch_suffix}.dmg"
+
+rm -f "${dmg_file_path}"
+rm -rf "${dmg_source_directory}"
+rm -rf \
+    "${dmg_target_directory}/bundle/osx/Backboard Studio.app" \
+    "${dmg_target_directory}/bundle/osx/Backboard Studio Dev.app" \
+    "${dmg_target_directory}/bundle/osx/Backboard Studio Nightly.app" \
+    "${dmg_target_directory}/bundle/osx/Backboard Studio Preview.app"
+
 # Generate the licenses first, so they can be baked into the binaries
 script/generate-licenses
 
@@ -96,17 +108,62 @@ cargo build ${build_flag} --package remote_server --target $target_triple
 
 echo "Creating application bundle"
 pushd crates/zed
-cp Cargo.toml Cargo.toml.backup
+if ! grep -q "^\\[package.metadata.bundle-${channel}\\]$" Cargo.toml; then
+    echo "Missing [package.metadata.bundle-${channel}] in crates/zed/Cargo.toml"
+    echo "Refusing to package because this can create the wrong release channel."
+    exit 1
+fi
+
+cp Cargo.toml Cargo.toml.bundle-backup
+restore_cargo_toml() {
+    if [[ -f Cargo.toml.bundle-backup ]]; then
+        mv Cargo.toml.bundle-backup Cargo.toml
+    fi
+}
+trap restore_cargo_toml EXIT
 sed \
-    -i.backup \
+    -i.bundle-tmp \
     "s/package.metadata.bundle-${channel}/package.metadata.bundle/" \
     Cargo.toml
 
 app_path=$(cargo bundle ${build_flag} --target $target_triple --select-workspace-root | xargs)
 
-mv Cargo.toml.backup Cargo.toml
+restore_cargo_toml
+trap - EXIT
 popd
 echo "Bundled ${app_path}"
+
+case "$channel" in
+    stable)
+        expected_bundle_name="Backboard Studio"
+        expected_bundle_identifier="io.backboard.studio"
+        ;;
+    dev)
+        expected_bundle_name="Backboard Studio Dev"
+        expected_bundle_identifier="io.backboard.studio.dev"
+        ;;
+    nightly)
+        expected_bundle_name="Backboard Studio Nightly"
+        expected_bundle_identifier="io.backboard.studio.nightly"
+        ;;
+    preview)
+        expected_bundle_name="Backboard Studio Preview"
+        expected_bundle_identifier="io.backboard.studio.preview"
+        ;;
+    *)
+        echo "Unknown release channel: ${channel}"
+        exit 1
+        ;;
+esac
+
+actual_bundle_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "${app_path}/Contents/Info.plist")
+actual_bundle_identifier=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${app_path}/Contents/Info.plist")
+if [[ "$actual_bundle_name" != "$expected_bundle_name" || "$actual_bundle_identifier" != "$expected_bundle_identifier" ]]; then
+    echo "Bundled app does not match release channel ${channel}:"
+    echo "  expected ${expected_bundle_name} (${expected_bundle_identifier})"
+    echo "  actual   ${actual_bundle_name} (${actual_bundle_identifier})"
+    exit 1
+fi
 
 # DocumentTypes.plist references CFBundleTypeIconFile "Document", so the bundle must contain Document.icns.
 # We use the app icon as a placeholder document icon for now.
@@ -268,12 +325,8 @@ function sign_app_binaries() {
             echo "$app_path"
         fi
     else
-        dmg_target_directory="target/${target_triple}/${target_dir}"
-        dmg_source_directory="${dmg_target_directory}/dmg"
-        dmg_file_path="${dmg_target_directory}/Backboard-Studio-${arch_suffix}.dmg"
         xcode_bin_dir_path="$(xcode-select -p)/usr/bin"
 
-        rm -rf ${dmg_source_directory}
         mkdir -p ${dmg_source_directory}
         mv "${app_path}" "${dmg_source_directory}"
         notarization_key_file=$(mktemp)

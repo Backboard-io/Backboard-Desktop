@@ -500,6 +500,7 @@ pub struct ButtonLike {
     on_right_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     children: SmallVec<[AnyElement; 2]>,
     focus_handle: Option<FocusHandle>,
+    stop_mouse_down_propagation: bool,
 }
 
 impl ButtonLike {
@@ -525,6 +526,7 @@ impl ButtonLike {
             layer: None,
             tab_index: None,
             focus_handle: None,
+            stop_mouse_down_propagation: false,
         }
     }
 
@@ -580,6 +582,11 @@ impl ButtonLike {
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_right_click = Some(Box::new(handler));
+        self
+    }
+
+    pub fn stop_mouse_down_propagation(mut self) -> Self {
+        self.stop_mouse_down_propagation = true;
         self
     }
 
@@ -789,11 +796,17 @@ impl RenderOnce for ButtonLike {
             .when_some(
                 self.on_click.filter(|_| !self.disabled),
                 |this, on_click| {
-                    this.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
-                        .on_click(move |event, window, cx| {
+                    let stop_mouse_down_propagation = self.stop_mouse_down_propagation;
+                    this.on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        window.prevent_default();
+                        if stop_mouse_down_propagation {
                             cx.stop_propagation();
-                            (on_click)(event, window, cx)
-                        })
+                        }
+                    })
+                    .on_click(move |event, window, cx| {
+                        cx.stop_propagation();
+                        (on_click)(event, window, cx)
+                    })
                 },
             )
             .when_some(self.tooltip, |this, tooltip| {

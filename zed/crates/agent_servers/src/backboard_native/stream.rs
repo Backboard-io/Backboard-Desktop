@@ -339,6 +339,20 @@ async fn consume_stream(
                 flush_stream_text(&state, &runtime, &mut text_coalescer, cx)?;
             }
 
+            if let Some(tool_calls) = tool_calls_required_by_chunk(&chunk) {
+                let run_id = run_id_from_tool_chunk(&state, &runtime, &chunk)
+                    .context("tool request did not include a run id")?;
+                let thread_id = thread_id
+                    .clone()
+                    .or_else(|| state.session_thread_id(&runtime.session_id))
+                    .context("tool request arrived before Backboard returned thread_id")?;
+                next_stream = Some(
+                    submit_tools(state.clone(), &runtime, &thread_id, &run_id, tool_calls, cx)
+                        .await?,
+                );
+                break;
+            }
+
             match chunk_type {
                 "run_started" => {
                     let run_id = chunk
@@ -420,74 +434,7 @@ async fn consume_stream(
                         return Ok(acp::StopReason::EndTurn);
                     }
                 }
-                "tool_submit_required" => {
-                    let run_id = chunk
-                        .get("run_id")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                        .or_else(|| {
-                            state
-                                .sessions
-                                .borrow()
-                                .get(&runtime.session_id)
-                                .and_then(|session| session.current_run_id.clone())
-                        })
-                        .context("tool_submit_required did not include a run id")?;
-                    let tool_calls = chunk
-                        .get("tool_calls")
-                        .and_then(Value::as_array)
-                        .cloned()
-                        .unwrap_or_default();
-                    let thread_id = thread_id
-                        .clone()
-                        .or_else(|| state.session_thread_id(&runtime.session_id))
-                        .context(
-                            "tool_submit_required arrived before Backboard returned thread_id",
-                        )?;
-                    next_stream = Some(
-                        submit_tools(state.clone(), &runtime, &thread_id, &run_id, tool_calls, cx)
-                            .await?,
-                    );
-                    break;
-                }
                 "run_ended" => {
-                    if chunk.get("status").and_then(Value::as_str) == Some("requires_action")
-                        && chunk.get("tool_calls").is_some()
-                    {
-                        let run_id = chunk
-                            .get("run_id")
-                            .and_then(Value::as_str)
-                            .map(str::to_string)
-                            .or_else(|| {
-                                state
-                                    .sessions
-                                    .borrow()
-                                    .get(&runtime.session_id)
-                                    .and_then(|session| session.current_run_id.clone())
-                            })
-                            .context("requires_action run_ended did not include a run id")?;
-                        let tool_calls = chunk
-                            .get("tool_calls")
-                            .and_then(Value::as_array)
-                            .cloned()
-                            .unwrap_or_default();
-                        let thread_id = thread_id
-                            .clone()
-                            .or_else(|| state.session_thread_id(&runtime.session_id))
-                            .context("requires_action run_ended arrived before Backboard returned thread_id")?;
-                        next_stream = Some(
-                            submit_tools(
-                                state.clone(),
-                                &runtime,
-                                &thread_id,
-                                &run_id,
-                                tool_calls,
-                                cx,
-                            )
-                            .await?,
-                        );
-                        break;
-                    }
                     if runtime.feature_settings.image_generation == "auto" {
                         emit_generated_media_records(&state, &runtime, &chunk, cx).ok();
                     }
@@ -526,6 +473,52 @@ async fn consume_stream(
             return Ok(acp::StopReason::EndTurn);
         }
     }
+}
+
+fn tool_calls_required_by_chunk(chunk: &Value) -> Option<Vec<Value>> {
+    let chunk_type = chunk
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let requires_action = chunk.get("status").and_then(Value::as_str) == Some("requires_action");
+    if chunk_type != "tool_submit_required" && !requires_action {
+        return None;
+    }
+
+    tool_calls_from_chunk(chunk).filter(|tool_calls| !tool_calls.is_empty())
+}
+
+fn tool_calls_from_chunk(chunk: &Value) -> Option<Vec<Value>> {
+    chunk
+        .get("tool_calls")
+        .or_else(|| chunk.pointer("/required_action/submit_tool_outputs/tool_calls"))
+        .or_else(|| chunk.pointer("/data/required_action/submit_tool_outputs/tool_calls"))
+        .or_else(|| chunk.pointer("/run/required_action/submit_tool_outputs/tool_calls"))
+        .and_then(Value::as_array)
+        .cloned()
+}
+
+fn run_id_from_tool_chunk(
+    state: &Rc<BackboardNativeState>,
+    runtime: &SessionRuntime,
+    chunk: &Value,
+) -> Option<String> {
+    chunk
+        .get("run_id")
+        .or_else(|| chunk.get("id"))
+        .or_else(|| chunk.pointer("/run/id"))
+        .or_else(|| chunk.pointer("/data/run_id"))
+        .or_else(|| chunk.pointer("/data/id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            state
+                .sessions
+                .borrow()
+                .get(&runtime.session_id)
+                .and_then(|session| session.current_run_id.clone())
+        })
 }
 
 fn emit_stream_text(
@@ -1814,6 +1807,35 @@ mod tests {
         assert_eq!(usage.context_limit, 102400);
         assert_eq!(usage.summary_tokens, 5000);
         assert_eq!(usage.model.as_deref(), Some("openai/gpt-5"));
+    }
+
+    #[test]
+    fn extracts_nested_required_action_tool_calls() {
+        let chunk = json!({
+            "type": "run_ended",
+            "status": "requires_action",
+            "required_action": {
+                "submit_tool_outputs": {
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\"target_file\":\"src/main.rs\"}"
+                        }
+                    }]
+                }
+            }
+        });
+
+        let tool_calls = tool_calls_required_by_chunk(&chunk).unwrap();
+
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0]
+                .pointer("/function/name")
+                .and_then(Value::as_str),
+            Some("read_file")
+        );
     }
 
     #[test]

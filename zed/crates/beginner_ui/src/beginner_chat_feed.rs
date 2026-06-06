@@ -73,6 +73,7 @@ pub enum BeginnerChatFeedEvent {
 
 impl EventEmitter<BeginnerChatFeedEvent> for BeginnerChatFeed {}
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PreviewCardState {
     Building,
@@ -81,6 +82,7 @@ pub enum PreviewCardState {
     Unavailable,
 }
 
+#[allow(dead_code)]
 impl BeginnerChatFeed {
     pub fn new(
         thread: Entity<AcpThread>,
@@ -1409,7 +1411,8 @@ fn friendly_progress_status_line(line: &str) -> Option<String> {
             "bash" | "computer" | "repl" | "run_code" | "run_terminal_cmd" => {
                 "Running a command.".to_string()
             }
-            "list_dir" | "read_file" | "read_lints" => "Reading project context.".to_string(),
+            "list_dir" | "read_file" => "Reading project context.".to_string(),
+            "read_lints" => "Checking lints.".to_string(),
             "grep" | "find_path" | "find_references" | "go_to_definition" => {
                 "Searching the project.".to_string()
             }
@@ -1981,9 +1984,7 @@ Backboard is running `read_file`.";
 
         assert_eq!(
             live_thought_text(text).as_deref(),
-            Some(
-                "Preparing workspace context.\nSending to model.\nBackboard is running `read_file`."
-            )
+            Some("Preparing workspace context.\nBackboard is running `read_file`.")
         );
     }
 

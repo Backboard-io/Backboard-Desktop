@@ -510,6 +510,9 @@ pub struct ConversationView {
     draft_prompt_persist_task: Option<Task<()>>,
     _backboard_config_task: Option<Task<()>>,
     suppress_notifications: bool,
+    suppress_mode_selector: bool,
+    suppress_multi_root_callout: bool,
+    background_override: Option<Hsla>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -709,6 +712,17 @@ impl ConversationView {
         });
     }
 
+    pub fn set_root_session_mode(
+        &self,
+        mode: acp::SessionModeId,
+        cx: &mut Context<Self>,
+    ) -> Option<Task<Result<()>>> {
+        let session_id = self.root_session_id.as_ref()?;
+        let connected = self.as_connected()?;
+        let session_modes = connected.connection.session_modes(session_id, cx)?;
+        Some(session_modes.set_mode(mode, cx))
+    }
+
     pub fn thread_view(&self, session_id: &acp::SessionId) -> Option<Entity<ThreadView>> {
         let connected = self.as_connected()?;
         connected.threads.get(session_id).cloned()
@@ -727,7 +741,7 @@ impl ConversationView {
     }
 
     /// Creates a new model selector popover for the root thread with the inner selector
-    /// passed through `wrap`. Used by simple mode to substitute a curated model list.
+    /// passed through `wrap`.
     pub fn make_root_model_selector_wrapped(
         &self,
         wrap: impl FnOnce(Rc<dyn AgentModelSelector>) -> Rc<dyn AgentModelSelector>,
@@ -956,6 +970,9 @@ impl ConversationView {
             draft_prompt_persist_task: None,
             _backboard_config_task: backboard_config_task,
             suppress_notifications: false,
+            suppress_mode_selector: false,
+            suppress_multi_root_callout: false,
+            background_override: None,
             _subscriptions: subscriptions,
             focus_handle: cx.focus_handle(),
         }
@@ -963,6 +980,41 @@ impl ConversationView {
 
     pub fn set_suppress_notifications(&mut self, suppress: bool) {
         self.suppress_notifications = suppress;
+    }
+
+    pub fn set_suppress_mode_selector(&mut self, suppress: bool, cx: &mut Context<Self>) {
+        self.suppress_mode_selector = suppress;
+        if suppress && let Some(root_thread) = self.root_thread_view() {
+            root_thread.update(cx, |thread, cx| {
+                thread.mode_selector = None;
+                cx.notify();
+            });
+        }
+        cx.notify();
+    }
+
+    pub fn set_suppress_multi_root_callout(&mut self, suppress: bool, cx: &mut Context<Self>) {
+        self.suppress_multi_root_callout = suppress;
+        if let Some(connected) = self.as_connected() {
+            for thread_view in connected.threads.values() {
+                thread_view.update(cx, |thread, cx| {
+                    thread.set_suppress_multi_root_callout(suppress, cx);
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    pub fn set_background_override(&mut self, background: Option<Hsla>, cx: &mut Context<Self>) {
+        self.background_override = background;
+        if let Some(connected) = self.as_connected() {
+            for thread_view in connected.threads.values() {
+                thread_view.update(cx, |thread, cx| {
+                    thread.set_background_override(background, cx);
+                });
+            }
+        }
+        cx.notify();
     }
 
     fn set_server_state(&mut self, state: ServerState, cx: &mut Context<Self>) {
@@ -1382,7 +1434,7 @@ impl ConversationView {
             })
         };
 
-        let mode_selector = if config_options_include_mode {
+        let mode_selector = if config_options_include_mode || self.suppress_mode_selector {
             None
         } else {
             connection
@@ -1475,7 +1527,8 @@ impl ConversationView {
             });
 
         let weak = cx.weak_entity();
-        cx.new(|cx| {
+        let background_override = self.background_override;
+        let thread_view = cx.new(|cx| {
             ThreadView::new(
                 thread,
                 conversation,
@@ -1501,7 +1554,18 @@ impl ConversationView {
                 window,
                 cx,
             )
-        })
+        });
+        if let Some(background_override) = background_override {
+            thread_view.update(cx, |thread, cx| {
+                thread.set_background_override(Some(background_override), cx);
+            });
+        }
+        if self.suppress_multi_root_callout {
+            thread_view.update(cx, |thread, cx| {
+                thread.set_suppress_multi_root_callout(true, cx);
+            });
+        }
+        thread_view
     }
 
     fn handle_auth_required(
@@ -3306,7 +3370,9 @@ impl Render for ConversationView {
         v_flex()
             .track_focus(&self.focus_handle)
             .size_full()
-            .bg(cx.theme().colors().panel_background)
+            .bg(self
+                .background_override
+                .unwrap_or(cx.theme().colors().panel_background))
             .child(match &self.server_state {
                 ServerState::Loading { .. } => v_flex()
                     .flex_1()

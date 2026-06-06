@@ -1719,7 +1719,21 @@ fn validate_completion_syntax(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
+
+    fn temp_config_path(test_name: &str) -> (PathBuf, PathBuf) {
+        let test_root = std::env::temp_dir().join(format!(
+            "{test_name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = test_root.join(".backboard").join("config.json");
+        (test_root, path)
+    }
 
     fn input(cursor_excerpt: &str, cursor_offset_in_excerpt: usize) -> ZetaPromptInput {
         input_with_lang(cursor_excerpt, cursor_offset_in_excerpt, "test.rs")
@@ -1744,6 +1758,22 @@ mod tests {
             can_collect_data: false,
             repo_url: None,
         }
+    }
+
+    #[test]
+    fn saved_backboard_api_key_reads_shared_config() {
+        let (test_root, path) = temp_config_path("edit-prediction-backboard-config");
+        let _guard = backboard_api::set_config_path_for_testing(path);
+
+        BackboardConfig::save_api_key_for_current_env("  bb-edit-prediction-key  ")
+            .expect("save api key");
+
+        assert_eq!(
+            saved_backboard_api_key().as_deref(),
+            Some("bb-edit-prediction-key")
+        );
+
+        std::fs::remove_dir_all(test_root).ok();
     }
 
     #[test]

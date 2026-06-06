@@ -25,9 +25,9 @@ pub fn system_prompt(workspace: &Path) -> String {
          - Never commit, amend, push, force-push, reset, checkout, or clean git state unless the user explicitly asks.\n\
          - Before creating files or directories, verify the parent location exists and is the intended target.\n\n\
          Native tool calls:\n\
-         - Read/search: read_file, list_dir, glob, grep, codebase_search, read_lints.\n\
+         - Read/search: read_file, list_dir, glob, grep, codebase_search.\n\
          - File changes: write, edit, search_replace, delete_file, create_directory.\n\
-         - Shell/checks: bash, run_terminal_cmd, run_code, repl.\n\
+         - Shell/checks: read_lints, bash, run_terminal_cmd, run_code, repl.\n\
          - Flow: todo_write, ask_user_question, sleep.\n\
          - Web: web_search, web_fetch when current external information is needed.\n\n\
          Tool policy:\n\
@@ -35,6 +35,7 @@ pub fn system_prompt(workspace: &Path) -> String {
          - Use native read/search tools for exploration; batch independent read/search calls when useful.\n\
          - Prefer edit/search_replace for existing files and write for new or complete-file rewrites.\n\
          - Use bash/run_terminal_cmd for builds, tests, git inspection, package scripts, and shell-only checks; quote paths with spaces and explain non-trivial, risky, or mutating commands briefly.\n\
+         - After code changes, near the end of the task, call read_lints or the user-requested check command when practical. Report unrelated or pre-existing failures separately.\n\
          - Use todo_write for multi-step work, build/test fix loops, and feature work; keep item statuses current.\n\
          - Ask the user only when required information cannot be discovered and guessing would be risky.\n\
          - Respect the active mode in <backboard_ide_context>; some tools may be hidden or blocked by mode.\n\
@@ -49,6 +50,7 @@ pub fn augment_prompt(
     mode: &str,
     selected_skills: &[String],
 ) -> String {
+    let system_prompt = system_prompt(workspace);
     let context = workspace_context(workspace);
     let selected_skills = if selected_skills.is_empty() {
         "none".to_string()
@@ -56,7 +58,9 @@ pub fn augment_prompt(
         selected_skills.join(", ")
     };
     format!(
-        "{message}\n\n\
+        "{system_prompt}\n\n\
+         User request:\n\n\
+         {message}\n\n\
          <backboard_ide_context>\n\
          runtime: native-rust\n\
          mode: {mode}\n\
@@ -143,5 +147,16 @@ mod tests {
 
         assert!(prompt.contains("ask for confirmation before recreating"));
         assert!(prompt.contains("explicitly says to recreate, adapt, or build a new copy"));
+    }
+
+    #[test]
+    fn augmented_prompt_includes_native_tool_policy() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let prompt = augment_prompt("Build a todo app", tempdir.path(), "free", &[]);
+
+        assert!(prompt.contains("You are Backboard, an autonomous software engineering agent"));
+        assert!(prompt.contains("Native tool calls:"));
+        assert!(prompt.contains("User request:\n\nBuild a todo app"));
+        assert!(prompt.contains("<backboard_ide_context>"));
     }
 }

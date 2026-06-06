@@ -58,12 +58,32 @@ enum ModelPickerEntry {
     Model(AgentModelInfo, bool),
 }
 
+#[derive(Clone)]
+enum ModelListState {
+    Loading,
+    Loaded(AgentModelList),
+    Failed,
+}
+
+impl ModelListState {
+    fn loaded(&self) -> Option<&AgentModelList> {
+        match self {
+            ModelListState::Loaded(models) => Some(models),
+            ModelListState::Loading | ModelListState::Failed => None,
+        }
+    }
+
+    fn has_visible_models(&self) -> bool {
+        self.loaded().is_some_and(model_list_has_visible_models)
+    }
+}
+
 pub struct ModelPickerDelegate {
     selector: Rc<dyn AgentModelSelector>,
     agent_server: Rc<dyn AgentServer>,
     fs: Arc<dyn Fs>,
     filtered_entries: Vec<ModelPickerEntry>,
-    models: Option<AgentModelList>,
+    models: ModelListState,
     selected_index: usize,
     selected_description: Option<(usize, SharedString, bool)>,
     selected_model: Option<AgentModelInfo>,
@@ -99,15 +119,29 @@ impl ModelPickerDelegate {
                             )
                         })?;
 
+                        this.update_in(cx, |this, window, cx| {
+                            if !this.delegate.models.has_visible_models() {
+                                this.delegate.models = ModelListState::Loading;
+                                this.refresh(window, cx);
+                            }
+                        })?;
+
                         let selected_model = selected_model_task.await.warn_on_err();
                         this.update_in(cx, |this, window, cx| {
                             this.delegate.selected_model = selected_model;
                             this.refresh(window, cx)
                         })?;
 
-                        let models = models_task.await.warn_on_err();
-                        let has_models =
-                            models.as_ref().map_or(false, model_list_has_visible_models);
+                        let (models, has_models) = match models_task.await {
+                            Ok(models) => {
+                                let has_models = model_list_has_visible_models(&models);
+                                (ModelListState::Loaded(models), has_models)
+                            }
+                            Err(error) => {
+                                log::warn!("failed to load agent models: {error:#}");
+                                (ModelListState::Failed, false)
+                            }
+                        };
                         this.update_in(cx, |this, window, cx| {
                             this.delegate.models = models;
                             this.refresh(window, cx)
@@ -157,7 +191,7 @@ impl ModelPickerDelegate {
             agent_server,
             fs,
             filtered_entries: Vec::new(),
-            models: None,
+            models: ModelListState::Loading,
             selected_model: None,
             selected_providers: HashSet::default(),
             show_provider_filters: false,
@@ -183,7 +217,7 @@ impl ModelPickerDelegate {
             return;
         }
 
-        let Some(models) = &self.models else {
+        let Some(models) = self.models.loaded() else {
             return;
         };
 
@@ -234,7 +268,7 @@ impl ModelPickerDelegate {
 
     fn available_provider_ids(&self) -> Vec<String> {
         let mut providers = HashSet::default();
-        let Some(models) = &self.models else {
+        let Some(models) = self.models.loaded() else {
             return Vec::new();
         };
         match models {
@@ -325,15 +359,7 @@ impl PickerDelegate for ModelPickerDelegate {
     }
 
     fn no_matches_text(&self, _window: &mut Window, _cx: &mut App) -> Option<SharedString> {
-        if self
-            .models
-            .as_ref()
-            .map_or(true, |models| !model_list_has_visible_models(models))
-        {
-            Some("Temporary Issue: Please Try Again".into())
-        } else {
-            Some("No matches".into())
-        }
+        Some(model_list_no_matches_text(&self.models))
     }
 
     fn render_editor(
@@ -367,18 +393,25 @@ impl PickerDelegate for ModelPickerDelegate {
                             ),
                     )
                     .child(
-                        Button::new("provider-filter-trigger", "Filter")
-                            .style(ButtonStyle::Subtle)
-                            .size(ButtonSize::Compact)
-                            .toggle_state(self.show_provider_filters)
-                            .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-                            .tooltip(Tooltip::text("Filter providers"))
-                            .on_click(cx.listener(|picker, _, window, cx| {
+                        div()
+                            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                window.prevent_default();
                                 cx.stop_propagation();
-                                picker.delegate.show_provider_filters =
-                                    !picker.delegate.show_provider_filters;
-                                picker.refresh(window, cx);
-                            })),
+                            })
+                            .child(
+                                Button::new("provider-filter-trigger", "Filter")
+                                    .style(ButtonStyle::Subtle)
+                                    .size(ButtonSize::Compact)
+                                    .toggle_state(self.show_provider_filters)
+                                    .selected_style(ButtonStyle::Tinted(TintColor::Accent))
+                                    .tooltip(Tooltip::text("Filter providers"))
+                                    .on_click(cx.listener(|picker, _, window, cx| {
+                                        cx.stop_propagation();
+                                        picker.delegate.show_provider_filters =
+                                            !picker.delegate.show_provider_filters;
+                                        picker.refresh(window, cx);
+                                    })),
+                            ),
                     ),
             )
             .child(div().h(px(1.)).bg(cx.theme().colors().border_variant))
@@ -402,7 +435,7 @@ impl PickerDelegate for ModelPickerDelegate {
         cx.spawn_in(window, async move |this, cx| {
             let filtered_models = match this
                 .read_with(cx, |this, cx| {
-                    this.delegate.models.clone().map(move |models| {
+                    this.delegate.models.loaded().cloned().map(move |models| {
                         let models = apply_model_filters(models, &this.delegate.selected_providers);
                         fuzzy_search(models, query, cx.background_executor().clone())
                     })
@@ -770,6 +803,17 @@ fn model_list_has_visible_models(model_list: &AgentModelList) -> bool {
             .values()
             .flatten()
             .any(|model| !is_featherless_model(model)),
+    }
+}
+
+fn model_list_no_matches_text(model_list_state: &ModelListState) -> SharedString {
+    match model_list_state {
+        ModelListState::Loading => "Loading models…".into(),
+        ModelListState::Failed => "Temporary Issue: Please Try Again".into(),
+        ModelListState::Loaded(models) if !model_list_has_visible_models(models) => {
+            "Temporary Issue: Please Try Again".into()
+        }
+        ModelListState::Loaded(_) => "No matches".into(),
     }
 }
 
@@ -1235,6 +1279,30 @@ mod tests {
     }
 
     #[test]
+    fn test_no_matches_text_distinguishes_loading_failure_and_empty_results() {
+        assert_eq!(
+            model_list_no_matches_text(&ModelListState::Loading).as_ref(),
+            "Loading models…"
+        );
+        assert_eq!(
+            model_list_no_matches_text(&ModelListState::Failed).as_ref(),
+            "Temporary Issue: Please Try Again"
+        );
+        assert_eq!(
+            model_list_no_matches_text(&ModelListState::Loaded(AgentModelList::Flat(Vec::new())))
+                .as_ref(),
+            "Temporary Issue: Please Try Again"
+        );
+        assert_eq!(
+            model_list_no_matches_text(&ModelListState::Loaded(AgentModelList::Flat(vec![
+                create_model("openai/gpt-5", "gpt-5")
+            ])))
+            .as_ref(),
+            "No matches"
+        );
+    }
+
+    #[test]
     fn test_provider_id_prefers_known_provider_prefix() {
         assert_eq!(
             provider_id(&create_model("openai/gpt-5", "GPT-5")),
@@ -1317,10 +1385,10 @@ mod tests {
 
         let entries = info_list_to_picker_entries(models, &favorites);
 
-        assert!(matches!(
-            entries.first(),
-            Some(ModelPickerEntry::Separator(s)) if s == "zed"
-        ));
+        assert_eq!(
+            get_entry_labels(&entries),
+            vec!["Anthropic", "zed/claude", "Google", "zed/gemini"]
+        );
     }
 
     #[gpui::test]
@@ -1345,7 +1413,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_favorites_appear_in_both_sections(_cx: &mut TestAppContext) {
+    fn test_favorites_are_not_duplicated_outside_favorite_section(_cx: &mut TestAppContext) {
         let models = create_model_list(vec![
             ("zed", vec!["zed/claude", "zed/gemini"]),
             ("openai", vec!["openai/gpt-5", "openai/gpt-4"]),
@@ -1358,8 +1426,10 @@ mod tests {
         assert_eq!(model_ids[0], "zed/gemini");
         assert_eq!(model_ids[1], "openai/gpt-5");
 
-        assert!(model_ids[2..].contains(&"zed/gemini"));
-        assert!(model_ids[2..].contains(&"openai/gpt-5"));
+        assert!(!model_ids[2..].contains(&"zed/gemini"));
+        assert!(!model_ids[2..].contains(&"openai/gpt-5"));
+        assert!(model_ids[2..].contains(&"zed/claude"));
+        assert!(model_ids[2..].contains(&"openai/gpt-4"));
     }
 
     #[gpui::test]
@@ -1374,25 +1444,19 @@ mod tests {
         let favorites = create_favorites(vec!["zed/claude"]);
 
         let entries = info_list_to_picker_entries(models, &favorites);
-        let labels = get_entry_labels(&entries);
+        let model_ids = get_entry_model_ids(&entries);
 
+        assert_eq!(model_ids[0], "zed/claude");
         assert_eq!(
-            labels,
-            vec![
-                "Favorite",
-                "zed/claude",
-                "Recommended",
-                "zed/claude",
-                "anthropic/claude",
-                "Backboard Studio",
-                "zed/claude",
-                "zed/gpt-5",
-                "Antropic",
-                "anthropic/claude",
-                "OpenAI",
-                "openai/gpt-5"
-            ]
+            model_ids
+                .iter()
+                .filter(|model_id| **model_id == "zed/claude")
+                .count(),
+            1
         );
+        assert!(model_ids[1..].contains(&"anthropic/claude"));
+        assert!(model_ids[1..].contains(&"zed/gpt-5"));
+        assert!(model_ids[1..].contains(&"openai/gpt-5"));
     }
 
     #[gpui::test]

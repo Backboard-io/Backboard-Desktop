@@ -5,10 +5,9 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use acp_thread::{
-    AcpThread, AcpThreadEvent, AgentModelInfo, AgentModelList, AgentModelSelector,
-    AssistantMessageChunk, SelectedPermissionOutcome, ThreadStatus, ToolCallStatus,
-};
+use acp_thread::{AcpThread, AcpThreadEvent, AssistantMessageChunk, ThreadStatus, ToolCallStatus};
+#[cfg(test)]
+use acp_thread::{AgentModelInfo, AgentModelList};
 use agent_client_protocol::schema as acp;
 use agent_ui::thread_metadata_store::{ThreadId, ThreadMetadataStore};
 use agent_ui::{
@@ -16,27 +15,30 @@ use agent_ui::{
     BackboardAgentWorkspaceMode, BackboardAgentWorkspaceScope, ConversationView,
     ModelSelectorPopover,
 };
-use anyhow::{Context as AnyhowContext, Result, bail};
+use anyhow::{Context as AnyhowContext, bail};
 use db::kvp::KeyValueStore;
 use editor::actions::{Cancel as EditorCancel, Newline};
 use editor::{Editor, EditorEvent};
 use gpui::{
     Animation, AnimationExt, AnyElement, App, AsyncWindowContext, ClipboardItem, Context,
     DragMoveEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
-    IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ObjectFit, PathPromptOptions, Pixels,
-    Render, SharedString, Subscription, Task, TextStyleRefinement, WeakEntity, Window,
-    WindowControlArea, canvas, ease_out_quint, img,
+    IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, PathPromptOptions, Pixels, Render,
+    SharedString, Subscription, Task, TextStyleRefinement, WeakEntity, Window, WindowControlArea,
+    canvas, ease_out_quint,
 };
 use indexmap::IndexMap;
 use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
-use project::Project;
+use project::{
+    Project,
+    git_store::{GitStoreEvent, Repository, RepositoryEvent},
+};
 use settings::Settings;
 use terminal_view::TerminalView;
 use theme_settings::ThemeSettings;
 use ui::{
     Button, ButtonSize, ButtonStyle, Color, ContextMenu, ContextMenuEntry, DropdownMenu,
-    DropdownStyle, Icon, IconButton, IconName, IconPosition, IconSize, Label, LabelSize, Tooltip,
-    prelude::*,
+    DropdownStyle, Icon, IconButton, IconName, IconPosition, IconSize, Label, LabelSize,
+    PopoverMenu, Tooltip, Vector, VectorName, prelude::*,
 };
 use util::ResultExt;
 use workspace::{
@@ -47,12 +49,11 @@ use zed_actions::{ConfigureBackboardApiKey, OpenSettings, ResetOnboarding};
 
 use acp_thread::AgentThreadEntry;
 
-use crate::beginner_chat_feed::{
-    BeginnerChatFeed, BeginnerChatFeedEvent, ChatFeedDisplayMode, PreviewCardState,
-};
+use crate::beginner_chat_feed::{BeginnerChatFeed, ChatFeedDisplayMode};
 use crate::file_changes_panel::{FileChangesPanel, FileChangesPanelEvent};
 use crate::simple_design as ds;
 
+#[cfg(test)]
 struct CuratedSimpleModel {
     provider_hint: &'static str,
     model_hints: &'static [&'static str],
@@ -61,6 +62,7 @@ struct CuratedSimpleModel {
 
 /// Provider/model ID hints for the curated simple-mode model list.
 /// Matched against live ACP model IDs returned by the Backboard catalog.
+#[cfg(test)]
 static CURATED_MODELS: &[CuratedSimpleModel] = &[
     CuratedSimpleModel {
         provider_hint: "anthropic",
@@ -169,7 +171,6 @@ static CURATED_MODELS: &[CuratedSimpleModel] = &[
     },
 ];
 
-const SIMPLE_LANDING_LOGO_PATH: &str = "images/animation_logo.png";
 const SIMPLE_PREVIEW_PORT: u16 = 3000;
 const PANEL_OPEN_ANIMATION_MS: u64 = 210;
 const SIMPLE_SIDEBAR_HOVER_OPEN_DELAY_MS: u64 = 3000;
@@ -181,6 +182,7 @@ const DOCKED_PANEL_DEFAULT_HEIGHT_PX: f32 = 340.0;
 const DOCKED_PANEL_MIN_HEIGHT_PX: f32 = 220.0;
 const DOCKED_PANEL_MIN_MAIN_SIZE_PX: f32 = 240.0;
 const CLOSED_CHATS_SIDEBAR_WIDTH_PX: f32 = 48.0;
+const SIMPLE_CHAT_HISTORY_ROW_HEIGHT_PX: f32 = 42.0;
 const FILES_SPLIT_MIN_DIRECTORY_WIDTH_PX: f32 = 160.0;
 const FILES_SPLIT_MIN_CODE_WIDTH_PX: f32 = 160.0;
 const MAX_UNTRACKED_DIFF_BYTES: u64 = 256 * 1024;
@@ -190,10 +192,12 @@ struct PreviewLaunch {
     url_path: String,
 }
 
+#[cfg(test)]
 fn curated_model_match(model: &AgentModelInfo) -> Option<(usize, &'static str)> {
     curated_model_match_with_provider(model, None)
 }
 
+#[cfg(test)]
 fn curated_model_match_with_provider(
     model: &AgentModelInfo,
     provider_hint: Option<&str>,
@@ -216,10 +220,20 @@ fn curated_model_match_with_provider(
         })
 }
 
+#[cfg(test)]
 fn model_provider_id(model: &AgentModelInfo, provider_hint: Option<&str>) -> String {
     let model_id = model.id.0.as_ref().to_lowercase();
-    if let Some((provider, _)) = model_id.split_once('/') {
-        return canonical_simple_model_provider(provider);
+    if let Some((provider, model)) = model_id.split_once('/') {
+        let provider = canonical_simple_model_provider(provider);
+        if provider == "openrouter"
+            && let Some((inner_provider, _)) = model.split_once('/')
+        {
+            let inner_provider = canonical_simple_model_provider(inner_provider);
+            if !inner_provider.is_empty() {
+                return inner_provider;
+            }
+        }
+        return provider;
     }
 
     if let Some(provider_hint) = provider_hint {
@@ -236,6 +250,7 @@ fn model_provider_id(model: &AgentModelInfo, provider_hint: Option<&str>) -> Str
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 fn canonical_simple_model_provider(provider: &str) -> String {
     match provider.trim().to_lowercase().as_str() {
         "google_ai" | "google ai" | "gemini" => "google".to_string(),
@@ -246,6 +261,7 @@ fn canonical_simple_model_provider(provider: &str) -> String {
     }
 }
 
+#[cfg(test)]
 fn model_id_without_provider(model_id: &str) -> String {
     model_id
         .split_once('/')
@@ -254,9 +270,25 @@ fn model_id_without_provider(model_id: &str) -> String {
         .to_lowercase()
 }
 
+#[cfg(test)]
 fn curated_model_id_matches(model_id: &str, model_hint: &str, model_name: &str) -> bool {
     let model_hint = model_hint.to_lowercase();
-    if model_id == model_hint || model_name == model_hint {
+    if model_name == model_hint {
+        return true;
+    }
+
+    if curated_model_id_or_variant_matches(model_id, &model_hint) {
+        return true;
+    }
+
+    model_id
+        .rsplit_once('/')
+        .is_some_and(|(_, model_id)| curated_model_id_or_variant_matches(model_id, &model_hint))
+}
+
+#[cfg(test)]
+fn curated_model_id_or_variant_matches(model_id: &str, model_hint: &str) -> bool {
+    if model_id == model_hint {
         return true;
     }
 
@@ -278,12 +310,14 @@ fn curated_model_id_matches(model_id: &str, model_hint: &str, model_name: &str) 
         || suffix.starts_with("preview")
 }
 
+#[cfg(test)]
 fn relabel_curated_model(mut model: AgentModelInfo) -> Option<(usize, AgentModelInfo)> {
     let (rank, display_name) = curated_model_match(&model)?;
     model.name = SharedString::from(display_name);
     Some((rank, model))
 }
 
+#[cfg(test)]
 fn relabel_curated_model_with_provider(
     mut model: AgentModelInfo,
     provider_hint: Option<&str>,
@@ -293,6 +327,7 @@ fn relabel_curated_model_with_provider(
     Some((rank, model))
 }
 
+#[cfg(test)]
 fn dedupe_curated_models(models: Vec<(usize, AgentModelInfo)>) -> Vec<AgentModelInfo> {
     let mut deduped_by_rank = IndexMap::new();
     for (rank, model) in models {
@@ -304,6 +339,7 @@ fn dedupe_curated_models(models: Vec<(usize, AgentModelInfo)>) -> Vec<AgentModel
     deduped.into_iter().map(|(_, model)| model).collect()
 }
 
+#[cfg(test)]
 fn curated_or_live_model_list(model_list: AgentModelList) -> AgentModelList {
     match model_list {
         AgentModelList::Flat(list) => {
@@ -430,10 +466,25 @@ mod simple_mode_draft_tests {
             .map(|model| model.id.to_string())
             .collect::<Vec<_>>();
 
-        assert_eq!(names, vec!["o3", "GPT-4o", "Gemini 2.5 Flash"]);
+        assert_eq!(
+            names,
+            vec![
+                "o3-pro (deep reasoning)",
+                "o3 (reasoning)",
+                "GPT-4o mini (fast general)",
+                "GPT-4o (general)",
+                "Gemini 2.5 Flash (fast multimodal)",
+            ]
+        );
         assert_eq!(
             ids,
-            vec!["openai/o3", "openai/gpt-4o", "google/gemini-2.5-flash"]
+            vec![
+                "openai/o3-pro",
+                "openai/o3",
+                "openai/gpt-4o-mini",
+                "openai/gpt-4o",
+                "google/gemini-2.5-flash"
+            ]
         );
     }
 
@@ -472,8 +523,16 @@ mod simple_mode_draft_tests {
             .map(|model| model.id.to_string())
             .collect::<Vec<_>>();
 
-        assert_eq!(names, vec!["o3", "GPT-4o", "Gemini 2.5 Flash"]);
-        assert_eq!(ids, vec!["o3", "gpt-4o", "gemini-2.5-flash"]);
+        assert_eq!(
+            names,
+            vec![
+                "o3 (reasoning)",
+                "GPT-4o mini (fast general)",
+                "GPT-4o (general)",
+                "Gemini 2.5 Flash (fast multimodal)",
+            ]
+        );
+        assert_eq!(ids, vec!["o3", "gpt-4o-mini", "gpt-4o", "gemini-2.5-flash"]);
     }
 
     #[test]
@@ -543,9 +602,9 @@ mod simple_mode_draft_tests {
             .downgrade();
         let mut cx = VisualTestContext::from_window(multi_workspace.into(), cx);
 
-        let beginner_workspace = workspace.update_in(&mut cx, |workspace, window, cx| {
-            let workspace_weak = workspace.weak_handle();
-            cx.new(|cx| BeginnerWorkspace::new(workspace_weak, multi_workspace_weak, window, cx))
+        let workspace_weak = workspace.downgrade();
+        let beginner_workspace = cx.new_window_entity(|window, cx| {
+            BeginnerWorkspace::new(workspace_weak, multi_workspace_weak, window, cx)
         });
 
         (beginner_workspace, workspace, cx)
@@ -616,8 +675,176 @@ mod simple_mode_draft_tests {
             assert_eq!(paths, vec![Path::new("/project").to_path_buf()]);
         });
     }
+
+    #[gpui::test]
+    async fn test_simple_composer_sends_raw_prompt_without_mode_prefix(cx: &mut TestAppContext) {
+        let (beginner_workspace, workspace, mut cx) = setup_beginner_workspace(cx).await;
+        let folder = PathBuf::from("/project");
+
+        beginner_workspace.update_in(&mut cx, |beginner_workspace, window, cx| {
+            beginner_workspace.selected_folder = Some(folder.clone());
+            assert!(
+                beginner_workspace
+                    .create_simple_agent_draft(window, cx)
+                    .is_some()
+            );
+        });
+        cx.run_until_parked();
+
+        let conversation_view = beginner_workspace.read_with(&cx, |beginner_workspace, _cx| {
+            beginner_workspace
+                .active_conversation_view
+                .clone()
+                .expect("simple draft should connect an active conversation view")
+        });
+        conversation_view.update_in(&mut cx, |conversation_view, window, cx| {
+            assert!(conversation_view.set_root_message_text(
+                "Make a recipe app".to_string(),
+                window,
+                cx
+            ));
+            assert!(conversation_view.send_root_message_editor(window, cx));
+        });
+        cx.run_until_parked();
+
+        let (thread_id, user_messages) =
+            beginner_workspace.read_with(&cx, |beginner_workspace, cx| {
+                let thread = beginner_workspace
+                    .thread
+                    .as_ref()
+                    .expect("simple composer send should use the active thread");
+                (
+                    beginner_workspace
+                        .active_conversation_thread_id(cx)
+                        .expect("simple composer send should keep a conversation thread id"),
+                    thread
+                        .read(cx)
+                        .entries()
+                        .iter()
+                        .filter_map(|entry| match entry {
+                            AgentThreadEntry::UserMessage(message) => {
+                                Some(message.content.to_markdown(cx).to_string())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            });
+
+        assert_eq!(user_messages, vec!["Make a recipe app"]);
+        assert!(
+            !user_messages[0].contains("Simple build mode:"),
+            "simple mode must not prepend build instructions to the user prompt"
+        );
+        assert!(
+            !user_messages[0].contains("Ask mode:"),
+            "simple mode must not prepend ask instructions to the user prompt"
+        );
+        beginner_workspace.read_with(&cx, |beginner_workspace, _cx| {
+            assert!(matches!(
+                beginner_workspace.state,
+                BeginnerState::ActiveProject
+            ));
+            assert!(beginner_workspace.active_chat_record_id.is_some());
+            assert_eq!(beginner_workspace.chat_history.len(), 1);
+            assert_eq!(
+                beginner_workspace.chat_history[0].folder(),
+                Path::new("/project").to_path_buf()
+            );
+            assert!(
+                !beginner_workspace.right_panel_open,
+                "submitting a prompt should not auto-open the right panel"
+            );
+            assert!(beginner_workspace.active_right_panel_tab.is_none());
+            assert_eq!(beginner_workspace.preview_url, None);
+            assert!(
+                !beginner_workspace.is_preview_generating,
+                "submitting a prompt should not auto-start the browser preview"
+            );
+            assert!(beginner_workspace.web_preview.is_none());
+        });
+        let agent_panel = workspace
+            .read_with(&cx, |workspace, cx| workspace.panel::<AgentPanel>(cx))
+            .expect("simple send should keep using AgentPanel");
+        agent_panel.read_with(&cx, |agent_panel, _cx| {
+            assert!(
+                !agent_panel.is_unpromoted_backboard_workspace_draft_thread(thread_id),
+                "native send should promote the draft through Simple bookkeeping"
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_simple_native_conversation_does_not_install_curated_model_selector(
+        cx: &mut TestAppContext,
+    ) {
+        let (beginner_workspace, _workspace, mut cx) = setup_beginner_workspace(cx).await;
+
+        beginner_workspace.update_in(&mut cx, |beginner_workspace, window, cx| {
+            beginner_workspace.selected_folder = Some(PathBuf::from("/project"));
+            assert!(
+                beginner_workspace
+                    .create_simple_agent_draft(window, cx)
+                    .is_some()
+            );
+        });
+        cx.run_until_parked();
+
+        beginner_workspace.read_with(&cx, |beginner_workspace, _cx| {
+            let conversation_view = beginner_workspace
+                .chat_surface_conversation_view()
+                .expect("simple mode should render the native ConversationView chat surface");
+            assert!(
+                conversation_view
+                    .read(_cx)
+                    .root_thread_view()
+                    .is_some_and(|thread_view| thread_view.read(_cx).mode_selector.is_none()),
+                "simple mode should hide the native Ask/Build mode selector"
+            );
+            assert!(
+                beginner_workspace.model_selector.is_none(),
+                "simple mode should not install the curated Simple model selector"
+            );
+            assert!(
+                beginner_workspace.chat_feed.is_none(),
+                "simple mode should not render the custom BeginnerChatFeed for native chats"
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_right_panel_dropdown_can_open_terminal(cx: &mut TestAppContext) {
+        let (beginner_workspace, _workspace, mut cx) = setup_beginner_workspace(cx).await;
+        let folder = PathBuf::from("/project");
+
+        beginner_workspace.update_in(&mut cx, |beginner_workspace, window, cx| {
+            assert!(RightPanelOption::ALL.contains(&RightPanelOption::Terminal));
+            beginner_workspace.selected_folder = Some(folder.clone());
+            beginner_workspace.select_right_panel_option(RightPanelOption::Terminal, window, cx);
+        });
+
+        beginner_workspace.read_with(&cx, |beginner_workspace, _cx| {
+            assert!(beginner_workspace.right_panel_open);
+            assert!(matches!(
+                beginner_workspace.active_right_panel_tab,
+                Some(RightPanelOption::Terminal)
+            ));
+            assert!(matches!(
+                beginner_workspace.right_panel_option,
+                RightPanelOption::Terminal
+            ));
+            assert!(!beginner_workspace.bottom_panel_open);
+            assert_eq!(
+                beginner_workspace
+                    .right_terminal_working_directory
+                    .as_deref(),
+                Some(Path::new("/project"))
+            );
+        });
+    }
 }
 
+#[cfg(test)]
 fn model_list_contains_id(model_list: &AgentModelList, model_id: &acp::ModelId) -> bool {
     match model_list {
         AgentModelList::Flat(models) => models.iter().any(|model| model.id == *model_id),
@@ -627,6 +854,7 @@ fn model_list_contains_id(model_list: &AgentModelList, model_id: &acp::ModelId) 
     }
 }
 
+#[cfg(test)]
 fn first_model_in_list(model_list: &AgentModelList) -> Option<AgentModelInfo> {
     match model_list {
         AgentModelList::Flat(models) => models.first().cloned(),
@@ -636,6 +864,7 @@ fn first_model_in_list(model_list: &AgentModelList) -> Option<AgentModelInfo> {
     }
 }
 
+#[cfg(test)]
 fn fallback_model_for_unsupported_simple_selection(
     model_list: &AgentModelList,
     selected_model: Option<&AgentModelInfo>,
@@ -647,38 +876,6 @@ fn fallback_model_for_unsupported_simple_selection(
     }
 
     first_model_in_list(model_list)
-}
-
-fn ensure_selected_simple_model_is_supported(
-    selector: Rc<dyn AgentModelSelector>,
-    cx: &mut App,
-) -> Task<Result<()>> {
-    let selected_model_task = selector.selected_model(cx);
-    let model_list_task = selector.list_models(cx);
-    cx.spawn(async move |cx| {
-        let selected_model = selected_model_task.await.ok();
-        let model_list = curated_or_live_model_list(model_list_task.await?);
-
-        let Some(fallback_model) =
-            fallback_model_for_unsupported_simple_selection(&model_list, selected_model.as_ref())
-        else {
-            return Ok(());
-        };
-
-        let previous_model = selected_model
-            .as_ref()
-            .map(|model| model.id.to_string())
-            .unwrap_or_else(|| "none".to_string());
-        log::warn!(
-            "Simple mode selected model is not in the live model list; switching model previous_model={} replacement_model={}",
-            previous_model,
-            fallback_model.id
-        );
-
-        cx.update(|cx| selector.select_model(fallback_model.id, cx))
-            .await?;
-        Ok(())
-    })
 }
 
 fn folder_display_name(folder: &Path) -> SharedString {
@@ -712,61 +909,8 @@ fn folder_matches_search(folder: &Path, search_query: &str) -> bool {
             .contains(search_query)
 }
 
-#[derive(Clone, Default)]
-struct ComposerGitState {
-    is_loading: bool,
-    is_git_repository: bool,
-    current_branch: Option<SharedString>,
-    branches: Vec<SharedString>,
-}
-
-/// Wraps an inner `AgentModelSelector` and curates the live Backboard model list.
-/// Model selection and all mutations pass through to the inner selector unchanged.
-struct CuratedModelSelector {
-    inner: Rc<dyn AgentModelSelector>,
-}
-
-impl AgentModelSelector for CuratedModelSelector {
-    fn list_models(&self, cx: &mut App) -> gpui::Task<anyhow::Result<AgentModelList>> {
-        let inner = self.inner.clone();
-        cx.spawn(async move |cx| {
-            let models = cx.update(|cx| inner.list_models(cx)).await?;
-            Ok(curated_or_live_model_list(models))
-        })
-    }
-
-    fn select_model(&self, model_id: acp::ModelId, cx: &mut App) -> gpui::Task<anyhow::Result<()>> {
-        self.inner.select_model(model_id, cx)
-    }
-
-    fn selected_model(
-        &self,
-        cx: &mut App,
-    ) -> gpui::Task<anyhow::Result<acp_thread::AgentModelInfo>> {
-        // Also apply the curated display name to the selected model so the button label matches.
-        let inner = self.inner.clone();
-        cx.spawn(async move |cx| {
-            let mut info = cx.update(|cx| inner.selected_model(cx)).await?;
-            if let Some((_, name)) = curated_model_match(&info) {
-                info.name = SharedString::from(name);
-            }
-            Ok(info)
-        })
-    }
-
-    fn watch(&self, cx: &mut App) -> Option<watch::Receiver<()>> {
-        self.inner.watch(cx)
-    }
-
-    fn should_render_footer(&self) -> bool {
-        false
-    }
-}
-
 const BEGINNER_CHATS_KVP_KEY: &str = "beginner_chats_v1";
 const BEGINNER_OPEN_TABS_KVP_KEY: &str = "beginner_open_tabs_v1";
-const SIMPLE_COMPOSER_MIN_LINES: usize = 3;
-const SIMPLE_COMPOSER_MAX_LINES: usize = 12;
 static SIMPLE_MODE_OPENED_THIS_PROCESS: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone)]
@@ -820,6 +964,25 @@ impl BeginnerChatRecord {
         } else {
             SharedString::from(name)
         }
+    }
+
+    fn relative_time_label(&self) -> SharedString {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or(self.timestamp_ms);
+        let elapsed_ms = now_ms.saturating_sub(self.timestamp_ms);
+        let elapsed_minutes = elapsed_ms / 60_000;
+
+        let label = match elapsed_minutes {
+            0..=1 => "Just now".to_string(),
+            2..=59 => format!("{elapsed_minutes}m ago"),
+            60..=1_439 => format!("{}h ago", elapsed_minutes / 60),
+            1_440..=2_879 => "Yesterday".to_string(),
+            _ => format!("{}d ago", elapsed_minutes / 1_440),
+        };
+
+        SharedString::from(label)
     }
 }
 
@@ -949,7 +1112,7 @@ enum RightPanelOption {
 }
 
 impl RightPanelOption {
-    const ALL: [Self; 3] = [Self::Files, Self::Design, Self::Code];
+    const ALL: [Self; 4] = [Self::Files, Self::Design, Self::Code, Self::Terminal];
 
     fn label(self) -> &'static str {
         match self {
@@ -981,18 +1144,10 @@ impl RightPanelOption {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ChatMode {
-    Ask,
     Build,
 }
 
 impl ChatMode {
-    fn label(self) -> &'static str {
-        match self {
-            ChatMode::Ask => "Ask",
-            ChatMode::Build => "Build",
-        }
-    }
-
     fn placeholder(self) -> &'static str {
         "Ask Backboard..."
     }
@@ -1003,32 +1158,23 @@ impl ChatMode {
 
     fn prompt_prefix(self) -> &'static str {
         match self {
-            ChatMode::Ask => {
-                concat!(
-                    "Ask mode: answer without editing files or making project changes unless I explicitly ask you to switch to build mode.\n",
-                    "Ask focused clarifying questions when the request is underspecified, especially when the answer depends on project goals, audience, constraints, or user intent."
-                )
-            }
-            ChatMode::Build => {
-                concat!(
-                    "Simple build mode: build or edit the project for a nontechnical user.\n",
-                    "- Default to creating a polished web app or page when the user asks for a product, app, page, dashboard, tool, game, or visual experience and does not specify another medium.\n",
-                    "- Do not force a web app when the user explicitly asks for another artifact, such as docs, scripts, data work, configuration, terminal help, or repository cleanup.\n",
-                    "- Proceed with sensible defaults when style, brand, audience, content, or layout choices are missing. Ask a clarifying question only when the request cannot be acted on safely or the user explicitly asks for a decision first.\n",
-                    "- Keep visible chat replies short, natural, and outcome-focused. Do not show code, filenames, commands, raw logs, markdown-heavy checklists, or implementation details unless the user asks.\n",
-                    "- When the work is done, reply like a chat message in 1-2 sentences. Avoid Features or Controls reports; mention the result and how to try it.\n",
-                    "- Do not narrate implementation mechanics in chat. Avoid phrases like updating files, creating HTML/CSS/JavaScript files, editing components, running commands, or changing specific filenames. Say what user-facing experience is being built instead.\n",
-                    "- Summarize edits as product changes. Let the UI expose file counts and read-only diffs separately, such as Backboard changed 3 files.\n",
-                    "- Treat code and diffs as read-only review surfaces for the user.\n",
-                    "- After creating or updating a runnable artifact, start or refresh the preview."
-                )
-            }
+            ChatMode::Build => concat!(
+                "Simple build mode: build or edit the project for a nontechnical user.\n",
+                "- Default to creating a polished web app or page when the user asks for a product, app, page, dashboard, tool, game, or visual experience and does not specify another medium.\n",
+                "- Do not force a web app when the user explicitly asks for another artifact, such as docs, scripts, data work, configuration, terminal help, or repository cleanup.\n",
+                "- Proceed with sensible defaults when style, brand, audience, content, or layout choices are missing. Ask a clarifying question only when the request cannot be acted on safely or the user explicitly asks for a decision first.\n",
+                "- Keep visible chat replies short, natural, and outcome-focused. Do not show code, filenames, commands, raw logs, markdown-heavy checklists, or implementation details unless the user asks.\n",
+                "- When the work is done, reply like a chat message in 1-2 sentences. Avoid Features or Controls reports; mention the result and how to try it.\n",
+                "- Do not narrate implementation mechanics in chat. Avoid phrases like updating files, creating HTML/CSS/JavaScript files, editing components, running commands, or changing specific filenames. Say what user-facing experience is being built instead.\n",
+                "- Summarize edits as product changes. Let the UI expose file counts and read-only diffs separately, such as Backboard changed 3 files.\n",
+                "- Treat code and diffs as read-only review surfaces for the user.\n",
+                "- After creating or updating a runnable artifact, start or refresh the preview."
+            ),
         }
     }
 
     fn agent_workspace_mode(self) -> BackboardAgentWorkspaceMode {
         match self {
-            ChatMode::Ask => BackboardAgentWorkspaceMode::Ask,
             ChatMode::Build => BackboardAgentWorkspaceMode::Free,
         }
     }
@@ -1130,8 +1276,6 @@ pub struct BeginnerWorkspace {
     chat_search_editor: Entity<Editor>,
     browser_address_editor: Entity<Editor>,
     selected_folder: Option<PathBuf>,
-    composer_git_state: ComposerGitState,
-    composer_git_state_folder: Option<PathBuf>,
     thread: Option<Entity<AcpThread>>,
     // Kept alive for the entire session lifetime. The ConversationView owns the
     // ThreadView which owns the send task — dropping it cancels in-flight sends.
@@ -1167,6 +1311,7 @@ pub struct BeginnerWorkspace {
     bottom_panel_closing: bool,
     bottom_panel_animation_generation: u64,
     share_dialog_open: bool,
+    browser_warning_dialog_open: bool,
     // URL of the running dev server once it's ready.
     preview_url: Option<String>,
     preview_visible: bool,
@@ -1195,6 +1340,7 @@ pub struct BeginnerWorkspace {
     files_sidebar_collapsed: bool,
     _tasks: Vec<Task<()>>,
     _project_subscription: Subscription,
+    _git_subscription: Subscription,
     _search_subscription: Subscription,
     session_subscriptions: Vec<Subscription>,
 }
@@ -1419,6 +1565,7 @@ impl BeginnerWorkspace {
         // The new editor's Enter-to-submit subscription belongs to the fresh session.
         self.session_subscriptions.push(enter_sub);
         self.session_subscriptions.push(browser_enter_sub);
+        self.browser_warning_dialog_open = false;
         self.background_sessions.push(session);
         self.save_open_tabs(cx);
         cx.notify();
@@ -1428,6 +1575,7 @@ impl BeginnerWorkspace {
         if ix >= self.background_sessions.len() {
             return;
         }
+        self.browser_warning_dialog_open = false;
         Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
         self.clear_current_preview_state();
         let session = &mut self.background_sessions[ix];
@@ -1549,7 +1697,6 @@ impl BeginnerWorkspace {
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_placeholder_text(placeholder, window, cx);
         });
-        self.refresh_composer_git_state_if_needed(cx);
         self.restore_active_chat_if_needed(window, cx);
         self.save_open_tabs(cx);
         cx.notify();
@@ -1601,6 +1748,24 @@ impl BeginnerWorkspace {
                     _ => {}
                 },
             );
+        let git_store = project.read(cx).git_store().clone();
+        let git_sub = cx.subscribe(&git_store, |_, _, event: &GitStoreEvent, cx| {
+            if matches!(
+                event,
+                GitStoreEvent::ActiveRepositoryChanged(_)
+                    | GitStoreEvent::RepositoryAdded
+                    | GitStoreEvent::RepositoryRemoved(_)
+                    | GitStoreEvent::RepositoryUpdated(
+                        _,
+                        RepositoryEvent::HeadChanged
+                            | RepositoryEvent::BranchListChanged
+                            | RepositoryEvent::StatusesChanged,
+                        _
+                    )
+            ) {
+                cx.notify();
+            }
+        });
 
         Self {
             workspace,
@@ -1616,8 +1781,6 @@ impl BeginnerWorkspace {
             chat_search_editor,
             browser_address_editor,
             selected_folder: initial_folder,
-            composer_git_state: ComposerGitState::default(),
-            composer_git_state_folder: None,
             thread: None,
             pending_conversation_view: None,
             active_conversation_view: None,
@@ -1647,6 +1810,7 @@ impl BeginnerWorkspace {
             bottom_panel_closing: false,
             bottom_panel_animation_generation: 0,
             share_dialog_open: false,
+            browser_warning_dialog_open: false,
             preview_url: None,
             preview_visible: false,
             is_preview_generating: false,
@@ -1670,6 +1834,7 @@ impl BeginnerWorkspace {
             files_sidebar_collapsed: false,
             _tasks: vec![load_recent, watch_api_key],
             _project_subscription: project_sub,
+            _git_subscription: git_sub,
             _search_subscription: search_sub,
             session_subscriptions: vec![chat_enter_sub, browser_enter_sub],
         }
@@ -1696,7 +1861,6 @@ impl BeginnerWorkspace {
             (BeginnerState::ActiveProject, None) => {
                 // All folders removed — return to landing.
                 self.selected_folder = None;
-                self.clear_composer_git_state();
                 self.state = BeginnerState::Landing;
                 self.chat_feed = None;
                 self.thread = None;
@@ -1714,6 +1878,7 @@ impl BeginnerWorkspace {
                 self.right_panel_option = RightPanelOption::Files;
                 self.reset_right_panel_tabs();
                 self.share_dialog_open = false;
+                self.browser_warning_dialog_open = false;
                 self.preview_url = None;
                 self.preview_visible = false;
                 self.is_preview_generating = false;
@@ -1755,11 +1920,63 @@ impl BeginnerWorkspace {
         }
     }
 
+    fn selected_or_visible_folder(&self, cx: &App) -> Option<PathBuf> {
+        self.selected_folder
+            .clone()
+            .or_else(|| first_visible_worktree_path(&self.project, cx))
+    }
+
+    fn selected_repository(&self, cx: &App) -> Option<Entity<Repository>> {
+        let selected_folder = self.selected_or_visible_folder(cx);
+        let project = self.project.read(cx);
+        selected_folder
+            .as_deref()
+            .and_then(|folder| {
+                project.repositories(cx).values().find_map(|repository| {
+                    let repository = repository.clone();
+                    let repository_root = repository.read(cx).work_directory_abs_path.clone();
+                    (folder == repository_root.as_ref()
+                        || folder.starts_with(repository_root.as_ref())
+                        || repository_root.starts_with(folder))
+                    .then_some(repository)
+                })
+            })
+            .or_else(|| project.active_repository(cx))
+    }
+
+    fn selected_folder_label(&self, cx: &App) -> SharedString {
+        self.selected_or_visible_folder(cx)
+            .as_ref()
+            .and_then(|folder| folder.file_name())
+            .map(|name| SharedString::from(name.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| SharedString::from("Choose folder"))
+    }
+
+    fn selected_branch_label(&self, cx: &App) -> Option<SharedString> {
+        let repository = self.selected_repository(cx)?;
+        let repository = repository.read(cx);
+        repository
+            .branch
+            .as_ref()
+            .map(|branch| SharedString::from(branch.name().to_string()))
+            .or_else(|| {
+                repository.head_commit.as_ref().map(|commit| {
+                    SharedString::from(commit.sha.chars().take(8).collect::<String>())
+                })
+            })
+    }
+
     fn active_conversation_thread_id(&self, cx: &App) -> Option<ThreadId> {
         self.active_conversation_view
             .as_ref()
             .or(self.pending_conversation_view.as_ref())
             .map(|conversation_view| conversation_view.read(cx).parent_id())
+    }
+
+    fn chat_surface_conversation_view(&self) -> Option<Entity<ConversationView>> {
+        self.active_conversation_view
+            .clone()
+            .or_else(|| self.pending_conversation_view.clone())
     }
 
     fn create_simple_agent_draft(
@@ -1776,37 +1993,6 @@ impl BeginnerWorkspace {
         })?;
         self.bind_conversation_view(conversation_view.clone(), window, cx);
         Some(conversation_view)
-    }
-
-    fn discard_simple_agent_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(panel) = self
-            .workspace
-            .upgrade()
-            .and_then(|workspace| workspace.read(cx).panel::<AgentPanel>(cx))
-        else {
-            return;
-        };
-        let Some(thread_id) = panel
-            .read(cx)
-            .active_backboard_workspace_draft_thread_id(cx)
-        else {
-            return;
-        };
-
-        panel.update(cx, |panel, cx| {
-            panel.remove_thread(thread_id, window, cx);
-        });
-        if self.active_conversation_thread_id(cx) == Some(thread_id) {
-            self.thread = None;
-            self.chat_feed = None;
-            self.file_changes_panel = None;
-            self.pending_conversation_view = None;
-            self.active_conversation_view = None;
-            self.queued_composer_submit = None;
-            self.model_selector = None;
-            self.is_agent_running = false;
-            self.agent_finished = false;
-        }
     }
 
     fn open_folder_as_worktree(
@@ -1924,156 +2110,6 @@ impl BeginnerWorkspace {
         Ok(Self::run_git_command_raw(folder, args)?.trim().to_string())
     }
 
-    fn read_composer_git_state(folder: &Path) -> anyhow::Result<ComposerGitState> {
-        let inside_worktree =
-            Self::run_git_command(folder, &["rev-parse", "--is-inside-work-tree"])?;
-        if inside_worktree != "true" {
-            bail!("{} is not a git repository", folder.display());
-        }
-
-        let branch_name = Self::run_git_command(folder, &["branch", "--show-current"])?;
-        let current_branch = if branch_name.is_empty() {
-            Self::run_git_command(folder, &["rev-parse", "--short", "HEAD"])
-                .ok()
-                .filter(|sha| !sha.is_empty())
-        } else {
-            Some(branch_name)
-        }
-        .map(SharedString::from);
-
-        let branches = Self::run_git_command(folder, &["branch", "--format=%(refname:short)"])?
-            .lines()
-            .map(str::trim)
-            .filter(|branch| !branch.is_empty())
-            .map(|branch| SharedString::from(branch.to_string()))
-            .collect();
-
-        Ok(ComposerGitState {
-            is_loading: false,
-            is_git_repository: true,
-            current_branch,
-            branches,
-        })
-    }
-
-    fn clear_composer_git_state(&mut self) {
-        self.composer_git_state = ComposerGitState::default();
-        self.composer_git_state_folder = None;
-    }
-
-    fn refresh_composer_git_state_if_needed(&mut self, cx: &mut Context<Self>) {
-        if self.composer_git_state_folder == self.selected_folder {
-            return;
-        }
-
-        self.composer_git_state_folder = self.selected_folder.clone();
-        let Some(folder) = self.selected_folder.clone() else {
-            self.composer_git_state = ComposerGitState::default();
-            return;
-        };
-
-        self.composer_git_state = ComposerGitState {
-            is_loading: true,
-            ..ComposerGitState::default()
-        };
-
-        cx.spawn(async move |this, cx| {
-            let folder_for_git = folder.clone();
-            let state = cx
-                .background_spawn(async move { Self::read_composer_git_state(&folder_for_git) })
-                .await;
-
-            this.update(cx, |this, cx| {
-                if this.selected_folder.as_ref() != Some(&folder) {
-                    return;
-                }
-
-                this.composer_git_state = state.unwrap_or_default();
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
-    }
-
-    fn switch_composer_git_branch(
-        &mut self,
-        branch_name: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(folder) = self.selected_folder.clone() else {
-            self.pick_folder(window, cx);
-            return;
-        };
-
-        cx.spawn_in(window, async move |this, cx| {
-            let folder_for_git = folder.clone();
-            let branch_name_for_git = branch_name.clone();
-            let state = cx
-                .background_spawn(async move {
-                    Self::run_git_command(
-                        &folder_for_git,
-                        &["switch", branch_name_for_git.as_str()],
-                    )?;
-                    Self::read_composer_git_state(&folder_for_git)
-                })
-                .await?;
-
-            this.update(cx, |this, cx| {
-                if this.selected_folder.as_ref() == Some(&folder) {
-                    this.composer_git_state_folder = Some(folder);
-                    this.composer_git_state = state;
-                    cx.notify();
-                }
-            })?;
-
-            anyhow::Ok(())
-        })
-        .detach_and_prompt_err("Failed to switch branch", window, cx, |_, _, _| None);
-    }
-
-    fn initialize_composer_git_repository(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(folder) = self.selected_folder.clone() else {
-            self.pick_folder(window, cx);
-            return;
-        };
-
-        self.composer_git_state = ComposerGitState {
-            is_loading: true,
-            ..ComposerGitState::default()
-        };
-        self.composer_git_state_folder = Some(folder.clone());
-        cx.notify();
-
-        cx.spawn_in(window, async move |this, cx| {
-            let folder_for_git = folder.clone();
-            let state = cx
-                .background_spawn(async move {
-                    Self::run_git_command(&folder_for_git, &["init"])?;
-                    Self::read_composer_git_state(&folder_for_git)
-                })
-                .await?;
-
-            this.update(cx, |this, cx| {
-                if this.selected_folder.as_ref() != Some(&folder) {
-                    return;
-                }
-
-                this.composer_git_state = state;
-                cx.notify();
-            })?;
-
-            anyhow::Ok(())
-        })
-        .detach_and_prompt_err(
-            "Failed to initialize Git repository",
-            window,
-            cx,
-            |_, _, _| None,
-        );
-    }
-
     fn add_chat_record(&mut self, name: String, folder: &PathBuf, cx: &mut App) -> String {
         let record = BeginnerChatRecord::new(name, folder);
         let id = record.id.clone();
@@ -2114,8 +2150,64 @@ impl BeginnerWorkspace {
         };
 
         if let Some(record) = record {
+            if record.session_id.as_deref() == Some(session_id.as_str()) {
+                return;
+            }
             record.session_id = Some(session_id);
             self.save_chat_history(cx);
+        }
+    }
+
+    fn update_active_chat_record_session_id(&mut self, session_id: String, cx: &mut App) {
+        let Some(active_id) = self.active_chat_record_id.clone() else {
+            return;
+        };
+        let Some(record) = self
+            .chat_history
+            .iter_mut()
+            .find(|record| record.id == active_id)
+        else {
+            return;
+        };
+        if record.session_id.as_deref() == Some(session_id.as_str()) {
+            return;
+        }
+        record.session_id = Some(session_id);
+        self.save_chat_history(cx);
+    }
+
+    fn conversation_root_session_id(
+        conversation_view: &Entity<ConversationView>,
+        cx: &App,
+    ) -> Option<String> {
+        let thread = conversation_view.read(cx).root_thread(cx)?;
+        Some(thread.read(cx).session_id().0.to_string())
+    }
+
+    fn update_active_chat_record_session_id_from_conversation(
+        &mut self,
+        conversation_view: &Entity<ConversationView>,
+        cx: &mut App,
+    ) {
+        if let Some(session_id) = Self::conversation_root_session_id(conversation_view, cx) {
+            self.update_active_chat_record_session_id(session_id, cx);
+        }
+    }
+
+    fn update_active_chat_record_session_id_from_thread(
+        &mut self,
+        thread: &Entity<AcpThread>,
+        cx: &mut App,
+    ) {
+        let session_id = thread.read(cx).session_id().0.to_string();
+        self.update_active_chat_record_session_id(session_id, cx);
+    }
+
+    fn update_active_chat_record_session_id_from_current_session(&mut self, cx: &mut App) {
+        if let Some(conversation_view) = self.chat_surface_conversation_view() {
+            self.update_active_chat_record_session_id_from_conversation(&conversation_view, cx);
+        } else if let Some(thread) = self.thread.clone() {
+            self.update_active_chat_record_session_id_from_thread(&thread, cx);
         }
     }
 
@@ -2148,7 +2240,6 @@ impl BeginnerWorkspace {
                 .update_in(cx, |this, window, cx| {
                     this.selected_folder = Some(folder.clone());
                     this.open_folder_as_worktree(folder.clone(), window, cx);
-                    this.refresh_composer_git_state_if_needed(cx);
                     if let (Some(thread), Some(folder)) =
                         (this.thread.clone(), this.selected_folder.clone())
                     {
@@ -2204,8 +2295,11 @@ impl BeginnerWorkspace {
         }
         let agent_text = self.chat_mode.prepare_message(text.clone());
 
-        let folder = match &self.selected_folder {
-            Some(f) => f.clone(),
+        let folder = match self.selected_or_visible_folder(cx) {
+            Some(folder) => {
+                self.selected_folder = Some(folder.clone());
+                folder
+            }
             None => {
                 self.pick_folder(window, cx);
                 return;
@@ -2231,6 +2325,7 @@ impl BeginnerWorkspace {
         // even if the user immediately closes without waiting for the agent.
         let record_id = self.add_chat_record(chat_name, &folder, cx);
         self.active_chat_record_id = Some(record_id);
+        self.update_active_chat_record_session_id_from_current_session(cx);
         self.save_open_tabs(cx);
 
         // If a draft thread is already present (for pre-send model selection),
@@ -2248,8 +2343,6 @@ impl BeginnerWorkspace {
             });
             self.is_agent_running = true;
             self.agent_finished = false;
-            self.open_live_preview_panel(cx);
-            self.ensure_live_preview_started(cx);
             self.send_queued_composer_submit(window, cx);
             cx.notify();
             return;
@@ -2276,6 +2369,7 @@ impl BeginnerWorkspace {
         self.right_panel_option = RightPanelOption::Files;
         self.reset_right_panel_tabs();
         self.share_dialog_open = false;
+        self.browser_warning_dialog_open = false;
         self.bottom_panel_open = false;
         self.bottom_panel_closing = false;
         self.bottom_panel_animation_generation = 0;
@@ -2283,8 +2377,6 @@ impl BeginnerWorkspace {
         self.terminal_working_directory = None;
         self.right_terminal_view = None;
         self.right_terminal_working_directory = None;
-        self.open_live_preview_panel(cx);
-        self.ensure_live_preview_started(cx);
         cx.notify();
 
         let task = cx.spawn_in(window, async move |this, cx| {
@@ -2308,10 +2400,7 @@ impl BeginnerWorkspace {
         .await;
 
         this.update_in(cx, |bw, window, cx| {
-            // Force a re-check of git state now that the repository is initialized.
-            bw.composer_git_state_folder = None;
             bw.open_folder_as_worktree(folder.clone(), window, cx);
-            bw.refresh_composer_git_state_if_needed(cx);
             bw.start_agent_thread(text, window, cx);
         })
         .ok();
@@ -2341,6 +2430,7 @@ impl BeginnerWorkspace {
         self.right_panel_option = RightPanelOption::Files;
         self.reset_right_panel_tabs();
         self.share_dialog_open = false;
+        self.browser_warning_dialog_open = false;
         self.bottom_panel_open = false;
         self.bottom_panel_closing = false;
         self.bottom_panel_animation_generation = 0;
@@ -2352,8 +2442,6 @@ impl BeginnerWorkspace {
             editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
             editor.set_text("", window, cx);
         });
-        self.open_live_preview_panel(cx);
-        self.ensure_live_preview_started(cx);
         cx.notify();
     }
 
@@ -2378,24 +2466,30 @@ impl BeginnerWorkspace {
         let prompt_prefix = SharedString::from(self.chat_mode.prompt_prefix());
         let draft_text = self.chat_editor.read(cx).text(cx);
         let thread_id = conversation_view.read(cx).parent_id();
+        let root_session_id = Self::conversation_root_session_id(conversation_view, cx);
         let hook_conversation_view = conversation_view.clone();
         let workspace = cx.entity().downgrade();
         conversation_view.update(cx, |conversation_view, cx| {
             conversation_view.set_root_prompt_prefix(Some(prompt_prefix), cx);
-            conversation_view.set_root_message_editor_auto_height(
-                SIMPLE_COMPOSER_MIN_LINES,
-                Some(SIMPLE_COMPOSER_MAX_LINES),
-                cx,
-            );
+            if let Some(task) =
+                conversation_view.set_root_session_mode(acp::SessionModeId::new("free"), cx)
+            {
+                cx.spawn(async move |_this, _cx| {
+                    task.await.log_err();
+                })
+                .detach();
+            }
             conversation_view.seed_root_message_text_if_empty(draft_text, window, cx);
             conversation_view.set_root_before_send_hook(
                 Some(Rc::new(move |text, window, cx| {
                     let conversation_view = hook_conversation_view.clone();
+                    let root_session_id = root_session_id.clone();
                     workspace
                         .update(cx, |workspace, cx| {
                             workspace.prepare_thread_composer_send(
                                 thread_id,
                                 conversation_view,
+                                root_session_id,
                                 text,
                                 window,
                                 cx,
@@ -2408,23 +2502,11 @@ impl BeginnerWorkspace {
         });
     }
 
-    fn sync_thread_prompt_prefix(&self, cx: &mut Context<Self>) {
-        let prompt_prefix = SharedString::from(self.chat_mode.prompt_prefix());
-        if let Some(conversation_view) = self
-            .active_conversation_view
-            .as_ref()
-            .or(self.pending_conversation_view.as_ref())
-        {
-            conversation_view.update(cx, |conversation_view, cx| {
-                conversation_view.set_root_prompt_prefix(Some(prompt_prefix), cx);
-            });
-        }
-    }
-
     fn prepare_thread_composer_send(
         &mut self,
         active_thread_id: ThreadId,
         conversation_view: Entity<ConversationView>,
+        root_session_id: Option<String>,
         text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -2432,6 +2514,7 @@ impl BeginnerWorkspace {
         self.prepare_thread_composer_send_impl(
             active_thread_id,
             conversation_view,
+            root_session_id,
             text,
             window,
             cx,
@@ -2442,6 +2525,7 @@ impl BeginnerWorkspace {
         &mut self,
         active_thread_id: ThreadId,
         conversation_view: Entity<ConversationView>,
+        root_session_id: Option<String>,
         text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -2456,9 +2540,15 @@ impl BeginnerWorkspace {
             return false;
         }
 
-        let Some(folder) = self.selected_folder.clone() else {
-            self.pick_folder(window, cx);
-            return false;
+        let folder = match self.selected_or_visible_folder(cx) {
+            Some(folder) => {
+                self.selected_folder = Some(folder.clone());
+                folder
+            }
+            None => {
+                self.pick_folder(window, cx);
+                return false;
+            }
         };
 
         self.open_folder_as_worktree(folder.clone(), window, cx);
@@ -2504,6 +2594,9 @@ impl BeginnerWorkspace {
             self.state = BeginnerState::ActiveProject;
             let record_id = self.add_chat_record(chat_name, &folder, cx);
             self.active_chat_record_id = Some(record_id.clone());
+            if let Some(root_session_id) = root_session_id {
+                self.update_active_chat_record_session_id(root_session_id, cx);
+            }
             if let Some(thread) = self.thread.clone() {
                 let session_id = thread.read(cx).session_id().0.to_string();
                 self.update_latest_chat_record_session_id(&folder, session_id, cx);
@@ -2514,20 +2607,15 @@ impl BeginnerWorkspace {
             self.save_open_tabs(cx);
         } else if let Some(record_id) = self.active_chat_record_id.clone() {
             self.touch_chat_record(&record_id, cx);
+            if let Some(root_session_id) = root_session_id {
+                self.update_active_chat_record_session_id(root_session_id, cx);
+            }
         }
 
         self.is_agent_running = true;
         self.agent_finished = false;
-        self.open_live_preview_panel(cx);
-        self.ensure_live_preview_started(cx);
         cx.notify();
-        self.send_conversation_message_after_model_check(
-            conversation_view,
-            text.to_string(),
-            window,
-            cx,
-        );
-        false
+        true
     }
 
     fn submit_follow_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2542,8 +2630,12 @@ impl BeginnerWorkspace {
         }
 
         if self.selected_folder.is_none() {
-            self.submit(window, cx);
-            return;
+            if let Some(folder) = self.selected_or_visible_folder(cx) {
+                self.selected_folder = Some(folder);
+            } else {
+                self.submit(window, cx);
+                return;
+            }
         }
 
         let text = self.chat_editor.read(cx).text(cx).trim().to_string();
@@ -2560,6 +2652,7 @@ impl BeginnerWorkspace {
         }
         if let Some(record_id) = self.active_chat_record_id.clone() {
             self.touch_chat_record(&record_id, cx);
+            self.update_active_chat_record_session_id_from_current_session(cx);
         }
 
         if self.pending_conversation_view.is_some() {
@@ -2570,8 +2663,6 @@ impl BeginnerWorkspace {
             });
             self.is_agent_running = true;
             self.agent_finished = false;
-            self.open_live_preview_panel(cx);
-            self.ensure_live_preview_started(cx);
             cx.notify();
             return;
         }
@@ -2580,29 +2671,12 @@ impl BeginnerWorkspace {
             editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
             editor.set_text("", window, cx);
         });
-        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
-        self.clear_current_preview_state();
         self.is_agent_running = true;
         self.agent_finished = false;
-        self.open_live_preview_panel(cx);
-        self.ensure_live_preview_started(cx);
         cx.notify();
 
         if let Some(conversation_view) = self.active_conversation_view.clone() {
-            self.send_conversation_message_after_model_check(
-                conversation_view,
-                agent_text,
-                window,
-                cx,
-            );
-        } else if let Some(thread) = self.thread.clone() {
-            cx.spawn(async move |_this, cx| {
-                let future = thread.update(cx, |thread, cx| {
-                    thread.send(vec![agent_text.as_str().into()], cx)
-                });
-                future.await.log_err();
-            })
-            .detach();
+            self.send_conversation_message(conversation_view, agent_text, window, cx);
         } else {
             self.queued_composer_submit = Some(agent_text);
             self.start_agent_thread(String::new(), window, cx);
@@ -2618,22 +2692,6 @@ impl BeginnerWorkspace {
         match event {
             FileChangesPanelEvent::FileSelected(path) => {
                 self.open_file_read_only(path.as_path(), window, cx);
-                cx.notify();
-            }
-        }
-    }
-
-    fn handle_chat_feed_event(
-        &mut self,
-        event: &BeginnerChatFeedEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match event {
-            BeginnerChatFeedEvent::PreviewRequested => self.show_preview(window, cx),
-            BeginnerChatFeedEvent::ChangesRequested => self.show_code_artifact(cx),
-            BeginnerChatFeedEvent::ShareRequested => {
-                self.share_dialog_open = true;
                 cx.notify();
             }
         }
@@ -2852,31 +2910,6 @@ impl BeginnerWorkspace {
         self.right_panel_option = RightPanelOption::Files;
     }
 
-    fn open_live_preview_panel(&mut self, cx: &mut Context<Self>) {
-        if self.chat_mode != ChatMode::Build {
-            return;
-        }
-
-        self.right_panel = RightPanel::Preview;
-        self.activate_right_panel_tab(RightPanelOption::Design);
-        self.right_panel_mode = RightPanelMode::Artifact;
-        self.preview_visible = self.preview_url.is_some();
-        cx.notify();
-    }
-
-    fn ensure_live_preview_started(&mut self, cx: &mut Context<Self>) {
-        if self.chat_mode != ChatMode::Build {
-            return;
-        }
-
-        if self.selected_folder.is_some()
-            && self.preview_url.is_none()
-            && !self.is_preview_generating
-        {
-            self.open_web_app_if_present(cx);
-        }
-    }
-
     fn close_right_panel_tab(
         &mut self,
         option: RightPanelOption,
@@ -2892,6 +2925,9 @@ impl BeginnerWorkspace {
         if option == RightPanelOption::Design {
             Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
             self.clear_current_preview_state();
+        } else if option == RightPanelOption::Terminal {
+            self.right_terminal_view = None;
+            self.right_terminal_working_directory = None;
         }
 
         if self.active_right_panel_tab == Some(option) {
@@ -2919,6 +2955,7 @@ impl BeginnerWorkspace {
         }
     }
 
+    #[allow(dead_code)]
     fn show_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.right_panel = RightPanel::Preview;
         self.activate_right_panel_tab(RightPanelOption::Design);
@@ -3002,11 +3039,6 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if option == RightPanelOption::Terminal {
-            self.open_bottom_terminal_panel(window, cx);
-            return;
-        }
-
         self.activate_right_panel_tab(option);
 
         match option {
@@ -3042,8 +3074,26 @@ impl BeginnerWorkspace {
             RightPanelOption::Code => {
                 self.show_code_artifact(cx);
             }
-            RightPanelOption::Terminal => {}
+            RightPanelOption::Terminal => {
+                self.right_panel_mode = RightPanelMode::Launcher;
+                self.preview_visible = false;
+                self.web_preview = None;
+                self.ensure_right_terminal(window, cx);
+                cx.notify();
+            }
         }
+    }
+
+    fn select_right_panel_option_from_user(
+        &mut self,
+        option: RightPanelOption,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if option == RightPanelOption::Design {
+            self.browser_warning_dialog_open = true;
+        }
+        self.select_right_panel_option(option, window, cx);
     }
 
     fn open_bottom_terminal_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3098,18 +3148,6 @@ impl BeginnerWorkspace {
         cx.notify();
     }
 
-    fn preview_card_state(&self) -> PreviewCardState {
-        if self.is_preview_generating {
-            PreviewCardState::Generating
-        } else if self.preview_url.is_some() {
-            PreviewCardState::Ready
-        } else if self.agent_finished {
-            PreviewCardState::Unavailable
-        } else {
-            PreviewCardState::Building
-        }
-    }
-
     fn terminal_working_directory(&self) -> Option<PathBuf> {
         self.selected_folder.clone().or_else(|| {
             std::env::var_os("HOME").map(|home| {
@@ -3159,6 +3197,53 @@ impl BeginnerWorkspace {
                     )
                 });
                 this.terminal_view = Some(terminal_view);
+                cx.notify();
+            })?;
+
+            anyhow::Ok(())
+        })
+        .detach_and_prompt_err("Failed to open terminal", window, cx, |_, _, _| None);
+    }
+
+    fn ensure_right_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(working_directory) = self.terminal_working_directory() else {
+            return;
+        };
+
+        if self.right_terminal_view.is_some()
+            && self.right_terminal_working_directory.as_ref() == Some(&working_directory)
+        {
+            return;
+        }
+
+        self.right_terminal_view = None;
+        self.right_terminal_working_directory = Some(working_directory.clone());
+        let project = self.project.clone();
+        let weak_project = self.project.downgrade();
+        let workspace = self.workspace.clone();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let create_terminal = project.update(cx, |project, cx| {
+                project.create_terminal_shell(Some(working_directory.clone()), cx)
+            });
+            let terminal = create_terminal.await?;
+
+            this.update_in(cx, |this, window, cx| {
+                if this.right_terminal_working_directory.as_ref() != Some(&working_directory) {
+                    return;
+                }
+
+                let terminal_view = cx.new(|cx| {
+                    TerminalView::new(
+                        terminal.clone(),
+                        workspace.clone(),
+                        None,
+                        weak_project.clone(),
+                        window,
+                        cx,
+                    )
+                });
+                this.right_terminal_view = Some(terminal_view);
                 cx.notify();
             })?;
 
@@ -3484,37 +3569,6 @@ impl BeginnerWorkspace {
         self.chat_editor.update(cx, |editor, cx| {
             editor.set_text(prompt, window, cx);
         });
-        cx.notify();
-    }
-
-    fn set_chat_mode(&mut self, mode: ChatMode, window: &mut Window, cx: &mut Context<Self>) {
-        if self.chat_mode == mode {
-            return;
-        }
-        self.chat_mode = mode;
-        let placeholder = if matches!(self.state, BeginnerState::ActiveProject) {
-            mode.follow_up_placeholder()
-        } else {
-            mode.placeholder()
-        };
-        self.chat_editor.update(cx, |editor, cx| {
-            editor.set_placeholder_text(placeholder, window, cx);
-        });
-        if self
-            .workspace
-            .upgrade()
-            .and_then(|workspace| workspace.read(cx).panel::<AgentPanel>(cx))
-            .and_then(|panel| {
-                panel
-                    .read(cx)
-                    .active_backboard_workspace_draft_thread_id(cx)
-            })
-            .is_some()
-        {
-            self.discard_simple_agent_draft(window, cx);
-            self.ensure_composer_thread(window, cx);
-        }
-        self.sync_thread_prompt_prefix(cx);
         cx.notify();
     }
 
@@ -3996,7 +4050,6 @@ res.end(data);\
         self.state = BeginnerState::Landing;
         self.active_chat_record_id = None;
         self.selected_folder = None;
-        self.clear_composer_git_state();
         self.file_changes_panel = None;
         self.chat_feed = None;
         self.thread = None;
@@ -4015,6 +4068,7 @@ res.end(data);\
         self.right_panel_option = RightPanelOption::Files;
         self.reset_right_panel_tabs();
         self.share_dialog_open = false;
+        self.browser_warning_dialog_open = false;
         self.clear_current_preview_state();
         self.bottom_panel_open = false;
         self.bottom_panel_closing = false;
@@ -4084,7 +4138,6 @@ res.end(data);\
         self.active_chat_record_id = Some(record.id.clone());
         self.selected_folder = Some(path.clone());
         self.open_folder_as_worktree(path.clone(), window, cx);
-        self.refresh_composer_git_state_if_needed(cx);
         self.tab_name = chat_name.clone();
         self.state = BeginnerState::ActiveProject;
         self.chat_mode = ChatMode::Build;
@@ -4121,6 +4174,7 @@ res.end(data);\
         self.right_panel_option = RightPanelOption::Files;
         self.reset_right_panel_tabs();
         self.share_dialog_open = false;
+        self.browser_warning_dialog_open = false;
         self.clear_current_preview_state();
         self.bottom_panel_open = false;
         self.bottom_panel_closing = false;
@@ -4166,6 +4220,17 @@ res.end(data);\
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.restore_thread_for_folder_impl(record, path, window, cx, true);
+    }
+
+    fn restore_thread_for_folder_impl(
+        &mut self,
+        record: BeginnerChatRecord,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        wait_for_metadata_reload: bool,
+    ) {
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
@@ -4178,6 +4243,7 @@ res.end(data);\
 
         let path_list = PathList::new(&[path.clone()]);
         let store_ref = store.read(cx);
+        let reload_task = store_ref.reload_task();
         let metadata = record
             .session_id
             .as_ref()
@@ -4200,6 +4266,16 @@ res.end(data);\
             });
 
         let Some(metadata) = metadata else {
+            if wait_for_metadata_reload && let Some(reload_task) = reload_task {
+                let task = cx.spawn_in(window, async move |this, cx| {
+                    reload_task.await;
+                    this.update_in(cx, |this, window, cx| {
+                        this.restore_thread_for_folder_impl(record, path, window, cx, false);
+                    })
+                    .ok();
+                });
+                self._tasks.push(task);
+            }
             return;
         };
 
@@ -4207,7 +4283,7 @@ res.end(data);\
         let work_dirs = Some(path_list);
         self.open_folder_as_worktree(path.clone(), window, cx);
         let options = BackboardAgentWorkspaceChatOptions {
-            mode: self.chat_mode.agent_workspace_mode(),
+            mode: BackboardAgentWorkspaceMode::Free,
             work_dirs,
             focus: false,
             source: "beginner_ui",
@@ -4235,25 +4311,7 @@ res.end(data);\
         thread: &Entity<AcpThread>,
         cx: &mut Context<Self>,
     ) {
-        if self.restore_preview_url_from_thread(thread, cx) {
-            return;
-        }
-
-        if self.preview_url.is_some() || self.is_preview_generating {
-            return;
-        }
-
-        let has_artifact_work = thread.read(cx).entries().iter().any(|entry| match entry {
-            AgentThreadEntry::ToolCall(call) => {
-                matches!(call.kind, acp::ToolKind::Edit | acp::ToolKind::Execute)
-            }
-            _ => false,
-        });
-        if !has_artifact_work {
-            return;
-        }
-
-        self.open_web_app_if_present(cx);
+        self.restore_preview_url_from_thread(thread, cx);
     }
 
     fn restore_preview_url_from_thread(
@@ -4485,6 +4543,19 @@ res.end(data);\
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        conversation_view.update(cx, |conversation_view, cx| {
+            conversation_view.set_background_override(Some(ds::app_background(cx)), cx);
+            conversation_view.set_suppress_multi_root_callout(true, cx);
+            conversation_view.set_suppress_mode_selector(true, cx);
+            if let Some(task) =
+                conversation_view.set_root_session_mode(acp::SessionModeId::new("free"), cx)
+            {
+                cx.spawn(async move |_this, _cx| {
+                    task.await.log_err();
+                })
+                .detach();
+            }
+        });
         self.pending_conversation_view = Some(conversation_view.clone());
         let cv_sub = cx.observe_in(&conversation_view, window, |this, cv, window, cx| {
             this.handle_conversation_view_update(&cv, window, cx);
@@ -4511,23 +4582,22 @@ res.end(data);\
         if let Some(thread) = root_thread {
             let thread_sub = cx.subscribe(&thread, |this, thread_entity, event, cx| match event {
                 AcpThreadEvent::Stopped(_) => {
+                    this.update_active_chat_record_session_id_from_thread(&thread_entity, cx);
                     this.is_agent_running = false;
                     this.agent_finished = true;
-                    let restored_preview_url =
-                        this.restore_preview_url_from_thread(&thread_entity, cx);
-                    if !restored_preview_url && this.preview_url.is_none() {
-                        this.open_web_app_if_present(cx);
-                    } else if !restored_preview_url {
+                    if !this.restore_preview_url_from_thread(&thread_entity, cx) {
                         this.web_preview = None;
                     }
                     cx.notify();
                 }
                 AcpThreadEvent::NewEntry => {
+                    this.update_active_chat_record_session_id_from_thread(&thread_entity, cx);
                     this.is_agent_running = thread_entity.read(cx).status() != ThreadStatus::Idle;
                     this.restore_preview_for_thread_if_present(&thread_entity, cx);
                     cx.notify();
                 }
                 AcpThreadEvent::EntryUpdated(entry_index) => {
+                    this.update_active_chat_record_session_id_from_thread(&thread_entity, cx);
                     this.is_agent_running = thread_entity.read(cx).status() != ThreadStatus::Idle;
                     this.restore_preview_for_thread_if_present(&thread_entity, cx);
                     this.refresh_live_preview_after_tool_update(&thread_entity, *entry_index, cx);
@@ -4538,33 +4608,6 @@ res.end(data);\
                     this.agent_finished = false;
                     cx.notify();
                 }
-                AcpThreadEvent::ToolAuthorizationRequested(tool_call_id) => {
-                    let outcome =
-                        thread_entity
-                            .read(cx)
-                            .tool_call(tool_call_id)
-                            .and_then(|(_, call)| {
-                                if let ToolCallStatus::WaitingForConfirmation { options, .. } =
-                                    &call.status
-                                {
-                                    let option = options.first_option_of_kind(
-                                        acp::PermissionOptionKind::AllowOnce,
-                                    )?;
-                                    Some(SelectedPermissionOutcome::new(
-                                        option.option_id.clone(),
-                                        option.kind,
-                                    ))
-                                } else {
-                                    None
-                                }
-                            });
-                    if let Some(outcome) = outcome {
-                        let id = tool_call_id.clone();
-                        thread_entity.update(cx, |t, cx| {
-                            t.authorize_tool_call(id, outcome, cx);
-                        });
-                    }
-                }
                 _ => {}
             });
             self.session_subscriptions.push(thread_sub);
@@ -4573,17 +4616,7 @@ res.end(data);\
                     thread.set_work_dirs(PathList::new(&[folder]), cx);
                 });
             }
-            let artifact_title = self.artifact_title();
-            let feed =
-                cx.new(|cx| BeginnerChatFeed::new(thread.clone(), artifact_title.clone(), cx));
-            feed.update(cx, |feed, cx| {
-                feed.set_display_mode(self.chat_feed_display_mode, cx);
-            });
-            let feed_sub = cx.subscribe_in(&feed, window, |bw, _, event, window, cx| {
-                bw.handle_chat_feed_event(event, window, cx);
-            });
-            self.session_subscriptions.push(feed_sub);
-            self.chat_feed = Some(feed);
+            self.chat_feed = None;
             let file_panel = cx.new(|cx| FileChangesPanel::new(thread.clone(), cx));
             let file_sub = cx.subscribe_in(&file_panel, window, |bw, _, event, window, cx| {
                 bw.handle_file_panel_event(event, window, cx);
@@ -4591,6 +4624,7 @@ res.end(data);\
             self.session_subscriptions.push(file_sub);
             self.file_changes_panel = Some(file_panel);
             self.thread = Some(thread.clone());
+            self.update_active_chat_record_session_id_from_conversation(conversation_view, cx);
             if let Some(folder) = self.selected_folder.clone() {
                 let sid = thread.read(cx).session_id().0.to_string();
                 self.update_latest_chat_record_session_id(&folder, sid, cx);
@@ -4600,38 +4634,7 @@ res.end(data);\
             if let Some(conversation_view) = self.active_conversation_view.as_ref() {
                 self.configure_thread_composer(conversation_view, window, cx);
             }
-            self.model_selector = self
-                .active_conversation_view
-                .as_ref()
-                .and_then(|cv_entity| {
-                    cv_entity.update(cx, |cv_ref, cx| {
-                        cv_ref.make_root_model_selector_wrapped(
-                            |inner| {
-                                Rc::new(CuratedModelSelector { inner })
-                                    as Rc<dyn AgentModelSelector>
-                            },
-                            window,
-                            cx,
-                        )
-                    })
-                });
-            if let Some(model_selector) = self.model_selector.as_ref() {
-                model_selector.update(cx, |model_selector, _cx| {
-                    model_selector.set_trigger_brand(SharedString::from(""), None);
-                });
-            }
-            // Replace the thread view's model selector with the curated one so the
-            // embedded editor picker shows only the simple-mode model list.
-            let curated_selector = self.model_selector.clone();
-            if let Some(cv_entity) = self.active_conversation_view.as_ref() {
-                cv_entity.update(cx, |cv, cx| {
-                    if let Some(thread_view) = cv.root_thread_view() {
-                        thread_view.update(cx, |thread_view, _cx| {
-                            thread_view.model_selector = curated_selector;
-                        });
-                    }
-                });
-            }
+            self.model_selector = None;
             self.send_queued_composer_submit(window, cx);
             cx.notify();
         } else if !is_loading {
@@ -4657,47 +4660,20 @@ res.end(data);\
             return;
         };
 
-        self.send_conversation_message_after_model_check(conversation_view, text, window, cx);
+        self.send_conversation_message(conversation_view, text, window, cx);
     }
 
-    fn send_conversation_message_after_model_check(
+    fn send_conversation_message(
         &mut self,
         conversation_view: Entity<ConversationView>,
         text: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let selector = self
-            .thread
-            .as_ref()
-            .and_then(|thread| {
-                let thread = thread.read(cx);
-                thread.connection().model_selector(thread.session_id())
-            })
-            .map(|inner| Rc::new(CuratedModelSelector { inner }) as Rc<dyn AgentModelSelector>);
-
-        cx.spawn_in(window, async move |_this, cx| {
-            if let Some(selector) = selector {
-                match cx
-                    .update(|_window, cx| ensure_selected_simple_model_is_supported(selector, cx))
-                {
-                    Ok(task) => {
-                        task.await.log_err();
-                    }
-                    Err(error) => {
-                        log::warn!("failed to validate simple mode model selection: {error:#}");
-                    }
-                }
-            }
-
-            conversation_view
-                .update_in(cx, |conversation_view, window, cx| {
-                    conversation_view.seed_root_message_text_if_empty(text, window, cx);
-                    conversation_view.send_root_message_editor_without_before_send_hook(window, cx);
-                })
-                .ok();
-        })
-        .detach();
+        conversation_view.update(cx, |conversation_view, cx| {
+            conversation_view.set_root_message_text(text, window, cx);
+            conversation_view.send_root_message_editor(window, cx);
+        });
     }
 
     fn schedule_restore_timeout(
@@ -5120,7 +5096,11 @@ impl BeginnerWorkspace {
                     .handler(move |window, cx| {
                         open_terminal
                             .update(cx, |this, cx| {
-                                this.open_bottom_terminal_panel(window, cx);
+                                this.select_right_panel_option(
+                                    RightPanelOption::Terminal,
+                                    window,
+                                    cx,
+                                );
                             })
                             .log_err();
                     }),
@@ -5905,6 +5885,37 @@ impl BeginnerWorkspace {
             })
     }
 
+    fn render_right_panel_terminal_state(&self, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(terminal_view) = self.right_terminal_view.clone() {
+            return div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .overflow_hidden()
+                .child(terminal_view)
+                .into_any_element();
+        }
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .items_center()
+            .justify_center()
+            .gap_3()
+            .bg(ds::app_background(cx))
+            .child(
+                Icon::new(IconName::LoadCircle)
+                    .size(IconSize::Medium)
+                    .color(Color::Custom(ds::icon_muted(cx))),
+            )
+            .child(
+                Label::new("Starting terminal...")
+                    .size(LabelSize::Small)
+                    .color(Color::Custom(ds::text_muted(cx))),
+            )
+            .into_any_element()
+    }
+
     fn render_open_artifact_panel_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let hover_background = ds::hover_background(cx);
 
@@ -6413,6 +6424,7 @@ impl BeginnerWorkspace {
                             })
                             .children(project_group.records.into_iter().map(|record| {
                                 let name = record.display_name();
+                                let time_label = record.relative_time_label();
                                 let record_id = record.id.clone();
                                 let row_group =
                                     SharedString::from(format!("chat-entry-{record_id}"));
@@ -6429,10 +6441,11 @@ impl BeginnerWorkspace {
                                 h_flex()
                                     .id(SharedString::from(format!("chat-{record_id}")))
                                     .group(row_group.clone())
-                                    .h(px(ds::CHAT_ROW_HEIGHT))
+                                    .h(px(SIMPLE_CHAT_HISTORY_ROW_HEIGHT_PX))
                                     .pl(px(34.))
                                     .pr_3()
                                     .gap_2()
+                                    .items_center()
                                     .rounded_lg()
                                     .cursor_pointer()
                                     .when(is_active, |el| {
@@ -6443,12 +6456,24 @@ impl BeginnerWorkspace {
                                         this.open_chat_record(record_for_click.clone(), window, cx);
                                     }))
                                     .child(
-                                        v_flex().flex_1().min_w_0().child(
-                                            Label::new(name)
-                                                .size(LabelSize::Custom(rems_from_px(14.)))
-                                                .color(Color::Custom(ds::sidebar_text(cx)))
-                                                .truncate(),
-                                        ),
+                                        v_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .gap_0p5()
+                                            .child(
+                                                Label::new(name)
+                                                    .size(LabelSize::Custom(rems_from_px(13.5)))
+                                                    .color(Color::Custom(ds::sidebar_text(cx)))
+                                                    .truncate(),
+                                            )
+                                            .child(
+                                                Label::new(time_label)
+                                                    .size(LabelSize::Small)
+                                                    .color(Color::Custom(ds::sidebar_text_subtle(
+                                                        cx,
+                                                    )))
+                                                    .truncate(),
+                                            ),
                                     )
                                     .child(
                                         div()
@@ -6722,18 +6747,9 @@ impl BeginnerWorkspace {
     }
 
     fn render_empty_conversation(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (headline, subtext_first, subtext_second) = match self.chat_mode {
-            ChatMode::Ask => (
-                "What do you want to ask?",
-                "Ask about this project without changing files.",
-                "Backboard will keep the project unchanged.",
-            ),
-            ChatMode::Build => (
-                "What are we building today?",
-                "Describe a page, feature, or change.",
-                "Backboard will generate the output.",
-            ),
-        };
+        let headline = "What are we building today?";
+        let subtext_first = "Describe a page, feature, or change.";
+        let subtext_second = "Backboard will generate the output.";
         v_flex()
             .items_center()
             .gap_3()
@@ -6743,12 +6759,7 @@ impl BeginnerWorkspace {
                 v_flex()
                     .items_center()
                     .gap_2()
-                    .child(
-                        img(SIMPLE_LANDING_LOGO_PATH)
-                            .size(px(52.))
-                            .object_fit(ObjectFit::Contain)
-                            .with_fallback(|| div().size(px(52.)).into_any_element()),
-                    )
+                    .child(Vector::square(VectorName::BackboardLogo, rems_from_px(52.)))
                     .child(
                         Label::new(headline)
                             .size(LabelSize::Custom(rems_from_px(22.)))
@@ -6783,7 +6794,6 @@ impl BeginnerWorkspace {
         if api_key_ready {
             self.ensure_composer_thread(window, cx);
         }
-        self.refresh_composer_git_state_if_needed(cx);
 
         v_flex()
             .relative()
@@ -6903,6 +6913,9 @@ impl BeginnerWorkspace {
             .when(self.share_dialog_open, |el| {
                 el.child(self.render_share_dialog(cx))
             })
+            .when(self.browser_warning_dialog_open, |el| {
+                el.child(self.render_browser_warning_dialog(cx))
+            })
     }
 
     fn render_active_project(
@@ -6919,10 +6932,10 @@ impl BeginnerWorkspace {
         if api_key_ready {
             self.ensure_composer_thread(window, cx);
         }
-        self.refresh_composer_git_state_if_needed(cx);
         let preview_url = self.preview_url.clone();
         let active_title = self.current_tab_title();
-        let preview_card_state = self.preview_card_state();
+        let chat_surface = self.chat_surface_conversation_view();
+        let chat_surface_is_missing = chat_surface.is_none();
         let colors = cx.theme().colors().clone();
 
         v_flex()
@@ -6981,35 +6994,30 @@ impl BeginnerWorkspace {
                                                 .child(self.render_api_key_required(cx)),
                                         )
                                     })
-                                    .when(api_key_ready, |el| {
-                                        el.when_some(self.chat_feed.as_ref(), |el, feed| {
-                                            feed.update(cx, |feed, cx| {
-                                                feed.set_preview_state(preview_card_state, cx);
-                                                feed.set_display_mode(
-                                                    self.chat_feed_display_mode,
-                                                    cx,
-                                                );
-                                            });
-                                            el.child(
-                                                v_flex()
-                                                    .h_full()
-                                                    .flex_1()
-                                                    .min_h_0()
-                                                    .overflow_hidden()
-                                                    .child(feed.clone()),
-                                            )
-                                        })
+                                    .when_some(chat_surface.clone(), |el, conversation_view| {
+                                        el.child(
+                                            v_flex()
+                                                .h_full()
+                                                .flex_1()
+                                                .min_h_0()
+                                                .overflow_hidden()
+                                                .child(
+                                                    div()
+                                                        .flex_1()
+                                                        .min_h_0()
+                                                        .overflow_hidden()
+                                                        .child(conversation_view),
+                                                )
+                                                .child(
+                                                    self.render_simple_context_selectors(false, cx),
+                                                ),
+                                        )
                                     })
-                                    .when(api_key_ready && self.chat_feed.is_none(), |el| {
+                                    .when(api_key_ready && chat_surface_is_missing, |el| {
                                         let (headline, subtext) = if is_connecting {
                                             (
                                                 "Backboard is connecting",
                                                 "Your agent is starting up.",
-                                            )
-                                        } else if self.chat_mode == ChatMode::Ask {
-                                            (
-                                                "What do you want to ask?",
-                                                "Ask about this project without changing files.",
                                             )
                                         } else {
                                             (
@@ -7048,47 +7056,56 @@ impl BeginnerWorkspace {
                                                 }),
                                         )
                                     })
-                                    .when(api_key_ready && (is_running || is_connecting), |el| {
-                                        let status = if is_connecting {
-                                            SharedString::from("Thought for 1s")
-                                        } else if self.chat_mode == ChatMode::Ask {
-                                            SharedString::from("Thinking...")
-                                        } else if self.is_preview_generating {
-                                            SharedString::from("Starting local preview")
-                                        } else {
-                                            SharedString::from(format!(
-                                                "Working on {}",
-                                                self.artifact_title().as_ref()
-                                            ))
-                                        };
-                                        el.child(
-                                            h_flex()
-                                                .flex_shrink_0()
-                                                .px_4()
-                                                .py_2()
-                                                .gap_2()
-                                                .items_center()
-                                                .child(
-                                                    Icon::new(IconName::LoadCircle)
-                                                        .size(IconSize::XSmall)
-                                                        .color(Color::Custom(colors.icon_accent)),
-                                                )
-                                                .child(
-                                                    Label::new(status)
-                                                        .size(LabelSize::XSmall)
-                                                        .color(Color::Custom(colors.text_muted)),
-                                                ),
-                                        )
+                                    .when(
+                                        api_key_ready
+                                            && chat_surface_is_missing
+                                            && (is_running || is_connecting),
+                                        |el| {
+                                            let status = if is_connecting {
+                                                SharedString::from("Thought for 1s")
+                                            } else if self.is_preview_generating {
+                                                SharedString::from("Starting local preview")
+                                            } else {
+                                                SharedString::from(format!(
+                                                    "Working on {}",
+                                                    self.artifact_title().as_ref()
+                                                ))
+                                            };
+                                            el.child(
+                                                h_flex()
+                                                    .flex_shrink_0()
+                                                    .px_4()
+                                                    .py_2()
+                                                    .gap_2()
+                                                    .items_center()
+                                                    .child(
+                                                        Icon::new(IconName::LoadCircle)
+                                                            .size(IconSize::XSmall)
+                                                            .color(Color::Custom(
+                                                                colors.icon_accent,
+                                                            )),
+                                                    )
+                                                    .child(
+                                                        Label::new(status)
+                                                            .size(LabelSize::XSmall)
+                                                            .color(Color::Custom(
+                                                                colors.text_muted,
+                                                            )),
+                                                    ),
+                                            )
+                                        },
+                                    )
+                                    .when(chat_surface_is_missing, |el| {
+                                        el.child(self.render_input_bar(
+                                            is_running,
+                                            is_connecting,
+                                            draft_is_empty,
+                                            false,
+                                            api_key_ready,
+                                            window,
+                                            cx,
+                                        ))
                                     })
-                                    .child(self.render_input_bar(
-                                        is_running,
-                                        is_connecting,
-                                        draft_is_empty,
-                                        false,
-                                        api_key_ready,
-                                        window,
-                                        cx,
-                                    ))
                                     .into_any_element(),
                                 is_running,
                                 preview_url,
@@ -7105,6 +7122,9 @@ impl BeginnerWorkspace {
             )
             .when(self.share_dialog_open, |el| {
                 el.child(self.render_share_dialog(cx))
+            })
+            .when(self.browser_warning_dialog_open, |el| {
+                el.child(self.render_browser_warning_dialog(cx))
             })
     }
 
@@ -7236,7 +7256,6 @@ impl BeginnerWorkspace {
                             .size(ButtonSize::Default)
                             .label_size(LabelSize::XSmall)
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_chat_mode(ChatMode::Build, window, cx);
                                 this.apply_suggested_prompt("Make a landing page", window, cx);
                                 this.submit_follow_up(window, cx);
                             })),
@@ -7254,7 +7273,6 @@ impl BeginnerWorkspace {
                             .cursor_pointer()
                             .hover(move |el| el.bg(hover_background))
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_chat_mode(ChatMode::Build, window, cx);
                                 this.apply_suggested_prompt("Make a landing page", window, cx);
                             }))
                             .child(
@@ -7615,7 +7633,7 @@ impl BeginnerWorkspace {
                         .handler(move |window, cx| {
                             workspace
                                 .update(cx, |this, cx| {
-                                    this.select_right_panel_option(option, window, cx);
+                                    this.select_right_panel_option_from_user(option, window, cx);
                                 })
                                 .log_err();
                         }),
@@ -7669,76 +7687,67 @@ impl BeginnerWorkspace {
                 .attach(gpui::Anchor::BottomLeft)
                 .no_chevron(),
             )
-            .children(
-                self.right_panel_tabs
-                    .iter()
-                    .copied()
-                    .filter(|option| *option != RightPanelOption::Terminal)
-                    .map(|option| {
-                        let is_active = active_option == Some(option);
-                        let tab_color = Color::Custom(if is_active {
-                            ds::text(cx)
-                        } else {
-                            ds::icon_muted(cx)
-                        });
-                        let close_hover_background = hover_background;
+            .children(self.right_panel_tabs.iter().copied().map(|option| {
+                let is_active = active_option == Some(option);
+                let tab_color = Color::Custom(if is_active {
+                    ds::text(cx)
+                } else {
+                    ds::icon_muted(cx)
+                });
+                let close_hover_background = hover_background;
 
-                        h_flex()
-                            .id(option.element_id())
-                            .h(px(32.))
-                            .max_w(px(118.))
-                            .min_w(px(82.))
+                h_flex()
+                    .id(option.element_id())
+                    .h(px(32.))
+                    .max_w(px(118.))
+                    .min_w(px(82.))
+                    .items_center()
+                    .gap_1p5()
+                    .pl(px(10.))
+                    .pr(px(6.))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(border_color)
+                    .cursor_pointer()
+                    .tooltip(Tooltip::text(option.label()))
+                    .when(is_active, |el| el.bg(ds::selected_background(cx)))
+                    .when(!is_active, |el| el.hover(move |el| el.bg(hover_background)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select_right_panel_option_from_user(option, window, cx);
+                    }))
+                    .child(
+                        Icon::new(option.icon())
+                            .size(IconSize::XSmall)
+                            .color(tab_color),
+                    )
+                    .child(
+                        Label::new(option.label())
+                            .size(LabelSize::XSmall)
+                            .color(tab_color)
+                            .truncate()
+                            .flex_1(),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{}-close", option.element_id())))
+                            .size(px(16.))
+                            .flex()
                             .items_center()
-                            .gap_1p5()
-                            .pl(px(10.))
-                            .pr(px(6.))
+                            .justify_center()
                             .rounded_full()
-                            .border_1()
-                            .border_color(border_color)
                             .cursor_pointer()
-                            .tooltip(Tooltip::text(option.label()))
-                            .when(is_active, |el| el.bg(ds::selected_background(cx)))
-                            .when(!is_active, |el| el.hover(move |el| el.bg(hover_background)))
+                            .hover(move |el| el.bg(close_hover_background))
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                this.select_right_panel_option(option, window, cx);
+                                cx.stop_propagation();
+                                this.close_right_panel_tab(option, window, cx);
                             }))
                             .child(
-                                Icon::new(option.icon())
+                                Icon::new(IconName::Close)
                                     .size(IconSize::XSmall)
                                     .color(tab_color),
-                            )
-                            .child(
-                                Label::new(option.label())
-                                    .size(LabelSize::XSmall)
-                                    .color(tab_color)
-                                    .truncate()
-                                    .flex_1(),
-                            )
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!(
-                                        "{}-close",
-                                        option.element_id()
-                                    )))
-                                    .size(px(16.))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded_full()
-                                    .cursor_pointer()
-                                    .hover(move |el| el.bg(close_hover_background))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        cx.stop_propagation();
-                                        this.close_right_panel_tab(option, window, cx);
-                                    }))
-                                    .child(
-                                        Icon::new(IconName::Close)
-                                            .size(IconSize::XSmall)
-                                            .color(tab_color),
-                                    ),
-                            )
-                    }),
-            )
+                            ),
+                    )
+            }))
     }
 
     fn render_right_panel_expand_button(
@@ -7822,7 +7831,7 @@ impl BeginnerWorkspace {
             )
             .child(match self.right_panel_option {
                 RightPanelOption::Files => self.render_right_panel_files_state(cx),
-                RightPanelOption::Terminal => self.render_right_panel_files_state(cx),
+                RightPanelOption::Terminal => self.render_right_panel_terminal_state(cx),
                 RightPanelOption::Design => self.render_empty_artifact_state(cx).into_any_element(),
                 RightPanelOption::Code => match &self.right_panel {
                     RightPanel::CodeDiff { .. } => {
@@ -9602,6 +9611,97 @@ impl BeginnerWorkspace {
             )
     }
 
+    fn render_browser_warning_dialog(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .size_full()
+            .inset_0()
+            .occlude()
+            .bg(gpui::black().opacity(0.35))
+            .flex()
+            .items_center()
+            .justify_center()
+            .p_4()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.browser_warning_dialog_open = false;
+                    cx.notify();
+                }),
+            )
+            .child(
+                v_flex()
+                    .w_full()
+                    .max_w(px(420.))
+                    .rounded(px(14.))
+                    .border_1()
+                    .border_color(ds::soft_border(cx))
+                    .bg(ds::card_background(cx))
+                    .shadow_sm()
+                    .occlude()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .child(
+                        h_flex()
+                            .h(px(56.))
+                            .px_5()
+                            .gap_3()
+                            .items_center()
+                            .border_b_1()
+                            .border_color(ds::separator(cx))
+                            .child(
+                                Icon::new(IconName::Warning)
+                                    .size(IconSize::Small)
+                                    .color(Color::Custom(ds::warning(cx))),
+                            )
+                            .child(
+                                Label::new("Browser warning")
+                                    .size(LabelSize::Custom(rems_from_px(16.)))
+                                    .weight(FontWeight::SEMIBOLD)
+                                    .color(Color::Custom(ds::text(cx))),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                IconButton::new("close-browser-warning", IconName::Close)
+                                    .icon_size(IconSize::Small)
+                                    .tooltip(Tooltip::text("Close"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.browser_warning_dialog_open = false;
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .px_5()
+                            .py_4()
+                            .text_size(rems_from_px(13.))
+                            .text_color(ds::text_muted(cx))
+                            .line_height(relative(1.46))
+                            .child("Warning: The browser may be down at the moment please try again later"),
+                    )
+                    .child(
+                        h_flex()
+                            .h(px(60.))
+                            .px_5()
+                            .items_center()
+                            .justify_end()
+                            .border_t_1()
+                            .border_color(ds::separator(cx))
+                            .child(
+                                Button::new("browser-warning-close", "Close")
+                                    .style(ButtonStyle::Filled)
+                                    .size(ButtonSize::Medium)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.browser_warning_dialog_open = false;
+                                        cx.notify();
+                                    })),
+                            ),
+                    ),
+            )
+    }
+
     fn render_api_status_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .h(px(28.))
@@ -9670,207 +9770,6 @@ impl BeginnerWorkspace {
             )
     }
 
-    fn render_composer_footer_trigger(
-        &self,
-        icon: IconName,
-        label: SharedString,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        h_flex()
-            .h(px(28.))
-            .min_w_0()
-            .items_center()
-            .gap_1p5()
-            .child(
-                Icon::new(icon)
-                    .size(IconSize::Small)
-                    .color(Color::Custom(ds::icon_muted(cx))),
-            )
-            .child(
-                Label::new(label)
-                    .size(LabelSize::Small)
-                    .color(Color::Custom(ds::text_muted(cx)))
-                    .truncate(),
-            )
-            .child(
-                Icon::new(IconName::ChevronDown)
-                    .size(IconSize::XSmall)
-                    .color(Color::Custom(ds::icon_muted(cx))),
-            )
-            .into_any_element()
-    }
-
-    fn composer_folder_menu(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Entity<ContextMenu> {
-        let beginner_workspace = cx.entity().downgrade();
-        let selected_folder = self.selected_folder.clone();
-
-        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            if let Some(folder) = selected_folder.as_ref() {
-                menu = menu
-                    .item(
-                        ContextMenuEntry::new(folder.to_string_lossy().into_owned())
-                            .icon(IconName::Folder)
-                            .icon_position(IconPosition::Start)
-                            .disabled(true),
-                    )
-                    .separator();
-            }
-
-            let label = if selected_folder.is_some() {
-                "Change folder"
-            } else {
-                "Choose folder"
-            };
-            menu.item(
-                ContextMenuEntry::new(label)
-                    .icon(IconName::FolderOpen)
-                    .icon_position(IconPosition::Start)
-                    .handler(move |window, cx| {
-                        beginner_workspace
-                            .update(cx, |this, cx| {
-                                this.pick_folder(window, cx);
-                            })
-                            .log_err();
-                    }),
-            )
-        })
-    }
-
-    fn composer_branch_menu(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Entity<ContextMenu> {
-        let beginner_workspace = cx.entity().downgrade();
-        let selected_folder = self.selected_folder.clone();
-        let git_state = self.composer_git_state.clone();
-
-        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            if selected_folder.is_none() {
-                let choose_workspace = beginner_workspace.clone();
-                return menu.item(
-                    ContextMenuEntry::new("Choose folder")
-                        .icon(IconName::FolderOpen)
-                        .icon_position(IconPosition::Start)
-                        .handler(move |window, cx| {
-                            choose_workspace
-                                .update(cx, |this, cx| {
-                                    this.pick_folder(window, cx);
-                                })
-                                .log_err();
-                        }),
-                );
-            }
-
-            if git_state.is_loading {
-                return menu.item(ContextMenuEntry::new("Checking Git...").disabled(true));
-            }
-
-            if !git_state.is_git_repository {
-                let initialize_workspace = beginner_workspace.clone();
-                return menu.item(
-                    ContextMenuEntry::new("Initialize Git repository")
-                        .icon(IconName::GitBranch)
-                        .icon_position(IconPosition::Start)
-                        .handler(move |window, cx| {
-                            initialize_workspace
-                                .update(cx, |this, cx| {
-                                    this.initialize_composer_git_repository(window, cx);
-                                })
-                                .log_err();
-                        }),
-                );
-            }
-
-            if git_state.branches.is_empty() {
-                return menu.item(ContextMenuEntry::new("No local branches").disabled(true));
-            }
-
-            for branch in git_state.branches {
-                let is_current = git_state
-                    .current_branch
-                    .as_ref()
-                    .is_some_and(|current| current.as_ref() == branch.as_ref());
-                let branch_name = branch.to_string();
-                let switch_workspace = beginner_workspace.clone();
-                menu = menu.item(
-                    ContextMenuEntry::new(branch)
-                        .icon(IconName::GitBranch)
-                        .icon_position(IconPosition::Start)
-                        .toggle(IconPosition::End, is_current)
-                        .disabled(is_current)
-                        .handler(move |window, cx| {
-                            switch_workspace
-                                .update(cx, |this, cx| {
-                                    this.switch_composer_git_branch(
-                                        branch_name.clone(),
-                                        window,
-                                        cx,
-                                    );
-                                })
-                                .log_err();
-                        }),
-                );
-            }
-
-            menu
-        })
-    }
-
-    fn render_composer_footer(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let folder_label = self
-            .selected_folder
-            .as_ref()
-            .map(|folder| folder_display_name(folder))
-            .unwrap_or_else(|| SharedString::from("Choose folder"));
-
-        let branch_label = if self.selected_folder.is_none() {
-            SharedString::from("No folder")
-        } else if self.composer_git_state.is_loading {
-            SharedString::from("Checking Git")
-        } else if let Some(branch) = self.composer_git_state.current_branch.clone() {
-            branch
-        } else if self.composer_git_state.is_git_repository {
-            SharedString::from("Detached HEAD")
-        } else {
-            SharedString::from("Connect Git")
-        };
-
-        h_flex()
-            .w_full()
-            .items_center()
-            .gap_3()
-            .px_1()
-            .pt_1p5()
-            .pb_0()
-            .child(
-                DropdownMenu::new_with_element(
-                    "simple-composer-folder",
-                    self.render_composer_footer_trigger(IconName::FolderOpen, folder_label, cx),
-                    self.composer_folder_menu(window, cx),
-                )
-                .style(DropdownStyle::Ghost)
-                .trigger_size(ButtonSize::None)
-                .no_chevron(),
-            )
-            .child(
-                DropdownMenu::new_with_element(
-                    "simple-composer-branch",
-                    self.render_composer_footer_trigger(IconName::GitBranch, branch_label, cx),
-                    self.composer_branch_menu(window, cx),
-                )
-                .style(DropdownStyle::Ghost)
-                .trigger_size(ButtonSize::None)
-                .no_chevron(),
-            )
-            .child(div().flex_1())
-            .into_any_element()
-    }
-
     fn render_input_bar(
         &self,
         is_running: bool,
@@ -9895,7 +9794,7 @@ impl BeginnerWorkspace {
                         .h(px(36.))
                         .w_full()
                         .items_center()
-                        .rounded_lg()
+                        .rounded(px(24.))
                         .bg(cx.theme().colors().element_background.opacity(0.5))
                         .px_3()
                         .child(
@@ -9907,55 +9806,26 @@ impl BeginnerWorkspace {
                 .into_any_element();
         }
 
-        let colors = cx.theme().colors().clone();
-        let composer_surface_bg = colors
-            .surface_background
-            .blend(colors.element_background.opacity(0.24));
-        let composer_border = colors.border_variant.opacity(0.82);
-        let composer_hover_border = colors.border_variant.opacity(0.96);
-        let root_composer_focus =
-            self.active_conversation_view
-                .as_ref()
-                .and_then(|conversation_view| {
-                    conversation_view
-                        .read(cx)
-                        .root_message_editor_focus_handle(cx)
-                });
-        if let Some(conversation_view) = self.active_conversation_view.clone()
+        if let Some(conversation_view) = self.chat_surface_conversation_view()
             && let Some(composer) = conversation_view.update(cx, |conversation_view, cx| {
-                conversation_view.render_embedded_root_message_editor(window, cx)
+                conversation_view.render_root_message_editor(window, cx)
             })
         {
-            let composer_shell = v_flex()
+            let composer = v_flex()
                 .key_context("AcpThread")
                 .w_full()
-                .rounded(px(18.))
-                .overflow_hidden()
-                .border_1()
-                .border_color(composer_border)
-                .hover(move |el| el.border_color(composer_hover_border))
-                .bg(composer_surface_bg)
-                .when_some(root_composer_focus, |el, focus_handle| {
-                    el.on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        window.focus(&focus_handle, cx);
-                    })
-                })
-                .child(composer)
-                .into_any_element();
-            let composer = v_flex()
-                .w_full()
                 .when(centered, |el| el.max_w(px(ds::CHAT_MAX_WIDTH)))
-                .gap_1()
-                .child(composer_shell)
-                .child(self.render_composer_footer(window, cx))
+                .rounded(px(24.))
+                .overflow_hidden()
+                .child(composer)
                 .into_any_element();
 
             return v_flex()
                 .flex_shrink_0()
                 .w_full()
                 .when(centered, |el| el.items_center())
-                .when(!centered, |el| el.px_2().pt_1().pb_1p5())
                 .child(composer)
+                .child(self.render_simple_context_selectors(centered, cx))
                 .when(is_connecting, |el| {
                     el.child(
                         h_flex().justify_end().child(
@@ -9970,19 +9840,12 @@ impl BeginnerWorkspace {
 
         let is_disabled = is_running || is_connecting || draft_is_empty || !api_key_ready;
         let icon_hover_bg = ds::hover_background(cx);
-        let next_mode = match self.chat_mode {
-            ChatMode::Ask => ChatMode::Build,
-            ChatMode::Build => ChatMode::Ask,
-        };
         let focus_handle = self.chat_editor.focus_handle(cx);
         let colors = cx.theme().colors().clone();
         let editor_focused = focus_handle.is_focused(window);
-        let editor_bg_color = colors
-            .panel_background
-            .blend(colors.editor_background.opacity(0.18));
         let composer_surface_bg = colors
-            .surface_background
-            .blend(colors.element_background.opacity(0.24));
+            .elevated_surface_background
+            .blend(colors.element_background.opacity(0.32));
         let composer_border = if editor_focused {
             colors.border_focused
         } else {
@@ -9998,7 +9861,7 @@ impl BeginnerWorkspace {
             .flex_shrink_0()
             .w_full()
             .items_center()
-            .bg(editor_bg_color)
+            .bg(ds::app_background(cx))
             .px_2()
             .pt_1()
             .pb_1p5()
@@ -10013,8 +9876,8 @@ impl BeginnerWorkspace {
                             .flex_shrink()
                             .flex_grow()
                             .justify_between()
-                            .min_h(px(92.))
-                            .rounded(px(18.))
+                            .min_h(px(108.))
+                            .rounded(px(24.))
                             .border_1()
                             .border_color(composer_border)
                             .hover(move |el| el.border_color(composer_hover_border))
@@ -10090,47 +9953,6 @@ impl BeginnerWorkspace {
                                     })
                                     .child(div().flex_1())
                                     .child(
-                                        h_flex()
-                                            .id("simple-mode-toggle")
-                                            .gap_1()
-                                            .items_center()
-                                            .min_w(px(48.))
-                                            .px_1p5()
-                                            .rounded(px(4.))
-                                            .overflow_hidden()
-                                            .when(
-                                                !is_running && !is_connecting && api_key_ready,
-                                                |el| {
-                                                    el.cursor_pointer()
-                                                        .hover(move |el| el.bg(icon_hover_bg))
-                                                        .tooltip(Tooltip::text("Switch chat mode"))
-                                                        .on_click(cx.listener(
-                                                            move |this, _, window, cx| {
-                                                                this.set_chat_mode(
-                                                                    next_mode, window, cx,
-                                                                );
-                                                            },
-                                                        ))
-                                                },
-                                            )
-                                            .child(
-                                                div()
-                                                    .size(px(10.))
-                                                    .rounded(px(2.))
-                                                    .bg(ds::status_dot(cx)),
-                                            )
-                                            .child(
-                                                Label::new(self.chat_mode.label())
-                                                    .size(LabelSize::Small)
-                                                    .color(Color::Custom(ds::mode_text(cx))),
-                                            )
-                                            .child(
-                                                Icon::new(IconName::ChevronDown)
-                                                    .size(IconSize::XSmall)
-                                                    .color(Color::Custom(ds::icon_muted(cx))),
-                                            ),
-                                    )
-                                    .child(
                                         div()
                                             .id("simple-mic")
                                             .when(centered, |el| el.size(px(24.)))
@@ -10179,6 +10001,7 @@ impl BeginnerWorkspace {
                             ),
                     ),
             )
+            .child(self.render_simple_context_selectors(centered, cx))
             .when(is_connecting, |el| {
                 el.child(
                     h_flex().justify_end().child(
@@ -10189,6 +10012,67 @@ impl BeginnerWorkspace {
                 )
             })
             .into_any_element()
+    }
+
+    fn render_simple_context_selectors(
+        &self,
+        centered: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let folder_label = self.selected_folder_label(cx);
+        let branch_label = self
+            .selected_branch_label(cx)
+            .unwrap_or_else(|| SharedString::from("No Git branch"));
+        let repository = self.selected_repository(cx);
+        let repository_for_menu = repository.clone();
+        let workspace = self.workspace.clone();
+
+        h_flex()
+            .w_full()
+            .when(centered, |el| el.max_w(px(ds::CHAT_MAX_WIDTH)))
+            .min_w_0()
+            .flex_wrap()
+            .gap_2()
+            .pt_2()
+            .px_1()
+            .child(
+                Button::new("simple-folder-selector", folder_label)
+                    .style(ButtonStyle::Subtle)
+                    .size(ButtonSize::Compact)
+                    .label_size(LabelSize::Small)
+                    .truncate(true)
+                    .start_icon(Icon::new(IconName::Folder).size(IconSize::XSmall))
+                    .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::XSmall))
+                    .tooltip(Tooltip::text("Choose project folder"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.pick_folder(window, cx);
+                    })),
+            )
+            .child(
+                PopoverMenu::new("simple-branch-selector")
+                    .menu(move |window, cx| {
+                        let workspace = workspace.upgrade()?;
+                        Some(git_ui::branch_picker::popover(
+                            workspace.downgrade(),
+                            false,
+                            repository_for_menu.clone(),
+                            window,
+                            cx,
+                        ))
+                    })
+                    .trigger_with_tooltip(
+                        Button::new("simple-branch-selector-trigger", branch_label)
+                            .style(ButtonStyle::Subtle)
+                            .size(ButtonSize::Compact)
+                            .label_size(LabelSize::Small)
+                            .truncate(true)
+                            .disabled(repository.is_none())
+                            .start_icon(Icon::new(IconName::GitBranch).size(IconSize::XSmall))
+                            .end_icon(Icon::new(IconName::ChevronDown).size(IconSize::XSmall)),
+                        Tooltip::text("Switch Git branch"),
+                    )
+                    .anchor(gpui::Anchor::TopLeft),
+            )
     }
 }
 

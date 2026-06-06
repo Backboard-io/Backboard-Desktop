@@ -1361,6 +1361,8 @@ pub struct ThreadView {
     pub show_codex_windows_warning: bool,
     pub multi_root_callout_dismissed: bool,
     pub generating_indicator_in_list: bool,
+    suppress_multi_root_callout: bool,
+    background_override: Option<Hsla>,
 }
 impl Focusable for ThreadView {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
@@ -1602,6 +1604,8 @@ impl ThreadView {
             show_codex_windows_warning,
             multi_root_callout_dismissed: false,
             generating_indicator_in_list: false,
+            suppress_multi_root_callout: false,
+            background_override: None,
         };
 
         this.sync_generating_indicator(cx);
@@ -3528,6 +3532,24 @@ impl ThreadView {
         cx.notify();
     }
 
+    pub(crate) fn set_background_override(
+        &mut self,
+        background: Option<Hsla>,
+        cx: &mut Context<Self>,
+    ) {
+        self.background_override = background;
+        cx.notify();
+    }
+
+    pub(crate) fn set_suppress_multi_root_callout(
+        &mut self,
+        suppress: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.suppress_multi_root_callout = suppress;
+        cx.notify();
+    }
+
     pub fn handle_title_editor_event(
         &mut self,
         title_editor: &Entity<Editor>,
@@ -5153,12 +5175,19 @@ impl ThreadView {
         let focus_handle = self.message_editor.focus_handle(cx);
         let colors = cx.theme().colors();
         let editor_focused = focus_handle.is_focused(window);
+        let simple_background = self.background_override;
         let editor_bg_color = colors
             .panel_background
             .blend(colors.editor_background.opacity(0.18));
-        let composer_surface_bg = colors
-            .editor_background
-            .blend(colors.element_background.opacity(0.08));
+        let composer_surface_bg = if simple_background.is_some() {
+            colors
+                .elevated_surface_background
+                .blend(colors.element_background.opacity(0.28))
+        } else {
+            colors
+                .editor_background
+                .blend(colors.element_background.opacity(0.08))
+        };
         let composer_border = if editor_focused {
             colors.border_focused
         } else {
@@ -5194,13 +5223,18 @@ impl ThreadView {
                 v_flex()
                     .relative()
                     .w_full()
-                    .min_h(px(92.))
+                    .min_h(px(if simple_background.is_some() {
+                        108.
+                    } else {
+                        92.
+                    }))
                     .when(fills_container, |this| this.flex_1())
                     .px_3()
                     .pt_2()
                     .pb_1p5()
                     .when(include_container, |this| {
-                        this.rounded_lg()
+                        this.when(simple_background.is_some(), |this| this.rounded(px(24.)))
+                            .when(simple_background.is_none(), |this| this.rounded_lg())
                             .border_1()
                             .border_color(composer_border)
                             .hover(|style| style.border_color(colors.border_variant.opacity(0.62)))
@@ -5302,7 +5336,7 @@ impl ThreadView {
             .px_2()
             .pt_1()
             .pb_1p5()
-            .bg(editor_bg_color)
+            .when(simple_background.is_none(), |this| this.bg(editor_bg_color))
             .justify_center()
             .child(editor)
             .into_any()
@@ -12278,7 +12312,7 @@ impl ThreadView {
     }
 
     fn render_multi_root_callout(&self, cx: &mut Context<Self>) -> Option<Callout> {
-        if self.multi_root_callout_dismissed {
+        if self.suppress_multi_root_callout || self.multi_root_callout_dismissed {
             return None;
         }
 
@@ -12554,9 +12588,11 @@ impl Render for ThreadView {
         let has_messages = self.list_state.item_count() > 0;
         let list_state = self.list_state.clone();
         let colors = cx.theme().colors();
-        let thread_bg = colors
-            .panel_background
-            .blend(colors.editor_background.opacity(0.68));
+        let thread_bg = self.background_override.unwrap_or_else(|| {
+            colors
+                .panel_background
+                .blend(colors.editor_background.opacity(0.68))
+        });
 
         let conversation = v_flex()
             .when(self.resumed_without_history, |this| {

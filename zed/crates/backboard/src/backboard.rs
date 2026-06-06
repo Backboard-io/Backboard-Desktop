@@ -39,6 +39,8 @@ static INLINE_COMPLETION_OUTPUT_SUBSCRIBERS: LazyLock<
 > = LazyLock::new(|| Mutex::new(Vec::new()));
 static CONFIG_CHANGE_SUBSCRIBERS: LazyLock<Mutex<Vec<async_channel::Sender<BackboardConfig>>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
+static CONFIG_PATH_OVERRIDE: LazyLock<Mutex<Option<PathBuf>>> = LazyLock::new(|| Mutex::new(None));
+static CONFIG_PATH_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 pub fn publish_inline_completion_output(output: InlineCompletionOutput) {
     {
@@ -99,6 +101,40 @@ fn config_change_subscribers() -> MutexGuard<'static, Vec<async_channel::Sender<
     match CONFIG_CHANGE_SUBSCRIBERS.lock() {
         Ok(subscribers) => subscribers,
         Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn config_path_override() -> MutexGuard<'static, Option<PathBuf>> {
+    match CONFIG_PATH_OVERRIDE.lock() {
+        Ok(path) => path,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+#[doc(hidden)]
+pub struct ConfigPathOverrideGuard {
+    previous_path: Option<PathBuf>,
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl Drop for ConfigPathOverrideGuard {
+    fn drop(&mut self) {
+        *config_path_override() = self.previous_path.take();
+    }
+}
+
+#[doc(hidden)]
+pub fn set_config_path_for_testing(path: impl Into<PathBuf>) -> ConfigPathOverrideGuard {
+    let lock = match CONFIG_PATH_TEST_LOCK.lock() {
+        Ok(lock) => lock,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let mut override_path = config_path_override();
+    let previous_path = override_path.replace(path.into());
+
+    ConfigPathOverrideGuard {
+        previous_path,
+        _lock: lock,
     }
 }
 
@@ -165,10 +201,29 @@ impl BackboardConfig {
         let dir = path
             .parent()
             .context("Backboard config path does not have a parent directory")?;
+        let mut existing = match std::fs::read_to_string(&path) {
+            Ok(contents) => match serde_json::from_str::<Value>(&contents) {
+                Ok(Value::Object(map)) => map,
+                _ => Map::new(),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Map::new(),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("reading Backboard config at {}", path.display()));
+            }
+        };
+        let overlay = serde_json::to_value(self)?
+            .as_object()
+            .cloned()
+            .context("Backboard config did not serialize to an object")?;
+
+        for (key, value) in overlay {
+            existing.insert(key, value);
+        }
 
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating Backboard config dir at {}", dir.display()))?;
-        std::fs::write(&path, serde_json::to_vec_pretty(self)?)
+        std::fs::write(&path, serde_json::to_vec_pretty(&existing)?)
             .with_context(|| format!("writing Backboard config at {}", path.display()))?;
 
         #[cfg(unix)]
@@ -240,6 +295,10 @@ impl Default for BackboardConfig {
 }
 
 pub fn config_path() -> Result<PathBuf> {
+    if let Some(path) = config_path_override().clone() {
+        return Ok(path);
+    }
+
     let home = dirs::home_dir().context("failed to determine user profile directory")?;
     Ok(home.join(".backboard").join("config.json"))
 }
@@ -1249,6 +1308,100 @@ mod tests {
         assert!(value.get("thread_id").is_none());
         assert!(value.get("default_provider").is_none());
         assert!(value.get("default_model").is_none());
+    }
+
+    #[test]
+    fn saving_api_key_writes_shared_config_file() {
+        let test_root = std::env::temp_dir().join(format!(
+            "backboard-config-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = test_root.join(".backboard").join("config.json");
+        let _guard = set_config_path_for_testing(path.clone());
+
+        let config =
+            BackboardConfig::save_api_key_for_current_env("  bb-test-key  ").expect("save api key");
+
+        assert_eq!(config.api_key().as_deref(), Some("bb-test-key"));
+
+        let contents = std::fs::read_to_string(&path).expect("read config file");
+        let value: serde_json::Value = serde_json::from_str(&contents).expect("parse config");
+
+        assert_eq!(value["env"], "prod");
+        assert_eq!(value["api_key"], "bb-test-key");
+        assert_eq!(value["env_keys"]["prod"], "bb-test-key");
+
+        #[cfg(unix)]
+        {
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+
+        std::fs::remove_dir_all(test_root).ok();
+    }
+
+    #[test]
+    fn saving_api_key_preserves_cli_only_config_fields() {
+        let test_root = std::env::temp_dir().join(format!(
+            "backboard-config-preserve-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = test_root.join(".backboard").join("config.json");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create config dir");
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({
+                "env": "prod",
+                "api_key": "old-key",
+                "env_keys": {
+                    "prod": "old-key",
+                    "dev": "dev-key"
+                },
+                "default_provider": "aws-bedrock",
+                "default_model": "anthropic.claude-opus-4-7",
+                "assistant_id": "asst-1",
+                "thread_id": "thread-1",
+                "mcp_servers": {
+                    "custom": {
+                        "command": "python",
+                        "args": ["-m", "server"],
+                        "enabled": true
+                    }
+                },
+                "thinking_config": {
+                    "effort": "high"
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write existing config");
+        let _guard = set_config_path_for_testing(path.clone());
+
+        BackboardConfig::save_api_key_for_current_env("new-key").expect("save api key");
+
+        let contents = std::fs::read_to_string(&path).expect("read config file");
+        let value: serde_json::Value = serde_json::from_str(&contents).expect("parse config");
+
+        assert_eq!(value["env"], "prod");
+        assert_eq!(value["api_key"], "new-key");
+        assert_eq!(value["env_keys"]["prod"], "new-key");
+        assert_eq!(value["env_keys"]["dev"], "dev-key");
+        assert_eq!(value["default_provider"], "aws-bedrock");
+        assert_eq!(value["default_model"], "anthropic.claude-opus-4-7");
+        assert_eq!(value["assistant_id"], "asst-1");
+        assert_eq!(value["thread_id"], "thread-1");
+        assert_eq!(value["mcp_servers"]["custom"]["command"], "python");
+        assert_eq!(value["thinking_config"]["effort"], "high");
+
+        std::fs::remove_dir_all(test_root).ok();
     }
 
     #[test]

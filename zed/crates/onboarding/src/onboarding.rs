@@ -497,6 +497,9 @@ impl Onboarding {
         match level {
             ExperienceLevel::Beginner => {
                 close_onboarding_tab(cx);
+                window.defer(cx, |_, cx| {
+                    Self::show_api_key_modal(cx, None);
+                });
             }
             ExperienceLevel::Developer | ExperienceLevel::Power => {
                 go_to_welcome_page(cx);
@@ -508,9 +511,23 @@ impl Onboarding {
     }
 
     fn show_api_key_modal_then_workspace_tour_prompt(cx: &mut App) {
+        Self::show_api_key_modal(
+            cx,
+            Some(Box::new(|window, cx| {
+                Self::show_workspace_tour_prompt(window, cx);
+            })),
+        );
+    }
+
+    fn show_api_key_modal(
+        cx: &mut App,
+        on_dismiss: Option<Box<dyn FnOnce(&mut Window, &mut App) + Send + 'static>>,
+    ) {
         with_active_or_new_workspace(cx, |workspace, window, cx| {
             if backboard_ui::backboard_api_key_is_connected() {
-                Self::show_workspace_tour_prompt(window, cx);
+                if let Some(on_dismiss) = on_dismiss {
+                    on_dismiss(window, cx);
+                }
                 return;
             }
 
@@ -519,9 +536,7 @@ impl Onboarding {
                 window,
                 cx,
                 |_| {},
-                Some(Box::new(|window, cx| {
-                    Self::show_workspace_tour_prompt(window, cx);
-                })),
+                on_dismiss,
             );
         });
     }

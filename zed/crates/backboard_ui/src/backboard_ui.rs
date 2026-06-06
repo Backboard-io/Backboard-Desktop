@@ -164,7 +164,7 @@ pub fn show_backboard_api_key_modal_with_dismiss(
     window: &mut Window,
     cx: &mut App,
     on_api_key_state_changed: impl Fn(&mut App) + 'static,
-    on_dismiss: Option<Box<dyn FnOnce(&mut Window, &mut App) + 'static>>,
+    on_dismiss: Option<Box<dyn FnOnce(&mut Window, &mut App) + Send + 'static>>,
 ) {
     let on_api_key_state_changed = Box::new(on_api_key_state_changed);
     workspace.toggle_modal(window, cx, move |window, cx| {
@@ -290,7 +290,7 @@ enum ApiKeyModalButtonStyle {
 }
 
 type ApiKeyStateChangedCallback = Box<dyn Fn(&mut App)>;
-type ApiKeyDismissCallback = Box<dyn FnOnce(&mut Window, &mut App)>;
+type ApiKeyDismissCallback = Box<dyn FnOnce(&mut Window, &mut App) + Send>;
 
 struct BackboardApiKeyModal {
     focus_handle: FocusHandle,
@@ -2670,7 +2670,7 @@ async fn send_backboard_prompt(
             )
             .await;
             let (outputs, file_changes, activities) =
-                execute_tool_calls(tool_calls, workspace_root.as_deref());
+                execute_tool_calls(&tool_calls, workspace_root.as_deref());
             for activity in activities {
                 push_activity_event(&tx, activity).await;
             }
@@ -2873,6 +2873,8 @@ fn run_id_from_chunk(chunk: &Value) -> Option<String> {
     chunk
         .get("run_id")
         .or_else(|| chunk.pointer("/run/id"))
+        .or_else(|| chunk.pointer("/data/run_id"))
+        .or_else(|| chunk.pointer("/data/id"))
         .or_else(|| {
             (chunk.get("type").and_then(Value::as_str) == Some("run_started"))
                 .then(|| chunk.get("id"))
@@ -2882,14 +2884,20 @@ fn run_id_from_chunk(chunk: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn tool_calls_from_chunk(chunk: &Value) -> Option<&Vec<Value>> {
+fn tool_calls_from_chunk(chunk: &Value) -> Option<Vec<Value>> {
     let has_tool_status = chunk.get("type").and_then(Value::as_str) == Some("tool_submit_required")
-        || (chunk.get("type").and_then(Value::as_str) == Some("run_ended")
-            && chunk.get("status").and_then(Value::as_str) == Some("requires_action"));
+        || chunk.get("status").and_then(Value::as_str) == Some("requires_action");
     if !has_tool_status {
         return None;
     }
-    chunk.get("tool_calls")?.as_array()
+    chunk
+        .get("tool_calls")
+        .or_else(|| chunk.pointer("/required_action/submit_tool_outputs/tool_calls"))
+        .or_else(|| chunk.pointer("/data/required_action/submit_tool_outputs/tool_calls"))
+        .or_else(|| chunk.pointer("/run/required_action/submit_tool_outputs/tool_calls"))
+        .and_then(Value::as_array)
+        .cloned()
+        .filter(|tool_calls| !tool_calls.is_empty())
 }
 
 struct ToolExecution {

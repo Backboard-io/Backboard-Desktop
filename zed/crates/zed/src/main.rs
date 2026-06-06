@@ -134,6 +134,20 @@ fn fail_to_open_window_async(e: anyhow::Error, cx: &mut AsyncApp) {
     cx.update(|cx| fail_to_open_window(e, cx));
 }
 
+fn activate_restored_workspace(cx: &mut App) {
+    cx.activate(true);
+
+    if let Some(window) = cx
+        .windows()
+        .into_iter()
+        .find_map(|window| window.downcast::<MultiWorkspace>())
+    {
+        window
+            .update(cx, |_, window, _| window.activate_window())
+            .log_err();
+    }
+}
+
 fn fail_to_open_window(e: anyhow::Error, _cx: &mut App) {
     eprintln!("Backboard Studio failed to open a window: {e:?}.");
     #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
@@ -935,8 +949,9 @@ fn main() {
         cx.spawn({
             let db = workspace::WorkspaceDb::global(cx);
             let fs = app_state.fs.clone();
-            async move |_cx| {
+            async move |cx| {
                 restore_task.await;
+                cx.update(|cx| activate_restored_workspace(cx));
                 db.garbage_collect_workspaces(
                     fs.as_ref(),
                     &current_session_id,

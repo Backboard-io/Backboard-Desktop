@@ -1,4 +1,4 @@
-use gpui::{Action, ClickEvent, FocusHandle, prelude::*};
+use gpui::{Action, ClickEvent, FocusHandle, MouseButton, prelude::*};
 use ui::{Chip, ElevationIndex, KeyBinding, ListItem, ListItemSpacing, Tooltip, prelude::*};
 use zed_actions::agent::ToggleModelSelector;
 
@@ -180,12 +180,21 @@ impl RenderOnce for ModelSelectorListItem {
                         (IconName::Star, Color::Muted, "Favorite Model")
                     };
                     this.child(
-                        IconButton::new(("toggle-favorite", index), icon)
-                            .layer(ElevationIndex::ElevatedSurface)
-                            .icon_color(color)
-                            .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text(tooltip))
-                            .on_click(move |event, window, cx| (handle_click)(event, window, cx)),
+                        div()
+                            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                            })
+                            .child(
+                                IconButton::new(("toggle-favorite", index), icon)
+                                    .layer(ElevationIndex::ElevatedSurface)
+                                    .icon_color(color)
+                                    .icon_size(IconSize::Small)
+                                    .tooltip(Tooltip::text(tooltip))
+                                    .on_click(move |event, window, cx| {
+                                        (handle_click)(event, window, cx)
+                                    }),
+                            ),
                     )
                 },
             ))

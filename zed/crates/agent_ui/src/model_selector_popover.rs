@@ -121,6 +121,7 @@ impl Render for ModelSelectorPopover {
             .filter(|provider| !provider.is_empty());
 
         let trigger = ButtonLike::new("active-model")
+            .stop_mouse_down_propagation()
             .when(branded_trigger, |this| {
                 this.width(px(220.))
                     .min_width(px(34.))

@@ -5,6 +5,7 @@ use std::os::unix::fs::PermissionsExt as _;
 
 use anyhow::{Context as _, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 pub const PROD_API_URL: &str = "https://app.backboard.io/api";
 pub const DEV_API_URL: &str = "https://dev.app.backboard.io/api";
@@ -71,10 +72,29 @@ impl BackboardConfig {
         let dir = path
             .parent()
             .context("Backboard config path does not have a parent directory")?;
+        let mut existing = match std::fs::read_to_string(&path) {
+            Ok(contents) => match serde_json::from_str::<Value>(&contents) {
+                Ok(Value::Object(map)) => map,
+                _ => Map::new(),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Map::new(),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("reading Backboard config at {}", path.display()));
+            }
+        };
+        let overlay = serde_json::to_value(self)?
+            .as_object()
+            .cloned()
+            .context("Backboard config did not serialize to an object")?;
+
+        for (key, value) in overlay {
+            existing.insert(key, value);
+        }
 
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating Backboard config dir at {}", dir.display()))?;
-        std::fs::write(&path, serde_json::to_vec_pretty(self)?)
+        std::fs::write(&path, serde_json::to_vec_pretty(&existing)?)
             .with_context(|| format!("writing Backboard config at {}", path.display()))?;
 
         #[cfg(unix)]

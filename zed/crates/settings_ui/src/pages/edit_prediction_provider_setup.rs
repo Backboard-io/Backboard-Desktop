@@ -1,3 +1,4 @@
+use anyhow::Result;
 use backboard::BackboardConfig;
 use edit_prediction::{
     ApiKeyState,
@@ -54,6 +55,13 @@ enum ApiKeyDocs {
     Link { dashboard_url: SharedString },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ApiKeySyncStatus {
+    Saved,
+    Cleared,
+    Error(String),
+}
+
 fn render_api_key_provider(
     brand_letter: &'static str,
     title: &'static str,
@@ -66,6 +74,9 @@ fn render_api_key_provider(
 ) -> impl IntoElement {
     let weak_page = cx.weak_entity();
     let credentials_provider = zed_credentials_provider::global(cx);
+    let sync_status = window.use_keyed_state(format!("{title}-api-key-sync-status"), cx, |_, _| {
+        None::<ApiKeySyncStatus>
+    });
     _ = window.use_keyed_state(current_url(cx), cx, |_, cx| {
         let task = api_key_state.update(cx, |key_state, cx| {
             key_state.load_if_needed(
@@ -85,16 +96,31 @@ fn render_api_key_provider(
         })
     });
 
-    let (has_key, env_var_name, is_from_env_var) = api_key_state.read_with(cx, |state, _| {
-        (
-            state.has_key() || backboard_config_has_key(),
-            Some(state.env_var_name().clone()),
-            state.is_from_env_var(),
-        )
+    let has_config_file_key = backboard_config_file_has_key();
+    let has_key = has_config_file_key || backboard_api_key_from_env();
+    let (env_var_name, is_from_env_var) = api_key_state.read_with(cx, |state, _| {
+        let is_from_env_var = !has_config_file_key && backboard_api_key_from_env();
+        (Some(state.env_var_name().clone()), is_from_env_var)
     });
 
+    let sync_status_for_write = sync_status.clone();
     let write_key = move |api_key: Option<String>, cx: &mut App| {
-        sync_backboard_config_api_key(api_key.clone());
+        let api_key = api_key.and_then(|key| non_empty_key(&key));
+        let sync_result = sync_backboard_config_api_key(api_key);
+        let (api_key, status) = match sync_result {
+            Ok(result) => result,
+            Err(error) => {
+                sync_status_for_write.update(cx, |status, cx| {
+                    *status = Some(ApiKeySyncStatus::Error(format!("{error:#}")));
+                    cx.notify();
+                });
+                return;
+            }
+        };
+        sync_status_for_write.update(cx, |current_status, cx| {
+            *current_status = Some(status);
+            cx.notify();
+        });
         let credentials_provider = zed_credentials_provider::global(cx);
         api_key_state
             .update(cx, |key_state, cx| {
@@ -109,6 +135,7 @@ fn render_api_key_provider(
             })
             .detach_and_log_err(cx);
     };
+    let sync_status = sync_status.read(cx).clone();
 
     let base_container = v_flex().id(title).min_w_0().pt_8().gap_1p5();
     let header = SettingsSectionHeader::new(title)
@@ -197,28 +224,132 @@ fn render_api_key_provider(
         )
     };
 
-    container.when_some(additional_fields, |this, additional_fields| {
-        this.child(
-            div()
-                .map(|this| if has_key { this.mt_1() } else { this.mt_4() })
-                .px_neg_8()
-                .border_t_1()
-                .border_color(cx.theme().colors().border_variant)
-                .child(additional_fields),
-        )
-    })
+    container
+        .when_some(sync_status, |this, status| {
+            this.child(render_api_key_sync_status(status))
+        })
+        .when_some(additional_fields, |this, additional_fields| {
+            this.child(
+                div()
+                    .map(|this| if has_key { this.mt_1() } else { this.mt_4() })
+                    .px_neg_8()
+                    .border_t_1()
+                    .border_color(cx.theme().colors().border_variant)
+                    .child(additional_fields),
+            )
+        })
 }
 
-fn backboard_config_has_key() -> bool {
-    BackboardConfig::load_or_default().api_key().is_some()
+fn backboard_config_file_has_key() -> bool {
+    let config = BackboardConfig::load_or_default();
+    config.api_key.as_deref().and_then(non_empty_key).is_some()
+        || config
+            .env_keys
+            .get(&config.env.to_lowercase())
+            .and_then(|key| non_empty_key(key))
+            .is_some()
 }
 
-fn sync_backboard_config_api_key(api_key: Option<String>) {
-    let result = match api_key {
-        Some(api_key) => BackboardConfig::save_api_key_for_current_env(api_key),
-        None => BackboardConfig::clear_api_key_for_current_env(),
+fn backboard_api_key_from_env() -> bool {
+    std::env::var("BACKBOARD_API_KEY")
+        .ok()
+        .and_then(|key| non_empty_key(&key))
+        .is_some()
+}
+
+fn non_empty_key(key: &str) -> Option<String> {
+    let key = key.trim();
+    (!key.is_empty()).then(|| key.to_string())
+}
+
+fn sync_backboard_config_api_key(
+    api_key: Option<String>,
+) -> Result<(Option<String>, ApiKeySyncStatus)> {
+    match api_key {
+        Some(api_key) => {
+            let config = BackboardConfig::save_api_key_for_current_env(api_key)?;
+            Ok((config.api_key(), ApiKeySyncStatus::Saved))
+        }
+        None => {
+            BackboardConfig::clear_api_key_for_current_env()?;
+            Ok((None, ApiKeySyncStatus::Cleared))
+        }
+    }
+}
+
+fn render_api_key_sync_status(status: ApiKeySyncStatus) -> impl IntoElement {
+    let (message, color) = match status {
+        ApiKeySyncStatus::Saved => (
+            "Saved to ~/.backboard/config.json".to_string(),
+            Color::Success,
+        ),
+        ApiKeySyncStatus::Cleared => (
+            "Removed from ~/.backboard/config.json".to_string(),
+            Color::Muted,
+        ),
+        ApiKeySyncStatus::Error(error) => {
+            (format!("Could not update API key: {error}"), Color::Error)
+        }
     };
-    if let Err(error) = result {
-        log::warn!("failed to sync Backboard API key config: {error:#}");
+
+    Label::new(message).size(LabelSize::Small).color(color)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn temp_config_path(test_name: &str) -> (PathBuf, PathBuf) {
+        let test_root = std::env::temp_dir().join(format!(
+            "{test_name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = test_root.join(".backboard").join("config.json");
+        (test_root, path)
+    }
+
+    #[test]
+    fn sync_backboard_api_key_writes_shared_config_before_reporting_success() {
+        let (test_root, path) = temp_config_path("settings-backboard-save");
+        let _guard = backboard::set_config_path_for_testing(path.clone());
+
+        let (api_key, status) =
+            sync_backboard_config_api_key(Some("  bb-settings-key  ".to_string())).unwrap();
+
+        assert_eq!(api_key.as_deref(), Some("bb-settings-key"));
+        assert_eq!(status, ApiKeySyncStatus::Saved);
+
+        let config = BackboardConfig::load().unwrap();
+        assert_eq!(config.api_key.as_deref(), Some("bb-settings-key"));
+        assert_eq!(
+            config.env_keys.get("prod").map(String::as_str),
+            Some("bb-settings-key")
+        );
+        assert!(path.exists());
+
+        std::fs::remove_dir_all(test_root).ok();
+    }
+
+    #[test]
+    fn sync_backboard_api_key_reset_clears_shared_config_key() {
+        let (test_root, path) = temp_config_path("settings-backboard-reset");
+        let _guard = backboard::set_config_path_for_testing(path);
+
+        sync_backboard_config_api_key(Some("bb-settings-key".to_string())).unwrap();
+        let (api_key, status) = sync_backboard_config_api_key(None).unwrap();
+
+        assert_eq!(api_key, None);
+        assert_eq!(status, ApiKeySyncStatus::Cleared);
+
+        let config = BackboardConfig::load().unwrap();
+        assert_eq!(config.api_key, None);
+        assert_eq!(config.env_keys.get("prod"), None);
+
+        std::fs::remove_dir_all(test_root).ok();
     }
 }

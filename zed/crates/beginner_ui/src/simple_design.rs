@@ -5,7 +5,7 @@ use theme::ActiveTheme;
 use ui::{Color, Icon, IconName, IconSize, prelude::*};
 
 pub const UTILITY_ICON_SIZE: f32 = 16.;
-pub const TOP_BAR_HEIGHT: f32 = 44.;
+pub const TOP_BAR_HEIGHT: f32 = 38.;
 pub const SIDEBAR_WIDTH: f32 = 260.;
 pub const SIDEBAR_MIN_WIDTH: f32 = 200.;
 pub const CHAT_PANEL_WIDTH: f32 = 540.;
@@ -14,10 +14,13 @@ pub const RIGHT_PANEL_MIN_WIDTH: f32 = 320.;
 pub const PANEL_RESIZE_HANDLE_WIDTH: f32 = 8.;
 pub const PANEL_CORNER_RADIUS: f32 = 22.;
 pub const PANEL_OVERLAP: f32 = PANEL_CORNER_RADIUS;
-pub const CHAT_ROW_HEIGHT: f32 = 36.;
+pub const CHAT_ROW_HEIGHT: f32 = 30.;
 pub const SIDEBAR_ROW_ICON_SLOT_WIDTH: f32 = 20.;
+pub const SIDEBAR_LABEL_FONT_SIZE: f32 = 15.5;
+pub const SIDEBAR_SECTION_LABEL_FONT_SIZE: f32 = 15.;
 pub const PROJECT_ROW_HEIGHT: f32 = 40.;
 pub const CHAT_MAX_WIDTH: f32 = 880.;
+pub const CHAT_FEED_BOTTOM_PADDING: f32 = 132.;
 
 pub fn app_background(cx: &App) -> Hsla {
     cx.theme().colors().editor_background
@@ -201,15 +204,7 @@ pub fn text_disabled(cx: &App) -> Hsla {
     cx.theme().colors().text_disabled
 }
 
-pub fn mode_text(cx: &App) -> Hsla {
-    cx.theme().colors().text
-}
-
 pub fn icon_muted(cx: &App) -> Hsla {
-    cx.theme().colors().icon_muted
-}
-
-pub fn status_dot(cx: &App) -> Hsla {
     cx.theme().colors().icon_muted
 }
 

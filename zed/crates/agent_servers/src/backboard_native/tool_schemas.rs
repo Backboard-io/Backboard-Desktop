@@ -22,7 +22,6 @@ pub fn read_only_task_tool_definitions() -> Vec<Value> {
         "list_dir",
         "web_search",
         "web_fetch",
-        "read_lints",
     ];
     all_tool_definitions()
         .into_iter()
@@ -49,6 +48,7 @@ fn blocked_tools(mode: &str) -> &'static [&'static str] {
             "repl",
             "computer",
             "task",
+            "read_lints",
         ],
         "manual" => &[
             "bash",
@@ -57,6 +57,7 @@ fn blocked_tools(mode: &str) -> &'static [&'static str] {
             "repl",
             "computer",
             "task",
+            "read_lints",
         ],
         _ => &[],
     }
@@ -229,9 +230,15 @@ fn all_tool_definitions() -> Vec<Value> {
         ),
         function(
             "read_lints",
-            "Check files for linter errors. Native runtime returns a lightweight status for now.",
+            "Run requested or auto-detected lint/check commands near the end of an implementation. Use command/commands for explicit checks, or omit them to discover common project lint commands.",
             json!({
-                "paths": {"type": "array", "items": {"type": "string"}}
+                "paths": {"type": "array", "items": {"type": "string"}, "description": "Optional paths changed or relevant to the lint request. They are reported for context and may guide future command selection."},
+                "command": {"type": "string", "description": "Single lint/check command to run, such as ./script/clippy or npm run lint"},
+                "cmd": {"type": "string", "description": "Alias for command"},
+                "commands": {"type": "array", "items": {"type": "string"}, "description": "Lint/check commands to run in order"},
+                "working_directory": {"type": "string", "description": "Directory to run from. Defaults to workspace root."},
+                "cwd": {"type": "string", "description": "Alias for working_directory"},
+                "timeout": {"type": "integer", "description": "Timeout per command in milliseconds"}
             }),
             &[],
         ),
@@ -367,6 +374,7 @@ mod tests {
         let names = tool_names("ask");
 
         assert!(names.contains(&"read_file".to_string()));
+        assert!(!names.contains(&"read_lints".to_string()));
         assert!(!names.contains(&"write".to_string()));
         assert!(!names.contains(&"search_replace".to_string()));
         assert!(!names.contains(&"create_directory".to_string()));
@@ -410,6 +418,7 @@ mod tests {
         assert!(names.contains(&"read_file".to_string()));
         assert!(names.contains(&"grep".to_string()));
         assert!(names.contains(&"codebase_search".to_string()));
+        assert!(!names.contains(&"read_lints".to_string()));
         assert!(!names.contains(&"write".to_string()));
         assert!(!names.contains(&"task".to_string()));
     }

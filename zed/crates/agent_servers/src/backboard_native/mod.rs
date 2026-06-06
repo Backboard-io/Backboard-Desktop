@@ -29,6 +29,10 @@ use action_log::ActionLog;
 use agent_client_protocol::schema as acp;
 use anyhow::{Context as _, Result, anyhow};
 use collections::{HashMap, IndexMap};
+use futures::{
+    FutureExt as _, StreamExt as _,
+    future::{LocalBoxFuture, Shared},
+};
 use gpui::{App, AppContext as _, Entity, SharedString, Task, WeakEntity};
 use language_model::icon_for_model_identifiers;
 use project::{AgentId, Project, context_server_store::ContextServerStore};
@@ -60,6 +64,147 @@ const MODEL_CATALOG_PROVIDERS: &[&str] = &[
     "fireworks",
     "perplexity",
 ];
+const MODEL_CATALOG_PROVIDER_CONCURRENCY: usize = 4;
+const TOOL_INCOMPATIBLE_MODELS: &[(&str, &str)] = &[
+    ("cerebras", "meta-llama/llama-3.1-8b-instruct"),
+    ("cerebras", "qwen/qwen3-235b-a22b-2507"),
+    ("cohere", "command-a-03-2025"),
+    ("cohere", "command-a-reasoning-08-2025"),
+    ("cohere", "command-a-translate-08-2025"),
+    ("cohere", "command-r-08-2024"),
+    ("cohere", "command-r-plus-08-2024"),
+    ("cohere", "command-r7b-12-2024"),
+    ("openai", "gpt-5-chat-latest"),
+    ("openai", "o1-pro"),
+    ("openrouter", "ai21/jamba-large-1.7"),
+    ("openrouter", "aion-labs/aion-1.0"),
+    ("openrouter", "aion-labs/aion-1.0-mini"),
+    ("openrouter", "aion-labs/aion-2.0"),
+    ("openrouter", "aion-labs/aion-rp-llama-3.1-8b"),
+    ("openrouter", "alfredpros/codellama-7b-instruct-solidity"),
+    ("openrouter", "anthracite-org/magnum-v4-72b"),
+    ("openrouter", "arcee-ai/maestro-reasoning"),
+    ("openrouter", "arcee-ai/spotlight"),
+    ("openrouter", "arcee-ai/trinity-large-thinking"),
+    ("openrouter", "arcee-ai/trinity-large-thinking:free"),
+    ("openrouter", "arcee-ai/virtuoso-large"),
+    ("openrouter", "baidu/cobuddy:free"),
+    ("openrouter", "baidu/ernie-4.5-21b-a3b"),
+    ("openrouter", "baidu/ernie-4.5-21b-a3b-thinking"),
+    ("openrouter", "baidu/ernie-4.5-300b-a47b"),
+    ("openrouter", "baidu/ernie-4.5-vl-28b-a3b"),
+    ("openrouter", "baidu/ernie-4.5-vl-424b-a47b"),
+    ("openrouter", "baidu/qianfan-ocr-fast"),
+    ("openrouter", "bytedance/ui-tars-1.5-7b"),
+    (
+        "openrouter",
+        "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+    ),
+    ("openrouter", "cohere/command-a"),
+    ("openrouter", "cohere/command-r-08-2024"),
+    ("openrouter", "cohere/command-r-plus-08-2024"),
+    ("openrouter", "cohere/command-r7b-12-2024"),
+    ("openrouter", "deepcogito/cogito-v2.1-671b"),
+    ("openrouter", "deepseek/deepseek-r1-distill-llama-70b"),
+    ("openrouter", "deepseek/deepseek-r1-distill-qwen-32b"),
+    ("openrouter", "deepseek/deepseek-v3.2-speciale"),
+    ("openrouter", "deepseek/deepseek-v4-flash:free"),
+    ("openrouter", "google/gemini-2.0-flash-001"),
+    ("openrouter", "google/gemini-2.0-flash-lite-001"),
+    ("openrouter", "google/gemma-2-27b-it"),
+    ("openrouter", "google/gemma-3-27b-it"),
+    ("openrouter", "google/gemma-3-4b-it"),
+    ("openrouter", "google/gemma-3n-e4b-it"),
+    ("openrouter", "google/gemma-4-26b-a4b-it:free"),
+    ("openrouter", "google/gemma-4-31b-it:free"),
+    ("openrouter", "gryphe/mythomax-l2-13b"),
+    ("openrouter", "ibm-granite/granite-4.0-h-micro"),
+    ("openrouter", "inflection/inflection-3-pi"),
+    ("openrouter", "inflection/inflection-3-productivity"),
+    ("openrouter", "liquid/lfm-2-24b-a2b"),
+    ("openrouter", "liquid/lfm-2.5-1.2b-instruct:free"),
+    ("openrouter", "liquid/lfm-2.5-1.2b-thinking:free"),
+    ("openrouter", "mancer/weaver"),
+    ("openrouter", "meta-llama/llama-3-70b-instruct"),
+    ("openrouter", "meta-llama/llama-3-8b-instruct"),
+    ("openrouter", "meta-llama/llama-3.2-11b-vision-instruct"),
+    ("openrouter", "meta-llama/llama-3.2-1b-instruct"),
+    ("openrouter", "meta-llama/llama-3.2-3b-instruct"),
+    ("openrouter", "meta-llama/llama-3.2-3b-instruct:free"),
+    ("openrouter", "meta-llama/llama-3.3-70b-instruct:free"),
+    ("openrouter", "meta-llama/llama-4-maverick"),
+    ("openrouter", "meta-llama/llama-guard-3-8b"),
+    ("openrouter", "meta-llama/llama-guard-4-12b"),
+    ("openrouter", "microsoft/phi-4"),
+    ("openrouter", "microsoft/phi-4-mini-instruct"),
+    ("openrouter", "microsoft/wizardlm-2-8x22b"),
+    ("openrouter", "minimax/minimax-01"),
+    ("openrouter", "minimax/minimax-m2-her"),
+    ("openrouter", "mistralai/devstral-medium"),
+    ("openrouter", "mistralai/devstral-small"),
+    ("openrouter", "mistralai/mistral-7b-instruct-v0.1"),
+    ("openrouter", "mistralai/mistral-large-2411"),
+    ("openrouter", "mistralai/mistral-medium-3-5"),
+    ("openrouter", "mistralai/mistral-small-24b-instruct-2501"),
+    ("openrouter", "mistralai/mistral-small-3.1-24b-instruct"),
+    ("openrouter", "mistralai/pixtral-large-2411"),
+    ("openrouter", "mistralai/voxtral-small-24b-2507"),
+    ("openrouter", "morph/morph-v3-fast"),
+    ("openrouter", "morph/morph-v3-large"),
+    ("openrouter", "nousresearch/hermes-2-pro-llama-3-8b"),
+    ("openrouter", "nousresearch/hermes-3-llama-3.1-405b"),
+    ("openrouter", "nousresearch/hermes-3-llama-3.1-405b:free"),
+    ("openrouter", "nousresearch/hermes-3-llama-3.1-70b"),
+    ("openrouter", "nousresearch/hermes-4-405b"),
+    ("openrouter", "nousresearch/hermes-4-70b"),
+    ("openrouter", "openai/gpt-3.5-turbo-instruct"),
+    ("openrouter", "openai/gpt-4o-mini-search-preview"),
+    ("openrouter", "openai/gpt-4o-search-preview"),
+    ("openrouter", "openai/gpt-5-chat"),
+    ("openrouter", "openai/gpt-5.1-codex-max"),
+    ("openrouter", "openai/gpt-oss-safeguard-20b"),
+    ("openrouter", "openai/o1-pro"),
+    ("openrouter", "openai/o3-deep-research"),
+    ("openrouter", "openai/o4-mini-deep-research"),
+    ("openrouter", "openrouter/bodybuilder"),
+    ("openrouter", "openrouter/free"),
+    ("openrouter", "openrouter/owl-alpha"),
+    ("openrouter", "openrouter/pareto-code"),
+    ("openrouter", "perceptron/perceptron-mk1"),
+    ("openrouter", "perplexity/sonar"),
+    ("openrouter", "perplexity/sonar-deep-research"),
+    ("openrouter", "perplexity/sonar-pro"),
+    ("openrouter", "perplexity/sonar-pro-search"),
+    ("openrouter", "perplexity/sonar-reasoning-pro"),
+    ("openrouter", "qwen/qwen-2.5-7b-instruct"),
+    ("openrouter", "qwen/qwen-2.5-coder-32b-instruct"),
+    ("openrouter", "qwen/qwen2.5-vl-72b-instruct"),
+    ("openrouter", "qwen/qwen3-14b"),
+    ("openrouter", "qwen/qwen3-coder:free"),
+    ("openrouter", "qwen/qwen3-next-80b-a3b-instruct:free"),
+    ("openrouter", "rekaai/reka-edge"),
+    ("openrouter", "rekaai/reka-flash-3"),
+    ("openrouter", "relace/relace-apply-3"),
+    ("openrouter", "sao10k/l3-euryale-70b"),
+    ("openrouter", "sao10k/l3-lunaris-8b"),
+    ("openrouter", "sao10k/l3.1-70b-hanami-x1"),
+    ("openrouter", "sao10k/l3.1-euryale-70b"),
+    ("openrouter", "sao10k/l3.3-euryale-70b"),
+    ("openrouter", "switchpoint/router"),
+    ("openrouter", "tencent/hunyuan-a13b-instruct"),
+    ("openrouter", "thedrummer/cydonia-24b-v4.1"),
+    ("openrouter", "thedrummer/rocinante-12b"),
+    ("openrouter", "thedrummer/skyfall-36b-v2"),
+    ("openrouter", "thedrummer/unslopnemo-12b"),
+    ("openrouter", "undi95/remm-slerp-l2-13b"),
+    ("openrouter", "writer/palmyra-x5"),
+    ("openrouter", "x-ai/grok-4.20-multi-agent"),
+    ("openrouter", "xiaomi/mimo-v2-omni"),
+    ("openrouter", "xiaomi/mimo-v2-pro"),
+    ("xai", "grok-4.20-multi-agent-0309"),
+];
+type SharedModelCatalogTask =
+    Shared<LocalBoxFuture<'static, std::result::Result<Vec<BackboardModel>, Arc<anyhow::Error>>>>;
 pub(crate) const DEFAULT_IMAGE_PROVIDER: &str = "openrouter";
 pub(crate) const DEFAULT_IMAGE_MODEL: &str = "google/gemini-3.1-flash-image-preview";
 pub(crate) const DEFAULT_TTS_PROVIDER: &str = "openai";
@@ -85,6 +230,8 @@ pub(crate) struct BackboardNativeState {
     sessions: RefCell<HashMap<acp::SessionId, NativeSession>>,
     client_cache: RefCell<Option<CachedBackboardClient>>,
     model_cache: RefCell<Option<Vec<AgentModelInfo>>>,
+    model_catalog_task: RefCell<Option<(u64, SharedModelCatalogTask)>>,
+    next_model_catalog_task_id: RefCell<u64>,
     model_context_windows: RefCell<HashMap<String, u64>>,
     model_pricing: RefCell<HashMap<String, BackboardModelPricing>>,
     prompt_capabilities: acp::PromptCapabilities,
@@ -284,10 +431,10 @@ impl NativeTurnMetrics {
 
 fn tool_metric_bucket(tool_name: &str) -> (&'static str, &'static str) {
     match tool_name {
-        "bash" | "run_terminal_cmd" | "run_code" | "repl" | "computer" => {
+        "bash" | "run_terminal_cmd" | "read_lints" | "run_code" | "repl" | "computer" => {
             ("shell_tools_ms", "shell_tools_count")
         }
-        "read_file" | "list_dir" | "read_lints" => ("read_tools_ms", "read_tools_count"),
+        "read_file" | "list_dir" => ("read_tools_ms", "read_tools_count"),
         "glob" | "glob_file_search" | "grep" | "codebase_search" | "web_search" | "web_fetch" => {
             ("search_tools_ms", "search_tools_count")
         }
@@ -352,6 +499,8 @@ impl BackboardNativeConnection {
                 sessions: RefCell::default(),
                 client_cache: RefCell::default(),
                 model_cache: RefCell::default(),
+                model_catalog_task: RefCell::default(),
+                next_model_catalog_task_id: RefCell::default(),
                 model_context_windows: RefCell::default(),
                 model_pricing: RefCell::default(),
                 prompt_capabilities: acp::PromptCapabilities::new()
@@ -954,7 +1103,7 @@ fn restore_native_paths(paths: IndexMap<PathBuf, NativePathSnapshot>) -> Result<
         }
     }
 
-    missing_paths.sort_by(|left, right| right.components().count().cmp(&left.components().count()));
+    missing_paths.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
     for path in missing_paths {
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
@@ -1644,14 +1793,39 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
 
             let (models, should_cache) = match state.client() {
                 Ok((_config, client)) => {
-                    log::info!(
-                        "Backboard native endpoint call: GET /models?model_type=llm&limit=15000 plus provider-scoped model catalogs agent_id={}",
-                        state.agent_id
-                    );
-                    let catalog_result = gpui_tokio::Tokio::spawn_result(cx, async move {
-                        list_backboard_model_catalog(client).await
-                    })
-                    .await;
+                    let (catalog_task_id, catalog_task) = {
+                        if let Some((task_id, task)) = state.model_catalog_task.borrow().clone() {
+                            (task_id, task)
+                        } else {
+                            log::info!(
+                                "Backboard native endpoint call: GET /models?model_type=llm&limit=15000 plus provider-scoped model catalogs agent_id={}",
+                                state.agent_id
+                            );
+                            let task = gpui_tokio::Tokio::spawn_result(cx, async move {
+                                list_backboard_model_catalog(client).await
+                            })
+                            .map(|result| result.map_err(Arc::new))
+                            .boxed_local()
+                            .shared();
+                            let task_id = {
+                                let mut next_task_id = state.next_model_catalog_task_id.borrow_mut();
+                                *next_task_id = next_task_id.saturating_add(1);
+                                *next_task_id
+                            };
+                            *state.model_catalog_task.borrow_mut() = Some((task_id, task.clone()));
+                            (task_id, task)
+                        }
+                    };
+                    let catalog_result = catalog_task.await;
+                    {
+                        let mut model_catalog_task = state.model_catalog_task.borrow_mut();
+                        if model_catalog_task
+                            .as_ref()
+                            .is_some_and(|(task_id, _)| *task_id == catalog_task_id)
+                        {
+                            model_catalog_task.take();
+                        }
+                    }
                     let models = match catalog_result {
                         Ok(models) => models,
                         Err(error) => {
@@ -1663,6 +1837,7 @@ impl acp_thread::AgentModelSelector for BackboardModelSelector {
                         .into_iter()
                         .filter(|model| !model.provider.is_empty() && !model.name.is_empty())
                         .filter(|model| !is_featherless_backboard_model(model))
+                        .filter(|model| !is_tool_incompatible_backboard_model(model))
                         .map(|model| {
                             if let Some(context_limit) = model.context_limit {
                                 state.remember_model_context_window(
@@ -1810,6 +1985,12 @@ fn is_featherless_backboard_model(model: &BackboardModel) -> bool {
         || display_name.contains("featherless")
 }
 
+fn is_tool_incompatible_backboard_model(model: &BackboardModel) -> bool {
+    TOOL_INCOMPATIBLE_MODELS.iter().any(|(provider, name)| {
+        model.provider.eq_ignore_ascii_case(provider) && model.name.eq_ignore_ascii_case(name)
+    })
+}
+
 fn model_icon(
     provider: &str,
     model: &str,
@@ -1836,6 +2017,7 @@ impl AgentSessionList for BackboardSessionList {
 
     fn notify_refresh(&self) {
         self.state.model_cache.borrow_mut().take();
+        self.state.model_catalog_task.borrow_mut().take();
     }
 
     fn into_any(self: Rc<Self>) -> Rc<dyn Any> {
@@ -2301,18 +2483,22 @@ async fn list_backboard_model_catalog(client: BackboardClient) -> Result<Vec<Bac
         }
     }
 
-    let scoped_results = futures::future::join_all(providers.into_iter().map(|provider| {
-        let client = client.clone();
-        async move {
-            let result = client
-                .list_models(Some(provider.as_str()), Some("llm"), Some(15_000))
-                .await;
-            (provider, result)
-        }
-    }))
-    .await;
+    let mut scoped_results =
+        futures::stream::iter(providers.into_iter().enumerate().map(|(index, provider)| {
+            let client = client.clone();
+            async move {
+                let result = client
+                    .list_models(Some(provider.as_str()), Some("llm"), Some(15_000))
+                    .await;
+                (index, provider, result)
+            }
+        }))
+        .buffer_unordered(MODEL_CATALOG_PROVIDER_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+    scoped_results.sort_by_key(|(index, _, _)| *index);
 
-    for (provider, result) in scoped_results {
+    for (_, provider, result) in scoped_results {
         match result {
             Ok(mut provider_models) => models.append(&mut provider_models),
             Err(error) => {
@@ -2361,6 +2547,34 @@ mod tests {
                 _ => None,
             }
         })
+    }
+
+    fn temp_config_path(test_name: &str) -> (PathBuf, PathBuf) {
+        let test_root = std::env::temp_dir().join(format!(
+            "{test_name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = test_root.join(".backboard").join("config.json");
+        (test_root, path)
+    }
+
+    #[test]
+    fn native_state_has_api_key_from_shared_config() {
+        let (test_root, path) = temp_config_path("agent-native-backboard-config");
+        let _guard = ::backboard::set_config_path_for_testing(path);
+
+        BackboardConfig::save_api_key_for_current_env("bb-agent-key").expect("save api key");
+
+        let connection =
+            BackboardNativeConnection::new(AgentId::new("backboard"), Some("free".into()));
+
+        assert!(connection.state.has_api_key());
+
+        std::fs::remove_dir_all(test_root).ok();
     }
 
     #[test]
@@ -2506,6 +2720,24 @@ mod tests {
         assert!(is_featherless_backboard_model(&featherless_name));
         assert!(is_featherless_backboard_model(&featherless_display_name));
         assert!(!is_featherless_backboard_model(&non_featherless_model));
+    }
+
+    #[test]
+    fn tool_incompatible_models_are_filtered_from_backboard_catalog() {
+        let incompatible_model = BackboardModel {
+            provider: "cohere".to_string(),
+            name: "command-a-03-2025".to_string(),
+            ..BackboardModel::default()
+        };
+        let compatible_model = BackboardModel {
+            provider: "anthropic".to_string(),
+            name: "claude-haiku-4-5-20251001".to_string(),
+            ..BackboardModel::default()
+        };
+
+        assert_eq!(TOOL_INCOMPATIBLE_MODELS.len(), 133);
+        assert!(is_tool_incompatible_backboard_model(&incompatible_model));
+        assert!(!is_tool_incompatible_backboard_model(&compatible_model));
     }
 
     #[test]
