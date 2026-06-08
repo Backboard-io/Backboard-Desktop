@@ -1,5 +1,10 @@
 # Backboard IDE Rust Endpoints
 
+> Current live-code note: for the code-audited endpoint flow in this checkout, see
+> [`BACKBOARD_ZED_API_ENDPOINTS.md`](BACKBOARD_ZED_API_ENDPOINTS.md). This file also
+> contains broader contract and migration notes, and some route details describe older
+> or target behavior rather than the currently compiled `backboard` crate entrypoint.
+
 This document describes the native Rust integration inside Backboard Studio. The older Python CLI plus ACP bridge path has been removed.
 
 Target architecture:

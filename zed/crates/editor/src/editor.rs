@@ -17124,19 +17124,18 @@ impl Editor {
     }
 
     fn theme_changed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.mode.is_full() {
-            return;
-        }
+        if self.mode.is_full() {
+            let new_accents = self.fetch_accent_data(cx);
+            if new_accents != self.accent_data {
+                self.accent_data = new_accents;
+                self.colorize_brackets(true, cx);
+            }
 
-        let new_accents = self.fetch_accent_data(cx);
-        if new_accents != self.accent_data {
-            self.accent_data = new_accents;
-            self.colorize_brackets(true, cx);
+            self.invalidate_semantic_tokens(None);
+            self.refresh_semantic_tokens(None, None, cx);
+            self.refresh_outline_symbols_at_cursor(cx);
         }
-
-        self.invalidate_semantic_tokens(None);
-        self.refresh_semantic_tokens(None, None, cx);
-        self.refresh_outline_symbols_at_cursor(cx);
+        cx.notify();
     }
 
     pub fn set_searchable(&mut self, searchable: bool) {

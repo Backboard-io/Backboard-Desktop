@@ -64,6 +64,18 @@ impl ModelSelectorPopover {
             selector.delegate.cycle_favorite_models(window, cx);
         });
     }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn is_open(&self) -> bool {
+        self.menu_handle.is_deployed()
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn visible_entry_count(&self, cx: &App) -> usize {
+        use picker::PickerDelegate as _;
+
+        self.selector.read(cx).delegate.match_count()
+    }
 }
 
 impl Render for ModelSelectorPopover {
@@ -254,5 +266,99 @@ impl Render for ModelSelectorPopover {
         )
         .with_handle(self.menu_handle.clone())
         .render(window, cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::any::Any;
+    use std::rc::Rc;
+
+    use acp_thread::{AgentConnection, StubAgentConnection};
+    use agent_servers::{AgentServer, AgentServerDelegate};
+    use anyhow::Result;
+    use fs::FakeFs;
+    use gpui::{Entity, Task, TestAppContext, VisualTestContext};
+    use project::{AgentId, Project};
+    use settings::SettingsStore;
+
+    use super::*;
+
+    struct TestAgentServer;
+
+    impl AgentServer for TestAgentServer {
+        fn logo(&self) -> IconName {
+            IconName::BackboardAssistant
+        }
+
+        fn agent_id(&self) -> AgentId {
+            AgentId::new("test-agent")
+        }
+
+        fn connect(
+            &self,
+            _delegate: AgentServerDelegate,
+            _project: Entity<Project>,
+            _cx: &mut App,
+        ) -> Task<Result<Rc<dyn AgentConnection>>> {
+            Task::ready(Err(anyhow::anyhow!("unused test server")))
+        }
+
+        fn into_any(self: Rc<Self>) -> Rc<dyn Any> {
+            self
+        }
+    }
+
+    fn init_test(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn model_selector_popover_stays_open_and_loads_models(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let connection = StubAgentConnection::new();
+        let selector = connection.model_selector_impl();
+        let agent_server = Rc::new(TestAgentServer);
+        let fs = FakeFs::new(cx.executor());
+
+        let window = cx.add_window({
+            let selector = selector.clone();
+            let agent_server = agent_server.clone();
+            let fs = fs.clone();
+            move |window, cx| {
+                let focus_handle = cx.focus_handle();
+                ModelSelectorPopover::new(
+                    selector,
+                    agent_server,
+                    fs,
+                    PopoverMenuHandle::default(),
+                    focus_handle,
+                    window,
+                    cx,
+                )
+            }
+        });
+        let popover = window
+            .entity(cx)
+            .expect("model selector popover should be the window root entity");
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+
+        popover.update_in(&mut cx, |popover, window, cx| {
+            popover.toggle(window, cx);
+        });
+        cx.run_until_parked();
+
+        popover.read_with(&cx, |popover, cx| {
+            assert!(popover.is_open());
+            assert!(popover.active_model(cx).is_some());
+            assert!(popover.visible_entry_count(cx) > 0);
+        });
     }
 }

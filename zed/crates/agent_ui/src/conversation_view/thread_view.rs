@@ -1879,7 +1879,14 @@ impl ThreadView {
             .into_any_element()
     }
 
-    fn render_backboard_footer_status(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_backboard_footer_status(&self, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(model_picker_trigger) = self.config_options_view.as_ref().and_then(|view| {
+            view.read(cx)
+                .category_picker_trigger(acp::SessionConfigOptionCategory::Model, cx)
+        }) {
+            return model_picker_trigger.into_any_element();
+        }
+
         let model_label = self
             .current_model_label(cx)
             .unwrap_or_else(|| SharedString::from("Select model"));
@@ -1887,6 +1894,7 @@ impl ThreadView {
         let tooltip_label = format!("Change model: {model_label}");
 
         ButtonLike::new("backboard-footer-model-selector")
+            .stop_mouse_down_propagation()
             .width(px(156.))
             .height(px(26.).into())
             .style(ButtonStyle::Subtle)
@@ -1921,6 +1929,7 @@ impl ThreadView {
             .on_click(cx.listener(|this, _, window, cx| {
                 this.toggle_model_selector(window, cx);
             }))
+            .into_any_element()
     }
 
     fn render_selected_model_readout(&self, cx: &App) -> Option<impl IntoElement> {

@@ -119,11 +119,13 @@ impl ModelPickerDelegate {
                             )
                         })?;
 
-                        this.update_in(cx, |this, window, cx| {
-                            if !this.delegate.models.has_visible_models() {
+                        let had_visible_models = this.update_in(cx, |this, window, cx| {
+                            let had_visible_models = this.delegate.models.has_visible_models();
+                            if !had_visible_models {
                                 this.delegate.models = ModelListState::Loading;
                                 this.refresh(window, cx);
                             }
+                            had_visible_models
                         })?;
 
                         let selected_model = selected_model_task.await.warn_on_err();
@@ -135,17 +137,27 @@ impl ModelPickerDelegate {
                         let (models, has_models) = match models_task.await {
                             Ok(models) => {
                                 let has_models = model_list_has_visible_models(&models);
-                                (ModelListState::Loaded(models), has_models)
+                                if has_models || !had_visible_models {
+                                    (Some(ModelListState::Loaded(models)), has_models)
+                                } else {
+                                    (None, true)
+                                }
                             }
                             Err(error) => {
                                 log::warn!("failed to load agent models: {error:#}");
-                                (ModelListState::Failed, false)
+                                if had_visible_models {
+                                    (None, true)
+                                } else {
+                                    (Some(ModelListState::Failed), false)
+                                }
                             }
                         };
-                        this.update_in(cx, |this, window, cx| {
-                            this.delegate.models = models;
-                            this.refresh(window, cx)
-                        })?;
+                        if let Some(models) = models {
+                            this.update_in(cx, |this, window, cx| {
+                                this.delegate.models = models;
+                                this.refresh(window, cx)
+                            })?;
+                        }
 
                         Ok(has_models)
                     }

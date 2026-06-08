@@ -163,12 +163,20 @@ impl RenderOnce for Tab {
         };
 
         let shape = self.shape;
+        let position = self.position;
 
         self.div
-            .h(Tab::content_height(cx))
+            .h(match shape {
+                TabShape::Pill => Tab::content_height(cx),
+                TabShape::StraightSided => Tab::container_height(cx),
+            })
             .when(shape == TabShape::Pill, |this| this.rounded_full())
             .bg(tab_bg)
-            .border_1()
+            .when(shape == TabShape::Pill, |this| this.border_1())
+            .when(shape == TabShape::StraightSided, |this| {
+                this.border_l_1()
+                    .when(position == TabPosition::Last, |this| this.border_r_1())
+            })
             .border_color(border_color)
             .hover(move |style| style.bg(tab_hover_bg))
             .active(move |style| style.bg(tab_active_bg))

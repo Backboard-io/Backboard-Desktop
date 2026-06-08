@@ -2908,10 +2908,10 @@ impl Pane {
         let capability = item.capability(cx);
         let tab = Tab::new(ix)
             .straight_sided()
-            .position(if is_first_item {
-                TabPosition::First
-            } else if is_last_item {
+            .position(if is_last_item {
                 TabPosition::Last
+            } else if is_first_item {
+                TabPosition::First
             } else {
                 TabPosition::Middle(position_relative_to_active_item)
             })
@@ -3632,7 +3632,7 @@ impl Pane {
             .id("unpinned tabs")
             .overflow_x_scroll()
             .w_full()
-            .gap_0p5()
+            .gap_0()
             .track_scroll(&self.tab_bar_scroll_handle)
             .on_scroll_wheel(cx.listener(|this, _, _, _| {
                 this.suppress_scroll = true;
@@ -3649,7 +3649,7 @@ impl Pane {
         div()
             .id("tab_bar_drop_target")
             .min_w_6()
-            .h(Tab::content_height(cx))
+            .h(Tab::container_height(cx))
             .flex_grow()
             // HACK: This empty child is currently necessary to force the drop target to appear
             // despite us setting a min width above.
@@ -3693,7 +3693,7 @@ impl Pane {
             .id("pinned_tabs_border")
             .debug_selector(|| "pinned_tabs_border".into())
             .min_w_6()
-            .h(Tab::content_height(cx))
+            .h(Tab::container_height(cx))
             .flex_grow()
             .border_l_1()
             .border_color(cx.theme().colors().border_variant.opacity(0.72))
@@ -3826,7 +3826,7 @@ impl Pane {
         let item_id = dragged_tab.item.item_id();
         self.unpreview_item_if_preview(item_id);
 
-        if !to_pane.read(cx).can_add_item(&*dragged_tab.item, cx) {
+        if !self.can_add_item(&*dragged_tab.item, cx) {
             return;
         }
 
@@ -4506,6 +4506,19 @@ impl Render for Pane {
             }))
             .child({
                 let has_worktrees = project.read(cx).visible_worktrees(cx).next().is_some();
+                let drag_target_top = if display_tab_bar {
+                    let tab_bar_height = Tab::container_height(cx);
+                    if TabBarSettings::get_global(cx).show_pinned_tabs_in_separate_row
+                        && self.pinned_tab_count > 0
+                        && self.pinned_tab_count < self.items.len()
+                    {
+                        tab_bar_height + tab_bar_height
+                    } else {
+                        tab_bar_height
+                    }
+                } else {
+                    px(0.)
+                };
                 // main content
                 div()
                     .flex_1()
@@ -4612,18 +4625,18 @@ impl Render for Pane {
                             .map(|div| {
                                 let size = DefiniteLength::Fraction(0.5);
                                 match self.drag_split_direction {
-                                    None => div.top_0().right_0().bottom_0().left_0(),
+                                    None => div.top(drag_target_top).right_0().bottom_0().left_0(),
                                     Some(SplitDirection::Up) => {
-                                        div.top_0().left_0().right_0().h(size)
+                                        div.top(drag_target_top).left_0().right_0().h(size)
                                     }
                                     Some(SplitDirection::Down) => {
                                         div.left_0().bottom_0().right_0().h(size)
                                     }
                                     Some(SplitDirection::Left) => {
-                                        div.top_0().left_0().bottom_0().w(size)
+                                        div.top(drag_target_top).left_0().bottom_0().w(size)
                                     }
                                     Some(SplitDirection::Right) => {
-                                        div.top_0().bottom_0().right_0().w(size)
+                                        div.top(drag_target_top).bottom_0().right_0().w(size)
                                     }
                                 }
                             }),

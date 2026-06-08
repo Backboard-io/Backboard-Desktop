@@ -11,9 +11,9 @@ use collections::HashMap;
 use db::kvp::KeyValueStore;
 use futures::{channel::oneshot, future::join_all};
 use gpui::{
-    Action, Anchor, AnyView, App, AsyncApp, AsyncWindowContext, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, IntoElement, ParentElement, Pixels, Render, Styled, Task, TaskExt,
-    WeakEntity, Window, actions,
+    Action, Anchor, App, AsyncApp, AsyncWindowContext, Context, Entity, EventEmitter, FocusHandle,
+    Focusable, IntoElement, ParentElement, Pixels, Render, Styled, Task, TaskExt, WeakEntity,
+    Window, actions,
 };
 use itertools::Itertools;
 use project::{Fs, Project};
@@ -38,7 +38,6 @@ use workspace::{
 };
 
 use anyhow::{Result, anyhow};
-use zed_actions::assistant::InlineAssist;
 
 const TERMINAL_PANEL_KEY: &str = "TerminalPanel";
 
@@ -83,7 +82,6 @@ pub struct TerminalPanel {
     pending_terminals_to_add: usize,
     deferred_tasks: HashMap<TaskId, Task<()>>,
     assistant_enabled: bool,
-    assistant_tab_bar_button: Option<AnyView>,
     active: bool,
 }
 
@@ -101,7 +99,6 @@ impl TerminalPanel {
             pending_terminals_to_add: 0,
             deferred_tasks: HashMap::default(),
             assistant_enabled: false,
-            assistant_tab_bar_button: None,
             active: false,
         };
         terminal_panel.apply_tab_bar_buttons(&terminal_panel.active_pane, cx);
@@ -110,20 +107,6 @@ impl TerminalPanel {
 
     pub fn set_assistant_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.assistant_enabled = enabled;
-        if enabled {
-            let focus_handle = self
-                .active_pane
-                .read(cx)
-                .active_item()
-                .map(|item| item.item_focus_handle(cx))
-                .unwrap_or(self.focus_handle(cx));
-            self.assistant_tab_bar_button = Some(
-                cx.new(move |_| InlineAssistTabBarButton { focus_handle })
-                    .into(),
-            );
-        } else {
-            self.assistant_tab_bar_button = None;
-        }
         for pane in self.center.panes() {
             self.apply_tab_bar_buttons(pane, cx);
         }
@@ -134,7 +117,6 @@ impl TerminalPanel {
         terminal_pane: &Entity<Pane>,
         cx: &mut Context<Self>,
     ) {
-        let assistant_tab_bar_button = self.assistant_tab_bar_button.clone();
         terminal_pane.update(cx, |pane, cx| {
             pane.set_render_tab_bar_buttons(cx, move |pane, window, cx| {
                 let split_context = pane
@@ -182,7 +164,6 @@ impl TerminalPanel {
                                 Some(menu)
                             }),
                     )
-                    .children(assistant_tab_bar_button.clone())
                     .child(
                         PopoverMenu::new("terminal-pane-tab-bar-split")
                             .trigger_with_tooltip(
@@ -1678,24 +1659,6 @@ impl workspace::TerminalProvider for TerminalProvider {
                 Err(e) => Some(Err(e)),
             }
         })
-    }
-}
-
-struct InlineAssistTabBarButton {
-    focus_handle: FocusHandle,
-}
-
-impl Render for InlineAssistTabBarButton {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let focus_handle = self.focus_handle.clone();
-        IconButton::new("terminal_inline_assistant", IconName::BackboardAssistant)
-            .icon_size(IconSize::Small)
-            .on_click(cx.listener(|_, _, window, cx| {
-                window.dispatch_action(InlineAssist::default().boxed_clone(), cx);
-            }))
-            .tooltip(move |_window, cx| {
-                Tooltip::for_action_in("Inline Assist", &InlineAssist::default(), &focus_handle, cx)
-            })
     }
 }
 

@@ -20,7 +20,7 @@ use db::kvp::KeyValueStore;
 use editor::actions::{Cancel as EditorCancel, Newline};
 use editor::{Editor, EditorEvent};
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, AsyncWindowContext, ClipboardItem, Context,
+    Animation, AnimationExt, AnyElement, App, AsyncWindowContext, ClipboardItem, Context, Div,
     DragMoveEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
     IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, PathPromptOptions, Pixels, Render,
     SharedString, Subscription, Task, TextStyleRefinement, WeakEntity, Window, WindowControlArea,
@@ -34,6 +34,7 @@ use project::{
 };
 use settings::Settings;
 use terminal_view::TerminalView;
+use theme::GlobalTheme;
 use theme_settings::ThemeSettings;
 use ui::{
     Button, ButtonSize, ButtonStyle, Color, ContextMenu, ContextMenuEntry, DropdownMenu,
@@ -42,8 +43,8 @@ use ui::{
 };
 use util::ResultExt;
 use workspace::{
-    MultiWorkspace, OpenOptions, OpenVisible, PathList, Workspace,
-    notifications::DetachAndPromptErr,
+    MultiWorkspace, OpenOptions, OpenVisible, PathList, Workspace, WorkspaceTourPlacement,
+    WorkspaceTourStep, notifications::DetachAndPromptErr, render_workspace_tour_target,
 };
 use zed_actions::{ConfigureBackboardApiKey, OpenSettings, ResetOnboarding};
 
@@ -809,6 +810,35 @@ mod simple_mode_draft_tests {
                 beginner_workspace.chat_feed.is_none(),
                 "simple mode should not render the custom BeginnerChatFeed for native chats"
             );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_simple_native_model_selector_loads_from_composer(cx: &mut TestAppContext) {
+        let (beginner_workspace, _workspace, mut cx) = setup_beginner_workspace(cx).await;
+
+        beginner_workspace.update_in(&mut cx, |beginner_workspace, window, cx| {
+            beginner_workspace.selected_folder = Some(PathBuf::from("/project"));
+            assert!(
+                beginner_workspace
+                    .create_simple_agent_draft(window, cx)
+                    .is_some()
+            );
+        });
+        cx.run_until_parked();
+
+        let model_selector = beginner_workspace.read_with(&cx, |beginner_workspace, cx| {
+            beginner_workspace
+                .chat_surface_conversation_view()
+                .and_then(|conversation_view| conversation_view.read(cx).root_model_selector(cx))
+                .expect("simple native composer should expose a model selector")
+        });
+
+        cx.run_until_parked();
+
+        model_selector.read_with(&cx, |model_selector, cx| {
+            assert!(model_selector.active_model(cx).is_some());
+            assert!(model_selector.visible_entry_count(cx) > 0);
         });
     }
 
@@ -4561,7 +4591,23 @@ res.end(data);\
             this.handle_conversation_view_update(&cv, window, cx);
         });
         self.session_subscriptions.push(cv_sub);
+        let conversation_view_for_theme = conversation_view.downgrade();
+        let theme_sub = cx.observe_global_in::<GlobalTheme>(window, move |_, _, cx| {
+            if let Some(conversation_view) = conversation_view_for_theme.upgrade() {
+                Self::update_conversation_background_override(&conversation_view, cx);
+            }
+        });
+        self.session_subscriptions.push(theme_sub);
         self.handle_conversation_view_update(&conversation_view, window, cx);
+    }
+
+    fn update_conversation_background_override(
+        conversation_view: &Entity<ConversationView>,
+        cx: &mut Context<Self>,
+    ) {
+        conversation_view.update(cx, |conversation_view, cx| {
+            conversation_view.set_background_override(Some(ds::app_background(cx)), cx);
+        });
     }
 
     fn handle_conversation_view_update(
@@ -4971,6 +5017,26 @@ impl Render for BeginnerWorkspace {
 }
 
 impl BeginnerWorkspace {
+    fn workspace_tour_step(&self, cx: &App) -> Option<WorkspaceTourStep> {
+        self.workspace
+            .upgrade()
+            .and_then(|workspace| workspace.read(cx).workspace_tour_step())
+    }
+
+    fn render_simple_tour_target(
+        &self,
+        target: Div,
+        step: WorkspaceTourStep,
+        placement: WorkspaceTourPlacement,
+        cx: &App,
+    ) -> Div {
+        if self.workspace_tour_step(cx) == Some(step) {
+            render_workspace_tour_target(target, step, placement, cx)
+        } else {
+            target
+        }
+    }
+
     fn reset_simple_sidebar_width(&mut self, cx: &mut Context<Self>) {
         self.chats_sidebar_width = px(ds::SIDEBAR_WIDTH);
         cx.notify();
@@ -5197,14 +5263,21 @@ impl BeginnerWorkspace {
 
     fn render_chats_sidebar_slot(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if !self.chats_sidebar_open {
-            return h_flex()
+            let slot = h_flex()
                 .id("simple-closed-sidebar-width-slot")
                 .h_full()
                 .w(px(CLOSED_CHATS_SIDEBAR_WIDTH_PX))
                 .flex_shrink_0()
                 .overflow_hidden()
                 .bg(ds::sidebar_background(cx))
-                .child(self.render_closed_chats_sidebar(window, cx))
+                .child(self.render_closed_chats_sidebar(window, cx));
+            return self
+                .render_simple_tour_target(
+                    slot,
+                    WorkspaceTourStep::SimpleModeChats,
+                    WorkspaceTourPlacement::InsideTop,
+                    cx,
+                )
                 .into_any_element();
         }
 
@@ -5212,7 +5285,7 @@ impl BeginnerWorkspace {
         let target_width = self.chats_sidebar_width;
         let closed_width = px(CLOSED_CHATS_SIDEBAR_WIDTH_PX);
 
-        h_flex()
+        let slot = h_flex()
             .id("simple-sidebar-width-slot")
             .h_full()
             .w(target_width)
@@ -5232,8 +5305,27 @@ impl BeginnerWorkspace {
                     let width = closed_width + (target_width - closed_width) * visible_progress;
                     slot.w(width.max(closed_width))
                 },
-            )
-            .into_any_element()
+            );
+
+        self.render_simple_tour_target(
+            slot,
+            WorkspaceTourStep::SimpleModeChats,
+            WorkspaceTourPlacement::InsideTop,
+            cx,
+        )
+        .into_any_element()
+    }
+
+    fn simple_top_bar_offset(window: &Window) -> f32 {
+        if cfg!(target_os = "macos") && !window.is_fullscreen() {
+            8.
+        } else {
+            0.
+        }
+    }
+
+    fn simple_top_bar_height(window: &Window) -> f32 {
+        ds::TOP_BAR_HEIGHT + Self::simple_top_bar_offset(window)
     }
 
     fn target_right_panel_width(&self, window: &Window) -> Pixels {
@@ -5522,7 +5614,7 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if !self.right_panel_open {
-            return self.render_open_artifact_panel_button(cx);
+            return self.render_open_artifact_panel_button(window, cx);
         }
 
         let preview_dominant = preview_dominant || self.right_panel_expanded;
@@ -5567,6 +5659,13 @@ impl BeginnerWorkspace {
                     cx,
                 )),
         };
+
+        let slot = self.render_simple_tour_target(
+            slot,
+            WorkspaceTourStep::SimpleModeOutput,
+            WorkspaceTourPlacement::InsideTop,
+            cx,
+        );
 
         slot.with_animation(
             ("right-panel-width", self.right_panel_animation_generation),
@@ -5916,8 +6015,14 @@ impl BeginnerWorkspace {
             .into_any_element()
     }
 
-    fn render_open_artifact_panel_button(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_open_artifact_panel_button(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let hover_background = ds::hover_background(cx);
+        let top_bar_offset = Self::simple_top_bar_offset(window);
+        let top_bar_height = Self::simple_top_bar_height(window);
 
         let button = div()
             .id("open-artifact-panel")
@@ -5938,8 +6043,8 @@ impl BeginnerWorkspace {
                     .color(Color::Custom(ds::icon_muted(cx))),
             );
 
-        match self.right_panel_dock {
-            SimplePanelDock::Left | SimplePanelDock::Right => div()
+        let panel_button = match self.right_panel_dock {
+            SimplePanelDock::Left | SimplePanelDock::Right => v_flex()
                 .w(px(RIGHT_PANEL_CLOSED_WIDTH_PX))
                 .h_full()
                 .flex_shrink_0()
@@ -5952,13 +6057,17 @@ impl BeginnerWorkspace {
                 })
                 .border_color(ds::panel_edge_line(cx))
                 .bg(ds::app_background(cx))
-                .flex()
-                .items_start()
-                .justify_center()
-                .pt_5()
-                .px_2()
-                .child(button)
-                .into_any_element(),
+                .child(
+                    h_flex()
+                        .h(px(top_bar_height))
+                        .flex_shrink_0()
+                        .pt(px(top_bar_offset))
+                        .items_center()
+                        .justify_center()
+                        .px_2()
+                        .child(button),
+                )
+                .child(div().flex_1().window_control_area(WindowControlArea::Drag)),
             SimplePanelDock::Top | SimplePanelDock::Bottom => div()
                 .h(px(44.))
                 .w_full()
@@ -5975,9 +6084,16 @@ impl BeginnerWorkspace {
                 .items_center()
                 .justify_end()
                 .pr_2()
-                .child(button)
-                .into_any_element(),
-        }
+                .child(button),
+        };
+
+        self.render_simple_tour_target(
+            panel_button,
+            WorkspaceTourStep::SimpleModeOutput,
+            WorkspaceTourPlacement::InsideTop,
+            cx,
+        )
+        .into_any_element()
     }
 
     fn render_sidebar_api_status_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -6044,7 +6160,8 @@ impl BeginnerWorkspace {
         let action_hover = ds::sidebar_hover_background(cx);
         let api_key_ready = Self::has_backboard_api_key();
         let traffic_lights = cfg!(target_os = "macos") && !window.is_fullscreen();
-        let top_bar_offset = if traffic_lights { 8. } else { 0. };
+        let top_bar_offset = Self::simple_top_bar_offset(window);
+        let top_bar_height = Self::simple_top_bar_height(window);
         let search_query = self
             .chat_search_editor
             .read(cx)
@@ -6133,7 +6250,7 @@ impl BeginnerWorkspace {
                     .gap_0p5()
                     .child(
                         h_flex()
-                            .h(px(ds::TOP_BAR_HEIGHT + top_bar_offset))
+                            .h(px(top_bar_height))
                             .pt(px(top_bar_offset))
                             .items_center()
                             .gap_1()
@@ -6698,15 +6815,25 @@ impl BeginnerWorkspace {
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        DropdownMenu::new(
-            "simple-workspace-mode-menu",
-            Self::simple_mode_target_label(SimpleModeTarget::Simple),
-            self.simple_mode_menu(window, cx),
+    ) -> AnyElement {
+        let switcher = div().child(
+            DropdownMenu::new(
+                "simple-workspace-mode-menu",
+                Self::simple_mode_target_label(SimpleModeTarget::Simple),
+                self.simple_mode_menu(window, cx),
+            )
+            .style(DropdownStyle::Ghost)
+            .trigger_size(ButtonSize::Compact)
+            .trigger_tooltip(|_, cx| Tooltip::simple("Switch interface mode", cx).into()),
+        );
+
+        self.render_simple_tour_target(
+            switcher,
+            WorkspaceTourStep::SimpleModeSwitcher,
+            WorkspaceTourPlacement::BelowRight,
+            cx,
         )
-        .style(DropdownStyle::Ghost)
-        .trigger_size(ButtonSize::Compact)
-        .trigger_tooltip(|_, cx| Tooltip::simple("Switch interface mode", cx).into())
+        .into_any_element()
     }
 
     fn render_simple_header(
@@ -6716,10 +6843,14 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let top_bar_offset = Self::simple_top_bar_offset(window);
+        let top_bar_height = Self::simple_top_bar_height(window);
+
         h_flex()
-            .h(px(ds::TOP_BAR_HEIGHT))
+            .h(px(top_bar_height))
             .w_full()
             .flex_shrink_0()
+            .pt(px(top_bar_offset))
             .px_3()
             .gap_2()
             .items_center()
@@ -6790,7 +6921,8 @@ impl BeginnerWorkspace {
         let api_key_ready = Self::has_backboard_api_key();
         let right_panel_expanded =
             api_key_ready && self.right_panel_open && self.right_panel_expanded;
-        let mode_buttons_top = if api_key_ready { 10. } else { 38. };
+        let mode_buttons_top =
+            (if api_key_ready { 10. } else { 38. }) + Self::simple_top_bar_offset(window);
         if api_key_ready {
             self.ensure_composer_thread(window, cx);
         }
@@ -8311,6 +8443,7 @@ impl BeginnerWorkspace {
                     .h_full()
                     .min_h_0()
                     .overflow_hidden()
+                    .bg(ds::app_background(cx))
                     .child(editor),
             )
             .into_any_element()
@@ -9236,6 +9369,7 @@ impl BeginnerWorkspace {
                             .h_full()
                             .min_h_0()
                             .overflow_hidden()
+                            .bg(ds::app_background(cx))
                             .child(editor),
                     ),
             )
@@ -9781,7 +9915,7 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if !api_key_ready {
-            return v_flex()
+            let input_bar = v_flex()
                 .flex_shrink_0()
                 .h(px(56.))
                 .w_full()
@@ -9802,6 +9936,13 @@ impl BeginnerWorkspace {
                                 .size(LabelSize::Small)
                                 .color(Color::Disabled),
                         ),
+                );
+            return self
+                .render_simple_tour_target(
+                    input_bar,
+                    WorkspaceTourStep::SimpleModePrompt,
+                    WorkspaceTourPlacement::AboveRight,
+                    cx,
                 )
                 .into_any_element();
         }
@@ -9820,7 +9961,7 @@ impl BeginnerWorkspace {
                 .child(composer)
                 .into_any_element();
 
-            return v_flex()
+            let input_bar = v_flex()
                 .flex_shrink_0()
                 .w_full()
                 .when(centered, |el| el.items_center())
@@ -9834,7 +9975,14 @@ impl BeginnerWorkspace {
                                 .color(Color::Custom(ds::text_muted(cx))),
                         ),
                     )
-                })
+                });
+            return self
+                .render_simple_tour_target(
+                    input_bar,
+                    WorkspaceTourStep::SimpleModePrompt,
+                    WorkspaceTourPlacement::AboveRight,
+                    cx,
+                )
                 .into_any_element();
         }
 
@@ -9857,7 +10005,7 @@ impl BeginnerWorkspace {
             colors.border_variant.opacity(0.96)
         };
 
-        v_flex()
+        let input_bar = v_flex()
             .flex_shrink_0()
             .w_full()
             .items_center()
@@ -10010,8 +10158,15 @@ impl BeginnerWorkspace {
                             .color(Color::Custom(ds::text_muted(cx))),
                     ),
                 )
-            })
-            .into_any_element()
+            });
+
+        self.render_simple_tour_target(
+            input_bar,
+            WorkspaceTourStep::SimpleModePrompt,
+            WorkspaceTourPlacement::AboveRight,
+            cx,
+        )
+        .into_any_element()
     }
 
     fn render_simple_context_selectors(

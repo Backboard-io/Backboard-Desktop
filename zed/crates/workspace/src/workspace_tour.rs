@@ -20,6 +20,10 @@ pub enum WorkspaceTourStep {
     DirectoryPanel,
     GitPanel,
     BottomBar,
+    SimpleModeChats,
+    SimpleModePrompt,
+    SimpleModeOutput,
+    SimpleModeSwitcher,
     TutorialModelSelection,
     TutorialAgentOptions,
     TutorialSkills,
@@ -28,6 +32,7 @@ pub enum WorkspaceTourStep {
 
 impl WorkspaceTourStep {
     pub const TOTAL: usize = 13;
+    pub const SIMPLE_MODE_TOTAL: usize = 4;
     pub const TUTORIAL_TOTAL: usize = 4;
 
     pub fn index(self) -> usize {
@@ -45,6 +50,10 @@ impl WorkspaceTourStep {
             Self::DirectoryPanel => 11,
             Self::GitPanel => 12,
             Self::BottomBar => 13,
+            Self::SimpleModeChats => 1,
+            Self::SimpleModePrompt => 2,
+            Self::SimpleModeOutput => 3,
+            Self::SimpleModeSwitcher => 4,
             Self::TutorialModelSelection => 1,
             Self::TutorialAgentOptions => 2,
             Self::TutorialSkills => 3,
@@ -67,6 +76,10 @@ impl WorkspaceTourStep {
             Self::DirectoryPanel => "Directory",
             Self::GitPanel => "Git",
             Self::BottomBar => "Bottom Icons",
+            Self::SimpleModeChats => "Chats",
+            Self::SimpleModePrompt => "Prompt",
+            Self::SimpleModeOutput => "Output",
+            Self::SimpleModeSwitcher => "Modes",
             Self::TutorialModelSelection => "Model",
             Self::TutorialAgentOptions => "Agent Options",
             Self::TutorialSkills => "Skills",
@@ -89,6 +102,10 @@ impl WorkspaceTourStep {
             Self::DirectoryPanel => "Browse files",
             Self::GitPanel => "Review changes",
             Self::BottomBar => "Open lower panels",
+            Self::SimpleModeChats => "Find your chats",
+            Self::SimpleModePrompt => "Describe what to build",
+            Self::SimpleModeOutput => "Review the output",
+            Self::SimpleModeSwitcher => "Switch modes",
             Self::TutorialModelSelection => "Select a model",
             Self::TutorialAgentOptions => "Choose agent options",
             Self::TutorialSkills => "Review skills",
@@ -117,6 +134,18 @@ impl WorkspaceTourStep {
             Self::BottomBar => {
                 "Click icons to open terminal, diagnostics, Git/search, language, and status menus."
             }
+            Self::SimpleModeChats => {
+                "Recent chats live here. Start a new chat or reopen previous work from the sidebar."
+            }
+            Self::SimpleModePrompt => {
+                "Type the page, feature, or change you want. Attach a folder when Backboard should work in a project."
+            }
+            Self::SimpleModeOutput => {
+                "Use the output panel for previews, generated files, code changes, and terminals."
+            }
+            Self::SimpleModeSwitcher => {
+                "Use this menu when you need the full code editor or agent workspace."
+            }
             Self::TutorialModelSelection => {
                 "Pick the model you want to use for the sample repo task."
             }
@@ -129,18 +158,32 @@ impl WorkspaceTourStep {
     }
 
     pub fn progress_label(self) -> String {
-        let total = if self.is_tutorial_step() {
+        let total = if self.is_simple_mode_step() {
+            Self::SIMPLE_MODE_TOTAL
+        } else if self.is_tutorial_step() {
             Self::TUTORIAL_TOTAL
         } else {
             Self::TOTAL
         };
-        let prefix = if self.is_tutorial_step() {
+        let prefix = if self.is_simple_mode_step() {
+            "Simple tour"
+        } else if self.is_tutorial_step() {
             "Tutorial"
         } else {
             "Step"
         };
 
         format!("{prefix} {} of {total} - {}", self.index(), self.target())
+    }
+
+    pub fn is_simple_mode_step(self) -> bool {
+        matches!(
+            self,
+            Self::SimpleModeChats
+                | Self::SimpleModePrompt
+                | Self::SimpleModeOutput
+                | Self::SimpleModeSwitcher
+        )
     }
 
     pub fn is_tutorial_step(self) -> bool {
@@ -168,6 +211,10 @@ impl WorkspaceTourStep {
             Self::DirectoryPanel => Some(Self::GitPanel),
             Self::GitPanel => Some(Self::BottomBar),
             Self::BottomBar => None,
+            Self::SimpleModeChats => Some(Self::SimpleModePrompt),
+            Self::SimpleModePrompt => Some(Self::SimpleModeOutput),
+            Self::SimpleModeOutput => Some(Self::SimpleModeSwitcher),
+            Self::SimpleModeSwitcher => None,
             Self::TutorialModelSelection => Some(Self::TutorialAgentOptions),
             Self::TutorialAgentOptions => Some(Self::TutorialSkills),
             Self::TutorialSkills => Some(Self::TutorialPrompt),
@@ -190,6 +237,10 @@ impl WorkspaceTourStep {
             Self::DirectoryPanel => Some(Self::McpTools),
             Self::GitPanel => Some(Self::DirectoryPanel),
             Self::BottomBar => Some(Self::GitPanel),
+            Self::SimpleModeChats => None,
+            Self::SimpleModePrompt => Some(Self::SimpleModeChats),
+            Self::SimpleModeOutput => Some(Self::SimpleModePrompt),
+            Self::SimpleModeSwitcher => Some(Self::SimpleModeOutput),
             Self::TutorialModelSelection => None,
             Self::TutorialAgentOptions => Some(Self::TutorialModelSelection),
             Self::TutorialSkills => Some(Self::TutorialAgentOptions),

@@ -1,22 +1,16 @@
 use crate::multibuffer_hint::MultibufferHint;
-use anyhow::Context as _;
 use db::kvp::KeyValueStore;
 use fs::Fs;
 use gpui::{
     Action, AnyElement, App, AppContext, AsyncWindowContext, Context, DismissEvent, Entity,
     EventEmitter, FocusHandle, Focusable, Global, IntoElement, KeyContext, MouseButton, ObjectFit,
-    Render, ScrollHandle, SharedString, Subscription, Task, TaskExt as _, WeakEntity, Window,
-    actions, img,
+    Render, ScrollHandle, SharedString, Subscription, Task, WeakEntity, Window, actions, img,
 };
 use notifications::status_toast::StatusToast;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use settings::{SettingsStore, VsCodeSettingsSource};
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::sync::Arc;
 use ui::{
     Divider, IconName, IconSize, KeyBinding, ParentElement as _, StatefulInteractiveElement,
     Vector, VectorName, WithScrollbar as _, prelude::*, rems_from_px,
@@ -25,9 +19,9 @@ use ui::{
 pub use workspace::welcome::ShowWelcome;
 use workspace::welcome::WelcomePage;
 use workspace::{
-    AppState, InterfaceMode, MultiWorkspace, OpenMode, OpenOptions, OpenVisible, Workspace,
+    AppState, InterfaceMode, MultiWorkspace, Workspace,
     item::{Item, ItemEvent},
-    open_new, open_paths, register_serializable_item, with_active_or_new_workspace,
+    open_new, register_serializable_item, with_active_or_new_workspace,
 };
 use zed_actions::{OpenOnboarding, ResetOnboarding};
 
@@ -59,7 +53,6 @@ pub const FIRST_OPEN: &str = "first_open";
 pub const EXPERIENCE_LEVEL_KVP_KEY: &str = "backboard_experience_level";
 const BACKBOARD_DASHBOARD_URL: &str = "https://app.backboard.io/dashboard";
 const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
-const TOUR_TEST_PROMPT: &str = "In this sample repo, add a completed-task counter to the app. Update the tests and run `npm test`.";
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ExperienceLevel {
@@ -98,16 +91,24 @@ enum OnboardingStep {
     ImportSettings(ExperienceLevel),
 }
 
+#[derive(Clone, Copy)]
+enum OnboardingTourKind {
+    SimpleMode,
+    Workspace,
+}
+
 struct WorkspaceTourPromptModal {
     focus_handle: FocusHandle,
     start_tour: bool,
+    tour_kind: OnboardingTourKind,
 }
 
 impl WorkspaceTourPromptModal {
-    fn new(cx: &mut Context<Self>) -> Self {
+    fn new(tour_kind: OnboardingTourKind, cx: &mut Context<Self>) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             start_tour: false,
+            tour_kind,
         }
     }
 }
@@ -118,6 +119,16 @@ impl Render for WorkspaceTourPromptModal {
         let overlay_background = colors.background.opacity(0.64);
         let modal_background = colors.elevated_surface_background;
         let modal_border = colors.border_variant;
+        let (title, description) = match self.tour_kind {
+            OnboardingTourKind::SimpleMode => (
+                "Take a quick Simple Mode tour?",
+                "Walk through chats, the prompt, output panel, and mode switcher.",
+            ),
+            OnboardingTourKind::Workspace => (
+                "Take a quick tour?",
+                "Walk through the editor, composer, and panels.",
+            ),
+        };
 
         div()
             .absolute()
@@ -146,16 +157,14 @@ impl Render for WorkspaceTourPromptModal {
                             v_flex()
                                 .gap_1()
                                 .child(
-                                    Label::new("Take a quick tour?")
+                                    Label::new(title)
                                         .size(LabelSize::Default)
                                         .color(Color::Default),
                                 )
                                 .child(
-                                    Label::new(
-                                        "Walk through the editor, composer, panels, and a sample repo.",
-                                    )
-                                    .size(LabelSize::Small)
-                                    .color(Color::Muted),
+                                    Label::new(description)
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
                                 ),
                         )
                         .child(
@@ -199,8 +208,14 @@ impl workspace::ModalView for WorkspaceTourPromptModal {
         cx: &mut Context<Self>,
     ) -> workspace::DismissDecision {
         if self.start_tour {
-            window.defer(cx, |window, cx| {
-                Onboarding::start_workspace_tour(window, cx);
+            let tour_kind = self.tour_kind;
+            window.defer(cx, move |window, cx| match tour_kind {
+                OnboardingTourKind::SimpleMode => {
+                    Onboarding::start_simple_mode_tour(window, cx);
+                }
+                OnboardingTourKind::Workspace => {
+                    Onboarding::start_workspace_tour(window, cx);
+                }
             });
         }
 
@@ -498,23 +513,29 @@ impl Onboarding {
             ExperienceLevel::Beginner => {
                 close_onboarding_tab(cx);
                 window.defer(cx, |_, cx| {
-                    Self::show_api_key_modal(cx, None);
+                    Self::show_api_key_modal_then_workspace_tour_prompt(
+                        cx,
+                        OnboardingTourKind::SimpleMode,
+                    );
                 });
             }
             ExperienceLevel::Developer | ExperienceLevel::Power => {
                 go_to_welcome_page(cx);
                 window.defer(cx, |_, cx| {
-                    Self::show_api_key_modal_then_workspace_tour_prompt(cx)
+                    Self::show_api_key_modal_then_workspace_tour_prompt(
+                        cx,
+                        OnboardingTourKind::Workspace,
+                    )
                 });
             }
         }
     }
 
-    fn show_api_key_modal_then_workspace_tour_prompt(cx: &mut App) {
+    fn show_api_key_modal_then_workspace_tour_prompt(cx: &mut App, tour_kind: OnboardingTourKind) {
         Self::show_api_key_modal(
             cx,
-            Some(Box::new(|window, cx| {
-                Self::show_workspace_tour_prompt(window, cx);
+            Some(Box::new(move |window, cx| {
+                Self::show_workspace_tour_prompt(window, tour_kind, cx);
             })),
         );
     }
@@ -541,10 +562,28 @@ impl Onboarding {
         });
     }
 
-    fn show_workspace_tour_prompt(window: &mut Window, cx: &mut App) {
-        window.defer(cx, |_, cx| {
-            with_active_or_new_workspace(cx, |workspace, window, cx| {
-                workspace.toggle_modal(window, cx, |_, cx| WorkspaceTourPromptModal::new(cx));
+    fn show_workspace_tour_prompt(
+        window: &mut Window,
+        tour_kind: OnboardingTourKind,
+        cx: &mut App,
+    ) {
+        window.defer(cx, move |_, cx| {
+            with_active_or_new_workspace(cx, move |workspace, window, cx| {
+                workspace.toggle_modal(window, cx, move |_, cx| {
+                    WorkspaceTourPromptModal::new(tour_kind, cx)
+                });
+            });
+        });
+    }
+
+    fn start_simple_mode_tour(window: &mut Window, cx: &mut App) {
+        window.defer(cx, |window, cx| {
+            let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() else {
+                return;
+            };
+
+            multi_workspace.update(cx, |multi_workspace, cx| {
+                multi_workspace.start_simple_mode_tour(window, cx);
             });
         });
     }
@@ -556,158 +595,9 @@ impl Onboarding {
             };
 
             multi_workspace.update(cx, |multi_workspace, cx| {
-                multi_workspace.start_workspace_tour_with_completion(window, cx, |window, cx| {
-                    Self::open_sample_repo_and_prompt(window, cx);
-                });
+                multi_workspace.start_workspace_tour(window, cx);
             });
         });
-    }
-
-    fn open_sample_repo_and_prompt(window: &mut Window, cx: &mut App) {
-        let Some(window_handle) = window.window_handle().downcast::<MultiWorkspace>() else {
-            return;
-        };
-
-        let app_state = AppState::global(cx);
-        let sample_repo_task =
-            cx.background_spawn(async move { Self::create_sample_repo_for_tour().await });
-
-        cx.spawn(async move |cx| {
-            let repo_path = sample_repo_task.await?;
-            let source_file = repo_path.join("src").join("app.js");
-            let open_task = cx.update(|cx| {
-                open_paths(
-                    &[repo_path, source_file],
-                    app_state,
-                    OpenOptions {
-                        visible: Some(OpenVisible::OnlyFiles),
-                        requesting_window: Some(window_handle),
-                        open_mode: OpenMode::Activate,
-                        add_dirs_to_sidebar: false,
-                        ..OpenOptions::default()
-                    },
-                    cx,
-                )
-            });
-
-            let open_result = open_task.await?;
-            open_result
-                .window
-                .update(cx, |multi_workspace, window, cx| {
-                    multi_workspace.open_code_editor(window, cx);
-                    open_result.workspace.update(cx, |workspace, cx| {
-                        backboard_ui::open_backboard_panel_with_prompt(
-                            workspace,
-                            window,
-                            cx,
-                            TOUR_TEST_PROMPT,
-                        );
-                    });
-                    if backboard_ui::backboard_api_key_is_connected() {
-                        multi_workspace.start_workspace_test_repo_tutorial(window, cx);
-                    }
-                })?;
-
-            anyhow::Ok(())
-        })
-        .detach_and_log_err(cx);
-    }
-
-    async fn create_sample_repo_for_tour() -> anyhow::Result<PathBuf> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .context("reading system time")?
-            .as_millis();
-        let repo_path = std::env::temp_dir().join(format!("backboard-tour-sample-{timestamp}"));
-
-        std::fs::create_dir_all(repo_path.join("src"))
-            .with_context(|| format!("creating sample repo source directory at {repo_path:?}"))?;
-        std::fs::create_dir_all(repo_path.join("tests"))
-            .with_context(|| format!("creating sample repo test directory at {repo_path:?}"))?;
-
-        std::fs::write(
-            repo_path.join("README.md"),
-            "# Backboard tour sample\n\nUse the prompt in the composer to make one small change, update the test, and run `npm test`.\n",
-        )
-        .context("writing sample README")?;
-        std::fs::write(
-            repo_path.join("package.json"),
-            r#"{
-  "name": "backboard-tour-sample",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "test": "node tests/app.test.js"
-  }
-}
-"#,
-        )
-        .context("writing sample package.json")?;
-        std::fs::write(
-            repo_path.join("src").join("app.js"),
-            r#"export const tasks = [
-  { title: "Plan the feature", completed: true },
-  { title: "Edit the code", completed: false },
-  { title: "Run the test", completed: false }
-];
-
-export function openTasks(items = tasks) {
-  return items.filter((task) => !task.completed);
-}
-
-export function renderTasks(items = tasks) {
-  return openTasks(items).map((task) => `- ${task.title}`).join("\n");
-}
-"#,
-        )
-        .context("writing sample app.js")?;
-        std::fs::write(
-            repo_path.join("tests").join("app.test.js"),
-            r#"import assert from "node:assert/strict";
-import { openTasks, renderTasks, tasks } from "../src/app.js";
-
-assert.equal(openTasks(tasks).length, 2);
-assert.equal(renderTasks(tasks), "- Edit the code\n- Run the test");
-
-console.log("sample app tests passed");
-"#,
-        )
-        .context("writing sample app.test.js")?;
-
-        if let Err(error) = Self::initialize_sample_repo_git(&repo_path).await {
-            zlog::warn!("failed to initialize tour sample git repo: {error:#}");
-        }
-
-        Ok(repo_path)
-    }
-
-    async fn initialize_sample_repo_git(repo_path: &Path) -> anyhow::Result<()> {
-        Self::run_git(repo_path, &["init"]).await?;
-        Self::run_git(repo_path, &["checkout", "-B", "main"]).await?;
-        Self::run_git(repo_path, &["config", "user.name", "Backboard Tour"]).await?;
-        Self::run_git(repo_path, &["config", "user.email", "tour@backboard.local"]).await?;
-        Self::run_git(repo_path, &["add", "."]).await?;
-        Self::run_git(repo_path, &["commit", "-m", "Initial sample app"]).await?;
-        Ok(())
-    }
-
-    async fn run_git(repo_path: &Path, args: &[&str]) -> anyhow::Result<()> {
-        let output = smol::process::Command::new("git")
-            .args(args)
-            .current_dir(repo_path)
-            .output()
-            .await
-            .with_context(|| format!("running git {}", args.join(" ")))?;
-
-        if !output.status.success() {
-            anyhow::bail!(
-                "git {} failed: {}",
-                args.join(" "),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-
-        Ok(())
     }
 
     fn shows_import_settings_step(level: ExperienceLevel) -> bool {

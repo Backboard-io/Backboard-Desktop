@@ -680,6 +680,11 @@ impl MultiWorkspace {
         self.go_to_workspace_tour_step(WorkspaceTourStep::Menu, window, cx);
     }
 
+    pub fn start_simple_mode_tour(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.workspace_tour_completion = None;
+        self.go_to_workspace_tour_step(WorkspaceTourStep::SimpleModeChats, window, cx);
+    }
+
     pub fn start_workspace_tour_with_completion(
         &mut self,
         window: &mut Window,
@@ -742,6 +747,12 @@ impl MultiWorkspace {
             WorkspaceTourStep::SimpleMode => {
                 self.set_interface_mode(InterfaceMode::Simple, window, cx);
                 self.close_workspace_tour_panels(window, cx);
+            }
+            WorkspaceTourStep::SimpleModeChats
+            | WorkspaceTourStep::SimpleModePrompt
+            | WorkspaceTourStep::SimpleModeOutput
+            | WorkspaceTourStep::SimpleModeSwitcher => {
+                self.set_interface_mode(InterfaceMode::Simple, window, cx);
             }
             WorkspaceTourStep::AgentWorkspace => {
                 self.set_interface_mode(InterfaceMode::Expert, window, cx);

@@ -149,6 +149,17 @@ impl ConfigOptionsView {
             .collect()
     }
 
+    pub(crate) fn category_picker_trigger(
+        &self,
+        category: acp::SessionConfigOptionCategory,
+        cx: &App,
+    ) -> Option<ConfigOptionCategoryPickerTrigger> {
+        let config_id = self.first_config_option_id(category)?;
+        let selector = self.selector_for_config_id(&config_id, cx)?;
+
+        Some(ConfigOptionCategoryPickerTrigger { selector })
+    }
+
     pub fn cycle_option(
         &mut self,
         config_id: &acp::SessionConfigId,
@@ -291,18 +302,35 @@ impl ConfigOptionsView {
     }
 
     fn rebuild_selectors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Config option updates can mutate option values for existing IDs (for example,
-        // reasoning levels after a model switch). Rebuild to refresh cached picker entries.
         let options = self.config_options.config_options();
         self.apply_options_snapshot(options.clone());
-        self.selectors = Self::build_selectors(
-            &options,
-            &self.config_options,
-            &self.agent_server,
-            &self.fs,
-            window,
-            cx,
-        );
+
+        let has_deployed_picker = self
+            .selectors
+            .iter()
+            .any(|selector| selector.read(cx).has_deployed_picker());
+
+        if has_deployed_picker {
+            self.selectors = Self::reconcile_selectors(
+                &options,
+                &self.selectors,
+                &self.config_options,
+                &self.agent_server,
+                &self.fs,
+                window,
+                cx,
+            );
+        } else {
+            self.selectors = Self::build_selectors(
+                &options,
+                &self.config_options,
+                &self.agent_server,
+                &self.fs,
+                window,
+                cx,
+            );
+        }
+
         cx.notify();
     }
 
@@ -323,23 +351,153 @@ impl ConfigOptionsView {
             .iter()
             .filter(|option| !is_skill_config_option_id(&option.id))
             .map(|option| {
-                let config_options = config_options.clone();
-                let agent_server = agent_server.clone();
-                let fs = fs.clone();
-                let option_count = count_config_options(option);
-                cx.new(|cx| {
-                    ConfigOptionSelector::new(
-                        config_options,
-                        option.id.clone(),
-                        option_count,
-                        agent_server,
-                        fs,
-                        window,
-                        cx,
-                    )
-                })
+                Self::build_selector(option, config_options, agent_server, fs, window, cx)
             })
             .collect()
+    }
+
+    fn reconcile_selectors(
+        options: &[acp::SessionConfigOption],
+        existing_selectors: &[Entity<ConfigOptionSelector>],
+        config_options: &Rc<dyn AgentSessionConfigOptions>,
+        agent_server: &Rc<dyn AgentServer>,
+        fs: &Arc<dyn Fs>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<Entity<ConfigOptionSelector>> {
+        options
+            .iter()
+            .filter(|option| !is_skill_config_option_id(&option.id))
+            .map(|option| {
+                let existing_selector = existing_selectors
+                    .iter()
+                    .find(|selector| selector.read(cx).config_id() == &option.id)
+                    .cloned();
+
+                if let Some(selector) = existing_selector {
+                    selector.update(cx, |selector, cx| {
+                        selector.refresh_picker(window, cx);
+                    });
+                    selector
+                } else {
+                    Self::build_selector(option, config_options, agent_server, fs, window, cx)
+                }
+            })
+            .collect()
+    }
+
+    fn build_selector(
+        option: &acp::SessionConfigOption,
+        config_options: &Rc<dyn AgentSessionConfigOptions>,
+        agent_server: &Rc<dyn AgentServer>,
+        fs: &Arc<dyn Fs>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<ConfigOptionSelector> {
+        let config_options = config_options.clone();
+        let agent_server = agent_server.clone();
+        let fs = fs.clone();
+        let option_count = count_config_options(option);
+        cx.new(|cx| {
+            ConfigOptionSelector::new(
+                config_options,
+                option.id.clone(),
+                option_count,
+                agent_server,
+                fs,
+                window,
+                cx,
+            )
+        })
+    }
+}
+
+#[derive(IntoElement)]
+pub(crate) struct ConfigOptionCategoryPickerTrigger {
+    selector: Entity<ConfigOptionSelector>,
+}
+
+impl RenderOnce for ConfigOptionCategoryPickerTrigger {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        self.selector.update(cx, |selector, cx| {
+            if selector.current_option().is_none() {
+                return ButtonLike::new("backboard-footer-model-selector")
+                    .stop_mouse_down_propagation()
+                    .width(px(156.))
+                    .height(px(26.).into())
+                    .style(ButtonStyle::Subtle)
+                    .child(
+                        Label::new("Select model")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .truncate(),
+                    )
+                    .disabled(true)
+                    .into_any_element();
+            }
+
+            let value_name = selector.current_value_name();
+            let provider_label = selector.current_value_description();
+            let tooltip_label = format!("Change model: {value_name}");
+            let is_deployed = selector.picker_handle.is_deployed();
+
+            let trigger = ButtonLike::new("backboard-footer-model-selector")
+                .stop_mouse_down_propagation()
+                .width(px(156.))
+                .height(px(26.).into())
+                .style(ButtonStyle::Subtle)
+                .child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .gap_1()
+                        .items_center()
+                        .when_some(provider_label, |this, provider| {
+                            this.child(
+                                Label::new(provider)
+                                    .size(LabelSize::XSmall)
+                                    .color(if is_deployed {
+                                        Color::Accent
+                                    } else {
+                                        Color::Muted
+                                    })
+                                    .flex_none(),
+                            )
+                        })
+                        .child(
+                            Label::new(value_name)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Default)
+                                .truncate()
+                                .flex_1(),
+                        )
+                        .child(
+                            Icon::new(if is_deployed {
+                                IconName::ChevronUp
+                            } else {
+                                IconName::ChevronDown
+                            })
+                            .size(IconSize::XSmall)
+                            .color(Color::Muted),
+                        ),
+                );
+
+            let tooltip = Tooltip::text(tooltip_label);
+            PickerPopoverMenu::new(
+                selector.picker.clone(),
+                trigger,
+                tooltip,
+                gpui::Anchor::BottomRight,
+                cx,
+            )
+            .id(format!(
+                "config-option-footer-picker-{}",
+                selector.config_id.0
+            ))
+            .with_handle(selector.picker_handle.clone())
+            .render(window, cx)
+            .into_any_element()
+        })
     }
 }
 
@@ -452,6 +610,17 @@ impl ConfigOptionSelector {
         self.picker_handle.toggle(window, cx);
     }
 
+    fn has_deployed_picker(&self) -> bool {
+        self.picker_handle.is_deployed()
+    }
+
+    fn refresh_picker(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.picker.update(cx, |picker, cx| {
+            picker.delegate.refresh_options(cx);
+            picker.refresh(window, cx);
+        });
+    }
+
     fn current_value_name(&self) -> String {
         let Some(option) = self.current_option() else {
             return "Unknown".to_string();
@@ -466,9 +635,20 @@ impl ConfigOptionSelector {
         }
     }
 
+    fn current_value_description(&self) -> Option<SharedString> {
+        let current_value = get_current_value(&self.config_options, &self.config_id)?;
+        extract_options(&self.config_options, &self.config_id)
+            .into_iter()
+            .find(|option| option.value == current_value)
+            .and_then(|option| option.description)
+            .filter(|description| !description.is_empty())
+            .map(SharedString::from)
+    }
+
     fn render_trigger_button(&self, _window: &mut Window, _cx: &mut Context<Self>) -> ButtonLike {
         let Some(option) = self.current_option() else {
             return ButtonLike::new("config-option-trigger")
+                .stop_mouse_down_propagation()
                 .full_width()
                 .height(px(30.).into())
                 .child(
@@ -491,6 +671,7 @@ impl ConfigOptionSelector {
         ButtonLike::new(ElementId::Name(
             format!("config-option-{}", option.id.0).into(),
         ))
+        .stop_mouse_down_propagation()
         .full_width()
         .height(px(32.).into())
         .style(ButtonStyle::Subtle)
@@ -663,6 +844,24 @@ impl ConfigOptionPickerDelegate {
 
     fn current_value(&self) -> Option<acp::SessionConfigValueId> {
         get_current_value(&self.config_options, &self.config_id)
+    }
+
+    fn refresh_options(&mut self, cx: &mut App) {
+        self.favorites = self
+            .agent_server
+            .favorite_config_option_value_ids(&self.config_id, cx);
+        self.all_options = extract_options(&self.config_options, &self.config_id);
+        self.filtered_entries = options_to_picker_entries(&self.all_options, &self.favorites);
+        self.selected_description = None;
+
+        let current_value = self.current_value();
+        self.selected_index = current_value
+            .and_then(|current| {
+                self.filtered_entries.iter().position(|entry| {
+                    matches!(entry, ConfigOptionPickerEntry::Option(opt) if opt.value == current)
+                })
+            })
+            .unwrap_or(0);
     }
 }
 
@@ -1069,5 +1268,177 @@ fn count_config_options(option: &acp::SessionConfigOption) -> usize {
             _ => 0,
         },
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{any::Any, cell::RefCell};
+
+    use acp_thread::AgentConnection;
+    use agent_servers::{AgentServer, AgentServerDelegate};
+    use anyhow::Result;
+    use fs::FakeFs;
+    use gpui::{TestAppContext, VisualTestContext};
+    use project::{AgentId, Project};
+    use settings::SettingsStore;
+
+    use super::*;
+
+    struct TestConfigOptions {
+        options: Rc<RefCell<Vec<acp::SessionConfigOption>>>,
+    }
+
+    impl AgentSessionConfigOptions for TestConfigOptions {
+        fn config_options(&self) -> Vec<acp::SessionConfigOption> {
+            self.options.borrow().clone()
+        }
+
+        fn set_config_option(
+            &self,
+            config_id: acp::SessionConfigId,
+            value: acp::SessionConfigValueId,
+            _cx: &mut App,
+        ) -> Task<Result<Vec<acp::SessionConfigOption>>> {
+            for option in self.options.borrow_mut().iter_mut() {
+                if option.id == config_id
+                    && let acp::SessionConfigKind::Select(select) = &mut option.kind
+                {
+                    select.current_value = value.clone();
+                }
+            }
+
+            Task::ready(Ok(self.config_options()))
+        }
+    }
+
+    struct TestAgentServer;
+
+    impl AgentServer for TestAgentServer {
+        fn logo(&self) -> IconName {
+            IconName::BackboardAssistant
+        }
+
+        fn agent_id(&self) -> AgentId {
+            AgentId::new("test-agent")
+        }
+
+        fn connect(
+            &self,
+            _delegate: AgentServerDelegate,
+            _project: Entity<Project>,
+            _cx: &mut App,
+        ) -> Task<Result<Rc<dyn AgentConnection>>> {
+            Task::ready(Err(anyhow::anyhow!("unused test server")))
+        }
+
+        fn into_any(self: Rc<Self>) -> Rc<dyn Any> {
+            self
+        }
+    }
+
+    fn model_config_options(
+        current_value: &str,
+        values: &[(&str, &str)],
+    ) -> Vec<acp::SessionConfigOption> {
+        vec![
+            acp::SessionConfigOption::select(
+                "test_model",
+                "Model",
+                current_value.to_string(),
+                values
+                    .iter()
+                    .map(|(value, name)| {
+                        acp::SessionConfigSelectOption::new(value.to_string(), name.to_string())
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .category(acp::SessionConfigOptionCategory::Model),
+        ]
+    }
+
+    fn init_test(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn refresh_preserves_deployed_config_option_picker(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let options = Rc::new(RefCell::new(model_config_options(
+            "gpt-5",
+            &[("gpt-5", "GPT-5"), ("gpt-5-mini", "GPT-5 mini")],
+        )));
+        let config_options: Rc<dyn AgentSessionConfigOptions> = Rc::new(TestConfigOptions {
+            options: options.clone(),
+        });
+        let agent_server = Rc::new(TestAgentServer);
+        let fs = FakeFs::new(cx.executor());
+
+        let window = cx.add_window({
+            let config_options = config_options.clone();
+            let agent_server = agent_server.clone();
+            let fs = fs.clone();
+            move |window, cx| ConfigOptionsView::new(config_options, agent_server, fs, window, cx)
+        });
+        let view = window
+            .entity(cx)
+            .expect("config options view should be the window root entity");
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+
+        view.update_in(&mut cx, |view, window, cx| {
+            assert!(view.toggle_category_picker(
+                acp::SessionConfigOptionCategory::Model,
+                window,
+                cx,
+            ));
+        });
+        cx.run_until_parked();
+
+        let selector_id_before = view.read_with(&cx, |view, cx| {
+            let selector = view.selectors.first().expect("model selector should exist");
+            assert!(selector.read(cx).has_deployed_picker());
+            selector.entity_id()
+        });
+
+        *options.borrow_mut() = model_config_options(
+            "claude-sonnet",
+            &[
+                ("gpt-5", "GPT-5"),
+                ("claude-sonnet", "Claude Sonnet"),
+                ("gemini-flash", "Gemini Flash"),
+            ],
+        );
+
+        view.update_in(&mut cx, |view, window, cx| {
+            view.refresh_options(window, cx);
+        });
+        cx.run_until_parked();
+
+        view.read_with(&cx, |view, cx| {
+            let selector = view
+                .selectors
+                .first()
+                .expect("model selector should remain");
+            assert_eq!(selector.entity_id(), selector_id_before);
+            assert!(selector.read(cx).has_deployed_picker());
+
+            let option_names = selector
+                .read(cx)
+                .picker
+                .read(cx)
+                .delegate
+                .all_options
+                .iter()
+                .map(|option| option.name.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(option_names, vec!["GPT-5", "Claude Sonnet", "Gemini Flash"]);
+        });
     }
 }

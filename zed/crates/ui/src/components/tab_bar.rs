@@ -104,7 +104,7 @@ impl RenderOnce for TabBar {
             .flex_none()
             .w_full()
             .h(Tab::container_height(cx))
-            .p_1()
+            .px_1()
             .bg(colors
                 .tab_bar_background
                 .blend(colors.panel_background.opacity(0.28)))
@@ -133,7 +133,7 @@ impl RenderOnce for TabBar {
                             .id("tabs")
                             .flex_grow()
                             .items_center()
-                            .gap_0p5()
+                            .gap_0()
                             .overflow_x_scroll()
                             .when_some(self.scroll_handle, |cx, scroll_handle| {
                                 cx.track_scroll(&scroll_handle)

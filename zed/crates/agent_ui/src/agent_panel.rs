@@ -93,7 +93,7 @@ use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use theme_settings::ThemeSettings;
 use ui::{
     ContextMenu, ContextMenuEntry, IconButton, IconButtonShape, PopoverMenu, PopoverMenuHandle,
-    Tab, Tooltip, prelude::*, utils::WithRemSize,
+    Tab, TabPosition, Tooltip, prelude::*, utils::WithRemSize,
 };
 use util::ResultExt as _;
 use workspace::{
@@ -6671,14 +6671,21 @@ impl AgentPanel {
     }
 
     fn render_thread_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tabs = self.live_thread_tabs(cx);
+        let active_tab_index = tabs
+            .iter()
+            .position(|(_, _, is_active)| *is_active)
+            .unwrap_or(0);
+        let tab_count = tabs.len();
+
         h_flex()
             .id("agent-thread-tabs")
             .min_w_0()
             .flex_1()
-            .gap_0p5()
+            .gap_0()
             .overflow_x_hidden()
-            .children(self.live_thread_tabs(cx).into_iter().map(
-                |(thread_id, conversation_view, is_active)| {
+            .children(tabs.into_iter().enumerate().map(
+                |(ix, (thread_id, conversation_view, is_active))| {
                     let label = self.thread_tab_label(&conversation_view, cx);
                     let close_button = IconButton::new(
                         format!("close-agent-thread-tab-{}", thread_id.to_key_string()),
@@ -6694,7 +6701,16 @@ impl AgentPanel {
                         cx.stop_propagation();
                         this.close_live_thread_tab(thread_id, window, cx);
                     }));
+                    let position = if tab_count == 1 || ix == tab_count.saturating_sub(1) {
+                        TabPosition::Last
+                    } else if ix == 0 {
+                        TabPosition::First
+                    } else {
+                        TabPosition::Middle(ix.cmp(&active_tab_index))
+                    };
                     Tab::new(format!("agent-thread-tab-{}", thread_id.to_key_string()))
+                        .straight_sided()
+                        .position(position)
                         .toggle_state(is_active)
                         .end_slot(close_button)
                         .child(
@@ -6854,16 +6870,6 @@ impl AgentPanel {
             .with_handle(self.new_thread_menu_handle.clone())
             .menu(move |window, cx| new_thread_menu_builder(window, cx));
 
-        let view_in_agents_button = IconButton::new("view-in-agents", IconName::BackboardAgent)
-            .shape(IconButtonShape::Square)
-            .size(ButtonSize::Compact)
-            .style(ButtonStyle::Subtle)
-            .icon_size(IconSize::Small)
-            .tooltip(Tooltip::text("Open in Agents"))
-            .on_click(|_, window, cx| {
-                window.dispatch_action(Box::new(OpenBackboardAgentWorkspace), cx);
-            });
-
         let base_container = h_flex()
             .size_full()
             .when(
@@ -6933,7 +6939,6 @@ impl AgentPanel {
                         .gap_1()
                         .pl_1()
                         .pr_1()
-                        .child(view_in_agents_button)
                         .child(new_thread_menu)
                         .child(full_screen_button)
                         .child(self.render_thread_history_menu(window, cx))

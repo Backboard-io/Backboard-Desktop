@@ -83,6 +83,11 @@ impl AgentModelSelector {
             selector.delegate.cycle_favorite_models(window, cx);
         });
     }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn is_open(&self) -> bool {
+        self.menu_handle.is_deployed()
+    }
 }
 
 impl Render for AgentModelSelector {
@@ -121,6 +126,7 @@ impl Render for AgentModelSelector {
         PickerPopoverMenu::new(
             self.selector.clone(),
             ButtonLike::new("active-model")
+                .stop_mouse_down_propagation()
                 .width(px(28.))
                 .height(px(28.).into())
                 .child(
