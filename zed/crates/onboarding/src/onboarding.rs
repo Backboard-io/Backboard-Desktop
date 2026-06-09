@@ -2,15 +2,16 @@ use crate::multibuffer_hint::MultibufferHint;
 use db::kvp::KeyValueStore;
 use fs::Fs;
 use gpui::{
-    Action, AnyElement, App, AppContext, AsyncWindowContext, Context, DismissEvent, Entity,
-    EventEmitter, FocusHandle, Focusable, Global, IntoElement, KeyContext, MouseButton, ObjectFit,
-    Render, ScrollHandle, SharedString, Subscription, Task, WeakEntity, Window, actions, img,
+    Action, Animation, AnimationExt, AnyElement, App, AppContext, AsyncWindowContext, Context,
+    DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Global, Hsla,
+    IntoElement, KeyContext, MouseButton, ObjectFit, Render, ScrollHandle, SharedString,
+    Subscription, Task, WeakEntity, Window, actions, img, rgb,
 };
 use notifications::status_toast::StatusToast;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use settings::{SettingsStore, VsCodeSettingsSource};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use ui::{
     Divider, IconName, IconSize, KeyBinding, ParentElement as _, StatefulInteractiveElement,
     Vector, VectorName, WithScrollbar as _, prelude::*, rems_from_px,
@@ -54,6 +55,7 @@ pub const FIRST_OPEN: &str = "first_open";
 pub const EXPERIENCE_LEVEL_KVP_KEY: &str = "backboard_experience_level";
 const BACKBOARD_DASHBOARD_URL: &str = "https://app.backboard.io/dashboard";
 const FIRST_RUN_NAV_TIPS_STATE_KEY: &str = "backboard_first_run_nav_tips_state_v1";
+const WELCOME_TITLE_TEXT: &str = "Welcome to Backboard Studio";
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ExperienceLevel {
@@ -418,6 +420,9 @@ struct Onboarding {
     focus_handle: FocusHandle,
     scroll_handle: ScrollHandle,
     step: OnboardingStep,
+    welcome_continue_transitioning: bool,
+    welcome_title_animation_generation: u64,
+    welcome_title_visible_characters: usize,
     _settings_subscription: Subscription,
 }
 
@@ -437,14 +442,86 @@ impl Onboarding {
             })
             .detach();
 
-            Self {
+            let mut onboarding = Self {
                 focus_handle: cx.focus_handle(),
                 scroll_handle: ScrollHandle::new(),
                 step: OnboardingStep::Welcome,
+                welcome_continue_transitioning: false,
+                welcome_title_animation_generation: 0,
+                welcome_title_visible_characters: 0,
                 _settings_subscription: cx
                     .observe_global::<SettingsStore>(move |_, cx| cx.notify()),
+            };
+
+            onboarding.animate_welcome_title(cx);
+            onboarding
+        })
+    }
+
+    fn animate_welcome_title(&mut self, cx: &mut Context<Self>) {
+        self.welcome_title_visible_characters = 0;
+        self.welcome_title_animation_generation =
+            self.welcome_title_animation_generation.wrapping_add(1);
+        let animation_generation = self.welcome_title_animation_generation;
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(220))
+                .await;
+
+            for visible_characters in 1..=WELCOME_TITLE_TEXT.chars().count() {
+                cx.background_executor()
+                    .timer(Duration::from_millis(72))
+                    .await;
+
+                let should_continue = this
+                    .update(cx, |this, cx| {
+                        if this.welcome_title_animation_generation != animation_generation
+                            || !matches!(this.step, OnboardingStep::Welcome)
+                        {
+                            return false;
+                        }
+
+                        this.welcome_title_visible_characters = visible_characters;
+                        cx.notify();
+                        true
+                    })
+                    .log_err()
+                    .unwrap_or(false);
+
+                if !should_continue {
+                    break;
+                }
             }
         })
+        .detach();
+    }
+
+    fn continue_from_welcome(&mut self, cx: &mut Context<Self>) {
+        if self.welcome_continue_transitioning {
+            return;
+        }
+
+        self.welcome_continue_transitioning = true;
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(1500))
+                .await;
+            this.update(cx, |this, cx| {
+                this.welcome_continue_transitioning = false;
+                this.step = OnboardingStep::ExperiencePicker;
+                cx.notify();
+            })
+            .log_err();
+        })
+        .detach();
+    }
+
+    fn backboard_mark_color() -> Hsla {
+        Hsla::from(rgb(0x000000))
     }
 
     fn preload_onboarding_assets(cx: &App) {
@@ -464,7 +541,8 @@ impl Onboarding {
 
     fn reset_to_start(&mut self, cx: &mut Context<Self>) {
         self.step = OnboardingStep::Welcome;
-        cx.notify();
+        self.welcome_continue_transitioning = false;
+        self.animate_welcome_title(cx);
     }
 
     fn on_finish(&mut self, _: &Finish, window: &mut Window, cx: &mut Context<Self>) {
@@ -665,48 +743,142 @@ impl Onboarding {
     }
 
     fn render_welcome(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let mark_color = Self::backboard_mark_color();
+        let title_black = Hsla::from(rgb(0x000000));
+        let visible_title = WELCOME_TITLE_TEXT
+            .chars()
+            .take(self.welcome_title_visible_characters)
+            .collect::<String>();
+
         v_flex()
             .w_full()
+            .h_full()
             .min_h(rems_from_px(620.))
             .items_center()
             .justify_center()
-            .pb_12()
+            .pb_16()
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(rems_from_px(420.))
+                    .max_w(rems_from_px(680.))
                     .items_center()
-                    .gap_6()
+                    .justify_center()
+                    .gap_4()
                     .child(
                         v_flex()
                             .w_full()
                             .items_center()
-                            .gap_2()
                             .child(
-                                div().w_full().text_center().child(
-                                    Headline::new("Welcome to Backboard Studio")
-                                        .size(HeadlineSize::XLarge),
+                                div().mb_16().child(
+                                    Vector::square(VectorName::BackboardMark, rems_from_px(92.))
+                                        .color(Color::Custom(mark_color)),
                                 ),
                             )
                             .child(
-                                div().w_full().text_center().child(
-                                    Label::new("Let's get your workspace set up.")
-                                        .size(LabelSize::Default)
-                                        .color(Color::Muted),
-                                ),
+                                v_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .gap_3()
+                                    .child(
+                                        h_flex().w_full().items_start().justify_center().child(
+                                            div()
+                                                .font_ui(cx)
+                                                .text_size(rems_from_px(38.))
+                                                .line_height(rems_from_px(46.))
+                                                .font_weight(FontWeight::LIGHT)
+                                                .text_color(title_black)
+                                                .child(SharedString::from(visible_title)),
+                                        ),
+                                    )
+                                    .child(
+                                        div()
+                                            .max_w(rems_from_px(380.))
+                                            .text_center()
+                                            .font_ui(cx)
+                                            .text_ui_lg(cx)
+                                            .line_height(rems_from_px(24.))
+                                            .font_weight(FontWeight::LIGHT)
+                                            .italic()
+                                            .text_color(title_black.opacity(0.50))
+                                            .child("Let's get your workspace set up."),
+                                    ),
                             ),
                     )
                     .child(
-                        Button::new("continue-from-welcome", "Continue")
-                            .style(ButtonStyle::Filled)
-                            .size(ButtonSize::Large)
-                            .width(rems_from_px(168.))
-                            .end_icon(Icon::new(IconName::ArrowRight).size(IconSize::Small))
+                        h_flex()
+                            .id("continue-from-welcome")
+                            .h(rems_from_px(44.))
+                            .min_w(rems_from_px(172.))
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .rounded_full()
+                            .px_6()
+                            .cursor_pointer()
+                            .hover(|style| style.opacity(0.74))
+                            .active(|style| style.opacity(0.58))
                             .on_click(cx.listener(|this, _, _window, cx| {
-                                this.step = OnboardingStep::ExperiencePicker;
-                                cx.notify();
-                            })),
+                                this.continue_from_welcome(cx);
+                            }))
+                            .child(
+                                div()
+                                    .font_ui(cx)
+                                    .text_size(rems_from_px(15.))
+                                    .line_height(rems_from_px(20.))
+                                    .font_weight(FontWeight::LIGHT)
+                                    .text_color(title_black)
+                                    .child("Continue"),
+                            )
+                            .child(
+                                Icon::new(IconName::ArrowRight)
+                                    .size(IconSize::Small)
+                                    .color(Color::Custom(title_black.opacity(0.72))),
+                            ),
                     ),
+            )
+            .into_any_element()
+    }
+
+    fn render_welcome_transition(&self, cx: &mut Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors();
+        let mark_color = Self::backboard_mark_color();
+
+        div()
+            .absolute()
+            .inset_0()
+            .size_full()
+            .occlude()
+            .bg(colors.editor_background)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .relative()
+                    .size(rems_from_px(240.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Vector::square(VectorName::BackboardMark, rems_from_px(180.))
+                                    .color(Color::Custom(mark_color)),
+                            )
+                            .with_animation(
+                                "welcome-continue-backboard-mark",
+                                Animation::new(Duration::from_millis(1400)),
+                                |element, delta| element.opacity(0.72 + delta * 0.28),
+                            ),
+                    ),
+            )
+            .with_animation(
+                "welcome-continue-full-page-transition",
+                Animation::new(Duration::from_millis(650)),
+                |element, delta| element.opacity(delta),
             )
             .into_any_element()
     }
@@ -772,15 +944,27 @@ impl Onboarding {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors();
+        let hover_background = Hsla::from(rgb(0xeaf6ff));
+        let hover_border = Hsla::from(rgb(0x9ed7ff));
+        let hover_group = SharedString::from(format!("onboarding-level-card-{title}"));
 
         div()
             .id(SharedString::from(title))
-            .w(rems_from_px(520.))
+            .group(hover_group.clone())
+            .w(rems_from_px(544.))
             .flex()
             .flex_col()
             .gap_4()
+            .rounded_lg()
+            .border_1()
+            .border_color(colors.border_transparent)
+            .p_3()
             .cursor_pointer()
-            .hover(|style| style.opacity(0.92))
+            .hover(move |style| {
+                style
+                    .bg(hover_background.opacity(0.7))
+                    .border_color(hover_border)
+            })
             .on_click(cx.listener(move |this, _, _window, cx| {
                 this.step = OnboardingStep::Setup(level);
                 cx.notify();
@@ -800,44 +984,60 @@ impl Onboarding {
                     ),
             )
             .child(
-                h_flex()
+                v_flex()
                     .w_full()
-                    .items_start()
-                    .justify_between()
-                    .gap_4()
+                    .items_center()
+                    .gap_3()
                     .child(
                         v_flex()
+                            .w_full()
+                            .max_w(rems_from_px(440.))
                             .min_w_0()
-                            .flex_1()
+                            .items_start()
                             .gap_1()
                             .child(
                                 h_flex()
+                                    .w_full()
                                     .gap_2()
                                     .items_center()
                                     .child(Headline::new(title).size(HeadlineSize::Large))
                                     .child(
-                                        Label::new(eyebrow)
-                                            .size(LabelSize::Small)
-                                            .color(Color::Accent),
+                                        div().mt_0p5().child(
+                                            Label::new(eyebrow)
+                                                .size(LabelSize::Small)
+                                                .color(Color::Accent),
+                                        ),
                                     ),
                             )
                             .child(
-                                Label::new(description)
-                                    .color(Color::Muted)
-                                    .size(LabelSize::Small),
+                                div().w_full().text_left().child(
+                                    Label::new(description)
+                                        .color(Color::Muted)
+                                        .size(LabelSize::Small),
+                                ),
                             ),
                     )
                     .child(
-                        div().rounded_full().overflow_hidden().child(
-                            Button::new(SharedString::from(format!("continue-{title}")), "Start")
-                                .style(ButtonStyle::Subtle)
-                                .width(rems_from_px(112.))
-                                .end_icon(Icon::new(IconName::ArrowRight).size(IconSize::Small))
-                                .on_click(cx.listener(move |this, _, _window, cx| {
-                                    this.step = OnboardingStep::Setup(level);
-                                    cx.notify();
-                                })),
-                        ),
+                        h_flex()
+                            .w_full()
+                            .max_w(rems_from_px(440.))
+                            .justify_start()
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .items_center()
+                                    .visible_on_hover(hover_group)
+                                    .child(
+                                        Label::new("Start")
+                                            .size(LabelSize::Small)
+                                            .color(Color::Accent),
+                                    )
+                                    .child(
+                                        Icon::new(IconName::ArrowRight)
+                                            .size(IconSize::Small)
+                                            .color(Color::Accent),
+                                    ),
+                            ),
                     ),
             )
     }
@@ -1011,6 +1211,9 @@ impl Render for Onboarding {
                     )
                     .track_scroll(&self.scroll_handle),
             )
+            .when(self.welcome_continue_transitioning, |this| {
+                this.child(self.render_welcome_transition(cx))
+            })
     }
 }
 
