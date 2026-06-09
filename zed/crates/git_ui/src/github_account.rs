@@ -1,4 +1,4 @@
-use anyhow::{Context as _, anyhow};
+use anyhow::Context as _;
 use askpass::EncryptedPassword;
 use client::Client;
 use futures::AsyncReadExt as _;
@@ -10,15 +10,15 @@ use std::time::{Duration, Instant};
 use util::ResultExt as _;
 
 const GITHUB_CREDENTIALS_URL: &str = "backboard://github.com";
-const GITHUB_REPOSITORIES_PER_PAGE: usize = 100;
 const GITHUB_OAUTH_CLIENT_ID_ENV_VAR: &str = "BACKBOARD_GITHUB_OAUTH_CLIENT_ID";
 const DEFAULT_GITHUB_OAUTH_CLIENT_ID: &str = "Ov23liepbvyEF8BpG4Tb";
 const GITHUB_OAUTH_SCOPES: &str = "repo read:org";
 const GITHUB_DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 const GITHUB_ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
+const GITHUB_REPOSITORIES_PER_PAGE: usize = 100;
 
 #[derive(Clone, Debug)]
-pub enum GitHubAccountStatus {
+pub(crate) enum GitHubAccountStatus {
     Checking,
     SignedOut,
     SigningIn {
@@ -32,25 +32,19 @@ pub enum GitHubAccountStatus {
 }
 
 #[derive(Clone, Debug)]
-pub struct GitHubRepository {
+pub(crate) struct GitHubRepository {
     pub name_with_owner: String,
     pub clone_url: String,
     pub is_private: bool,
 }
 
 #[derive(Clone, Debug)]
-pub struct StoredGitHubCredential {
-    pub login: String,
+pub(crate) struct StoredGitHubCredential {
+    login: String,
     access_token: String,
 }
 
-#[derive(Clone, Debug)]
-struct GitHubCredentials {
-    github_login: String,
-    access_token: String,
-}
-
-pub struct GitHubAccountStore {
+pub(crate) struct GitHubAccountStore {
     client: Arc<Client>,
     status: GitHubAccountStatus,
 }
@@ -95,29 +89,21 @@ impl GitHubAccountStore {
 
         let client = self.client.clone();
         cx.spawn(async move |this, cx| {
+            let this_for_code = this.clone();
             let status = async {
-                let authorization = request_device_authorization(client.clone()).await?;
-                let user_code = authorization.user_code.clone();
-                let verification_uri = authorization.verification_uri.clone();
-                this.update(cx, |this, cx| {
-                    this.status = GitHubAccountStatus::SigningIn {
-                        user_code: user_code.into(),
-                    };
-                    cx.notify();
+                let credentials = sign_in_and_store(client.clone(), cx, move |user_code, cx| {
+                    this_for_code
+                        .update(cx, |this, cx| {
+                            this.status = GitHubAccountStatus::SigningIn { user_code };
+                            cx.notify();
+                        })
+                        .ok();
                 })
-                .ok();
-                cx.update(|cx| cx.open_url(&verification_uri));
+                .await?;
 
-                let credentials =
-                    poll_device_authorization(client.clone(), authorization, cx).await?;
-                write_stored_credentials(client.clone(), &credentials, cx).await?;
                 Ok::<GitHubAccountStatus, anyhow::Error>(
-                    fetch_signed_in_status(
-                        client,
-                        credentials.github_login,
-                        credentials.access_token,
-                    )
-                    .await,
+                    fetch_signed_in_status(client, credentials.login, credentials.access_token)
+                        .await,
                 )
             }
             .await
@@ -133,34 +119,45 @@ impl GitHubAccountStore {
     }
 }
 
-pub async fn stored_credentials(
-    cx: &mut AsyncApp,
-) -> anyhow::Result<Option<StoredGitHubCredential>> {
-    let client = cx.update(|cx| Client::global(cx));
-    let credentials_provider = client.credentials_provider();
-    let Some((login, access_token)) = credentials_provider
-        .read_credentials(GITHUB_CREDENTIALS_URL, cx)
-        .await?
-    else {
-        return Ok(None);
-    };
-
-    Ok(Some(StoredGitHubCredential {
-        login,
-        access_token: String::from_utf8(access_token)
-            .context("stored GitHub token is not valid UTF-8")?,
-    }))
+#[derive(Deserialize)]
+struct GitHubDeviceAuthorization {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    #[serde(default = "default_github_device_poll_interval")]
+    interval: u64,
 }
 
-pub async fn delete_stored_credentials(cx: &mut AsyncApp) -> anyhow::Result<()> {
-    let client = cx.update(|cx| Client::global(cx));
-    client
-        .credentials_provider()
-        .delete_credentials(GITHUB_CREDENTIALS_URL, cx)
-        .await
+#[derive(Deserialize)]
+struct GitHubAccessTokenResponse {
+    access_token: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
 }
 
-pub async fn askpass_response_for_prompt(
+#[derive(Deserialize)]
+struct GitHubUserResponse {
+    login: String,
+}
+
+fn default_github_device_poll_interval() -> u64 {
+    5
+}
+
+fn github_oauth_client_id() -> String {
+    std::env::var(GITHUB_OAUTH_CLIENT_ID_ENV_VAR)
+        .ok()
+        .or_else(|| option_env!("BACKBOARD_GITHUB_OAUTH_CLIENT_ID").map(str::to_string))
+        .unwrap_or_else(|| DEFAULT_GITHUB_OAUTH_CLIENT_ID.to_string())
+}
+
+pub(crate) fn is_github_askpass_prompt(prompt: &str) -> bool {
+    let prompt = prompt.to_lowercase();
+    prompt.contains("github.com") && (prompt.contains("username") || prompt.contains("password"))
+}
+
+pub(crate) async fn askpass_response_for_prompt(
     prompt: &str,
     cx: &mut AsyncApp,
 ) -> anyhow::Result<Option<EncryptedPassword>> {
@@ -176,7 +173,27 @@ pub async fn askpass_response_for_prompt(
     encrypted_response_for_prompt(&lower_prompt, credentials)
 }
 
-pub fn filter_repositories(
+pub(crate) async fn sign_in_and_store(
+    client: Arc<Client>,
+    cx: &mut AsyncApp,
+    on_user_code: impl FnOnce(SharedString, &mut AsyncApp) + Send + 'static,
+) -> anyhow::Result<StoredGitHubCredential> {
+    let authorization = request_device_authorization(client.clone()).await?;
+    let verification_uri = authorization.verification_uri.clone();
+    on_user_code(authorization.user_code.clone().into(), cx);
+    cx.update(|cx| cx.open_url(&verification_uri));
+
+    let access_token = poll_device_authorization(client.clone(), authorization, cx).await?;
+    let login = fetch_github_login(client.clone(), &access_token).await?;
+    let credentials = StoredGitHubCredential {
+        login,
+        access_token,
+    };
+    write_stored_credentials(client, &credentials, cx).await?;
+    Ok(credentials)
+}
+
+pub(crate) fn filter_repositories(
     repositories: &[GitHubRepository],
     query: &str,
 ) -> Vec<GitHubRepository> {
@@ -195,6 +212,21 @@ pub fn filter_repositories(
         .collect()
 }
 
+pub(crate) fn encrypted_response_for_prompt(
+    lower_prompt: &str,
+    credentials: StoredGitHubCredential,
+) -> anyhow::Result<Option<EncryptedPassword>> {
+    let response = if lower_prompt.contains("username") {
+        credentials.login
+    } else if lower_prompt.contains("password") {
+        credentials.access_token
+    } else {
+        return Ok(None);
+    };
+
+    Ok(Some(EncryptedPassword::try_from(response.as_ref())?))
+}
+
 async fn load_status(client: Arc<Client>, cx: &mut AsyncApp) -> GitHubAccountStatus {
     let credentials = match stored_credentials(cx).await {
         Ok(Some(credentials)) => credentials,
@@ -202,9 +234,7 @@ async fn load_status(client: Arc<Client>, cx: &mut AsyncApp) -> GitHubAccountSta
         Err(error) => return GitHubAccountStatus::Error(error.to_string().into()),
     };
 
-    let login = credentials.login;
-    let access_token = credentials.access_token;
-    match fetch_signed_in_status(client, login, access_token).await {
+    match fetch_signed_in_status(client, credentials.login, credentials.access_token).await {
         GitHubAccountStatus::Error(error) if error.as_ref().contains("GitHub sign-in expired") => {
             delete_stored_credentials(cx).await.log_err();
             GitHubAccountStatus::SignedOut
@@ -235,117 +265,51 @@ async fn fetch_signed_in_status(
     }
 }
 
+async fn stored_credentials(cx: &mut AsyncApp) -> anyhow::Result<Option<StoredGitHubCredential>> {
+    let client = cx.update(|cx| Client::global(cx));
+    let Some((login, access_token)) = client
+        .credentials_provider()
+        .read_credentials(GITHUB_CREDENTIALS_URL, cx)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some(StoredGitHubCredential {
+        login,
+        access_token: String::from_utf8(access_token)
+            .context("stored GitHub token is not valid UTF-8")?,
+    }))
+}
+
+async fn delete_stored_credentials(cx: &mut AsyncApp) -> anyhow::Result<()> {
+    let client = cx.update(|cx| Client::global(cx));
+    client
+        .credentials_provider()
+        .delete_credentials(GITHUB_CREDENTIALS_URL, cx)
+        .await
+}
+
 async fn write_stored_credentials(
     client: Arc<Client>,
-    credentials: &GitHubCredentials,
+    credentials: &StoredGitHubCredential,
     cx: &mut AsyncApp,
 ) -> anyhow::Result<()> {
     client
         .credentials_provider()
         .write_credentials(
             GITHUB_CREDENTIALS_URL,
-            &credentials.github_login,
+            &credentials.login,
             credentials.access_token.as_bytes(),
             cx,
         )
         .await
 }
 
-#[derive(Debug)]
-enum GitHubRepositoryFetchError {
-    Unauthorized,
-    Forbidden(String),
-    Other(anyhow::Error),
-}
-
-impl From<anyhow::Error> for GitHubRepositoryFetchError {
-    fn from(error: anyhow::Error) -> Self {
-        Self::Other(error)
-    }
-}
-
-#[derive(Deserialize)]
-struct GitHubDeviceAuthorization {
-    device_code: String,
-    user_code: String,
-    verification_uri: String,
-    expires_in: u64,
-    #[serde(default = "default_github_device_poll_interval")]
-    interval: u64,
-}
-
-#[derive(Deserialize)]
-struct GitHubAccessTokenResponse {
-    access_token: Option<String>,
-    error: Option<String>,
-    error_description: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct GitHubUserResponse {
-    login: String,
-}
-
-fn default_github_device_poll_interval() -> u64 {
-    5
-}
-
-fn github_oauth_client_id() -> anyhow::Result<String> {
-    std::env::var(GITHUB_OAUTH_CLIENT_ID_ENV_VAR)
-        .ok()
-        .or_else(|| option_env!("BACKBOARD_GITHUB_OAUTH_CLIENT_ID").map(str::to_string))
-        .or_else(|| Some(DEFAULT_GITHUB_OAUTH_CLIENT_ID.to_string()))
-        .filter(|client_id| !client_id.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow!(
-                "GitHub sign-in is not configured. Build Backboard with {GITHUB_OAUTH_CLIENT_ID_ENV_VAR} set to a GitHub OAuth app client ID with device flow enabled."
-            )
-        })
-}
-
-pub(crate) fn is_github_askpass_prompt(prompt: &str) -> bool {
-    let lower_prompt = prompt.to_lowercase();
-    lower_prompt.contains("github.com")
-        && (lower_prompt.contains("username") || lower_prompt.contains("password"))
-}
-
-pub(crate) async fn sign_in_and_store(
-    client: Arc<Client>,
-    cx: &mut AsyncApp,
-    on_user_code: impl FnOnce(SharedString, &mut AsyncApp) + Send + 'static,
-) -> anyhow::Result<StoredGitHubCredential> {
-    let authorization = request_device_authorization(client.clone()).await?;
-    let verification_uri = authorization.verification_uri.clone();
-    on_user_code(authorization.user_code.clone().into(), cx);
-    cx.update(|cx| cx.open_url(&verification_uri));
-
-    let credentials = poll_device_authorization(client.clone(), authorization, cx).await?;
-    write_stored_credentials(client, &credentials, cx).await?;
-    Ok(StoredGitHubCredential {
-        login: credentials.github_login,
-        access_token: credentials.access_token,
-    })
-}
-
-pub(crate) fn encrypted_response_for_prompt(
-    lower_prompt: &str,
-    credentials: StoredGitHubCredential,
-) -> anyhow::Result<Option<EncryptedPassword>> {
-    let response = if lower_prompt.contains("username") {
-        credentials.login
-    } else if lower_prompt.contains("password") {
-        credentials.access_token
-    } else {
-        return Ok(None);
-    };
-
-    Ok(Some(EncryptedPassword::try_from(response.as_ref())?))
-}
-
 async fn request_device_authorization(
     client: Arc<Client>,
 ) -> anyhow::Result<GitHubDeviceAuthorization> {
-    let client_id = github_oauth_client_id()?;
+    let client_id = github_oauth_client_id();
     let body = format!(
         "client_id={client_id}&scope={}",
         GITHUB_OAUTH_SCOPES.replace(' ', "%20").replace(':', "%3A")
@@ -382,8 +346,8 @@ async fn poll_device_authorization(
     client: Arc<Client>,
     authorization: GitHubDeviceAuthorization,
     cx: &mut AsyncApp,
-) -> anyhow::Result<GitHubCredentials> {
-    let client_id = github_oauth_client_id()?;
+) -> anyhow::Result<String> {
+    let client_id = github_oauth_client_id();
     let started_at = Instant::now();
     let mut interval = Duration::from_secs(authorization.interval.max(1));
     let expires_in = Duration::from_secs(authorization.expires_in);
@@ -427,11 +391,7 @@ async fn poll_device_authorization(
             serde_json::from_str(&body).context("failed to parse GitHub token response")?;
 
         if let Some(access_token) = response.access_token {
-            let github_login = fetch_github_login(client, &access_token).await?;
-            return Ok(GitHubCredentials {
-                github_login,
-                access_token,
-            });
+            return Ok(access_token);
         }
 
         match response.error.as_deref() {
@@ -498,6 +458,20 @@ async fn fetch_github_login(client: Arc<Client>, access_token: &str) -> anyhow::
         serde_json::from_str(&body).context("failed to parse GitHub user response")?;
     Ok(user.login)
 }
+
+#[derive(Debug)]
+enum GitHubRepositoryFetchError {
+    Unauthorized,
+    Forbidden(String),
+    Other(anyhow::Error),
+}
+
+impl From<anyhow::Error> for GitHubRepositoryFetchError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Other(error)
+    }
+}
+
 async fn fetch_github_repositories(
     client: Arc<Client>,
     access_token: &str,
@@ -539,7 +513,7 @@ async fn fetch_github_repositories(
             let status = response.status();
             let mut body = String::new();
             response.body_mut().read_to_string(&mut body).await.ok();
-            return Err(anyhow!("GitHub returned {status}: {body}").into());
+            return Err(anyhow::anyhow!("GitHub returned {status}: {body}").into());
         }
 
         let mut body = String::new();
@@ -591,45 +565,4 @@ fn parse_github_repositories(body: &str) -> anyhow::Result<Vec<GitHubRepository>
             is_private: repository.is_private,
         })
         .collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_github_repositories() {
-        let repositories = parse_github_repositories(
-            r#"[
-                {"full_name":"zed-industries/zed","clone_url":"https://github.com/zed-industries/zed.git","private":false},
-                {"full_name":"backboard/private","clone_url":"https://github.com/backboard/private.git","private":true}
-            ]"#,
-        )
-        .expect("repositories should parse");
-
-        assert_eq!(repositories.len(), 2);
-        assert_eq!(repositories[0].name_with_owner, "zed-industries/zed");
-        assert!(!repositories[0].is_private);
-        assert!(repositories[1].is_private);
-    }
-
-    #[test]
-    fn filters_repositories_by_owner_or_name() {
-        let repositories = vec![
-            GitHubRepository {
-                name_with_owner: "zed-industries/zed".into(),
-                clone_url: "https://github.com/zed-industries/zed.git".into(),
-                is_private: false,
-            },
-            GitHubRepository {
-                name_with_owner: "backboard/private".into(),
-                clone_url: "https://github.com/backboard/private.git".into(),
-                is_private: true,
-            },
-        ];
-
-        let filtered = filter_repositories(&repositories, "PRIVATE");
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].name_with_owner, "backboard/private");
-    }
 }

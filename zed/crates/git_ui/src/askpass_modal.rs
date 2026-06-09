@@ -48,7 +48,7 @@ impl AskPassModal {
             }
             editor
         });
-        Self {
+        let mut this = Self {
             operation,
             prompt,
             editor,
@@ -56,7 +56,11 @@ impl AskPassModal {
             github_user_code: None,
             github_sign_in_error: None,
             is_signing_in_to_github: false,
+        };
+        if this.is_github_prompt() {
+            this.sign_in_to_github(cx);
         }
+        this
     }
 
     fn cancel(&mut self, _: &menu::Cancel, _window: &mut Window, cx: &mut Context<Self>) {
@@ -92,6 +96,7 @@ impl AskPassModal {
         let Some(tx) = self.tx.take() else {
             return;
         };
+
         self.is_signing_in_to_github = true;
         self.github_sign_in_error = None;
         cx.notify();
