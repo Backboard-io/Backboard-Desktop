@@ -1186,23 +1186,6 @@ impl ChatMode {
         "Ask Backboard..."
     }
 
-    fn prompt_prefix(self) -> &'static str {
-        match self {
-            ChatMode::Build => concat!(
-                "Simple build mode: build or edit the project for a nontechnical user.\n",
-                "- Default to creating a polished web app or page when the user asks for a product, app, page, dashboard, tool, game, or visual experience and does not specify another medium.\n",
-                "- Do not force a web app when the user explicitly asks for another artifact, such as docs, scripts, data work, configuration, terminal help, or repository cleanup.\n",
-                "- Proceed with sensible defaults when style, brand, audience, content, or layout choices are missing. Ask a clarifying question only when the request cannot be acted on safely or the user explicitly asks for a decision first.\n",
-                "- Keep visible chat replies short, natural, and outcome-focused. Do not show code, filenames, commands, raw logs, markdown-heavy checklists, or implementation details unless the user asks.\n",
-                "- When the work is done, reply like a chat message in 1-2 sentences. Avoid Features or Controls reports; mention the result and how to try it.\n",
-                "- Do not narrate implementation mechanics in chat. Avoid phrases like updating files, creating HTML/CSS/JavaScript files, editing components, running commands, or changing specific filenames. Say what user-facing experience is being built instead.\n",
-                "- Summarize edits as product changes. Let the UI expose file counts and read-only diffs separately, such as Backboard changed 3 files.\n",
-                "- Treat code and diffs as read-only review surfaces for the user.\n",
-                "- After creating or updating a runnable artifact, start or refresh the preview."
-            ),
-        }
-    }
-
     fn agent_workspace_mode(self) -> BackboardAgentWorkspaceMode {
         match self {
             ChatMode::Build => BackboardAgentWorkspaceMode::Free,
@@ -2493,14 +2476,12 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let prompt_prefix = SharedString::from(self.chat_mode.prompt_prefix());
         let draft_text = self.chat_editor.read(cx).text(cx);
         let thread_id = conversation_view.read(cx).parent_id();
         let root_session_id = Self::conversation_root_session_id(conversation_view, cx);
         let hook_conversation_view = conversation_view.clone();
         let workspace = cx.entity().downgrade();
         conversation_view.update(cx, |conversation_view, cx| {
-            conversation_view.set_root_prompt_prefix(Some(prompt_prefix), cx);
             if let Some(task) =
                 conversation_view.set_root_session_mode(acp::SessionModeId::new("free"), cx)
             {

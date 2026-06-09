@@ -165,7 +165,7 @@ pub async fn askpass_response_for_prompt(
     cx: &mut AsyncApp,
 ) -> anyhow::Result<Option<EncryptedPassword>> {
     let lower_prompt = prompt.to_lowercase();
-    if !lower_prompt.contains("github.com") {
+    if !is_github_askpass_prompt(&lower_prompt) {
         return Ok(None);
     }
 
@@ -173,15 +173,7 @@ pub async fn askpass_response_for_prompt(
         return Ok(None);
     };
 
-    let response = if lower_prompt.contains("username") {
-        credentials.login
-    } else if lower_prompt.contains("password") {
-        credentials.access_token
-    } else {
-        return Ok(None);
-    };
-
-    Ok(Some(EncryptedPassword::try_from(response.as_ref())?))
+    encrypted_response_for_prompt(&lower_prompt, credentials)
 }
 
 pub fn filter_repositories(
@@ -309,6 +301,45 @@ fn github_oauth_client_id() -> anyhow::Result<String> {
                 "GitHub sign-in is not configured. Build Backboard with {GITHUB_OAUTH_CLIENT_ID_ENV_VAR} set to a GitHub OAuth app client ID with device flow enabled."
             )
         })
+}
+
+pub(crate) fn is_github_askpass_prompt(prompt: &str) -> bool {
+    let lower_prompt = prompt.to_lowercase();
+    lower_prompt.contains("github.com")
+        && (lower_prompt.contains("username") || lower_prompt.contains("password"))
+}
+
+pub(crate) async fn sign_in_and_store(
+    client: Arc<Client>,
+    cx: &mut AsyncApp,
+    on_user_code: impl FnOnce(SharedString, &mut AsyncApp) + Send + 'static,
+) -> anyhow::Result<StoredGitHubCredential> {
+    let authorization = request_device_authorization(client.clone()).await?;
+    let verification_uri = authorization.verification_uri.clone();
+    on_user_code(authorization.user_code.clone().into(), cx);
+    cx.update(|cx| cx.open_url(&verification_uri));
+
+    let credentials = poll_device_authorization(client.clone(), authorization, cx).await?;
+    write_stored_credentials(client, &credentials, cx).await?;
+    Ok(StoredGitHubCredential {
+        login: credentials.github_login,
+        access_token: credentials.access_token,
+    })
+}
+
+pub(crate) fn encrypted_response_for_prompt(
+    lower_prompt: &str,
+    credentials: StoredGitHubCredential,
+) -> anyhow::Result<Option<EncryptedPassword>> {
+    let response = if lower_prompt.contains("username") {
+        credentials.login
+    } else if lower_prompt.contains("password") {
+        credentials.access_token
+    } else {
+        return Ok(None);
+    };
+
+    Ok(Some(EncryptedPassword::try_from(response.as_ref())?))
 }
 
 async fn request_device_authorization(
@@ -455,6 +486,10 @@ async fn fetch_github_login(client: Arc<Client>, access_token: &str) -> anyhow::
         .await
         .context("failed to read GitHub user response")?;
 
+    if status == StatusCode::UNAUTHORIZED {
+        anyhow::bail!("GitHub sign-in expired. Sign in again.");
+    }
+
     if !status.is_success() {
         anyhow::bail!("GitHub returned {status}: {body}");
     }
@@ -463,7 +498,6 @@ async fn fetch_github_login(client: Arc<Client>, access_token: &str) -> anyhow::
         serde_json::from_str(&body).context("failed to parse GitHub user response")?;
     Ok(user.login)
 }
-
 async fn fetch_github_repositories(
     client: Arc<Client>,
     access_token: &str,
