@@ -6031,7 +6031,7 @@ impl BeginnerWorkspace {
                 .render_simple_tour_target(
                     slot,
                     WorkspaceTourStep::SimpleModeChats,
-                    WorkspaceTourPlacement::InsideTop,
+                    WorkspaceTourPlacement::InsideTopBelowWindowControls,
                     cx,
                 )
                 .id("simple-closed-sidebar-width-slot")
@@ -6053,7 +6053,7 @@ impl BeginnerWorkspace {
         self.render_simple_tour_target(
             slot,
             WorkspaceTourStep::SimpleModeChats,
-            WorkspaceTourPlacement::InsideTop,
+            WorkspaceTourPlacement::InsideTopBelowWindowControls,
             cx,
         )
         .id("simple-sidebar-width-slot")
@@ -6486,9 +6486,21 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let panel = api_key_ready.then(|| {
-            self.render_right_panel_slot(is_running, preview_url, right_panel_expanded, window, cx)
-        });
+        let output_tour_active =
+            self.workspace_tour_step(cx) == Some(WorkspaceTourStep::SimpleModeOutput);
+        let panel = if api_key_ready {
+            Some(self.render_right_panel_slot(
+                is_running,
+                preview_url,
+                right_panel_expanded,
+                window,
+                cx,
+            ))
+        } else if output_tour_active {
+            Some(self.render_open_artifact_panel_button(window, cx))
+        } else {
+            None
+        };
         let main_content = self.render_middle_panel_shell(
             main_content,
             (api_key_ready && self.right_panel_open).then(|| px(ds::CHAT_PANEL_MIN_WIDTH)),
@@ -10641,7 +10653,7 @@ impl BeginnerWorkspace {
                 .render_simple_tour_target(
                     input_bar,
                     WorkspaceTourStep::SimpleModePrompt,
-                    WorkspaceTourPlacement::TopRight,
+                    WorkspaceTourPlacement::AboveRight,
                     cx,
                 )
                 .into_any_element();
@@ -10687,7 +10699,7 @@ impl BeginnerWorkspace {
                 .render_simple_tour_target(
                     input_bar,
                     WorkspaceTourStep::SimpleModePrompt,
-                    WorkspaceTourPlacement::TopRight,
+                    WorkspaceTourPlacement::AboveRight,
                     cx,
                 )
                 .into_any_element();
@@ -10875,7 +10887,7 @@ impl BeginnerWorkspace {
         self.render_simple_tour_target(
             input_bar,
             WorkspaceTourStep::SimpleModePrompt,
-            WorkspaceTourPlacement::TopRight,
+            WorkspaceTourPlacement::AboveRight,
             cx,
         )
         .into_any_element()
