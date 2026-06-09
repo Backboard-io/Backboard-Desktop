@@ -45,6 +45,12 @@ use settings_json::{infer_json_indent_size, update_value_in_json_text};
 
 pub const LSP_SETTINGS_SCHEMA_URL_PREFIX: &str = "backboard://schemas/settings/lsp/";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsFileUpdateResult {
+    Updated,
+    RecoveredInvalidUserSettings,
+}
+
 const BACKBOARD_USER_SETTINGS_HEADER: &str = "\
 // Backboard Studio settings
 //
@@ -698,6 +704,84 @@ impl SettingsStore {
         })
     }
 
+    pub fn update_settings_file_with_recovery(
+        &self,
+        fs: Arc<dyn Fs>,
+        update: impl 'static + Send + FnOnce(&mut SettingsContent, &App),
+    ) -> oneshot::Receiver<Result<SettingsFileUpdateResult>> {
+        let (tx, rx) = oneshot::channel::<Result<SettingsFileUpdateResult>>();
+        self.setting_file_updates_tx
+            .unbounded_send(Box::new(move |cx: AsyncApp| {
+                async move {
+                    let res = async move {
+                        let old_text = Self::load_settings(&fs).await?;
+                        let (new_text, update_result) = cx.read_global(
+                            |store: &SettingsStore, cx| -> Result<(String, SettingsFileUpdateResult)> {
+                                store.new_text_for_update_with_recovery(old_text.clone(), |content| {
+                                    update(content, cx)
+                                })
+                            },
+                        )?;
+
+                        if update_result == SettingsFileUpdateResult::RecoveredInvalidUserSettings
+                            && !old_text.trim().is_empty()
+                        {
+                            fs.atomic_write(paths::settings_backup_file().clone(), old_text.clone())
+                                .await
+                                .with_context(|| {
+                                    format!(
+                                        "Failed to back up invalid settings to file {:?}",
+                                        paths::settings_backup_file()
+                                    )
+                                })?;
+                        }
+
+                        let settings_path = paths::settings_file().as_path();
+                        if fs.is_file(settings_path).await {
+                            let resolved_path =
+                                fs.canonicalize(settings_path).await.with_context(|| {
+                                    format!(
+                                        "Failed to canonicalize settings path {:?}",
+                                        settings_path
+                                    )
+                                })?;
+
+                            fs.atomic_write(resolved_path.clone(), new_text.clone())
+                                .await
+                                .with_context(|| {
+                                    format!("Failed to write settings to file {:?}", resolved_path)
+                                })?;
+                        } else {
+                            fs.atomic_write(settings_path.to_path_buf(), new_text.clone())
+                                .await
+                                .with_context(|| {
+                                    format!("Failed to write settings to file {:?}", settings_path)
+                                })?;
+                        }
+
+                        cx.update_global(|store: &mut SettingsStore, cx| {
+                            store.set_user_settings(&new_text, cx).result().map(|_| ())
+                        })?;
+
+                        anyhow::Ok(update_result)
+                    }
+                    .await;
+
+                    let new_res = match &res {
+                        Ok(result) => Ok(*result),
+                        Err(error) => Err(anyhow::anyhow!("{:?}", error)),
+                    };
+
+                    _ = tx.send(new_res);
+                    res.map(|_| ())
+                }
+                .boxed_local()
+            }))
+            .map_err(|err| anyhow::format_err!("Failed to update settings file: {}", err))
+            .log_with_level(log::Level::Warn);
+        rx
+    }
+
     pub fn import_vscode_settings(
         &self,
         fs: Arc<dyn Fs>,
@@ -904,6 +988,60 @@ impl SettingsStore {
             new_text.replace_range(range, &replacement);
         }
         Ok(new_text)
+    }
+
+    pub fn new_text_for_update_with_recovery(
+        &self,
+        old_text: String,
+        update: impl FnOnce(&mut SettingsContent),
+    ) -> Result<(String, SettingsFileUpdateResult)> {
+        let old_content = if old_text.trim().is_empty() {
+            UserSettingsContent::default()
+        } else {
+            let (old_content, parse_status) = UserSettingsContent::parse_json(&old_text);
+            if let ParseStatus::Failed { error } = &parse_status {
+                log::error!("Failed to parse settings for update: {error}");
+            }
+            match old_content {
+                Some(old_content) => old_content,
+                None => {
+                    let mut new_content = UserSettingsContent::default();
+                    update(&mut new_content.content);
+                    let mut new_text = serde_json::to_string_pretty(&new_content)?;
+                    new_text.push('\n');
+                    return Ok((
+                        new_text,
+                        SettingsFileUpdateResult::RecoveredInvalidUserSettings,
+                    ));
+                }
+            }
+        };
+
+        let mut new_content = old_content.clone();
+        update(&mut new_content.content);
+
+        let old_value = serde_json::to_value(&old_content).unwrap();
+        let new_value = serde_json::to_value(new_content).unwrap();
+
+        let mut key_path = Vec::new();
+        let mut edits = Vec::new();
+        let tab_size = infer_json_indent_size(&old_text);
+        let mut text = old_text.clone();
+        update_value_in_json_text(
+            &mut text,
+            &mut key_path,
+            tab_size,
+            &old_value,
+            &new_value,
+            &mut edits,
+        );
+
+        let mut new_text = old_text;
+        for (range, replacement) in edits.into_iter() {
+            new_text.replace_range(range, &replacement);
+        }
+
+        Ok((new_text, SettingsFileUpdateResult::Updated))
     }
 
     pub fn get_vscode_edits(&self, old_text: String, vscode: &VsCodeSettings) -> Result<String> {
@@ -2267,6 +2405,32 @@ mod tests {
         let invalid_json = r#"{ this is not valid json at all !!!"#;
         let result = store.edits_for_update(invalid_json, |_| {});
         assert!(result.is_err());
+    }
+
+    #[gpui::test]
+    fn test_new_text_for_update_with_recovery_replaces_invalid_settings(cx: &mut App) {
+        let store = SettingsStore::new(cx, &test_settings());
+
+        let (new_text, result) = store
+            .new_text_for_update_with_recovery(r#""icon_theme""#.to_string(), |settings| {
+                settings.theme.theme = Some(settings_content::ThemeSelection::Static(ThemeName(
+                    "Backboard Paper".into(),
+                )));
+            })
+            .unwrap();
+
+        assert_eq!(
+            result,
+            SettingsFileUpdateResult::RecoveredInvalidUserSettings
+        );
+
+        let parsed = UserSettingsContent::parse_json_with_comments(&new_text).unwrap();
+        assert_eq!(
+            parsed.content.theme.theme,
+            Some(settings_content::ThemeSelection::Static(ThemeName(
+                "Backboard Paper".into()
+            )))
+        );
     }
 
     #[gpui::test]

@@ -105,7 +105,7 @@ fn workspace_context(workspace: &Path) -> String {
 fn is_user_visible_workspace_entry(name: &str) -> bool {
     !matches!(
         name,
-        ".backboard" | ".backboard_index" | ".git" | ".DS_Store"
+        ".backboard_ide" | ".backboard_ide_index" | ".git" | ".DS_Store"
     )
 }
 
@@ -117,8 +117,8 @@ mod tests {
     fn workspace_context_reports_empty_when_only_backboard_artifacts_exist() {
         let tempdir = tempfile::tempdir().unwrap();
         let workspace = tempdir.path();
-        fs::create_dir_all(workspace.join(".backboard").join("scratchpad")).unwrap();
-        fs::create_dir_all(workspace.join(".backboard_index")).unwrap();
+        fs::create_dir_all(workspace.join(".backboard_ide").join("scratchpad")).unwrap();
+        fs::create_dir_all(workspace.join(".backboard_ide_index")).unwrap();
 
         let context = workspace_context(workspace);
 
@@ -130,14 +130,14 @@ mod tests {
     fn workspace_context_reports_user_visible_files() {
         let tempdir = tempfile::tempdir().unwrap();
         let workspace = tempdir.path();
-        fs::create_dir_all(workspace.join(".backboard")).unwrap();
+        fs::create_dir_all(workspace.join(".backboard_ide")).unwrap();
         fs::write(workspace.join("index.html"), "<main></main>").unwrap();
 
         let context = workspace_context(workspace);
 
         assert!(context.contains("workspace_state: non_empty"));
         assert!(context.contains("workspace_files: index.html"));
-        assert!(!context.contains(".backboard"));
+        assert!(!context.contains(".backboard_ide"));
     }
 
     #[test]

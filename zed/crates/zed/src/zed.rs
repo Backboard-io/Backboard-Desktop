@@ -5840,14 +5840,14 @@ mod tests {
             .insert_tree(
                 Path::new("/root"),
                 json!({
-                    ".backboard": {
+                    ".backboard_ide": {
                         "settings.json": settings_init
                     }
                 }),
             )
             .await;
 
-        eprintln!("Created project with .backboard/settings.json containing UNIQUEVALUE");
+        eprintln!("Created project with .backboard_ide/settings.json containing UNIQUEVALUE");
 
         // 2. Create a project with the file system and load it
         let project = Project::test(app_state.fs.clone(), [Path::new("/root")], cx).await;
@@ -5855,7 +5855,7 @@ mod tests {
         // Save original settings content for comparison
         let original_settings = app_state
             .fs
-            .load(Path::new("/root/.backboard/settings.json"))
+            .load(Path::new("/root/.backboard_ide/settings.json"))
             .await
             .unwrap();
 
@@ -5868,39 +5868,39 @@ mod tests {
             "Test setup failed - settings file doesn't contain our marker"
         );
 
-        // 3. Add .backboard to file scan exclusions in user settings
+        // 3. Add .backboard_ide to file scan exclusions in user settings
         cx.update_global::<SettingsStore, _>(|store, cx| {
             store.update_user_settings(cx, |worktree_settings| {
                 worktree_settings.project.worktree.file_scan_exclusions =
-                    Some(vec![".backboard".to_string()]);
+                    Some(vec![".backboard_ide".to_string()]);
             });
         });
 
-        eprintln!("Added .backboard to file_scan_exclusions in settings");
+        eprintln!("Added .backboard_ide to file_scan_exclusions in settings");
 
         // 4. Run tasks to apply settings
         cx.background_executor.run_until_parked();
 
-        // 5. Critical: Verify .backboard is actually excluded from worktree
+        // 5. Critical: Verify .backboard_ide is actually excluded from worktree
         let worktree = cx.update(|cx| project.read(cx).worktrees(cx).next().unwrap());
 
         let has_zed_entry = cx.update(|cx| {
             worktree
                 .read(cx)
-                .entry_for_path(rel_path(".backboard"))
+                .entry_for_path(rel_path(".backboard_ide"))
                 .is_some()
         });
 
         eprintln!(
-            "Is .backboard directory visible in worktree after exclusion: {}",
+            "Is .backboard_ide directory visible in worktree after exclusion: {}",
             has_zed_entry
         );
 
         // This assertion verifies the test is set up correctly to show the bug
-        // If .backboard is not excluded, the test will fail here
+        // If .backboard_ide is not excluded, the test will fail here
         assert!(
             !has_zed_entry,
-            "Test precondition failed: .backboard directory should be excluded but was found in worktree"
+            "Test precondition failed: .backboard_ide directory should be excluded but was found in worktree"
         );
 
         // 6. Create workspace and trigger the actual function that causes the bug
@@ -5925,7 +5925,7 @@ mod tests {
         // 8. Verify file contents after calling function
         let new_content = app_state
             .fs
-            .load(Path::new("/root/.backboard/settings.json"))
+            .load(Path::new("/root/.backboard_ide/settings.json"))
             .await
             .unwrap();
 

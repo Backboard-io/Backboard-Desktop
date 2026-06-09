@@ -748,7 +748,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path.home() / ".backboard" / "config.json",
+        default=Path.home() / ".backboard_ide" / "config.json",
         help="Backboard config path.",
     )
     parser.add_argument(

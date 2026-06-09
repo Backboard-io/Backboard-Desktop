@@ -176,9 +176,9 @@ These ports also default to the `localhost` interface on the remote host. If you
 
 When opening a remote project there are three relevant settings locations:
 
-- The local Backboard Studio settings (in `~/.backboard/settings.json` on macOS or `~/.config/backboard/settings.json` on Linux) on your local machine.
+- The local Backboard Studio settings (in `~/.backboard_ide/settings.json` on macOS or `~/.config/backboard/settings.json` on Linux) on your local machine.
 - The server Backboard Studio settings (in the same place) on the remote server.
-- The project settings (in `.backboard/settings.json` or `.editorconfig` of your project)
+- The project settings (in `.backboard_ide/settings.json` or `.editorconfig` of your project)
 
 Both the local Backboard Studio and the server Backboard Studio read the project settings, but they are not aware of the other's main settings file.
 
@@ -204,7 +204,7 @@ export https_proxy="http://proxy.example.com:8080"
 export no_proxy="localhost,127.0.0.1"
 ```
 
-Alternatively, you can configure the proxy in the remote machine's `~/.config/backboard/settings.json` (Linux) or `~/.backboard/settings.json` (macOS):
+Alternatively, you can configure the proxy in the remote machine's `~/.config/backboard/settings.json` (Linux) or `~/.backboard_ide/settings.json` (macOS):
 
 ```json
 {
@@ -220,11 +220,11 @@ Once you provide the SSH options, Backboard Studio shells out to `ssh` on your l
 
 Any prompts that SSH needs will be shown in the UI, so you can verify host keys, type key passwords, etc.
 
-Once the master connection is established, Backboard Studio will check to see if the remote server binary is present in `~/.backboard_server` on the remote, and that its version matches the current version of Backboard Studio that you're using.
+Once the master connection is established, Backboard Studio will check to see if the remote server binary is present in `~/.backboard_ide_server` on the remote, and that its version matches the current version of Backboard Studio that you're using.
 
 If it is not there or the version mismatches, Backboard Studio will try to download the latest version. By default, it will download from `https://app.backboard.io` directly, but if you set: `{"upload_binary_over_ssh":true}` in your settings for that server, it will download the binary to your local machine and then upload it to the remote server.
 
-If you'd like to maintain the server binary yourself you can. You can either download our prebuilt versions from [GitHub](https://github.com/backboard/ide/releases), or [build your own](https://app.backboard.io/docs/development) with `cargo build -p remote_server --release`. If you do this, you must upload it to `~/.backboard_server/backboard-remote-server-{RELEASE_CHANNEL}-{VERSION}` on the server, for example `~/.backboard_server/backboard-remote-server-stable-0.217.3+stable.105.80433cb239e868271457ac376673a5f75bc4adb1`. The version must exactly match the version of Backboard Studio itself you are using.
+If you'd like to maintain the server binary yourself you can. You can either download our prebuilt versions from [GitHub](https://github.com/backboard/ide/releases), or [build your own](https://app.backboard.io/docs/development) with `cargo build -p remote_server --release`. If you do this, you must upload it to `~/.backboard_ide_server/backboard-remote-server-{RELEASE_CHANNEL}-{VERSION}` on the server, for example `~/.backboard_ide_server/backboard-remote-server-stable-0.217.3+stable.105.80433cb239e868271457ac376673a5f75bc4adb1`. The version must exactly match the version of Backboard Studio itself you are using.
 
 ## Maintaining the SSH connection
 
@@ -266,7 +266,7 @@ Note that we deliberately disallow some options (for example `-t` or `-T`) that 
   Git worktrees. Backboard Studio supports the worktree picker in remote projects when the
   remote connection is active.
 - [Configuring Backboard Studio](./configuring-backboard.md): Manage shared and project settings,
-  including `.backboard/settings.json`.
+  including `.backboard_ide/settings.json`.
 - [Agent Panel](./ai/agent-panel.md): Use AI workflows in remote projects.
 - [Remote Development on app.backboard.io](https://app.backboard.io/remote-development): Product
   overview and release updates.

@@ -248,7 +248,7 @@ pub struct BackboardSettingsContent {
     /// with OpenRouter-compatible `/chat/completions` APIs. Backboard model
     /// names must come from Backboard's supported model registry and can be
     /// overridden in user settings. If this is unset, Backboard Studio uses the
-    /// model saved in `~/.backboard/config.json` or resolves one from
+    /// model saved in `~/.backboard_ide/config.json` or resolves one from
     /// Backboard's live model registry.
     ///
     /// Default: resolved from the Backboard registry

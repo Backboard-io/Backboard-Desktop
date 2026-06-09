@@ -10,8 +10,8 @@ Backboard Studio opens a worktree each time you run `backboard some/path`, drag 
 
 > Note: This is broader than a [Git worktree](./git.md#git-worktrees). A Git worktree is a linked checkout managed by Git; Backboard Studio's trust model applies to every opened file or folder root, including Git worktrees.
 
-Every worktree opened may contain a `.backboard/settings.json` file with extra configuration options that may require installing and spawning language servers or MCP servers.
-To let users choose based on their own threat model and risk tolerance, all worktrees start in Restricted Mode. Restricted Mode prevents downloading and running related items from `.backboard/settings.json`. Until a worktree is trusted, Backboard Studio does not run related untrusted actions and waits for user confirmation. This gives users a chance to review project settings, MCP servers, and language servers.
+Every worktree opened may contain a `.backboard_ide/settings.json` file with extra configuration options that may require installing and spawning language servers or MCP servers.
+To let users choose based on their own threat model and risk tolerance, all worktrees start in Restricted Mode. Restricted Mode prevents downloading and running related items from `.backboard_ide/settings.json`. Until a worktree is trusted, Backboard Studio does not run related untrusted actions and waits for user confirmation. This gives users a chance to review project settings, MCP servers, and language servers.
 
 Backboard Studio still trusts tools it installs globally. Global MCP servers and global language servers such as Prettier and Copilot are installed and started as usual, independent of worktree trust.
 
@@ -26,7 +26,7 @@ This feature works locally and on SSH and WSL remote hosts. Backboard Studio tra
 
 Restricted Mode prevents:
 
-- Project settings (`.backboard/settings.json`) from being parsed and applied
+- Project settings (`.backboard_ide/settings.json`) from being parsed and applied
 - Language servers from being installed and spawned
 - MCP servers from being installed and spawned
 

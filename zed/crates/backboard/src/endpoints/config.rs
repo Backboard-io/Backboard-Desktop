@@ -167,5 +167,5 @@ impl Default for BackboardConfig {
 
 pub fn config_path() -> Result<PathBuf> {
     let home = dirs::home_dir().context("failed to determine user profile directory")?;
-    Ok(home.join(".backboard").join("config.json"))
+    Ok(home.join(".backboard_ide").join("config.json"))
 }

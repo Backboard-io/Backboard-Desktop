@@ -2053,8 +2053,8 @@ fn shell_path() -> String {
     let Some(home) = std::env::var_os("HOME") else {
         return current;
     };
-    let backboard_bin = PathBuf::from(home).join(".backboard").join("bin");
-    format!("{}:{current}", backboard_bin.display())
+    let backboard_ide_bin = PathBuf::from(home).join(".backboard_ide").join("bin");
+    format!("{}:{current}", backboard_ide_bin.display())
 }
 
 #[derive(Debug)]
@@ -2716,8 +2716,8 @@ fn skip_hidden_heavy_dirs(entry: &walkdir::DirEntry) -> bool {
         && matches!(
             name.as_ref(),
             ".git"
-                | ".backboard"
-                | ".backboard_index"
+                | ".backboard_ide"
+                | ".backboard_ide_index"
                 | "node_modules"
                 | "target"
                 | "dist"
@@ -2978,7 +2978,7 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let workspace = tempdir.path();
         fs::create_dir_all(workspace.join("src")).unwrap();
-        fs::create_dir_all(workspace.join(".backboard")).unwrap();
+        fs::create_dir_all(workspace.join(".backboard_ide")).unwrap();
         fs::create_dir_all(workspace.join("node_modules/pkg")).unwrap();
         fs::write(
             workspace.join("src/main.rs"),
@@ -2986,7 +2986,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            workspace.join(".backboard/hidden.rs"),
+            workspace.join(".backboard_ide/hidden.rs"),
             "indexed_marker hidden",
         )
         .unwrap();
@@ -3009,7 +3009,7 @@ mod tests {
         );
         assert!(
             !workspace
-                .join(".backboard_index/codebase_index.json")
+                .join(".backboard_ide_index/codebase_index.json")
                 .exists()
         );
     }

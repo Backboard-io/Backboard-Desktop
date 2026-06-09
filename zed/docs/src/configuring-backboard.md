@@ -42,12 +42,12 @@ To see all available settings with their default values, run {#action backboard:
 
 ### Project Settings
 
-Override user settings for a specific project by creating a `.backboard/settings.json` file in your project root. Run {#action backboard::OpenProjectSettings} to create this file.
+Override user settings for a specific project by creating a `.backboard_ide/settings.json` file in your project root. Run {#action backboard::OpenProjectSettings} to create this file.
 
 Project settings take precedence over user settings for that project only.
 
 ```json [settings]
-// .backboard/settings.json
+// .backboard_ide/settings.json
 {
   "tab_size": 2,
   "formatter": "prettier",

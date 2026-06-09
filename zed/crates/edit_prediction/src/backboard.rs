@@ -1731,7 +1731,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let path = test_root.join(".backboard").join("config.json");
+        let path = test_root.join(".backboard_ide").join("config.json");
         (test_root, path)
     }
 

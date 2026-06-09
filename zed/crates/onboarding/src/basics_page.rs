@@ -1,14 +1,16 @@
-use std::sync::Arc;
+use std::{fmt::Display, future::Future, sync::Arc};
 
 use fs::Fs;
-use gpui::{App, IntoElement};
-use settings::{Settings, update_settings_file};
+use gpui::{Action, App, IntoElement};
+use notifications::status_toast::StatusToast;
+use settings::{Settings, SettingsFileUpdateResult, update_settings_file_with_recovery};
 use theme::{Appearance, SystemAppearance, ThemeRegistry};
 use theme_settings::{ThemeAppearanceMode, ThemeName, ThemeSelection, ThemeSettings};
 use ui::{
     StatefulInteractiveElement, ToggleButtonGroup, ToggleButtonGroupSize, ToggleButtonSimple,
     prelude::*,
 };
+use workspace::with_active_or_new_workspace;
 
 use crate::{
     ExperienceLevel,
@@ -298,9 +300,10 @@ fn render_theme_section(tab_index: &mut isize, cx: &mut App) -> impl IntoElement
 
     fn write_mode_change(mode: ThemeAppearanceMode, cx: &mut App) {
         let fs = <dyn Fs>::global(cx);
-        update_settings_file(fs, cx, move |settings, _cx| {
+        let update_result = update_settings_file_with_recovery(fs, cx, move |settings, _cx| {
             theme_settings::set_mode(settings, mode);
         });
+        handle_theme_settings_update(update_result, cx);
     }
 
     fn write_theme_change(
@@ -310,30 +313,90 @@ fn render_theme_section(tab_index: &mut isize, cx: &mut App) -> impl IntoElement
     ) {
         let fs = <dyn Fs>::global(cx);
         let theme = theme.into();
-        update_settings_file(fs, cx, move |settings, cx| match theme_mode {
-            ThemeAppearanceMode::System => {
-                let (light_theme, dark_theme) =
-                    get_theme_family_themes(&theme).unwrap_or((theme.as_ref(), theme.as_ref()));
+        let update_result =
+            update_settings_file_with_recovery(fs, cx, move |settings, cx| match theme_mode {
+                ThemeAppearanceMode::System => {
+                    let (light_theme, dark_theme) =
+                        get_theme_family_themes(&theme).unwrap_or((theme.as_ref(), theme.as_ref()));
 
-                settings.theme.theme = Some(settings::ThemeSelection::Dynamic {
-                    mode: ThemeAppearanceMode::System,
-                    light: ThemeName(light_theme.into()),
-                    dark: ThemeName(dark_theme.into()),
-                });
-            }
-            ThemeAppearanceMode::Light => theme_settings::set_theme(
-                settings,
-                theme,
-                Appearance::Light,
-                *SystemAppearance::global(cx),
-            ),
-            ThemeAppearanceMode::Dark => theme_settings::set_theme(
-                settings,
-                theme,
-                Appearance::Dark,
-                *SystemAppearance::global(cx),
-            ),
-        });
+                    settings.theme.theme = Some(settings::ThemeSelection::Dynamic {
+                        mode: ThemeAppearanceMode::System,
+                        light: ThemeName(light_theme.into()),
+                        dark: ThemeName(dark_theme.into()),
+                    });
+                }
+                ThemeAppearanceMode::Light => theme_settings::set_theme(
+                    settings,
+                    theme,
+                    Appearance::Light,
+                    *SystemAppearance::global(cx),
+                ),
+                ThemeAppearanceMode::Dark => theme_settings::set_theme(
+                    settings,
+                    theme,
+                    Appearance::Dark,
+                    *SystemAppearance::global(cx),
+                ),
+            });
+        handle_theme_settings_update(update_result, cx);
+    }
+
+    fn handle_theme_settings_update<F, E>(update_result: F, cx: &mut App)
+    where
+        F: Future<Output = Result<anyhow::Result<SettingsFileUpdateResult>, E>> + 'static,
+        E: Display + 'static,
+    {
+        cx.spawn(async move |cx| {
+            let update_result = match update_result.await {
+                Ok(update_result) => update_result,
+                Err(error) => Err(anyhow::anyhow!(
+                    "settings update task was canceled: {error}"
+                )),
+            };
+
+            cx.update(|cx| match update_result {
+                Ok(SettingsFileUpdateResult::Updated) => {}
+                Ok(SettingsFileUpdateResult::RecoveredInvalidUserSettings) => {
+                    with_active_or_new_workspace(cx, |workspace, _window, cx| {
+                        let toast = StatusToast::new(
+                            "Theme saved. Invalid settings were backed up and repaired.",
+                            cx,
+                            |this, _| {
+                                this.icon(
+                                    Icon::new(IconName::Check)
+                                        .size(IconSize::Small)
+                                        .color(Color::Success),
+                                )
+                                .dismiss_button(true)
+                            },
+                        );
+                        workspace.toggle_status_toast(toast, cx);
+                    });
+                }
+                Err(error) => {
+                    zlog::error!("Failed to update onboarding theme settings: {error:?}");
+                    with_active_or_new_workspace(cx, |workspace, _window, cx| {
+                        let toast = StatusToast::new(
+                            "Theme could not be saved. See log for details.",
+                            cx,
+                            |this, _| {
+                                this.icon(
+                                    Icon::new(IconName::Close)
+                                        .size(IconSize::Small)
+                                        .color(Color::Error),
+                                )
+                                .action("Open Log", |window, cx| {
+                                    window.dispatch_action(workspace::OpenLog.boxed_clone(), cx)
+                                })
+                                .dismiss_button(true)
+                            },
+                        );
+                        workspace.toggle_status_toast(toast, cx);
+                    });
+                }
+            });
+        })
+        .detach();
     }
 }
 

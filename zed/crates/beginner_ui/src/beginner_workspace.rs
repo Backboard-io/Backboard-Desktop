@@ -5264,7 +5264,6 @@ impl BeginnerWorkspace {
     fn render_chats_sidebar_slot(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if !self.chats_sidebar_open {
             let slot = h_flex()
-                .id("simple-closed-sidebar-width-slot")
                 .h_full()
                 .w(px(CLOSED_CHATS_SIDEBAR_WIDTH_PX))
                 .flex_shrink_0()
@@ -5278,6 +5277,7 @@ impl BeginnerWorkspace {
                     WorkspaceTourPlacement::InsideTop,
                     cx,
                 )
+                .id("simple-closed-sidebar-width-slot")
                 .into_any_element();
         }
 
@@ -5286,32 +5286,32 @@ impl BeginnerWorkspace {
         let closed_width = px(CLOSED_CHATS_SIDEBAR_WIDTH_PX);
 
         let slot = h_flex()
-            .id("simple-sidebar-width-slot")
             .h_full()
             .w(target_width)
             .flex_shrink_0()
             .overflow_hidden()
             .bg(ds::sidebar_background(cx))
-            .child(self.render_chats_sidebar(window, cx))
-            .with_animation(
-                (
-                    "simple-sidebar-width",
-                    self.chats_sidebar_animation_generation,
-                ),
-                Animation::new(Duration::from_millis(PANEL_OPEN_ANIMATION_MS))
-                    .with_easing(ease_out_quint()),
-                move |slot, delta| {
-                    let visible_progress = if is_closing { 1.0 - delta } else { delta };
-                    let width = closed_width + (target_width - closed_width) * visible_progress;
-                    slot.w(width.max(closed_width))
-                },
-            );
+            .child(self.render_chats_sidebar(window, cx));
 
         self.render_simple_tour_target(
             slot,
             WorkspaceTourStep::SimpleModeChats,
             WorkspaceTourPlacement::InsideTop,
             cx,
+        )
+        .id("simple-sidebar-width-slot")
+        .with_animation(
+            (
+                "simple-sidebar-width",
+                self.chats_sidebar_animation_generation,
+            ),
+            Animation::new(Duration::from_millis(PANEL_OPEN_ANIMATION_MS))
+                .with_easing(ease_out_quint()),
+            move |slot, delta| {
+                let visible_progress = if is_closing { 1.0 - delta } else { delta };
+                let width = closed_width + (target_width - closed_width) * visible_progress;
+                slot.w(width.max(closed_width))
+            },
         )
         .into_any_element()
     }
@@ -5629,7 +5629,6 @@ impl BeginnerWorkspace {
 
         let slot = match dock {
             SimplePanelDock::Left | SimplePanelDock::Right => h_flex()
-                .id("right-panel-width-slot")
                 .h_full()
                 .w(target_size)
                 .flex_shrink_0()
@@ -5644,7 +5643,6 @@ impl BeginnerWorkspace {
                     cx,
                 )),
             SimplePanelDock::Top | SimplePanelDock::Bottom => v_flex()
-                .id("right-panel-width-slot")
                 .w_full()
                 .h(target_size)
                 .flex_shrink_0()
@@ -5667,22 +5665,23 @@ impl BeginnerWorkspace {
             cx,
         );
 
-        slot.with_animation(
-            ("right-panel-width", self.right_panel_animation_generation),
-            Animation::new(Duration::from_millis(PANEL_OPEN_ANIMATION_MS))
-                .with_easing(ease_out_quint()),
-            move |slot, delta| {
-                let visible_progress = if is_closing { 1.0 - delta } else { delta };
-                let size = closed_size + (target_size - closed_size) * visible_progress;
+        slot.id("right-panel-width-slot")
+            .with_animation(
+                ("right-panel-width", self.right_panel_animation_generation),
+                Animation::new(Duration::from_millis(PANEL_OPEN_ANIMATION_MS))
+                    .with_easing(ease_out_quint()),
+                move |slot, delta| {
+                    let visible_progress = if is_closing { 1.0 - delta } else { delta };
+                    let size = closed_size + (target_size - closed_size) * visible_progress;
 
-                if dock.is_side() {
-                    slot.w(size.max(closed_size))
-                } else {
-                    slot.h(size.max(closed_size))
-                }
-            },
-        )
-        .into_any_element()
+                    if dock.is_side() {
+                        slot.w(size.max(closed_size))
+                    } else {
+                        slot.h(size.max(closed_size))
+                    }
+                },
+            )
+            .into_any_element()
     }
 
     fn render_middle_panel_shell(
@@ -6023,6 +6022,13 @@ impl BeginnerWorkspace {
         let hover_background = ds::hover_background(cx);
         let top_bar_offset = Self::simple_top_bar_offset(window);
         let top_bar_height = Self::simple_top_bar_height(window);
+        let output_tour_active =
+            self.workspace_tour_step(cx) == Some(WorkspaceTourStep::SimpleModeOutput);
+        let output_tour_placement = match self.right_panel_dock {
+            SimplePanelDock::Left => WorkspaceTourPlacement::TopLeft,
+            SimplePanelDock::Right => WorkspaceTourPlacement::TopRight,
+            SimplePanelDock::Top | SimplePanelDock::Bottom => WorkspaceTourPlacement::InsideTop,
+        };
 
         let button = div()
             .id("open-artifact-panel")
@@ -6048,7 +6054,7 @@ impl BeginnerWorkspace {
                 .w(px(RIGHT_PANEL_CLOSED_WIDTH_PX))
                 .h_full()
                 .flex_shrink_0()
-                .overflow_hidden()
+                .when(!output_tour_active, |el| el.overflow_hidden())
                 .when(self.right_panel_dock == SimplePanelDock::Left, |el| {
                     el.border_r_1()
                 })
@@ -6090,7 +6096,7 @@ impl BeginnerWorkspace {
         self.render_simple_tour_target(
             panel_button,
             WorkspaceTourStep::SimpleModeOutput,
-            WorkspaceTourPlacement::InsideTop,
+            output_tour_placement,
             cx,
         )
         .into_any_element()
@@ -9941,7 +9947,7 @@ impl BeginnerWorkspace {
                 .render_simple_tour_target(
                     input_bar,
                     WorkspaceTourStep::SimpleModePrompt,
-                    WorkspaceTourPlacement::AboveRight,
+                    WorkspaceTourPlacement::TopRight,
                     cx,
                 )
                 .into_any_element();
@@ -9980,7 +9986,7 @@ impl BeginnerWorkspace {
                 .render_simple_tour_target(
                     input_bar,
                     WorkspaceTourStep::SimpleModePrompt,
-                    WorkspaceTourPlacement::AboveRight,
+                    WorkspaceTourPlacement::TopRight,
                     cx,
                 )
                 .into_any_element();
@@ -10163,7 +10169,7 @@ impl BeginnerWorkspace {
         self.render_simple_tour_target(
             input_bar,
             WorkspaceTourStep::SimpleModePrompt,
-            WorkspaceTourPlacement::AboveRight,
+            WorkspaceTourPlacement::TopRight,
             cx,
         )
         .into_any_element()

@@ -57,7 +57,7 @@ Settings WebStorm users typically configure first:
 | `inlay_hints`           | Show parameter names and type hints inline, like WebStorm's hints.              |
 | `relative_line_numbers` | Useful if you're coming from IdeaVim.                                           |
 
-Backboard Studio also supports per-project settings. Create a `.backboard/settings.json` file in your project root to override global settings for that project, similar to how you might use `.idea` folders in WebStorm.
+Backboard Studio also supports per-project settings. Create a `.backboard_ide/settings.json` file in your project root to override global settings for that project, similar to how you might use `.idea` folders in WebStorm.
 
 > **Tip:** If you're joining an existing project, check `format_on_save` before making your first commit. Otherwise you might accidentally reformat an entire file when you only meant to change one line.
 
@@ -181,7 +181,7 @@ What this means in practice:
 
 **How to adapt:**
 
-- Create a `.backboard/settings.json` in your project root for project-specific settings
+- Create a `.backboard_ide/settings.json` in your project root for project-specific settings
 - Define common commands in `tasks.json` (open via Command Palette: {#action backboard::OpenTasks}):
 
 ```json
@@ -257,7 +257,7 @@ Backboard Studio can debug:
 - Jest, Mocha, Vitest, and other test frameworks
 - Next.js (both server and client-side)
 
-For more control, create a `.backboard/debug.json` file:
+For more control, create a `.backboard_ide/debug.json` file:
 
 ```json
 [

@@ -160,6 +160,16 @@ impl ConfigOptionsView {
         Some(ConfigOptionCategoryPickerTrigger { selector })
     }
 
+    pub(crate) fn option_picker_trigger(
+        &self,
+        config_id: &acp::SessionConfigId,
+        cx: &App,
+    ) -> Option<ConfigOptionPickerTrigger> {
+        let selector = self.selector_for_config_id(config_id, cx)?;
+
+        Some(ConfigOptionPickerTrigger { selector })
+    }
+
     pub fn cycle_option(
         &mut self,
         config_id: &acp::SessionConfigId,
@@ -409,6 +419,17 @@ impl ConfigOptionsView {
                 cx,
             )
         })
+    }
+}
+
+#[derive(IntoElement)]
+pub(crate) struct ConfigOptionPickerTrigger {
+    selector: Entity<ConfigOptionSelector>,
+}
+
+impl RenderOnce for ConfigOptionPickerTrigger {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        self.selector
     }
 }
 

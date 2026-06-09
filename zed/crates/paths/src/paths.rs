@@ -68,7 +68,7 @@ static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// Returns the relative path to the Backboard Studio server directory on the ssh host.
 pub fn remote_server_dir_relative() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".backboard_server").unwrap());
+        LazyLock::new(|| RelPath::unix(".backboard_ide_server").unwrap());
     *CACHED
 }
 
@@ -76,7 +76,7 @@ pub fn remote_server_dir_relative() -> &'static RelPath {
 /// Returns the relative path to the Backboard Studio WSL server directory on the wsl host.
 pub fn remote_wsl_server_dir_relative() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".backboard_wsl_server").unwrap());
+        LazyLock::new(|| RelPath::unix(".backboard_ide_wsl_server").unwrap());
     *CACHED
 }
 
@@ -457,9 +457,9 @@ pub fn devcontainer_dir() -> &'static PathBuf {
     DEVCONTAINER_DIR.get_or_init(|| data_dir().join("devcontainer"))
 }
 
-/// Returns the relative path to a `.backboard` folder within a project.
+/// Returns the relative path to a `.backboard_ide` folder within a project.
 pub fn local_settings_folder_name() -> &'static str {
-    ".backboard"
+    ".backboard_ide"
 }
 
 /// Returns the relative path to a `.vscode` folder within a project.
@@ -470,14 +470,14 @@ pub fn local_vscode_folder_name() -> &'static str {
 /// Returns the relative path to a `settings.json` file within a project.
 pub fn local_settings_file_relative_path() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".backboard/settings.json").unwrap());
+        LazyLock::new(|| RelPath::unix(".backboard_ide/settings.json").unwrap());
     *CACHED
 }
 
 /// Returns the relative path to a `tasks.json` file within a project.
 pub fn local_tasks_file_relative_path() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".backboard/tasks.json").unwrap());
+        LazyLock::new(|| RelPath::unix(".backboard_ide/tasks.json").unwrap());
     *CACHED
 }
 
@@ -497,10 +497,10 @@ pub fn task_file_name() -> &'static str {
 }
 
 /// Returns the relative path to a `debug.json` file within a project.
-/// .backboard/debug.json
+/// .backboard_ide/debug.json
 pub fn local_debug_file_relative_path() -> &'static RelPath {
     static CACHED: LazyLock<&'static RelPath> =
-        LazyLock::new(|| RelPath::unix(".backboard/debug.json").unwrap());
+        LazyLock::new(|| RelPath::unix(".backboard_ide/debug.json").unwrap());
     *CACHED
 }
 

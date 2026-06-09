@@ -640,9 +640,12 @@ impl ConfigurationSource {
                         .log_err()
                 });
                 let installation_instructions = installation.as_ref().map(|installation| {
+                    let installation_instructions = installation
+                        .installation_instructions
+                        .replace("In your Zed settings", "In your Backboard Studio settings");
                     cx.new(|cx| {
                         Markdown::new(
-                            installation.installation_instructions.clone().into(),
+                            installation_instructions.into(),
                             Some(language_registry.clone()),
                             None,
                             cx,

@@ -753,7 +753,7 @@ mod tests {
         fs.insert_tree(
             path!("/dir"),
             json!({
-                ".backboard": {
+                ".backboard_ide": {
                     "tasks.json": r#"[
                         {
                             "label": "example task",
@@ -926,7 +926,7 @@ mod tests {
         fs.insert_tree(
             path!("/dir"),
             json!({
-                ".backboard": {
+                ".backboard_ide": {
                     "tasks.json": r#"[
                         {
                             "label": "hello from $BACKBOARD_FILE:$BACKBOARD_ROW:$BACKBOARD_COLUMN",

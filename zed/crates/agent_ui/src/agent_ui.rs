@@ -106,10 +106,6 @@ const RECOMMENDED_MCP_INSTALL_DIR: &str = "bundled-recommended-mcp";
 const RECOMMENDED_MCP_ARCHIVE_FILENAME: &str = "archive.tar.gz";
 const RECOMMENDED_MCP_EXTENSIONS_RAW: &[RecommendedMcpExtension] = &[
     RecommendedMcpExtension {
-        id: "mcp-server-shopify-dev",
-        repository: Some("https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev"),
-    },
-    RecommendedMcpExtension {
         id: "mcp-server-slack",
         repository: None,
     },
@@ -124,10 +120,6 @@ const RECOMMENDED_MCP_EXTENSIONS_RAW: &[RecommendedMcpExtension] = &[
     RecommendedMcpExtension {
         id: "mcp-server-github",
         repository: None,
-    },
-    RecommendedMcpExtension {
-        id: "mcp-server-shopify-dev",
-        repository: Some("https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev"),
     },
 ];
 
@@ -1063,7 +1055,6 @@ mod tests {
         assert_eq!(
             ids.iter().map(|id| id.as_ref()).collect::<Vec<_>>(),
             vec![
-                "mcp-server-shopify-dev",
                 "mcp-server-slack",
                 "mcp-server-supabase",
                 "mcp-server-figma",
@@ -1078,7 +1069,6 @@ mod tests {
         assert_eq!(
             repositories,
             vec![
-                Some("https://github.com/TheBeyondGroup/zed-mcp-server-shopify-dev"),
                 None,
                 Some("https://github.com/maximoffua/zed-mcp-server-supabase"),
                 Some("https://github.com/LoamStudios/zed-mcp-server-figma"),

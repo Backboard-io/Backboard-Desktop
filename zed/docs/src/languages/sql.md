@@ -43,7 +43,7 @@ sql-formatter --version
 
 Substitute your preferred [SQL Dialect] for `mysql` above (`duckdb`, `hive`, `mariadb`, `postgresql`, `redshift`, `snowflake`, `sqlite`, `spark`, etc).
 
-You can add this to Backboard Studio project settings (`.backboard/settings.json`) or via your Backboard Studio user settings (`~/.config/backboard/settings.json`).
+You can add this to Backboard Studio project settings (`.backboard_ide/settings.json`) or via your Backboard Studio user settings (`~/.config/backboard/settings.json`).
 
 ### Advanced Formatting
 

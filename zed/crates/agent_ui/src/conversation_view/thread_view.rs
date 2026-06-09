@@ -336,7 +336,6 @@ fn recommended_mcp_server_statuses(cx: &App) -> Vec<RecommendedMcpServerStatus> 
         ("mcp-server-slack", "Slack"),
         ("mcp-server-supabase", "Supabase"),
         ("mcp-server-figma", "Figma"),
-        ("mcp-server-shopify-dev", "Shopify"),
     ];
 
     let extension_store = ExtensionStore::try_global(cx);
@@ -965,11 +964,16 @@ impl AgentOptionsMenu {
             .into_any_element()
     }
 
-    fn render_option_row(
-        &self,
-        option: ConfigOptionSummary,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn render_option_row(&self, option: ConfigOptionSummary, cx: &mut Context<Self>) -> AnyElement {
+        if !matches!(self.mode, AgentOptionsMenuMode::Skills)
+            && let Some(trigger) = self
+                .config_options_view
+                .read(cx)
+                .option_picker_trigger(&option.id, cx)
+        {
+            return trigger.into_any_element();
+        }
+
         let option_id = option.id.clone();
         let description = option.description.clone();
         let preview_path = matches!(self.mode, AgentOptionsMenuMode::Skills)
@@ -1076,6 +1080,7 @@ impl AgentOptionsMenu {
                 view.cycle_option(&option_id, cx);
             });
         }))
+        .into_any_element()
     }
 }
 

@@ -169,7 +169,7 @@ You can pass Ruby LSP configuration to `initialization_options`, e.g.
 
 For full configuration options, see the [Ruby LSP website](https://shopify.github.io/ruby-lsp/editors.html).
 
-LSP `settings` and `initialization_options` can also be project-specific. For example to use [standardrb/standard](https://github.com/standardrb/standard) as a formatter and linter for a particular project, add this to a `.backboard/settings.json` inside your project repo:
+LSP `settings` and `initialization_options` can also be project-specific. For example to use [standardrb/standard](https://github.com/standardrb/standard) as a formatter and linter for a particular project, add this to a `.backboard_ide/settings.json` inside your project repo:
 
 ```json [settings]
 {
@@ -302,7 +302,7 @@ end
 
 ## Running tests
 
-To run tests in your Ruby project, you can set up custom tasks in your local `.backboard/tasks.json` configuration file. These tasks can be defined to work with different test frameworks like Minitest, RSpec, quickdraw, and tldr. Below are some examples of how to set up these tasks to run your tests from within your editor.
+To run tests in your Ruby project, you can set up custom tasks in your local `.backboard_ide/tasks.json` configuration file. These tasks can be defined to work with different test frameworks like Minitest, RSpec, quickdraw, and tldr. Below are some examples of how to set up these tasks to run your tests from within your editor.
 
 ### Minitest with Rails
 

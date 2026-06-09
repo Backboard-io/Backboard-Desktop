@@ -280,11 +280,11 @@ fn sync_backboard_config_api_key(
 fn render_api_key_sync_status(status: ApiKeySyncStatus) -> impl IntoElement {
     let (message, color) = match status {
         ApiKeySyncStatus::Saved => (
-            "Saved to ~/.backboard/config.json".to_string(),
+            "Saved to ~/.backboard_ide/config.json".to_string(),
             Color::Success,
         ),
         ApiKeySyncStatus::Cleared => (
-            "Removed from ~/.backboard/config.json".to_string(),
+            "Removed from ~/.backboard_ide/config.json".to_string(),
             Color::Muted,
         ),
         ApiKeySyncStatus::Error(error) => {
@@ -309,12 +309,12 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let path = test_root.join(".backboard").join("config.json");
+        let path = test_root.join(".backboard_ide").join("config.json");
         (test_root, path)
     }
 
     #[test]
-    fn sync_backboard_api_key_writes_shared_config_before_reporting_success() {
+    fn sync_backboard_api_key_writes_ide_config_before_reporting_success() {
         let (test_root, path) = temp_config_path("settings-backboard-save");
         let _guard = backboard::set_config_path_for_testing(path.clone());
 
@@ -336,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_backboard_api_key_reset_clears_shared_config_key() {
+    fn sync_backboard_api_key_reset_clears_ide_config_key() {
         let (test_root, path) = temp_config_path("settings-backboard-reset");
         let _guard = backboard::set_config_path_for_testing(path);
 

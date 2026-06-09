@@ -10,7 +10,7 @@ use gpui::{
     Action, AnyElement, App, AppContext as _, AsyncWindowContext, Context, DismissEvent, Div,
     Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, MouseButton, ParentElement,
     Render, SharedString, Stateful, Styled, Subscription, Task, WeakEntity, Window, actions, div,
-    px, rgb,
+    px,
 };
 use serde_json::{Value, json};
 use ui::{
@@ -120,7 +120,7 @@ actions!(
         ToggleFocus,
         /// Starts a fresh Backboard chat draft.
         NewChat,
-        /// Saves the Backboard API key into the shared CLI config.
+        /// Saves the Backboard API key into the IDE config.
         SaveApiKey,
         /// Sends the current Backboard chat draft.
         SendPrompt,
@@ -133,10 +133,6 @@ const API_MODAL_OVERLAY: Hsla = Hsla {
     l: 0.03,
     a: 0.20,
 };
-
-fn api_modal_color(hex: u32) -> Hsla {
-    Hsla::from(rgb(hex))
-}
 
 pub fn backboard_api_key_is_connected() -> bool {
     backboard::BackboardConfig::load_or_default()
@@ -170,6 +166,28 @@ pub fn show_backboard_api_key_modal_with_dismiss(
     workspace.toggle_modal(window, cx, move |window, cx| {
         BackboardApiKeyModal::new(window, cx, on_api_key_state_changed, on_dismiss)
     });
+}
+
+async fn detect_api_key_env(api_key: &str, config: &backboard::BackboardConfig) -> Result<String> {
+    if config.env.eq_ignore_ascii_case("local") {
+        let client = backboard::BackboardClient::new(config.base_url(), api_key.to_string());
+        client.list_assistants().await?;
+        return Ok(config.env.clone());
+    }
+
+    for (env, base_url) in [
+        ("prod", backboard::PROD_API_URL),
+        ("dev", backboard::DEV_API_URL),
+    ] {
+        let client = backboard::BackboardClient::new(base_url, api_key.to_string());
+        if client.list_assistants().await.is_ok() {
+            return Ok(env.to_string());
+        }
+    }
+
+    let client = backboard::BackboardClient::new(config.base_url(), api_key.to_string());
+    client.list_assistants().await?;
+    Ok(config.env.clone())
 }
 
 pub fn open_backboard_panel_with_prompt(
@@ -372,14 +390,12 @@ impl BackboardApiKeyModal {
         self.verification_error = None;
         cx.notify();
 
-        let base_url = backboard::BackboardConfig::load_or_default().base_url();
+        let config = backboard::BackboardConfig::load_or_default();
         let verification_task = gpui_tokio::Tokio::spawn_result(cx, async move {
-            let client = backboard::BackboardClient::new(base_url, api_key.clone());
-            client
-                .list_providers()
+            let env = detect_api_key_env(&api_key, &config)
                 .await
                 .context("verifying Backboard API access")?;
-            backboard::BackboardConfig::save_api_key_for_current_env(api_key)
+            backboard::BackboardConfig::save_api_key_for_env(api_key, env)
                 .context("saving Backboard API key")?;
             anyhow::Ok(())
         });
@@ -405,32 +421,34 @@ impl BackboardApiKeyModal {
         .detach();
     }
 
-    fn render_header(&self) -> impl IntoElement {
+    fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let status = cx.theme().status();
         let (title, subtitle, title_color) = match self.state {
             ApiKeyModalState::EnterKey => (
                 "Connect API key",
                 "Add your API key to run agents and generate workspace output.",
-                api_modal_color(0x141414),
+                colors.text,
             ),
             ApiKeyModalState::UseWithoutApi => (
                 "Use without API?",
                 "Some workspace features will be unavailable.",
-                api_modal_color(0x141414),
+                colors.text,
             ),
             ApiKeyModalState::Verifying => (
                 "Verifying API key...",
                 "Checking workspace permissions.",
-                api_modal_color(0x141414),
+                colors.text,
             ),
             ApiKeyModalState::Success => (
                 "API access ready",
                 "Your workspace can now run agents and generate output.",
-                api_modal_color(0x141414),
+                colors.text,
             ),
             ApiKeyModalState::Error => (
                 "Couldn't verify API key",
                 "Check the key and try again.",
-                api_modal_color(0xd83e64),
+                status.error,
             ),
         };
 
@@ -448,17 +466,19 @@ impl BackboardApiKeyModal {
             .child(
                 Label::new(subtitle)
                     .size(LabelSize::Small)
-                    .color(Color::Custom(api_modal_color(0x8f9bad))),
+                    .color(Color::Custom(colors.text_muted)),
             )
     }
 
-    fn render_api_key_field(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_api_key_field(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+
         v_flex()
             .gap_1p5()
             .child(
                 Label::new("API key")
                     .size(LabelSize::Small)
-                    .color(Color::Custom(api_modal_color(0x141414))),
+                    .color(Color::Custom(colors.text)),
             )
             .child(
                 div()
@@ -466,8 +486,8 @@ impl BackboardApiKeyModal {
                     .w_full()
                     .rounded(px(8.))
                     .border_1()
-                    .border_color(api_modal_color(0xeceff4))
-                    .bg(api_modal_color(0xf5f7fa))
+                    .border_color(colors.border_variant)
+                    .bg(colors.element_background)
                     .px_2()
                     .py_1()
                     .child(self.api_key_editor.clone()),
@@ -479,7 +499,7 @@ impl BackboardApiKeyModal {
                     .child(
                         Label::new("Your key is stored locally for this workspace.")
                             .size(LabelSize::XSmall)
-                            .color(Color::Custom(api_modal_color(0x8f9bad))),
+                            .color(Color::Custom(colors.text_muted)),
                     )
                     .child(
                         h_flex()
@@ -488,7 +508,7 @@ impl BackboardApiKeyModal {
                             .child(
                                 Label::new("Where do I find my API key?")
                                     .size(LabelSize::XSmall)
-                                    .color(Color::Custom(api_modal_color(0x5b8cff))),
+                                    .color(Color::Custom(colors.text_accent)),
                             )
                             .on_click(|_, _, cx| {
                                 cx.open_url("https://app.backboard.io/dashboard");
@@ -498,17 +518,20 @@ impl BackboardApiKeyModal {
     }
 
     fn render_status_card(
+        cx: &mut Context<Self>,
         title: impl Into<SharedString>,
         detail: impl Into<SharedString>,
         dot_color: Hsla,
         title_color: Hsla,
     ) -> impl IntoElement {
+        let colors = cx.theme().colors();
+
         h_flex()
             .w_full()
             .gap(px(10.))
             .items_start()
             .rounded(px(8.))
-            .bg(api_modal_color(0xf5f7fa))
+            .bg(colors.element_background)
             .px_3()
             .py_3()
             .child(div().mt(px(5.)).size(px(8.)).rounded_full().bg(dot_color))
@@ -524,7 +547,7 @@ impl BackboardApiKeyModal {
                     .child(
                         Label::new(detail)
                             .size(LabelSize::XSmall)
-                            .color(Color::Custom(api_modal_color(0xaeb8c6))),
+                            .color(Color::Custom(colors.text_muted)),
                     ),
             )
     }
@@ -551,32 +574,24 @@ impl BackboardApiKeyModal {
     }
 
     fn render_button(
+        cx: &mut Context<Self>,
         id: &'static str,
         label: &'static str,
         style: ApiKeyModalButtonStyle,
     ) -> Stateful<Div> {
+        let colors = cx.theme().colors();
         let (background, text_color, disabled) = match style {
-            ApiKeyModalButtonStyle::Primary => {
-                (api_modal_color(0x5b8cff), api_modal_color(0xffffff), false)
+            ApiKeyModalButtonStyle::Primary => (colors.text_accent, colors.background, false),
+            ApiKeyModalButtonStyle::DisabledPrimary => {
+                (colors.text_accent.opacity(0.40), colors.text_disabled, true)
             }
-            ApiKeyModalButtonStyle::DisabledPrimary => (
-                api_modal_color(0x5b8cff).opacity(0.40),
-                api_modal_color(0xffffff),
-                true,
-            ),
-            ApiKeyModalButtonStyle::Secondary => {
-                (api_modal_color(0xeceff4), api_modal_color(0x141414), false)
+            ApiKeyModalButtonStyle::Secondary => (colors.element_background, colors.text, false),
+            ApiKeyModalButtonStyle::Text => {
+                (colors.ghost_element_background, colors.text_muted, false)
             }
-            ApiKeyModalButtonStyle::Text => (
-                api_modal_color(0xffffff).opacity(0.0),
-                api_modal_color(0x8f9bad),
-                false,
-            ),
-            ApiKeyModalButtonStyle::MutedText => (
-                api_modal_color(0xffffff).opacity(0.0),
-                api_modal_color(0xaeb8c6),
-                false,
-            ),
+            ApiKeyModalButtonStyle::MutedText => {
+                (colors.ghost_element_background, colors.text_disabled, false)
+            }
         };
 
         h_flex()
@@ -600,7 +615,10 @@ impl BackboardApiKeyModal {
         v_flex().px_6().pb_4().child(self.render_api_key_field(cx))
     }
 
-    fn render_use_without_api(&self) -> impl IntoElement {
+    fn render_use_without_api(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let status = cx.theme().status();
+
         v_flex()
             .px_6()
             .pb_4()
@@ -609,7 +627,7 @@ impl BackboardApiKeyModal {
                 div()
                     .text_sm()
                     .line_height(gpui::relative(1.35))
-                    .text_color(api_modal_color(0x8f9bad))
+                    .text_color(colors.text_muted)
                     .child("You can continue without an API key, but agents, generated outputs, and API-powered workspace actions will be disabled until you connect one."),
             )
             .child(
@@ -617,91 +635,106 @@ impl BackboardApiKeyModal {
                     .gap_2()
                     .child(Self::render_access_row(
                         IconName::Dash,
-                        api_modal_color(0xddc300),
+                        status.warning,
                         "Agents unavailable",
-                        api_modal_color(0x8f9bad),
+                        colors.text_muted,
                     ))
                     .child(Self::render_access_row(
                         IconName::Dash,
-                        api_modal_color(0xddc300),
+                        status.warning,
                         "Generated artifacts unavailable",
-                        api_modal_color(0x8f9bad),
+                        colors.text_muted,
                     ))
                     .child(Self::render_access_row(
                         IconName::Dash,
-                        api_modal_color(0xddc300),
+                        status.warning,
                         "API-powered edits unavailable",
-                        api_modal_color(0x8f9bad),
+                        colors.text_muted,
                     ))
                     .child(Self::render_access_row(
                         IconName::Check,
-                        api_modal_color(0x2f9f5b),
+                        status.success,
                         "Manual workspace browsing still available",
-                        api_modal_color(0x141414),
+                        colors.text,
                     )),
             )
     }
 
-    fn render_verifying(&self) -> impl IntoElement {
+    fn render_verifying(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let dot_color = colors.text_muted;
+        let title_color = colors.text;
+
         v_flex().px_6().pb_4().child(Self::render_status_card(
+            cx,
             "Confirming access",
             "Verifying key and workspace permissions.",
-            api_modal_color(0xaeb8c6),
-            api_modal_color(0x141414),
+            dot_color,
+            title_color,
         ))
     }
 
-    fn render_success(&self) -> impl IntoElement {
+    fn render_success(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let status = cx.theme().status();
+        let text_color = colors.text;
+        let success_color = status.success;
+
         v_flex()
             .px_6()
             .pb_4()
             .gap_3()
             .child(Self::render_status_card(
+                cx,
                 "API access ready",
                 "Agents can now run tasks and generate output.",
-                api_modal_color(0x2f9f5b),
-                api_modal_color(0x2f9f5b),
+                success_color,
+                success_color,
             ))
             .child(
                 v_flex()
                     .gap_2()
                     .child(Self::render_access_row(
                         IconName::Check,
-                        api_modal_color(0x2f9f5b),
+                        success_color,
                         "API key verified",
-                        api_modal_color(0x141414),
+                        text_color,
                     ))
                     .child(Self::render_access_row(
                         IconName::Check,
-                        api_modal_color(0x2f9f5b),
+                        success_color,
                         "Workspace permissions ready",
-                        api_modal_color(0x141414),
+                        text_color,
                     ))
                     .child(Self::render_access_row(
                         IconName::Check,
-                        api_modal_color(0x2f9f5b),
+                        success_color,
                         "Agents enabled",
-                        api_modal_color(0x141414),
+                        text_color,
                     )),
             )
     }
 
-    fn render_error(&self) -> impl IntoElement {
+    fn render_error(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let status = cx.theme().status();
+        let error_color = status.error;
+
         v_flex().px_6().pb_4().child(Self::render_status_card(
+            cx,
             "Invalid or expired API key",
             "Check the key and try again, or generate a new one.",
-            api_modal_color(0xd83e64),
-            api_modal_color(0xd83e64),
+            error_color,
+            error_color,
         ))
     }
 
     fn render_body(&self, cx: &mut Context<Self>) -> AnyElement {
         match self.state {
             ApiKeyModalState::EnterKey => self.render_enter_key(cx).into_any_element(),
-            ApiKeyModalState::UseWithoutApi => self.render_use_without_api().into_any_element(),
-            ApiKeyModalState::Verifying => self.render_verifying().into_any_element(),
-            ApiKeyModalState::Success => self.render_success().into_any_element(),
-            ApiKeyModalState::Error => self.render_error().into_any_element(),
+            ApiKeyModalState::UseWithoutApi => self.render_use_without_api(cx).into_any_element(),
+            ApiKeyModalState::Verifying => self.render_verifying(cx).into_any_element(),
+            ApiKeyModalState::Success => self.render_success(cx).into_any_element(),
+            ApiKeyModalState::Error => self.render_error(cx).into_any_element(),
         }
     }
 
@@ -715,6 +748,7 @@ impl BackboardApiKeyModal {
                 .gap_3()
                 .child(
                     Self::render_button(
+                        cx,
                         "backboard-api-use-without",
                         "Use without API",
                         ApiKeyModalButtonStyle::Text,
@@ -726,6 +760,7 @@ impl BackboardApiKeyModal {
                 .child(div().flex_1())
                 .child(
                     Self::render_button(
+                        cx,
                         "backboard-api-cancel",
                         "Cancel",
                         ApiKeyModalButtonStyle::Secondary,
@@ -734,6 +769,7 @@ impl BackboardApiKeyModal {
                 )
                 .child(
                     Self::render_button(
+                        cx,
                         "backboard-api-verify",
                         "Verify key",
                         ApiKeyModalButtonStyle::Primary,
@@ -751,6 +787,7 @@ impl BackboardApiKeyModal {
                 .child(div().flex_1())
                 .child(
                     Self::render_button(
+                        cx,
                         "backboard-api-back",
                         "Back",
                         ApiKeyModalButtonStyle::Secondary,
@@ -761,6 +798,7 @@ impl BackboardApiKeyModal {
                 )
                 .child(
                     Self::render_button(
+                        cx,
                         "backboard-api-continue-without",
                         "Continue without API",
                         ApiKeyModalButtonStyle::Secondary,
@@ -776,6 +814,7 @@ impl BackboardApiKeyModal {
                 .child(div().flex_1())
                 .child(
                     Self::render_button(
+                        cx,
                         "backboard-api-cancel-verifying",
                         "Cancel",
                         ApiKeyModalButtonStyle::Secondary,
@@ -783,6 +822,7 @@ impl BackboardApiKeyModal {
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
                 )
                 .child(Self::render_button(
+                    cx,
                     "backboard-api-verifying",
                     "Verifying...",
                     ApiKeyModalButtonStyle::DisabledPrimary,
@@ -796,6 +836,7 @@ impl BackboardApiKeyModal {
                 .child(div().flex_1())
                 .child(
                     Self::render_button(
+                        cx,
                         "backboard-api-success-continue",
                         "Continue to workspace",
                         ApiKeyModalButtonStyle::Primary,
@@ -817,6 +858,7 @@ impl BackboardApiKeyModal {
                         .child(div().flex_1())
                         .child(
                             Self::render_button(
+                                cx,
                                 "backboard-api-error-cancel",
                                 "Cancel",
                                 ApiKeyModalButtonStyle::Secondary,
@@ -825,6 +867,7 @@ impl BackboardApiKeyModal {
                         )
                         .child(
                             Self::render_button(
+                                cx,
                                 "backboard-api-try-again",
                                 "Try again",
                                 ApiKeyModalButtonStyle::Primary,
@@ -841,6 +884,7 @@ impl BackboardApiKeyModal {
                 .child(
                     h_flex().justify_center().child(
                         Self::render_button(
+                            cx,
                             "backboard-api-error-use-without",
                             "Use without API",
                             ApiKeyModalButtonStyle::MutedText,
@@ -857,6 +901,10 @@ impl BackboardApiKeyModal {
 
 impl Render for BackboardApiKeyModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors();
+        let modal_border = colors.border_variant;
+        let modal_background = colors.elevated_surface_background;
+
         div()
             .absolute()
             .inset_0()
@@ -874,10 +922,10 @@ impl Render for BackboardApiKeyModal {
                         .max_w(px(480.))
                         .rounded(px(14.))
                         .border_1()
-                        .border_color(api_modal_color(0xeceff4))
-                        .bg(api_modal_color(0xfbfcfd))
+                        .border_color(modal_border)
+                        .bg(modal_background)
                         .shadow_lg()
-                        .child(self.render_header())
+                        .child(self.render_header(cx))
                         .child(self.render_body(cx))
                         .child(self.render_footer(cx)),
                 ),
@@ -967,7 +1015,7 @@ impl BackboardPanel {
         let initial_message = if api_ready {
             "Backboard IDE is connected. Choose a model, then ask it to inspect files, create code, run tools, or plan work in this workspace."
         } else {
-            "Paste your Backboard API key in the setup card above. It saves to the same ~/.backboard/config.json file used by the CLI."
+            "Paste your Backboard API key in the setup card above. It saves to ~/.backboard_ide/config.json for IDE use."
         };
 
         let config_changes = backboard::subscribe_config_changes();
@@ -1172,12 +1220,12 @@ impl BackboardPanel {
             Ok(config) => {
                 self.api_ready = true;
                 self.configuring_api_key = false;
-                self.status = format!("Saved API key to ~/.backboard/config.json ({})", config.env);
+                self.status = format!("Saved API key to ~/.backboard_ide/config.json ({})", config.env);
                 self.api_key_editor
                     .update(cx, |editor, cx| editor.set_text("", window, cx));
                 self.messages.push(BackboardMessage::compact(
                     MessageRole::Backboard,
-                    "API key saved. The IDE and Backboard CLI now share the same config file.",
+                    "API key saved for the IDE.",
                 ));
                 self.model_picker_open = true;
                 self.load_models(cx);
@@ -1790,7 +1838,7 @@ impl BackboardPanel {
                 div()
                     .text_sm()
                     .text_color(cx.theme().colors().text_muted)
-                    .child("Paste your API key here. It saves to ~/.backboard/config.json, the same config file your Backboard CLI uses."),
+                    .child("Paste your API key here. It saves to ~/.backboard_ide/config.json for IDE use."),
             )
             .child(
                 v_flex()
@@ -1807,7 +1855,7 @@ impl BackboardPanel {
                 h_flex()
                     .justify_between()
                     .child(
-                        Label::new("CLI fallback: backboard config set-api-key <key>")
+                        Label::new("Saved locally for Backboard IDE")
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     )

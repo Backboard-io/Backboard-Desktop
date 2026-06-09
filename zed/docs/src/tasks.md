@@ -75,7 +75,7 @@ Keep `"use_new_terminal": false` and set `"allow_concurrent_runs": true` to allo
 Tasks can be defined:
 
 - in the global `tasks.json` file; such tasks are available in all Backboard Studio projects you work on. This file is usually located in `~/.config/backboard/tasks.json`. You can edit them by using the {#action backboard::OpenTasks} action.
-- in the worktree-specific (local) `.backboard/tasks.json` file; such tasks are available only when working on a project with that worktree included. You can edit worktree-specific tasks by using the {#action backboard::OpenProjectTasks} action.
+- in the worktree-specific (local) `.backboard_ide/tasks.json` file; such tasks are available only when working on a project with that worktree included. You can edit worktree-specific tasks by using the {#action backboard::OpenProjectTasks} action.
 - on the fly with [oneshot tasks](#oneshot-tasks). These tasks are project-specific and do not persist across sessions.
 - by language extension.
 
@@ -320,7 +320,7 @@ To run a bash script:
 
 Bash scripts are tagged with `bash-script`, allowing you to filter or reference them in task configurations.
 
-If you need to pass arguments or customize the execution environment, add a task configuration in your `.backboard/tasks.json`:
+If you need to pass arguments or customize the execution environment, add a task configuration in your `.backboard_ide/tasks.json`:
 
 ```json
 [

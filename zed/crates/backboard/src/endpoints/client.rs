@@ -25,7 +25,7 @@ impl BackboardClient {
         Ok(Self::new(config.base_url(), api_key))
     }
 
-    pub fn from_cli_config() -> Result<Self> {
+    pub fn from_saved_config() -> Result<Self> {
         Self::from_config(BackboardConfig::load()?)
     }
 

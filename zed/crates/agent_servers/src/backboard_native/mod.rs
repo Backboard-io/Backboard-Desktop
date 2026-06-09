@@ -490,8 +490,6 @@ impl BackboardNativeConnection {
         log::info!(
             "Backboard native runtime initialized; Python ACP/CLI bridge is not in the active path"
         );
-        #[cfg(not(test))]
-        cleanup_obsolete_home_session_store();
         Self {
             state: Rc::new(BackboardNativeState {
                 agent_id,
@@ -954,8 +952,7 @@ impl BackboardNativeState {
     }
 
     fn cleanup_obsolete_workspace_storage(&self, workspace: &Path) {
-        cleanup_obsolete_path(workspace.join(".backboard"));
-        cleanup_obsolete_path(workspace.join(".backboard_index"));
+        cleanup_obsolete_workspace_storage(workspace);
     }
 
     pub(crate) fn emit_update(
@@ -1136,19 +1133,24 @@ fn config_watch_channel() -> (watch::Sender<()>, watch::Receiver<()>) {
     watch::channel(())
 }
 
-#[cfg(not(test))]
-fn cleanup_obsolete_home_session_store() {
-    let Some(home) = std::env::var_os("HOME") else {
-        return;
-    };
-    cleanup_obsolete_path(
-        PathBuf::from(home)
-            .join(".backboard")
-            .join("ide_sessions.json"),
-    );
+fn cleanup_obsolete_workspace_storage(workspace: &Path) {
+    // `.backboard_ide` is a project settings directory. Never delete it as part of
+    // obsolete IDE workspace storage cleanup.
+    cleanup_obsolete_path(workspace.join(".backboard_ide_index"));
 }
 
 fn cleanup_obsolete_path(path: PathBuf) {
+    if path
+        .components()
+        .any(|component| component.as_os_str() == std::ffi::OsStr::new(".backboard_ide"))
+    {
+        log::warn!(
+            "Backboard native skipped obsolete local store cleanup for protected path: {}",
+            path.display()
+        );
+        return;
+    }
+
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == ErrorKind::NotFound => return,
@@ -2558,12 +2560,12 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let path = test_root.join(".backboard").join("config.json");
+        let path = test_root.join(".backboard_ide").join("config.json");
         (test_root, path)
     }
 
     #[test]
-    fn native_state_has_api_key_from_shared_config() {
+    fn native_state_has_api_key_from_ide_config() {
         let (test_root, path) = temp_config_path("agent-native-backboard-config");
         let _guard = ::backboard::set_config_path_for_testing(path);
 
@@ -2654,19 +2656,28 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_obsolete_workspace_storage_removes_backboard_local_dirs() {
+    fn cleanup_obsolete_workspace_storage_preserves_project_backboard_dir() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         let workspace = temp_dir.path();
-        fs::create_dir_all(workspace.join(".backboard/scratchpad")).expect("create backboard dir");
-        fs::create_dir_all(workspace.join(".backboard_index")).expect("create index dir");
-        fs::write(workspace.join(".backboard/config.txt"), "obsolete").expect("write artifact");
+        fs::create_dir_all(workspace.join(".backboard_ide/scratchpad")).expect("create backboard dir");
+        fs::create_dir_all(workspace.join(".backboard_ide_index")).expect("create index dir");
+        fs::write(workspace.join(".backboard_ide/config.txt"), "obsolete").expect("write artifact");
         fs::write(workspace.join("config.json"), "preserve").expect("write normal file");
 
-        cleanup_obsolete_path(workspace.join(".backboard"));
-        cleanup_obsolete_path(workspace.join(".backboard_index"));
+        cleanup_obsolete_workspace_storage(workspace);
 
-        assert!(!workspace.join(".backboard").exists());
-        assert!(!workspace.join(".backboard_index").exists());
+        assert!(workspace.join(".backboard_ide").exists());
+        assert_eq!(
+            fs::read_to_string(workspace.join(".backboard_ide/config.txt")).unwrap(),
+            "obsolete"
+        );
+        assert!(!workspace.join(".backboard_ide_index").exists());
+        cleanup_obsolete_path(workspace.join(".backboard_ide"));
+        assert!(workspace.join(".backboard_ide").exists());
+        assert_eq!(
+            fs::read_to_string(workspace.join(".backboard_ide/config.txt")).unwrap(),
+            "obsolete"
+        );
         assert_eq!(
             fs::read_to_string(workspace.join("config.json")).unwrap(),
             "preserve"
@@ -2775,15 +2786,15 @@ mod tests {
             .path()
             .join("assets")
             .join("skills")
-            .join("shopify")
-            .join("shopify-admin");
+            .join("web")
+            .join("modern");
         std::fs::create_dir_all(&skill_dir).expect("create skill dir");
         std::fs::write(
             skill_dir.join("SKILL.md"),
             r#"<!-- generated -->
 ---
-name: shopify-admin
-description: "Build against the Shopify Admin API."
+name: modern
+description: "Modern web design guidance."
 ---
 
 # Instructions
@@ -2795,13 +2806,13 @@ description: "Build against the Shopify Admin API."
         let skills = discover_file_system_skills(&workspace);
         let skill = skills
             .iter()
-            .find(|skill| skill.relative_path == "shopify/shopify-admin")
-            .expect("shopify admin skill should be discovered");
+            .find(|skill| skill.relative_path == "web/modern")
+            .expect("modern web skill should be discovered");
 
-        assert_eq!(skill.name, "Shopify Admin");
+        assert_eq!(skill.name, "Modern");
         assert_eq!(
             skill.description.as_deref(),
-            Some("Build against the Shopify Admin API.")
+            Some("Modern web design guidance.")
         );
     }
 
@@ -2813,14 +2824,14 @@ description: "Build against the Shopify Admin API."
             .join("zed")
             .join("assets")
             .join("skills")
-            .join("shopify")
-            .join("shopify-admin");
+            .join("web")
+            .join("modern");
         std::fs::create_dir_all(&skill_dir).expect("create skill dir");
         std::fs::write(
             skill_dir.join("SKILL.md"),
             r#"---
-name: shopify-admin
-description: "Build against the Shopify Admin API."
+name: modern
+description: "Modern web design guidance."
 ---
 "#,
         )
@@ -2830,8 +2841,8 @@ description: "Build against the Shopify Admin API."
         let skills = discover_file_system_skills(&workspace);
         let skill = skills
             .iter()
-            .find(|skill| skill.relative_path == "shopify/shopify-admin")
-            .expect("shopify admin skill should be discovered");
+            .find(|skill| skill.relative_path == "web/modern")
+            .expect("modern web skill should be discovered");
 
         assert_eq!(
             skill.path,

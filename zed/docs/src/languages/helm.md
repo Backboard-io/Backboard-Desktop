@@ -12,7 +12,7 @@ Support for Helm in Backboard Studio is provided by the community-maintained [He
 
 ## Setup
 
-Enable Helm language for Helm files by editing your `.backboard/settings.json` and adding:
+Enable Helm language for Helm files by editing your `.backboard_ide/settings.json` and adding:
 
 ```json [settings]
   "file_types": {

@@ -107,7 +107,7 @@ backboard --foreground
 Use a custom directory for all user data (database, extensions, logs) instead of the default location:
 
 ```sh
-backboard --user-data-dir ~/.backboard-custom
+backboard --user-data-dir ~/.backboard_ide-custom
 ```
 
 Default locations:

@@ -111,7 +111,7 @@ TBD: Get this working
 
 ### REditorSupport/languageserver Configuration
 
-You can configure the [R languageserver settings](https://github.com/REditorSupport/languageserver#settings) via Backboard Project Settings `.backboard/settings.json` or Backboard Studio User Settings `~/.config/backboard/settings.json`:
+You can configure the [R languageserver settings](https://github.com/REditorSupport/languageserver#settings) via Backboard Project Settings `.backboard_ide/settings.json` or Backboard Studio User Settings `~/.config/backboard/settings.json`:
 
 For example to disable Lintr linting and suppress code snippet suggestions (both enabled by default):
 

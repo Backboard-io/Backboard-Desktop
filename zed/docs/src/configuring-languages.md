@@ -281,7 +281,7 @@ You can toggle language server support globally or per-language:
   }
 ```
 
-This disables the language server for Markdown files, which can be useful for performance in large documentation projects. You can configure this globally in your `~/.config/backboard/settings.json` or inside a `.backboard/settings.json` in your project directory.
+This disables the language server for Markdown files, which can be useful for performance in large documentation projects. You can configure this globally in your `~/.config/backboard/settings.json` or inside a `.backboard_ide/settings.json` in your project directory.
 
 ## Formatting and Linting
 

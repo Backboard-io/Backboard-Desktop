@@ -16,7 +16,7 @@ Support for Ansible in Backboard Studio is provided via a community-maintained [
 
 To avoid mishandling non-Ansible YAML files, the Ansible Language is not associated with any file extensions by default.
 
-To change this behavior, you can add a `"file_types"` section to Backboard Studio settings inside your project (`.backboard/settings.json`) or your Backboard Studio user settings (`~/.config/backboard/settings.json`) to match your folder/naming conventions. For example:
+To change this behavior, you can add a `"file_types"` section to Backboard Studio settings inside your project (`.backboard_ide/settings.json`) or your Backboard Studio user settings (`~/.config/backboard/settings.json`) to match your folder/naming conventions. For example:
 
 ```json [settings]
 {

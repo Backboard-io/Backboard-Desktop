@@ -55,7 +55,7 @@ struct SkillTemplate {
     prompt: &'static str,
 }
 
-const SECTIONS: &[&str] = &["Websites", "Shopify", "Design Systems", "Product"];
+const SECTIONS: &[&str] = &["Websites", "Design Systems", "Product"];
 
 const SKILL_TEMPLATES: &[SkillTemplate] = &[
     SkillTemplate {
@@ -91,40 +91,6 @@ Build the actual tool surface as the first screen. Favor compact information den
 Avoid oversized hero sections, decorative cards, abstract gradients, and marketing composition. Use icons for common actions, restrained color, 8px-or-smaller card radii unless the design system says otherwise, and stable dimensions for toolbars, filters, tabs, counters, and repeated rows.
 
 Include realistic data, selected/hover/empty states, and mobile behavior. Run the local app and inspect the screen for overlap, clipping, and unreadable text."#,
-    },
-    SkillTemplate {
-        section: "Shopify",
-        title: "Product Detail Page",
-        description: "Build a Shopify PDP basis with merchandising, variants, trust, and conversion details.",
-        prompt: r#"---
-name: shopify-product-detail-page
-description: Use when building or improving a Shopify product detail page.
----
-
-# Shopify Product Detail Page
-
-Create a product detail page that helps a shopper evaluate, configure, and buy the item.
-
-Include product media, title, price, variant selectors, quantity, add-to-cart, shipping/returns cues, accordions for details, reviews or social proof, related products, and inventory or urgency states where appropriate. Use swatches for color and familiar controls for variants. Keep the layout responsive and make the buy box usable on mobile.
-
-Use the existing storefront framework and theme conventions. Avoid generic stock-like imagery when the product needs to be inspectable. Verify the page renders cleanly across desktop and mobile."#,
-    },
-    SkillTemplate {
-        section: "Shopify",
-        title: "Collection Page",
-        description: "Create a merchandised collection view with filters, sort, and product cards.",
-        prompt: r#"---
-name: shopify-collection-page
-description: Use when building or improving a Shopify collection or category page.
----
-
-# Shopify Collection Page
-
-Build a collection page optimized for browsing and comparison.
-
-Include collection heading, concise supporting copy, filter controls, sort, product grid, product cards with image, price, badges, ratings or reviews if available, quick add where appropriate, empty results, and mobile filter behavior. Make product imagery prominent and consistent. Avoid decorative wrappers that reduce scanability.
-
-Preserve existing theme structure and data-loading conventions. Verify filter controls, layout wrapping, and card text fit on mobile and desktop."#,
     },
     SkillTemplate {
         section: "Design Systems",
@@ -979,8 +945,8 @@ mod tests {
             "Build the PDP"
         );
         assert_eq!(
-            normalize_title("  Shopify PDP  ".to_string(), "Build"),
-            "Shopify PDP"
+            normalize_title("  Feature Brief  ".to_string(), "Build"),
+            "Feature Brief"
         );
     }
 }

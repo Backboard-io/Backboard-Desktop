@@ -15,6 +15,7 @@ use ui::{
     Divider, IconName, IconSize, KeyBinding, ParentElement as _, StatefulInteractiveElement,
     Vector, VectorName, WithScrollbar as _, prelude::*, rems_from_px,
 };
+use util::ResultExt;
 
 pub use workspace::welcome::ShowWelcome;
 use workspace::welcome::WelcomePage;
@@ -511,13 +512,7 @@ impl Onboarding {
 
         match level {
             ExperienceLevel::Beginner => {
-                close_onboarding_tab(cx);
-                window.defer(cx, |_, cx| {
-                    Self::show_api_key_modal_then_workspace_tour_prompt(
-                        cx,
-                        OnboardingTourKind::SimpleMode,
-                    );
-                });
+                Self::finish_simple_onboarding(cx);
             }
             ExperienceLevel::Developer | ExperienceLevel::Power => {
                 go_to_welcome_page(cx);
@@ -529,6 +524,32 @@ impl Onboarding {
                 });
             }
         }
+    }
+
+    fn finish_simple_onboarding(cx: &mut App) {
+        with_active_or_new_workspace(cx, |workspace, window, cx| {
+            close_onboarding_tab_in_workspace(workspace, window, cx);
+
+            let workspace_handle = cx.entity().downgrade();
+            window.defer(cx, move |window, cx| {
+                workspace_handle
+                    .update(cx, |workspace, cx| {
+                        Self::show_api_key_modal_in_workspace(
+                            workspace,
+                            window,
+                            cx,
+                            Some(Box::new(move |window, cx| {
+                                Self::show_workspace_tour_prompt(
+                                    window,
+                                    OnboardingTourKind::SimpleMode,
+                                    cx,
+                                );
+                            })),
+                        );
+                    })
+                    .log_err();
+            });
+        });
     }
 
     fn show_api_key_modal_then_workspace_tour_prompt(cx: &mut App, tour_kind: OnboardingTourKind) {
@@ -545,21 +566,30 @@ impl Onboarding {
         on_dismiss: Option<Box<dyn FnOnce(&mut Window, &mut App) + Send + 'static>>,
     ) {
         with_active_or_new_workspace(cx, |workspace, window, cx| {
-            if backboard_ui::backboard_api_key_is_connected() {
-                if let Some(on_dismiss) = on_dismiss {
-                    on_dismiss(window, cx);
-                }
-                return;
-            }
-
-            backboard_ui::show_backboard_api_key_modal_with_dismiss(
-                workspace,
-                window,
-                cx,
-                |_| {},
-                on_dismiss,
-            );
+            Self::show_api_key_modal_in_workspace(workspace, window, cx, on_dismiss);
         });
+    }
+
+    fn show_api_key_modal_in_workspace(
+        workspace: &mut Workspace,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+        on_dismiss: Option<Box<dyn FnOnce(&mut Window, &mut App) + Send + 'static>>,
+    ) {
+        if backboard_ui::backboard_api_key_is_connected() {
+            if let Some(on_dismiss) = on_dismiss {
+                on_dismiss(window, cx);
+            }
+            return;
+        }
+
+        backboard_ui::show_backboard_api_key_modal_with_dismiss(
+            workspace,
+            window,
+            cx,
+            |_| {},
+            on_dismiss,
+        );
     }
 
     fn show_workspace_tour_prompt(
@@ -1020,18 +1050,20 @@ impl Item for Onboarding {
     }
 }
 
-fn close_onboarding_tab(cx: &mut App) {
-    with_active_or_new_workspace(cx, |workspace, window, cx| {
-        let Some(onboarding_id) = workspace.active_pane().read(cx).items().find_map(|item| {
-            item.downcast::<Onboarding>()?;
-            Some(item.item_id())
-        }) else {
-            return;
-        };
+fn close_onboarding_tab_in_workspace(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some(onboarding_id) = workspace.active_pane().read(cx).items().find_map(|item| {
+        item.downcast::<Onboarding>()?;
+        Some(item.item_id())
+    }) else {
+        return;
+    };
 
-        workspace.active_pane().update(cx, |pane, cx| {
-            pane.remove_item(onboarding_id, false, false, window, cx);
-        });
+    workspace.active_pane().update(cx, |pane, cx| {
+        pane.remove_item(onboarding_id, false, false, window, cx);
     });
 }
 

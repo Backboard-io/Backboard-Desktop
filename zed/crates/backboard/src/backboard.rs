@@ -1,9 +1,10 @@
 use std::{
     collections::{HashMap, VecDeque},
+    io::Write as _,
     path::{Path, PathBuf},
     pin::Pin,
     sync::{LazyLock, Mutex, MutexGuard},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(unix)]
@@ -151,17 +152,16 @@ pub struct BackboardConfig {
 }
 
 fn default_env() -> String {
-    "prod".into()
+    "dev".into()
 }
 
 impl BackboardConfig {
     pub fn load() -> Result<Self> {
         let path = config_path()?;
-        let contents = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading Backboard config at {}", path.display()))?;
-        let mut config: Self = serde_json::from_str(&contents)
+        let map = read_config_map(&path)?;
+        let mut config: Self = serde_json::from_value(Value::Object(map))
             .with_context(|| format!("parsing Backboard config at {}", path.display()))?;
-        config.promote_legacy_default_env();
+        config.normalize_env();
         Ok(config)
     }
 
@@ -171,7 +171,7 @@ impl BackboardConfig {
 
     pub fn save_api_key_for_current_env(api_key: impl Into<String>) -> Result<Self> {
         let mut config = Self::load_or_default();
-        config.promote_legacy_default_env();
+        config.normalize_env();
         let api_key = api_key.into().trim().to_string();
         let env = config.env.to_lowercase();
 
@@ -183,9 +183,33 @@ impl BackboardConfig {
         Ok(config)
     }
 
+    pub fn save_api_key_for_env(api_key: impl Into<String>, env: impl AsRef<str>) -> Result<Self> {
+        let mut config = Self::load_or_default();
+        config.normalize_env();
+
+        let api_key = api_key.into().trim().to_string();
+        let target_env = normalize_env(env.as_ref());
+        let current_env = config.env.to_lowercase();
+
+        if target_env != current_env {
+            if let Some(current_key) = config.api_key.as_deref().and_then(non_empty_api_key) {
+                config.env_keys.entry(current_env).or_insert(current_key);
+            }
+            config.env = target_env.clone();
+            config.api_url = None;
+        }
+
+        config.env_keys.insert(target_env, api_key.clone());
+        config.api_key = Some(api_key);
+        config.save()?;
+        publish_config_change(config.clone());
+
+        Ok(config)
+    }
+
     pub fn clear_api_key_for_current_env() -> Result<Self> {
         let mut config = Self::load_or_default();
-        config.promote_legacy_default_env();
+        config.normalize_env();
         let env = config.env.to_lowercase();
 
         config.api_key = None;
@@ -201,17 +225,7 @@ impl BackboardConfig {
         let dir = path
             .parent()
             .context("Backboard config path does not have a parent directory")?;
-        let mut existing = match std::fs::read_to_string(&path) {
-            Ok(contents) => match serde_json::from_str::<Value>(&contents) {
-                Ok(Value::Object(map)) => map,
-                _ => Map::new(),
-            },
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Map::new(),
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("reading Backboard config at {}", path.display()));
-            }
-        };
+        let mut existing = read_config_map(&path)?;
         let overlay = serde_json::to_value(self)?
             .as_object()
             .cloned()
@@ -223,19 +237,9 @@ impl BackboardConfig {
 
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating Backboard config dir at {}", dir.display()))?;
-        std::fs::write(&path, serde_json::to_vec_pretty(&existing)?)
+        write_config_atomically(&path, dir, &existing)
             .with_context(|| format!("writing Backboard config at {}", path.display()))?;
-
-        #[cfg(unix)]
-        {
-            let permissions = std::fs::Permissions::from_mode(0o600);
-            std::fs::set_permissions(&path, permissions).with_context(|| {
-                format!(
-                    "setting permissions on Backboard config at {}",
-                    path.display()
-                )
-            })?;
-        }
+        write_config_backup(&path, dir, &existing);
 
         Ok(())
     }
@@ -268,19 +272,201 @@ impl BackboardConfig {
             })
     }
 
-    fn promote_legacy_default_env(&mut self) {
-        if self.api_url.is_none() && self.env.eq_ignore_ascii_case("dev") {
-            if let Some(api_key) = self.env_keys.get("dev").cloned() {
-                self.env_keys.entry("prod".to_string()).or_insert(api_key);
-            }
-            self.env = default_env();
-        }
+    fn normalize_env(&mut self) {
+        self.env = normalize_env(&self.env);
+    }
+}
+
+fn normalize_env(env: &str) -> String {
+    match env.trim().to_lowercase().as_str() {
+        "production" => "prod".to_string(),
+        "development" => "dev".to_string(),
+        "" => default_env(),
+        env => env.to_string(),
     }
 }
 
 fn non_empty_api_key(key: &str) -> Option<String> {
     let key = key.trim();
     (!key.is_empty()).then(|| key.to_string())
+}
+
+fn read_config_contents(path: &Path) -> Result<String> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => Ok(contents),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let backup = path.with_extension("json.bak");
+            std::fs::read_to_string(&backup).with_context(|| {
+                format!(
+                    "reading Backboard config at {} or backup at {}",
+                    path.display(),
+                    backup.display()
+                )
+            })
+        }
+        Err(error) => {
+            Err(error).with_context(|| format!("reading Backboard config at {}", path.display()))
+        }
+    }
+}
+
+fn read_config_map(path: &Path) -> Result<Map<String, Value>> {
+    match read_config_contents(path) {
+        Ok(contents) => match serde_json::from_str::<Value>(&contents) {
+            Ok(Value::Object(map)) => Ok(map),
+            Ok(_) => Ok(Map::new()),
+            Err(error) => {
+                preserve_corrupt_config(path)?;
+                let backup = path.with_extension("json.bak");
+                match std::fs::read_to_string(&backup) {
+                    Ok(contents) => match serde_json::from_str::<Value>(&contents) {
+                        Ok(Value::Object(map)) => Ok(map),
+                        _ => Ok(Map::new()),
+                    },
+                    Err(backup_error) if backup_error.kind() == std::io::ErrorKind::NotFound => {
+                        Ok(Map::new())
+                    }
+                    Err(backup_error) => Err(backup_error).with_context(|| {
+                        format!("reading Backboard config backup at {}", backup.display())
+                    }),
+                }
+                .with_context(|| {
+                    format!(
+                        "parsing Backboard config at {} failed before backup recovery: {error}",
+                        path.display()
+                    )
+                })
+            }
+        },
+        Err(error) => {
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            {
+                Ok(Map::new())
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+fn preserve_corrupt_config(path: &Path) -> Result<()> {
+    if !path.is_file() {
+        return Ok(());
+    }
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let corrupt_path = path.with_file_name(format!(
+        "{}.corrupt-{timestamp}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("config.json")
+    ));
+    std::fs::rename(path, &corrupt_path).with_context(|| {
+        format!(
+            "preserving corrupt Backboard config at {}",
+            corrupt_path.display()
+        )
+    })
+}
+
+fn write_config_atomically(path: &Path, dir: &Path, config: &Map<String, Value>) -> Result<()> {
+    let temp_path = temp_config_path(dir, "tmp");
+    let contents = serde_json::to_vec_pretty(config)?;
+
+    let write_result = (|| -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .with_context(|| {
+                format!("creating temp Backboard config at {}", temp_path.display())
+            })?;
+        set_private_permissions(&temp_path)?;
+        file.write_all(&contents)
+            .with_context(|| format!("writing temp Backboard config at {}", temp_path.display()))?;
+        std::fs::rename(&temp_path, path).with_context(|| {
+            format!(
+                "replacing Backboard config {} with {}",
+                path.display(),
+                temp_path.display()
+            )
+        })?;
+        set_private_permissions(path)?;
+        Ok(())
+    })();
+
+    if write_result.is_err() && temp_path.exists() {
+        if let Err(error) = std::fs::remove_file(&temp_path) {
+            eprintln!(
+                "warning: failed to remove temp Backboard config at {}: {error}",
+                temp_path.display()
+            );
+        }
+    }
+
+    write_result
+}
+
+fn write_config_backup(path: &Path, dir: &Path, config: &Map<String, Value>) {
+    let backup_path = path.with_extension("json.bak");
+    let temp_path = temp_config_path(dir, "bak.tmp");
+    let Ok(contents) = serde_json::to_vec_pretty(config) else {
+        return;
+    };
+
+    let write_result = (|| -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)?;
+        set_private_permissions(&temp_path)?;
+        file.write_all(&contents)?;
+        std::fs::rename(&temp_path, &backup_path)?;
+        set_private_permissions(&backup_path)?;
+        Ok(())
+    })();
+
+    if write_result.is_err() && temp_path.exists() {
+        if let Err(error) = std::fs::remove_file(&temp_path) {
+            eprintln!(
+                "warning: failed to remove temp Backboard config backup at {}: {error}",
+                temp_path.display()
+            );
+        }
+    }
+}
+
+fn temp_config_path(dir: &Path, suffix: &str) -> PathBuf {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    dir.join(format!(
+        "config.{}.{}.{}",
+        std::process::id(),
+        timestamp,
+        suffix
+    ))
+}
+
+fn set_private_permissions(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let permissions = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(path, permissions).with_context(|| {
+            format!(
+                "setting permissions on Backboard config at {}",
+                path.display()
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 impl Default for BackboardConfig {
@@ -300,7 +486,7 @@ pub fn config_path() -> Result<PathBuf> {
     }
 
     let home = dirs::home_dir().context("failed to determine user profile directory")?;
-    Ok(home.join(".backboard").join("config.json"))
+    Ok(home.join(".backboard_ide").join("config.json"))
 }
 
 #[derive(Debug, Error)]
@@ -464,7 +650,7 @@ impl BackboardClient {
         Ok(Self::new(config.base_url(), api_key))
     }
 
-    pub fn from_cli_config() -> Result<Self> {
+    pub fn from_saved_config() -> Result<Self> {
         Self::from_config(BackboardConfig::load()?)
     }
 
@@ -1245,29 +1431,27 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn default_config_uses_production_api() {
+    fn default_config_uses_development_env() {
         let config = BackboardConfig::default();
 
-        assert_eq!(config.env, "prod");
-        assert_eq!(config.base_url(), PROD_API_URL);
+        assert_eq!(config.env, "dev");
+        assert_eq!(config.base_url(), DEV_API_URL);
     }
 
     #[test]
-    fn legacy_dev_config_without_custom_url_promotes_to_production() {
-        let mut config = BackboardConfig {
+    fn development_config_uses_development_api() {
+        let config = BackboardConfig {
             env: "dev".to_string(),
-            api_key: Some("bb-prod-key".to_string()),
-            env_keys: HashMap::from([("dev".to_string(), "bb-prod-key".to_string())]),
+            api_key: Some("bb-dev-key".to_string()),
+            env_keys: HashMap::from([("dev".to_string(), "bb-dev-key".to_string())]),
             ..BackboardConfig::default()
         };
 
-        config.promote_legacy_default_env();
-
-        assert_eq!(config.env, "prod");
-        assert_eq!(config.base_url(), PROD_API_URL);
+        assert_eq!(config.env, "dev");
+        assert_eq!(config.base_url(), DEV_API_URL);
         assert_eq!(
-            config.env_keys.get("prod").map(String::as_str),
-            Some("bb-prod-key")
+            config.env_keys.get("dev").map(String::as_str),
+            Some("bb-dev-key")
         );
     }
 
@@ -1311,7 +1495,7 @@ mod tests {
     }
 
     #[test]
-    fn saving_api_key_writes_shared_config_file() {
+    fn saving_api_key_writes_ide_config_file() {
         let test_root = std::env::temp_dir().join(format!(
             "backboard-config-test-{}-{}",
             std::process::id(),
@@ -1320,7 +1504,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let path = test_root.join(".backboard").join("config.json");
+        let path = test_root.join(".backboard_ide").join("config.json");
         let _guard = set_config_path_for_testing(path.clone());
 
         let config =
@@ -1331,9 +1515,10 @@ mod tests {
         let contents = std::fs::read_to_string(&path).expect("read config file");
         let value: serde_json::Value = serde_json::from_str(&contents).expect("parse config");
 
-        assert_eq!(value["env"], "prod");
+        assert_eq!(value["env"], "dev");
         assert_eq!(value["api_key"], "bb-test-key");
-        assert_eq!(value["env_keys"]["prod"], "bb-test-key");
+        assert_eq!(value["env_keys"]["dev"], "bb-test-key");
+        assert!(path.with_extension("json.bak").is_file());
 
         #[cfg(unix)]
         {
@@ -1345,7 +1530,7 @@ mod tests {
     }
 
     #[test]
-    fn saving_api_key_preserves_cli_only_config_fields() {
+    fn saving_api_key_preserves_unrelated_config_fields() {
         let test_root = std::env::temp_dir().join(format!(
             "backboard-config-preserve-test-{}-{}",
             std::process::id(),
@@ -1354,7 +1539,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let path = test_root.join(".backboard").join("config.json");
+        let path = test_root.join(".backboard_ide").join("config.json");
         std::fs::create_dir_all(path.parent().unwrap()).expect("create config dir");
         std::fs::write(
             &path,

@@ -2065,7 +2065,7 @@ Note, specifying `file_scan_exclusions` in settings.json will override the defau
 {
   "file_types": {
     "JSONC": [
-      "**/.backboard/**/*.json",
+      "**/.backboard_ide/**/*.json",
       "**/backboard/**/*.json",
       "**/Backboard Studio/**/*.json",
       "**/.vscode/**/*.json"

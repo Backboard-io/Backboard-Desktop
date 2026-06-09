@@ -317,7 +317,7 @@ result = func( #sql
 
 ## Debugging
 
-Backboard Studio supports Python debugging through the `debugpy` adapter. You can start with no configuration or define custom launch profiles in `.backboard/debug.json`.
+Backboard Studio supports Python debugging through the `debugpy` adapter. You can start with no configuration or define custom launch profiles in `.backboard_ide/debug.json`.
 
 ### Start Debugging with No Setup
 
@@ -332,7 +332,7 @@ Backboard Studio uses `debugpy` under the hood, but no manual adapter configurat
 
 ### Define Custom Debug Configurations
 
-For reusable setups, create a `.backboard/debug.json` file in your project root. This gives you more control over how Backboard Studio runs and debugs your code.
+For reusable setups, create a `.backboard_ide/debug.json` file in your project root. This gives you more control over how Backboard Studio runs and debugs your code.
 
 - [debugpy configuration documentation](https://github.com/microsoft/debugpy/wiki/Debug-configuration-settings#launchattach-settings)
 

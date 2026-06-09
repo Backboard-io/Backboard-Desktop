@@ -57,7 +57,7 @@ Settings RustRover users typically configure first:
 | `inlay_hints`           | Show type hints, parameter names, and chaining hints inline.                    |
 | `relative_line_numbers` | Useful if you're coming from IdeaVim.                                           |
 
-Backboard Studio also supports per-project settings. Create a `.backboard/settings.json` file in your project root to override global settings for that project.
+Backboard Studio also supports per-project settings. Create a `.backboard_ide/settings.json` file in your project root to override global settings for that project.
 
 > **Tip:** If you're joining an existing project, check `format_on_save` before making your first commit. Otherwise you might accidentally reformat an entire file when you only meant to change one line.
 
@@ -165,24 +165,24 @@ Where you might notice differences:
 **How to adapt:**
 
 - Use `Alt+Enter` for available code actions—rust-analyzer provides many
-- Configure rust-analyzer settings in `.backboard/settings.json` for project-specific needs
+- Configure rust-analyzer settings in `.backboard_ide/settings.json` for project-specific needs
 - Run `cargo clippy` for linting (it integrates with rust-analyzer diagnostics)
 
 ### Project Configuration
 
-Both editors store per-project configuration in a hidden folder. RustRover uses `.idea` (with XML files), Backboard Studio uses `.backboard` (with JSON files).
+Both editors store per-project configuration in a hidden folder. RustRover uses `.idea` (with XML files), Backboard Studio uses `.backboard_ide` (with JSON files).
 
-**Run configurations don't transfer.** RustRover stores run/debug configurations in `.idea`. These have no automatic migration path. You'll recreate them as Backboard Studio [tasks](../tasks.md) in `.backboard/tasks.json` and debug configurations in `.backboard/debug.json`.
+**Run configurations don't transfer.** RustRover stores run/debug configurations in `.idea`. These have no automatic migration path. You'll recreate them as Backboard Studio [tasks](../tasks.md) in `.backboard_ide/tasks.json` and debug configurations in `.backboard_ide/debug.json`.
 
 **No Cargo tool window.** RustRover provides a visual tree of your workspace members, targets, features, and dependencies. Backboard Studio doesn't have this. You work with `Cargo.toml` and the Cargo CLI directly.
 
 **Toolchain management is external.** RustRover lets you select and switch toolchains in its settings UI. In Backboard Studio, you manage toolchains through `rustup`.
 
-**Configuration is opt-in.** RustRover auto-generates `.idea` when you open a project. Backboard Studio doesn't generate anything. You create `.backboard/settings.json`, `tasks.json`, and `debug.json` as needed.
+**Configuration is opt-in.** RustRover auto-generates `.idea` when you open a project. Backboard Studio doesn't generate anything. You create `.backboard_ide/settings.json`, `tasks.json`, and `debug.json` as needed.
 
 **How to adapt:**
 
-- Create a `.backboard/settings.json` in your project root for project-specific settings
+- Create a `.backboard_ide/settings.json` in your project root for project-specific settings
 - Define common commands in `tasks.json` (open via Command Palette: {#action backboard::OpenTasks}):
 
 ```json
@@ -262,7 +262,7 @@ To debug Rust code in Backboard Studio:
 
 Backboard Studio can automatically detect debuggable targets in your Cargo project. Press `F4` to see available options.
 
-For more control, create a `.backboard/debug.json` file:
+For more control, create a `.backboard_ide/debug.json` file:
 
 ```json
 [

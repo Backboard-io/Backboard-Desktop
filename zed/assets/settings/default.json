@@ -1621,7 +1621,7 @@
       "**/*.crt",
       "**/.dev.vars",
       "**/secrets.yml",
-      "**/.backboard/settings.json", // Backboard project settings
+      "**/.backboard_ide/settings.json", // Backboard project settings
       "/**/.config/backboard studio/settings.json", // Backboard user settings
       "/**/.config/backboard studio/keymap.json",
     ],
@@ -1966,7 +1966,7 @@
   //
   "file_types": {
     "JSONC": [
-      "**/.backboard/*.json",
+      "**/.backboard_ide/*.json",
       "**/.vscode/**/*.json",
       "**/{backboard,Backboard Studio}/{settings,keymap,tasks,debug}.json",
       "tsconfig*.json",

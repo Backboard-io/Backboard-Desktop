@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use settings::{LanguageModelProviderSetting, LanguageModelSelection};
 
 use zed_actions::{
-    DecreaseBufferFontSize, IncreaseBufferFontSize, ResetBufferFontSize,
+    ConfigureBackboardApiKey, DecreaseBufferFontSize, IncreaseBufferFontSize, ResetBufferFontSize,
     agent::{
         AddSelectionToThread, ConflictContent, ReauthenticateAgent, ResetAgentZoom,
         ResetOnboarding, ResolveConflictedFilesWithAgent, ResolveConflictsWithAgent,
@@ -1878,12 +1878,13 @@ impl AgentPanel {
             AgentPanelOnboarding::new(
                 user_store.clone(),
                 client,
-                move |_window, cx| {
+                move |window, cx| {
                     weak_panel
                         .update(cx, |panel, cx| {
                             panel.dismiss_ai_onboarding(cx);
                         })
                         .ok();
+                    window.dispatch_action(Box::new(ConfigureBackboardApiKey), cx);
                 },
                 cx,
             )
