@@ -78,6 +78,13 @@ struct AccessTokenResponse {
 }
 
 #[derive(Deserialize)]
+struct OAuthErrorResponse {
+    error: String,
+    error_description: Option<String>,
+    error_uri: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct UserResponse {
     login: String,
 }
@@ -349,9 +356,13 @@ async fn request_device_code(
         .append_pair("client_id", client_id)
         .append_pair("scope", GITHUB_SCOPES)
         .finish();
-    let mut response = post_form(http_client, "https://github.com/login/device/code", body).await?;
-    ensure_success(&mut response).await?;
-    read_json_response(response).await
+    let response = post_form(http_client, "https://github.com/login/device/code", body).await?;
+    if response.status().is_success() {
+        read_json_response(response).await
+    } else {
+        bail_github_oauth_error(response, client_id).await?;
+        unreachable!()
+    }
 }
 
 async fn poll_for_access_token(
@@ -513,6 +524,31 @@ async fn ensure_success(response: &mut Response<AsyncBody>) -> Result<()> {
     }
 
     bail!("GitHub request failed with status {status}: {body}");
+}
+
+async fn bail_github_oauth_error(mut response: Response<AsyncBody>, client_id: &str) -> Result<()> {
+    let status = response.status();
+    let mut body = String::new();
+    response.body_mut().read_to_string(&mut body).await?;
+
+    if let Ok(error) = serde_json::from_str::<OAuthErrorResponse>(&body) {
+        match error.error.as_str() {
+            "device_flow_disabled" => bail!(
+                "GitHub Device Flow is disabled for OAuth client {client_id}. Enable Device Flow in that GitHub OAuth app, or set BACKBOARD_GITHUB_OAUTH_CLIENT_ID to an OAuth app with Device Flow enabled."
+            ),
+            _ => {
+                let description = error
+                    .error_description
+                    .unwrap_or_else(|| format!("GitHub OAuth failed: {}", error.error));
+                if let Some(error_uri) = error.error_uri {
+                    bail!("{description} ({error_uri})");
+                }
+                bail!("{description}");
+            }
+        }
+    }
+
+    bail!("GitHub OAuth request failed with status {status}: {body}");
 }
 
 async fn read_json_response<T: for<'de> Deserialize<'de>>(
