@@ -1,8 +1,15 @@
-use gpui::{App, Context, WeakEntity, Window};
+use crate::askpass_modal::AskPassModal;
+use anyhow::{Context as _, anyhow};
+use askpass::AskPassDelegate;
+use futures::{FutureExt as _, select_biased};
+use git::repository::{AskPassResult, AskPassSession};
+use gpui::{App, BackgroundExecutor, Context, WeakEntity, Window};
 use notifications::status_toast::StatusToast;
+use std::path::PathBuf;
 use std::sync::Arc;
 use ui::{Color, Icon, IconName, IconSize, SharedString};
 use util::ResultExt;
+use util::command::new_command;
 use workspace::{self, Workspace};
 
 pub fn clone_and_open(
@@ -20,6 +27,8 @@ pub fn clone_and_open(
         multiple: false,
         prompt: Some("Select as Repository Destination".into()),
     });
+    let askpass_delegate = askpass_delegate("clone", workspace.clone(), window, cx);
+    let background_executor = cx.background_executor().clone();
 
     window
         .spawn(cx, async move |cx| {
@@ -33,16 +42,20 @@ pub fn clone_and_open(
                 .unwrap_or("repository")
                 .to_owned();
 
-            let clone_task = workspace
-                .update(cx, |workspace, cx| {
-                    let fs = workspace.app_state().fs.clone();
-                    let destination_dir = destination_dir.clone();
-                    let repo_url = repo_url.clone();
-                    cx.spawn(async move |_workspace, _cx| {
-                        fs.git_clone(destination_dir.as_path(), &repo_url).await
-                    })
-                })
-                .ok()?;
+            let clone_task = background_executor.spawn({
+                let background_executor = background_executor.clone();
+                let destination_dir = destination_dir.clone();
+                let repo_url = repo_url.clone();
+                async move {
+                    git_clone_with_askpass(
+                        destination_dir,
+                        repo_url,
+                        askpass_delegate,
+                        background_executor,
+                    )
+                    .await
+                }
+            });
 
             if let Err(error) = clone_task.await {
                 workspace
@@ -156,4 +169,79 @@ pub fn clone_and_open(
             Some(())
         })
         .detach();
+}
+
+fn askpass_delegate(
+    operation: impl Into<SharedString>,
+    workspace: WeakEntity<Workspace>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AskPassDelegate {
+    let operation = operation.into();
+    let window = window.window_handle();
+    AskPassDelegate::new(&mut cx.to_async(), move |prompt, tx, cx| {
+        let workspace = workspace.clone();
+        let operation = operation.clone();
+        let window = window.clone();
+        cx.spawn(async move |cx| {
+            match crate::github_account::askpass_response_for_prompt(&prompt, cx).await {
+                Ok(Some(response)) => {
+                    tx.send(response).ok();
+                    return;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    log::warn!("failed to load GitHub credential for askpass: {error}");
+                }
+            }
+
+            window
+                .update(cx, |_, window, cx| {
+                    workspace.update(cx, |workspace, cx| {
+                        workspace.toggle_modal(window, cx, |window, cx| {
+                            AskPassModal::new(operation.clone(), prompt.into(), tx, window, cx)
+                        });
+                    })
+                })
+                .ok();
+        })
+        .detach();
+    })
+}
+
+async fn git_clone_with_askpass(
+    destination_dir: PathBuf,
+    repo_url: SharedString,
+    askpass_delegate: AskPassDelegate,
+    background_executor: BackgroundExecutor,
+) -> anyhow::Result<()> {
+    let mut askpass = AskPassSession::new(background_executor.clone(), askpass_delegate).await?;
+    let mut command = new_command("git");
+    command
+        .current_dir(destination_dir)
+        .args(["clone", repo_url.as_ref()])
+        .env("GIT_ASKPASS", askpass.script_path())
+        .env("SSH_ASKPASS", askpass.script_path())
+        .env("SSH_ASKPASS_REQUIRE", "force");
+    let git_process = command.spawn()?;
+
+    select_biased! {
+        result = askpass.run().fuse() => {
+            match result {
+                AskPassResult::CancelledByUser => Err(anyhow!("git clone cancelled by user")),
+                AskPassResult::Timedout => Err(anyhow!("Connecting to host timed out")),
+            }
+        }
+        output = git_process.output().fuse() => {
+            let output = output.context("failed to run git clone")?;
+            if !output.status.success() {
+                anyhow::bail!(
+                    "git clone failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
+            Ok(())
+        }
+    }
 }

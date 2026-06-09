@@ -3410,15 +3410,32 @@ impl GitPanel {
         let operation = operation.into();
         let window = window.window_handle();
         AskPassDelegate::new(&mut cx.to_async(), move |prompt, tx, cx| {
-            window
-                .update(cx, |_, window, cx| {
-                    workspace.update(cx, |workspace, cx| {
-                        workspace.toggle_modal(window, cx, |window, cx| {
-                            AskPassModal::new(operation.clone(), prompt.into(), tx, window, cx)
-                        });
+            let workspace = workspace.clone();
+            let operation = operation.clone();
+            let window = window.clone();
+            cx.spawn(async move |cx| {
+                match crate::github_account::askpass_response_for_prompt(&prompt, cx).await {
+                    Ok(Some(response)) => {
+                        tx.send(response).ok();
+                        return;
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        log::warn!("failed to load GitHub credential for askpass: {error}");
+                    }
+                }
+
+                window
+                    .update(cx, |_, window, cx| {
+                        workspace.update(cx, |workspace, cx| {
+                            workspace.toggle_modal(window, cx, |window, cx| {
+                                AskPassModal::new(operation.clone(), prompt.into(), tx, window, cx)
+                            });
+                        })
                     })
-                })
-                .ok();
+                    .ok();
+            })
+            .detach();
         })
     }
 
