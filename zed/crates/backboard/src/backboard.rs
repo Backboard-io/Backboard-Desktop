@@ -152,7 +152,7 @@ pub struct BackboardConfig {
 }
 
 fn default_env() -> String {
-    "dev".into()
+    "prod".into()
 }
 
 impl BackboardConfig {
@@ -162,6 +162,7 @@ impl BackboardConfig {
         let mut config: Self = serde_json::from_value(Value::Object(map))
             .with_context(|| format!("parsing Backboard config at {}", path.display()))?;
         config.normalize_env();
+        config.promote_legacy_default_env();
         Ok(config)
     }
 
@@ -172,6 +173,7 @@ impl BackboardConfig {
     pub fn save_api_key_for_current_env(api_key: impl Into<String>) -> Result<Self> {
         let mut config = Self::load_or_default();
         config.normalize_env();
+        config.promote_legacy_default_env();
         let api_key = api_key.into().trim().to_string();
         let env = config.env.to_lowercase();
 
@@ -186,6 +188,7 @@ impl BackboardConfig {
     pub fn save_api_key_for_env(api_key: impl Into<String>, env: impl AsRef<str>) -> Result<Self> {
         let mut config = Self::load_or_default();
         config.normalize_env();
+        config.promote_legacy_default_env();
 
         let api_key = api_key.into().trim().to_string();
         let target_env = normalize_env(env.as_ref());
@@ -196,7 +199,7 @@ impl BackboardConfig {
                 config.env_keys.entry(current_env).or_insert(current_key);
             }
             config.env = target_env.clone();
-            config.api_url = None;
+            config.api_url = default_api_url_override_for_env(&target_env);
         }
 
         config.env_keys.insert(target_env, api_key.clone());
@@ -210,6 +213,7 @@ impl BackboardConfig {
     pub fn clear_api_key_for_current_env() -> Result<Self> {
         let mut config = Self::load_or_default();
         config.normalize_env();
+        config.promote_legacy_default_env();
         let env = config.env.to_lowercase();
 
         config.api_key = None;
@@ -275,6 +279,20 @@ impl BackboardConfig {
     fn normalize_env(&mut self) {
         self.env = normalize_env(&self.env);
     }
+
+    fn promote_legacy_default_env(&mut self) {
+        if self.api_url.is_none() && self.env.eq_ignore_ascii_case("dev") {
+            if let Some(api_key) = self
+                .env_keys
+                .get("dev")
+                .cloned()
+                .or_else(|| self.api_key.as_deref().and_then(non_empty_api_key))
+            {
+                self.env_keys.entry("prod".to_string()).or_insert(api_key);
+            }
+            self.env = default_env();
+        }
+    }
 }
 
 fn normalize_env(env: &str) -> String {
@@ -284,6 +302,10 @@ fn normalize_env(env: &str) -> String {
         "" => default_env(),
         env => env.to_string(),
     }
+}
+
+fn default_api_url_override_for_env(env: &str) -> Option<String> {
+    (env == "dev").then(|| DEV_API_URL.to_string())
 }
 
 fn non_empty_api_key(key: &str) -> Option<String> {
@@ -1431,11 +1453,11 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn default_config_uses_development_env() {
+    fn default_config_uses_production_env() {
         let config = BackboardConfig::default();
 
-        assert_eq!(config.env, "dev");
-        assert_eq!(config.base_url(), DEV_API_URL);
+        assert_eq!(config.env, "prod");
+        assert_eq!(config.base_url(), PROD_API_URL);
     }
 
     #[test]
@@ -1515,9 +1537,9 @@ mod tests {
         let contents = std::fs::read_to_string(&path).expect("read config file");
         let value: serde_json::Value = serde_json::from_str(&contents).expect("parse config");
 
-        assert_eq!(value["env"], "dev");
+        assert_eq!(value["env"], "prod");
         assert_eq!(value["api_key"], "bb-test-key");
-        assert_eq!(value["env_keys"]["dev"], "bb-test-key");
+        assert_eq!(value["env_keys"]["prod"], "bb-test-key");
         assert!(path.with_extension("json.bak").is_file());
 
         #[cfg(unix)]
@@ -1585,6 +1607,159 @@ mod tests {
         assert_eq!(value["thread_id"], "thread-1");
         assert_eq!(value["mcp_servers"]["custom"]["command"], "python");
         assert_eq!(value["thinking_config"]["effort"], "high");
+
+        std::fs::remove_dir_all(test_root).ok();
+    }
+
+    #[test]
+    fn loading_legacy_default_development_config_promotes_to_production() {
+        let test_root = std::env::temp_dir().join(format!(
+            "backboard-config-legacy-env-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = test_root.join(".backboard_ide").join("config.json");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create config dir");
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({
+                "env": "dev",
+                "api_key": "legacy-key",
+                "api_url": null,
+                "env_keys": {
+                    "dev": "legacy-key"
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write legacy config");
+        let _guard = set_config_path_for_testing(path.clone());
+
+        let config = BackboardConfig::load().expect("load config");
+
+        assert_eq!(config.env, "prod");
+        assert_eq!(config.base_url(), PROD_API_URL);
+        assert_eq!(config.api_key().as_deref(), Some("legacy-key"));
+        assert_eq!(
+            config.env_keys.get("prod").map(String::as_str),
+            Some("legacy-key")
+        );
+
+        BackboardConfig::save_api_key_for_current_env("new-prod-key").expect("save api key");
+
+        let contents = std::fs::read_to_string(&path).expect("read config file");
+        let value: serde_json::Value = serde_json::from_str(&contents).expect("parse config");
+
+        assert_eq!(value["env"], "prod");
+        assert_eq!(value["api_key"], "new-prod-key");
+        assert_eq!(value["env_keys"]["prod"], "new-prod-key");
+        assert_eq!(value["env_keys"]["dev"], "legacy-key");
+
+        std::fs::remove_dir_all(test_root).ok();
+    }
+
+    #[test]
+    fn explicit_development_api_url_keeps_development_env() {
+        let test_root = std::env::temp_dir().join(format!(
+            "backboard-config-explicit-dev-env-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = test_root.join(".backboard_ide").join("config.json");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create config dir");
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({
+                "env": "dev",
+                "api_key": "dev-key",
+                "api_url": DEV_API_URL,
+                "env_keys": {
+                    "dev": "dev-key"
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write dev config");
+        let _guard = set_config_path_for_testing(path);
+
+        let config = BackboardConfig::load().expect("load config");
+
+        assert_eq!(config.env, "dev");
+        assert_eq!(config.base_url(), DEV_API_URL);
+        assert_eq!(config.api_key().as_deref(), Some("dev-key"));
+        assert_eq!(config.env_keys.get("prod"), None);
+
+        std::fs::remove_dir_all(test_root).ok();
+    }
+
+    #[test]
+    fn saving_api_key_for_detected_development_env_survives_reload() {
+        let test_root = std::env::temp_dir().join(format!(
+            "backboard-config-detected-dev-env-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = test_root.join(".backboard_ide").join("config.json");
+        let _guard = set_config_path_for_testing(path.clone());
+
+        let config =
+            BackboardConfig::save_api_key_for_env("  bb-dev-key  ", "dev").expect("save api key");
+
+        assert_eq!(config.env, "dev");
+        assert_eq!(config.api_url.as_deref(), Some(DEV_API_URL));
+        assert_eq!(config.api_key().as_deref(), Some("bb-dev-key"));
+
+        let reloaded = BackboardConfig::load().expect("load config");
+
+        assert_eq!(reloaded.env, "dev");
+        assert_eq!(reloaded.base_url(), DEV_API_URL);
+        assert_eq!(reloaded.api_key().as_deref(), Some("bb-dev-key"));
+        assert_eq!(reloaded.env_keys.get("prod"), None);
+
+        let contents = std::fs::read_to_string(&path).expect("read config file");
+        let value: serde_json::Value = serde_json::from_str(&contents).expect("parse config");
+
+        assert_eq!(value["env"], "dev");
+        assert_eq!(value["api_url"], DEV_API_URL);
+        assert_eq!(value["api_key"], "bb-dev-key");
+        assert_eq!(value["env_keys"]["dev"], "bb-dev-key");
+        assert!(value["env_keys"].get("prod").is_none());
+
+        std::fs::remove_dir_all(test_root).ok();
+    }
+
+    #[test]
+    fn saving_api_key_publishes_saved_config_change() {
+        let test_root = std::env::temp_dir().join(format!(
+            "backboard-config-publish-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = test_root.join(".backboard_ide").join("config.json");
+        let _guard = set_config_path_for_testing(path);
+        let config_changes = subscribe_config_changes();
+
+        BackboardConfig::save_api_key_for_current_env("published-key").expect("save api key");
+
+        let published = config_changes.try_recv().expect("published config change");
+        assert_eq!(published.env, "prod");
+        assert_eq!(published.api_key().as_deref(), Some("published-key"));
+        assert_eq!(
+            published.env_keys.get("prod").map(String::as_str),
+            Some("published-key")
+        );
 
         std::fs::remove_dir_all(test_root).ok();
     }

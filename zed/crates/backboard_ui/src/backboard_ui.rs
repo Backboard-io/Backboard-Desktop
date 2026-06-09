@@ -249,6 +249,7 @@ pub struct BackboardPanel {
     files_changed_open: bool,
     providers: Vec<String>,
     models: Vec<backboard::BackboardModel>,
+    model_load_generation: u64,
     visible_model_count: usize,
     model_picker_open: bool,
     selected_provider: Option<String>,
@@ -1059,6 +1060,7 @@ impl BackboardPanel {
             files_changed_open: true,
             providers: Vec::new(),
             models: Vec::new(),
+            model_load_generation: 0,
             visible_model_count: INITIAL_VISIBLE_MODELS,
             model_picker_open: api_ready && selected_model.is_none(),
             selected_provider,
@@ -1107,20 +1109,35 @@ impl BackboardPanel {
 
     fn refresh_status(&mut self, cx: &mut Context<Self>) {
         let config = backboard::BackboardConfig::load_or_default();
+        let previous_status = self.status.clone();
+        let previous_api_ready = self.api_ready;
         self.api_ready = config.api_key().is_some();
         self.status = Self::status_for_config(&config, self.api_ready);
         if !self.api_ready {
             self.configuring_api_key = false;
             self.model_picker_open = false;
             self.models_loading = false;
-            self.providers.clear();
-            self.models.clear();
+            self.clear_model_catalog();
             self.model_status = "Connect Backboard to load models.".into();
+        }
+        if self.api_ready && (self.status != previous_status || !previous_api_ready) {
+            self.clear_model_catalog();
+            self.model_picker_open = true;
         }
         if self.api_ready && self.models.is_empty() && !self.models_loading {
             self.load_models(cx);
         }
         cx.notify();
+    }
+
+    fn clear_model_catalog(&mut self) {
+        self.models_loading = false;
+        self.providers.clear();
+        self.models.clear();
+        self.visible_model_count = INITIAL_VISIBLE_MODELS;
+        self.selected_provider = None;
+        self.selected_model = None;
+        self.model_load_generation = self.model_load_generation.wrapping_add(1);
     }
 
     fn load_models(&mut self, cx: &mut Context<Self>) {
@@ -1146,6 +1163,8 @@ impl BackboardPanel {
 
         self.models_loading = true;
         self.model_status = "Loading Backboard model catalog...".into();
+        self.model_load_generation = self.model_load_generation.wrapping_add(1);
+        let model_load_generation = self.model_load_generation;
         cx.notify();
 
         let models_task = gpui_tokio::Tokio::spawn_result(cx, async move {
@@ -1158,6 +1177,9 @@ impl BackboardPanel {
             let result = models_task.await;
 
             this.update(cx, |this, cx| {
+                if this.model_load_generation != model_load_generation {
+                    return;
+                }
                 this.models_loading = false;
                 match result {
                     Ok((providers, mut models)) => {
@@ -1200,9 +1222,7 @@ impl BackboardPanel {
         if self.models_loading {
             return;
         }
-        self.providers.clear();
-        self.models.clear();
-        self.visible_model_count = INITIAL_VISIBLE_MODELS;
+        self.clear_model_catalog();
         self.load_models(cx);
     }
 
@@ -1218,15 +1238,16 @@ impl BackboardPanel {
 
         match backboard::BackboardConfig::save_api_key_for_current_env(api_key) {
             Ok(config) => {
-                self.api_ready = true;
+                self.api_ready = config.api_key().is_some();
                 self.configuring_api_key = false;
-                self.status = format!("Saved API key to ~/.backboard_ide/config.json ({})", config.env);
+                self.status = Self::status_for_config(&config, self.api_ready);
                 self.api_key_editor
                     .update(cx, |editor, cx| editor.set_text("", window, cx));
                 self.messages.push(BackboardMessage::compact(
                     MessageRole::Backboard,
                     "API key saved for the IDE.",
                 ));
+                self.clear_model_catalog();
                 self.model_picker_open = true;
                 self.load_models(cx);
             }

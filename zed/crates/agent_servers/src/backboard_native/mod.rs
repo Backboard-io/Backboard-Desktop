@@ -2659,7 +2659,8 @@ mod tests {
     fn cleanup_obsolete_workspace_storage_preserves_project_backboard_dir() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         let workspace = temp_dir.path();
-        fs::create_dir_all(workspace.join(".backboard_ide/scratchpad")).expect("create backboard dir");
+        fs::create_dir_all(workspace.join(".backboard_ide/scratchpad"))
+            .expect("create backboard dir");
         fs::create_dir_all(workspace.join(".backboard_ide_index")).expect("create index dir");
         fs::write(workspace.join(".backboard_ide/config.txt"), "obsolete").expect("write artifact");
         fs::write(workspace.join("config.json"), "preserve").expect("write normal file");
