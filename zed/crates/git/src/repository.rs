@@ -3533,6 +3533,8 @@ async fn run_git_command(
     mut command: util::command::Command,
     executor: BackgroundExecutor,
 ) -> Result<RemoteCommandOutput> {
+    command.env("GIT_TERMINAL_PROMPT", "0");
+
     if env.contains_key("GIT_ASKPASS") {
         let git_process = command.spawn()?;
         let output = git_process.output().await?;

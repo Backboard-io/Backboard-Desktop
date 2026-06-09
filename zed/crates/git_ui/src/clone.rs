@@ -220,6 +220,7 @@ async fn git_clone_with_askpass(
     command
         .current_dir(destination_dir)
         .args(["clone", repo_url.as_ref()])
+        .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", askpass.script_path())
         .env("SSH_ASKPASS", askpass.script_path())
         .env("SSH_ASKPASS_REQUIRE", "force");

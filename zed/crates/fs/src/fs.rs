@@ -1320,6 +1320,7 @@ impl Fs for RealFs {
         let output = new_command("git")
             .current_dir(abs_work_directory)
             .args(&["clone", repo_url])
+            .env("GIT_TERMINAL_PROMPT", "0")
             .output()
             .await?;
 
