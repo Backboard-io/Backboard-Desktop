@@ -1,26 +1,100 @@
+use crate::github_account::{GitHubAccountState, GitHubAccountStore, GitHubPromptKind};
 use askpass::EncryptedPassword;
 use client::Client;
 use editor::Editor;
 use futures::channel::oneshot;
-use gpui::{AppContext, DismissEvent, Entity, EventEmitter, Focusable, Styled};
+use gpui::{
+    AnyWindowHandle, AppContext, AsyncApp, DismissEvent, Entity, EventEmitter, Focusable, Styled,
+    Subscription, Task, WeakEntity,
+};
+use std::sync::Arc;
 use ui::{
-    ActiveTheme, AnyElement, App, Button, Clickable, Color, Context, Disableable, DynamicSpacing,
-    FluentBuilder, Headline, HeadlineSize, Icon, IconName, IconSize, InteractiveElement,
-    IntoElement, Label, LabelCommon, LabelSize, ParentElement, Render, SharedString, StyledExt,
-    StyledTypography, Window, div, h_flex, v_flex,
+    ActiveTheme, AnyElement, App, Button, Clickable, Color, Context, DynamicSpacing, FluentBuilder,
+    Headline, HeadlineSize, Icon, IconName, IconSize, InteractiveElement, IntoElement, Label,
+    LabelCommon, LabelSize, ParentElement, Render, SharedString, StyledExt, StyledTypography,
+    Window, div, h_flex, v_flex,
 };
 use util::maybe;
 use workspace::ModalView;
+use workspace::Workspace;
 use zeroize::Zeroize;
+
+pub(crate) fn askpass_delegate(
+    operation: impl Into<SharedString>,
+    workspace: WeakEntity<Workspace>,
+    window: AnyWindowHandle,
+    cx: &mut AsyncApp,
+) -> git::repository::AskPassDelegate {
+    let operation = operation.into();
+    git::repository::AskPassDelegate::new(cx, move |prompt, tx, cx| {
+        if let Some(prompt_kind) = GitHubPromptKind::parse(&prompt) {
+            let workspace = workspace.clone();
+            let operation = operation.clone();
+            let window = window;
+            cx.spawn(async move |cx| {
+                let client = workspace
+                    .read_with(cx, |workspace, _| workspace.client().clone())
+                    .ok();
+
+                if let Some(client) = client.clone() {
+                    match crate::github_account::load_valid_credentials(client, cx).await {
+                        Ok(Some(credentials)) => {
+                            if let Ok(response) = prompt_kind.response(&credentials) {
+                                tx.send(response).ok();
+                                return;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => log::warn!("failed to load GitHub credentials: {error:#}"),
+                    }
+                }
+
+                if let Some(client) = client {
+                    window
+                        .update(cx, |_, window, cx| {
+                            workspace.update(cx, |workspace, cx| {
+                                workspace.toggle_modal(window, cx, |window, cx| {
+                                    AskPassModal::new_github(
+                                        operation.clone(),
+                                        prompt.into(),
+                                        prompt_kind,
+                                        client,
+                                        tx,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            })
+                        })
+                        .ok();
+                }
+            })
+            .detach();
+            return;
+        }
+
+        window
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.toggle_modal(window, cx, |window, cx| {
+                        AskPassModal::new(operation.clone(), prompt.into(), tx, window, cx)
+                    });
+                })
+            })
+            .ok();
+    })
+}
 
 pub(crate) struct AskPassModal {
     operation: SharedString,
     prompt: SharedString,
     editor: Entity<Editor>,
     tx: Option<oneshot::Sender<EncryptedPassword>>,
-    github_user_code: Option<SharedString>,
-    github_sign_in_error: Option<SharedString>,
-    is_signing_in_to_github: bool,
+    github_prompt_kind: Option<GitHubPromptKind>,
+    github_account: Option<Entity<GitHubAccountStore>>,
+    github_client: Option<Arc<Client>>,
+    github_response_task: Option<Task<()>>,
+    _github_subscription: Option<Subscription>,
 }
 
 impl EventEmitter<DismissEvent> for AskPassModal {}
@@ -48,19 +122,50 @@ impl AskPassModal {
             }
             editor
         });
-        let mut this = Self {
+        Self {
             operation,
             prompt,
             editor,
             tx: Some(tx),
-            github_user_code: None,
-            github_sign_in_error: None,
-            is_signing_in_to_github: false,
-        };
-        if this.is_github_prompt() {
-            this.sign_in_to_github(cx);
+            github_prompt_kind: None,
+            github_account: None,
+            github_client: None,
+            github_response_task: None,
+            _github_subscription: None,
         }
-        this
+    }
+
+    pub fn new_github(
+        operation: SharedString,
+        prompt: SharedString,
+        prompt_kind: GitHubPromptKind,
+        client: Arc<Client>,
+        tx: oneshot::Sender<EncryptedPassword>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_masked(false, cx);
+            editor
+        });
+        let github_account = cx.new(|cx| GitHubAccountStore::new(client.clone(), cx));
+        let github_subscription = cx.observe(&github_account, |this, _, cx| {
+            this.try_send_github_response(cx);
+            cx.notify();
+        });
+
+        Self {
+            operation,
+            prompt,
+            editor,
+            tx: Some(tx),
+            github_prompt_kind: Some(prompt_kind),
+            github_account: Some(github_account),
+            github_client: Some(client),
+            github_response_task: None,
+            _github_subscription: Some(github_subscription),
+        }
     }
 
     fn cancel(&mut self, _: &menu::Cancel, _window: &mut Window, cx: &mut Context<Self>) {
@@ -84,107 +189,182 @@ impl AskPassModal {
         cx.emit(DismissEvent);
     }
 
-    fn is_github_prompt(&self) -> bool {
-        crate::github_account::is_github_askpass_prompt(&self.prompt)
+    fn render_hint(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let color = cx.theme().status().info_background;
+        if self.github_account.is_some() {
+            return None;
+        }
+        if (self.prompt.contains("Password") || self.prompt.contains("Username"))
+            && self.prompt.contains("github.com")
+        {
+            return Some(
+            div()
+                .p_2()
+                .bg(color)
+                .border_t_1()
+                .border_color(cx.theme().status().info_border)
+                .child(
+                    h_flex().gap_2()
+                        .child(
+                            Icon::new(IconName::Github).size(IconSize::Small)
+                        )
+                        .child(
+                            Label::new("You may need to configure git for Github.")
+                                .size(LabelSize::Small),
+                        )
+                        .child(Button::new("learn-more", "Learn more").color(Color::Accent).label_size(LabelSize::Small).on_click(|_, _, cx| {
+                            cx.open_url("https://docs.github.com/en/get-started/git-basics/set-up-git#authenticating-with-github-from-git")
+                        })),
+                )
+                .into_any_element(),
+        );
+        }
+        None
     }
 
-    fn sign_in_to_github(&mut self, cx: &mut Context<Self>) {
-        if self.is_signing_in_to_github {
+    fn try_send_github_response(&mut self, cx: &mut Context<Self>) {
+        if self.github_response_task.is_some() {
             return;
         }
 
         let Some(tx) = self.tx.take() else {
             return;
         };
+        let Some(prompt_kind) = self.github_prompt_kind else {
+            self.tx = Some(tx);
+            return;
+        };
+        let Some(client) = self.github_client.clone() else {
+            self.tx = Some(tx);
+            return;
+        };
+        let signed_in = self
+            .github_account
+            .as_ref()
+            .map(|account| {
+                matches!(
+                    account.read(cx).state(),
+                    GitHubAccountState::SignedIn { .. }
+                )
+            })
+            .unwrap_or(false);
+        if !signed_in {
+            self.tx = Some(tx);
+            return;
+        }
 
-        self.is_signing_in_to_github = true;
-        self.github_sign_in_error = None;
-        cx.notify();
-
-        let prompt = self.prompt.to_lowercase();
-        cx.spawn(async move |this, cx| {
-            let client = cx.update(|cx| Client::global(cx));
-            let this_for_code = this.clone();
-            let result =
-                crate::github_account::sign_in_and_store(client, cx, move |user_code, cx| {
-                    this_for_code
-                        .update(cx, |this, cx| {
-                            this.github_user_code = Some(user_code);
-                            cx.notify();
-                        })
-                        .ok();
-                })
-                .await
-                .and_then(|credentials| {
-                    crate::github_account::encrypted_response_for_prompt(&prompt, credentials)
-                });
+        self.github_response_task = Some(cx.spawn(async move |this, cx| {
+            let result = async {
+                let credentials = crate::github_account::load_valid_credentials(client, cx)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("GitHub credentials were not stored"))?;
+                prompt_kind.response(&credentials)
+            }
+            .await;
 
             this.update(cx, |this, cx| {
                 match result {
-                    Ok(Some(response)) => {
+                    Ok(response) => {
                         tx.send(response).ok();
                         cx.emit(DismissEvent);
                     }
-                    Ok(None) => {
-                        this.github_sign_in_error =
-                            Some("GitHub did not ask for a username or password.".into());
-                    }
                     Err(error) => {
-                        this.github_sign_in_error = Some(error.to_string().into());
+                        log::warn!("failed to answer GitHub askpass prompt: {error:#}");
+                        this.github_response_task = None;
                     }
                 }
-                this.is_signing_in_to_github = false;
                 cx.notify();
             })
             .ok();
-        })
-        .detach();
+        }));
     }
 
-    fn render_github_sign_in(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
-            .gap_2()
-            .child(
-                h_flex()
-                    .gap_1p5()
-                    .child(Icon::new(IconName::Github).size(IconSize::Small))
-                    .child(Label::new("Sign in with GitHub").size(LabelSize::Small)),
-            )
-            .child(
-                Label::new("Backboard needs your GitHub sign-in to continue this Git operation.")
-                    .color(Color::Muted)
-                    .size(LabelSize::Small),
-            )
-            .when_some(self.github_user_code.clone(), |this, user_code| {
-                this.child(
-                    v_flex()
-                        .gap_1()
-                        .child(
-                            Label::new("Enter this code in the GitHub browser window:")
-                                .color(Color::Muted)
-                                .size(LabelSize::Small),
-                        )
-                        .child(Label::new(user_code).size(LabelSize::Large)),
-                )
-            })
-            .when_some(self.github_sign_in_error.clone(), |this, error| {
-                this.child(Label::new(error).color(Color::Error).size(LabelSize::Small))
-            })
-            .child(
+    fn render_github_sign_in(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let account = self.github_account.clone()?;
+        let state = account.read(cx).state().clone();
+
+        let content = match state {
+            GitHubAccountState::Checking => v_flex()
+                .gap_2()
+                .child(Label::new("Checking GitHub sign-in...").size(LabelSize::Small)),
+            GitHubAccountState::SignedOut => v_flex().gap_2().child(
                 Button::new("github-sign-in", "Sign in with GitHub")
-                    .start_icon(Icon::new(IconName::Github).size(IconSize::XSmall))
-                    .label_size(LabelSize::Small)
-                    .disabled(self.is_signing_in_to_github)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.sign_in_to_github(cx);
+                    .start_icon(Icon::new(IconName::Github).size(IconSize::Small))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(account) = this.github_account.clone() {
+                            account.update(cx, |account, cx| account.sign_in(cx));
+                        }
                     })),
-            )
-            .into_any_element()
+            ),
+            GitHubAccountState::SigningIn {
+                user_code,
+                verification_uri,
+                status,
+            } => v_flex()
+                .gap_2()
+                .child(Label::new(status).size(LabelSize::Small))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(Label::new(user_code.clone()).size(LabelSize::Large))
+                        .child(Button::new("copy-github-code", "Copy").on_click(
+                            move |_, _, cx| {
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                    user_code.to_string(),
+                                ));
+                            },
+                        )),
+                )
+                .child(
+                    Button::new("open-github-device", "Open GitHub")
+                        .on_click(move |_, _, cx| cx.open_url(&verification_uri)),
+                ),
+            GitHubAccountState::SignedIn { login, .. } => v_flex()
+                .gap_2()
+                .child(Label::new(format!("Signed in to GitHub as {login}")).size(LabelSize::Small))
+                .child(Label::new("Continuing git authentication...").size(LabelSize::Small)),
+            GitHubAccountState::Error { message, sso_url } => {
+                let sso_url_for_button = sso_url.clone();
+                v_flex()
+                    .gap_2()
+                    .child(
+                        Label::new(message)
+                            .size(LabelSize::Small)
+                            .color(Color::Error),
+                    )
+                    .when_some(sso_url_for_button, |this, sso_url| {
+                        this.child(
+                            Button::new("open-github-sso", "Authorize SSO")
+                                .on_click(move |_, _, cx| cx.open_url(&sso_url)),
+                        )
+                    })
+                    .child(
+                        Button::new("retry-github-sign-in", "Sign in with GitHub")
+                            .start_icon(Icon::new(IconName::Github).size(IconSize::Small))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(account) = this.github_account.clone() {
+                                    account.update(cx, |account, cx| account.sign_in(cx));
+                                }
+                            })),
+                    )
+            }
+        };
+
+        Some(
+            v_flex()
+                .gap_3()
+                .p_3()
+                .child(Label::new("GitHub authentication required").size(LabelSize::Small))
+                .child(content)
+                .into_any_element(),
+        )
     }
 }
 
 impl Render for AskPassModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.try_send_github_response(cx);
+
         v_flex()
             .key_context("PasswordPrompt")
             .on_action(cx.listener(Self::cancel))
@@ -207,8 +387,8 @@ impl Render for AskPassModal {
                         ),
                     )),
             )
-            .child({
-                let content = div()
+            .child(
+                div()
                     .font_buffer(cx)
                     .text_buffer(cx)
                     .py_2()
@@ -217,15 +397,13 @@ impl Render for AskPassModal {
                     .border_t_1()
                     .border_color(cx.theme().colors().border_variant)
                     .size_full()
-                    .overflow_hidden();
-
-                if self.is_github_prompt() {
-                    content.child(self.render_github_sign_in(cx))
-                } else {
-                    content
-                        .child(self.prompt.clone())
-                        .child(self.editor.clone())
-                }
-            })
+                    .overflow_hidden()
+                    .child(self.prompt.clone())
+                    .when(self.github_account.is_none(), |this| {
+                        this.child(self.editor.clone())
+                    })
+                    .children(self.render_github_sign_in(cx)),
+            )
+            .children(self.render_hint(cx))
     }
 }

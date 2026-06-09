@@ -3536,6 +3536,7 @@ async fn run_git_command(
     command.env("GIT_TERMINAL_PROMPT", "0");
 
     if env.contains_key("GIT_ASKPASS") {
+        command.env("GIT_TERMINAL_PROMPT", "0");
         let git_process = command.spawn()?;
         let output = git_process.output().await?;
         anyhow::ensure!(
@@ -3552,7 +3553,8 @@ async fn run_git_command(
         command
             .env("GIT_ASKPASS", ask_pass.script_path())
             .env("SSH_ASKPASS", ask_pass.script_path())
-            .env("SSH_ASKPASS_REQUIRE", "force");
+            .env("SSH_ASKPASS_REQUIRE", "force")
+            .env("GIT_TERMINAL_PROMPT", "0");
         let git_process = command.spawn()?;
 
         run_askpass_command(ask_pass, git_process).await

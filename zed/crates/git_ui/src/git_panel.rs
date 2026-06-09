@@ -1,4 +1,3 @@
-use crate::askpass_modal::AskPassModal;
 use crate::commit_modal::CommitModal;
 use crate::commit_tooltip::CommitTooltip;
 use crate::commit_view::CommitView;
@@ -12,7 +11,6 @@ use crate::{
 use agent_settings::AgentSettings;
 use alacritty_terminal::vte::ansi;
 use anyhow::Context as _;
-use askpass::AskPassDelegate;
 use collections::{BTreeMap, HashMap, HashSet};
 use db::kvp::KeyValueStore;
 use editor::{
@@ -3405,38 +3403,13 @@ impl GitPanel {
         operation: impl Into<SharedString>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> AskPassDelegate {
-        let workspace = self.workspace.clone();
-        let operation = operation.into();
-        let window = window.window_handle();
-        AskPassDelegate::new(&mut cx.to_async(), move |prompt, tx, cx| {
-            let workspace = workspace.clone();
-            let operation = operation.clone();
-            let window = window.clone();
-            cx.spawn(async move |cx| {
-                match crate::github_account::askpass_response_for_prompt(&prompt, cx).await {
-                    Ok(Some(response)) => {
-                        tx.send(response).ok();
-                        return;
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        log::warn!("failed to load GitHub credential for askpass: {error}");
-                    }
-                }
-
-                window
-                    .update(cx, |_, window, cx| {
-                        workspace.update(cx, |workspace, cx| {
-                            workspace.toggle_modal(window, cx, |window, cx| {
-                                AskPassModal::new(operation.clone(), prompt.into(), tx, window, cx)
-                            });
-                        })
-                    })
-                    .ok();
-            })
-            .detach();
-        })
+    ) -> git::repository::AskPassDelegate {
+        crate::askpass_modal::askpass_delegate(
+            operation,
+            self.workspace.clone(),
+            window.window_handle(),
+            &mut cx.to_async(),
+        )
     }
 
     fn can_push_and_pull(&self, cx: &App) -> bool {

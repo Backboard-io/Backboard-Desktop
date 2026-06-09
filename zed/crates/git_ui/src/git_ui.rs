@@ -3,8 +3,8 @@ use commit_modal::CommitModal;
 use editor::{Editor, actions::DiffClipboardWithSelectionData};
 
 use ui::{
-    AnyElement, Color, Headline, HeadlineSize, Icon, IconName, IconSize, IntoElement, ListItem,
-    ListItemSpacing, ParentElement, Render, Styled, StyledExt, div, h_flex, rems, v_flex,
+    Color, Headline, HeadlineSize, Icon, IconName, IconSize, IntoElement, ParentElement, Render,
+    Styled, StyledExt, div, h_flex, rems, v_flex,
 };
 use workspace::{Toast, notifications::NotificationId};
 
@@ -17,7 +17,8 @@ use git::{
 };
 use gpui::{
     App, ClipboardItem, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
-    SharedString, Subscription, Task, TaskExt, Window,
+    MouseButton, SharedString, StatefulInteractiveElement, Subscription, Task, TaskExt, Window,
+    prelude::*,
 };
 use menu::{Cancel, Confirm};
 use project::git_store::Repository;
@@ -27,7 +28,12 @@ use ui::prelude::*;
 use workspace::{ModalView, OpenMode, Workspace, notifications::DetachAndPromptErr};
 use zed_actions;
 
-use crate::{commit_view::CommitView, git_panel::GitPanel, text_diff_view::TextDiffView};
+use crate::{
+    commit_view::CommitView,
+    git_panel::GitPanel,
+    github_account::{GitHubAccountState, GitHubAccountStore},
+    text_diff_view::TextDiffView,
+};
 
 mod askpass_modal;
 pub mod branch_picker;
@@ -1131,253 +1137,239 @@ impl Component for GitStatusIcon {
 struct GitCloneModal {
     panel: Entity<GitPanel>,
     repo_input: Entity<Editor>,
-    github_account: Entity<github_account::GitHubAccountStore>,
+    repo_search: Entity<Editor>,
+    github_account: Entity<GitHubAccountStore>,
     focus_handle: FocusHandle,
-    _subscriptions: Vec<Subscription>,
+    _github_subscription: Subscription,
 }
 
 impl GitCloneModal {
     pub fn show(panel: Entity<GitPanel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let repo_input = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Paste repository URL or search GitHub", window, cx);
+            editor.set_placeholder_text("Enter repository URL…", window, cx);
             editor
         });
-        let github_account =
-            cx.new(|cx| github_account::GitHubAccountStore::new(client::Client::global(cx), cx));
+        let repo_search = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_placeholder_text("Search GitHub repositories…", window, cx);
+            editor
+        });
         let focus_handle = repo_input.focus_handle(cx);
-        let _subscriptions = vec![
-            cx.observe(&repo_input, |_, _, cx| cx.notify()),
-            cx.observe(&github_account, |_, _, cx| cx.notify()),
-        ];
+        let workspace = panel.read(cx).workspace.clone();
+        let client = workspace
+            .read_with(cx, |workspace, _| workspace.client().clone())
+            .unwrap_or_else(|_| client::Client::global(cx));
+        let github_account = cx.new(|cx| GitHubAccountStore::new(client, cx));
+        let github_subscription = cx.observe(&github_account, |_, _, cx| cx.notify());
 
         window.focus(&focus_handle, cx);
 
         Self {
             panel,
             repo_input,
+            repo_search,
             github_account,
             focus_handle,
-            _subscriptions,
+            _github_subscription: github_subscription,
         }
     }
 
-    fn clone_url(&mut self, repo_url: String, window: &mut Window, cx: &mut Context<Self>) {
-        if repo_url.trim().is_empty() {
+    fn clone_manual_url(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let repo = self.repo_input.read(cx).text(cx);
+        if repo.trim().is_empty() {
             return;
         }
 
         self.panel.update(cx, |panel, cx| {
-            panel.git_clone(repo_url, window, cx);
+            panel.git_clone(repo, window, cx);
         });
         cx.emit(DismissEvent);
     }
 
-    fn render_github_message(
-        &self,
-        title: &'static str,
-        detail: &'static str,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        v_flex()
-            .p_2()
-            .gap_1()
-            .child(
-                h_flex()
-                    .gap_1p5()
-                    .child(Icon::new(IconName::Github).size(IconSize::Small))
-                    .child(Label::new(title).size(LabelSize::Small)),
-            )
-            .child(
-                Label::new(detail)
-                    .color(Color::Muted)
-                    .size(LabelSize::Small),
-            )
-            .child(
-                Button::new("refresh-github-repositories", "Refresh")
-                    .label_size(LabelSize::Small)
-                    .disabled(matches!(
-                        self.github_account.read(cx).status(),
-                        github_account::GitHubAccountStatus::Checking
-                            | github_account::GitHubAccountStatus::SigningIn { .. }
-                    ))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.github_account.update(cx, |account, cx| {
-                            account.refresh(cx);
-                        });
-                    })),
-            )
-    }
-
     fn render_github_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        match self.github_account.read(cx).status().clone() {
-            github_account::GitHubAccountStatus::Checking => self
-                .render_github_message(
-                    "Checking GitHub sign-in…",
-                    "Backboard is checking for a stored GitHub sign-in.",
-                    cx,
-                )
+        match self.github_account.read(cx).state().clone() {
+            GitHubAccountState::Checking => v_flex()
+                .p_3()
+                .gap_2()
+                .child(Label::new("Checking GitHub sign-in...").size(LabelSize::Small))
                 .into_any_element(),
-            github_account::GitHubAccountStatus::SignedOut => v_flex()
-                .p_2()
+            GitHubAccountState::SignedOut => v_flex()
+                .p_3()
                 .gap_2()
                 .child(
-                    h_flex()
-                        .gap_1p5()
-                        .child(Icon::new(IconName::Github).size(IconSize::Small))
-                        .child(Label::new("Sign in to GitHub").size(LabelSize::Small)),
-                )
-                .child(
-                    Label::new("Signing in lets Backboard list your GitHub repositories and use your GitHub credential for private HTTPS Git operations.")
-                        .color(Color::Muted)
-                        .size(LabelSize::Small),
+                    Label::new("GitHub")
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
                 )
                 .child(
                     Button::new("github-sign-in", "Sign in with GitHub")
-                        .label_size(LabelSize::Small)
-                        .start_icon(Icon::new(IconName::Github).size(IconSize::XSmall))
+                        .start_icon(Icon::new(IconName::Github).size(IconSize::Small))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.github_account.update(cx, |account, cx| {
-                                account.sign_in(cx);
-                            });
+                            this.github_account
+                                .update(cx, |account, cx| account.sign_in(cx));
                         })),
                 )
                 .into_any_element(),
-            github_account::GitHubAccountStatus::SigningIn { user_code } => v_flex()
-                .p_2()
+            GitHubAccountState::SigningIn {
+                user_code,
+                verification_uri,
+                status,
+            } => v_flex()
+                .p_3()
                 .gap_2()
+                .child(Label::new(status).size(LabelSize::Small))
                 .child(
                     h_flex()
-                        .gap_1p5()
-                        .child(Icon::new(IconName::Github).size(IconSize::Small))
-                        .child(Label::new("Waiting for GitHub sign-in").size(LabelSize::Small)),
+                        .gap_2()
+                        .child(Label::new(user_code.clone()).size(LabelSize::Large))
+                        .child(Button::new("copy-github-code", "Copy").on_click(
+                            move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    user_code.to_string(),
+                                ));
+                            },
+                        )),
                 )
                 .child(
-                    Label::new("Enter this code in the GitHub browser window:")
-                        .color(Color::Muted)
-                        .size(LabelSize::Small),
+                    Button::new("open-github-device", "Open GitHub")
+                        .on_click(move |_, _, cx| cx.open_url(&verification_uri)),
                 )
-                .child(Label::new(user_code).size(LabelSize::Large))
                 .into_any_element(),
-            github_account::GitHubAccountStatus::SignedIn {
+            GitHubAccountState::SignedIn {
                 login,
                 repositories,
-            } => self.render_github_repositories(login, repositories, cx),
-            github_account::GitHubAccountStatus::Error(error) => v_flex()
-                .p_2()
-                .gap_2()
-                .child(
-                    h_flex()
-                        .gap_1p5()
-                        .child(
-                            Icon::new(IconName::XCircle)
-                                .size(IconSize::Small)
-                                .color(Color::Error),
-                        )
-                        .child(Label::new("GitHub setup failed").size(LabelSize::Small)),
-                )
-                .child(Label::new(error).color(Color::Muted).size(LabelSize::Small))
-                .child(
-                    h_flex()
-                        .gap_1()
-                        .child(
-                            Button::new("retry-github", "Retry")
-                                .label_size(LabelSize::Small)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.github_account.update(cx, |account, cx| {
-                                        account.refresh(cx);
-                                    });
-                                })),
-                        )
-                        .child(
-                            Button::new("github-sign-in-again", "Sign in")
-                                .label_size(LabelSize::Small)
-                                .start_icon(Icon::new(IconName::Github).size(IconSize::XSmall))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.github_account.update(cx, |account, cx| {
-                                        account.sign_in(cx);
-                                    });
-                                })),
-                        ),
-                )
-                .into_any_element(),
-        }
-    }
+                loading_repositories,
+            } => {
+                let query = self.repo_search.read(cx).text(cx).to_ascii_lowercase();
+                let repositories = repositories
+                    .into_iter()
+                    .filter(|repository| {
+                        query.is_empty()
+                            || repository
+                                .name_with_owner
+                                .to_ascii_lowercase()
+                                .contains(&query)
+                    })
+                    .take(100)
+                    .collect::<Vec<_>>();
 
-    fn render_github_repositories(
-        &mut self,
-        login: SharedString,
-        repositories: Vec<github_account::GitHubRepository>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let query = self.repo_input.read(cx).text(cx);
-        let filtered_repositories = github_account::filter_repositories(&repositories, &query);
-
-        v_flex()
-            .border_t_1()
-            .border_color(cx.theme().colors().border_variant)
-            .child(
-                h_flex()
-                    .p_2()
+                v_flex()
+                    .p_3()
                     .gap_2()
-                    .justify_between()
                     .child(
                         h_flex()
-                            .gap_1p5()
-                            .child(Icon::new(IconName::Github).size(IconSize::Small))
+                            .gap_2()
                             .child(
-                                Label::new(format!("GitHub repositories ({login})"))
-                                    .size(LabelSize::Small),
+                                Label::new(format!("Signed in as {login}"))
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .child(
+                                Button::new("github-refresh", "Refresh")
+                                    .label_size(LabelSize::Small)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.github_account.update(cx, |account, cx| {
+                                            account.refresh_repositories(cx)
+                                        });
+                                    })),
+                            )
+                            .child(
+                                Button::new("github-sign-out", "Sign out")
+                                    .label_size(LabelSize::Small)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.github_account
+                                            .update(cx, |account, cx| account.sign_out(cx));
+                                    })),
                             ),
                     )
+                    .child(self.repo_search.clone())
                     .child(
-                        Button::new("refresh-github-repositories", "Refresh")
-                            .label_size(LabelSize::Small)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.github_account.update(cx, |account, cx| {
-                                    account.refresh(cx);
-                                });
+                        v_flex()
+                            .id("github-repositories")
+                            .max_h(rems(20.))
+                            .overflow_y_scroll()
+                            .border_1()
+                            .border_color(cx.theme().colors().border_variant)
+                            .rounded_sm()
+                            .when(loading_repositories, |this| {
+                                this.child(div().p_2().child(
+                                    Label::new("Loading repositories...").size(LabelSize::Small),
+                                ))
+                            })
+                            .when(!loading_repositories && repositories.is_empty(), |this| {
+                                this.child(div().p_2().child(
+                                    Label::new("No repositories found").size(LabelSize::Small),
+                                ))
+                            })
+                            .children(repositories.into_iter().map(|repository| {
+                                let clone_url = repository.clone_url.clone();
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .cursor_pointer()
+                                    .hover(|style| style.bg(cx.theme().colors().element_hover))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _, window, cx| {
+                                            this.panel.update(cx, |panel, cx| {
+                                                panel.git_clone(clone_url.to_string(), window, cx);
+                                            });
+                                            cx.emit(DismissEvent);
+                                        }),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .child(
+                                                Icon::new(IconName::Github).size(IconSize::Small),
+                                            )
+                                            .child(
+                                                v_flex()
+                                                    .child(Label::new(repository.name_with_owner))
+                                                    .child(
+                                                        Label::new(if repository.is_private {
+                                                            "Private"
+                                                        } else {
+                                                            "Public"
+                                                        })
+                                                        .size(LabelSize::Small)
+                                                        .color(Color::Muted),
+                                                    ),
+                                            ),
+                                    )
+                                    .into_any_element()
                             })),
-                    ),
-            )
-            .child(
+                    )
+                    .into_any_element()
+            }
+            GitHubAccountState::Error { message, sso_url } => {
+                let sso_url_for_button = sso_url.clone();
                 v_flex()
-                    .id("github-repositories-list")
-                    .max_h(rems(18.))
-                    .overflow_y_scroll()
-                    .children(filtered_repositories.into_iter().enumerate().map(
-                        |(ix, repository)| {
-                            let clone_url = repository.clone_url.clone();
-                            ListItem::new(("github-repository", ix))
-                                .inset(true)
-                                .spacing(ListItemSpacing::Sparse)
-                                .start_slot(Icon::new(IconName::Github).size(IconSize::Small))
-                                .child(
-                                    v_flex()
-                                        .overflow_hidden()
-                                        .child(Label::new(repository.name_with_owner).truncate())
-                                        .child(
-                                            Label::new(if repository.is_private {
-                                                "Private"
-                                            } else {
-                                                "Public"
-                                            })
-                                            .color(Color::Muted)
-                                            .size(LabelSize::Small),
-                                        ),
-                                )
-                                .end_slot(
-                                    Icon::new(IconName::Download)
-                                        .size(IconSize::Small)
-                                        .color(Color::Accent),
-                                )
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.clone_url(clone_url.clone(), window, cx);
-                                }))
-                        },
-                    )),
-            )
-            .into_any_element()
+                    .p_3()
+                    .gap_2()
+                    .child(
+                        Label::new(message)
+                            .size(LabelSize::Small)
+                            .color(Color::Error),
+                    )
+                    .when_some(sso_url_for_button, |this, sso_url| {
+                        this.child(
+                            Button::new("github-sso", "Authorize GitHub SSO")
+                                .on_click(move |_, _, cx| cx.open_url(&sso_url)),
+                        )
+                    })
+                    .child(
+                        Button::new("github-sign-in-retry", "Sign in with GitHub")
+                            .start_icon(Icon::new(IconName::Github).size(IconSize::Small))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.github_account
+                                    .update(cx, |account, cx| account.sign_in(cx));
+                            })),
+                    )
+                    .into_any_element()
+            }
+        }
     }
 }
 
@@ -1391,45 +1383,31 @@ impl Render for GitCloneModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .elevation_3(cx)
-            .w(rems(40.))
+            .w(rems(34.))
             .flex_1()
             .overflow_hidden()
             .child(
-                div()
+                v_flex()
                     .w_full()
                     .p_2()
+                    .gap_2()
                     .border_b_1()
                     .border_color(cx.theme().colors().border_variant)
-                    .child(self.repo_input.clone()),
+                    .child(self.repo_input.clone())
+                    .child(h_flex().justify_end().child(
+                        Button::new("clone-url", "Clone URL").on_click(cx.listener(
+                            |this, _, window, cx| {
+                                this.clone_manual_url(window, cx);
+                            },
+                        )),
+                    )),
             )
             .child(self.render_github_section(cx))
-            .child(
-                h_flex()
-                    .w_full()
-                    .p_2()
-                    .gap_0p5()
-                    .rounded_b_sm()
-                    .bg(cx.theme().colors().editor_background)
-                    .child(
-                        Label::new("Clone a repository from GitHub or other sources.")
-                            .color(Color::Muted)
-                            .size(LabelSize::Small),
-                    )
-                    .child(
-                        Button::new("learn-more", "Learn More")
-                            .label_size(LabelSize::Small)
-                            .end_icon(Icon::new(IconName::ArrowUpRight).size(IconSize::XSmall))
-                            .on_click(|_, _, cx| {
-                                cx.open_url("https://github.com/git-guides/git-clone");
-                            }),
-                    ),
-            )
             .on_action(cx.listener(|_, _: &menu::Cancel, _, cx| {
                 cx.emit(DismissEvent);
             }))
             .on_action(cx.listener(|this, _: &menu::Confirm, window, cx| {
-                let repo = this.repo_input.read(cx).text(cx);
-                this.clone_url(repo, window, cx);
+                this.clone_manual_url(window, cx);
             }))
     }
 }
