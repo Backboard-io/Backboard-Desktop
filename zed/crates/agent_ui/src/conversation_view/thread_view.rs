@@ -1723,7 +1723,10 @@ impl ThreadView {
         };
         cx.spawn(async move |_cx| {
             let (content, tracked_buffers) = contents.await?;
-            Ok((prefix_content_blocks(&prompt_prefix, content), tracked_buffers))
+            Ok((
+                prefix_content_blocks(&prompt_prefix, content),
+                tracked_buffers,
+            ))
         })
     }
 

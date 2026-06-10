@@ -270,8 +270,7 @@ impl Render for ModelSelectorPopover {
                                 IconName::ChevronDown
                             })
                             .color(Color::Muted)
-                            .size(IconSize::XSmall)
-                            .flex_none(),
+                            .size(IconSize::XSmall),
                         )
                     }),
             );
