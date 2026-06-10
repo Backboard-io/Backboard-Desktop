@@ -116,7 +116,6 @@ impl Render for ModelSelectorPopover {
         let trigger_logo = self.trigger_logo.clone();
         let branded_trigger = trigger_label.is_some() || trigger_logo.is_some();
         let has_trigger_logo = trigger_logo.is_some();
-        let has_model_icon = model_icon.is_some();
         let trigger_model_name = if branded_trigger {
             model_name
                 .rsplit('/')
@@ -131,6 +130,12 @@ impl Render for ModelSelectorPopover {
             .as_ref()
             .and_then(|model| model.description.clone())
             .filter(|provider| !provider.is_empty());
+        let compact_trigger_model_name = model_name
+            .rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .map(SharedString::from)
+            .unwrap_or_else(|| model_name.clone());
 
         let trigger = ButtonLike::new("active-model")
             .stop_mouse_down_propagation()
@@ -141,7 +146,13 @@ impl Render for ModelSelectorPopover {
                     .flex_shrink()
                     .overflow_hidden()
             })
-            .when(!branded_trigger, |this| this.width(px(28.)))
+            .when(!branded_trigger, |this| {
+                this.width(px(168.))
+                    .min_width(px(34.))
+                    .max_width(px(220.))
+                    .flex_shrink()
+                    .overflow_hidden()
+            })
             .height(if branded_trigger {
                 px(22.).into()
             } else {
@@ -244,11 +255,23 @@ impl Render for ModelSelectorPopover {
                                 ),
                         )
                     })
-                    .when(!branded_trigger && !has_model_icon, |this| {
+                    .when(!branded_trigger, |this| {
                         this.child(
-                            Icon::new(IconName::ChevronDown)
+                            Label::new(compact_trigger_model_name.clone())
+                                .size(LabelSize::XSmall)
                                 .color(color)
-                                .size(IconSize::XSmall),
+                                .truncate()
+                                .flex_1(),
+                        )
+                        .child(
+                            Icon::new(if self.menu_handle.is_deployed() {
+                                IconName::ChevronUp
+                            } else {
+                                IconName::ChevronDown
+                            })
+                            .color(Color::Muted)
+                            .size(IconSize::XSmall)
+                            .flex_none(),
                         )
                     }),
             );

@@ -43,8 +43,8 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 const BACKBOARD_TELEMETRY_ID: &str = "backboard-native";
-const DEFAULT_PROVIDER: &str = "openai";
-const DEFAULT_MODEL: &str = "gpt-4o";
+const DEFAULT_PROVIDER: &str = "aws-bedrock";
+const DEFAULT_MODEL: &str = "anthropic.claude-sonnet-4-6";
 const DEFAULT_INTENSITY: &str = "fast";
 const DEFAULT_CONTEXT_WINDOW: u64 = 258_000;
 const BACKBOARD_SKILL_CONFIG_PREFIX: &str = "backboard_skill:";
@@ -2691,15 +2691,18 @@ mod tests {
 
         let model = fallback_agent_model_info(&config);
 
-        assert_eq!(model.id, acp::ModelId::new("openai/gpt-4o"));
-        assert_eq!(model.name, "gpt-4o");
+        assert_eq!(
+            model.id,
+            acp::ModelId::new("aws-bedrock/anthropic.claude-sonnet-4-6")
+        );
+        assert_eq!(model.name, "anthropic.claude-sonnet-4-6");
         assert_eq!(
             model.description.as_ref().map(|value| value.as_ref()),
-            Some("openai")
+            Some("aws-bedrock")
         );
         assert_eq!(
             model.icon,
-            Some(acp_thread::AgentModelIcon::Named(IconName::AiOpenAi))
+            Some(acp_thread::AgentModelIcon::Named(IconName::AiClaude))
         );
     }
 
