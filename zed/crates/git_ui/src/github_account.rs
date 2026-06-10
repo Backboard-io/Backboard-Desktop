@@ -15,6 +15,7 @@ const GITHUB_OAUTH_CLIENT_ID_ENV: &str = "BACKBOARD_GITHUB_OAUTH_CLIENT_ID";
 const GITHUB_CREDENTIALS_URL: &str = "backboard://github/oauth";
 const GITHUB_SCOPES: &str = "repo read:org";
 const GITHUB_USER_AGENT: &str = "Backboard";
+const GITHUB_OAUTH_APP_ACCESS_URL: &str = "https://github.com/settings/connections/applications";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct GitHubRepository {
@@ -159,9 +160,10 @@ impl GitHubAccountStore {
                         this.refresh_repositories(cx);
                     }
                     Err(error) => {
+                        let error = error.to_string();
                         this.state = GitHubAccountState::Error {
-                            message: SharedString::from(error.to_string()),
-                            sso_url: None,
+                            sso_url: github_sso_url_from_error(&error).map(SharedString::from),
+                            message: SharedString::from(error),
                         };
                     }
                 }
@@ -205,10 +207,10 @@ impl GitHubAccountStore {
                         };
                     }
                     Err(error) => {
+                        let error = error.to_string();
                         this.state = GitHubAccountState::Error {
-                            message: SharedString::from(error.to_string()),
-                            sso_url: github_sso_url_from_error(&error.to_string())
-                                .map(SharedString::from),
+                            sso_url: github_sso_url_from_error(&error).map(SharedString::from),
+                            message: SharedString::from(error),
                         };
                     }
                 }
@@ -236,9 +238,10 @@ impl GitHubAccountStore {
                         this.state = GitHubAccountState::SignedOut;
                     }
                     Err(error) => {
+                        let error = error.to_string();
                         this.state = GitHubAccountState::Error {
-                            message: SharedString::from(error.to_string()),
-                            sso_url: None,
+                            sso_url: github_sso_url_from_error(&error).map(SharedString::from),
+                            message: SharedString::from(error),
                         };
                     }
                 }
@@ -348,6 +351,13 @@ fn github_client_id() -> String {
         .unwrap_or_else(|| DEFAULT_GITHUB_OAUTH_CLIENT_ID.to_string())
 }
 
+fn github_oauth_app_access_url() -> String {
+    format!(
+        "{GITHUB_OAUTH_APP_ACCESS_URL}/{}",
+        urlencoding::encode(&github_client_id())
+    )
+}
+
 async fn request_device_code(
     http_client: Arc<dyn HttpClient>,
     client_id: &str,
@@ -450,6 +460,7 @@ async fn fetch_repositories(
         );
         let mut response = github_api_get(http_client.clone(), &url, token).await?;
         ensure_success(&mut response).await?;
+        ensure_complete_github_sso_results(&response)?;
         let page_repositories: Vec<RepositoryResponse> = read_json_response(response).await?;
         if page_repositories.is_empty() {
             break;
@@ -526,6 +537,29 @@ async fn ensure_success(response: &mut Response<AsyncBody>) -> Result<()> {
     bail!("GitHub request failed with status {status}: {body}");
 }
 
+fn ensure_complete_github_sso_results(response: &Response<AsyncBody>) -> Result<()> {
+    let Some(sso_header) = response
+        .headers()
+        .get("X-GitHub-SSO")
+        .and_then(|header| header.to_str().ok())
+    else {
+        return Ok(());
+    };
+
+    if let Some(sso_url) = github_sso_url_from_error(sso_header) {
+        bail!("GitHub organization SSO authorization is required: {sso_url}");
+    }
+
+    if github_sso_partial_results(sso_header) {
+        bail!(
+            "GitHub organization SSO authorization is required before Backboard can list all repositories or use Git operations for protected organizations. Review Backboard's GitHub OAuth access, authorize the required organizations, then sign in again: {}",
+            github_oauth_app_access_url()
+        );
+    }
+
+    Ok(())
+}
+
 async fn bail_github_oauth_error(mut response: Response<AsyncBody>, client_id: &str) -> Result<()> {
     let status = response.status();
     let mut body = String::new();
@@ -564,13 +598,29 @@ pub(crate) fn github_sso_url_from_error(text: &str) -> Option<String> {
         .flat_map(|part| part.split(','))
         .find_map(|part| {
             let part = part.trim();
-            part.strip_prefix("url=").map(ToString::to_string)
+            part.strip_prefix("url=")
+                .map(trim_github_sso_url)
+                .map(ToString::to_string)
         })
         .or_else(|| {
             text.split_whitespace()
-                .find(|part| part.starts_with("https://github.com/orgs/"))
-                .map(|part| part.trim_end_matches('.').to_string())
+                .find(|part| {
+                    part.starts_with("https://github.com/orgs/")
+                        || part.starts_with("https://github.com/enterprises/")
+                        || part.starts_with(&GITHUB_OAUTH_APP_ACCESS_URL)
+                })
+                .map(trim_github_sso_url)
+                .map(ToString::to_string)
         })
+}
+
+fn github_sso_partial_results(text: &str) -> bool {
+    text.split(';')
+        .any(|part| part.trim().eq_ignore_ascii_case("partial-results"))
+}
+
+fn trim_github_sso_url(url: &str) -> &str {
+    url.trim_matches('"').trim_end_matches(['.', '"'])
 }
 
 #[cfg(test)]
@@ -598,5 +648,25 @@ mod tests {
             ),
             Some("https://github.com/orgs/acme/sso?authorization_request=123".to_string())
         );
+    }
+
+    #[test]
+    fn parses_enterprise_sso_url_from_error_text() {
+        assert_eq!(
+            github_sso_url_from_error(
+                "Authorize in your browser: https://github.com/enterprises/acme/sso."
+            ),
+            Some("https://github.com/enterprises/acme/sso".to_string())
+        );
+    }
+
+    #[test]
+    fn detects_sso_partial_results_header() {
+        assert!(github_sso_partial_results(
+            "partial-results; organizations=21955855,20582480"
+        ));
+        assert!(!github_sso_partial_results(
+            "required; url=https://github.com/orgs/acme/sso?authorization_request=123"
+        ));
     }
 }
