@@ -1673,7 +1673,7 @@ fn render_artifact_summary(
                             cx.emit(BeginnerChatFeedEvent::PreviewRequested);
                         }))
                         .child(
-                            Label::new("Preview")
+                            Label::new("Preview now")
                                 .size(LabelSize::XSmall)
                                 .color(Color::Custom(colors.text)),
                         ),
@@ -1727,9 +1727,12 @@ fn artifact_status(
             metadata: {
                 let changed_files = file_change_count(tasks);
                 if changed_files > 0 {
-                    changed_files_label(changed_files)
+                    SharedString::from(format!(
+                        "{}. Ready to preview.",
+                        changed_files_label(changed_files).as_ref()
+                    ))
                 } else {
-                    SharedString::from("Preview ready")
+                    SharedString::from("Artifact ready to preview")
                 }
             },
         },

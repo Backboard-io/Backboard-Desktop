@@ -672,6 +672,19 @@ impl ConversationView {
         true
     }
 
+    pub fn set_root_prompt_prefix(
+        &self,
+        prompt_prefix: Option<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(root_thread) = self.root_thread_view() else {
+            return;
+        };
+        root_thread.update(cx, |thread, _cx| {
+            thread.set_prompt_prefix(prompt_prefix);
+        });
+    }
+
     pub fn set_root_message_editor_auto_height(
         &self,
         min_lines: usize,

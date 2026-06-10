@@ -35,6 +35,33 @@ use super::*;
 
 pub(super) type BeforeSendHook = Rc<dyn Fn(&str, &mut Window, &mut App) -> bool>;
 
+fn prefix_content_blocks(
+    prompt_prefix: &str,
+    mut content: Vec<acp::ContentBlock>,
+) -> Vec<acp::ContentBlock> {
+    if prompt_prefix.trim().is_empty() {
+        return content;
+    }
+
+    for block in &mut content {
+        if let acp::ContentBlock::Text(text) = block {
+            if text.text.trim().is_empty() {
+                continue;
+            }
+
+            let user_text = std::mem::take(&mut text.text);
+            text.text = format!("{prompt_prefix}\n\n{user_text}");
+            return content;
+        }
+    }
+
+    content.insert(
+        0,
+        acp::ContentBlock::Text(acp::TextContent::new(prompt_prefix.to_string())),
+    );
+    content
+}
+
 fn prompt_title_for_content_blocks(contents: &[acp::ContentBlock]) -> Option<SharedString> {
     let text = contents
         .iter()
@@ -1326,6 +1353,7 @@ pub struct ThreadView {
     pub in_flight_prompt: Option<Vec<acp::ContentBlock>>,
     pub _subscriptions: Vec<Subscription>,
     pub message_editor: Entity<MessageEditor>,
+    prompt_prefix: Option<SharedString>,
     before_send_hook: Option<BeforeSendHook>,
     #[cfg(feature = "audio")]
     dictation_state: DictationState,
@@ -1568,6 +1596,7 @@ impl ThreadView {
             hovered_edited_file_buttons: None,
             in_flight_prompt: None,
             message_editor,
+            prompt_prefix: None,
             before_send_hook: None,
             #[cfg(feature = "audio")]
             dictation_state: DictationState::default(),
@@ -1664,6 +1693,10 @@ impl ThreadView {
             .thread(acp_thread.session_id(), cx)
     }
 
+    pub(super) fn set_prompt_prefix(&mut self, prompt_prefix: Option<SharedString>) {
+        self.prompt_prefix = prompt_prefix;
+    }
+
     pub(super) fn set_before_send_hook(&mut self, before_send_hook: Option<BeforeSendHook>) {
         self.before_send_hook = before_send_hook;
     }
@@ -1683,7 +1716,15 @@ impl ThreadView {
                 .get(thread.profile())
                 .is_some_and(|profile| profile.tools.is_empty())
         });
-        message_editor.update(cx, |message_editor, cx| message_editor.contents(expand, cx))
+        let contents =
+            message_editor.update(cx, |message_editor, cx| message_editor.contents(expand, cx));
+        let Some(prompt_prefix) = self.prompt_prefix.clone() else {
+            return contents;
+        };
+        cx.spawn(async move |_cx| {
+            let (content, tracked_buffers) = contents.await?;
+            Ok((prefix_content_blocks(&prompt_prefix, content), tracked_buffers))
+        })
     }
 
     pub fn current_model_id(&self, cx: &App) -> Option<String> {

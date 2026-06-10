@@ -255,6 +255,7 @@ pub enum WorkspaceTourPlacement {
     AboveRight,
     BottomLeft,
     InsideTop,
+    InsideTopBelowWindowControls,
     TopLeft,
     TopRight,
 }
@@ -515,7 +516,9 @@ fn render_workspace_tour_card(
         );
     let card = if matches!(
         placement,
-        WorkspaceTourPlacement::BottomLeft | WorkspaceTourPlacement::InsideTop
+        WorkspaceTourPlacement::BottomLeft
+            | WorkspaceTourPlacement::InsideTop
+            | WorkspaceTourPlacement::InsideTopBelowWindowControls
     ) {
         card.w_full()
     } else {
@@ -544,6 +547,12 @@ fn render_workspace_tour_card(
         WorkspaceTourPlacement::InsideTop => div()
             .absolute()
             .top(px(12.))
+            .left(px(8.))
+            .right(px(8.))
+            .child(card),
+        WorkspaceTourPlacement::InsideTopBelowWindowControls => div()
+            .absolute()
+            .top(px(44.))
             .left(px(8.))
             .right(px(8.))
             .child(card),

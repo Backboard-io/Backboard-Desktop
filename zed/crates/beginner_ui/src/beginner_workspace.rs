@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use acp_thread::{AcpThread, AcpThreadEvent, AssistantMessageChunk, ThreadStatus, ToolCallStatus};
 #[cfg(test)]
@@ -16,6 +16,7 @@ use agent_ui::{
     ModelSelectorPopover,
 };
 use anyhow::{Context as AnyhowContext, bail};
+use collections::HashSet as FxHashSet;
 use db::kvp::KeyValueStore;
 use editor::actions::{Cancel as EditorCancel, Newline};
 use editor::{Editor, EditorEvent};
@@ -31,6 +32,7 @@ use onboarding::{EXPERIENCE_LEVEL_KVP_KEY, ExperienceLevel};
 use project::{
     Project,
     git_store::{GitStoreEvent, Repository, RepositoryEvent},
+    trusted_worktrees::{PathTrust, TrustedWorktrees},
 };
 use settings::Settings;
 use terminal_view::TerminalView;
@@ -187,10 +189,74 @@ const SIMPLE_CHAT_HISTORY_ROW_HEIGHT_PX: f32 = 42.0;
 const FILES_SPLIT_MIN_DIRECTORY_WIDTH_PX: f32 = 160.0;
 const FILES_SPLIT_MIN_CODE_WIDTH_PX: f32 = 160.0;
 const MAX_UNTRACKED_DIFF_BYTES: u64 = 256 * 1024;
+const WORKSPACE_SNAPSHOT_MAX_DEPTH: usize = 8;
+const WORKSPACE_SNAPSHOT_MAX_FILES: usize = 5000;
+
 struct PreviewLaunch {
     folder: PathBuf,
     command: String,
     url_path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WorkspaceFileSnapshot {
+    files: HashMap<PathBuf, FileFingerprint>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileFingerprint {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PreviewError {
+    kind: PreviewErrorKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PreviewErrorKind {
+    SpawnFailed,
+    PortNotReady,
+    NoRunnableArtifact,
+    EmbeddedBrowserUnsupported,
+    ArtifactUnchanged,
+}
+
+impl PreviewError {
+    fn new(kind: PreviewErrorKind) -> Self {
+        Self { kind }
+    }
+
+    fn title(&self) -> &'static str {
+        match self.kind {
+            PreviewErrorKind::SpawnFailed => "Preview failed to start",
+            PreviewErrorKind::PortNotReady => "Preview did not become ready",
+            PreviewErrorKind::NoRunnableArtifact => "Preview unavailable",
+            PreviewErrorKind::EmbeddedBrowserUnsupported => "Embedded browser unavailable",
+            PreviewErrorKind::ArtifactUnchanged => "No file changes detected",
+        }
+    }
+
+    fn message(&self) -> &'static str {
+        match self.kind {
+            PreviewErrorKind::SpawnFailed => {
+                "Backboard could not launch the local preview server on port 3000."
+            }
+            PreviewErrorKind::PortNotReady => {
+                "The app started, but port 3000 did not serve the preview page in time."
+            }
+            PreviewErrorKind::NoRunnableArtifact => {
+                "No package app or HTML page was detected in this project."
+            }
+            PreviewErrorKind::EmbeddedBrowserUnsupported => {
+                "The preview server is running, but this platform cannot embed the browser view."
+            }
+            PreviewErrorKind::ArtifactUnchanged => {
+                "Backboard finished without changing the project files, so the existing preview was not updated."
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -566,6 +632,110 @@ mod simple_mode_draft_tests {
             BeginnerWorkspace::preview_url_from_text("Suspicious URL: http://localhost.evil.test"),
             None
         );
+    }
+
+    #[test]
+    fn loopback_preview_url_normalization_rejects_non_loopback_hosts() {
+        assert_eq!(
+            BeginnerWorkspace::loopback_preview_url_from_candidate("localhost:3000/app").as_deref(),
+            Some("http://localhost:3000/app")
+        );
+        assert_eq!(
+            BeginnerWorkspace::loopback_preview_url_from_candidate("http://127.0.0.1:3000")
+                .as_deref(),
+            Some("http://127.0.0.1:3000")
+        );
+        assert_eq!(
+            BeginnerWorkspace::loopback_preview_url_from_candidate("http://127.42.0.1:3000/path")
+                .as_deref(),
+            Some("http://127.42.0.1:3000/path")
+        );
+        assert_eq!(
+            BeginnerWorkspace::loopback_preview_url_from_candidate("http://192.168.0.10:3000"),
+            None
+        );
+        assert_eq!(
+            BeginnerWorkspace::loopback_preview_url_from_candidate("http://localhost.evil:3000"),
+            None
+        );
+    }
+
+    fn preview_test_dir() -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("beginner-preview-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create preview test dir");
+        dir
+    }
+
+    #[test]
+    fn static_html_detection_prefers_index_html() {
+        let root = preview_test_dir();
+        std::fs::write(root.join("about.html"), "<h1>About</h1>").expect("write about");
+        std::fs::write(root.join("index.html"), "<h1>Home</h1>").expect("write index");
+
+        assert_eq!(
+            BeginnerWorkspace::static_preview_html_path(&root).as_deref(),
+            Some(root.join("index.html").as_path())
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn package_preview_command_adds_fixed_port_args_for_framework_scripts() {
+        let next_root = preview_test_dir();
+        std::fs::write(
+            next_root.join("package.json"),
+            r#"{"scripts":{"dev":"next dev"}}"#,
+        )
+        .expect("write next package");
+        let next_command = BeginnerWorkspace::package_preview_command(&next_root, 3000)
+            .expect("next preview command");
+        assert!(next_command.contains("npm run dev -- -H 127.0.0.1 -p 3000"));
+
+        let vite_root = preview_test_dir();
+        std::fs::write(
+            vite_root.join("package.json"),
+            r#"{"scripts":{"dev":"vite --host 0.0.0.0"}}"#,
+        )
+        .expect("write vite package");
+        let vite_command = BeginnerWorkspace::package_preview_command(&vite_root, 3000)
+            .expect("vite preview command");
+        assert!(vite_command.contains("npm run dev -- --host 127.0.0.1 --port 3000"));
+
+        std::fs::remove_dir_all(next_root).ok();
+        std::fs::remove_dir_all(vite_root).ok();
+    }
+
+    #[gpui::test]
+    async fn stale_preview_generation_cannot_replace_newer_preview_state(cx: &mut TestAppContext) {
+        let (beginner_workspace, _workspace, mut cx) = setup_beginner_workspace(cx).await;
+
+        beginner_workspace.update_in(&mut cx, |beginner_workspace, _window, _cx| {
+            beginner_workspace.preview_generation = 2;
+            beginner_workspace.preview_url = Some("http://127.0.0.1:3000/new".to_string());
+            beginner_workspace.is_preview_generating = true;
+
+            assert!(!beginner_workspace.apply_preview_ready_for_generation(
+                1,
+                "http://127.0.0.1:3000/old".to_string(),
+            ));
+            assert_eq!(
+                beginner_workspace.preview_url.as_deref(),
+                Some("http://127.0.0.1:3000/new")
+            );
+            assert!(beginner_workspace.is_preview_generating);
+
+            assert!(beginner_workspace.apply_preview_ready_for_generation(
+                2,
+                "http://127.0.0.1:3000/current".to_string(),
+            ));
+            assert_eq!(
+                beginner_workspace.preview_url.as_deref(),
+                Some("http://127.0.0.1:3000/current")
+            );
+            assert!(!beginner_workspace.is_preview_generating);
+        });
     }
 
     async fn setup_beginner_workspace(
@@ -956,6 +1126,8 @@ struct BeginnerChatRecord {
     name: String,
     folder_path: String,
     #[serde(default)]
+    thread_id: Option<ThreadId>,
+    #[serde(default)]
     session_id: Option<String>,
     timestamp_ms: i64,
 }
@@ -978,6 +1150,7 @@ impl BeginnerChatRecord {
             id: uuid::Uuid::new_v4().to_string(),
             name,
             folder_path: folder.to_string_lossy().into_owned(),
+            thread_id: None,
             session_id: None,
             timestamp_ms,
         }
@@ -1147,9 +1320,18 @@ impl RightPanelOption {
     fn label(self) -> &'static str {
         match self {
             Self::Files => "Files",
-            Self::Design => "Browser",
+            Self::Design => "Preview",
             Self::Code => "Review",
             Self::Terminal => "Terminal",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::Files => "Browse project files",
+            Self::Design => "View the generated preview",
+            Self::Code => "View code changes",
+            Self::Terminal => "Start an interactive shell",
         }
     }
 
@@ -1170,6 +1352,15 @@ impl RightPanelOption {
             Self::Terminal => "right-panel-tab-terminal",
         }
     }
+
+    fn launcher_element_id(self) -> &'static str {
+        match self {
+            Self::Files => "right-panel-launcher-files",
+            Self::Design => "right-panel-launcher-browser",
+            Self::Code => "right-panel-launcher-review",
+            Self::Terminal => "right-panel-launcher-terminal",
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1184,6 +1375,27 @@ impl ChatMode {
 
     fn follow_up_placeholder(self) -> &'static str {
         "Ask Backboard..."
+    }
+
+    fn prompt_prefix(self) -> &'static str {
+        match self {
+            ChatMode::Build => concat!(
+                "Simple build mode: build or edit the project for a nontechnical user.\n",
+                "- Default to creating a polished web app or page when the user asks for a product, app, page, dashboard, tool, game, or visual experience and does not specify another medium.\n",
+                "- Do not force a web app when the user explicitly asks for another artifact, such as docs, scripts, data work, configuration, terminal help, or repository cleanup.\n",
+                "- Proceed with sensible defaults when style, brand, audience, content, or layout choices are missing. Ask a clarifying question only when the request cannot be acted on safely or the user explicitly asks for a decision first.\n",
+                "- Keep visible chat replies short, natural, and outcome-focused. Do not show code, filenames, commands, raw logs, markdown-heavy checklists, or implementation details unless the user asks.\n",
+                "- When the work is done, reply like a chat message in 1-2 sentences. Avoid Features or Controls reports; mention the result and how to try it.\n",
+                "- Do not narrate implementation mechanics in chat. Avoid phrases like updating files, creating HTML/CSS/JavaScript files, editing components, running commands, or changing specific filenames. Say what user-facing experience is being built instead.\n",
+                "- Summarize edits as product changes. Let the UI expose file counts and read-only diffs separately, such as Backboard changed 3 files.\n",
+                "- Treat code and diffs as read-only review surfaces for the user.\n",
+                "- After creating or updating a runnable artifact, start or refresh the preview so the user can press Preview now in the app.\n",
+                "- Do not tell the user to open local files, index.html, refresh the preview, or use an external browser; the app provides the preview flow.\n",
+                "- Never claim an artifact changed unless you actually changed files. If a requested visual change cannot be completed, say that briefly instead of saying it is ready.\n",
+                "- For visual pages that need images, use reachable image URLs or create the image assets. Do not reference local image filenames unless those files exist.\n",
+                "- Do not use generated media as a substitute for project files. Visual changes must be durable edits to the workspace, such as HTML, CSS, JavaScript, reachable image URLs, or actual asset files."
+            ),
+        }
     }
 
     fn agent_workspace_mode(self) -> BackboardAgentWorkspaceMode {
@@ -1235,8 +1447,16 @@ struct ProjectSession {
     bottom_panel_animation_generation: u64,
     share_dialog_open: bool,
     preview_url: Option<String>,
+    browser_url: Option<String>,
+    browser_blank_tab: bool,
     preview_visible: bool,
     is_preview_generating: bool,
+    browser_loading: bool,
+    browser_url_polling: bool,
+    preview_refresh_pending: bool,
+    preview_generation: u64,
+    preview_error: Option<PreviewError>,
+    pending_file_snapshot: Option<WorkspaceFileSnapshot>,
     terminal_view: Option<Entity<TerminalView>>,
     terminal_working_directory: Option<PathBuf>,
     right_terminal_view: Option<Entity<TerminalView>>,
@@ -1324,11 +1544,20 @@ pub struct BeginnerWorkspace {
     bottom_panel_closing: bool,
     bottom_panel_animation_generation: u64,
     share_dialog_open: bool,
-    browser_warning_dialog_open: bool,
     // URL of the running dev server once it's ready.
     preview_url: Option<String>,
+    // URL currently loaded in the embedded browser. This may be a search or
+    // external page and is separate from the artifact preview URL.
+    browser_url: Option<String>,
+    browser_blank_tab: bool,
     preview_visible: bool,
     is_preview_generating: bool,
+    browser_loading: bool,
+    browser_url_polling: bool,
+    preview_refresh_pending: bool,
+    preview_generation: u64,
+    preview_error: Option<PreviewError>,
+    pending_file_snapshot: Option<WorkspaceFileSnapshot>,
     terminal_view: Option<Entity<TerminalView>>,
     terminal_working_directory: Option<PathBuf>,
     right_terminal_view: Option<Entity<TerminalView>>,
@@ -1416,11 +1645,10 @@ impl BeginnerWorkspace {
     fn make_browser_address_editor(
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> (Entity<Editor>, Subscription) {
-        let workspace = cx.entity().downgrade();
+    ) -> (Entity<Editor>, Vec<Subscription>) {
         let editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Enter a URL", window, cx);
+            editor.set_placeholder_text("Preview URL", window, cx);
             let mut text_style = Self::simple_mode_editor_text_style(cx);
             text_style.color = Some(ds::text_muted(cx));
             editor.set_text_style_refinement(text_style);
@@ -1429,20 +1657,7 @@ impl BeginnerWorkspace {
             editor.set_show_indent_guides(false, cx);
             editor
         });
-        let address_editor = editor.clone();
-        let subscription = editor.update(cx, |editor, _cx| {
-            let workspace = workspace.clone();
-            let address_editor = address_editor.clone();
-            editor.register_action(move |_: &Newline, window, cx| {
-                let url_text = address_editor.read(cx).text(cx);
-                workspace
-                    .update(cx, |this, cx| {
-                        this.navigate_browser_to_input(url_text, window, cx);
-                    })
-                    .log_err();
-            })
-        });
-        (editor, subscription)
+        (editor, Vec::new())
     }
 
     fn simple_mode_editor_text_style(cx: &mut App) -> TextStyleRefinement {
@@ -1498,7 +1713,7 @@ impl BeginnerWorkspace {
 
         let (replacement_editor, enter_sub) =
             Self::make_chat_editor(window, cx, ChatMode::Build.placeholder());
-        let (replacement_browser_address_editor, browser_enter_sub) =
+        let (replacement_browser_address_editor, browser_enter_subs) =
             Self::make_browser_address_editor(window, cx);
         let session = ProjectSession {
             chat_record_id: self.active_chat_record_id.take(),
@@ -1559,8 +1774,16 @@ impl BeginnerWorkspace {
             ),
             share_dialog_open: std::mem::replace(&mut self.share_dialog_open, false),
             preview_url: self.preview_url.take(),
+            browser_url: self.browser_url.take(),
+            browser_blank_tab: std::mem::replace(&mut self.browser_blank_tab, false),
             preview_visible: std::mem::replace(&mut self.preview_visible, false),
             is_preview_generating: std::mem::replace(&mut self.is_preview_generating, false),
+            browser_loading: std::mem::replace(&mut self.browser_loading, false),
+            browser_url_polling: std::mem::replace(&mut self.browser_url_polling, false),
+            preview_refresh_pending: std::mem::replace(&mut self.preview_refresh_pending, false),
+            preview_generation: std::mem::replace(&mut self.preview_generation, 0),
+            preview_error: self.preview_error.take(),
+            pending_file_snapshot: self.pending_file_snapshot.take(),
             terminal_view: self.terminal_view.take(),
             terminal_working_directory: self.terminal_working_directory.take(),
             right_terminal_view: self.right_terminal_view.take(),
@@ -1577,10 +1800,10 @@ impl BeginnerWorkspace {
         self.web_preview = None;
         // The new editor's Enter-to-submit subscription belongs to the fresh session.
         self.session_subscriptions.push(enter_sub);
-        self.session_subscriptions.push(browser_enter_sub);
-        self.browser_warning_dialog_open = false;
+        self.session_subscriptions.extend(browser_enter_subs);
         self.background_sessions.push(session);
         self.save_open_tabs(cx);
+        self.focus_primary_composer(window, cx);
         cx.notify();
     }
 
@@ -1588,13 +1811,19 @@ impl BeginnerWorkspace {
         if ix >= self.background_sessions.len() {
             return;
         }
-        self.browser_warning_dialog_open = false;
         Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
         self.clear_current_preview_state();
         let session = &mut self.background_sessions[ix];
         session.preview_url = None;
+        session.browser_url = None;
+        session.browser_blank_tab = false;
         session.preview_visible = false;
         session.is_preview_generating = false;
+        session.browser_loading = false;
+        session.browser_url_polling = false;
+        session.preview_refresh_pending = false;
+        session.preview_generation = session.preview_generation.saturating_add(1);
+        session.preview_error = None;
         session.web_preview = None;
         session.dev_server_port = None;
         session.dev_server_task = None;
@@ -1678,10 +1907,30 @@ impl BeginnerWorkspace {
         );
         std::mem::swap(&mut self.share_dialog_open, &mut session.share_dialog_open);
         std::mem::swap(&mut self.preview_url, &mut session.preview_url);
+        std::mem::swap(&mut self.browser_url, &mut session.browser_url);
+        std::mem::swap(&mut self.browser_blank_tab, &mut session.browser_blank_tab);
         std::mem::swap(&mut self.preview_visible, &mut session.preview_visible);
         std::mem::swap(
             &mut self.is_preview_generating,
             &mut session.is_preview_generating,
+        );
+        std::mem::swap(&mut self.browser_loading, &mut session.browser_loading);
+        std::mem::swap(
+            &mut self.browser_url_polling,
+            &mut session.browser_url_polling,
+        );
+        std::mem::swap(
+            &mut self.preview_refresh_pending,
+            &mut session.preview_refresh_pending,
+        );
+        std::mem::swap(
+            &mut self.preview_generation,
+            &mut session.preview_generation,
+        );
+        std::mem::swap(&mut self.preview_error, &mut session.preview_error);
+        std::mem::swap(
+            &mut self.pending_file_snapshot,
+            &mut session.pending_file_snapshot,
         );
         std::mem::swap(&mut self.terminal_view, &mut session.terminal_view);
         std::mem::swap(
@@ -1712,6 +1961,7 @@ impl BeginnerWorkspace {
         });
         self.restore_active_chat_if_needed(window, cx);
         self.save_open_tabs(cx);
+        self.focus_primary_composer(window, cx);
         cx.notify();
     }
 
@@ -1724,7 +1974,7 @@ impl BeginnerWorkspace {
         let (chat_editor, chat_enter_sub) =
             Self::make_chat_editor(window, cx, ChatMode::Build.placeholder());
         let chat_search_editor = Self::make_search_editor(window, cx);
-        let (browser_address_editor, browser_enter_sub) =
+        let (browser_address_editor, browser_enter_subs) =
             Self::make_browser_address_editor(window, cx);
         let search_sub = cx.subscribe(&chat_search_editor, |_, _, event: &EditorEvent, cx| {
             if matches!(event, EditorEvent::Edited { .. }) {
@@ -1823,10 +2073,17 @@ impl BeginnerWorkspace {
             bottom_panel_closing: false,
             bottom_panel_animation_generation: 0,
             share_dialog_open: false,
-            browser_warning_dialog_open: false,
             preview_url: None,
+            browser_url: None,
+            browser_blank_tab: false,
             preview_visible: false,
             is_preview_generating: false,
+            browser_loading: false,
+            browser_url_polling: false,
+            preview_refresh_pending: false,
+            preview_generation: 0,
+            preview_error: None,
+            pending_file_snapshot: None,
             terminal_view: None,
             terminal_working_directory: None,
             right_terminal_view: None,
@@ -1849,7 +2106,9 @@ impl BeginnerWorkspace {
             _project_subscription: project_sub,
             _git_subscription: git_sub,
             _search_subscription: search_sub,
-            session_subscriptions: vec![chat_enter_sub, browser_enter_sub],
+            session_subscriptions: std::iter::once(chat_enter_sub)
+                .chain(browser_enter_subs)
+                .collect(),
         }
     }
 
@@ -1891,10 +2150,7 @@ impl BeginnerWorkspace {
                 self.right_panel_option = RightPanelOption::Files;
                 self.reset_right_panel_tabs();
                 self.share_dialog_open = false;
-                self.browser_warning_dialog_open = false;
-                self.preview_url = None;
-                self.preview_visible = false;
-                self.is_preview_generating = false;
+                self.clear_current_preview_state();
                 self.bottom_panel_open = false;
                 self.bottom_panel_closing = false;
                 self.bottom_panel_animation_generation = 0;
@@ -1979,6 +2235,114 @@ impl BeginnerWorkspace {
             })
     }
 
+    fn trust_folder_for_simple_mode(&self, folder: &Path, cx: &mut App) {
+        if !folder.is_absolute() {
+            return;
+        }
+
+        let Some(trusted_worktrees) = TrustedWorktrees::try_get_global(cx) else {
+            return;
+        };
+        let worktree_store = self.project.read(cx).worktree_store();
+        let paths = FxHashSet::from_iter([PathTrust::AbsPath(folder.to_path_buf())]);
+        trusted_worktrees.update(cx, |trusted_worktrees, cx| {
+            trusted_worktrees.trust(&worktree_store, paths, cx);
+        });
+    }
+
+    fn workspace_file_snapshot(root: &Path) -> WorkspaceFileSnapshot {
+        let mut files = HashMap::new();
+        Self::collect_workspace_file_snapshot(root, root, 0, &mut files);
+        WorkspaceFileSnapshot { files }
+    }
+
+    fn collect_workspace_file_snapshot(
+        root: &Path,
+        dir: &Path,
+        depth: usize,
+        files: &mut HashMap<PathBuf, FileFingerprint>,
+    ) {
+        if depth > WORKSPACE_SNAPSHOT_MAX_DEPTH || files.len() >= WORKSPACE_SNAPSHOT_MAX_FILES {
+            return;
+        }
+
+        let Ok(read_dir) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut entries = read_dir
+            .flatten()
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        entries.sort();
+
+        for path in entries {
+            if files.len() >= WORKSPACE_SNAPSHOT_MAX_FILES {
+                break;
+            }
+
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy())
+                .unwrap_or_default();
+            if path.is_dir() {
+                if !Self::is_workspace_snapshot_ignored_dir(name.as_ref()) {
+                    Self::collect_workspace_file_snapshot(root, &path, depth + 1, files);
+                }
+                continue;
+            }
+
+            let Ok(metadata) = std::fs::metadata(&path) else {
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+
+            let key = path
+                .strip_prefix(root)
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|_| path.clone());
+            files.insert(
+                key,
+                FileFingerprint {
+                    len: metadata.len(),
+                    modified: metadata.modified().ok(),
+                },
+            );
+        }
+    }
+
+    fn is_workspace_snapshot_ignored_dir(name: &str) -> bool {
+        matches!(
+            name,
+            ".git"
+                | ".hg"
+                | ".svn"
+                | "node_modules"
+                | "target"
+                | ".next"
+                | ".nuxt"
+                | ".svelte-kit"
+                | "dist"
+                | "build"
+                | ".cache"
+                | ".turbo"
+        )
+    }
+
+    fn capture_pending_file_snapshot(&mut self) {
+        self.pending_file_snapshot = self
+            .selected_folder
+            .as_deref()
+            .map(Self::workspace_file_snapshot);
+    }
+
+    fn finish_pending_file_snapshot(&mut self) -> Option<bool> {
+        let snapshot = self.pending_file_snapshot.take()?;
+        let folder = self.selected_folder.as_deref()?;
+        Some(Self::workspace_file_snapshot(folder) != snapshot)
+    }
+
     fn active_conversation_thread_id(&self, cx: &App) -> Option<ThreadId> {
         self.active_conversation_view
             .as_ref()
@@ -2014,6 +2378,7 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.trust_folder_for_simple_mode(&folder, cx);
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
@@ -2146,10 +2511,11 @@ impl BeginnerWorkspace {
         self.save_chat_history(cx);
     }
 
-    fn update_latest_chat_record_session_id(
+    fn update_latest_chat_record_identity(
         &mut self,
         folder: &PathBuf,
-        session_id: String,
+        thread_id: Option<ThreadId>,
+        session_id: Option<String>,
         cx: &mut App,
     ) {
         let record = if let Some(active_id) = self.active_chat_record_id.clone() {
@@ -2163,15 +2529,27 @@ impl BeginnerWorkspace {
         };
 
         if let Some(record) = record {
-            if record.session_id.as_deref() == Some(session_id.as_str()) {
+            let thread_id_changed = thread_id.is_some() && record.thread_id != thread_id;
+            let session_id_changed = session_id.is_some() && record.session_id != session_id;
+            if !thread_id_changed && !session_id_changed {
                 return;
             }
-            record.session_id = Some(session_id);
+            if thread_id.is_some() {
+                record.thread_id = thread_id;
+            }
+            if session_id.is_some() {
+                record.session_id = session_id;
+            }
             self.save_chat_history(cx);
         }
     }
 
-    fn update_active_chat_record_session_id(&mut self, session_id: String, cx: &mut App) {
+    fn update_active_chat_record_identity(
+        &mut self,
+        thread_id: Option<ThreadId>,
+        session_id: Option<String>,
+        cx: &mut App,
+    ) {
         let Some(active_id) = self.active_chat_record_id.clone() else {
             return;
         };
@@ -2182,10 +2560,17 @@ impl BeginnerWorkspace {
         else {
             return;
         };
-        if record.session_id.as_deref() == Some(session_id.as_str()) {
+        let thread_id_changed = thread_id.is_some() && record.thread_id != thread_id;
+        let session_id_changed = session_id.is_some() && record.session_id != session_id;
+        if !thread_id_changed && !session_id_changed {
             return;
         }
-        record.session_id = Some(session_id);
+        if thread_id.is_some() {
+            record.thread_id = thread_id;
+        }
+        if session_id.is_some() {
+            record.session_id = session_id;
+        }
         self.save_chat_history(cx);
     }
 
@@ -2202,9 +2587,9 @@ impl BeginnerWorkspace {
         conversation_view: &Entity<ConversationView>,
         cx: &mut App,
     ) {
-        if let Some(session_id) = Self::conversation_root_session_id(conversation_view, cx) {
-            self.update_active_chat_record_session_id(session_id, cx);
-        }
+        let thread_id = conversation_view.read(cx).parent_id();
+        let session_id = Self::conversation_root_session_id(conversation_view, cx);
+        self.update_active_chat_record_identity(Some(thread_id), session_id, cx);
     }
 
     fn update_active_chat_record_session_id_from_thread(
@@ -2213,7 +2598,10 @@ impl BeginnerWorkspace {
         cx: &mut App,
     ) {
         let session_id = thread.read(cx).session_id().0.to_string();
-        self.update_active_chat_record_session_id(session_id, cx);
+        let thread_id = self
+            .chat_surface_conversation_view()
+            .map(|conversation_view| conversation_view.read(cx).parent_id());
+        self.update_active_chat_record_identity(thread_id, Some(session_id), cx);
     }
 
     fn update_active_chat_record_session_id_from_current_session(&mut self, cx: &mut App) {
@@ -2288,6 +2676,10 @@ impl BeginnerWorkspace {
                 conversation_view
                     .downgrade()
                     .update_in(cx, |view, window, cx| {
+                        view.set_root_prompt_prefix(
+                            Some(SharedString::from(ChatMode::Build.prompt_prefix())),
+                            cx,
+                        );
                         view.send_root_message_editor(window, cx);
                     })
                     .ok();
@@ -2311,6 +2703,7 @@ impl BeginnerWorkspace {
         let folder = match self.selected_or_visible_folder(cx) {
             Some(folder) => {
                 self.selected_folder = Some(folder.clone());
+                self.trust_folder_for_simple_mode(&folder, cx);
                 folder
             }
             None => {
@@ -2330,6 +2723,7 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.trust_folder_for_simple_mode(&folder, cx);
         self.selected_folder = Some(folder.clone());
         let chat_name = generate_chat_name(&text);
         self.tab_name = SharedString::from(chat_name.clone());
@@ -2382,7 +2776,6 @@ impl BeginnerWorkspace {
         self.right_panel_option = RightPanelOption::Files;
         self.reset_right_panel_tabs();
         self.share_dialog_open = false;
-        self.browser_warning_dialog_open = false;
         self.bottom_panel_open = false;
         self.bottom_panel_closing = false;
         self.bottom_panel_animation_generation = 0;
@@ -2443,7 +2836,6 @@ impl BeginnerWorkspace {
         self.right_panel_option = RightPanelOption::Files;
         self.reset_right_panel_tabs();
         self.share_dialog_open = false;
-        self.browser_warning_dialog_open = false;
         self.bottom_panel_open = false;
         self.bottom_panel_closing = false;
         self.bottom_panel_animation_generation = 0;
@@ -2554,6 +2946,7 @@ impl BeginnerWorkspace {
         let folder = match self.selected_or_visible_folder(cx) {
             Some(folder) => {
                 self.selected_folder = Some(folder.clone());
+                self.trust_folder_for_simple_mode(&folder, cx);
                 folder
             }
             None => {
@@ -2605,12 +2998,15 @@ impl BeginnerWorkspace {
             self.state = BeginnerState::ActiveProject;
             let record_id = self.add_chat_record(chat_name, &folder, cx);
             self.active_chat_record_id = Some(record_id.clone());
-            if let Some(root_session_id) = root_session_id {
-                self.update_active_chat_record_session_id(root_session_id, cx);
-            }
+            self.update_active_chat_record_identity(Some(active_thread_id), root_session_id, cx);
             if let Some(thread) = self.thread.clone() {
                 let session_id = thread.read(cx).session_id().0.to_string();
-                self.update_latest_chat_record_session_id(&folder, session_id, cx);
+                self.update_latest_chat_record_identity(
+                    &folder,
+                    Some(active_thread_id),
+                    Some(session_id),
+                    cx,
+                );
                 thread.update(cx, |thread, cx| {
                     thread.set_provisional_title(SharedString::from(generate_chat_name(text)), cx);
                 });
@@ -2618,11 +3014,10 @@ impl BeginnerWorkspace {
             self.save_open_tabs(cx);
         } else if let Some(record_id) = self.active_chat_record_id.clone() {
             self.touch_chat_record(&record_id, cx);
-            if let Some(root_session_id) = root_session_id {
-                self.update_active_chat_record_session_id(root_session_id, cx);
-            }
+            self.update_active_chat_record_identity(Some(active_thread_id), root_session_id, cx);
         }
 
+        self.capture_pending_file_snapshot();
         self.is_agent_running = true;
         self.agent_finished = false;
         cx.notify();
@@ -2642,6 +3037,7 @@ impl BeginnerWorkspace {
 
         if self.selected_folder.is_none() {
             if let Some(folder) = self.selected_or_visible_folder(cx) {
+                self.trust_folder_for_simple_mode(&folder, cx);
                 self.selected_folder = Some(folder);
             } else {
                 self.submit(window, cx);
@@ -2655,6 +3051,7 @@ impl BeginnerWorkspace {
         }
         let agent_text = self.chat_mode.prepare_message(text);
         if let Some(folder) = self.selected_folder.clone() {
+            self.trust_folder_for_simple_mode(&folder, cx);
             if let Some(thread) = self.thread.clone() {
                 thread.update(cx, |thread, cx| {
                     thread.set_work_dirs(PathList::new(&[folder]), cx);
@@ -2735,6 +3132,7 @@ impl BeginnerWorkspace {
     }
 
     fn focus_primary_composer(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.release_browser_focus(window);
         if let Some(focus_handle) =
             self.active_conversation_view
                 .as_ref()
@@ -2748,6 +3146,12 @@ impl BeginnerWorkspace {
         } else {
             let focus_handle = self.chat_editor.focus_handle(cx);
             window.focus(&focus_handle, cx);
+        }
+    }
+
+    fn release_browser_focus(&self, window: &Window) {
+        if let Some(preview) = self.web_preview.as_ref() {
+            preview.release_focus(window);
         }
     }
 
@@ -2973,14 +3377,23 @@ impl BeginnerWorkspace {
         self.right_panel_mode = RightPanelMode::Artifact;
 
         if self.selected_folder.is_some()
-            && self.preview_url.is_none()
             && !self.is_preview_generating
+            && (self.preview_url.is_none() || self.current_preview_is_fixed_loopback())
         {
             self.open_web_app_if_present(cx);
         }
 
         if let Some(url) = self.preview_url.clone() {
-            self.navigate_browser_to_url(url, window, cx);
+            let address_label = Self::browser_address_label(Some(&url));
+            self.browser_address_editor.update(cx, |editor, cx| {
+                editor.set_text(address_label, window, cx);
+            });
+            self.preview_visible = true;
+            self.browser_loading = true;
+            self.preview_error = None;
+            self.web_preview = None;
+            self.schedule_browser_loading_clear(cx);
+            cx.notify();
         } else {
             cx.notify();
         }
@@ -3001,37 +3414,188 @@ impl BeginnerWorkspace {
             return Some(format!("http://{input}"));
         }
 
+        if input.split_whitespace().count() > 1 || !input.contains('.') {
+            return None;
+        }
+
         Some(format!("https://{input}"))
     }
 
-    fn navigate_browser_to_input(
-        &mut self,
-        input: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(url) = Self::normalize_browser_url(input) {
-            self.navigate_browser_to_url(url, window, cx);
+    fn schedule_browser_loading_clear(&self, cx: &mut Context<Self>) {
+        let expected_url = self.current_browser_url();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(1_200))
+                .await;
+            this.update(cx, |this, cx| {
+                if this.current_browser_url() == expected_url && this.browser_loading {
+                    this.browser_loading = false;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn current_preview_is_fixed_loopback(&self) -> bool {
+        self.preview_url.as_deref().is_some_and(|url| {
+            Self::is_loopback_http_url(url)
+                && (url.contains(":3000/")
+                    || url.ends_with(":3000")
+                    || url.contains(":3000?")
+                    || url.contains(":3000#"))
+        })
+    }
+
+    fn reload_browser_preview(&mut self, cx: &mut Context<Self>) {
+        if let Some(preview) = self.web_preview.as_mut() {
+            preview.reload();
+            self.browser_loading = true;
+            self.schedule_browser_loading_clear(cx);
+            cx.notify();
+            return;
+        }
+
+        if self.selected_folder.is_some() && self.current_preview_is_fixed_loopback() {
+            self.open_web_app_if_present(cx);
+            return;
+        }
+
+        if self.current_browser_url().is_some() {
+            self.preview_visible = true;
+            self.browser_loading = true;
+            self.web_preview = None;
+            self.schedule_browser_loading_clear(cx);
+            cx.notify();
+        } else {
+            self.open_web_app_if_present(cx);
         }
     }
 
-    fn navigate_browser_to_url(
-        &mut self,
-        url: String,
+    fn stop_browser_loading(&mut self, cx: &mut Context<Self>) {
+        if let Some(preview) = self.web_preview.as_mut() {
+            preview.stop_loading();
+        }
+        self.browser_loading = false;
+        cx.notify();
+    }
+
+    fn go_browser_back(&mut self, cx: &mut Context<Self>) {
+        if let Some(preview) = self.web_preview.as_mut() {
+            preview.go_back();
+            self.browser_loading = true;
+            self.schedule_browser_loading_clear(cx);
+            cx.notify();
+        }
+    }
+
+    fn go_browser_forward(&mut self, cx: &mut Context<Self>) {
+        if let Some(preview) = self.web_preview.as_mut() {
+            preview.go_forward();
+            self.browser_loading = true;
+            self.schedule_browser_loading_clear(cx);
+            cx.notify();
+        }
+    }
+
+    fn refresh_browser_url_from_preview(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.browser_loading || self.is_preview_generating {
+            return false;
+        }
+
+        let Some(current_url) = self
+            .web_preview
+            .as_ref()
+            .and_then(|preview| preview.current_url())
+            .filter(|url| !url.trim().is_empty())
+        else {
+            return false;
+        };
+
+        if self.current_browser_url().as_deref() == Some(current_url.as_str()) {
+            return false;
+        }
+
+        self.browser_url = Some(current_url);
+        self.browser_blank_tab = false;
+        self.browser_loading = false;
+        self.preview_error = None;
+        cx.notify();
+        true
+    }
+
+    fn current_browser_url(&self) -> Option<String> {
+        self.preview_url.clone()
+    }
+
+    fn start_browser_url_polling(&mut self, cx: &mut Context<Self>) {
+        if self.browser_url_polling {
+            return;
+        }
+
+        self.browser_url_polling = true;
+        let task = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(500))
+                    .await;
+
+                let keep_polling = this
+                    .update(cx, |this, cx| {
+                        let should_poll = this.right_panel_open
+                            && this.right_panel_mode == RightPanelMode::Artifact
+                            && this.active_right_panel_tab == Some(RightPanelOption::Design)
+                            && this.preview_visible
+                            && this.web_preview.is_some();
+
+                        if !should_poll {
+                            this.browser_url_polling = false;
+                            return false;
+                        }
+
+                        this.refresh_browser_url_from_preview(cx);
+                        true
+                    })
+                    .unwrap_or(false);
+
+                if !keep_polling {
+                    break;
+                }
+            }
+        });
+        self._tasks.push(task);
+    }
+
+    fn sync_browser_address_editor(
+        &self,
+        preview_url: Option<&String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let address_label = Self::browser_address_label(Some(&url));
-        self.browser_address_editor.update(cx, |editor, cx| {
-            editor.set_text(address_label, window, cx);
-        });
-        self.preview_url = Some(url);
-        self.preview_visible = true;
-        self.web_preview = None;
-        self.right_panel = RightPanel::Preview;
-        self.activate_right_panel_tab(RightPanelOption::Design);
-        self.right_panel_mode = RightPanelMode::Artifact;
-        cx.notify();
+        let address_label = Self::browser_address_label(preview_url);
+        let should_sync = {
+            let editor = self.browser_address_editor.read(cx);
+            !editor.focus_handle(cx).contains_focused(window, cx)
+                && editor.text(cx) != address_label.as_ref()
+        };
+        if should_sync {
+            self.browser_address_editor.update(cx, |editor, cx| {
+                editor.set_text(address_label, window, cx);
+            });
+        }
+    }
+
+    fn preview_is_ready(&self) -> bool {
+        self.preview_url.is_some()
+            && self.preview_error.is_none()
+            && !self.is_agent_running
+            && !self.is_preview_generating
+            && !self.preview_refresh_pending
+    }
+
+    fn should_show_preview_ready_alert(&self) -> bool {
+        self.preview_is_ready()
     }
 
     fn open_artifact_panel(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -3065,15 +3629,15 @@ impl BeginnerWorkspace {
             RightPanelOption::Design => {
                 self.right_panel = RightPanel::Preview;
                 self.right_panel_mode = RightPanelMode::Artifact;
-                self.preview_visible = self.preview_url.is_some();
+                self.preview_visible = true;
                 self.web_preview = None;
-                if let Some(url) = self.preview_url.clone() {
+                if let Some(url) = self.current_browser_url() {
                     let address_label = Self::browser_address_label(Some(&url));
                     self.browser_address_editor.update(cx, |editor, cx| {
                         editor.set_text(address_label, window, cx);
                     });
                     cx.notify();
-                } else if self.selected_folder.is_some() {
+                } else if self.selected_folder.is_some() && self.preview_url.is_none() {
                     self.open_web_app_if_present(cx);
                 } else {
                     self.browser_address_editor.update(cx, |editor, cx| {
@@ -3101,9 +3665,6 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if option == RightPanelOption::Design {
-            self.browser_warning_dialog_open = true;
-        }
         self.select_right_panel_option(option, window, cx);
     }
 
@@ -3566,6 +4127,7 @@ impl BeginnerWorkspace {
 
     fn go_home(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(self.state, BeginnerState::Landing) {
+            self.focus_primary_composer(window, cx);
             return;
         }
         self.stash_current_session_and_reset(window, cx);
@@ -3598,6 +4160,7 @@ impl BeginnerWorkspace {
 
     #[allow(dead_code)]
     pub fn switch_to_editor(&mut self, cx: &mut Context<Self>) {
+        self.shutdown_simple_preview();
         persist_experience_level(ExperienceLevel::Developer, cx);
         cx.emit(BeginnerWorkspaceEvent::SwitchToEditor);
     }
@@ -3629,7 +4192,7 @@ impl BeginnerWorkspace {
             self.start_static_preview_server(html_path, cx);
             return;
         }
-        self.is_preview_generating = false;
+        self.set_preview_error(PreviewErrorKind::NoRunnableArtifact, None);
         cx.notify();
     }
 
@@ -3889,18 +4452,117 @@ res.end(data);\
 
         for session in &mut self.background_sessions {
             session.preview_url = None;
+            session.browser_url = None;
+            session.browser_blank_tab = false;
             session.preview_visible = false;
             session.is_preview_generating = false;
+            session.browser_loading = false;
+            session.browser_url_polling = false;
+            session.preview_refresh_pending = false;
+            session.preview_generation = session.preview_generation.saturating_add(1);
+            session.preview_error = None;
             session.web_preview = None;
             session.dev_server_port = None;
             session.dev_server_task = None;
         }
     }
 
+    fn shutdown_simple_preview(&mut self) {
+        Self::kill_preview_port(SIMPLE_PREVIEW_PORT);
+        self.reset_all_preview_state();
+    }
+
     fn clear_current_preview_state(&mut self) {
         self.preview_url = None;
+        self.browser_url = None;
+        self.browser_blank_tab = false;
         self.preview_visible = false;
         self.is_preview_generating = false;
+        self.browser_loading = false;
+        self.browser_url_polling = false;
+        self.preview_refresh_pending = false;
+        self.preview_generation = self.preview_generation.saturating_add(1);
+        self.preview_error = None;
+        self.web_preview = None;
+        self.dev_server_port = None;
+        self.dev_server_task = None;
+    }
+
+    fn begin_preview_launch(&mut self, url: String, port: u16) -> u64 {
+        self.preview_generation = self.preview_generation.saturating_add(1);
+        let generation = self.preview_generation;
+        let browser_tab_active = self.active_right_panel_tab == Some(RightPanelOption::Design);
+        self.dev_server_task = None;
+        self.dev_server_port = Some(port);
+        self.preview_url = Some(url.clone());
+        self.browser_url = Some(url);
+        self.browser_blank_tab = false;
+        self.preview_visible = browser_tab_active;
+        self.is_preview_generating = true;
+        self.browser_loading = false;
+        self.browser_url_polling = false;
+        self.preview_refresh_pending = false;
+        self.preview_error = None;
+        self.web_preview = None;
+        generation
+    }
+
+    fn apply_preview_ready_for_generation(&mut self, generation: u64, url: String) -> bool {
+        if self.preview_generation != generation {
+            return false;
+        }
+
+        let browser_tab_active = self.active_right_panel_tab == Some(RightPanelOption::Design);
+        self.web_preview = None;
+        self.right_panel = RightPanel::Preview;
+        self.right_panel_mode = RightPanelMode::Artifact;
+        self.preview_visible = browser_tab_active;
+        self.is_preview_generating = false;
+        self.browser_loading = false;
+        self.browser_url_polling = false;
+        self.preview_error = None;
+        self.preview_url = Some(url.clone());
+        self.browser_url = Some(url);
+        self.browser_blank_tab = false;
+        true
+    }
+
+    fn apply_preview_error_for_generation(
+        &mut self,
+        generation: u64,
+        kind: PreviewErrorKind,
+        url: Option<String>,
+    ) -> bool {
+        if self.preview_generation != generation {
+            return false;
+        }
+
+        self.preview_url = url.clone();
+        self.browser_url = url;
+        self.browser_blank_tab = false;
+        self.preview_visible = self.active_right_panel_tab == Some(RightPanelOption::Design);
+        self.is_preview_generating = false;
+        self.browser_loading = false;
+        self.browser_url_polling = false;
+        self.preview_refresh_pending = false;
+        self.preview_error = Some(PreviewError::new(kind));
+        self.web_preview = None;
+        self.dev_server_port = None;
+        self.dev_server_task = None;
+        true
+    }
+
+    fn set_preview_error(&mut self, kind: PreviewErrorKind, url: Option<String>) {
+        self.preview_generation = self.preview_generation.saturating_add(1);
+        self.preview_url = url.clone();
+        self.browser_url = url;
+        self.browser_blank_tab = false;
+        self.preview_visible = self.active_right_panel_tab == Some(RightPanelOption::Design);
+        self.is_preview_generating = false;
+        self.browser_loading = false;
+        self.browser_url_polling = false;
+        self.preview_refresh_pending = false;
+        self.preview_error = Some(PreviewError::new(kind));
         self.web_preview = None;
         self.dev_server_port = None;
         self.dev_server_task = None;
@@ -3941,7 +4603,18 @@ res.end(data);\
         Self::shell_quote(&path.to_string_lossy())
     }
 
-    fn is_http_preview_ready(port: u16) -> bool {
+    fn preview_request_path(url_path: &str) -> String {
+        let path = url_path.trim();
+        if path.is_empty() {
+            "/".to_string()
+        } else if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{path}")
+        }
+    }
+
+    fn is_http_preview_ready(port: u16, url_path: &str) -> bool {
         let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
         let Ok(mut stream) =
             std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(350))
@@ -3950,8 +4623,9 @@ res.end(data);\
         };
         let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(700)));
         let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(350)));
+        let path = Self::preview_request_path(url_path);
         let request =
-            format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+            format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
         if std::io::Write::write_all(&mut stream, request.as_bytes()).is_err() {
             return false;
         }
@@ -3976,13 +4650,15 @@ res.end(data);\
 
     fn start_preview_server(&mut self, launch: PreviewLaunch, cx: &mut Context<Self>) {
         let port = SIMPLE_PREVIEW_PORT;
-        let url = format!("http://localhost:{port}{}", launch.url_path);
-        let browser_tab_active = self.active_right_panel_tab == Some(RightPanelOption::Design);
-        self.dev_server_port = Some(port);
-        self.preview_url = Some(url.clone());
-        self.preview_visible = browser_tab_active;
-        self.is_preview_generating = true;
-        self.web_preview = None;
+        let url_path = Self::preview_request_path(&launch.url_path);
+        let cache_bust = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0);
+        let url_separator = if url_path.contains('?') { "&" } else { "?" };
+        let url =
+            format!("http://127.0.0.1:{port}{url_path}{url_separator}bb_preview={cache_bust}");
+        let generation = self.begin_preview_launch(url.clone(), port);
         cx.notify();
 
         let task = cx.spawn(async move |this, cx| {
@@ -4008,12 +4684,21 @@ res.end(data);\
                 .is_ok();
 
             if !spawned {
+                let url = url.clone();
                 this.update(cx, |this, cx| {
-                    this.is_preview_generating = false;
-                    this.preview_visible = false;
-                    this.preview_url = None;
-                    this.dev_server_port = None;
-                    cx.notify();
+                    let refresh_after_error = this.preview_refresh_pending;
+                    if this.apply_preview_error_for_generation(
+                        generation,
+                        PreviewErrorKind::SpawnFailed,
+                        Some(url),
+                    ) {
+                        if refresh_after_error {
+                            this.preview_refresh_pending = false;
+                            this.open_web_app_if_present(cx);
+                        } else {
+                            cx.notify();
+                        }
+                    }
                 })
                 .ok();
                 return;
@@ -4025,29 +4710,38 @@ res.end(data);\
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(500))
                     .await;
-                if Self::is_http_preview_ready(port) {
+                if Self::is_http_preview_ready(port, &url_path) {
                     let url = url.clone();
                     this.update(cx, |this, cx| {
-                        let browser_tab_active =
-                            this.active_right_panel_tab == Some(RightPanelOption::Design);
-                        this.web_preview = None;
-                        this.right_panel = RightPanel::Preview;
-                        this.right_panel_mode = RightPanelMode::Artifact;
-                        this.preview_visible = browser_tab_active;
-                        this.is_preview_generating = false;
-                        this.preview_url = Some(url);
-                        cx.notify();
+                        let refresh_after_ready = this.preview_refresh_pending;
+                        if this.apply_preview_ready_for_generation(generation, url) {
+                            if refresh_after_ready {
+                                this.preview_refresh_pending = false;
+                                this.open_web_app_if_present(cx);
+                            } else {
+                                cx.notify();
+                            }
+                        }
                     })
                     .ok();
                     return;
                 }
             }
+            let url = url.clone();
             this.update(cx, |this, cx| {
-                this.is_preview_generating = false;
-                this.preview_visible = false;
-                this.preview_url = None;
-                this.dev_server_port = None;
-                cx.notify();
+                let refresh_after_error = this.preview_refresh_pending;
+                if this.apply_preview_error_for_generation(
+                    generation,
+                    PreviewErrorKind::PortNotReady,
+                    Some(url),
+                ) {
+                    if refresh_after_error {
+                        this.preview_refresh_pending = false;
+                        this.open_web_app_if_present(cx);
+                    } else {
+                        cx.notify();
+                    }
+                }
             })
             .ok();
         });
@@ -4079,7 +4773,6 @@ res.end(data);\
         self.right_panel_option = RightPanelOption::Files;
         self.reset_right_panel_tabs();
         self.share_dialog_open = false;
-        self.browser_warning_dialog_open = false;
         self.clear_current_preview_state();
         self.bottom_panel_open = false;
         self.bottom_panel_closing = false;
@@ -4091,14 +4784,15 @@ res.end(data);\
         self.chat_mode = ChatMode::Build;
         let (chat_editor, enter_sub) =
             Self::make_chat_editor(window, cx, self.chat_mode.placeholder());
-        let (browser_address_editor, browser_enter_sub) =
+        let (browser_address_editor, browser_enter_subs) =
             Self::make_browser_address_editor(window, cx);
         self.chat_editor = chat_editor;
         self.browser_address_editor = browser_address_editor;
         self.session_subscriptions.clear();
         self.session_subscriptions.push(enter_sub);
-        self.session_subscriptions.push(browser_enter_sub);
+        self.session_subscriptions.extend(browser_enter_subs);
         self.save_open_tabs(cx);
+        self.focus_primary_composer(window, cx);
         cx.notify();
     }
 
@@ -4156,6 +4850,7 @@ res.end(data);\
             editor.set_placeholder_text(self.chat_mode.follow_up_placeholder(), window, cx);
         });
         self.restore_thread_for_folder(record.clone(), path.clone(), window, cx);
+        self.focus_primary_composer(window, cx);
         cx.notify();
     }
 
@@ -4185,7 +4880,6 @@ res.end(data);\
         self.right_panel_option = RightPanelOption::Files;
         self.reset_right_panel_tabs();
         self.share_dialog_open = false;
-        self.browser_warning_dialog_open = false;
         self.clear_current_preview_state();
         self.bottom_panel_open = false;
         self.bottom_panel_closing = false;
@@ -4196,10 +4890,10 @@ res.end(data);\
         self.right_terminal_working_directory = None;
         self.session_subscriptions.clear();
         self.session_subscriptions.push(enter_sub);
-        let (browser_address_editor, browser_enter_sub) =
+        let (browser_address_editor, browser_enter_subs) =
             Self::make_browser_address_editor(window, cx);
         self.browser_address_editor = browser_address_editor;
-        self.session_subscriptions.push(browser_enter_sub);
+        self.session_subscriptions.extend(browser_enter_subs);
     }
 
     fn restore_active_chat_if_needed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -4255,26 +4949,34 @@ res.end(data);\
         let path_list = PathList::new(&[path.clone()]);
         let store_ref = store.read(cx);
         let reload_task = store_ref.reload_task();
+        let record_title = record.display_name();
         let metadata = record
-            .session_id
-            .as_ref()
-            .and_then(|sid| {
-                let session = acp::SessionId::new(sid.clone());
-                store_ref.entry_by_session(&session)
+            .thread_id
+            .and_then(|thread_id| store_ref.entry(thread_id))
+            .or_else(|| {
+                record.session_id.as_ref().and_then(|sid| {
+                    let session = acp::SessionId::new(sid.clone());
+                    store_ref.entry_by_session(&session)
+                })
             })
             .or_else(|| {
                 store_ref
-                    .entries_for_path(&path_list, None)
-                    .chain(store_ref.entries_for_main_worktree_path(&path_list, None))
+                    .entries()
+                    .filter(|entry| {
+                        entry.remote_connection.is_none()
+                            && (entry.folder_paths() == &path_list
+                                || entry.main_worktree_paths() == &path_list)
+                    })
                     .max_by_key(|entry| entry.updated_at)
             })
             .or_else(|| {
                 // Fallback for legacy history rows where folder path matching is unreliable.
                 store_ref
                     .entries()
-                    .filter(|entry| entry.display_title() == self.tab_name)
+                    .filter(|entry| entry.display_title().as_ref() == record_title.as_ref())
                     .max_by_key(|entry| entry.updated_at)
-            });
+            })
+            .cloned();
 
         let Some(metadata) = metadata else {
             if wait_for_metadata_reload && let Some(reload_task) = reload_task {
@@ -4289,8 +4991,13 @@ res.end(data);\
             }
             return;
         };
-
         let thread_id = metadata.thread_id;
+        let session_id = metadata
+            .session_id
+            .as_ref()
+            .map(|session| session.0.to_string());
+        self.update_active_chat_record_identity(Some(thread_id), session_id, cx);
+
         let work_dirs = Some(path_list);
         self.open_folder_as_worktree(path.clone(), window, cx);
         let options = BackboardAgentWorkspaceChatOptions {
@@ -4336,8 +5043,13 @@ res.end(data);\
 
         let url_changed = self.preview_url.as_deref() != Some(url.as_str());
         self.preview_url = Some(url.clone());
+        self.browser_url = Some(url);
+        self.browser_blank_tab = false;
         self.preview_visible = self.active_right_panel_tab == Some(RightPanelOption::Design);
         self.is_preview_generating = false;
+        self.browser_loading = false;
+        self.browser_url_polling = false;
+        self.preview_error = None;
         self.dev_server_port = None;
         self.dev_server_task = None;
         if url_changed {
@@ -4520,29 +5232,45 @@ res.end(data);\
         entry_index: usize,
         cx: &mut Context<Self>,
     ) {
-        if self.preview_url.is_none() {
-            return;
-        }
-
         let should_refresh = thread
             .read(cx)
             .entries()
             .get(entry_index)
-            .is_some_and(|entry| match entry {
-                AgentThreadEntry::ToolCall(call) => {
-                    matches!(call.status, ToolCallStatus::Completed)
-                        && matches!(
-                            call.kind,
-                            acp::ToolKind::Edit
-                                | acp::ToolKind::Delete
-                                | acp::ToolKind::Move
-                                | acp::ToolKind::Execute
-                        )
-                }
-                _ => false,
-            });
+            .is_some_and(Self::entry_is_completed_preview_update);
 
-        if should_refresh {
+        if !should_refresh {
+            return;
+        }
+
+        self.request_live_preview_refresh(cx);
+    }
+
+    fn entry_is_completed_preview_update(entry: &AgentThreadEntry) -> bool {
+        match entry {
+            AgentThreadEntry::ToolCall(call) => {
+                matches!(call.status, ToolCallStatus::Completed)
+                    && matches!(
+                        call.kind,
+                        acp::ToolKind::Edit
+                            | acp::ToolKind::Delete
+                            | acp::ToolKind::Move
+                            | acp::ToolKind::Execute
+                    )
+            }
+            _ => false,
+        }
+    }
+
+    fn request_live_preview_refresh(&mut self, cx: &mut Context<Self>) {
+        if self.selected_folder.is_some() {
+            if self.is_preview_generating {
+                self.preview_refresh_pending = true;
+                self.web_preview = None;
+                cx.notify();
+            } else {
+                self.open_web_app_if_present(cx);
+            }
+        } else {
             self.web_preview = None;
             cx.notify();
         }
@@ -4612,7 +5340,31 @@ res.end(data);\
                     this.update_active_chat_record_session_id_from_thread(&thread_entity, cx);
                     this.is_agent_running = false;
                     this.agent_finished = true;
-                    if !this.restore_preview_url_from_thread(&thread_entity, cx) {
+                    let files_changed = this.finish_pending_file_snapshot();
+                    if let Some(files_changed) = files_changed {
+                        log::info!(
+                            "Simple Mode finished turn: files_changed={} selected_folder={}",
+                            files_changed,
+                            this.selected_folder
+                                .as_ref()
+                                .map(|folder| folder.display().to_string())
+                                .unwrap_or_else(|| "<none>".to_string())
+                        );
+                    }
+                    if files_changed == Some(false) {
+                        this.preview_url = None;
+                        this.browser_url = None;
+                        this.browser_blank_tab = false;
+                        this.preview_visible = false;
+                        this.is_preview_generating = false;
+                        this.browser_loading = false;
+                        this.preview_refresh_pending = false;
+                        this.preview_error =
+                            Some(PreviewError::new(PreviewErrorKind::ArtifactUnchanged));
+                        this.web_preview = None;
+                    } else if this.selected_folder.is_some() {
+                        this.request_live_preview_refresh(cx);
+                    } else if !this.restore_preview_url_from_thread(&thread_entity, cx) {
                         this.web_preview = None;
                     }
                     cx.notify();
@@ -4653,8 +5405,9 @@ res.end(data);\
             self.thread = Some(thread.clone());
             self.update_active_chat_record_session_id_from_conversation(conversation_view, cx);
             if let Some(folder) = self.selected_folder.clone() {
+                let thread_id = conversation_view.read(cx).parent_id();
                 let sid = thread.read(cx).session_id().0.to_string();
-                self.update_latest_chat_record_session_id(&folder, sid, cx);
+                self.update_latest_chat_record_identity(&folder, Some(thread_id), Some(sid), cx);
             }
             self.restore_preview_for_thread_if_present(&thread, cx);
             self.active_conversation_view = self.pending_conversation_view.take();
@@ -4697,6 +5450,8 @@ res.end(data);\
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.capture_pending_file_snapshot();
+        self.configure_thread_composer(&conversation_view, window, cx);
         conversation_view.update(cx, |conversation_view, cx| {
             conversation_view.set_root_message_text(text, window, cx);
             conversation_view.send_root_message_editor(window, cx);
@@ -4740,7 +5495,7 @@ res.end(data);\
     ) -> ProjectSession {
         let (chat_editor, enter_sub) =
             Self::make_chat_editor(window, cx, ChatMode::Build.placeholder());
-        let (browser_address_editor, browser_enter_sub) =
+        let (browser_address_editor, browser_enter_subs) =
             Self::make_browser_address_editor(window, cx);
         let folder = record.folder();
         ProjectSession {
@@ -4781,8 +5536,16 @@ res.end(data);\
             bottom_panel_animation_generation: 0,
             share_dialog_open: false,
             preview_url: None,
+            browser_url: None,
+            browser_blank_tab: false,
             preview_visible: false,
             is_preview_generating: false,
+            browser_loading: false,
+            browser_url_polling: false,
+            preview_refresh_pending: false,
+            preview_generation: 0,
+            preview_error: None,
+            pending_file_snapshot: None,
             terminal_view: None,
             terminal_working_directory: None,
             right_terminal_view: None,
@@ -4790,7 +5553,9 @@ res.end(data);\
             dev_server_port: None,
             web_preview: None,
             dev_server_task: None,
-            subscriptions: vec![enter_sub, browser_enter_sub],
+            subscriptions: std::iter::once(enter_sub)
+                .chain(browser_enter_subs)
+                .collect(),
         }
     }
 
@@ -4968,22 +5733,31 @@ impl Render for BeginnerWorkspace {
             && matches!(self.right_panel, RightPanel::Preview)
             && self.preview_visible
             && self.preview_url.is_some();
+        let should_show_embedded_preview = should_show_embedded_preview
+            && !self.is_agent_running
+            && !self.is_preview_generating
+            && self.preview_error.is_none();
+        let preview_url = self.preview_url.clone();
 
         // Lazily create the embedded web preview only after the user asks to view it.
         // Returns None on unsupported platforms (Linux/Wayland).
         if should_show_embedded_preview && self.web_preview.is_none() {
-            if let Some(url) = self.preview_url.clone() {
+            if let Some(url) = preview_url.clone() {
                 self.web_preview = crate::web_preview::WebPreview::new(window, &url);
+                if self.web_preview.is_some() {
+                    self.start_browser_url_polling(cx);
+                }
             }
         } else if !should_show_embedded_preview {
             self.web_preview = None;
+            self.browser_url_polling = false;
         }
 
         // If the URL changed after the view was already created, navigate it.
         if let (true, Some(preview), Some(url)) = (
             should_show_embedded_preview,
             &mut self.web_preview,
-            &self.preview_url,
+            &preview_url,
         ) {
             preview.load_url(url);
         }
@@ -5255,7 +6029,7 @@ impl BeginnerWorkspace {
                 .render_simple_tour_target(
                     slot,
                     WorkspaceTourStep::SimpleModeChats,
-                    WorkspaceTourPlacement::InsideTop,
+                    WorkspaceTourPlacement::InsideTopBelowWindowControls,
                     cx,
                 )
                 .id("simple-closed-sidebar-width-slot")
@@ -5277,7 +6051,7 @@ impl BeginnerWorkspace {
         self.render_simple_tour_target(
             slot,
             WorkspaceTourStep::SimpleModeChats,
-            WorkspaceTourPlacement::InsideTop,
+            WorkspaceTourPlacement::InsideTopBelowWindowControls,
             cx,
         )
         .id("simple-sidebar-width-slot")
@@ -5710,9 +6484,21 @@ impl BeginnerWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let panel = api_key_ready.then(|| {
-            self.render_right_panel_slot(is_running, preview_url, right_panel_expanded, window, cx)
-        });
+        let output_tour_active =
+            self.workspace_tour_step(cx) == Some(WorkspaceTourStep::SimpleModeOutput);
+        let panel = if api_key_ready {
+            Some(self.render_right_panel_slot(
+                is_running,
+                preview_url,
+                right_panel_expanded,
+                window,
+                cx,
+            ))
+        } else if output_tour_active {
+            Some(self.render_open_artifact_panel_button(window, cx))
+        } else {
+            None
+        };
         let main_content = self.render_middle_panel_shell(
             main_content,
             (api_key_ready && self.right_panel_open).then(|| px(ds::CHAT_PANEL_MIN_WIDTH)),
@@ -6753,6 +7539,7 @@ impl BeginnerWorkspace {
         match target {
             SimpleModeTarget::Simple => {}
             SimpleModeTarget::CodeEditor => {
+                self.shutdown_simple_preview();
                 persist_experience_level(ExperienceLevel::Developer, cx);
                 self.multi_workspace
                     .update(cx, |multi_workspace, cx| {
@@ -6761,6 +7548,7 @@ impl BeginnerWorkspace {
                     .log_err();
             }
             SimpleModeTarget::Agents => {
+                self.shutdown_simple_preview();
                 persist_experience_level(ExperienceLevel::Developer, cx);
                 self.multi_workspace
                     .update(cx, |multi_workspace, cx| {
@@ -7032,9 +7820,6 @@ impl BeginnerWorkspace {
             .when(self.share_dialog_open, |el| {
                 el.child(self.render_share_dialog(cx))
             })
-            .when(self.browser_warning_dialog_open, |el| {
-                el.child(self.render_browser_warning_dialog(cx))
-            })
     }
 
     fn render_active_project(
@@ -7126,6 +7911,14 @@ impl BeginnerWorkspace {
                                                         .min_h_0()
                                                         .overflow_hidden()
                                                         .child(conversation_view),
+                                                )
+                                                .when(
+                                                    self.should_show_preview_ready_alert(),
+                                                    |el| {
+                                                        el.child(
+                                                            self.render_preview_ready_alert(cx),
+                                                        )
+                                                    },
                                                 )
                                                 .child(
                                                     self.render_simple_context_selectors(false, cx),
@@ -7241,9 +8034,6 @@ impl BeginnerWorkspace {
             )
             .when(self.share_dialog_open, |el| {
                 el.child(self.render_share_dialog(cx))
-            })
-            .when(self.browser_warning_dialog_open, |el| {
-                el.child(self.render_browser_warning_dialog(cx))
             })
     }
 
@@ -7444,7 +8234,19 @@ impl BeginnerWorkspace {
         preview_url: String,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let display_url = Self::browser_address_label(Some(&preview_url));
+        self.render_preview_error_card(
+            PreviewError::new(PreviewErrorKind::EmbeddedBrowserUnsupported),
+            Some(preview_url),
+            cx,
+        )
+    }
+
+    fn render_preview_error_card(
+        &self,
+        error: PreviewError,
+        preview_url: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let preview_url_for_open = preview_url.clone();
         v_flex()
             .flex_1()
@@ -7452,9 +8254,9 @@ impl BeginnerWorkspace {
             .justify_center()
             .gap_3()
             .p_4()
-            .child(self.render_artifact_illustration(ArtifactIllustrationState::Empty, cx))
+            .child(self.render_artifact_illustration(ArtifactIllustrationState::Error, cx))
             .child(
-                Label::new("Preview running")
+                Label::new(error.title())
                     .size(LabelSize::Custom(rems_from_px(15.)))
                     .weight(FontWeight::SEMIBOLD)
                     .color(Color::Custom(ds::text(cx))),
@@ -7466,32 +8268,33 @@ impl BeginnerWorkspace {
                     .text_size(rems_from_px(13.))
                     .text_color(ds::text_muted(cx))
                     .line_height(relative(1.46))
-                    .child(format!("The app is serving at {}.", display_url.as_ref())),
+                    .child(error.message()),
             )
             .child(
                 h_flex()
                     .gap_2()
                     .items_center()
                     .child(
-                        Button::new("open-running-preview", "Open in browser")
+                        Button::new("retry-preview-error", "Retry")
                             .style(ButtonStyle::Filled)
                             .size(ButtonSize::Default)
                             .label_size(LabelSize::XSmall)
-                            .on_click(move |_, _, cx| {
-                                cx.open_url(preview_url_for_open.as_str());
-                            }),
-                    )
-                    .child(
-                        Button::new("retry-running-preview", "Reload")
-                            .style(ButtonStyle::Subtle)
-                            .size(ButtonSize::Default)
-                            .label_size(LabelSize::XSmall)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.web_preview = None;
-                                this.preview_visible = this.preview_url.is_some();
-                                cx.notify();
+                                this.preview_error = None;
+                                this.open_web_app_if_present(cx);
                             })),
-                    ),
+                    )
+                    .when_some(preview_url_for_open, |el, preview_url| {
+                        el.child(
+                            Button::new("open-preview-error", "Open externally")
+                                .style(ButtonStyle::Subtle)
+                                .size(ButtonSize::Default)
+                                .label_size(LabelSize::XSmall)
+                                .on_click(move |_, _, cx| {
+                                    cx.open_url(preview_url.as_str());
+                                }),
+                        )
+                    }),
             )
     }
 
@@ -7529,6 +8332,51 @@ impl BeginnerWorkspace {
             )
     }
 
+    fn render_preview_ready_alert(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .mx_4()
+            .mb_3()
+            .px_3()
+            .py_2()
+            .gap_3()
+            .items_center()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(ds::soft_border(cx))
+            .bg(ds::field_background(cx).opacity(0.72))
+            .child(
+                Icon::new(IconName::Public)
+                    .size(IconSize::Small)
+                    .color(Color::Custom(ds::accent(cx))),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_0p5()
+                    .child(
+                        Label::new("Artifact ready to preview")
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD)
+                            .color(Color::Custom(ds::text(cx))),
+                    )
+                    .child(
+                        Label::new("Open the live preview when you are ready.")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Custom(ds::text_muted(cx))),
+                    ),
+            )
+            .child(
+                Button::new("simple-preview-ready-open", "Preview now")
+                    .style(ButtonStyle::Filled)
+                    .size(ButtonSize::Compact)
+                    .label_size(LabelSize::XSmall)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.show_preview(window, cx);
+                    })),
+            )
+    }
+
     fn render_design_preview_fallback(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div().flex_1().min_h_0().bg(ds::app_background(cx))
     }
@@ -7541,6 +8389,7 @@ impl BeginnerWorkspace {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let hover_background = ds::hover_background(cx);
+        self.sync_browser_address_editor(preview_url.as_ref(), window, cx);
 
         v_flex()
             .flex_1()
@@ -7584,7 +8433,7 @@ impl BeginnerWorkspace {
                             ),
                     ),
             )
-            .child(self.render_browser_status_bar(preview_url, cx))
+            .child(self.render_browser_toolbar(preview_url, cx))
             .child(
                 v_flex()
                     .id("artifact-browser-page")
@@ -7597,54 +8446,80 @@ impl BeginnerWorkspace {
             )
     }
 
-    fn render_browser_status_bar(
+    fn render_browser_toolbar(
         &self,
         preview_url: Option<String>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let has_url = preview_url.is_some();
-        let address = Self::browser_address_label(preview_url.as_ref());
-        let (status_icon, status_label, status_color) = if self.is_preview_generating {
-            (
-                IconName::LoadCircle,
-                "Loading preview",
-                Color::Custom(ds::accent(cx)),
-            )
-        } else if self.web_preview.is_some() {
-            (
-                IconName::Check,
-                "Browser live",
-                Color::Custom(ds::accent(cx)),
-            )
-        } else if has_url {
-            (
-                IconName::ArrowUpRight,
-                "Open externally",
-                Color::Custom(ds::text_muted(cx)),
-            )
+        let has_webview = self.web_preview.is_some();
+        let is_loading = self.browser_loading;
+        let reload_icon = if is_loading {
+            IconName::Stop
         } else {
-            (
-                IconName::Circle,
-                "No preview URL",
-                Color::Custom(ds::text_muted(cx)),
-            )
+            IconName::RotateCw
         };
-        let hover_background = ds::hover_background(cx);
+        let reload_tooltip = if is_loading {
+            "Stop loading"
+        } else {
+            "Reload preview"
+        };
+        let preview_label = Self::browser_address_label(preview_url.as_ref());
 
         h_flex()
             .h(px(42.))
             .flex_shrink_0()
-            .px_5()
+            .px_4()
             .gap_2()
             .items_center()
             .bg(ds::app_background(cx))
             .border_b_1()
             .border_color(ds::separator(cx).opacity(0.34))
             .child(
+                IconButton::new("artifact-browser-back", IconName::ArrowLeft)
+                    .style(ButtonStyle::Subtle)
+                    .size(ButtonSize::Compact)
+                    .icon_size(IconSize::XSmall)
+                    .disabled(!has_webview)
+                    .tooltip(Tooltip::text("Back"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.go_browser_back(cx);
+                    })),
+            )
+            .child(
+                IconButton::new("artifact-browser-forward", IconName::ArrowRight)
+                    .style(ButtonStyle::Subtle)
+                    .size(ButtonSize::Compact)
+                    .icon_size(IconSize::XSmall)
+                    .disabled(!has_webview)
+                    .tooltip(Tooltip::text("Forward"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.go_browser_forward(cx);
+                    })),
+            )
+            .child(
+                IconButton::new("artifact-browser-reload", reload_icon)
+                    .style(ButtonStyle::Subtle)
+                    .size(ButtonSize::Compact)
+                    .icon_size(IconSize::XSmall)
+                    .disabled(!has_url && self.selected_folder.is_none())
+                    .tooltip(Tooltip::text(reload_tooltip))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if is_loading {
+                            this.stop_browser_loading(cx);
+                        } else {
+                            this.reload_browser_preview(cx);
+                        }
+                    })),
+            )
+            .child(
                 h_flex()
                     .flex_1()
                     .min_w_0()
-                    .h(px(28.))
+                    .h(px(30.))
                     .items_center()
                     .gap_2()
                     .rounded(px(7.))
@@ -7658,114 +8533,19 @@ impl BeginnerWorkspace {
                             .color(Color::Custom(ds::icon_muted(cx))),
                     )
                     .child(
-                        Label::new(address)
-                            .size(LabelSize::XSmall)
-                            .color(Color::Custom(ds::text_muted(cx)))
-                            .truncate()
-                            .flex_1(),
+                        div().flex_1().min_w_0().child(
+                            Label::new(preview_label)
+                                .truncate()
+                                .size(LabelSize::Small)
+                                .color(Color::Custom(ds::text_muted(cx))),
+                        ),
                     ),
             )
-            .child(
-                h_flex()
-                    .min_w(px(118.))
-                    .items_center()
-                    .justify_end()
-                    .gap_1p5()
-                    .child(
-                        Icon::new(status_icon)
-                            .size(IconSize::XSmall)
-                            .color(status_color),
-                    )
-                    .child(
-                        Label::new(status_label)
-                            .size(LabelSize::XSmall)
-                            .color(Color::Custom(ds::text_muted(cx)))
-                            .truncate(),
-                    ),
-            )
-            .when_some(preview_url.clone(), |el, url| {
-                let url_for_open = url.clone();
-                el.child(
-                    div()
-                        .id("artifact-browser-reload")
-                        .size(px(26.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(6.))
-                        .cursor_pointer()
-                        .hover(move |el| el.bg(hover_background))
-                        .tooltip(Tooltip::text("Reload preview"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.preview_url = Some(url.clone());
-                            this.preview_visible = true;
-                            this.web_preview = None;
-                            cx.notify();
-                        }))
-                        .child(
-                            Icon::new(IconName::RotateCw)
-                                .size(IconSize::XSmall)
-                                .color(Color::Custom(ds::icon_muted(cx))),
-                        ),
-                )
-                .child(
-                    div()
-                        .id("artifact-browser-open-external")
-                        .size(px(26.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(6.))
-                        .cursor_pointer()
-                        .hover(move |el| el.bg(hover_background))
-                        .tooltip(Tooltip::text("Open in browser"))
-                        .on_click(move |_, _, cx| {
-                            cx.open_url(url_for_open.as_str());
-                        })
-                        .child(
-                            Icon::new(IconName::ArrowUpRight)
-                                .size(IconSize::XSmall)
-                                .color(Color::Custom(ds::icon_muted(cx))),
-                        ),
-                )
-            })
-    }
-
-    fn right_panel_tab_menu(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Entity<ContextMenu> {
-        let workspace = cx.entity().downgrade();
-        let active_option = self.active_right_panel_tab;
-
-        ContextMenu::build(window, cx, move |mut menu, _window, _cx| {
-            menu = menu.header("New tab");
-
-            for option in RightPanelOption::ALL {
-                let workspace = workspace.clone();
-                menu = menu.item(
-                    ContextMenuEntry::new(option.label())
-                        .icon(option.icon())
-                        .icon_position(IconPosition::Start)
-                        .toggle(IconPosition::End, active_option == Some(option))
-                        .handler(move |window, cx| {
-                            workspace
-                                .update(cx, |this, cx| {
-                                    this.select_right_panel_option_from_user(option, window, cx);
-                                })
-                                .log_err();
-                        }),
-                );
-            }
-
-            menu
-        })
     }
 
     fn render_right_panel_option_tabs(
         &self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let hover_background = ds::hover_background(cx);
@@ -7780,32 +8560,6 @@ impl BeginnerWorkspace {
             .items_center()
             .gap_1p5()
             .overflow_hidden()
-            .child(
-                DropdownMenu::new_with_element(
-                    "right-panel-new-tab",
-                    div()
-                        .size(px(32.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded_full()
-                        .border_1()
-                        .border_color(border_color)
-                        .bg(ds::chip_background(cx))
-                        .hover(move |el| el.bg(hover_background))
-                        .child(
-                            Icon::new(IconName::Plus)
-                                .size(IconSize::Small)
-                                .color(Color::Custom(ds::icon_muted(cx))),
-                        )
-                        .into_any_element(),
-                    self.right_panel_tab_menu(window, cx),
-                )
-                .style(DropdownStyle::Ghost)
-                .trigger_size(ButtonSize::None)
-                .attach(gpui::Anchor::BottomLeft)
-                .no_chevron(),
-            )
             .children(self.right_panel_tabs.iter().copied().map(|option| {
                 let is_active = active_option == Some(option);
                 let tab_color = Color::Custom(if is_active {
@@ -7965,6 +8719,50 @@ impl BeginnerWorkspace {
             .into_any_element()
     }
 
+    fn render_right_panel_option_card(
+        &self,
+        option: RightPanelOption,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let hover_background = ds::hover_background(cx);
+
+        v_flex()
+            .id(option.launcher_element_id())
+            .w_full()
+            .min_h(px(128.))
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .rounded(px(16.))
+            .bg(ds::field_background(cx))
+            .border_1()
+            .border_color(ds::soft_border(cx).opacity(0.36))
+            .cursor_pointer()
+            .hover(move |el| el.bg(hover_background))
+            .tooltip(Tooltip::text(option.description()))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.select_right_panel_option_from_user(option, window, cx);
+            }))
+            .child(
+                Icon::new(option.icon())
+                    .size(IconSize::Custom(rems_from_px(24.)))
+                    .color(Color::Custom(ds::icon_muted(cx))),
+            )
+            .child(
+                Label::new(option.label())
+                    .size(LabelSize::Custom(rems_from_px(17.)))
+                    .weight(FontWeight::SEMIBOLD)
+                    .color(Color::Custom(ds::text(cx))),
+            )
+            .child(
+                Label::new(option.description())
+                    .size(LabelSize::Custom(rems_from_px(13.)))
+                    .color(Color::Custom(ds::text_muted(cx)))
+                    .truncate(),
+            )
+            .into_any_element()
+    }
+
     fn render_right_panel_blank(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let hover_background = ds::hover_background(cx);
 
@@ -8006,7 +8804,25 @@ impl BeginnerWorkspace {
                             ),
                     ),
             )
-            .child(div().flex_1().min_h_0().bg(ds::app_background(cx)))
+            .child(
+                v_flex()
+                    .id("right-panel-options-list")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .items_center()
+                    .justify_center()
+                    .px_6()
+                    .py_8()
+                    .bg(ds::app_background(cx))
+                    .child(
+                        v_flex().w_full().max_w(px(560.)).gap_4().children(
+                            RightPanelOption::ALL
+                                .into_iter()
+                                .map(|option| self.render_right_panel_option_card(option, cx)),
+                        ),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -9364,7 +10180,7 @@ impl BeginnerWorkspace {
 
     fn browser_address_label(preview_url: Option<&String>) -> SharedString {
         let Some(preview_url) = preview_url else {
-            return SharedString::from("about:blank");
+            return SharedString::from("");
         };
 
         let display_url = preview_url
@@ -9407,8 +10223,13 @@ impl BeginnerWorkspace {
             let has_failed_artifact = self.has_failed_tool_call(cx);
             let workspace = cx.entity().downgrade();
             let available_preview_url = preview_url.clone();
-            let content = if has_failed_artifact {
+            let content = if let Some(error) = self.preview_error.clone() {
+                self.render_preview_error_card(error, preview_url.clone(), cx)
+                    .into_any_element()
+            } else if has_failed_artifact {
                 self.render_artifact_error_state(cx).into_any_element()
+            } else if is_running || self.is_preview_generating {
+                self.render_artifact_working_state(cx).into_any_element()
             } else if has_webview {
                 canvas(
                     move |bounds, window, cx| {
@@ -9424,13 +10245,9 @@ impl BeginnerWorkspace {
                 .flex_1()
                 .w_full()
                 .into_any_element()
-            } else if let Some(preview_url) = preview_url.clone()
-                && !self.is_preview_generating
-            {
+            } else if let Some(preview_url) = preview_url.clone() {
                 self.render_browser_external_fallback(preview_url, cx)
                     .into_any_element()
-            } else if is_running || self.is_preview_generating {
-                self.render_artifact_working_state(cx).into_any_element()
             } else {
                 self.render_design_preview_fallback(cx).into_any_element()
             };
@@ -9443,16 +10260,12 @@ impl BeginnerWorkspace {
                 .h_full()
                 .overflow_hidden()
                 .bg(ds::app_background(cx))
-                .child(
-                    self.render_artifact_browser_shell(
-                        self.preview_visible
-                            .then_some(available_preview_url)
-                            .flatten(),
-                        content,
-                        window,
-                        cx,
-                    ),
-                )
+                .child(self.render_artifact_browser_shell(
+                    available_preview_url,
+                    content,
+                    window,
+                    cx,
+                ))
                 .into_any_element();
         }
 
@@ -9562,8 +10375,13 @@ impl BeginnerWorkspace {
                     .into_any_element(),
                 RightPanel::Preview => {
                     let browser_url = preview_url_for_browser.clone();
-                    let content = if has_failed_artifact {
+                    let content = if let Some(error) = self.preview_error.clone() {
+                        self.render_preview_error_card(error, browser_url.clone(), cx)
+                            .into_any_element()
+                    } else if has_failed_artifact {
                         self.render_artifact_error_state(cx).into_any_element()
+                    } else if is_running || self.is_preview_generating {
+                        self.render_artifact_working_state(cx).into_any_element()
                     } else if has_webview {
                         canvas(
                             move |bounds, window, cx| {
@@ -9579,13 +10397,9 @@ impl BeginnerWorkspace {
                         .flex_1()
                         .w_full()
                         .into_any_element()
-                    } else if let Some(preview_url) = preview_url_for_browser.clone()
-                        && !self.is_preview_generating
-                    {
+                    } else if let Some(preview_url) = preview_url_for_browser.clone() {
                         self.render_browser_external_fallback(preview_url, cx)
                             .into_any_element()
-                    } else if is_running || self.is_preview_generating {
-                        self.render_artifact_working_state(cx).into_any_element()
                     } else {
                         self.render_design_preview_fallback(cx).into_any_element()
                     };
@@ -9732,97 +10546,6 @@ impl BeginnerWorkspace {
             )
     }
 
-    fn render_browser_warning_dialog(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .absolute()
-            .size_full()
-            .inset_0()
-            .occlude()
-            .bg(gpui::black().opacity(0.35))
-            .flex()
-            .items_center()
-            .justify_center()
-            .p_4()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    this.browser_warning_dialog_open = false;
-                    cx.notify();
-                }),
-            )
-            .child(
-                v_flex()
-                    .w_full()
-                    .max_w(px(420.))
-                    .rounded(px(14.))
-                    .border_1()
-                    .border_color(ds::soft_border(cx))
-                    .bg(ds::card_background(cx))
-                    .shadow_sm()
-                    .occlude()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(
-                        h_flex()
-                            .h(px(56.))
-                            .px_5()
-                            .gap_3()
-                            .items_center()
-                            .border_b_1()
-                            .border_color(ds::separator(cx))
-                            .child(
-                                Icon::new(IconName::Warning)
-                                    .size(IconSize::Small)
-                                    .color(Color::Custom(ds::warning(cx))),
-                            )
-                            .child(
-                                Label::new("Browser warning")
-                                    .size(LabelSize::Custom(rems_from_px(16.)))
-                                    .weight(FontWeight::SEMIBOLD)
-                                    .color(Color::Custom(ds::text(cx))),
-                            )
-                            .child(div().flex_1())
-                            .child(
-                                IconButton::new("close-browser-warning", IconName::Close)
-                                    .icon_size(IconSize::Small)
-                                    .tooltip(Tooltip::text("Close"))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.browser_warning_dialog_open = false;
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .px_5()
-                            .py_4()
-                            .text_size(rems_from_px(13.))
-                            .text_color(ds::text_muted(cx))
-                            .line_height(relative(1.46))
-                            .child("Warning: The browser may be down at the moment please try again later"),
-                    )
-                    .child(
-                        h_flex()
-                            .h(px(60.))
-                            .px_5()
-                            .items_center()
-                            .justify_end()
-                            .border_t_1()
-                            .border_color(ds::separator(cx))
-                            .child(
-                                Button::new("browser-warning-close", "Close")
-                                    .style(ButtonStyle::Filled)
-                                    .size(ButtonSize::Medium)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.browser_warning_dialog_open = false;
-                                        cx.notify();
-                                    })),
-                            ),
-                    ),
-            )
-    }
-
     fn render_api_status_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .h(px(28.))
@@ -9928,7 +10651,7 @@ impl BeginnerWorkspace {
                 .render_simple_tour_target(
                     input_bar,
                     WorkspaceTourStep::SimpleModePrompt,
-                    WorkspaceTourPlacement::TopRight,
+                    WorkspaceTourPlacement::AboveRight,
                     cx,
                 )
                 .into_any_element();
@@ -9945,6 +10668,13 @@ impl BeginnerWorkspace {
                 .when(centered, |el| el.max_w(px(ds::CHAT_MAX_WIDTH)))
                 .rounded(px(24.))
                 .overflow_hidden()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
+                        this.focus_primary_composer(window, cx);
+                    }),
+                )
                 .child(composer)
                 .into_any_element();
 
@@ -9967,7 +10697,7 @@ impl BeginnerWorkspace {
                 .render_simple_tour_target(
                     input_bar,
                     WorkspaceTourStep::SimpleModePrompt,
-                    WorkspaceTourPlacement::TopRight,
+                    WorkspaceTourPlacement::AboveRight,
                     cx,
                 )
                 .into_any_element();
@@ -10018,9 +10748,14 @@ impl BeginnerWorkspace {
                             .hover(move |el| el.border_color(composer_hover_border))
                             .bg(composer_surface_bg)
                             .track_focus(&focus_handle)
-                            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                                window.focus(&focus_handle, cx);
-                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                                    cx.stop_propagation();
+                                    this.release_browser_focus(window);
+                                    window.focus(&focus_handle, cx);
+                                }),
+                            )
                             .px_3()
                             .pt_2()
                             .pb_1p5()
@@ -10150,7 +10885,7 @@ impl BeginnerWorkspace {
         self.render_simple_tour_target(
             input_bar,
             WorkspaceTourStep::SimpleModePrompt,
-            WorkspaceTourPlacement::TopRight,
+            WorkspaceTourPlacement::AboveRight,
             cx,
         )
         .into_any_element()
