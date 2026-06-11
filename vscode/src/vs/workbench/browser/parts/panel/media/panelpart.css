@@ -11,6 +11,10 @@
 .monaco-workbench .part.panel.bottom .composite.title {
 	border-top-width: 1px;
 	border-top-style: solid;
+	border-top-color: var(--vscode-panel-border);
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+	border-bottom-color: var(--vscode-panel-border);
 }
 
 .monaco-workbench.nomaineditorarea .part.panel.bottom .composite.title {
@@ -48,6 +52,17 @@
 .monaco-workbench .part.panel > .content .monaco-editor .margin,
 .monaco-workbench .part.panel > .content .monaco-editor .monaco-editor-background {
 	/* THIS DOESN'T WORK ANYMORE */
+	background-color: var(--vscode-panel-background);
+}
+
+.monaco-workbench .part.panel > .content {
+	background-color: var(--vscode-panel-background);
+}
+
+.monaco-workbench .part.panel.bottom {
+	border-top-left-radius: 8px;
+	border-top-right-radius: 8px;
+	overflow: hidden;
 	background-color: var(--vscode-panel-background);
 }
 

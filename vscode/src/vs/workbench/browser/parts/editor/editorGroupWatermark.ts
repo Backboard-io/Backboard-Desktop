@@ -3,13 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, clearNode, h } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode } from '../../../../base/browser/dom.js';
 import { KeybindingLabel } from '../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
 import { coalesce, shuffle } from '../../../../base/common/arrays.js';
+import { onUnexpectedError } from '../../../../base/common/errors.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { isMacintosh, isWeb, OS } from '../../../../base/common/platform.js';
 import { localize } from '../../../../nls.js';
-import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
+import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, ContextKeyExpression, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
@@ -86,22 +87,65 @@ export class EditorGroupWatermark extends Disposable {
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
-		@IStorageService private readonly storageService: IStorageService
+		@IStorageService private readonly storageService: IStorageService,
+		@ICommandService private readonly commandService: ICommandService
 	) {
 		super();
 
 		this.cachedWhen = this.storageService.getObject(EditorGroupWatermark.CACHED_WHEN, StorageScope.PROFILE, Object.create(null));
 		this.workbenchState = this.contextService.getWorkbenchState();
 
-		const elements = h('.editor-group-watermark', [
-			h('.watermark-container', [
-				h('.letterpress'),
-				h('.shortcuts@shortcuts'),
-			])
-		]);
+		const runCommand = (command: string, ...args: unknown[]) => {
+			Promise.resolve(this.commandService.executeCommand(command, ...args)).catch(onUnexpectedError);
+		};
 
-		append(container, elements.root);
-		this.shortcuts = elements.shortcuts;
+		const createActionRow = (icon: string, label: string, command: string, ...args: unknown[]) => {
+			const keybinding = this.keybindingService.lookupKeybinding(command)?.getLabel();
+			const row = $('button.backboard-empty-welcome-action', { type: 'button' },
+				$('span.backboard-empty-welcome-action-icon.codicon.' + icon, { 'aria-hidden': 'true' }),
+				$('span.backboard-empty-welcome-action-label', {}, label),
+				keybinding ? $('span.backboard-empty-welcome-action-keybinding', {}, keybinding) : $('span.backboard-empty-welcome-action-keybinding', {}),
+			) as HTMLButtonElement;
+			this._register(addDisposableListener(row, 'click', () => runCommand(command, ...args)));
+			return row;
+		};
+
+		const createSection = (label: string, ...actions: HTMLElement[]) => $('.backboard-empty-welcome-section', {},
+			$('.backboard-empty-welcome-section-heading', {},
+				$('span', {}, label),
+				$('.backboard-empty-welcome-section-rule'),
+			),
+			$('.backboard-empty-welcome-action-list', {}, ...actions),
+		);
+
+		const root = $('.editor-group-watermark');
+		const containerElement = append(root, $('.watermark-container'));
+		append(containerElement, $('.backboard-empty-welcome', {},
+			$('.backboard-empty-welcome-header', {},
+				$('.backboard-empty-welcome-logo', { 'aria-hidden': 'true' }),
+				$('.backboard-empty-welcome-header-copy', {},
+					$('h1.backboard-empty-welcome-title', {}, localize('watermark.backboardWelcomeTitle', "Welcome to Backboard Studio")),
+					$('p.backboard-empty-welcome-subtitle', {}, localize('watermark.backboardWelcomeSubtitle', "The editor for what's next")),
+				),
+			),
+			createSection(
+				localize('watermark.backboardGetStarted', "GET STARTED"),
+				createActionRow('codicon-add', localize('watermark.backboardNewFile', "New File"), 'workbench.action.files.newUntitledFile'),
+				createActionRow('codicon-folder-opened', localize('watermark.backboardOpenProject', "Open Project"), 'workbench.action.files.openFolder'),
+				createActionRow('codicon-cloud-download', localize('watermark.backboardCloneRepository', "Clone Repository"), 'git.clone'),
+			),
+			createSection(
+				localize('watermark.backboardConfigure', "CONFIGURE"),
+				createActionRow('codicon-settings-gear', localize('watermark.backboardOpenSettings', "Open Settings"), 'workbench.action.openSettings'),
+				createActionRow('codicon-keyboard', localize('watermark.backboardCustomizeKeymaps', "Customize Keymaps"), 'workbench.action.openGlobalKeybindings'),
+				createActionRow('codicon-extensions', localize('watermark.backboardExploreExtensions', "Explore Extensions"), 'workbench.view.extensions'),
+			),
+			$('span.backboard-empty-welcome-footer-link', {}, localize('watermark.backboardReturnToOnboarding', "Return to Onboarding")),
+		));
+		const shortcuts = append(containerElement, $('.shortcuts'));
+
+		append(container, root);
+		this.shortcuts = shortcuts;
 
 		this.registerListeners();
 

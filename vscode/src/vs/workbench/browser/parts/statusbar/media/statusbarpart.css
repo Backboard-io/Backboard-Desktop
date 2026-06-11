@@ -7,8 +7,8 @@
 	box-sizing: border-box;
 	cursor: default;
 	width: 100%;
-	height: 22px;
-	font-size: 12px;
+	height: 27px;
+	font-size: 11px;
 	display: flex;
 	overflow: hidden;
 }
@@ -56,7 +56,7 @@
 
 .monaco-workbench .part.statusbar > .items-container > .statusbar-item {
 	display: inline-block;
-	line-height: 22px;
+	line-height: 27px;
 	height: 100%;
 	vertical-align: top;
 	max-width: 40vw;
@@ -103,6 +103,7 @@
 	padding: 0 5px;
 	white-space: pre; /* gives some degree of styling */
 	align-items: center;
+	gap: 4px;
 	text-overflow: ellipsis;
 	overflow: hidden;
 	outline-width: 0px; /* do not render focus outline, we already have background */

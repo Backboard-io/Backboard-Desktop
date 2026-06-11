@@ -39,6 +39,173 @@
 	height: 100%;
 }
 
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .gettingStarted,
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .gettingStartedSlideCategories {
+	background-color: var(--vscode-editor-background);
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .gettingStartedSlideCategories {
+	padding: 0;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-page {
+	box-sizing: border-box;
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	padding: clamp(32px, 8vh, 96px) 40px 32px;
+	color: var(--vscode-editor-foreground);
+	font-family: var(--vscode-editor-font-family, var(--vscode-font-family, monospace));
+	text-align: left;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-shell {
+	display: flex;
+	flex-direction: column;
+	gap: 24px;
+	width: 540px;
+	max-width: 100%;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-header {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 16px;
+	margin-bottom: 2px;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-logo {
+	width: 38px;
+	height: 52px;
+	flex: 0 0 auto;
+	background-color: currentColor;
+	color: var(--vscode-editor-foreground);
+	-webkit-mask: url('./backboard_mark.svg') center / contain no-repeat;
+	mask: url('./backboard_mark.svg') center / contain no-repeat;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-header-copy {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-title {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.2;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-subtitle {
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	font-style: italic;
+	font-weight: 500;
+	line-height: 1.2;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-section-heading {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-section-rule {
+	height: 1px;
+	flex: 1;
+	background-color: var(--vscode-editorGroupHeader-tabsBorder);
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-action-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-action {
+	box-sizing: border-box;
+	display: grid;
+	grid-template-columns: 20px 1fr auto;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-height: 32px;
+	padding: 0 12px;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--vscode-editor-foreground);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0;
+	text-align: left;
+	cursor: pointer;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-action:hover,
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-action:focus-visible {
+	background-color: var(--vscode-list-hoverBackground);
+	outline: none;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-action:first-child {
+	background-color: var(--vscode-list-activeSelectionBackground);
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-action-icon {
+	color: var(--vscode-icon-foreground);
+	font-size: 14px;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-action-keybinding {
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-footer-link {
+	align-self: center;
+	margin-top: 0;
+	color: var(--vscode-editor-foreground);
+	font-size: 11px;
+	font-weight: 600;
+}
+
+@media (max-width: 720px) {
+	.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-page {
+		padding: 28px 24px;
+	}
+
+	.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-shell {
+		gap: 22px;
+	}
+
+	.monaco-workbench .part.editor > .content .gettingStartedContainer.backboard-welcome .backboard-welcome-action {
+		font-size: 13px;
+	}
+
+}
+
 .monaco-workbench .part.editor > .content .gettingStartedContainer h1 {
 	padding: 5px 0 0;
 	margin: 0;

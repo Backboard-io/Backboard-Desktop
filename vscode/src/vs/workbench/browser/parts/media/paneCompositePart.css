@@ -81,6 +81,96 @@
 	display: flex;
 }
 
+.monaco-workbench .part.panel.pane-composite-part > .title {
+	box-sizing: border-box;
+	min-height: 48px;
+	height: 48px;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 12px;
+	background-color: var(--vscode-sideBar-background, var(--vscode-panel-background));
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar {
+	line-height: 30px;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item {
+	align-items: center;
+	height: 30px;
+	margin: 0 1px;
+	padding: 0 9px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	text-transform: none;
+	font-size: 13px;
+	font-weight: 500;
+	padding-bottom: 0;
+	padding-top: 0;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked {
+	border-color: var(--vscode-panel-border);
+	background-color: var(--vscode-editor-background);
+	color: var(--vscode-panelTitle-activeForeground);
+	font-weight: 600;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .action-label {
+	padding: 0;
+	border-radius: 8px;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .active-item-indicator {
+	display: none;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title > .title-actions,
+.monaco-workbench .part.panel.pane-composite-part > .title > .global-actions,
+.monaco-workbench .part.panel.pane-composite-part > .title > .global-actions-left {
+	align-items: center;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title > .title-actions {
+	padding-left: 8px;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title > .title-actions .monaco-action-bar .actions-container,
+.monaco-workbench .part.panel.pane-composite-part > .title > .global-actions .monaco-action-bar .actions-container,
+.monaco-workbench .part.panel.pane-composite-part > .title > .global-actions-left .monaco-action-bar .actions-container {
+	align-items: center;
+	gap: 4px;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item,
+.monaco-workbench .part.panel.pane-composite-part > .title.has-composite-bar > .global-actions .monaco-action-bar .action-item,
+.monaco-workbench .part.panel.pane-composite-part > .title.has-composite-bar > .global-actions-left .monaco-action-bar .action-item {
+	margin-right: 0;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title > .title-actions .monaco-action-bar .action-item .action-label.codicon,
+.monaco-workbench .part.panel.pane-composite-part > .title > .global-actions .monaco-action-bar .action-item .action-label.codicon,
+.monaco-workbench .part.panel.pane-composite-part > .title > .global-actions-left .monaco-action-bar .action-item .action-label.codicon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 999px;
+	color: var(--vscode-icon-foreground) !important;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title > .title-actions .monaco-action-bar .action-item:hover .action-label.codicon,
+.monaco-workbench .part.panel.pane-composite-part > .title > .title-actions .monaco-action-bar .action-item:focus .action-label.codicon,
+.monaco-workbench .part.panel.pane-composite-part > .title > .global-actions .monaco-action-bar .action-item:hover .action-label.codicon,
+.monaco-workbench .part.panel.pane-composite-part > .title > .global-actions .monaco-action-bar .action-item:focus .action-label.codicon,
+.monaco-workbench .part.panel.pane-composite-part > .title > .global-actions-left .monaco-action-bar .action-item:hover .action-label.codicon,
+.monaco-workbench .part.panel.pane-composite-part > .title > .global-actions-left .monaco-action-bar .action-item:focus .action-label.codicon {
+	background-color: var(--vscode-toolbar-hoverBackground) !important;
+	outline: none;
+}
+
 .monaco-workbench .pane-composite-part > .title > .composite-bar-container >.composite-bar > .monaco-action-bar .action-item.icon,
 .monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container >.composite-bar > .monaco-action-bar .action-item.icon {
 	height: 35px; /* matches height of composite container */

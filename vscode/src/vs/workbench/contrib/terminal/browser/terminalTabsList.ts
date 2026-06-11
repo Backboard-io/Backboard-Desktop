@@ -61,6 +61,7 @@ const $ = DOM.$;
 
 export const enum TerminalTabsListSizes {
 	TabHeight = 22,
+	BackboardTabBarHeight = 36,
 	NarrowViewWidth = 46,
 	WideViewMinimumWidth = 80,
 	DefaultWidth = 120,

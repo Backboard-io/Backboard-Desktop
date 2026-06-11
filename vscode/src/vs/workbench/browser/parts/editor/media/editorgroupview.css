@@ -56,12 +56,16 @@
 	box-shadow: none;
 }
 
+.monaco-workbench .part.editor::after {
+	box-shadow: none !important;
+}
+
 .monaco-workbench .part.editor > .content .editor-group-container {
 	height: 100%;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container.empty  {
-	opacity: 0.5; /* dimmed to indicate inactive state */
+	opacity: 1;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container.empty.active,
@@ -81,13 +85,16 @@
 /* Watermark & shortcuts */
 
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark  {
+	box-sizing: border-box;
 	display: flex;
 	height: 100%;
-	max-width: 272px;
-	margin: auto;
+	width: 100%;
+	max-width: none;
+	margin: 0;
+	padding: clamp(32px, 8vh, 96px) 40px 32px;
 	flex-direction: column;
 	align-items: center;
-	justify-content: center;
+	justify-content: flex-start;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark > .watermark-container {
@@ -97,6 +104,8 @@
 	align-items: center;
 	justify-content: center;
 	gap: 24px;
+	font-family: var(--vscode-editor-font-family, var(--vscode-font-family, monospace));
+	text-align: left;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container:not(.empty) > .editor-group-watermark {
@@ -133,7 +142,139 @@
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .shortcuts {
+	display: none;
 	width: 100%;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome {
+	display: flex;
+	flex-direction: column;
+	gap: 24px;
+	width: 540px;
+	max-width: 100%;
+	color: var(--vscode-editor-foreground);
+	word-break: break-word;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-header {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 16px;
+	margin-bottom: 2px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-logo {
+	width: 38px;
+	height: 52px;
+	flex: 0 0 auto;
+	background-color: currentColor;
+	color: var(--vscode-editor-foreground);
+	-webkit-mask: url('../../../../contrib/welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
+	mask: url('../../../../contrib/welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-header-copy {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-title {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.2;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-subtitle {
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	font-style: italic;
+	font-weight: 500;
+	line-height: 1.2;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-section-heading {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-section-rule {
+	height: 1px;
+	flex: 1;
+	background-color: var(--vscode-editorGroupHeader-tabsBorder);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-action-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-action {
+	box-sizing: border-box;
+	display: grid;
+	grid-template-columns: 20px 1fr auto;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-height: 32px;
+	padding: 0 12px;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--vscode-editor-foreground);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0;
+	text-align: left;
+	cursor: pointer;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-action:hover,
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-action:focus-visible {
+	background-color: var(--vscode-list-hoverBackground);
+	outline: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-action:first-child {
+	background-color: var(--vscode-list-activeSelectionBackground);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-action-icon {
+	color: var(--vscode-icon-foreground);
+	font-size: 14px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-action-keybinding {
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .backboard-empty-welcome-footer-link {
+	align-self: center;
+	color: var(--vscode-editor-foreground);
+	font-size: 11px;
+	font-weight: 600;
 }
 
 .monaco-workbench .part.editor > .content:not(.empty) .editor-group-container > .editor-group-watermark .shortcuts,
@@ -178,6 +319,7 @@
 	position: relative;
 	box-sizing: border-box;
 	overflow: hidden;
+	background-color: var(--vscode-editorGroupHeader-tabsBackground);
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title:not(.tabs) {

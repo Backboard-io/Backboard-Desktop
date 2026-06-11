@@ -10,6 +10,7 @@
 .monaco-workbench .part > .composite.header-or-footer,
 .monaco-workbench .part > .composite.title {
 	display: flex;
+	box-sizing: border-box;
 }
 
 .monaco-workbench .part > .composite.title > .title-actions {

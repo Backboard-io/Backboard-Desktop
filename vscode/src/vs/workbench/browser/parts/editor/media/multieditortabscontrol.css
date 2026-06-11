@@ -105,6 +105,7 @@
 	box-sizing: border-box;
 	padding-left: 10px;
 	outline-offset: -2px;
+	font-size: 13px;
 }
 
 /* Tab Background Color in/active group/tab */
@@ -145,11 +146,11 @@
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active {
-	box-shadow: inset var(--vscode-shadow-active-tab);
+	box-shadow: none;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:hover:not(.active) {
-	box-shadow: var(--vscode-shadow-sm);
+	box-shadow: none;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title > .tabs-and-actions-container.wrapping .tabs-container > .tab:last-child {

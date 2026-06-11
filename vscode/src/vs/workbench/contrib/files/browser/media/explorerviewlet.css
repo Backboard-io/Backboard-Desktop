@@ -16,8 +16,9 @@
 
 .explorer-folders-view .explorer-item,
 .explorer-folders-view .editor-group {
-	height: 22px;
-	line-height: 22px;
+	height: 24px;
+	line-height: 24px;
+	font-size: 12px;
 }
 
 .explorer-folders-view .explorer-item {
@@ -81,7 +82,7 @@
 
 .monaco-workbench.linux .explorer-folders-view .explorer-item .monaco-inputbox,
 .monaco-workbench.mac .explorer-folders-view .explorer-item .monaco-inputbox {
-	height: 22px;
+	height: 24px;
 }
 
 .monaco-workbench .explorer-folders-view .explorer-item .monaco-inputbox > .ibwrapper > .input {

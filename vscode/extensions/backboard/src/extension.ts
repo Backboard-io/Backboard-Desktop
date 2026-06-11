@@ -261,138 +261,15 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 }
 
 class BackboardRightPanel implements vscode.Disposable {
-	private panel: vscode.WebviewPanel | undefined;
-	private runToken: vscode.CancellationTokenSource | undefined;
-
-	constructor(private readonly bridge: BackboardBridge, private readonly context: vscode.ExtensionContext) {
+	constructor(_bridge: BackboardBridge, _context: vscode.ExtensionContext) {
 	}
 
 	dispose(): void {
-		this.runToken?.cancel();
-		this.panel?.dispose();
 	}
 
 	async open(): Promise<void> {
-		if (this.panel) {
-			this.panel.reveal(vscode.ViewColumn.Beside, false);
-			return;
-		}
-		this.panel = vscode.window.createWebviewPanel(
-			'backboard.rightPanel',
-			'Backboard',
-			{ viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
-			{ enableScripts: true, retainContextWhenHidden: true, localResourceRoots: webviewLocalResourceRoots(this.context) }
-		);
-		this.panel.iconPath = new vscode.ThemeIcon('sparkle');
-		this.panel.webview.html = panelHtml(this.panel.webview, codiconsStylesheetUri(this.context, this.panel.webview));
-		this.panel.onDidDispose(() => {
-			this.runToken?.cancel();
-			this.panel = undefined;
-		});
-		this.panel.webview.onDidReceiveMessage(message => {
-			if (message?.type === 'send' && typeof message.prompt === 'string') {
-				void this.sendPrompt(message.prompt, asPanelOptions(message.options));
-			} else if (message?.type === 'cancel') {
-				this.runToken?.cancel();
-			} else if (message?.type === 'setApiKey') {
-				void setApiKey();
-			} else if (message?.type === 'insertActiveFile') {
-				if (this.panel) {
-					void postComposerContext(this.panel.webview, 'activeFile');
-				}
-			} else if (message?.type === 'insertSelection') {
-				if (this.panel) {
-					void postComposerContext(this.panel.webview, 'selection');
-				}
-			} else if (message?.type === 'insertBranchDiff') {
-				if (this.panel) {
-					void postBranchDiff(this.panel.webview);
-				}
-			} else if (message?.type === 'ready' || message?.type === 'refreshModels') {
-				if (this.panel) {
-					void postPanelState(this.bridge, this.panel.webview);
-				}
-			} else if (message?.type === 'saveSettings') {
-				void savePanelOptions(asPanelOptions(message.options));
-			}
-		});
-		void postPanelState(this.bridge, this.panel.webview);
-	}
-
-	private async sendPrompt(prompt: string, options: PanelOptions): Promise<void> {
-		const panel = this.panel;
-		if (!panel || !prompt.trim()) {
-			return;
-		}
-		if (!(await ensureApiKey())) {
-			await panel.webview.postMessage({ type: 'status', text: 'Backboard API key required.' });
-			return;
-		}
-		this.runToken?.cancel();
-		this.runToken = new vscode.CancellationTokenSource();
-		const token = this.runToken.token;
-		const settings = resolveTurnSettings(options);
-		const sessionId = `right-panel:${workspacePath() ?? 'default'}`;
-		const sink = this.panelSink(panel);
-		await panel.webview.postMessage({ type: 'clear' });
-		await panel.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
-		const firstToolRequests: ToolResultRequest[] = [];
-		try {
-			await this.bridge.send('sendPrompt', sessionId, {
-				content: prompt,
-				workspace: workspacePath(),
-				provider: settings.defaultProvider,
-				model: settings.defaultModel,
-				mode: settings.mode,
-				intensity: settings.intensity,
-				webSearch: settings.webSearch,
-				imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
-				voiceMode: settings.voiceMode,
-				mcpCalls: mcpCallsPayload(settings),
-				config: settings.config
-			}, event => {
-				const toolRequest = renderBridgeEvent(event, sink, firstToolRequests.at(-1));
-				if (toolRequest && toolRequest !== firstToolRequests.at(-1)) {
-					firstToolRequests.push(toolRequest);
-				}
-			}, token);
-
-			let nextToolRequest = firstToolRequests.shift();
-			while (nextToolRequest && !token.isCancellationRequested) {
-				const toolOutputs = await executeToolCalls(this.bridge, nextToolRequest.toolCalls, settings.mode, sink, token);
-				const continuationToolRequests: ToolResultRequest[] = [];
-				await this.bridge.send('submitToolResult', sessionId, {
-					threadId: nextToolRequest.threadId,
-					runId: nextToolRequest.runId,
-					toolOutputs,
-					config: settings.config
-				}, event => {
-					const followupToolRequest = renderBridgeEvent(event, sink, continuationToolRequests.at(-1));
-					if (followupToolRequest && followupToolRequest !== continuationToolRequests.at(-1)) {
-						continuationToolRequests.push(followupToolRequest);
-					}
-				}, token);
-				nextToolRequest = continuationToolRequests.shift();
-			}
-			await panel.webview.postMessage({ type: 'status', text: token.isCancellationRequested ? 'Cancelled.' : 'Done.' });
-		} catch (error) {
-			await panel.webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
-			await panel.webview.postMessage({ type: 'status', text: 'Failed.' });
-		}
-	}
-
-	private panelSink(panel: vscode.WebviewPanel): ResponseSink {
-		return {
-			markdown: value => {
-				void panel.webview.postMessage({ type: 'delta', role: 'assistant', text: typeof value === 'string' ? value : value.value });
-			},
-			progress: value => {
-				void panel.webview.postMessage({ type: 'status', text: value });
-			},
-			event: (type, payload) => {
-				void panel.webview.postMessage({ type, payload });
-			}
-		};
+		await vscode.commands.executeCommand('workbench.view.extension.backboard');
+		await vscode.commands.executeCommand('backboard.panel.focus');
 	}
 }
 

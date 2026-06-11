@@ -7,7 +7,9 @@
 .monaco-workbench .part.titlebar {
 	display: flex;
 	flex-direction: row;
-	box-shadow: var(--vscode-shadow-md);
+	box-shadow: none;
+	border-bottom: 1px solid var(--vscode-titleBar-border);
+	font-size: 12px;
 }
 
 .monaco-workbench.mac .part.titlebar {
@@ -27,6 +29,7 @@
 	display: flex;
 	height: 100%;
 	width: 100%;
+	padding: 0 8px;
 }
 
 /* Account for zooming */
@@ -173,8 +176,8 @@
 	border: 1px solid var(--vscode-commandCenter-border);
 	overflow: hidden;
 	margin: 0 6px;
-	border-radius: var(--vscode-cornerRadius-medium);
-	height: 22px;
+	border-radius: 6px;
+	height: 28px;
 	width: 38vw;
 	max-width: 600px;
 }
