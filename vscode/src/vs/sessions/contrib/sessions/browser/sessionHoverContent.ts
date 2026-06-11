@@ -52,7 +52,7 @@ export function buildSessionHoverContent(
 	const md = new MarkdownString('', { supportThemeIcons: true, supportHtml: true });
 
 	// Line 1: session icon + bold title
-	const title = session.title.get() || localize('agentSessions.newSession', "New Session");
+	const title = session.title.get() || localize('agentSessions.newSession', "New Sandbox");
 	if (session.icon) {
 		md.appendMarkdown(`$(${session.icon.id}) `);
 	}

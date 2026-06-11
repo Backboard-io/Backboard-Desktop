@@ -68,6 +68,7 @@ import { IAgentSession } from '../../agentSessions/agentSessionsModel.js';
 import { ChatEntitlementContextKeys, IChatEntitlementService } from '../../../../../services/chat/common/chatEntitlementService.js';
 import { toErrorMessage } from '../../../../../../base/common/errorMessage.js';
 import { IHostService } from '../../../../../services/host/browser/host.js';
+import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
 
 interface IChatViewPaneState extends Partial<IChatModelInputState> {
 	/**
@@ -129,6 +130,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		@ICommandService private readonly commandService: ICommandService,
 		@IActivityService private readonly activityService: IActivityService,
 		@IHostService private readonly hostService: IHostService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -168,6 +170,14 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 
 	private getViewPositionAndLocation(): { position: Position; location: ViewContainerLocation } {
 		const viewLocation = this.viewDescriptorService.getViewLocationById(this.id);
+
+		if (this.environmentService.isSessionsWindow) {
+			return {
+				position: Position.LEFT,
+				location: viewLocation ?? ViewContainerLocation.AuxiliaryBar,
+			};
+		}
+
 		const sideBarPosition = this.layoutService.getSideBarPosition();
 		const panelPosition = this.layoutService.getPanelPosition();
 
@@ -219,6 +229,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 
 		this.viewPaneContainer?.classList.toggle('chat-view-position-left', position === Position.LEFT);
 		this.viewPaneContainer?.classList.toggle('chat-view-position-right', position === Position.RIGHT);
+		this.viewPaneContainer?.classList.toggle('chat-view-simple-agents', this.environmentService.isSessionsWindow);
 
 		if (fromEvent) {
 			this.relayout();
@@ -340,7 +351,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 
 	private static readonly SESSIONS_SIDEBAR_MIN_WIDTH = 200;
 	private static readonly SESSIONS_SIDEBAR_SNAP_THRESHOLD = this.SESSIONS_SIDEBAR_MIN_WIDTH / 2; // snap to hide when dragged below half of minimum width
-	private static readonly SESSIONS_SIDEBAR_DEFAULT_WIDTH = 300;
+	private static readonly SESSIONS_SIDEBAR_DEFAULT_WIDTH = 260;
 	private static readonly CHAT_WIDGET_DEFAULT_WIDTH = 300;
 	private static readonly SESSIONS_SIDEBAR_VIEW_MIN_WIDTH = this.CHAT_WIDGET_DEFAULT_WIDTH + this.SESSIONS_SIDEBAR_DEFAULT_WIDTH;
 
@@ -369,7 +380,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		// Sessions Title
 		const sessionsTitleContainer = this.sessionsTitleContainer = append(sessionsContainer, $('.agent-sessions-title-container'));
 		const sessionsTitle = this.sessionsTitle = append(sessionsTitleContainer, $('span.agent-sessions-title'));
-		sessionsTitle.textContent = localize('sessions', "Sessions");
+		sessionsTitle.textContent = this.environmentService.isSessionsWindow ? localize('chats', "Chats") : localize('sessions', "Sessions");
 		this._register(addDisposableListener(sessionsTitle, EventType.CLICK, () => {
 			this.sessionsControl?.scrollToTop();
 			this.sessionsControl?.focus();
@@ -393,7 +404,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		// New Session Button
 		const newSessionButtonContainer = this.sessionsNewButtonContainer = append(sessionsContainer, $('.agent-sessions-new-button-container'));
 		const newSessionButton = this._register(new Button(newSessionButtonContainer, { ...defaultButtonStyles, secondary: true }));
-		newSessionButton.label = localize('newSession', "New Session");
+		newSessionButton.label = this.environmentService.isSessionsWindow ? localize('newChat', "New chat") : localize('newSession', "New Session");
 		this._register(newSessionButton.onDidClick(() => this.commandService.executeCommand(ACTION_ID_NEW_CHAT)));
 
 		// Sessions Control
@@ -403,6 +414,10 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 			filter: sessionsFilter,
 			overrideStyles: this.getLocationBasedColors().listOverrideStyles,
 			getHoverPosition: () => this.getSessionHoverPosition(),
+			hideSectionCount: this.environmentService.isSessionsWindow,
+			hideSessionBadge: this.environmentService.isSessionsWindow,
+			useStatusOnlyIcons: this.environmentService.isSessionsWindow,
+			compactShowMore: this.environmentService.isSessionsWindow,
 			trackActiveEditorSession: () => {
 				return !this._widget || this._widget.isEmpty(); // only track and reveal if chat widget is empty
 			},
@@ -553,6 +568,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: true,
 				dndContainer: parent,
+				isSessionsWindow: this.environmentService.isSessionsWindow,
 			},
 			{
 				listForeground: SIDE_BAR_FOREGROUND,
@@ -612,6 +628,9 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		this._register(chatWidget.onDidChangeViewModel(() => {
 			const model = chatWidget.viewModel?.model;
 			this.titleControl?.update(model);
+			if (this.environmentService.isSessionsWindow) {
+				chatWidget.setInputPlaceholder(localize('backboardInputPlaceholder', "What are we building today?"));
+			}
 
 			if (this.sessionsViewerOrientation === AgentSessionsViewerOrientation.Stacked) {
 				return; // only reveal in side-by-side mode

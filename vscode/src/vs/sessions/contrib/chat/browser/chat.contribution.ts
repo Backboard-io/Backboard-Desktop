@@ -109,7 +109,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			type: 'boolean',
 			default: true,
 			scope: ConfigurationScope.APPLICATION,
-			description: localize('chat.agentSessions.scopedInputHistory', "Controls whether chat input history in the Agents Window is scoped to the current session. Disable this to use shared input history across sessions."),
+			description: localize('chat.agentSessions.scopedInputHistory', "Controls whether chat input history in the Sandbox Window is scoped to the current session. Disable this to use shared input history across sessions."),
 		},
 	},
 });

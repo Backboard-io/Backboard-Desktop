@@ -71,7 +71,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 				localize('sessions.customizations.sidebarMode.section', "Show one item per customization category. Clicking a category deep-links to that category's section in the Customizations editor."),
 				localize('sessions.customizations.sidebarMode.single', "Show a single \"Customizations\" entry instead of one item per category. Clicking it opens the Customizations welcome page."),
 			],
-			description: localize('sessions.customizations.sidebarMode', "Controls how the Customizations section in the Agents sidebar is presented and what happens when an entry is clicked."),
+			description: localize('sessions.customizations.sidebarMode', "Controls how the Customizations section in the Sandbox sidebar is presented and what happens when an entry is clicked."),
 			default: SessionsCustomizationsSidebarMode.Welcome,
 		},
 	},
@@ -101,7 +101,7 @@ function customizationSectionVisibleKey(section: string): string {
 export const CUSTOMIZATION_ITEMS: ICustomizationItemConfig[] = [
 	{
 		id: 'sessions.customization.agents',
-		label: localize('agents', "Agents"),
+		label: localize('agents', "Sandbox"),
 		icon: agentIcon,
 		section: AICustomizationManagementSection.Agents,
 		modelSection: AICustomizationManagementSection.Agents,

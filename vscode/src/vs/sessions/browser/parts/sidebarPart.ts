@@ -91,7 +91,7 @@ export class SidebarPart extends AbstractPaneCompositePart {
 			return undefined;
 		}
 
-		return Math.max(width, 300);
+		return Math.max(width, 270);
 	}
 
 	//#endregion

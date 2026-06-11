@@ -179,7 +179,7 @@ export class SessionsView extends ViewPane {
 		// widget mounts inside it.
 		const phoneLayout = isPhoneLayout(this.layoutService);
 		if (!phoneLayout) {
-			headerLabel.textContent = localize('sessionsHeader', "Sessions");
+			headerLabel.textContent = localize('sessionsHeader', "Sandbox");
 
 			// Header actions (visual order: New, Filter, Search)
 			this.createNewSessionButton(headerActions);
@@ -367,8 +367,8 @@ export class SessionsView extends ViewPane {
 			const keybindingLabel = getNewSessionKeybinding()?.getLabel() ?? undefined;
 			return {
 				content: keybindingLabel
-					? localize('newSessionButtonTitle', "New Session ({0})", keybindingLabel)
-					: localize('newSessionButtonTitleWithoutKeybinding', "New Session"),
+					? localize('newSessionButtonTitle', "New Sandbox ({0})", keybindingLabel)
+					: localize('newSessionButtonTitleWithoutKeybinding', "New Sandbox"),
 				appearance: { compact: true },
 				position: { hoverPosition: HoverPosition.BELOW },
 			};
@@ -397,8 +397,8 @@ export class SessionsView extends ViewPane {
 			}
 
 			newSessionButton.element.setAttribute('aria-label', keybindingAriaLabel
-				? localize('newSessionButtonAriaLabel', "New Session ({0})", keybindingAriaLabel)
-				: localize('newSessionButtonAriaLabelWithoutKeybinding', "New Session"));
+				? localize('newSessionButtonAriaLabel', "New Sandbox ({0})", keybindingAriaLabel)
+				: localize('newSessionButtonAriaLabelWithoutKeybinding', "New Sandbox"));
 		};
 		this._register(Event.runAndSubscribe(this.keybindingService.onDidUpdateKeybindings, updateNewSessionButton));
 	}

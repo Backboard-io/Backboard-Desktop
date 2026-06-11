@@ -910,7 +910,7 @@ export class AgentSessionsAccessibilityProvider implements IListAccessibilityPro
 	}
 
 	getWidgetAriaLabel(): string {
-		return localize('agentSessions', "Agent Sessions");
+		return localize('agentSessions', "Sandbox");
 	}
 
 	getAriaLabel(element: AgentSessionListItem): string | null {
@@ -1636,7 +1636,7 @@ export class AgentSessionsDragAndDrop extends Disposable implements ITreeDragAnd
 			return sessions[0].label;
 		}
 
-		return localize('agentSessions.dragLabel', "{0} agent sessions", sessions.length);
+		return localize('agentSessions.dragLabel', "{0} Sandbox sessions", sessions.length);
 	}
 
 	onDragOver(data: IDragAndDropData, targetElement: AgentSessionListItem | undefined, targetIndex: number | undefined, targetSector: ListViewTargetSector | undefined, originalEvent: DragEvent): boolean | ITreeDragOverReaction {

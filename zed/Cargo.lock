@@ -1931,6 +1931,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "backboard_bridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "backboard",
+ "futures 0.3.32",
+ "serde",
+ "serde_json",
+ "tokio",
+ "urlencoding",
+ "uuid",
+ "zed-reqwest",
+]
+
+[[package]]
 name = "backboard_ui"
 version = "0.1.0"
 dependencies = [

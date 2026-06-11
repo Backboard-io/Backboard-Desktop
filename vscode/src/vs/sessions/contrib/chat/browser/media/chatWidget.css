@@ -42,7 +42,7 @@
 .new-session-workspace-picker-container {
 	display: none;
 	width: 100%;
-	max-width: 800px;
+	max-width: 880px;
 	padding: 0;
 	box-sizing: border-box;
 }
@@ -71,7 +71,7 @@
 
 .new-chat-widget-content {
 	width: 100%;
-	max-width: 800px;
+	max-width: 880px;
 	display: flex;
 	flex-direction: column;
 	align-items: stretch;
@@ -80,7 +80,7 @@
 
 .new-chat-widget-container .new-chat-bottom-container {
 	width: 100%;
-	max-width: 800px;
+	max-width: 880px;
 	margin-top: 4px;
 	padding: 0 4px;
 	box-sizing: border-box;

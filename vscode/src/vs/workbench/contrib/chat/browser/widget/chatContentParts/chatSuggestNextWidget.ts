@@ -130,7 +130,7 @@ export class ChatSuggestNextWidget extends Disposable {
 
 	private createAgentsWindowHandoffButton(seedHandoff: IHandOff): HTMLElement {
 		const disposables = new DisposableStore();
-		const label = localize('chat.suggestNext.continueInAgentsWindow', "Continue in Agents Window");
+		const label = localize('chat.suggestNext.continueInAgentsWindow', "Continue in Sandbox Window");
 
 		const handoffLabel = seedHandoff.label;
 		const getCurrentHandoff = (): IHandOff | undefined => {

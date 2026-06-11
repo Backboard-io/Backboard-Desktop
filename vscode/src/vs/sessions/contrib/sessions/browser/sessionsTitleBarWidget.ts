@@ -112,7 +112,7 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 
 		try {
 			const icon = this._getActiveSessionIcon();
-			const sessionTitle = this._getSessionTitle() ?? localize('newSession', "New Session");
+			const sessionTitle = this._getSessionTitle() ?? localize('newSession', "New Sandbox");
 			const workspaceLabel = this._getRepositoryLabel();
 
 			// Build a render-state key from all displayed data
@@ -131,7 +131,7 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 			// Set up container as the button directly
 			this._container.removeAttribute('aria-hidden');
 			this._container.setAttribute('role', 'button');
-			this._container.setAttribute('aria-label', localize('agentSessionsShowSessions', "Show Sessions"));
+			this._container.setAttribute('aria-label', localize('agentSessionsShowSessions', "Show Sandbox"));
 			this._container.tabIndex = 0;
 
 			// Session pill: icon + title + workspace together
@@ -247,7 +247,7 @@ export class SessionsTitleBarContribution extends Disposable implements IWorkben
 		// Register the submenu item in the Agent Sessions command center
 		this._register(MenuRegistry.appendMenuItem(Menus.CommandCenter, {
 			submenu: Menus.TitleBarSessionTitle,
-			title: localize('agentSessionsControl', "Agent Sessions"),
+			title: localize('agentSessionsControl', "Sandbox"),
 			order: 101,
 			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.negate(), SessionsWelcomeVisibleContext.negate())
 		}));
@@ -256,7 +256,7 @@ export class SessionsTitleBarContribution extends Disposable implements IWorkben
 		this._register(MenuRegistry.appendMenuItem(Menus.TitleBarSessionTitle, {
 			command: {
 				id: SHOW_SESSIONS_PICKER_COMMAND_ID,
-				title: localize('showSessions', "Show Sessions"),
+				title: localize('showSessions', "Show Sandbox"),
 			},
 			group: 'a_sessions',
 			order: 1,

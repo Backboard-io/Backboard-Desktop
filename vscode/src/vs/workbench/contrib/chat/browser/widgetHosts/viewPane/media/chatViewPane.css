@@ -167,3 +167,91 @@
 		}
 	}
 }
+
+/* Backboard simple-mode shell for the standalone Agents window. */
+.chat-viewpane.chat-view-simple-agents {
+	background:
+		linear-gradient(142deg, color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent), transparent 64%),
+		var(--vscode-editor-background);
+}
+
+.chat-viewpane.chat-view-simple-agents .agent-sessions-container {
+	background:
+		linear-gradient(142deg, color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent), transparent 58%),
+		linear-gradient(104deg, color-mix(in srgb, var(--vscode-sideBar-background) 82%, var(--vscode-editor-background)), var(--vscode-sideBar-background));
+	border-right: 1px solid color-mix(in srgb, var(--vscode-panel-border) 78%, transparent) !important;
+	border-left: none !important;
+}
+
+.chat-viewpane.chat-view-simple-agents.has-sessions-control.sessions-control-orientation-sidebyside {
+	flex-direction: row;
+}
+
+.chat-viewpane.chat-view-simple-agents .agent-sessions-title-container {
+	min-height: 38px;
+	padding: 0 10px 0 14px;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 50%, transparent);
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0;
+	text-transform: none;
+	color: var(--vscode-foreground);
+}
+
+.chat-viewpane.chat-view-simple-agents .agent-sessions-title {
+	font-size: 13px;
+}
+
+.chat-viewpane.chat-view-simple-agents .agent-sessions-toolbar .action-label,
+.chat-viewpane.chat-view-simple-agents .agent-sessions-new-button-container .monaco-button {
+	border-radius: 6px;
+}
+
+.chat-viewpane.chat-view-simple-agents.has-sessions-control.sessions-control-orientation-sidebyside .agent-sessions-new-button-container {
+	padding: 10px 12px;
+}
+
+.chat-viewpane.chat-view-simple-agents .agent-sessions-new-button-container .monaco-button {
+	width: 100%;
+}
+
+.chat-viewpane.chat-view-simple-agents .agent-sessions-control-container {
+	padding-top: 6px;
+}
+
+.chat-viewpane.chat-view-simple-agents .chat-controls-container {
+	background-color: var(--vscode-editor-background);
+}
+
+.chat-viewpane.chat-view-simple-agents .chat-view-title-header {
+	min-height: 38px;
+	border-bottom-color: color-mix(in srgb, var(--vscode-panel-border) 55%, transparent);
+}
+
+.chat-viewpane.chat-view-simple-agents .interactive-session {
+	max-width: 950px;
+	margin: 0 auto;
+}
+
+.chat-viewpane.chat-view-simple-agents .interactive-input-part {
+	padding-left: 18px;
+	padding-right: 18px;
+}
+
+.chat-viewpane.chat-view-simple-agents.sessions-control-orientation-stacked .agent-sessions-container {
+	max-width: 950px;
+	background: transparent;
+	border-right: none !important;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 55%, transparent);
+}
+
+.chat-viewpane.chat-view-simple-agents.sessions-control-orientation-stacked .agent-sessions-title-container {
+	padding: 0 18px;
+}
+
+@media (max-width: 700px) {
+	.chat-viewpane.chat-view-simple-agents .interactive-input-part {
+		padding-left: 10px;
+		padding-right: 10px;
+	}
+}

@@ -132,10 +132,8 @@
  *
  * No z-index or stacking-context changes - sashes render naturally on top.
  *
- * Margin values (must match the constants in the Part classes):
- *   Sidebar:       no card (flush, spans full height)
- *   Auxiliary bar:  top=16, bottom=18, right=16
- *   Panel:          bottom=18, left=16, right=16
+ * Margin values must match the constants in the Part classes. Sandbox Simple
+ * Mode uses an 8px panel gap, while the sidebar stays flush and spans full height.
  */
 
 .agent-sessions-workbench.shell-gradient-background .part.titlebar,
@@ -386,15 +384,15 @@
 .agent-sessions-workbench .part.auxiliarybar {
 	/*
 	 * The right gutter is provided by the workbench grid (see Workbench.layout).
-	 * The bottom margin is 5px when the panel is visible (paired with the panel's
-	 * 5px top margin to center the sash) and 0 when the panel is hidden
+	 * The bottom margin is present when the panel is visible (paired with the panel's
+	 * top margin to center the sash) and 0 when the panel is hidden
 	 * (see `.nopanel` override below) so the card fills its cell.
 	 *
 	 * Default (editor visible): card flushes against the editor with the
 	 * grid sash at the seam. `padding-left: 5px` keeps the inner content
 	 * aligned with the editor-hidden state.
 	 *
-	 * Editor hidden (override below): 5px left gutter against the sash.
+	 * Editor hidden (override below): left gutter against the sash.
 	 *
 	 * The TS `layout()` mirrors this and re-runs on editor visibility
 	 * changes so the inner area is sized correctly.
@@ -546,6 +544,86 @@
 	border-color: var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) !important;
 }
 
+/* ---- Sandbox Simple Mode ---- */
+
+.agent-sessions-workbench {
+	--sandbox-simple-panel-radius: 22px;
+	--sandbox-simple-inner-radius: 12px;
+	--sandbox-simple-panel-gap: 8px;
+}
+
+.agent-sessions-workbench.shell-gradient-background {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--vscode-agents-background) 92%, var(--vscode-agentsGradient-tintColor) 8%) 0%, var(--vscode-agents-background) 42%),
+		var(--vscode-agents-background);
+}
+
+.agent-sessions-workbench .part.sidebar {
+	border-right: 1px solid color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 8%, transparent);
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.sidebar {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 7%, transparent) 0%, transparent 34%),
+		transparent !important;
+}
+
+.agent-sessions-workbench .part.sessionspart {
+	margin: 0 var(--sandbox-simple-panel-gap) var(--sandbox-simple-panel-gap) var(--sandbox-simple-panel-gap);
+	border-radius: var(--sandbox-simple-panel-radius);
+	box-shadow: 0 1px 0 color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+	overflow: hidden;
+}
+
+.agent-sessions-workbench:not(.nosidebar) .part.sessionspart {
+	margin-left: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar {
+	margin: 0 0 var(--sandbox-simple-panel-gap) 0;
+	padding-left: var(--sandbox-simple-panel-gap);
+	border-top-right-radius: var(--sandbox-simple-panel-radius);
+	border-bottom-right-radius: var(--sandbox-simple-panel-radius);
+	box-shadow: 0 1px 0 color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+	overflow: hidden;
+}
+
+.agent-sessions-workbench.nomaineditorarea .part.auxiliarybar {
+	margin-left: var(--sandbox-simple-panel-gap);
+	border-top-left-radius: var(--sandbox-simple-panel-radius);
+	border-bottom-left-radius: var(--sandbox-simple-panel-radius);
+}
+
+.agent-sessions-workbench.nopanel .part.sessionspart,
+.agent-sessions-workbench.nopanel .part.auxiliarybar,
+.agent-sessions-workbench.nopanel .monaco-grid-view .part.editor:not(.modal-editor-part) {
+	margin-bottom: 0;
+}
+
+.agent-sessions-workbench .part.panel {
+	margin: var(--sandbox-simple-panel-gap) 0 0 var(--sandbox-simple-panel-gap);
+	border-radius: var(--sandbox-simple-panel-radius) var(--sandbox-simple-panel-radius) 0 0;
+	box-shadow: 0 -1px 0 color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+	overflow: hidden;
+}
+
+.agent-sessions-workbench:not(.nosidebar) .part.panel {
+	margin-left: 0;
+}
+
+.agent-sessions-workbench .part.sessionspart > .content,
+.agent-sessions-workbench .part.auxiliarybar > .content,
+.agent-sessions-workbench .part.panel > .content {
+	background: var(--vscode-agentsPanel-background);
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container,
+.agent-sessions-workbench .part.sessionspart .interactive-session > .chat-suggest-next-widget,
+.agent-sessions-workbench .chat-editor-relative .interactive-session > .chat-suggest-next-widget {
+	max-width: 880px;
+}
+
 /* While the developer-joy animated border is active, keep a faint
 	persistent ring so the input still has a visible boundary throughout
 	the comet animation (improves visuals + accessibility). The spinning
@@ -585,6 +663,96 @@
  * should not surface the shared workbench chat session pickers here. */
 .agent-sessions-workbench .interactive-session .chat-input-toolbars .chat-sessionPicker-container {
 	display: none;
+}
+
+/* ---- Full-screen Sandbox shell opened by "Open in Sandbox" ---- */
+
+.agent-sessions-workbench.shell-gradient-background {
+	background: var(--vscode-agents-background);
+}
+
+.agent-sessions-workbench.shell-gradient-background::before {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 5%, transparent) 0%, transparent 28%),
+		var(--vscode-agents-background);
+}
+
+.agent-sessions-workbench.shell-gradient-background > .monaco-grid-view {
+	background: transparent;
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.titlebar {
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.sidebar {
+	border-right: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 6%, transparent) 0%, transparent 36%),
+		color-mix(in srgb, var(--vscode-sideBar-background) 92%, var(--vscode-agents-background) 8%) !important;
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.sessionspart {
+	margin: 0;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	background: transparent;
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.sessionspart > .content {
+	background: transparent;
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.sessionspart .monaco-grid-view,
+.agent-sessions-workbench.shell-gradient-background .part.sessionspart .split-view,
+.agent-sessions-workbench.shell-gradient-background .part.sessionspart .split-view-view {
+	background: transparent;
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.auxiliarybar {
+	margin: 18px 16px 18px 12px;
+	padding-left: 0;
+	border-radius: var(--sandbox-simple-panel-radius);
+	box-shadow:
+		0 14px 36px color-mix(in srgb, var(--vscode-widget-shadow, #000) 12%, transparent),
+		0 1px 0 color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
+.agent-sessions-workbench.shell-gradient-background.nomaineditorarea .part.auxiliarybar {
+	margin-left: 12px;
+	border-radius: var(--sandbox-simple-panel-radius);
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.panel {
+	margin: 8px 16px 0 0;
+	border-radius: var(--sandbox-simple-panel-radius) var(--sandbox-simple-panel-radius) 0 0;
+	box-shadow:
+		0 -10px 28px color-mix(in srgb, var(--vscode-widget-shadow, #000) 10%, transparent),
+		0 -1px 0 color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.nosidebar) .part.panel {
+	margin-left: 0;
+}
+
+.agent-sessions-workbench.shell-gradient-background.nopanel .part.sessionspart,
+.agent-sessions-workbench.shell-gradient-background.nopanel .part.auxiliarybar,
+.agent-sessions-workbench.shell-gradient-background.nopanel .monaco-grid-view .part.editor:not(.modal-editor-part) {
+	margin-bottom: 18px;
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.sessionspart .interactive-session .interactive-item-container,
+.agent-sessions-workbench.shell-gradient-background .chat-editor-relative .interactive-session .interactive-item-container,
+.agent-sessions-workbench.shell-gradient-background .part.sessionspart .interactive-session > .chat-suggest-next-widget,
+.agent-sessions-workbench.shell-gradient-background .chat-editor-relative .interactive-session > .chat-suggest-next-widget {
+	max-width: 1030px;
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.sessionspart .interactive-session .interactive-input-part,
+.agent-sessions-workbench.shell-gradient-background .chat-editor-relative .interactive-session .interactive-input-part {
+	max-width: 1030px;
+	padding: 8px 36px 18px 36px;
 }
 
 /* ---- Sessions Action Widget Pickers ---- */

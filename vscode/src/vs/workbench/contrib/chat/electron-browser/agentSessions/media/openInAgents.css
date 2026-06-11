@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/* "Open in Agents" titlebar widget — icon-only at rest, expands on hover/focus. */
+/* "Open in Sandbox" titlebar widget — icon-only at rest, expands on hover/focus. */
 .monaco-workbench .open-in-agents-titlebar-widget {
 	display: inline-flex;
 	align-items: center;

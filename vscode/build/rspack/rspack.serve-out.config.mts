@@ -68,7 +68,7 @@ export default {
 				type: 'css',
 			},
 			{
-				test: /\.ttf$/,
+				test: /\.(ttf|woff2)$/,
 				type: 'asset/resource',
 			},
 			{

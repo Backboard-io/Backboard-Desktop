@@ -411,7 +411,7 @@ export const TIP_CATALOG: readonly ITipDefinition[] = [
 		buildMessage(ctx) {
 			const defaultMessage = localize(
 				'tip.agentsWindow',
-				"Work across multiple projects at once in the [Agents window](command:{0} \"Open Agents Window\").",
+				"Work across multiple projects at once in the [Sandbox window](command:{0} \"Open Sandbox Window\").",
 				OPEN_AGENTS_WINDOW_COMMAND_ID
 			);
 			const experimentalTemplate = ctx.experimentalTipMessages.get(ChatTipExperiment.OpenAgentsWindowTip);

@@ -68,8 +68,8 @@ export class PanelPart extends AbstractPaneCompositePart {
 	static readonly activePanelSettingsKey = 'workbench.agentsession.panelpart.activepanelid';
 
 	/** Visual margin values for the card-like appearance */
-	static readonly MARGIN_TOP = 5;
-	static readonly MARGIN_LEFT = 10;
+	static readonly MARGIN_TOP = 8;
+	static readonly MARGIN_LEFT = 8;
 
 	constructor(
 		@INotificationService notificationService: INotificationService,
@@ -175,7 +175,7 @@ export class PanelPart extends AbstractPaneCompositePart {
 		}
 
 		// Layout content with reduced dimensions to account for visual margins and border.
-		// The right and bottom gutters are provided by the workbench grid; the 5px top
+		// The right and bottom gutters are provided by the workbench grid; the top
 		// margin pairs with the top row's MARGIN_BOTTOM to center the sash.
 		const borderTotal = 2; // 1px border on each side
 		const marginLeft = this.layoutService.isVisible(Parts.SIDEBAR_PART) ? 0 : PanelPart.MARGIN_LEFT;

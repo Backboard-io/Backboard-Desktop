@@ -126,7 +126,7 @@ suite('Sessions - Account Title Bar State', () => {
 		});
 	});
 
-	test('shows sign in state when no account is available', () => {
+	test('shows Backboard state when no account is available', () => {
 		const state = getAccountTitleBarState(createState({
 			accountName: undefined,
 			accountProviderLabel: undefined,
@@ -137,10 +137,12 @@ suite('Sessions - Account Title Bar State', () => {
 			source: state.source,
 			label: state.label,
 			kind: state.kind,
+			revealLabelOnHover: state.revealLabelOnHover,
 		}, {
-			source: 'copilot',
-			label: 'Agents Signed Out',
-			kind: 'prominent',
+			source: 'account',
+			label: 'Backboard',
+			kind: 'default',
+			revealLabelOnHover: true,
 		});
 	});
 

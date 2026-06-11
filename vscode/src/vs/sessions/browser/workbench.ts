@@ -716,8 +716,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.partVisibility.sessions = visibilityDefaults.sessions;
 		const savedPartVisibility = this._loadPartVisibility(storageService);
 		this.partVisibility.editor = savedPartVisibility.editor ?? visibilityDefaults.editor;
-		this.partVisibility.auxiliaryBar = savedPartVisibility.auxiliaryBar ?? visibilityDefaults.auxiliaryBar;
-		this.partVisibility.sidebar = savedPartVisibility.sidebar ?? visibilityDefaults.sidebar;
+		this.partVisibility.auxiliaryBar = visibilityDefaults.auxiliaryBar;
+		this.partVisibility.sidebar = visibilityDefaults.sidebar;
 
 		// Load saved grid part sizes — these will be consumed when building the
 		// grid descriptor so editor/sidebar/auxbar/panel restore to their previous
@@ -730,7 +730,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const workbenchClasses = coalesce([
 			'monaco-workbench',
 			'agent-sessions-workbench',
-			// LayoutClasses.SHELL_GRADIENT_BACKGROUND,
+			LayoutClasses.SHELL_GRADIENT_BACKGROUND,
 			platformClass,
 			isWeb ? 'web' : undefined,
 			isChrome ? 'chromium' : isFirefox ? 'firefox' : isSafari ? 'safari' : undefined,
@@ -1204,10 +1204,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const sizes = this.layoutPolicy.getPartSizes(width, height);
 		// For hidden parts, still provide a reasonable cached size for when they're shown later.
 		// Saved sizes from a previous session take precedence over policy defaults.
-		const sideBarSize = this._savedPartSizes.sidebar
-			?? (this.partVisibility.sidebar ? sizes.sideBarSize : Math.max(sizes.sideBarSize, 250));
-		const auxiliaryBarSize = this._savedPartSizes.auxiliaryBar
-			?? (this.partVisibility.auxiliaryBar ? sizes.auxiliaryBarSize : Math.max(sizes.auxiliaryBarSize, 300));
+		const sideBarSize = sizes.sideBarSize;
+		const auxiliaryBarSize = sizes.auxiliaryBarSize;
 		const panelSize = this._savedPartSizes.panel
 			?? (this.partVisibility.panel ? sizes.panelSize : Math.max(sizes.panelSize, 250));
 		const editorSize = this._savedPartSizes.editor ?? 600;
@@ -1382,16 +1380,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		// On phone, subtract the mobile top bar height from the grid
 		const mobileTopBarHeight = this.mobileTopBarElement?.offsetHeight ?? 0;
-		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
 
-		// Reserve a 10px gutter on the right and bottom edges of the workbench so that
-		// parts at those edges don't need to manage their own outer right/bottom margin.
-		// The top-row parts (chat/editor/aux) drop their bottom margin to 0 when the panel
-		// is hidden, so the card fills its cell and the visible 10px gap comes entirely
-		// from the workbench gutter. When the panel is visible, top-row parts contribute
-		// a 5px bottom margin so the sash with the panel (which has a 5px top margin) is
-		// centered in a 10px gap. Skip on phone where the layout uses different chrome.
-		const gutter = isPhone ? 0 : 10;
+		const gutter = 0;
 		const gridWidth = this._mainContainerDimension.width - gutter;
 		const gridHeight = this._mainContainerDimension.height - mobileTopBarHeight - gutter;
 

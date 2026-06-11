@@ -20,9 +20,9 @@ import { SessionsWelcomeVisibleContext } from '../common/contextkeys.js';
 import { mainWindow } from '../../base/browser/window.js';
 
 // Register Icons
-const panelCloseIcon = registerIcon('agent-panel-close', Codicon.close, localize('agentPanelCloseIcon', "Icon to close the panel."));
-const sidebarToggleClosedIcon = registerIcon('agent-sidebar-toggle-closed', Codicon.layoutSidebarLeftOff, localize('agentSidebarToggleClosedIcon', "Icon for the sessions sidebar when closed."));
-const sidebarToggleOpenIcon = registerIcon('agent-sidebar-toggle-open', Codicon.layoutSidebarLeft, localize('agentSidebarToggleOpenIcon', "Icon for the sessions sidebar when open."));
+const panelCloseIcon = registerIcon('agent-panel-close', Codicon.close, localize('agentPanelCloseIcon', "Icon to close the Sandbox panel."));
+const sidebarToggleClosedIcon = registerIcon('agent-sidebar-toggle-closed', Codicon.layoutSidebarLeftOff, localize('agentSidebarToggleClosedIcon', "Icon for the Sandbox sidebar when closed."));
+const sidebarToggleOpenIcon = registerIcon('agent-sidebar-toggle-open', Codicon.layoutSidebarLeft, localize('agentSidebarToggleOpenIcon', "Icon for the Sandbox sidebar when open."));
 
 class ToggleSidebarVisibilityAction extends Action2 {
 
@@ -31,14 +31,14 @@ class ToggleSidebarVisibilityAction extends Action2 {
 	constructor() {
 		super({
 			id: ToggleSidebarVisibilityAction.ID,
-			title: localize2('toggleSidebar', 'Toggle Primary Side Bar Visibility'),
+			title: localize2('toggleSidebar', 'Toggle Sandbox Sidebar Visibility'),
 			icon: sidebarToggleClosedIcon,
 			toggled: {
 				condition: SideBarVisibleContext,
 				icon: sidebarToggleOpenIcon,
 			},
 			metadata: {
-				description: localize('openAndCloseSidebar', 'Open/Show and Close/Hide Sidebar'),
+				description: localize('openAndCloseSidebar', 'Open/Show and Close/Hide Sandbox Sidebar'),
 			},
 			category: Categories.View,
 			f1: true,
@@ -65,8 +65,8 @@ class ToggleSidebarVisibilityAction extends Action2 {
 
 		// Announce visibility change to screen readers
 		const alertMessage = isCurrentlyVisible
-			? localize('sidebarHidden', "Primary Side Bar hidden")
-			: localize('sidebarVisible', "Primary Side Bar shown");
+			? localize('sidebarHidden', "Sandbox Sidebar hidden")
+			: localize('sidebarVisible', "Sandbox Sidebar shown");
 		alert(alertMessage);
 	}
 }
@@ -78,10 +78,10 @@ class ToggleSecondarySidebarVisibilityAction extends Action2 {
 	constructor() {
 		super({
 			id: ToggleSecondarySidebarVisibilityAction.ID,
-			title: localize2('toggleSecondarySidebar', 'Toggle Secondary Side Bar Visibility'),
+			title: localize2('toggleSecondarySidebar', 'Toggle Sandbox Output Visibility'),
 			icon: panelCloseIcon,
 			metadata: {
-				description: localize('openAndCloseSecondarySidebar', 'Open/Show and Close/Hide Secondary Side Bar'),
+				description: localize('openAndCloseSecondarySidebar', 'Open/Show and Close/Hide Sandbox Output'),
 			},
 			category: Categories.View,
 			f1: true
@@ -102,8 +102,8 @@ class ToggleSecondarySidebarVisibilityAction extends Action2 {
 
 		// Announce visibility change to screen readers
 		const alertMessage = isCurrentlyVisible
-			? localize('secondarySidebarHidden', "Secondary Side Bar hidden")
-			: localize('secondarySidebarVisible', "Secondary Side Bar shown");
+			? localize('secondarySidebarHidden', "Sandbox Output hidden")
+			: localize('secondarySidebarVisible', "Sandbox Output shown");
 		alert(alertMessage);
 	}
 }
@@ -115,7 +115,7 @@ class TogglePanelVisibilityAction extends Action2 {
 	constructor() {
 		super({
 			id: TogglePanelVisibilityAction.ID,
-			title: localize2('togglePanel', 'Toggle Panel Visibility'),
+			title: localize2('togglePanel', 'Toggle Terminal Visibility'),
 			category: Categories.View,
 			f1: true,
 			icon: panelCloseIcon

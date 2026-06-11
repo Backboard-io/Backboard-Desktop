@@ -175,6 +175,27 @@
 	box-shadow: none;
 }
 
+.agent-sessions-workbench.monaco-workbench .part.titlebar {
+	background: transparent;
+}
+
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container {
+	min-height: 38px;
+	padding-inline: 8px;
+}
+
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-center .window-title {
+	height: 30px;
+	align-items: center;
+}
+
+.agent-sessions-workbench.monaco-workbench .part.titlebar .command-center {
+	border-radius: var(--vscode-cornerRadius-large);
+	background: color-mix(in srgb, var(--vscode-agentsPanel-background) 78%, transparent);
+	border: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-border, var(--vscode-contrastBorder)) 70%, transparent);
+	box-shadow: 0 1px 0 color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
 /* macOS native: the spacer uses window-controls-container but should not block dragging */
 .agent-sessions-workbench.mac .part.titlebar .window-controls-container {
 	-webkit-app-region: drag;

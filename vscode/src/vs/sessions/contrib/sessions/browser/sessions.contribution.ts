@@ -18,8 +18,8 @@ import './views/sessionsViewActions.js';
 import './sessionsActions.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 
-const agentSessionsViewIcon = registerIcon('chat-sessions-icon', Codicon.commentDiscussionSparkle, localize('agentSessionsViewIcon', 'Icon for Agent Sessions View'));
-const AGENT_SESSIONS_VIEW_TITLE = localize2('agentSessions.view.label', "Sessions");
+const agentSessionsViewIcon = registerIcon('chat-sessions-icon', Codicon.commentDiscussionSparkle, localize('agentSessionsViewIcon', 'Icon for Sandbox View'));
+const AGENT_SESSIONS_VIEW_TITLE = localize2('agentSessions.view.label', "Sandbox");
 const SessionsContainerId = 'agentic.workbench.view.sessionsContainer';
 
 const agentSessionsViewContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
@@ -32,7 +32,7 @@ const agentSessionsViewContainer: ViewContainer = Registry.as<IViewContainersReg
 	order: 6,
 	openCommandActionDescriptor: {
 		id: SessionsContainerId,
-		mnemonicTitle: localize({ key: 'miSessions', comment: ['&& denotes a mnemonic'] }, "&&Sessions"),
+		mnemonicTitle: localize({ key: 'miSessions', comment: ['&& denotes a mnemonic'] }, "&&Sandbox"),
 		keybindings: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyX },
 		order: 0
 	},

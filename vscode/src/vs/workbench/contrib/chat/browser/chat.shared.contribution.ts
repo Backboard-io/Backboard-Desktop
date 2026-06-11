@@ -693,7 +693,7 @@ configurationRegistry.registerConfiguration({
 			default: 'hidden',
 			tags: ['experimental'],
 			experiment: { mode: 'startup' },
-			description: nls.localize('chat.agentsHandoffTip.mode', "Controls the tip shown above the chat input offering to continue eligible agent sessions in the Agents Window."),
+			description: nls.localize('chat.agentsHandoffTip.mode', "Controls the tip shown above the chat input offering to continue eligible agent sessions in the Sandbox Window."),
 		},
 		[ChatConfiguration.ChatContextUsageEnabled]: {
 			type: 'boolean',
@@ -1690,7 +1690,7 @@ configurationRegistry.registerConfiguration({
 		},
 		[ChatConfiguration.TitleBarOpenInAgentsWindowEnabled]: {
 			type: 'boolean',
-			description: nls.localize('chat.titleBar.openInAgentsWindow.enabled', "Controls whether the Open in Agents Window button is shown in the title bar."),
+			description: nls.localize('chat.titleBar.openInAgentsWindow.enabled', "Controls whether the Open in Sandbox Window button is shown in the title bar."),
 			default: true,
 		},
 		'chat.approvedAccountOrganizations': {

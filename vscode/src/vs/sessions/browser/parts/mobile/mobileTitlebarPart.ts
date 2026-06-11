@@ -148,7 +148,7 @@ export class MobileTitlebarPart extends Disposable {
 
 		this.sessionTitleElement = append(center, $('button.mobile-session-title'));
 		this.sessionTitleElement.setAttribute('type', 'button');
-		this.sessionTitleElement.textContent = localize('mobileTopBar.newSession', "New Session");
+		this.sessionTitleElement.textContent = localize('mobileTopBar.newSession', "New Sandbox");
 		this._register(addDisposableListener(this.sessionTitleElement, EventType.CLICK, () => this._onDidClickTitle.fire()));
 
 		this.actionsContainer = append(center, $('div.mobile-top-bar-actions'));
@@ -201,7 +201,7 @@ export class MobileTitlebarPart extends Disposable {
 		this._register(autorun(reader => {
 			const session = this.sessionsManagementService.activeSession.read(reader);
 			const title = session?.title.read(reader);
-			this.sessionTitleElement.textContent = title || localize('mobileTopBar.newSession', "New Session");
+			this.sessionTitleElement.textContent = title || localize('mobileTopBar.newSession', "New Sandbox");
 		}));
 
 		// Keep the changes pill in sync with the active session's changes.

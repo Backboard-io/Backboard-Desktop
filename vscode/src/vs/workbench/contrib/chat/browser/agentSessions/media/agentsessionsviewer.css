@@ -427,3 +427,98 @@
 		opacity: 0.4;
 	}
 }
+
+/* Backboard simple-mode session rows. Scoped to the Agents window and welcome page. */
+.chat-view-simple-agents .agent-sessions-viewer,
+.agentSessionsWelcome .agent-sessions-viewer {
+	.monaco-scrollable-element {
+		padding: 0 8px;
+	}
+
+	.monaco-list,
+	.monaco-list-rows {
+		background-color: transparent !important;
+	}
+
+	.monaco-list-row {
+		border-radius: 8px;
+	}
+
+	.monaco-list-row:hover:not(.selected) {
+		background-color: color-mix(in srgb, var(--vscode-list-hoverBackground) 74%, transparent) !important;
+	}
+
+	.monaco-list-row.selected,
+	.monaco-list:focus .monaco-list-row.focused.selected {
+		background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 72%, var(--vscode-list-hoverBackground)) !important;
+		outline: none !important;
+	}
+
+	.agent-session-item {
+		min-height: 42px;
+		padding: 8px 8px;
+	}
+
+	.agent-session-icon-col {
+		width: 20px;
+		justify-content: center;
+	}
+
+	.agent-session-icon-col .agent-session-icon {
+		font-size: 13px;
+		opacity: 0.9;
+	}
+
+	.agent-session-main-col {
+		padding-left: 7px;
+	}
+
+	.agent-session-title-row {
+		padding-bottom: 3px;
+	}
+
+	.agent-session-title {
+		font-size: 13px;
+		font-weight: 500;
+		letter-spacing: 0;
+	}
+
+	.agent-session-details-row {
+		gap: 5px;
+		font-size: 11px;
+		line-height: 14px;
+		max-height: 14px;
+		color: color-mix(in srgb, var(--vscode-descriptionForeground) 86%, transparent);
+	}
+
+	.agent-session-status {
+		color: color-mix(in srgb, var(--vscode-descriptionForeground) 82%, transparent);
+	}
+
+	.agent-session-diff-container {
+		font-size: 11px;
+	}
+
+	.agent-session-section {
+		height: 28px;
+		padding: 8px 8px 4px;
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0;
+		text-transform: none;
+		color: color-mix(in srgb, var(--vscode-descriptionForeground) 86%, transparent);
+	}
+
+	.agent-session-show-more {
+		height: 28px;
+		padding-left: 35px;
+		border-radius: 8px;
+		color: var(--vscode-descriptionForeground);
+	}
+
+	.agent-session-approval-row {
+		border-color: color-mix(in srgb, var(--vscode-panel-border) 68%, transparent);
+		border-radius: 8px;
+		background-color: color-mix(in srgb, var(--vscode-editor-background) 82%, var(--vscode-sideBar-background));
+	}
+}

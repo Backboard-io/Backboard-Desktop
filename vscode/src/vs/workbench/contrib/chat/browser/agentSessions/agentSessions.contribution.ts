@@ -57,7 +57,7 @@ registerAction2(SetAgentSessionsOrientationSideBySideAction);
 
 MenuRegistry.appendMenuItem(MenuId.AgentSessionsToolbar, {
 	submenu: MenuId.AgentSessionsViewerFilterSubMenu,
-	title: localize2('filterAgentSessions', "Filter Agent Sessions"),
+	title: localize2('filterAgentSessions', "Filter Sandbox"),
 	group: 'navigation',
 	order: 3,
 	icon: Codicon.filter,
@@ -164,9 +164,9 @@ Registry.as<IQuickAccessRegistry>(QuickAccessExtensions.Quickaccess).registerQui
 	prefix: AGENT_SESSIONS_QUICK_ACCESS_PREFIX,
 	contextKey: 'inAgentSessionsPicker',
 	when: ChatContextKeys.enabled,
-	placeholder: localize('agentSessionsQuickAccessPlaceholder', "Search agent sessions by name"),
+	placeholder: localize('agentSessionsQuickAccessPlaceholder', "Search Sandbox sessions by name"),
 	helpEntries: [{
-		description: localize('agentSessionsQuickAccessHelp', "Show All Agent Sessions"),
+		description: localize('agentSessionsQuickAccessHelp', "Show Sandbox"),
 		commandId: 'workbench.action.chat.history',
 	}]
 });

@@ -33,7 +33,7 @@ export class AgentSessionsQuickAccessProvider extends PickerQuickAccessProvider<
 		super(AGENT_SESSIONS_QUICK_ACCESS_PREFIX, {
 			canAcceptInBackground: true,
 			noResultsPick: {
-				label: localize('noAgentSessionResults', "No matching agent sessions")
+				label: localize('noAgentSessionResults', "No matching Sandbox sessions")
 			}
 		});
 

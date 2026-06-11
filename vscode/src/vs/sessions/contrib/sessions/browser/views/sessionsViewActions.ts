@@ -447,7 +447,7 @@ registerAction2(class NewSessionForWorkspaceAction extends Action2 {
 	constructor() {
 		super({
 			id: 'sessionsView.sectionNewSession',
-			title: localize2('newSessionForWorkspace', "New Session"),
+			title: localize2('newSessionForWorkspace', "New Sandbox"),
 			icon: Codicon.plus,
 			menu: [{
 				id: SessionSectionToolbarMenuId,
@@ -782,7 +782,7 @@ registerAction2(class RenameSessionAction extends Action2 {
 		const sessionsManagementService = accessor.get(ISessionsManagementService);
 		const newTitle = await quickInputService.input({
 			value: session.title.get(),
-			prompt: localize('renameSession.prompt', "New agent session title"),
+			prompt: localize('renameSession.prompt', "New Sandbox title"),
 			validateInput: async value => {
 				if (!value.trim()) {
 					return localize('renameSession.empty', "Title cannot be empty");

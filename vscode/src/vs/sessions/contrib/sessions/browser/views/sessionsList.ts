@@ -707,7 +707,7 @@ class SessionShowMoreRenderer implements ITreeRenderer<SessionListItem, FuzzySco
 
 class SessionsAccessibilityProvider {
 	getWidgetAriaLabel(): string {
-		return localize('sessionsList', "Sessions");
+		return localize('sessionsList', "Sandbox");
 	}
 
 	getAriaLabel(element: SessionListItem): string | null {

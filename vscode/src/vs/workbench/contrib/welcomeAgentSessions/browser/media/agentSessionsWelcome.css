@@ -551,3 +551,560 @@
 		opacity: 0.6;
 	}
 }
+
+/* Backboard simple-mode shell */
+.agentSessionsWelcome {
+	background:
+		linear-gradient(142deg, color-mix(in srgb, var(--vscode-focusBorder) 10%, transparent), transparent 58%),
+		linear-gradient(104deg, color-mix(in srgb, var(--vscode-sideBar-background) 72%, var(--vscode-editor-background)), var(--vscode-editor-background));
+}
+
+.agentSessionsWelcome-scrollable {
+	align-items: stretch;
+	justify-content: center;
+}
+
+.agentSessionsWelcome-content {
+	justify-content: center;
+	min-height: 100%;
+	max-width: 880px;
+	padding: 48px 32px 40px;
+}
+
+.agentSessionsWelcome-header {
+	align-items: center;
+	max-width: 560px;
+	text-align: center;
+}
+
+.agentSessionsWelcome-header h1.product-name {
+	margin: 0;
+	font-size: 36px;
+	font-weight: 650;
+	line-height: 1.08;
+	letter-spacing: 0;
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-subtitle {
+	max-width: 420px;
+	margin: 10px 0 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	line-height: 1.45;
+}
+
+.agentSessionsWelcome-startEntries {
+	justify-content: center;
+	margin-top: 20px;
+	gap: 8px;
+}
+
+.agentSessionsWelcome-startEntry {
+	height: 30px;
+	padding: 0 10px;
+	border-radius: 6px;
+	background-color: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 72%, transparent);
+	color: var(--vscode-descriptionForeground);
+}
+
+.agentSessionsWelcome-startEntry:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-chatSection {
+	max-width: 720px;
+	margin-top: 28px;
+}
+
+.agentSessionsWelcome-chatWidget {
+	border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 72%, transparent);
+	border-radius: 22px;
+	background-color: color-mix(in srgb, var(--vscode-editor-background) 88%, var(--vscode-sideBar-background));
+	box-shadow: 0 18px 44px color-mix(in srgb, var(--vscode-widget-shadow) 22%, transparent);
+	overflow: hidden;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-input-part {
+	padding: 10px 12px;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-input-part,
+.agentSessionsWelcome-chatWidget .interactive-input-part .monaco-editor,
+.agentSessionsWelcome-chatWidget .interactive-input-part .monaco-editor-background {
+	background-color: transparent !important;
+}
+
+.agentSessionsWelcome-sessionsSection {
+	max-width: 720px;
+	margin-top: 22px;
+}
+
+.agentSessionsWelcome-sessionsGrid {
+	border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 62%, transparent);
+	border-radius: 14px;
+	background-color: color-mix(in srgb, var(--vscode-sideBar-background) 66%, transparent);
+	padding: 8px;
+}
+
+.agentSessionsWelcome-sessionsGrid .monaco-list-row {
+	border-radius: 8px;
+}
+
+.agentSessionsWelcome-sessionsGrid .agent-session-item {
+	padding: 8px 10px;
+	border-radius: 8px;
+}
+
+.agentSessionsWelcome-sessionsGrid .agent-session-title {
+	font-size: 13px;
+	font-weight: 500;
+}
+
+.agentSessionsWelcome-sessionsGrid .agent-session-details-row {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agentSessionsWelcome-walkthroughCard,
+.agentSessionsWelcome-tosCard {
+	border-color: color-mix(in srgb, var(--vscode-panel-border) 62%, transparent);
+	background-color: color-mix(in srgb, var(--vscode-sideBar-background) 46%, transparent);
+}
+
+.agentSessionsWelcome-footer {
+	max-width: 720px;
+	margin-top: 18px;
+}
+
+.agentSessionsWelcome-footerLink {
+	color: var(--vscode-descriptionForeground);
+}
+
+@media (max-width: 700px) {
+	.agentSessionsWelcome-content {
+		padding: 28px 18px 24px;
+	}
+
+	.agentSessionsWelcome-header h1.product-name {
+		font-size: 30px;
+	}
+
+	.agentSessionsWelcome-startEntries {
+		align-items: stretch;
+		flex-direction: column;
+		width: 100%;
+	}
+
+	.agentSessionsWelcome-startEntry {
+		justify-content: center;
+	}
+
+	.agentSessionsWelcome-sessionsGrid .monaco-list-row {
+		width: 100% !important;
+		transform: none !important;
+	}
+}
+
+/* Full-screen Sandbox shell matching the Zed/Codex simple-mode layout. */
+.agentSessionsWelcome {
+	--sandbox-shell-sidebar-width: 420px;
+	--sandbox-shell-right-width: 420px;
+	--sandbox-shell-border: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	--sandbox-shell-muted: color-mix(in srgb, var(--vscode-foreground) 64%, transparent);
+	--sandbox-shell-row-hover: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+	background: var(--vscode-editor-background);
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-scrollable {
+	height: 100%;
+	align-items: stretch;
+	justify-content: stretch;
+}
+
+.agentSessionsWelcome-scrollable > .monaco-scrollable-element {
+	width: 100%;
+}
+
+.agentSessionsWelcome-content {
+	display: block;
+	width: 100%;
+	height: 100%;
+	min-height: 100%;
+	max-width: none;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-shell {
+	display: grid;
+	grid-template-columns: var(--sandbox-shell-sidebar-width) minmax(520px, 1fr) var(--sandbox-shell-right-width);
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--vscode-editor-background);
+}
+
+.agentSessionsWelcome-leftRail {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	padding: 72px 12px 12px;
+	box-sizing: border-box;
+	border-right: 1px solid var(--sandbox-shell-border);
+	background: color-mix(in srgb, var(--vscode-sideBar-background) 78%, var(--vscode-editor-background));
+}
+
+.agentSessionsWelcome-railNav {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	flex-shrink: 0;
+}
+
+.agentSessionsWelcome-railButton,
+.agentSessionsWelcome-iconButton {
+	border: 0;
+	background: transparent;
+	color: var(--sandbox-shell-muted);
+	font: inherit;
+	cursor: pointer;
+}
+
+.agentSessionsWelcome-railButton {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	min-height: 36px;
+	padding: 6px 10px;
+	border-radius: 8px;
+	font-size: 13px;
+	text-align: left;
+}
+
+.agentSessionsWelcome-railButton:hover {
+	background: var(--sandbox-shell-row-hover);
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-railButton .codicon {
+	width: 18px;
+	font-size: 16px;
+}
+
+.agentSessionsWelcome-railSection {
+	margin-top: 28px;
+}
+
+.agentSessionsWelcome-railSectionHeader {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	height: 30px;
+	padding: 0 10px;
+	color: var(--sandbox-shell-muted);
+	font-size: 13px;
+}
+
+.agentSessionsWelcome-leftRail .agentSessionsWelcome-sessionsSection {
+	flex: 1;
+	min-height: 0;
+	width: 100%;
+	max-width: none;
+	margin: 18px 0 0;
+	overflow: hidden;
+}
+
+.agentSessionsWelcome-leftRail .agentSessionsWelcome-walkthroughCard {
+	display: none;
+}
+
+.agentSessionsWelcome-leftRail .agentSessionsWelcome-sessionsSection:empty::before {
+	content: 'No chats';
+	display: block;
+	padding: 8px 10px;
+	color: color-mix(in srgb, var(--vscode-foreground) 38%, transparent);
+	font-size: 13px;
+}
+
+.agentSessionsWelcome-noChats {
+	padding: 8px 10px;
+	color: color-mix(in srgb, var(--vscode-foreground) 38%, transparent);
+	font-size: 13px;
+}
+
+.agentSessionsWelcome-leftRail .agentSessionsWelcome-sessionsGrid {
+	height: 100%;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	padding: 0;
+}
+
+.agentSessionsWelcome-leftRail .agentSessionsWelcome-sessionsGrid .monaco-list-row {
+	width: 100% !important;
+	transform: none !important;
+}
+
+.agentSessionsWelcome-leftRail .agent-session-item {
+	min-height: 42px;
+	border-radius: 8px;
+}
+
+.agentSessionsWelcome-footer {
+	align-items: stretch;
+	max-width: none;
+	width: 100%;
+	margin-top: auto;
+	gap: 8px;
+}
+
+.agentSessionsWelcome-footer::before {
+	content: 'Settings';
+	display: flex;
+	align-items: center;
+	min-height: 36px;
+	padding: 0 10px;
+	border-radius: 8px;
+	color: var(--sandbox-shell-muted);
+	font-size: 13px;
+}
+
+.agentSessionsWelcome-footer:hover::before {
+	background: var(--sandbox-shell-row-hover);
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-footer .agentSessionsWelcome-tosCard,
+.agentSessionsWelcome-footer .agentSessionsWelcome-showOnStartup {
+	display: none;
+}
+
+.agentSessionsWelcome-mainRegion {
+	display: grid;
+	grid-template-rows: 70px minmax(0, 1fr) auto;
+	min-width: 0;
+	min-height: 0;
+	background: var(--vscode-editor-background);
+}
+
+.agentSessionsWelcome-topBar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	min-width: 0;
+	padding: 0 22px;
+	border-bottom: 1px solid var(--sandbox-shell-border);
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-threadTitle {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.agentSessionsWelcome-topActions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.agentSessionsWelcome-iconButton {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+}
+
+.agentSessionsWelcome-iconButton:hover {
+	background: var(--sandbox-shell-row-hover);
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-conversation {
+	position: relative;
+	min-width: 0;
+	min-height: 0;
+	overflow: auto;
+	padding: 40px min(7vw, 84px) 24px;
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-conversation .agentSessionsWelcome-header {
+	align-items: flex-start;
+	width: min(100%, 980px);
+	max-width: 980px;
+	margin: 0 auto;
+	text-align: left;
+}
+
+.agentSessionsWelcome-conversation .agentSessionsWelcome-header h1.product-name {
+	font-size: 20px;
+	font-weight: 600;
+	line-height: 1.2;
+}
+
+.agentSessionsWelcome-conversation .agentSessionsWelcome-subtitle {
+	max-width: 620px;
+	margin-top: 8px;
+	font-size: 14px;
+}
+
+.agentSessionsWelcome-chatSection {
+	width: min(100%, 1030px);
+	max-width: 1030px;
+	margin: 0 auto 30px;
+	padding: 0 0 0;
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-chatWidget {
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
+	border-radius: 28px;
+	background: var(--vscode-editor-background);
+	box-shadow:
+		0 1px 2px color-mix(in srgb, var(--vscode-widget-shadow) 20%, transparent),
+		0 14px 44px color-mix(in srgb, var(--vscode-widget-shadow) 12%, transparent);
+}
+
+.agentSessionsWelcome-chatWidget .interactive-input-part {
+	padding: 12px 16px;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-container {
+	border-color: transparent !important;
+	background: transparent !important;
+	box-shadow: none !important;
+}
+
+.agentSessionsWelcome-rightPanel {
+	align-self: start;
+	width: calc(100% - 34px);
+	max-width: 420px;
+	margin: 88px 16px 0 18px;
+	padding: 22px 24px;
+	box-sizing: border-box;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+	border-radius: 24px;
+	background: color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-sideBar-background));
+	box-shadow:
+		0 1px 2px color-mix(in srgb, var(--vscode-widget-shadow) 18%, transparent),
+		0 12px 34px color-mix(in srgb, var(--vscode-widget-shadow) 10%, transparent);
+}
+
+.agentSessionsWelcome-environmentHeader {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 12px;
+	color: var(--sandbox-shell-muted);
+	font-size: 13px;
+}
+
+.agentSessionsWelcome-environmentHeader .agentSessionsWelcome-iconButton {
+	width: 28px;
+	height: 28px;
+}
+
+.agentSessionsWelcome-environmentRows {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.agentSessionsWelcome-environmentRow {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-height: 28px;
+	color: var(--vscode-foreground);
+	font-size: 13px;
+}
+
+.agentSessionsWelcome-environmentRow.muted {
+	color: var(--sandbox-shell-muted);
+}
+
+.agentSessionsWelcome-environmentRow .codicon {
+	width: 16px;
+	color: var(--sandbox-shell-muted);
+}
+
+.agentSessionsWelcome-environmentLabel {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.agentSessionsWelcome-diffStat {
+	margin-left: auto;
+	color: var(--vscode-chat-linesAddedForeground, var(--vscode-testing-iconPassed));
+	font-variant-numeric: tabular-nums;
+}
+
+.agentSessionsWelcome-panelDivider {
+	height: 1px;
+	margin: 18px 0;
+	background: var(--sandbox-shell-border);
+}
+
+.agentSessionsWelcome-environmentSectionTitle,
+.agentSessionsWelcome-emptyPanelText {
+	color: var(--sandbox-shell-muted);
+	font-size: 13px;
+}
+
+.agentSessionsWelcome-emptyPanelText {
+	margin-top: 12px;
+}
+
+@media (max-width: 1280px) {
+	.agentSessionsWelcome {
+		--sandbox-shell-sidebar-width: 300px;
+		--sandbox-shell-right-width: 340px;
+	}
+}
+
+@media (max-width: 980px) {
+	.agentSessionsWelcome-shell {
+		grid-template-columns: 280px minmax(0, 1fr);
+	}
+
+	.agentSessionsWelcome-rightPanel {
+		display: none;
+	}
+}
+
+@media (max-width: 700px) {
+	.agentSessionsWelcome-shell {
+		grid-template-columns: 1fr;
+	}
+
+	.agentSessionsWelcome-leftRail {
+		display: none;
+	}
+
+	.agentSessionsWelcome-mainRegion {
+		grid-template-rows: 54px minmax(0, 1fr) auto;
+	}
+
+	.agentSessionsWelcome-conversation {
+		padding: 24px 18px;
+	}
+
+	.agentSessionsWelcome-chatSection {
+		padding: 0 12px 12px;
+	}
+}

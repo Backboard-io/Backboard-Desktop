@@ -1,0 +1,1949 @@
+import * as vscode from 'vscode';
+import * as cp from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as readline from 'readline';
+
+interface BridgeEvent {
+	readonly type: string;
+	readonly requestId: string;
+	readonly sessionId?: string;
+	readonly message?: string;
+	readonly text?: string;
+	readonly models?: BridgeModel[];
+	readonly tools?: unknown[];
+	readonly toolCalls?: unknown[];
+	readonly threadId?: string;
+	readonly runId?: string;
+	readonly stopReason?: string;
+	readonly usage?: unknown;
+	readonly chunk?: unknown;
+	readonly assistantId?: string;
+	readonly output?: unknown;
+	readonly status?: string;
+	readonly name?: string;
+}
+
+interface BridgeModel {
+	readonly provider: string;
+	readonly name: string;
+	readonly displayName?: string;
+	readonly contextLimit?: number;
+	readonly supportsThinking?: boolean;
+}
+
+interface PendingRequest {
+	readonly events: BridgeEvent[];
+	readonly onEvent?: (event: BridgeEvent) => void | Promise<void>;
+	readonly resolve: (events: BridgeEvent[]) => void;
+	readonly reject: (error: Error) => void;
+}
+
+interface ToolResultRequest {
+	readonly threadId?: string;
+	readonly runId?: string;
+	readonly toolCalls: unknown[];
+}
+
+interface PanelOptions {
+	readonly provider?: string;
+	readonly model?: string;
+	readonly mode?: string;
+	readonly intensity?: string;
+	readonly webSearch?: string;
+	readonly imageGeneration?: string;
+	readonly voiceMode?: string;
+	readonly mcpFigma?: boolean;
+	readonly mcpNotion?: boolean;
+	readonly mcpGoogle?: boolean;
+}
+
+type BackboardSettings = ReturnType<typeof readSettings>;
+
+export function activate(context: vscode.ExtensionContext): void {
+	const bridge = new BackboardBridge(context);
+	context.subscriptions.push(bridge);
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', () => setApiKey()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => bridge.refreshModels()));
+	const rightPanel = new BackboardRightPanel(bridge, context);
+	context.subscriptions.push(rightPanel);
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.openRightPanel', () => rightPanel.open()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.openPanel', async () => {
+		await rightPanel.open();
+	}));
+	context.subscriptions.push(vscode.window.registerWebviewViewProvider('backboard.panel', new BackboardPanelProvider(bridge, context), { webviewOptions: { retainContextWhenHidden: true } }));
+}
+
+export function deactivate(): void {
+}
+
+async function setApiKey(): Promise<boolean> {
+	const value = await vscode.window.showInputBox({
+		title: 'Backboard API Key',
+		password: true,
+		ignoreFocusOut: true,
+		prompt: 'Stored in VS Code user settings for the Backboard extension.'
+	});
+	if (value !== undefined) {
+		await vscode.workspace.getConfiguration('backboard').update('apiKey', value.trim(), vscode.ConfigurationTarget.Global);
+		return value.trim().length > 0;
+	}
+	return false;
+}
+
+async function ensureApiKey(): Promise<boolean> {
+	if (readSettings().config.apiKey) {
+		return true;
+	}
+	const choice = await vscode.window.showInformationMessage('Backboard needs an API key before it can send requests.', 'Set API Key');
+	if (choice !== 'Set API Key') {
+		return false;
+	}
+	return setApiKey();
+}
+
+interface ResponseSink {
+	markdown(value: string | vscode.MarkdownString): void;
+	progress(value: string): void;
+	event?(type: string, payload: unknown): void;
+}
+
+function renderBridgeEvent(event: BridgeEvent, response: ResponseSink, currentToolRequest: ToolResultRequest | undefined): ToolResultRequest | undefined {
+	switch (event.type) {
+		case 'progress':
+			if (event.message) {
+				response.progress(event.message);
+			}
+			return currentToolRequest;
+		case 'assistantTextDelta':
+			if (event.text) {
+				response.markdown(event.text);
+			}
+			return currentToolRequest;
+		case 'reasoningDelta':
+			if (event.text) {
+				response.progress(event.text.slice(0, 180));
+			}
+			return currentToolRequest;
+		case 'media':
+			response.event?.('media', event.chunk ?? event);
+			return currentToolRequest;
+		case 'voice':
+			response.event?.('voice', event.chunk ?? event);
+			return currentToolRequest;
+		case 'usage':
+			response.event?.('usage', event.usage ?? event);
+			return currentToolRequest;
+		case 'sessionBinding':
+			response.event?.('sessionBinding', event);
+			return currentToolRequest;
+		case 'toolRequested':
+			response.event?.('toolRequested', event.toolCalls ?? []);
+			response.progress(`Running ${event.toolCalls?.length ?? 0} local tool call(s).`);
+			return { threadId: event.threadId, runId: event.runId, toolCalls: event.toolCalls ?? [] };
+		case 'error':
+			response.markdown(`\n\nBackboard error: ${event.message ?? 'request failed'}\n\n`);
+			return currentToolRequest;
+		default:
+			return currentToolRequest;
+	}
+}
+
+class BackboardPanelProvider implements vscode.WebviewViewProvider {
+	private view: vscode.WebviewView | undefined;
+	private runToken: vscode.CancellationTokenSource | undefined;
+
+	constructor(private readonly bridge: BackboardBridge, private readonly context: vscode.ExtensionContext) {
+	}
+
+	resolveWebviewView(webviewView: vscode.WebviewView): void {
+		this.view = webviewView;
+		webviewView.webview.options = { enableScripts: true, localResourceRoots: webviewLocalResourceRoots(this.context) };
+		webviewView.webview.html = panelHtml(webviewView.webview, codiconsStylesheetUri(this.context, webviewView.webview));
+		webviewView.webview.onDidReceiveMessage(message => {
+			if (message?.type === 'send' && typeof message.prompt === 'string') {
+				void this.sendPrompt(message.prompt, asPanelOptions(message.options));
+			} else if (message?.type === 'cancel') {
+				this.runToken?.cancel();
+			} else if (message?.type === 'setApiKey') {
+				void setApiKey();
+			} else if (message?.type === 'insertActiveFile') {
+				void postComposerContext(webviewView.webview, 'activeFile');
+			} else if (message?.type === 'insertSelection') {
+				void postComposerContext(webviewView.webview, 'selection');
+			} else if (message?.type === 'insertBranchDiff') {
+				void postBranchDiff(webviewView.webview);
+			} else if (message?.type === 'ready' || message?.type === 'refreshModels') {
+				void postPanelState(this.bridge, webviewView.webview);
+			} else if (message?.type === 'saveSettings') {
+				void savePanelOptions(asPanelOptions(message.options));
+			}
+		});
+		void postPanelState(this.bridge, webviewView.webview);
+	}
+
+	private async sendPrompt(prompt: string, options: PanelOptions): Promise<void> {
+		const view = this.view;
+		if (!view || !prompt.trim()) {
+			return;
+		}
+		if (!(await ensureApiKey())) {
+			await view.webview.postMessage({ type: 'status', text: 'Backboard API key required.' });
+			return;
+		}
+		this.runToken?.cancel();
+		this.runToken = new vscode.CancellationTokenSource();
+		const token = this.runToken.token;
+		const settings = resolveTurnSettings(options);
+		const sessionId = `panel:${workspacePath() ?? 'default'}`;
+		const sink = this.panelSink(view);
+		await view.webview.postMessage({ type: 'clear' });
+		await view.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
+		const firstToolRequests: ToolResultRequest[] = [];
+		try {
+			await this.bridge.send('sendPrompt', sessionId, {
+				content: prompt,
+				workspace: workspacePath(),
+				provider: settings.defaultProvider,
+				model: settings.defaultModel,
+				mode: settings.mode,
+				intensity: settings.intensity,
+				webSearch: settings.webSearch,
+				imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
+				voiceMode: settings.voiceMode,
+				mcpCalls: mcpCallsPayload(settings),
+				config: settings.config
+			}, event => {
+				const toolRequest = renderBridgeEvent(event, sink, firstToolRequests.at(-1));
+				if (toolRequest && toolRequest !== firstToolRequests.at(-1)) {
+					firstToolRequests.push(toolRequest);
+				}
+			}, token);
+
+			let nextToolRequest = firstToolRequests.shift();
+			while (nextToolRequest && !token.isCancellationRequested) {
+				const toolOutputs = await executeToolCalls(this.bridge, nextToolRequest.toolCalls, settings.mode, sink, token);
+				const continuationToolRequests: ToolResultRequest[] = [];
+				await this.bridge.send('submitToolResult', sessionId, {
+					threadId: nextToolRequest.threadId,
+					runId: nextToolRequest.runId,
+					toolOutputs,
+					config: settings.config
+				}, event => {
+					const followupToolRequest = renderBridgeEvent(event, sink, continuationToolRequests.at(-1));
+					if (followupToolRequest && followupToolRequest !== continuationToolRequests.at(-1)) {
+						continuationToolRequests.push(followupToolRequest);
+					}
+				}, token);
+				nextToolRequest = continuationToolRequests.shift();
+			}
+			await view.webview.postMessage({ type: 'status', text: token.isCancellationRequested ? 'Cancelled.' : 'Done.' });
+		} catch (error) {
+			await view.webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
+			await view.webview.postMessage({ type: 'status', text: 'Failed.' });
+		}
+	}
+
+	private panelSink(view: vscode.WebviewView): ResponseSink {
+		return {
+			markdown: value => {
+				void view.webview.postMessage({ type: 'delta', role: 'assistant', text: typeof value === 'string' ? value : value.value });
+			},
+			progress: value => {
+				void view.webview.postMessage({ type: 'status', text: value });
+			},
+			event: (type, payload) => {
+				void view.webview.postMessage({ type, payload });
+			}
+		};
+	}
+}
+
+class BackboardRightPanel implements vscode.Disposable {
+	private panel: vscode.WebviewPanel | undefined;
+	private runToken: vscode.CancellationTokenSource | undefined;
+
+	constructor(private readonly bridge: BackboardBridge, private readonly context: vscode.ExtensionContext) {
+	}
+
+	dispose(): void {
+		this.runToken?.cancel();
+		this.panel?.dispose();
+	}
+
+	async open(): Promise<void> {
+		if (this.panel) {
+			this.panel.reveal(vscode.ViewColumn.Beside, false);
+			return;
+		}
+		this.panel = vscode.window.createWebviewPanel(
+			'backboard.rightPanel',
+			'Backboard',
+			{ viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
+			{ enableScripts: true, retainContextWhenHidden: true, localResourceRoots: webviewLocalResourceRoots(this.context) }
+		);
+		this.panel.iconPath = new vscode.ThemeIcon('sparkle');
+		this.panel.webview.html = panelHtml(this.panel.webview, codiconsStylesheetUri(this.context, this.panel.webview));
+		this.panel.onDidDispose(() => {
+			this.runToken?.cancel();
+			this.panel = undefined;
+		});
+		this.panel.webview.onDidReceiveMessage(message => {
+			if (message?.type === 'send' && typeof message.prompt === 'string') {
+				void this.sendPrompt(message.prompt, asPanelOptions(message.options));
+			} else if (message?.type === 'cancel') {
+				this.runToken?.cancel();
+			} else if (message?.type === 'setApiKey') {
+				void setApiKey();
+			} else if (message?.type === 'insertActiveFile') {
+				if (this.panel) {
+					void postComposerContext(this.panel.webview, 'activeFile');
+				}
+			} else if (message?.type === 'insertSelection') {
+				if (this.panel) {
+					void postComposerContext(this.panel.webview, 'selection');
+				}
+			} else if (message?.type === 'insertBranchDiff') {
+				if (this.panel) {
+					void postBranchDiff(this.panel.webview);
+				}
+			} else if (message?.type === 'ready' || message?.type === 'refreshModels') {
+				if (this.panel) {
+					void postPanelState(this.bridge, this.panel.webview);
+				}
+			} else if (message?.type === 'saveSettings') {
+				void savePanelOptions(asPanelOptions(message.options));
+			}
+		});
+		void postPanelState(this.bridge, this.panel.webview);
+	}
+
+	private async sendPrompt(prompt: string, options: PanelOptions): Promise<void> {
+		const panel = this.panel;
+		if (!panel || !prompt.trim()) {
+			return;
+		}
+		if (!(await ensureApiKey())) {
+			await panel.webview.postMessage({ type: 'status', text: 'Backboard API key required.' });
+			return;
+		}
+		this.runToken?.cancel();
+		this.runToken = new vscode.CancellationTokenSource();
+		const token = this.runToken.token;
+		const settings = resolveTurnSettings(options);
+		const sessionId = `right-panel:${workspacePath() ?? 'default'}`;
+		const sink = this.panelSink(panel);
+		await panel.webview.postMessage({ type: 'clear' });
+		await panel.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
+		const firstToolRequests: ToolResultRequest[] = [];
+		try {
+			await this.bridge.send('sendPrompt', sessionId, {
+				content: prompt,
+				workspace: workspacePath(),
+				provider: settings.defaultProvider,
+				model: settings.defaultModel,
+				mode: settings.mode,
+				intensity: settings.intensity,
+				webSearch: settings.webSearch,
+				imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
+				voiceMode: settings.voiceMode,
+				mcpCalls: mcpCallsPayload(settings),
+				config: settings.config
+			}, event => {
+				const toolRequest = renderBridgeEvent(event, sink, firstToolRequests.at(-1));
+				if (toolRequest && toolRequest !== firstToolRequests.at(-1)) {
+					firstToolRequests.push(toolRequest);
+				}
+			}, token);
+
+			let nextToolRequest = firstToolRequests.shift();
+			while (nextToolRequest && !token.isCancellationRequested) {
+				const toolOutputs = await executeToolCalls(this.bridge, nextToolRequest.toolCalls, settings.mode, sink, token);
+				const continuationToolRequests: ToolResultRequest[] = [];
+				await this.bridge.send('submitToolResult', sessionId, {
+					threadId: nextToolRequest.threadId,
+					runId: nextToolRequest.runId,
+					toolOutputs,
+					config: settings.config
+				}, event => {
+					const followupToolRequest = renderBridgeEvent(event, sink, continuationToolRequests.at(-1));
+					if (followupToolRequest && followupToolRequest !== continuationToolRequests.at(-1)) {
+						continuationToolRequests.push(followupToolRequest);
+					}
+				}, token);
+				nextToolRequest = continuationToolRequests.shift();
+			}
+			await panel.webview.postMessage({ type: 'status', text: token.isCancellationRequested ? 'Cancelled.' : 'Done.' });
+		} catch (error) {
+			await panel.webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
+			await panel.webview.postMessage({ type: 'status', text: 'Failed.' });
+		}
+	}
+
+	private panelSink(panel: vscode.WebviewPanel): ResponseSink {
+		return {
+			markdown: value => {
+				void panel.webview.postMessage({ type: 'delta', role: 'assistant', text: typeof value === 'string' ? value : value.value });
+			},
+			progress: value => {
+				void panel.webview.postMessage({ type: 'status', text: value });
+			},
+			event: (type, payload) => {
+				void panel.webview.postMessage({ type, payload });
+			}
+		};
+	}
+}
+
+function webviewLocalResourceRoots(context: vscode.ExtensionContext): vscode.Uri[] {
+	return [
+		context.extensionUri,
+		vscode.Uri.file(path.join(context.extensionPath, '..', '..', 'node_modules', '@vscode', 'codicons', 'dist'))
+	];
+}
+
+function codiconsStylesheetUri(context: vscode.ExtensionContext, webview: vscode.Webview): vscode.Uri {
+	return webview.asWebviewUri(vscode.Uri.file(path.join(context.extensionPath, '..', '..', 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css')));
+}
+
+function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri): string {
+	const nonce = newId();
+	const csp = `default-src 'none'; img-src ${webview.cspSource} https: data: blob:; media-src ${webview.cspSource} https: data: blob:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';`;
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta http-equiv="Content-Security-Policy" content="${csp}">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link href="${codiconsStylesheet}" rel="stylesheet">
+	<style>
+			body { padding: 0; margin: 0; color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-sideBar-background) 94%, var(--vscode-editor-background)); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
+			.root { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; min-height: 320px; overflow: hidden; }
+			.panelHeader { height: 36px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px; border-bottom: 1px solid color-mix(in srgb, var(--vscode-sideBarSectionHeader-border) 72%, transparent); background: var(--vscode-sideBar-background); }
+			.headerTitle { min-width: 0; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+			.headerTitle .codicon { color: var(--vscode-descriptionForeground); }
+			.headerMeta { display: flex; align-items: center; gap: 6px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+			.statusPill { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--vscode-input-border) 70%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--vscode-editorWidget-background) 78%, transparent); }
+			.composer { position: relative; padding: 8px 10px 10px; border-top: 1px solid color-mix(in srgb, var(--vscode-sideBarSectionHeader-border) 72%, transparent); background: color-mix(in srgb, var(--vscode-sideBar-background) 92%, var(--vscode-editor-background)); }
+		.stateControl { display: none; }
+		.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+		label { display: grid; gap: 3px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+		select, input, textarea { width: 100%; box-sizing: border-box; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); font-family: var(--vscode-font-family); }
+		select, input { height: 28px; padding: 2px 6px; }
+		.toggles { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+		.toggle { display: inline-flex; grid-template-columns: none; gap: 4px; align-items: center; color: var(--vscode-foreground); font-size: 12px; }
+		.toggle input { width: auto; height: auto; }
+			.log { overflow: auto; min-height: 0; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: color-mix(in srgb, var(--vscode-editor-background) 52%, var(--vscode-sideBar-background)); }
+			.emptyState { margin: auto; max-width: 280px; display: grid; justify-items: center; gap: 8px; color: var(--vscode-descriptionForeground); text-align: center; font-size: 12px; }
+			.emptyIcon { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--vscode-input-border) 80%, transparent); border-radius: 8px; background: var(--vscode-sideBar-background); box-shadow: 0 8px 18px color-mix(in srgb, var(--vscode-widget-shadow) 16%, transparent); }
+			.emptyIcon .codicon { font-size: 26px; }
+		.row { white-space: pre-wrap; line-height: 1.45; border: 1px solid transparent; border-bottom-color: var(--vscode-sideBarSectionHeader-border); padding: 7px 0 8px; overflow-wrap: anywhere; }
+		.row.assistant { color: var(--vscode-foreground); }
+		.row.tool { color: var(--vscode-descriptionForeground); font-size: 12px; }
+		.row.error { color: var(--vscode-errorForeground); }
+		.row.media, .row.voice, .row.usage, .row.session { color: var(--vscode-descriptionForeground); font-size: 12px; }
+		.row img { display: block; max-width: 100%; margin-top: 6px; border: 1px solid var(--vscode-sideBarSectionHeader-border); }
+		.row audio { width: 100%; margin-top: 6px; }
+			.status { color: var(--vscode-descriptionForeground); font-size: 11px; padding: 0 3px 6px; min-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		form { display: block; }
+		.composerCard { border: 1px solid color-mix(in srgb, var(--vscode-input-border) 70%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--vscode-input-background) 94%, var(--vscode-editor-background)); box-shadow: 0 8px 18px color-mix(in srgb, var(--vscode-widget-shadow) 18%, transparent); overflow: hidden; transition: border-color .12s ease, box-shadow .12s ease, background .12s ease; }
+		.composerCard:focus-within { border-color: color-mix(in srgb, var(--vscode-focusBorder) 88%, var(--vscode-input-border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder) 46%, transparent), 0 10px 22px color-mix(in srgb, var(--vscode-widget-shadow) 22%, transparent); background: var(--vscode-input-background); }
+			textarea { min-height: 74px; max-height: 220px; resize: vertical; padding: 10px 14px 9px; border: 0; outline: 0; line-height: 1.45; background: transparent; color: var(--vscode-input-foreground); font-size: 12px; }
+		textarea::placeholder { color: color-mix(in srgb, var(--vscode-input-placeholderForeground) 86%, var(--vscode-descriptionForeground)); }
+		.composerRule { height: 1px; margin: 0 12px; background: color-mix(in srgb, var(--vscode-input-border) 72%, transparent); }
+		.composerBar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; padding: 4px 7px 6px; }
+			.barLeft, .barRight { display: flex; align-items: center; gap: 4px; min-width: 0; }
+			.barLeft { flex: 1; }
+			.barRight { justify-content: flex-end; }
+		button { border: 0; cursor: pointer; font-family: var(--vscode-font-family); }
+		.iconButton { width: 23px; height: 23px; display: inline-grid; place-items: center; padding: 0; border-radius: 5px; color: var(--vscode-descriptionForeground); background: transparent; font-size: 13px; line-height: 1; flex: 0 0 auto; }
+		.iconButton .codicon { font-size: 15px; }
+		.iconButton:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+		.iconButton.active { color: var(--vscode-inputOption-activeForeground); background: color-mix(in srgb, var(--vscode-inputOption-activeBackground) 78%, transparent); outline: 1px solid color-mix(in srgb, var(--vscode-inputOption-activeBorder) 70%, transparent); outline-offset: -1px; }
+		.iconButton:disabled { cursor: default; color: var(--vscode-disabledForeground); background: transparent; outline: 0; }
+		.sendButton { width: 25px; color: var(--vscode-disabledForeground); background: transparent; }
+		.sendButton.ready { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+		.sendButton.ready:hover { background: var(--vscode-button-hoverBackground); }
+			.modelButton { flex: 1; min-width: 84px; max-width: 320px; height: 23px; display: flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 5px; color: var(--vscode-descriptionForeground); background: transparent; font-size: 11px; overflow: hidden; }
+		.modelButton:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+		.modelButton.active { color: var(--vscode-inputOption-activeForeground); background: color-mix(in srgb, var(--vscode-inputOption-activeBackground) 78%, transparent); outline: 1px solid color-mix(in srgb, var(--vscode-inputOption-activeBorder) 70%, transparent); outline-offset: -1px; }
+		.modelLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.drawerButton { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 5px; padding: 5px 8px; }
+			.popover { position: fixed; z-index: 20; width: min(360px, calc(100vw - 20px)); max-height: min(460px, calc(100vh - 24px)); display: none; overflow: hidden; border: 1px solid var(--vscode-widget-border, var(--vscode-input-border)); border-radius: 8px; background: var(--vscode-editorWidget-background); color: var(--vscode-foreground); box-shadow: 0 12px 28px color-mix(in srgb, var(--vscode-widget-shadow) 45%, transparent); }
+			.popover[data-kind="model"] { max-height: min(620px, calc(100vh - 24px)); }
+			.popover.open { display: flex; flex-direction: column; }
+			.popoverHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px 7px; border-bottom: 1px solid color-mix(in srgb, var(--vscode-sideBarSectionHeader-border) 78%, transparent); }
+			.popoverTitle { font-size: 12px; font-weight: 600; }
+			.popoverBody { overflow: auto; padding: 8px; display: grid; gap: 8px; }
+			.popover[data-kind="model"] .popoverBody { padding: 0; gap: 0; }
+			.popoverSection { display: grid; gap: 5px; }
+			.popover[data-kind="model"] .popoverSection { padding: 8px; border-top: 1px solid color-mix(in srgb, var(--vscode-sideBarSectionHeader-border) 58%, transparent); }
+			.popoverSectionTitle { color: var(--vscode-descriptionForeground); font-size: 10px; text-transform: uppercase; letter-spacing: 0; }
+			.choiceRow { width: 100%; min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px; border-radius: 5px; color: var(--vscode-foreground); background: transparent; text-align: left; }
+		.choiceRow:hover { background: var(--vscode-list-hoverBackground); }
+		.choiceRow.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+		.choiceRow.disabled { cursor: default; color: var(--vscode-disabledForeground); }
+		.choiceRow.disabled:hover { background: transparent; }
+		.choiceMain { display: grid; gap: 2px; min-width: 0; }
+		.choiceLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+		.choiceMeta { color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+			.choiceRow.selected .choiceMeta { color: inherit; opacity: .8; }
+				.popoverActions { display: flex; flex-wrap: wrap; gap: 6px; }
+				.popoverSearch { width: 100%; height: 28px; padding: 4px 8px; border: 1px solid var(--vscode-input-border); border-radius: 5px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); outline: 0; }
+				.popoverSearch:focus { border-color: var(--vscode-focusBorder); }
+					.modelFilterModal { position: sticky; top: 0; z-index: 2; display: grid; gap: 8px; padding: 10px; border-bottom: 1px solid color-mix(in srgb, var(--vscode-sideBarSectionHeader-border) 72%, transparent); background: color-mix(in srgb, var(--vscode-editorWidget-background) 96%, var(--vscode-editor-background)); }
+					.filterHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+					.filterTitle { font-size: 12px; font-weight: 600; }
+					.filterMeta { color: var(--vscode-descriptionForeground); font-size: 11px; }
+					.filterControls { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+					.filterControls .popoverActions { flex: 0 0 auto; }
+					.filterChips { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+					.filterChip { min-height: 24px; padding: 3px 8px; border-radius: 5px; color: var(--vscode-descriptionForeground); background: transparent; border: 1px solid color-mix(in srgb, var(--vscode-input-border) 78%, transparent); font-size: 11px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+					.filterChip:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+					.filterChip.active { color: var(--vscode-inputOption-activeForeground); background: color-mix(in srgb, var(--vscode-inputOption-activeBackground) 78%, transparent); border-color: color-mix(in srgb, var(--vscode-inputOption-activeBorder) 70%, transparent); }
+					.modelChoice { min-height: 34px; padding: 6px 8px; }
+					.modelChoice .choiceLabel { font-size: 12px; }
+					.modelChoice .choiceMeta { font-size: 10.5px; }
+	</style>
+</head>
+	<body>
+		<div class="root">
+			<div class="panelHeader">
+				<div class="headerTitle"><span class="codicon codicon-sparkle"></span><span>New Agent</span></div>
+				<div class="headerMeta"><span id="headerStatus" class="statusPill">Ready</span></div>
+			</div>
+			<div id="log" class="log">
+				<div id="emptyState" class="emptyState">
+					<div class="emptyIcon"><span class="codicon codicon-sparkle"></span></div>
+					<div>Open a chat to start Backboard.</div>
+				</div>
+			</div>
+			<div class="composer">
+			<select id="provider" class="stateControl" aria-hidden="true"></select>
+			<select id="model" class="stateControl" aria-hidden="true"></select>
+			<select id="mode" class="stateControl" aria-hidden="true">
+				<option value="agent">Agent</option>
+				<option value="ask">Ask</option>
+				<option value="manual">Manual</option>
+				<option value="free">Full Access</option>
+			</select>
+			<select id="intensity" class="stateControl" aria-hidden="true">
+				<option value="fast">Fast</option>
+				<option value="balanced">Balanced</option>
+				<option value="deep">Deep</option>
+			</select>
+			<select id="webSearch" class="stateControl" aria-hidden="true">
+				<option value="off">Off</option>
+				<option value="Auto">Auto</option>
+			</select>
+			<select id="imageGeneration" class="stateControl" aria-hidden="true">
+				<option value="off">Off</option>
+				<option value="auto">Auto</option>
+			</select>
+			<select id="voiceMode" class="stateControl" aria-hidden="true">
+				<option value="off">Off</option>
+				<option value="tts">TTS</option>
+				<option value="stt">STT</option>
+				<option value="conversation">Conversation</option>
+			</select>
+			<input id="mcpFigma" class="stateControl" type="checkbox" aria-hidden="true">
+			<input id="mcpNotion" class="stateControl" type="checkbox" aria-hidden="true">
+			<input id="mcpGoogle" class="stateControl" type="checkbox" aria-hidden="true">
+			<span id="toolCount" class="stateControl" aria-hidden="true">Tools loading</span>
+				<div id="popover" class="popover" role="dialog" aria-modal="false" aria-hidden="true">
+				<div class="popoverHeader">
+					<div id="popoverTitle" class="popoverTitle"></div>
+					<button id="popoverClose" class="iconButton" type="button" title="Close" aria-label="Close"><span class="codicon codicon-close"></span></button>
+				</div>
+				<div id="popoverBody" class="popoverBody"></div>
+			</div>
+			<div id="status" class="status">Ready.</div>
+			<form id="form">
+					<div class="composerCard">
+						<textarea id="prompt" placeholder="Message Backboard - @ to include context"></textarea>
+						<div class="composerRule"></div>
+						<div class="composerBar">
+							<div class="barLeft">
+								<button id="plusBtn" class="iconButton" type="button" title="Composer menu" aria-label="Composer menu"><span class="codicon codicon-add"></span></button>
+								<button id="modelBtn" class="modelButton" type="button" title="Backboard model" aria-label="Backboard model"><span id="modelLabel" class="modelLabel">aws-bedrock / anthropic.claude-sonnet-4-6</span><span class="codicon codicon-chevron-down"></span></button>
+							</div>
+							<div class="barRight">
+								<button id="voiceBtn" class="iconButton" type="button" title="Voice mode" aria-label="Voice mode"><span class="codicon codicon-mic"></span></button>
+								<button id="sendBtn" class="iconButton sendButton" type="submit" title="Send" aria-label="Send" disabled><span class="codicon codicon-send"></span></button>
+							</div>
+						</div>
+					</div>
+			</form>
+		</div>
+	</div>
+	<script nonce="${nonce}">
+		const vscode = acquireVsCodeApi();
+		const log = document.getElementById('log');
+		const status = document.getElementById('status');
+		const headerStatus = document.getElementById('headerStatus');
+		const emptyState = document.getElementById('emptyState');
+		const prompt = document.getElementById('prompt');
+		const toolCount = document.getElementById('toolCount');
+		const popover = document.getElementById('popover');
+		const popoverTitle = document.getElementById('popoverTitle');
+		const popoverBody = document.getElementById('popoverBody');
+		const modelLabel = document.getElementById('modelLabel');
+		const buttons = {
+			plus: document.getElementById('plusBtn'),
+			model: document.getElementById('modelBtn'),
+			voice: document.getElementById('voiceBtn'),
+			send: document.getElementById('sendBtn')
+		};
+		const controls = {
+			provider: document.getElementById('provider'),
+			model: document.getElementById('model'),
+			mode: document.getElementById('mode'),
+			intensity: document.getElementById('intensity'),
+			webSearch: document.getElementById('webSearch'),
+			imageGeneration: document.getElementById('imageGeneration'),
+			voiceMode: document.getElementById('voiceMode'),
+			mcpFigma: document.getElementById('mcpFigma'),
+			mcpNotion: document.getElementById('mcpNotion'),
+			mcpGoogle: document.getElementById('mcpGoogle')
+		};
+		let models = [];
+		let tools = [];
+		let settings = {};
+		let activePopover = undefined;
+		let activeAnchor = undefined;
+		let modelFilter = '';
+		let disabledModelProviders = new Set();
+		function options() {
+			return {
+				provider: controls.provider.value,
+				model: controls.model.value,
+				mode: controls.mode.value,
+				intensity: controls.intensity.value,
+				webSearch: controls.webSearch.value,
+				imageGeneration: controls.imageGeneration.value,
+				voiceMode: controls.voiceMode.value,
+				mcpFigma: controls.mcpFigma.checked,
+				mcpNotion: controls.mcpNotion.checked,
+				mcpGoogle: controls.mcpGoogle.checked
+			};
+		}
+		function saveOptions() {
+			vscode.postMessage({ type: 'saveSettings', options: options() });
+		}
+		function toolName(tool) {
+			return tool && tool.function && tool.function.name || tool && tool.name || 'tool';
+		}
+		function renderToolCount() {
+			toolCount.textContent = tools.length ? tools.length + ' tools enabled' : 'Tools loading';
+		}
+		function updateStatus(text) {
+			const value = text || 'Ready.';
+			status.textContent = value;
+			headerStatus.textContent = value.replace(/\\.$/, '');
+		}
+		function syncEmptyState() {
+			emptyState.style.display = log.children.length <= 1 ? 'grid' : 'none';
+		}
+		function setActive(button, active) {
+			button.classList.toggle('active', !!active);
+		}
+		function syncComposerButtons() {
+			const hasPlusFeature = activePopover === 'menu' || controls.intensity.value !== 'fast' || controls.mode.value !== 'agent' || controls.webSearch.value === 'Auto' || controls.imageGeneration.value === 'auto' || controls.mcpFigma.checked || controls.mcpNotion.checked || controls.mcpGoogle.checked;
+			setActive(buttons.plus, hasPlusFeature);
+			setActive(buttons.model, activePopover === 'model');
+			setActive(buttons.voice, activePopover === 'voice' || controls.voiceMode.value !== 'off');
+			const hasPrompt = prompt.value.trim().length > 0;
+			buttons.send.disabled = !hasPrompt;
+			buttons.send.classList.toggle('ready', hasPrompt);
+		}
+		function insertAtCursor(text) {
+			const start = prompt.selectionStart || 0;
+			const end = prompt.selectionEnd || 0;
+			prompt.value = prompt.value.slice(0, start) + text + prompt.value.slice(end);
+			prompt.selectionStart = prompt.selectionEnd = start + text.length;
+			prompt.focus();
+			syncComposerButtons();
+		}
+		function setSelect(select, value) {
+			if ([...select.options].some(option => option.value === value)) {
+				select.value = value;
+			}
+		}
+		function escapeHtml(value) {
+			return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+		}
+		function attr(value) {
+			return escapeHtml(value);
+		}
+		function currentModelLabel() {
+			const provider = controls.provider.value;
+			const selected = models.find(model => model.provider === provider && model.name === controls.model.value);
+			return [provider, selected?.displayName || selected?.name || controls.model.value].filter(Boolean).join(' / ');
+		}
+		function isVisibleModel(model) {
+			return ![model.provider, model.name, model.displayName].filter(Boolean).join(' ').toLowerCase().includes('featherless');
+		}
+		function section(title, content) {
+			return '<div class="popoverSection"><div class="popoverSectionTitle">' + escapeHtml(title) + '</div>' + content + '</div>';
+		}
+			function choice(action, value, label, meta, selected, disabled, extraAttrs) {
+				return '<button class="choiceRow' + (selected ? ' selected' : '') + (disabled ? ' disabled' : '') + '" type="button" data-action="' + attr(action) + '" data-value="' + attr(value) + '" ' + (disabled ? 'disabled' : '') + ' ' + (extraAttrs || '') + '><span class="choiceMain"><span class="choiceLabel">' + escapeHtml(label) + '</span>' + (meta ? '<span class="choiceMeta">' + escapeHtml(meta) + '</span>' : '') + '</span>' + (selected ? '<span class="codicon codicon-check"></span>' : '') + '</button>';
+			}
+			function modelChoice(model, provider, selected) {
+				const meta = [provider, model.name, model.contextLimit ? model.contextLimit + ' tokens' : '', model.supportsThinking ? 'thinking' : ''].filter(Boolean).join(' / ');
+				return '<button class="choiceRow modelChoice' + (selected ? ' selected' : '') + '" type="button" data-action="chooseModel" data-value="' + attr(model.name) + '" data-provider="' + attr(provider) + '" data-model="' + attr(model.name) + '"><span class="choiceMain"><span class="choiceLabel">' + escapeHtml(model.displayName || model.name) + '</span><span class="choiceMeta">' + escapeHtml(meta) + '</span></span>' + (selected ? '<span class="codicon codicon-check"></span>' : '') + '</button>';
+			}
+		function actionButton(action, label, icon) {
+			return '<button class="drawerButton" type="button" data-action="' + attr(action) + '">' + (icon ? '<span class="codicon codicon-' + attr(icon) + '"></span> ' : '') + escapeHtml(label) + '</button>';
+		}
+		function providerChip(provider, active) {
+			return '<button class="filterChip' + (active ? ' active' : '') + '" type="button" data-action="toggleProviderFilter" data-provider="' + attr(provider) + '">' + escapeHtml(provider) + '</button>';
+		}
+		function modelSource() {
+			return models.length ? models : [{ provider: controls.provider.value || 'aws-bedrock', name: controls.model.value || 'anthropic.claude-sonnet-4-6', displayName: controls.model.value || 'anthropic.claude-sonnet-4-6' }];
+		}
+		function modeLabel(value) {
+			return ({ agent: 'Agent', ask: 'Ask', manual: 'Manual', free: 'Full Access' })[value] || value;
+		}
+		function intensityLabel(value) {
+			return ({ fast: 'Fast', balanced: 'Balanced', deep: 'Deep' })[value] || value;
+		}
+		function voiceLabel(value) {
+			return ({ off: 'Off', tts: 'TTS', stt: 'STT', conversation: 'Conversation' })[value] || value;
+		}
+		function renderMenuPopover() {
+			return section('Context', [
+				choice('insertContextType', 'file', 'Files & Directories', 'Insert @file and pick workspace context from the composer.', false, false),
+				choice('insertContextType', 'symbol', 'Symbols', 'Insert @symbol for code symbol context.', false, false),
+				choice('insertContextType', 'thread', 'Threads', 'Insert @thread for thread context.', false, false),
+				choice('insertContextType', 'rule', 'Rules', 'Insert @rule for project and user rules.', false, false),
+				choice('insertActiveFile', '', 'Active file', 'Insert the current editor file as @path context.', false, false),
+				choice('insertSelection', '', 'Selection', 'Insert the current editor selection with file and line range.', false, false),
+				choice('insertBranchDiff', '', 'Branch Diff', 'Insert the current git diff as context.', false, false),
+				choice('openImage', '', 'Image', controls.imageGeneration.value === 'auto' ? 'Image generation is Auto.' : 'Enable image payloads for this turn.', controls.imageGeneration.value === 'auto', false)
+			].join(''))
+				+ section('Agent', [
+					choice('openModel', '', 'Model', currentModelLabel(), false, false),
+					choice('openReasoning', '', 'Mode and reasoning', modeLabel(controls.mode.value) + ' / ' + intensityLabel(controls.intensity.value), controls.mode.value !== 'agent' || controls.intensity.value !== 'fast', false),
+					choice('openWeb', '', 'Web search', controls.webSearch.value === 'Auto' ? 'Auto' : 'Off', controls.webSearch.value === 'Auto', false),
+					choice('openMcp', '', 'MCP tools', [controls.mcpFigma.checked ? 'Figma' : '', controls.mcpNotion.checked ? 'Notion' : '', controls.mcpGoogle.checked ? 'Google' : ''].filter(Boolean).join(', ') || 'Off', controls.mcpFigma.checked || controls.mcpNotion.checked || controls.mcpGoogle.checked, false),
+					choice('openSettings', '', 'Settings', tools.length ? tools.length + ' tools enabled' : 'Tools loading', false, false)
+				].join(''))
+				+ section('Run', choice('cancelRun', '', 'Cancel current run', 'Stops the active Backboard request if one is running.', false, false));
+		}
+		function renderModelPopover() {
+			const source = modelSource();
+			const query = modelFilter.trim().toLowerCase();
+			const allProviders = [...new Set(source.map(model => model.provider))].sort();
+			const providerFiltered = source.filter(model => !disabledModelProviders.has(model.provider));
+			const filtered = query
+				? providerFiltered.filter(model => [model.provider, model.displayName, model.name].filter(Boolean).join(' ').toLowerCase().includes(query))
+				: providerFiltered;
+			const providers = [...new Set(filtered.map(model => model.provider))].sort();
+			const search = '<input id="modelFilter" class="popoverSearch" type="search" placeholder="Filter models" value="' + attr(modelFilter) + '" autocomplete="off">';
+			const providerFilters = '<div class="modelFilterModal"><div class="filterHeader"><span class="filterTitle">Filter models</span><span class="filterMeta">' + filtered.length + ' / ' + source.length + ' shown</span></div>' + search + '<div class="filterControls"><div class="filterChips">' + allProviders.map(provider => providerChip(provider, !disabledModelProviders.has(provider))).join('') + '</div><div class="popoverActions">' + actionButton('enableAllProviders', 'All', 'check-all') + actionButton('disableAllProviders', 'None', 'close-all') + '</div></div></div>';
+			const noModelsMeta = query ? 'Try a different text filter.' : disabledModelProviders.size ? 'Enable a provider filter.' : 'Refresh models or set an API key.';
+			const sections = providers.length ? providers.map(provider => {
+				const rows = filtered
+					.filter(model => model.provider === provider)
+					.map(model => modelChoice(model, provider, controls.provider.value === provider && controls.model.value === model.name))
+					.join('');
+				return section(provider, rows);
+			}).join('') : section('Models', choice('disabled', '', 'No matching models', noModelsMeta, false, true));
+			return providerFilters + sections + '<div class="popoverActions">' + actionButton('refreshModels', 'Refresh Models', 'refresh') + actionButton('setApiKey', 'API Key', 'key') + '</div>';
+		}
+		function renderReasoningPopover() {
+			const modes = [
+				['agent', 'Agent', 'Use Backboard tools with approvals and edits.'],
+				['ask', 'Ask', 'Answer without making editor changes.'],
+				['manual', 'Manual', 'Ask before host-dependent actions.'],
+				['free', 'Full Access', 'Allow feasible host tools with fewer prompts.']
+			].map(([value, label, meta]) => choice('chooseMode', value, label, meta, controls.mode.value === value, false)).join('');
+			const intensities = [
+				['fast', 'Fast', 'Lowest latency.'],
+				['balanced', 'Balanced', 'More reasoning for harder tasks.'],
+				['deep', 'Deep', 'Highest reasoning budget.']
+			].map(([value, label, meta]) => choice('chooseIntensity', value, label, meta, controls.intensity.value === value, false)).join('');
+			return section('Mode', modes) + section('Reasoning', intensities);
+		}
+		function renderWebPopover() {
+			return section('Web Search', [
+				choice('chooseWeb', 'off', 'Off', 'Do not request web_search/web_fetch unless the model calls tools explicitly.', controls.webSearch.value === 'off', false),
+				choice('chooseWeb', 'Auto', 'Auto', 'Allow Backboard to include web search intent for this turn.', controls.webSearch.value === 'Auto', false)
+			].join(''));
+		}
+		function renderImagePopover() {
+			return section('Image', [
+				choice('chooseImage', 'off', 'Off', 'Disable image generation payloads.', controls.imageGeneration.value === 'off', false),
+				choice('chooseImage', 'auto', 'Auto', 'Let Backboard return generated media when useful.', controls.imageGeneration.value === 'auto', false)
+			].join(''));
+		}
+		function renderVoicePopover() {
+			return section('Voice', [
+				choice('chooseVoice', 'off', 'Off', 'No voice payload requested.', controls.voiceMode.value === 'off', false),
+				choice('chooseVoice', 'tts', 'TTS', 'Allow assistant audio output when Backboard returns it.', controls.voiceMode.value === 'tts', false),
+				choice('chooseVoice', 'stt', 'STT', 'Audio input capture is not implemented in the VS Code host yet.', controls.voiceMode.value === 'stt', true),
+				choice('chooseVoice', 'conversation', 'Conversation', 'Live audio conversation is not implemented in the VS Code host yet.', controls.voiceMode.value === 'conversation', true)
+			].join(''));
+		}
+		function renderMcpPopover() {
+			return section('MCP Servers', [
+				choice('toggleMcp', 'figma', 'Figma MCP', 'Expose Figma tool intent to Backboard.', controls.mcpFigma.checked, false),
+				choice('toggleMcp', 'notion', 'Notion MCP', 'Expose Notion tool intent to Backboard.', controls.mcpNotion.checked, false),
+				choice('toggleMcp', 'google', 'Google MCP', 'Expose Google tool intent to Backboard.', controls.mcpGoogle.checked, false)
+			].join('')) + section('Tools', choice('disabled', '', tools.length + ' Rust-owned tools advertised', 'Backboard bridge owns tool schemas and host routing.', false, true));
+		}
+		function renderSettingsPopover() {
+			return section('Current Turn', [
+				choice('openModel', '', 'Model', currentModelLabel(), false, false),
+				choice('openReasoning', '', 'Mode and reasoning', modeLabel(controls.mode.value) + ' / ' + intensityLabel(controls.intensity.value), false, false),
+				choice('openMcp', '', 'MCP', [controls.mcpFigma.checked ? 'Figma' : '', controls.mcpNotion.checked ? 'Notion' : '', controls.mcpGoogle.checked ? 'Google' : ''].filter(Boolean).join(', ') || 'Off', false, false)
+			].join('')) + '<div class="popoverActions">' + actionButton('refreshModels', 'Refresh Models', 'refresh') + actionButton('setApiKey', 'API Key', 'key') + '</div>';
+		}
+			function renderPopover(name) {
+				const renderers = {
+				menu: ['Composer Menu', renderMenuPopover],
+				model: ['Model', renderModelPopover],
+				reasoning: ['Mode and Reasoning', renderReasoningPopover],
+				web: ['Web', renderWebPopover],
+				image: ['Image', renderImagePopover],
+				voice: ['Voice', renderVoicePopover],
+				mcp: ['MCP Tools', renderMcpPopover],
+				settings: ['Composer Settings', renderSettingsPopover]
+				};
+				const renderer = renderers[name] || renderers.settings;
+				popover.dataset.kind = name;
+				popoverTitle.textContent = renderer[0];
+				popoverBody.innerHTML = renderer[1]();
+			}
+			function positionPopover(anchorButton) {
+				const width = Math.min(activePopover === 'model' ? 560 : 360, window.innerWidth - 20);
+				popover.style.width = width + 'px';
+			const rect = anchorButton.getBoundingClientRect();
+			const popoverRect = popover.getBoundingClientRect();
+			const left = Math.max(10, Math.min(window.innerWidth - popoverRect.width - 10, rect.left + rect.width / 2 - popoverRect.width / 2));
+			const top = Math.max(10, rect.top - popoverRect.height - 8);
+			popover.style.left = left + 'px';
+			popover.style.top = top + 'px';
+		}
+		function openPopover(name, anchorButton) {
+			if (activePopover === name && popover.classList.contains('open')) {
+				closePopover();
+				return;
+			}
+			if (name === 'model') {
+				modelFilter = '';
+				disabledModelProviders.clear();
+			}
+			activePopover = name;
+			activeAnchor = anchorButton;
+			renderPopover(name);
+			popover.classList.add('open');
+			popover.setAttribute('aria-hidden', 'false');
+			positionPopover(anchorButton);
+			syncComposerButtons();
+		}
+		function closePopover() {
+			activePopover = undefined;
+			activeAnchor = undefined;
+			popover.classList.remove('open');
+			popover.setAttribute('aria-hidden', 'true');
+			popoverBody.textContent = '';
+			modelFilter = '';
+			disabledModelProviders.clear();
+			prompt.focus();
+			syncComposerButtons();
+		}
+		function chooseSelect(select, value, close) {
+			setSelect(select, value);
+			select.dispatchEvent(new Event('change'));
+			if (close) {
+				closePopover();
+			} else if (activePopover) {
+				renderPopover(activePopover);
+				if (activeAnchor) {
+					positionPopover(activeAnchor);
+				}
+			}
+		}
+		function renderModels() {
+			const providers = [...new Set(models.map(model => model.provider))].sort();
+			controls.provider.textContent = '';
+			for (const provider of providers.length ? providers : [settings.provider || 'aws-bedrock']) {
+				const option = document.createElement('option');
+				option.value = provider;
+				option.textContent = provider;
+				controls.provider.appendChild(option);
+			}
+			setSelect(controls.provider, settings.provider || '');
+			const provider = controls.provider.value;
+			const providerModels = models.filter(model => model.provider === provider);
+			controls.model.textContent = '';
+			for (const model of providerModels.length ? providerModels : [{ name: settings.model || 'anthropic.claude-sonnet-4-6', displayName: settings.model || 'anthropic.claude-sonnet-4-6' }]) {
+				const option = document.createElement('option');
+				option.value = model.name;
+				option.textContent = [provider, model.displayName || model.name].filter(Boolean).join(' / ');
+				option.title = [provider, model.name, model.contextLimit ? model.contextLimit + ' tokens' : '', model.supportsThinking ? 'thinking' : ''].filter(Boolean).join(' / ');
+				controls.model.appendChild(option);
+			}
+			setSelect(controls.model, settings.model || '');
+			modelLabel.textContent = currentModelLabel();
+			buttons.model.title = currentModelLabel();
+		}
+		function applySettings(next) {
+			settings = { ...settings, ...(next || {}) };
+			renderModels();
+			setSelect(controls.mode, settings.mode || 'agent');
+			setSelect(controls.intensity, settings.intensity || 'fast');
+			setSelect(controls.webSearch, settings.webSearch || 'off');
+			setSelect(controls.imageGeneration, settings.imageGeneration || 'off');
+			setSelect(controls.voiceMode, settings.voiceMode || 'off');
+			controls.mcpFigma.checked = !!settings.mcpFigma;
+			controls.mcpNotion.checked = !!settings.mcpNotion;
+			controls.mcpGoogle.checked = !!settings.mcpGoogle;
+			modelLabel.textContent = currentModelLabel();
+			syncComposerButtons();
+		}
+		for (const control of Object.values(controls)) {
+			control.addEventListener('change', () => {
+				if (control === controls.provider) {
+					settings.provider = controls.provider.value;
+					const first = models.find(model => model.provider === settings.provider);
+					if (first) {
+						settings.model = first.name;
+					}
+					renderModels();
+				}
+				if (control === controls.mode) {
+					vscode.postMessage({ type: 'refreshModels' });
+				}
+				saveOptions();
+				syncComposerButtons();
+			});
+		}
+		prompt.addEventListener('input', syncComposerButtons);
+		prompt.addEventListener('keydown', event => {
+			if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+				event.preventDefault();
+				document.getElementById('form').requestSubmit();
+			}
+		});
+		buttons.plus.addEventListener('click', event => openPopover('menu', event.currentTarget));
+		buttons.model.addEventListener('click', event => openPopover('model', event.currentTarget));
+		buttons.voice.addEventListener('click', event => openPopover('voice', event.currentTarget));
+		document.getElementById('popoverClose').addEventListener('click', closePopover);
+		popoverBody.addEventListener('input', event => {
+			const target = event.target;
+			if (!(target instanceof HTMLInputElement) || target.id !== 'modelFilter') {
+				return;
+			}
+			modelFilter = target.value;
+			renderPopover('model');
+			if (activeAnchor) {
+				positionPopover(activeAnchor);
+			}
+			const filter = document.getElementById('modelFilter');
+			if (filter instanceof HTMLInputElement) {
+				filter.focus();
+				filter.setSelectionRange(filter.value.length, filter.value.length);
+			}
+		});
+		popoverBody.addEventListener('click', event => {
+			const target = event.target instanceof Element ? event.target.closest('[data-action]') : undefined;
+			if (!target || target.classList.contains('disabled')) {
+				return;
+			}
+			const action = target.dataset.action;
+			const value = target.dataset.value || '';
+			if (action === 'insertContextType') {
+				insertAtCursor('@' + value + ' ');
+				closePopover();
+			} else if (action === 'insertActiveFile') {
+				vscode.postMessage({ type: 'insertActiveFile' });
+				closePopover();
+			} else if (action === 'insertSelection') {
+				vscode.postMessage({ type: 'insertSelection' });
+				closePopover();
+			} else if (action === 'insertBranchDiff') {
+				vscode.postMessage({ type: 'insertBranchDiff' });
+				closePopover();
+			} else if (action === 'chooseMode') {
+				chooseSelect(controls.mode, value, false);
+			} else if (action === 'chooseIntensity') {
+				chooseSelect(controls.intensity, value, false);
+			} else if (action === 'chooseWeb') {
+				chooseSelect(controls.webSearch, value, true);
+			} else if (action === 'chooseImage') {
+				chooseSelect(controls.imageGeneration, value, true);
+			} else if (action === 'chooseVoice') {
+				chooseSelect(controls.voiceMode, value, true);
+			} else if (action === 'toggleProviderFilter') {
+				const provider = target.dataset.provider || value;
+				if (disabledModelProviders.has(provider)) {
+					disabledModelProviders.delete(provider);
+				} else {
+					disabledModelProviders.add(provider);
+				}
+				renderPopover('model');
+				if (activeAnchor) {
+					positionPopover(activeAnchor);
+				}
+			} else if (action === 'enableAllProviders') {
+				disabledModelProviders.clear();
+				renderPopover('model');
+				if (activeAnchor) {
+					positionPopover(activeAnchor);
+				}
+			} else if (action === 'disableAllProviders') {
+				disabledModelProviders = new Set(modelSource().map(model => model.provider));
+				renderPopover('model');
+				if (activeAnchor) {
+					positionPopover(activeAnchor);
+				}
+			} else if (action === 'toggleMcp') {
+				const map = { figma: controls.mcpFigma, notion: controls.mcpNotion, google: controls.mcpGoogle };
+				const input = map[value];
+				if (input) {
+					input.checked = !input.checked;
+					input.dispatchEvent(new Event('change'));
+					renderPopover(activePopover);
+					if (activeAnchor) {
+						positionPopover(activeAnchor);
+					}
+				}
+			} else if (action === 'chooseModel') {
+				const provider = target.dataset.provider || controls.provider.value;
+				const model = target.dataset.model || value;
+				setSelect(controls.provider, provider);
+				renderModels();
+				setSelect(controls.model, model);
+				settings.provider = provider;
+				settings.model = model;
+				modelLabel.textContent = currentModelLabel();
+				saveOptions();
+				closePopover();
+			} else if (action === 'refreshModels') {
+				vscode.postMessage({ type: 'refreshModels' });
+				closePopover();
+			} else if (action === 'setApiKey') {
+				vscode.postMessage({ type: 'setApiKey' });
+				closePopover();
+			} else if (action === 'openModel') {
+				openPopover('model', buttons.model);
+			} else if (action === 'openReasoning') {
+				openPopover('reasoning', buttons.plus);
+			} else if (action === 'openWeb') {
+				openPopover('web', buttons.plus);
+			} else if (action === 'openImage') {
+				openPopover('image', buttons.plus);
+			} else if (action === 'openMcp') {
+				openPopover('mcp', buttons.plus);
+			} else if (action === 'openSettings') {
+				openPopover('settings', buttons.plus);
+			} else if (action === 'cancelRun') {
+				vscode.postMessage({ type: 'cancel' });
+				closePopover();
+			}
+		});
+		document.addEventListener('click', event => {
+			if (!activePopover) {
+				return;
+			}
+			const target = event.target;
+			if (!(target instanceof Element)) {
+				return;
+			}
+			if (popover.contains(target) || Object.values(buttons).some(button => button.contains(target))) {
+				return;
+			}
+			closePopover();
+		});
+		document.addEventListener('keydown', event => {
+			if (event.key === 'Escape' && activePopover) {
+				event.preventDefault();
+				closePopover();
+			}
+		});
+		window.addEventListener('resize', () => {
+			if (activePopover && activeAnchor) {
+				positionPopover(activeAnchor);
+			}
+		});
+		document.getElementById('form').addEventListener('submit', event => {
+			event.preventDefault();
+			const text = prompt.value.trim();
+			if (!text) {
+				syncComposerButtons();
+				return;
+			}
+			vscode.postMessage({ type: 'send', prompt: text, options: options() });
+			prompt.value = '';
+			syncComposerButtons();
+		});
+		function appendRow(role, text) {
+			const row = document.createElement('div');
+			row.className = 'row ' + (role || '');
+			row.textContent = text || '';
+			log.appendChild(row);
+			syncEmptyState();
+			log.scrollTop = log.scrollHeight;
+			return row;
+		}
+		function appendDelta(role, text) {
+			const last = log.lastElementChild;
+			if (last && last.classList.contains(role)) {
+				last.textContent += text || '';
+				log.scrollTop = log.scrollHeight;
+				return;
+			}
+			appendRow(role, text);
+		}
+		function urlsFrom(value) {
+			const urls = [];
+			const visit = item => {
+				if (!item) return;
+				if (typeof item === 'string') {
+					if (/^(https?:|data:|blob:)/.test(item)) urls.push(item);
+				} else if (Array.isArray(item)) {
+					item.forEach(visit);
+				} else if (typeof item === 'object') {
+					Object.values(item).forEach(visit);
+				}
+			};
+			visit(value);
+			return urls;
+		}
+		function renderMedia(role, payload) {
+			const row = appendRow(role, role === 'voice' ? 'Voice output' : 'Generated media');
+			for (const url of urlsFrom(payload)) {
+				if (/\\.(png|jpe?g|gif|webp|svg)(\\?|$)/i.test(url) || url.startsWith('data:image/')) {
+					const img = document.createElement('img');
+					img.src = url;
+					row.appendChild(img);
+				} else if (/\\.(mp3|wav|ogg|m4a|webm)(\\?|$)/i.test(url) || url.startsWith('data:audio/')) {
+					const audio = document.createElement('audio');
+					audio.controls = true;
+					audio.src = url;
+					row.appendChild(audio);
+				}
+			}
+			if (row.childElementCount === 0) {
+				row.textContent += '\\n' + JSON.stringify(payload, null, 2).slice(0, 2000);
+			}
+			log.scrollTop = log.scrollHeight;
+		}
+		window.addEventListener('message', event => {
+			const message = event.data;
+			if (message.type === 'clear') {
+				log.textContent = '';
+				log.appendChild(emptyState);
+				syncEmptyState();
+			} else if (message.type === 'status') {
+				updateStatus(message.text || '');
+			} else if (message.type === 'settings') {
+				applySettings(message.settings);
+			} else if (message.type === 'models') {
+				models = (message.models || []).filter(isVisibleModel);
+				renderModels();
+				if (activePopover) {
+					renderPopover(activePopover);
+					if (activeAnchor) {
+						positionPopover(activeAnchor);
+					}
+				}
+			} else if (message.type === 'tools') {
+				tools = message.tools || [];
+				renderToolCount();
+				if (activePopover) {
+					renderPopover(activePopover);
+					if (activeAnchor) {
+						positionPopover(activeAnchor);
+					}
+				}
+			} else if (message.type === 'append') {
+				appendRow(message.role, message.text);
+			} else if (message.type === 'insertText') {
+				insertAtCursor(message.text || '');
+			} else if (message.type === 'delta') {
+				appendDelta(message.role || 'assistant', message.text);
+			} else if (message.type === 'media' || message.type === 'voice') {
+				renderMedia(message.type, message.payload);
+			} else if (message.type === 'usage') {
+				appendRow('usage', 'Usage: ' + JSON.stringify(message.payload));
+			} else if (message.type === 'sessionBinding') {
+				appendRow('session', 'Session: ' + JSON.stringify(message.payload));
+			} else if (message.type === 'toolRequested') {
+				const calls = message.payload || [];
+				appendRow('tool', 'Tool request: ' + calls.map(toolName).join(', '));
+			} else if (message.type === 'toolFinished') {
+				const item = message.payload || {};
+				appendRow('tool', 'Tool ' + (item.status || 'updated') + ': ' + (item.name || 'tool'));
+			}
+		});
+		applySettings({});
+		renderToolCount();
+		vscode.postMessage({ type: 'ready' });
+	</script>
+</body>
+</html>`;
+}
+
+class BackboardBridge implements vscode.Disposable {
+	private child: cp.ChildProcessWithoutNullStreams | undefined;
+	private readonly pending = new Map<string, PendingRequest>();
+	private readonly output = vscode.window.createOutputChannel('Backboard Bridge');
+
+	constructor(private readonly context: vscode.ExtensionContext) {
+	}
+
+	dispose(): void {
+		this.child?.kill();
+		this.output.dispose();
+	}
+
+	refreshModels(): void {
+		void this.listModels(new vscode.CancellationTokenSource().token);
+	}
+
+	async listModels(token: vscode.CancellationToken): Promise<BridgeModel[]> {
+		const settings = readSettings();
+		const events = await this.send('listModels', undefined, { config: settings.config }, undefined, token);
+		return events.find(event => event.type === 'models')?.models ?? [];
+	}
+
+	async listTools(mode: string, token: vscode.CancellationToken): Promise<unknown[]> {
+		const events = await this.send('listTools', undefined, { mode }, undefined, token);
+		return events.find(event => event.type === 'tools')?.tools ?? [];
+	}
+
+	async runRustTool(name: string, args: Record<string, unknown>, token: vscode.CancellationToken): Promise<unknown> {
+		const events = await this.send('runTool', undefined, { name, args }, undefined, token);
+		const result = [...events].reverse().find(event => event.type === 'toolFinished' && event.status === 'finished');
+		return result?.output ?? { success: false, error: `Rust tool ${name} did not return output.` };
+	}
+
+	async send(command: string, sessionId: string | undefined, params: unknown, onEvent: ((event: BridgeEvent) => void | Promise<void>) | undefined, token: vscode.CancellationToken): Promise<BridgeEvent[]> {
+		const requestId = newId();
+		const child = this.ensureProcess();
+		const promise = new Promise<BridgeEvent[]>((resolve, reject) => {
+			const disposable = token.onCancellationRequested(() => {
+				this.write({ requestId: newId(), command: 'cancel', sessionId, params: {} });
+				disposable.dispose();
+			});
+			this.pending.set(requestId, {
+				events: [],
+				onEvent,
+				resolve: events => {
+					disposable.dispose();
+					resolve(events);
+				},
+				reject: error => {
+					disposable.dispose();
+					reject(error);
+				}
+			});
+		});
+		child.stdin.write(`${JSON.stringify({ requestId, command, sessionId, params })}\n`);
+		return promise;
+	}
+
+	private ensureProcess(): cp.ChildProcessWithoutNullStreams {
+		if (this.child && !this.child.killed) {
+			return this.child;
+		}
+		const bridgePath = this.resolveBridgePath();
+		if (!fs.existsSync(bridgePath)) {
+			throw new Error(`Backboard bridge binary not found at ${bridgePath}. Build it with: cargo build -p backboard_bridge`);
+		}
+		this.child = cp.spawn(bridgePath, [], {
+			cwd: workspacePath() ?? os.homedir(),
+			stdio: ['pipe', 'pipe', 'pipe']
+		});
+		readline.createInterface({ input: this.child.stdout }).on('line', line => this.handleLine(line));
+		this.child.stderr.on('data', chunk => this.output.append(chunk.toString()));
+		this.child.on('exit', (code, signal) => {
+			this.output.appendLine(`Bridge exited code=${code ?? 'null'} signal=${signal ?? 'null'}`);
+			for (const pending of this.pending.values()) {
+				pending.reject(new Error('Backboard bridge exited.'));
+			}
+			this.pending.clear();
+			this.child = undefined;
+		});
+		return this.child;
+	}
+
+	private resolveBridgePath(): string {
+		const configured = vscode.workspace.getConfiguration('backboard').get<string>('bridgePath')?.trim();
+		if (configured) {
+			return configured;
+		}
+		const packaged = path.join(this.context.extensionPath, 'bin', process.platform === 'win32' ? 'backboard-bridge.exe' : 'backboard-bridge');
+		if (fs.existsSync(packaged)) {
+			return packaged;
+		}
+		return path.resolve(this.context.extensionPath, '..', '..', '..', 'zed', 'target', 'debug', process.platform === 'win32' ? 'backboard-bridge.exe' : 'backboard-bridge');
+	}
+
+	private write(payload: unknown): void {
+		this.child?.stdin.write(`${JSON.stringify(payload)}\n`);
+	}
+
+	private handleLine(line: string): void {
+		let event: BridgeEvent;
+		try {
+			event = JSON.parse(line) as BridgeEvent;
+		} catch {
+			this.output.appendLine(line);
+			return;
+		}
+		const pending = this.pending.get(event.requestId);
+		if (!pending) {
+			return;
+		}
+		pending.events.push(event);
+		void pending.onEvent?.(event);
+		if (event.type === 'done') {
+			this.pending.delete(event.requestId);
+			pending.resolve(pending.events);
+		}
+	}
+}
+
+async function executeToolCalls(bridge: BackboardBridge, toolCalls: unknown[], mode: string, response: ResponseSink, token: vscode.CancellationToken): Promise<unknown[]> {
+	const outputs: unknown[] = [];
+	for (const rawCall of toolCalls) {
+		if (token.isCancellationRequested) {
+			break;
+		}
+		const call = parseToolCall(rawCall);
+		const allowed = await approveTool(call.name, call.args, mode);
+		if (!allowed) {
+			response.event?.('toolFinished', { status: 'denied', name: call.name, args: call.args });
+			outputs.push(toolOutput(call.id, { success: false, content: 'User denied this tool call.' }));
+			continue;
+		}
+		try {
+			response.event?.('toolFinished', { status: 'started', name: call.name, args: call.args });
+			const result = await executeTool(bridge, call.name, call.args, response, token);
+			response.event?.('toolFinished', { status: 'finished', name: call.name, output: result });
+			outputs.push(toolOutput(call.id, { success: true, content: result }));
+		} catch (error) {
+			response.event?.('toolFinished', { status: 'failed', name: call.name, error: error instanceof Error ? error.message : String(error) });
+			outputs.push(toolOutput(call.id, { success: false, content: error instanceof Error ? error.message : String(error) }));
+		}
+	}
+	return outputs;
+}
+
+async function approveTool(name: string, args: Record<string, unknown>, mode: string): Promise<boolean> {
+	if (mode === 'free' || isReadOnlyTool(name)) {
+		return true;
+	}
+	const command = typeof args.command === 'string' ? `\n\n${args.command}` : '';
+	const choice = await vscode.window.showWarningMessage(`Backboard wants to run ${name}.${command}`, { modal: true }, 'Allow');
+	return choice === 'Allow';
+}
+
+async function executeTool(bridge: BackboardBridge, name: string, args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken): Promise<string> {
+	switch (name) {
+		case 'read_file':
+			return readFile(args);
+		case 'list_dir':
+			return listDir(args);
+		case 'glob':
+			return globFiles(args);
+		case 'grep':
+			return grepFiles(args);
+		case 'codebase_search':
+			return codebaseSearch(args);
+		case 'web_search':
+		case 'web_fetch':
+		case 'computer':
+			return asCompactJson(await bridge.runRustTool(name, args, token));
+		case 'read_lints':
+			return readLints(args, token);
+		case 'write':
+			return writeFileTool(args);
+		case 'edit':
+		case 'search_replace':
+			return editFileTool(args);
+		case 'delete_file':
+			return deleteFileTool(args);
+		case 'create_directory':
+			return createDirectoryTool(args);
+		case 'bash':
+		case 'run_terminal_cmd':
+			return runShellTool(args, response, token);
+		case 'run_code':
+		case 'repl':
+			return runCodeTool(args, response, token);
+		case 'todo_write':
+			return `Todo list updated: ${asCompactJson(args.todos ?? [])}`;
+		case 'ask_user_question':
+			return askUserQuestion(args);
+		case 'sleep':
+			return sleepTool(args, token);
+		case 'task':
+			return taskTool(args);
+		case 'enter_plan_mode':
+			return `Plan mode requested: ${stringArg(args, 'reason')}`;
+		case 'exit_plan_mode':
+			return `Plan proposed:\n${stringArg(args, 'plan')}`;
+		case 'persistence_decide':
+			return `Persistence decision: ${asCompactJson(args)}`;
+		default:
+			throw new Error(`Unsupported tool: ${name}`);
+	}
+}
+
+async function readFile(args: Record<string, unknown>): Promise<string> {
+	const uri = resolveWorkspaceUri(stringArg(args, 'path', 'file_path', 'target_file'));
+	const bytes = await vscode.workspace.fs.readFile(uri);
+	const text = Buffer.from(bytes).toString('utf8');
+	const offset = numberArg(args, 'offset');
+	const limit = numberArg(args, 'limit');
+	if (!offset && !limit) {
+		return text;
+	}
+	const lines = text.split(/\r?\n/);
+	const start = Math.max((offset ?? 1) - 1, 0);
+	const end = limit ? start + limit : lines.length;
+	return lines.slice(start, end).map((line, index) => `${start + index + 1}: ${line}`).join('\n');
+}
+
+async function listDir(args: Record<string, unknown>): Promise<string> {
+	const uri = resolveWorkspaceUri(stringArg(args, 'path', 'relative_workspace_path', 'target_directory') || '.');
+	const entries = await vscode.workspace.fs.readDirectory(uri);
+	const rows = await Promise.all(entries.map(async ([name, type]) => {
+		const child = vscode.Uri.joinPath(uri, name);
+		const stat = await tryStat(child);
+		return `${type === vscode.FileType.Directory ? 'dir ' : 'file'} ${name}${stat ? ` ${stat.size}b` : ''}`;
+	}));
+	return rows.join('\n');
+}
+
+async function globFiles(args: Record<string, unknown>): Promise<string> {
+	const pattern = stringArg(args, 'pattern') || '**/*';
+	const base = stringArg(args, 'target_directory');
+	const fullPattern = base ? path.posix.join(base.replace(/\\/g, '/'), pattern) : pattern;
+	const files = await vscode.workspace.findFiles(fullPattern, '**/{node_modules,.git,target,out,dist}/**', 300);
+	return files.map(uri => vscode.workspace.asRelativePath(uri)).join('\n');
+}
+
+async function grepFiles(args: Record<string, unknown>): Promise<string> {
+	const pattern = stringArg(args, 'pattern');
+	if (!pattern) {
+		throw new Error('grep requires pattern');
+	}
+	const include = stringArg(args, 'glob', 'include') || '**/*';
+	const rootPath = stringArg(args, 'path');
+	const fullPattern = rootPath ? path.posix.join(rootPath.replace(/\\/g, '/'), include) : include;
+	const files = await vscode.workspace.findFiles(fullPattern, '**/{node_modules,.git,target,out,dist}/**', 500);
+	const matches: string[] = [];
+	const flags = boolArg(args, 'case_insensitive') ? 'i' : '';
+	const regex = new RegExp(pattern, flags);
+	const outputMode = stringArg(args, 'output_mode') || 'content';
+	let count = 0;
+	for (const uri of files) {
+		const bytes = await vscode.workspace.fs.readFile(uri);
+		const text = Buffer.from(bytes).toString('utf8');
+		const lines = text.split(/\r?\n/);
+		let fileMatched = false;
+		for (let i = 0; i < lines.length; i++) {
+			if (regex.test(lines[i])) {
+				count++;
+				fileMatched = true;
+				if (outputMode === 'content') {
+					matches.push(`${vscode.workspace.asRelativePath(uri)}:${i + 1}: ${lines[i]}`);
+					if (matches.length >= 100) {
+						return matches.join('\n');
+					}
+				}
+			}
+		}
+		if (outputMode === 'files_with_matches' && fileMatched) {
+			matches.push(vscode.workspace.asRelativePath(uri));
+		}
+	}
+	if (outputMode === 'count') {
+		return String(count);
+	}
+	return matches.join('\n');
+}
+
+async function codebaseSearch(args: Record<string, unknown>): Promise<string> {
+	const query = stringArg(args, 'query');
+	if (!query) {
+		throw new Error('codebase_search requires query');
+	}
+	const limit = numberArg(args, 'num_results') ?? 15;
+	const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+	const files = await vscode.workspace.findFiles('**/*', '**/{node_modules,.git,target,out,dist}/**', 800);
+	const scored: { uri: vscode.Uri; score: number; preview: string }[] = [];
+	for (const uri of files) {
+		const bytes = await tryReadFile(uri);
+		if (!bytes || bytes.byteLength > 512_000) {
+			continue;
+		}
+		const text = Buffer.from(bytes).toString('utf8');
+		const lower = text.toLowerCase();
+		const score = terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0);
+		if (score > 0) {
+			const line = text.split(/\r?\n/).find(value => terms.some(term => value.toLowerCase().includes(term))) ?? '';
+			scored.push({ uri, score, preview: line.trim().slice(0, 240) });
+		}
+	}
+	return scored
+		.sort((left, right) => right.score - left.score)
+		.slice(0, limit)
+		.map(item => `${vscode.workspace.asRelativePath(item.uri)}: ${item.preview}`)
+		.join('\n');
+}
+
+async function readLints(args: Record<string, unknown>, token: vscode.CancellationToken): Promise<string> {
+	const commands = arrayStringArg(args, 'commands');
+	const command = stringArg(args, 'command', 'cmd');
+	if (command) {
+		commands.unshift(command);
+	}
+	if (commands.length) {
+		const outputs: string[] = [];
+		for (const item of commands) {
+			outputs.push(`$ ${item}\n${await runShellTool({ ...args, command: item }, { markdown() {}, progress() {} }, token)}`);
+		}
+		return outputs.join('\n\n');
+	}
+	const target = stringArg(args, 'path', 'file_path');
+	const diagnostics = target ? vscode.languages.getDiagnostics(resolveWorkspaceUri(target)) : vscode.languages.getDiagnostics().flatMap(([_uri, items]) => items);
+	return diagnostics.map(item => `${item.source ?? 'diagnostic'}: ${item.message}`).join('\n');
+}
+
+async function writeFileTool(args: Record<string, unknown>): Promise<string> {
+	const uri = resolveWorkspaceUri(stringArg(args, 'path', 'file_path', 'target_file'));
+	const content = stringArg(args, 'content', 'contents', 'new_text');
+	const edit = new vscode.WorkspaceEdit();
+	try {
+		const document = await vscode.workspace.openTextDocument(uri);
+		const source = document.getText();
+		edit.replace(uri, new vscode.Range(document.positionAt(0), document.positionAt(source.length)), content);
+	} catch {
+		edit.createFile(uri, { ignoreIfExists: true });
+		edit.insert(uri, new vscode.Position(0, 0), content);
+	}
+	const ok = await vscode.workspace.applyEdit(edit);
+	await vscode.workspace.saveAll(false);
+	return ok ? `Wrote ${vscode.workspace.asRelativePath(uri)}` : `Failed to write ${vscode.workspace.asRelativePath(uri)}`;
+}
+
+async function editFileTool(args: Record<string, unknown>): Promise<string> {
+	const uri = resolveWorkspaceUri(stringArg(args, 'path', 'file_path', 'target_file'));
+	const oldText = stringArg(args, 'old_string', 'oldText');
+	const newText = stringArg(args, 'new_string', 'newText');
+	const document = await vscode.workspace.openTextDocument(uri);
+	const source = document.getText();
+	if (!source.includes(oldText)) {
+		throw new Error(`Target text not found in ${vscode.workspace.asRelativePath(uri)}`);
+	}
+	const replaceAll = boolArg(args, 'replace_all');
+	const edited = replaceAll ? source.split(oldText).join(newText) : source.replace(oldText, newText);
+	const edit = new vscode.WorkspaceEdit();
+	const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(source.length));
+	edit.replace(uri, fullRange, edited);
+	const ok = await vscode.workspace.applyEdit(edit);
+	await document.save();
+	await vscode.window.showTextDocument(document);
+	return ok ? `Edited ${vscode.workspace.asRelativePath(uri)}` : `Failed to edit ${vscode.workspace.asRelativePath(uri)}`;
+}
+
+async function deleteFileTool(args: Record<string, unknown>): Promise<string> {
+	const uri = resolveWorkspaceUri(stringArg(args, 'path', 'file_path', 'target_file'));
+	const edit = new vscode.WorkspaceEdit();
+	edit.deleteFile(uri, { ignoreIfNotExists: true });
+	const ok = await vscode.workspace.applyEdit(edit);
+	return ok ? `Deleted ${vscode.workspace.asRelativePath(uri)}` : `Failed to delete ${vscode.workspace.asRelativePath(uri)}`;
+}
+
+async function createDirectoryTool(args: Record<string, unknown>): Promise<string> {
+	const uri = resolveWorkspaceUri(stringArg(args, 'path', 'dir_path', 'target_directory'));
+	await vscode.workspace.fs.createDirectory(uri);
+	return `Created ${vscode.workspace.asRelativePath(uri)}`;
+}
+
+async function runShellTool(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken): Promise<string> {
+	const command = stringArg(args, 'command', 'cmd');
+	if (!command) {
+		throw new Error('shell tool requires command');
+	}
+	const cwd = stringArg(args, 'working_directory', 'cwd') || workspacePath() || os.homedir();
+	const terminal = vscode.window.createTerminal({ name: 'Backboard', cwd });
+	terminal.show(true);
+	terminal.sendText(command);
+	response.progress(command);
+	if (boolArg(args, 'is_background')) {
+		return `Started background command: ${command}`;
+	}
+	return new Promise((resolve, reject) => {
+		const child = cp.exec(command, { cwd, timeout: numberArg(args, 'timeout_ms', 'timeout') ?? 120_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+			if (error && !stdout && !stderr) {
+				reject(error);
+			} else {
+				resolve([stdout, stderr].filter(Boolean).join('\n'));
+			}
+		});
+		const disposable = token.onCancellationRequested(() => {
+			child.kill();
+			disposable.dispose();
+			resolve('Command cancelled.');
+		});
+	});
+}
+
+async function runCodeTool(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken): Promise<string> {
+	const code = stringArg(args, 'code');
+	if (!code) {
+		throw new Error('run_code/repl requires code');
+	}
+	const language = (stringArg(args, 'language') || 'python').toLowerCase();
+	if (language === 'shell') {
+		return runShellTool({ ...args, command: code }, response, token);
+	}
+	const command = language === 'node' || language === 'typescript'
+		? `node -e ${shellQuote(code)}`
+		: `python3 -c ${shellQuote(code)}`;
+	return runShellTool({ ...args, command }, response, token);
+}
+
+async function askUserQuestion(args: Record<string, unknown>): Promise<string> {
+	const question = stringArg(args, 'question');
+	const options = arrayStringArg(args, 'options');
+	const choice = options.length
+		? await vscode.window.showInformationMessage(question, { modal: true }, ...options)
+		: await vscode.window.showInputBox({ title: 'Backboard Question', prompt: question, ignoreFocusOut: true });
+	return choice ?? 'No response.';
+}
+
+async function sleepTool(args: Record<string, unknown>, token: vscode.CancellationToken): Promise<string> {
+	const seconds = Math.max(0, numberArg(args, 'seconds') ?? 1);
+	await new Promise<void>(resolve => {
+		const handle = setTimeout(resolve, seconds * 1000);
+		token.onCancellationRequested(() => {
+			clearTimeout(handle);
+			resolve();
+		});
+	});
+	return `Waited ${seconds} second(s).`;
+}
+
+async function taskTool(args: Record<string, unknown>): Promise<string> {
+	const prompt = stringArg(args, 'prompt', 'description');
+	return `Sub-task requested: ${prompt}\n\nVS Code Backboard bridge recorded the task request. Parallel sub-agent execution is not available in this host yet.`;
+}
+
+async function tryStat(uri: vscode.Uri): Promise<vscode.FileStat | undefined> {
+	try {
+		return await vscode.workspace.fs.stat(uri);
+	} catch {
+		return undefined;
+	}
+}
+
+async function tryReadFile(uri: vscode.Uri): Promise<Uint8Array | undefined> {
+	try {
+		return await vscode.workspace.fs.readFile(uri);
+	} catch {
+		return undefined;
+	}
+}
+
+function parseToolCall(raw: unknown): { id: string; name: string; args: Record<string, unknown> } {
+	const value = raw as { id?: string; name?: string; function?: { name?: string; arguments?: string | Record<string, unknown> }; args?: Record<string, unknown> };
+	const rawArgs = value.function?.arguments ?? value.args ?? {};
+	const args = typeof rawArgs === 'string' ? JSON.parse(rawArgs || '{}') as Record<string, unknown> : rawArgs;
+	return {
+		id: value.id ?? `call_${newId()}`,
+		name: value.function?.name ?? value.name ?? 'unknown',
+		args
+	};
+}
+
+function toolOutput(toolCallId: string, output: unknown): unknown {
+	return { toolCallId, output: JSON.stringify(output) };
+}
+
+function isReadOnlyTool(name: string): boolean {
+	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search', 'web_search', 'web_fetch'].includes(name);
+}
+
+function readSettings(): {
+	readonly defaultProvider: string;
+	readonly defaultModel: string;
+	readonly mode: string;
+	readonly intensity: string;
+	readonly webSearch: string;
+	readonly imageGeneration: string;
+	readonly voiceMode: string;
+	readonly mcpFigma: boolean;
+	readonly mcpNotion: boolean;
+	readonly mcpGoogle: boolean;
+	readonly config: { readonly env: string; readonly apiUrl?: string; readonly apiKey?: string };
+} {
+	const config = vscode.workspace.getConfiguration('backboard');
+	const apiUrl = config.get<string>('apiUrl')?.trim() || undefined;
+	const apiKey = config.get<string>('apiKey')?.trim() || undefined;
+	return {
+		defaultProvider: config.get<string>('defaultProvider') || 'aws-bedrock',
+		defaultModel: config.get<string>('defaultModel') || 'anthropic.claude-sonnet-4-6',
+		mode: config.get<string>('mode') || 'agent',
+		intensity: config.get<string>('intensity') || 'fast',
+		webSearch: config.get<string>('webSearch') || 'off',
+		imageGeneration: config.get<string>('imageGeneration') || 'off',
+		voiceMode: config.get<string>('voiceMode') || 'off',
+		mcpFigma: config.get<boolean>('mcpFigma') ?? false,
+		mcpNotion: config.get<boolean>('mcpNotion') ?? false,
+		mcpGoogle: config.get<boolean>('mcpGoogle') ?? false,
+		config: {
+			env: config.get<string>('env') || 'prod',
+			apiUrl,
+			apiKey
+		}
+	};
+}
+
+function resolveTurnSettings(options: PanelOptions): BackboardSettings {
+	const settings = readSettings();
+	return {
+		...settings,
+		defaultProvider: options.provider || settings.defaultProvider,
+		defaultModel: options.model || settings.defaultModel,
+		mode: options.mode || settings.mode,
+		intensity: options.intensity || settings.intensity,
+		webSearch: options.webSearch || settings.webSearch,
+		imageGeneration: options.imageGeneration || settings.imageGeneration,
+		voiceMode: options.voiceMode || settings.voiceMode,
+		mcpFigma: options.mcpFigma ?? settings.mcpFigma,
+		mcpNotion: options.mcpNotion ?? settings.mcpNotion,
+		mcpGoogle: options.mcpGoogle ?? settings.mcpGoogle
+	};
+}
+
+function mcpCallsPayload(settings: BackboardSettings): string[] | undefined {
+	const enabled = [
+		settings.mcpFigma ? 'figma' : undefined,
+		settings.mcpNotion ? 'notion' : undefined,
+		settings.mcpGoogle ? 'google' : undefined
+	].filter((value): value is string => Boolean(value));
+	return enabled.length ? enabled : undefined;
+}
+
+function asPanelOptions(value: unknown): PanelOptions {
+	if (!value || typeof value !== 'object') {
+		return {};
+	}
+	const raw = value as Record<string, unknown>;
+	return {
+		provider: stringValue(raw.provider),
+		model: stringValue(raw.model),
+		mode: stringValue(raw.mode),
+		intensity: stringValue(raw.intensity),
+		webSearch: stringValue(raw.webSearch),
+		imageGeneration: stringValue(raw.imageGeneration),
+		voiceMode: stringValue(raw.voiceMode),
+		mcpFigma: booleanValue(raw.mcpFigma),
+		mcpNotion: booleanValue(raw.mcpNotion),
+		mcpGoogle: booleanValue(raw.mcpGoogle)
+	};
+}
+
+async function savePanelOptions(options: PanelOptions): Promise<void> {
+	const config = vscode.workspace.getConfiguration('backboard');
+	const updates: [string, string | boolean | undefined][] = [
+		['defaultProvider', options.provider],
+		['defaultModel', options.model],
+		['mode', options.mode],
+		['intensity', options.intensity],
+		['webSearch', options.webSearch],
+		['imageGeneration', options.imageGeneration],
+		['voiceMode', options.voiceMode],
+		['mcpFigma', options.mcpFigma],
+		['mcpNotion', options.mcpNotion],
+		['mcpGoogle', options.mcpGoogle]
+	];
+	await Promise.all(updates
+		.filter(([, value]) => value !== undefined)
+		.map(([key, value]) => config.update(key, value, vscode.ConfigurationTarget.Global)));
+}
+
+async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview): Promise<void> {
+	const settings = readSettings();
+	await webview.postMessage({ type: 'settings', settings: publicSettings(settings), workspace: workspacePath() });
+	try {
+		const tools = await bridge.listTools(settings.mode, new vscode.CancellationTokenSource().token);
+		await webview.postMessage({ type: 'tools', tools });
+	} catch {
+		await webview.postMessage({ type: 'tools', tools: [] });
+	}
+	if (!settings.config.apiKey) {
+		await webview.postMessage({ type: 'status', text: 'Set a Backboard API key to load models.' });
+		return;
+	}
+	try {
+		await webview.postMessage({ type: 'status', text: 'Loading Backboard models.' });
+		const models = await bridge.listModels(new vscode.CancellationTokenSource().token);
+		await webview.postMessage({ type: 'models', models });
+		await webview.postMessage({ type: 'status', text: 'Ready.' });
+	} catch (error) {
+		await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
+		await webview.postMessage({ type: 'status', text: 'Could not load models.' });
+	}
+}
+
+async function postComposerContext(webview: vscode.Webview, kind: 'activeFile' | 'selection'): Promise<void> {
+	const editor = vscode.window.activeTextEditor;
+	if (!editor) {
+		await webview.postMessage({ type: 'status', text: 'No active editor.' });
+		return;
+	}
+	const text = composerContextText(editor, kind);
+	if (!text) {
+		await webview.postMessage({ type: 'status', text: kind === 'selection' ? 'No selected text.' : 'No active file.' });
+		return;
+	}
+	await webview.postMessage({ type: 'insertText', text });
+}
+
+async function postBranchDiff(webview: vscode.Webview): Promise<void> {
+	const cwd = workspacePath();
+	if (!cwd) {
+		await webview.postMessage({ type: 'status', text: 'No workspace folder for branch diff.' });
+		return;
+	}
+	try {
+		const diff = await execFileText('git', ['diff', '--'], cwd, 1_000_000);
+		if (!diff.trim()) {
+			await webview.postMessage({ type: 'status', text: 'No branch diff to add.' });
+			return;
+		}
+		const trimmed = diff.length > 80_000 ? `${diff.slice(0, 80_000)}\n\n[Diff truncated]` : diff;
+		await webview.postMessage({ type: 'insertText', text: `Branch diff\n\n\`\`\`diff\n${trimmed}\n\`\`\`` });
+	} catch (error) {
+		await webview.postMessage({ type: 'status', text: error instanceof Error ? error.message : String(error) });
+	}
+}
+
+function execFileText(command: string, args: string[], cwd: string, maxBuffer: number): Promise<string> {
+	return new Promise((resolve, reject) => {
+		cp.execFile(command, args, { cwd, maxBuffer }, (error, stdout, stderr) => {
+			if (error) {
+				reject(new Error(stderr || error.message));
+			} else {
+				resolve(stdout);
+			}
+		});
+	});
+}
+
+function composerContextText(editor: vscode.TextEditor, kind: 'activeFile' | 'selection'): string | undefined {
+	const document = editor.document;
+	const relativePath = vscode.workspace.asRelativePath(document.uri, false);
+	if (kind === 'activeFile') {
+		return `@${relativePath}`;
+	}
+	const selection = editor.selection;
+	const selectedText = document.getText(selection);
+	if (!selectedText.trim()) {
+		return undefined;
+	}
+	const start = selection.start.line + 1;
+	const end = selection.end.line + 1;
+	const language = document.languageId || 'text';
+	return `Selected text from ${relativePath}:${start}${end !== start ? `-${end}` : ''}\n\n\`\`\`${language}\n${selectedText}\n\`\`\``;
+}
+
+function publicSettings(settings: BackboardSettings): PanelOptions {
+	return {
+		provider: settings.defaultProvider,
+		model: settings.defaultModel,
+		mode: settings.mode,
+		intensity: settings.intensity,
+		webSearch: settings.webSearch,
+		imageGeneration: settings.imageGeneration,
+		voiceMode: settings.voiceMode,
+		mcpFigma: settings.mcpFigma,
+		mcpNotion: settings.mcpNotion,
+		mcpGoogle: settings.mcpGoogle
+	};
+}
+
+function stringValue(value: unknown): string | undefined {
+	return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+	return typeof value === 'boolean' ? value : undefined;
+}
+
+function workspacePath(): string | undefined {
+	return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function resolveWorkspaceUri(rawPath: string): vscode.Uri {
+	if (!rawPath) {
+		throw new Error('tool requires a path');
+	}
+	if (path.isAbsolute(rawPath)) {
+		return vscode.Uri.file(rawPath);
+	}
+	const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+	if (!root) {
+		throw new Error('No workspace folder is open.');
+	}
+	return vscode.Uri.joinPath(root, rawPath);
+}
+
+function stringArg(args: Record<string, unknown>, ...names: string[]): string {
+	for (const name of names) {
+		const value = args[name];
+		if (typeof value === 'string') {
+			return value;
+		}
+	}
+	return '';
+}
+
+function numberArg(args: Record<string, unknown>, ...names: string[]): number | undefined {
+	for (const name of names) {
+		const value = args[name];
+		if (typeof value === 'number') {
+			return value;
+		}
+		if (typeof value === 'string' && value.trim() && !Number.isNaN(Number(value))) {
+			return Number(value);
+		}
+	}
+	return undefined;
+}
+
+function boolArg(args: Record<string, unknown>, name: string): boolean {
+	return args[name] === true;
+}
+
+function arrayStringArg(args: Record<string, unknown>, name: string): string[] {
+	const value = args[name];
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	return value.filter((item): item is string => typeof item === 'string');
+}
+
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function asCompactJson(value: unknown): string {
+	return JSON.stringify(value).slice(0, 2000);
+}
+
+function newId(): string {
+	return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}

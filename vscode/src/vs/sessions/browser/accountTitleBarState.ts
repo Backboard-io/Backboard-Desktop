@@ -125,10 +125,11 @@ export function getAccountTitleBarState(context: IAccountTitleBarStateContext): 
 
 	return {
 		source: 'account',
-		kind: 'prominent',
-		icon: Codicon.account,
-		label: localize('signInLabel', "Sign In"),
-		ariaLabel: localize('signInAria', "Sign in to your account"),
+		kind: 'default',
+		icon: Codicon.serverProcess,
+		label: localize('backboardLabel', "Backboard"),
+		ariaLabel: localize('backboardAria', "Backboard integration status"),
+		revealLabelOnHover: true,
 	};
 }
 
@@ -142,24 +143,18 @@ function getCopilotPresentation(
 	}
 
 	if (entitlement === ChatEntitlement.Unknown) {
-		return {
-			source: 'copilot',
-			kind: 'prominent',
-			icon: Codicon.account,
-			label: localize('agentsSignedOut', "Agents Signed Out"),
-			ariaLabel: localize('agentsSignedOutAria', "Agents is signed out"),
-		};
+		return undefined;
 	}
 
 	if (sentiment.disabled || sentiment.untrusted) {
 		return {
 			source: 'copilot',
 			kind: 'warning',
-			icon: Codicon.account,
-			label: localize('copilotUnavailable', "Copilot Unavailable"),
+			icon: Codicon.serverProcess,
+			label: localize('backboardUnavailable', "Backboard Unavailable"),
 			ariaLabel: sentiment.untrusted
-				? localize('copilotUnavailableUntrustedAria', "GitHub Copilot is unavailable in untrusted workspaces")
-				: localize('copilotUnavailableDisabledAria', "GitHub Copilot is disabled"),
+				? localize('backboardUnavailableUntrustedAria', "Backboard Sandbox is unavailable in untrusted workspaces")
+				: localize('backboardUnavailableDisabledAria', "Backboard Sandbox is disabled"),
 		};
 	}
 
@@ -169,7 +164,7 @@ function getCopilotPresentation(
 		return {
 			source: 'copilot',
 			kind: 'warning',
-			icon: Codicon.account,
+			icon: Codicon.serverProcess,
 			label: localize('copilotQuotaReached', "Quota Reached"),
 			dotBadge: 'error',
 			ariaLabel: getQuotaReachedAriaLabel(chatQuotaExceeded, completionsQuotaExceeded),
@@ -181,11 +176,11 @@ function getCopilotPresentation(
 		return {
 			source: 'copilot',
 			kind: remainingPercent <= 10 ? 'warning' : 'accent',
-			icon: Codicon.account,
+			icon: Codicon.serverProcess,
 			label: localize('copilotTokensRemaining', "Tokens Remaining"),
 			badge: `${remainingPercent}%`,
 			dotBadge: remainingPercent <= 10 ? 'error' : 'warning',
-			ariaLabel: localize('copilotTokensRemainingAria', "{0}% GitHub Copilot tokens remaining", remainingPercent),
+			ariaLabel: localize('backboardTokensRemainingAria', "{0}% Backboard tokens remaining", remainingPercent),
 		};
 	}
 
@@ -209,12 +204,12 @@ function getLowestPositivePercent(...quotas: Array<IQuotaSnapshot | undefined>):
 
 function getQuotaReachedAriaLabel(chatQuotaExceeded: boolean, completionsQuotaExceeded: boolean): string {
 	if (chatQuotaExceeded && completionsQuotaExceeded) {
-		return localize('copilotAllQuotaReachedAria', "GitHub Copilot chat and inline suggestion quota reached");
+		return localize('backboardAllQuotaReachedAria', "Backboard chat and inline suggestion quota reached");
 	}
 
 	if (chatQuotaExceeded) {
-		return localize('copilotChatQuotaReachedAria', "GitHub Copilot chat quota reached");
+		return localize('backboardChatQuotaReachedAria', "Backboard chat quota reached");
 	}
 
-	return localize('copilotCompletionsQuotaReachedAria', "GitHub Copilot inline suggestion quota reached");
+	return localize('backboardCompletionsQuotaReachedAria', "Backboard inline suggestion quota reached");
 }

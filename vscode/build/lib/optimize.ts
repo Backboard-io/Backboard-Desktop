@@ -144,6 +144,7 @@ function bundleESMTask(opts: IBundleESMTaskOpts): NodeJS.ReadWriteStream {
 				target: [target],
 				loader: {
 					'.ttf': 'file',
+					'.woff2': 'file',
 					'.svg': 'file',
 					'.png': 'file',
 					'.sh': 'file',
@@ -281,4 +282,3 @@ function getBuildTarget() {
 	const tsconfigPath = path.join(REPO_ROOT_PATH, 'src', 'tsconfig.base.json');
 	return getTargetStringFromTsConfig(tsconfigPath);
 }
-

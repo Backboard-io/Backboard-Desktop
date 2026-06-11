@@ -98,6 +98,12 @@ export class ChatSetup {
 		const dialogSkipped = this.skipDialogOnce;
 		this.skipDialogOnce = false;
 
+		if (this.layoutService.mainContainer.classList.contains('agent-sessions-workbench')) {
+			this.logService.info('[chat setup] Skipping VS Code/GitHub chat setup in Backboard agents window.');
+			this.context.update({ completed: true });
+			return { success: true, dialogSkipped };
+		}
+
 		const trusted = await this.workspaceTrustRequestService.requestWorkspaceTrust({
 			message: localize('chatWorkspaceTrust', "AI features are currently only supported in trusted workspaces.")
 		});

@@ -174,7 +174,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		hide(this.emptyFilterMessage);
 
 		const span = append(this.emptyFilterMessage, $('span'));
-		span.textContent = `${localize('agentSessions.noFilterResults', "No matching sessions")} - `;
+		span.textContent = `${localize('agentSessions.noFilterResults', "No matching Sandbox sessions")} - `;
 
 		const link = append(this.emptyFilterMessage, $('span.reset-filter-link'));
 		link.textContent = localize('agentSessions.resetFilter', "Reset Filter");

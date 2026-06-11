@@ -33,7 +33,7 @@ registerAction2(class ShowSessionsPickerAction extends Action2 {
 	constructor() {
 		super({
 			id: SHOW_SESSIONS_PICKER_COMMAND_ID,
-			title: localize2('showSessionsPicker', "Show Sessions Picker"),
+			title: localize2('showSessionsPicker', "Show Sandbox Picker"),
 			f1: true,
 			category: SessionsCategories.Sessions,
 			keybinding: {
@@ -66,14 +66,14 @@ registerAction2(class ShowSessionsPickerAction extends Action2 {
 
 		// New session item
 		items.push({
-			label: `$(add) ${localize('newSession', "New Session")}`,
+			label: `$(add) ${localize('newSession', "New Sandbox")}`,
 			session: undefined,
 		});
 
 		let activeItem: ISessionPickItem | undefined;
 
 		const toPickItem = (session: ISession): ISessionPickItem => {
-			const title = session.title.get() || localize('untitledSession', "New Session");
+			const title = session.title.get() || localize('untitledSession', "New Sandbox");
 
 			// Status icon, mirroring the sessions list and session header. Use the
 			// list model service's read state (not session.isRead) so the icon
@@ -129,7 +129,7 @@ registerAction2(class ShowSessionsPickerAction extends Action2 {
 
 		const picker = quickInputService.createQuickPick<ISessionPickItem>({ useSeparators: true });
 		picker.items = items;
-		picker.placeholder = localize('searchSessions', "Search sessions by name or folder");
+		picker.placeholder = localize('searchSessions', "Search Sandbox sessions by name or folder");
 		picker.canAcceptInBackground = true;
 		// Match on the detail row too so sessions can be found by their folder.
 		picker.matchOnDetail = true;

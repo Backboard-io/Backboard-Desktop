@@ -222,7 +222,7 @@ export class RunScriptCustomTaskWidget extends Disposable {
 
 	private _getSubmitLabel(): string {
 		if (this._isAddExistingTask) {
-			return localize('confirmAddToAgents', "Add to Agents Window");
+			return localize('confirmAddToAgents', "Add to Sandbox Window");
 		}
 		if (!this._isExistingTask) {
 			return localize('confirmAddTask', "Add Task");

@@ -6,7 +6,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { IAuthenticationService } from '../../../../platform/authentication/common/authentication';
 import { IConfigurationService } from '../../../../platform/configuration/common/configurationService';
-import { ILogService } from '../../../../platform/log/common/logService';
 import { Emitter } from '../../../../util/vs/base/common/event';
 
 // ---- vscode mock -----------------------------------------------------------
@@ -72,11 +71,6 @@ function createConfigService(values: Record<string, unknown> = {}) {
 	return { configService, set };
 }
 
-const noopLog = {
-	_serviceBrand: undefined,
-	trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), show: vi.fn(),
-} as unknown as ILogService;
-
 async function flushAsync() {
 	// Drain microtasks so async _update() observers complete.
 	await Promise.resolve();
@@ -104,37 +98,30 @@ describe('ByokUtilityModelNotificationContribution', () => {
 		contribution = undefined;
 	});
 
-	test('shows notification when signed out + BYOK + both utility settings unset', async () => {
+	test('does not show notification when signed out + BYOK + utility settings unset', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
 		const { configService } = createConfigService();
-		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService);
 
 		await flushAsync();
 
-		expect(mockNotification.show).toHaveBeenCalled();
-		expect(mockNotification.message).toBe('Set BYOK utility models');
-		expect(mockNotification.actions).toHaveLength(1);
-		expect(mockNotification.actions[0].commandId).toBe('workbench.action.openSettings');
-		expect(mockNotification.actions[0].commandArgs).toEqual(['chat.utility']);
+		expect(mockNotification.show).not.toHaveBeenCalled();
 	});
 
-	test('shows notification with single action when only chat.utilityModel is unset', async () => {
+	test('does not show notification when only chat.utilityModel is unset', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
 		const { configService } = createConfigService({ 'chat.utilitySmallModel': 'ollama/llama3' });
-		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService);
 
 		await flushAsync();
 
-		expect(mockNotification.show).toHaveBeenCalled();
-		expect(mockNotification.message).toBe('Set BYOK utility model');
-		expect(mockNotification.actions).toHaveLength(1);
-		expect(mockNotification.actions[0].commandArgs).toEqual(['chat.utilityModel']);
+		expect(mockNotification.show).not.toHaveBeenCalled();
 	});
 
 	test('does not show notification when signed in', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: { accessToken: 'tok' } });
 		const { configService } = createConfigService();
-		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService);
 
 		await flushAsync();
 
@@ -145,7 +132,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 		selectChatModelsMock.mockResolvedValue([{ vendor: 'copilot', id: 'gpt-4' }]);
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
 		const { configService } = createConfigService();
-		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService);
 
 		await flushAsync();
 
@@ -158,7 +145,7 @@ describe('ByokUtilityModelNotificationContribution', () => {
 			'chat.utilityModel': 'ollama/llama3',
 			'chat.utilitySmallModel': 'ollama/llama3',
 		});
-		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService);
 
 		await flushAsync();
 
@@ -168,32 +155,32 @@ describe('ByokUtilityModelNotificationContribution', () => {
 	test('hides notification once both utility settings are configured', async () => {
 		const { authService } = createAuthService({ anyGitHubSession: undefined });
 		const { configService, set } = createConfigService();
-		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService);
 
 		await flushAsync();
-		expect(mockNotification.show).toHaveBeenCalled();
+		expect(mockNotification.show).not.toHaveBeenCalled();
 
 		set('chat.utilityModel', 'ollama/llama3');
 		await flushAsync();
-		expect(mockNotification.hide).not.toHaveBeenCalled(); // small model still unset → still showing
+		expect(mockNotification.show).not.toHaveBeenCalled();
 
 		set('chat.utilitySmallModel', 'ollama/llama3');
 		await flushAsync();
-		expect(mockNotification.hide).toHaveBeenCalled();
+		expect(mockNotification.show).not.toHaveBeenCalled();
 	});
 
 	test('hides notification when user signs in', async () => {
 		const { authService, emitter } = createAuthService({ anyGitHubSession: undefined });
 		const { configService } = createConfigService();
-		contribution = new ByokUtilityModelNotificationContribution(authService, configService, noopLog);
+		contribution = new ByokUtilityModelNotificationContribution(authService, configService);
 
 		await flushAsync();
-		expect(mockNotification.show).toHaveBeenCalled();
+		expect(mockNotification.show).not.toHaveBeenCalled();
 
 		(authService as unknown as { anyGitHubSession: unknown }).anyGitHubSession = { accessToken: 'tok' };
 		emitter.fire();
 		await flushAsync();
 
-		expect(mockNotification.hide).toHaveBeenCalled();
+		expect(mockNotification.show).not.toHaveBeenCalled();
 	});
 });

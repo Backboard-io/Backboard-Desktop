@@ -50,13 +50,13 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 
 	/** Visual margin values for the card-like appearance */
 	static readonly MARGIN_TOP = 0;
-	static readonly MARGIN_BOTTOM = 5;
-	static readonly MARGIN_LEFT = 5;
+	static readonly MARGIN_BOTTOM = 8;
+	static readonly MARGIN_LEFT = 8;
 
 	// Action ID for run script - defined here to avoid layering issues
 	private static readonly RUN_SCRIPT_ACTION_ID = 'workbench.action.agentSessions.runScript';
 	private static readonly RUN_SCRIPT_DROPDOWN_MENU_ID = MenuId.for('AgentSessionsRunScriptDropdown');
-	private static readonly DEFAULT_MINIMUM_WIDTH = 270;
+	private static readonly DEFAULT_MINIMUM_WIDTH = 320;
 
 	// Run script dropdown management
 	private readonly _runScriptDropdown = this._register(new MutableDisposable<DropdownWithPrimaryActionViewItem>());
@@ -158,7 +158,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	override create(parent: HTMLElement): void {
 		super.create(parent);
 		parent.setAttribute('role', 'complementary');
-		parent.setAttribute('aria-label', localize('auxiliaryBarAriaLabel', "Session Details"));
+		parent.setAttribute('aria-label', localize('auxiliaryBarAriaLabel', "Sandbox Output"));
 	}
 
 	override updateStyles(): void {
@@ -295,11 +295,11 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		const borderTotal = 2; // 1px border on each side
 
 		// The right gutter is provided by the workbench grid (see Workbench.layout).
-		// The bottom margin is 5px when the panel is visible (paired with the panel's
-		// 5px top margin to center the sash) and 0 when the panel is hidden (so the card
+		// The bottom margin is present when the panel is visible (paired with the panel's
+		// top margin to center the sash) and 0 when the panel is hidden (so the card
 		// fills its cell; the workbench grid's 10px bottom gutter provides the visible gap).
-		// When the editor is visible, padding-left: 5px keeps the inner content position
-		// invariant (matching the editor-hidden state where margin-left: 5px applies instead).
+		// When the editor is visible, padding-left keeps the inner content position
+		// invariant (matching the editor-hidden state where margin-left applies instead).
 		const editorVisible = this.layoutService.isVisible(Parts.EDITOR_PART, mainWindow);
 		const marginLeft = editorVisible ? 0 : AuxiliaryBarPart.MARGIN_LEFT;
 		const paddingLeft = editorVisible ? AuxiliaryBarPart.MARGIN_LEFT : 0;

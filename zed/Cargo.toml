@@ -19,6 +19,7 @@ members = [
     "crates/auto_update_ui",
     "crates/aws_http_client",
     "crates/backboard",
+    "crates/backboard_bridge",
     "crates/backboard_ui",
     "crates/beginner_ui",
     "crates/bedrock",

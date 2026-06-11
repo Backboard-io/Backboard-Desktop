@@ -49,7 +49,7 @@ export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 	constructor() {
 		super({
 			id: OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID,
-			title: localize2('openWorkspaceInAgentsWindow', "Open in Agents"),
+			title: localize2('openWorkspaceInAgentsWindow', "Open in Sandbox"),
 			category: CHAT_CATEGORY,
 			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
 			f1: true,
@@ -82,8 +82,8 @@ export class ToggleOpenInAgentsWindowTitleBarAction extends ToggleTitleBarConfig
 	constructor() {
 		super(
 			ChatConfiguration.TitleBarOpenInAgentsWindowEnabled,
-			localize('toggle.openInAgentsWindow', 'Open in Agents Window'),
-			localize('toggle.openInAgentsWindowDescription', "Toggle visibility of the Open in Agents Window button in title bar"),
+			localize('toggle.openInAgentsWindow', 'Open in Sandbox Window'),
+			localize('toggle.openInAgentsWindowDescription', "Toggle visibility of the Open in Sandbox Window button in title bar"),
 			6,
 			OPEN_AGENTS_WINDOW_PRECONDITION,
 		);
@@ -94,7 +94,7 @@ export class OpenAgentsWindowAction extends Action2 {
 	constructor() {
 		super({
 			id: OPEN_AGENTS_WINDOW_COMMAND_ID,
-			title: localize2('openAgentsWindow', "Open Agents Window"),
+			title: localize2('openAgentsWindow', "Open Sandbox Window"),
 			category: CHAT_CATEGORY,
 			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
 			f1: true,
@@ -119,9 +119,9 @@ export class OpenAgentsWindowAction extends Action2 {
 }
 
 /**
- * Opens the current chat session inside the Agents window. Visible only when
+ * Opens the current chat session inside the Sandbox window. Visible only when
  * the active chat is a first-party agent-host session (Copilot CLI today)
- * since those are the session types the Agents window can render directly.
+ * since those are the session types the Sandbox window can render directly.
  */
 export class OpenChatSessionInAgentsWindowAction extends Action2 {
 
@@ -130,7 +130,7 @@ export class OpenChatSessionInAgentsWindowAction extends Action2 {
 	constructor() {
 		super({
 			id: OpenChatSessionInAgentsWindowAction.ID,
-			title: localize2('openSessionInAgentsWindow', "Open in Agents Window"),
+			title: localize2('openSessionInAgentsWindow', "Open in Sandbox Window"),
 			category: CHAT_CATEGORY,
 			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
 			f1: false,
@@ -187,7 +187,7 @@ export class OpenChatSessionInAgentsWindowAction extends Action2 {
 }
 
 /**
- * Renders the "Open in Agents" titlebar entry as an icon-only button that
+ * Renders the "Open in Sandbox" titlebar entry as an icon-only button that
  * expands to reveal a label on hover / keyboard focus.
  */
 class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
@@ -208,7 +208,7 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 		container.setAttribute('role', 'button');
 
 		const label = this.action.label;
-		const hoverText = this.keybindingService.appendKeybinding(localize('openInAgentsHover', "Open in Agents Window"), OPEN_AGENTS_WINDOW_COMMAND_ID);
+		const hoverText = this.keybindingService.appendKeybinding(localize('openInAgentsHover', "Open in Sandbox Window"), OPEN_AGENTS_WINDOW_COMMAND_ID);
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 
@@ -267,8 +267,8 @@ type AgentsHandoffTipActionClassification = {
 /**
  * Posts a tip notification above the chat input whenever the focused chat
  * widget is showing a contributed session (Copilot CLI, Cloud, Claude, etc.)
- * that the Agents Window can render directly. The notification provides a
- * one-click button to hand off the current session to the Agents Window.
+ * that the Sandbox Window can render directly. The notification provides a
+ * one-click button to hand off the current session to the Sandbox Window.
  */
 export class AgentsHandoffInputTipContribution extends Disposable implements IWorkbenchContribution {
 
@@ -291,7 +291,7 @@ export class AgentsHandoffInputTipContribution extends Disposable implements IWo
 	 */
 	private static readonly TIP_MUTE_COMMAND_ID = 'workbench.action.chat.agentsHandoffTip.mute';
 
-	/** Session types eligible for the handoff tip — the same set the Agents window can render directly. */
+	/** Session types eligible for the handoff tip — the same set the Sandbox window can render directly. */
 	private static readonly ELIGIBLE_SESSION_TYPES: ReadonlySet<string> = new Set([SessionType.CopilotCLI, SessionType.AgentHostCopilot]);
 
 	/** Pseudo-key used as the {@link _lastPostedFor} value for the empty-workspace tip (no real session URI exists). */
@@ -456,17 +456,17 @@ export class AgentsHandoffInputTipContribution extends Disposable implements IWo
 		const useEmptyWorkspaceCopy = emptyWorkspaceEligible && !eligible;
 		const message = useEmptyWorkspaceCopy
 			? localize('chat.agentsHandoff.tip.emptyWorkspace.message', "Copilot CLI [Agent Host] isn't available without an open folder")
-			: localize('chat.agentsHandoff.tip.message', "Continue this session in the Agents Window");
+			: localize('chat.agentsHandoff.tip.message', "Continue this session in the Sandbox Window");
 		const description = useEmptyWorkspaceCopy
-			? localize('chat.agentsHandoff.tip.emptyWorkspace.description', "Open the Agents Window to start a Copilot CLI session.")
+			? localize('chat.agentsHandoff.tip.emptyWorkspace.description', "Open the Sandbox Window to start a Copilot CLI session.")
 			: mode === AgentsHandoffTipMode.Custom
 				? localize('chat.agentsHandoff.tip.description.copilot', "Free with your Copilot plan — get a dedicated, multi-pane view alongside your workspace.")
 				: localize('chat.agentsHandoff.tip.description', "Get a dedicated, multi-pane view alongside your workspace.");
 		const actionLabel = useEmptyWorkspaceCopy
-			? localize('chat.agentsHandoff.tip.action', "Open in Agents Window")
+			? localize('chat.agentsHandoff.tip.action', "Open in Sandbox Window")
 			: mode === AgentsHandoffTipMode.Custom
 				? localize('chat.agentsHandoff.tip.action.custom', "Give your agent more room?")
-				: localize('chat.agentsHandoff.tip.action.default', "Continue in Agents Window");
+				: localize('chat.agentsHandoff.tip.action.default', "Continue in Sandbox Window");
 
 		this._notificationService.setNotification({
 			id: AgentsHandoffInputTipContribution.NOTIFICATION_ID,
@@ -504,4 +504,3 @@ export class AgentsHandoffInputTipContribution extends Disposable implements IWo
 		this._update();
 	}
 }
-

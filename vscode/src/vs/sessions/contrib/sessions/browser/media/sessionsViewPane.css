@@ -77,7 +77,7 @@
 	.agent-sessions-header-row {
 		display: flex;
 		align-items: center;
-		padding: 8px 10px;
+		padding: 10px 12px 8px 12px;
 		min-height: 40px;
 		box-sizing: border-box;
 		-webkit-user-select: none;
@@ -90,6 +90,8 @@
 		font-size: var(--vscode-agents-fontSize-label1, 12px);
 		font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
 		color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -226,7 +228,13 @@
 	.agent-sessions-control-container {
 		flex: 1;
 		overflow: hidden;
+		padding: 0 8px 8px 8px;
+		box-sizing: border-box;
 	}
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .agent-session-item {
+	border-radius: var(--vscode-cornerRadius-medium);
 }
 
 .agent-sessions-workbench.shell-gradient-background .agent-sessions-viewpane {

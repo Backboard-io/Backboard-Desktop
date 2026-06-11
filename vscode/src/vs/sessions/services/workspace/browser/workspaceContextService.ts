@@ -38,7 +38,7 @@ export class SessionsWorkspaceContextService extends Disposable implements IWork
 		private readonly uriIdentityService: IUriIdentityService,
 	) {
 		super();
-		this.workspace = new Workspace(workspaceIdentifier.id, [], false, workspaceIdentifier.configPath, uri => uriIdentityService.extUri.ignorePathCasing(uri), localize('agentsWindow', "Agents Window"));
+		this.workspace = new Workspace(workspaceIdentifier.id, [], false, workspaceIdentifier.configPath, uri => uriIdentityService.extUri.ignorePathCasing(uri), localize('agentsWindow', "Sandbox Window"));
 	}
 
 	getCompleteWorkspace(): Promise<IWorkspace> {

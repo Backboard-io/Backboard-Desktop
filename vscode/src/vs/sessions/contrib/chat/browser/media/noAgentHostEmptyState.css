@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/* Empty state shown in the new-session view on web when no agent hosts are
+/* Empty state shown in the new-session view when no Backboard agent hosts are
  * known. Replaces the workspace picker row + chat input. The chat input is
  * hidden via the `.no-agent-host` class on `.new-chat-widget-content`,
  * which is set from `newChatViewPane.ts` in the same render pass that
@@ -54,7 +54,7 @@
 	color: var(--vscode-descriptionForeground);
 }
 
-/* Inline command (e.g. `code tunnel` / `code-insiders tunnel`) rendered
+/* Inline command/status text rendered
  * inside the description by `renderFormattedText` as a <code> element. */
 .no-agent-host-empty-state .no-agent-host-description code {
 	display: inline-block;
@@ -67,17 +67,6 @@
 	color: var(--vscode-foreground);
 	user-select: text;
 	white-space: nowrap;
-}
-
-.no-agent-host-empty-state .no-agent-host-link {
-	color: var(--vscode-textLink-foreground);
-	cursor: pointer;
-	text-decoration: none;
-}
-
-.no-agent-host-empty-state .no-agent-host-link:hover,
-.no-agent-host-empty-state .no-agent-host-link:focus {
-	text-decoration: underline;
 }
 
 /* When the empty state is mounted, hide the chat input below it — the

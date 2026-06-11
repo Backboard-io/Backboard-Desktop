@@ -59,40 +59,27 @@ registerUpdateTitleBarMenuPlacement(Menus.TitleBarRightLayout, {
 	order: 99,
 });
 
-// Sign In (shown when signed out)
+// Legacy VS Code account commands remain registered for callers that still invoke them
+// directly, but Backboard does not surface them in the Agents account menu.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: 'workbench.action.agenticSignIn',
 			title: localize2('signIn', 'Sign In'),
 			icon: Codicon.signIn,
-			menu: {
-				id: AccountMenu,
-				when: ContextKeyExpr.notEquals('defaultAccountStatus', 'available'),
-				group: '1_account',
-				order: 1,
-			}
 		});
 	}
-	async run(accessor: ServicesAccessor): Promise<void> {
-		const defaultAccountService = accessor.get(IDefaultAccountService);
-		await defaultAccountService.signIn();
+	async run(_accessor: ServicesAccessor): Promise<void> {
+		// Backboard owns agent connectivity; do not open the legacy VS Code/GitHub sign-in flow.
 	}
 });
 
-// Sign Out (shown when signed in)
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: 'workbench.action.agenticSignOut',
 			title: localize2('signOut', 'Sign Out'),
 			icon: Codicon.signOut,
-			menu: {
-				id: AccountMenu,
-				when: ContextKeyExpr.equals('defaultAccountStatus', 'available'),
-				group: '1_account',
-				order: 1,
-			}
 		});
 	}
 	async run(accessor: ServicesAccessor): Promise<void> {
@@ -248,7 +235,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 		}
 
 		// When we have a session but entitlement hasn't resolved yet,
-		// treat as Unresolved to avoid showing "Agents Signed Out".
+		// treat as Unresolved so quota/status UI does not flash.
 		const entitlement = this.accountName && this.chatEntitlementService.entitlement === ChatEntitlement.Unknown
 			? ChatEntitlement.Unresolved
 			: this.chatEntitlementService.entitlement;

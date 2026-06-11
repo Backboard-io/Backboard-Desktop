@@ -266,7 +266,7 @@ export class SessionHeader extends Disposable {
 		this._statusIcon.setStatus(status, isRead, isArchived, pullRequestIcon);
 
 		// Session title
-		this._titleTextEl.textContent = session.title.read(reader) || localize('agentSessions.newSession', "New Session");
+		this._titleTextEl.textContent = session.title.read(reader) || localize('agentSessions.newSession', "New Sandbox");
 		this._titleEl.classList.toggle('editable', this._isTitleEditable());
 
 		// Meta row: workspace · branch · diff stats
@@ -373,10 +373,10 @@ export class SessionHeader extends Disposable {
 
 		const initialTitle = session.title.get();
 		// When the stored title is empty the header shows a localized fallback
-		// ("New Session"). Reflect that as a placeholder rather than seeding the
+		// ("New Sandbox"). Reflect that as a placeholder rather than seeding the
 		// input with it, so the user neither sees a blank field nor accidentally
 		// commits the fallback string.
-		const fallbackTitle = localize('agentSessions.newSession', "New Session");
+		const fallbackTitle = localize('agentSessions.newSession', "New Sandbox");
 
 		const input = document.createElement('input');
 		input.type = 'text';
