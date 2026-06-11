@@ -121,9 +121,9 @@ export class SessionsLayoutPolicy extends Disposable {
 				return { sidebar: false, auxiliaryBar: false, panel: false, sessions: true, editor: false };
 			case 'tablet':
 			case 'desktop':
-				// Tablet and desktop share the standard multi-part workbench defaults.
-				// A dedicated tablet layout has not been designed yet.
-				return { sidebar: true, auxiliaryBar: true, panel: false, sessions: true, editor: false };
+				// Simple Mode opens as a chat-first surface: project/history rail
+				// on the left, Sandbox in the main area, and no artifact column.
+				return { sidebar: true, auxiliaryBar: false, panel: false, sessions: true, editor: false };
 		}
 	}
 
@@ -148,11 +148,12 @@ export class SessionsLayoutPolicy extends Disposable {
 			case 'tablet':
 			case 'desktop':
 				// Tablet currently falls back to desktop sizing.
+				const sideBarSize = Math.min(336, Math.max(280, Math.round(width * 0.16)));
 				return {
-					sideBarSize: 420,
-					auxiliaryBarSize: 420,
+					sideBarSize,
+					auxiliaryBarSize: 0,
 					panelSize: 300,
-					sessionsWidth: Math.max(320, width - 840),
+					sessionsWidth: Math.max(0, width - sideBarSize),
 				};
 		}
 	}

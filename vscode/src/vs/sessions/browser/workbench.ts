@@ -1202,10 +1202,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		// Default sizes from layout policy
 		const sizes = this.layoutPolicy.getPartSizes(width, height);
-		// For hidden parts, still provide a reasonable cached size for when they're shown later.
-		// Saved sizes from a previous session take precedence over policy defaults.
+		// Simple-mode desktop uses fixed Figma proportions for the primary
+		// columns so saved VS Code split sizes do not make first-open look stale.
 		const sideBarSize = sizes.sideBarSize;
-		const auxiliaryBarSize = sizes.auxiliaryBarSize;
 		const panelSize = this._savedPartSizes.panel
 			?? (this.partVisibility.panel ? sizes.panelSize : Math.max(sizes.panelSize, 250));
 		const editorSize = this._savedPartSizes.editor ?? 600;
@@ -1214,14 +1213,13 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// Calculate right section width — when sidebar is hidden it takes no space
 		const effectiveSideBarWidth = this.partVisibility.sidebar ? sideBarSize : 0;
 		const rightSectionWidth = Math.max(0, width - effectiveSideBarWidth);
-		const effectiveAuxBarWidth = this.partVisibility.auxiliaryBar ? auxiliaryBarSize : 0;
 		const effectiveEditorWidth = this.partVisibility.editor ? editorSize : 0;
-		// Prefer the saved chat bar width so the user's preferred chat bar size
-		// is preserved across reloads. Fall back to the remainder of the right
-		// section, which the grid distributes proportionally when the saved
-		// sizes don't fit the current container.
-		const sessionsWidth = this._savedPartSizes.sessions
-			?? Math.max(0, rightSectionWidth - effectiveAuxBarWidth - effectiveEditorWidth);
+		const sessionsWidth = this.partVisibility.sessions
+			? Math.min(sizes.sessionsWidth, Math.max(0, rightSectionWidth - effectiveEditorWidth - (this.partVisibility.auxiliaryBar ? sizes.auxiliaryBarSize : 0)))
+			: sizes.sessionsWidth;
+		const auxiliaryBarSize = this.partVisibility.auxiliaryBar
+			? Math.max(0, rightSectionWidth - sessionsWidth - effectiveEditorWidth)
+			: sizes.auxiliaryBarSize;
 
 		const contentHeight = Math.max(0, height - titleBarHeight);
 		const topRightHeight = Math.max(0, contentHeight - panelSize);

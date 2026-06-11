@@ -288,3 +288,160 @@
 		color: var(--vscode-foreground);
 	}
 }
+
+/* Sandbox rail, scoped to the sessions workbench. */
+.agent-sessions-workbench .agent-sessions-viewpane .agent-sessions-container {
+	background: var(--vscode-sideBar-background);
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .agent-sessions-section {
+	margin-bottom: 0;
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .agent-sessions-header-row {
+	height: 44px;
+	min-height: 44px;
+	padding: 0 8px 0 12px;
+	border-bottom: 0;
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .agent-sessions-header-label {
+	text-transform: none;
+	letter-spacing: 0;
+	font-size: var(--vscode-font-size);
+	line-height: 20px;
+	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .agent-sessions-header-actions {
+	gap: 0;
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .simple-chat-header-icon {
+	width: 28px;
+	height: 28px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--vscode-cornerRadius-small);
+	color: var(--vscode-icon-foreground);
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .simple-chat-header-icon:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .simple-chat-sidebar-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 0 8px 8px 8px;
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .simple-chat-sidebar-action {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 36px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-medium);
+	box-sizing: border-box;
+	background: transparent;
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	font: inherit;
+	font-size: var(--vscode-font-size);
+	font-weight: 500;
+	text-align: left;
+	cursor: pointer;
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .simple-chat-sidebar-action:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .simple-chat-sidebar-action:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .simple-chat-sidebar-action-icon {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-codiconFontSize);
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .simple-chat-sidebar-action-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .simple-chat-recents-header {
+	display: flex;
+	align-items: center;
+	height: 28px;
+	padding: 0 12px;
+	box-sizing: border-box;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-agents-fontSize-label2, 11px);
+	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+}
+
+.agent-sessions-workbench .agent-sessions-viewpane .agent-sessions-control-container {
+	padding: 0 8px 8px 8px;
+}
+
+/* Chat-first Sandbox rail. */
+.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane .agent-sessions-header-row {
+	display: none;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane .agent-sessions-container {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--vscode-focusBorder) 9%, transparent) 0%, transparent 42%),
+		var(--vscode-sideBar-background);
+	font-family: var(--vscode-font-family);
+}
+
+.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane .simple-chat-sidebar-actions {
+	gap: 10px;
+	padding: 34px 22px 22px 22px;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane .simple-chat-sidebar-action {
+	min-height: 38px;
+	padding: 0;
+	gap: 14px;
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: transparent;
+	font-size: 14px;
+	line-height: 20px;
+	font-weight: 500;
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane .simple-chat-sidebar-action:hover {
+	background: transparent;
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane .simple-chat-sidebar-action-icon {
+	width: 18px;
+	font-size: 16px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane .simple-chat-recents-header {
+	height: 34px;
+	padding: 0 22px;
+	font-size: 14px;
+	line-height: 20px;
+	font-weight: 500;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane .agent-sessions-control-container {
+	padding: 0 0 18px 0;
+}

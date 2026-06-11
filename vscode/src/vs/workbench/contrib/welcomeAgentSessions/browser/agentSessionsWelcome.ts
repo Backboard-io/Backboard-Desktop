@@ -66,8 +66,7 @@ const MAX_REPO_PICKS = 10;
 const WELCOME_CHAT_INPUT_LAYOUT_HEIGHT = 150;
 const WELCOME_CHAT_INPUT_RESERVED_LIST_HEIGHT = 50;
 const WELCOME_CHAT_INPUT_RESERVED_CHROME_HEIGHT = 72;
-const BACKBOARD_WELCOME_TITLE = 'Backboard';
-const BACKBOARD_WELCOME_PROMPT = 'What are we building today?';
+const SANDBOX_INPUT_PLACEHOLDER = 'Describe what you want to build';
 // Mirror ChatWidget's compact-surface sizing so the hidden list reservation and input chrome do not collapse the editor.
 const WELCOME_CHAT_INPUT_MAX_HEIGHT_OVERRIDE = WELCOME_CHAT_INPUT_LAYOUT_HEIGHT + WELCOME_CHAT_INPUT_RESERVED_LIST_HEIGHT + WELCOME_CHAT_INPUT_RESERVED_CHROME_HEIGHT;
 
@@ -116,6 +115,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 	private contentContainer!: HTMLElement;
 	private scrollableElement: DomScrollableElement | undefined;
 	private chatWidget: ChatWidget | undefined;
+	private chatWidgetContainer: HTMLElement | undefined;
 	private chatModelRef: IReference<IChatModel> | undefined;
 	private sessionsControl: AgentSessionsControl | undefined;
 	private sessionsControlContainer: HTMLElement | undefined;
@@ -161,7 +161,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		this.container = $('.agentSessionsWelcome', {
 			role: 'document',
 			tabindex: 0,
-			'aria-label': localize('agentSessionsWelcomeAriaLabel', "Overview of Sandbox and how to get started.")
+			'aria-label': localize('agentSessionsWelcomeAriaLabel', "Sandbox chat workspace.")
 		});
 
 		this.contextService = this._register(contextKeyService.createScoped(this.container));
@@ -234,18 +234,28 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		this.buildLeftRail(leftRail);
 
 		const topBar = append(mainRegion, $('.agentSessionsWelcome-topBar'));
-		append(topBar, $('div.agentSessionsWelcome-threadTitle', {}, localize('sandboxThreadTitle', "Sandbox")));
+		const titleWrap = append(topBar, $('.agentSessionsWelcome-threadTitle'));
+		append(titleWrap, $('span.agentSessionsWelcome-projectGlyph'));
+		append(titleWrap, $('span', {}, localize('sandboxTitle', "Sandbox")));
+		titleWrap.appendChild(renderIcon(Codicon.chevronDown));
 		const topActions = append(topBar, $('.agentSessionsWelcome-topActions'));
-		this.buildIconButton(topActions, Codicon.layout, localize('layoutButton', "Layout"));
 		this.buildIconButton(topActions, Codicon.more, localize('moreActionsButton', "More Actions"));
 
 		const conversation = append(mainRegion, $('.agentSessionsWelcome-conversation'));
 		const header = append(conversation, $('.agentSessionsWelcome-header'));
-		append(header, $('h1.product-name', {}, BACKBOARD_WELCOME_TITLE));
+		append(header, $('h1.product-name', {}, localize('simpleModePromptTitle', "What do you want to build?")));
 		append(header, $('p.agentSessionsWelcome-subtitle', {}, localize('agentSessionsWelcome.subtitle', "Describe a page, feature, or change. Backboard will generate the output.")));
+		const suggestions = append(header, $('.agentSessionsWelcome-suggestedPrompts'));
+		this.buildSuggestedPrompt(suggestions, localize('landingPagePrompt', "Make a landing page"));
+		this.buildSuggestedPrompt(suggestions, localize('pricingSectionPrompt', "Create a pricing section"));
+		this.buildSuggestedPrompt(suggestions, localize('settingsScreenPrompt', "Build a settings screen"));
 
 		const chatSection = append(mainRegion, $('.agentSessionsWelcome-chatSection'));
 		this.buildChatWidget(chatSection);
+
+		const recentsHeader = append(leftRail, $('.agentSessionsWelcome-sessionsHeader'));
+		append(recentsHeader, $('span', {}, localize('recents', "Recents")));
+		append(recentsHeader, $('span.agentSessionsWelcome-recentsIndicator'));
 
 		const sessionsSection = append(leftRail, $('.agentSessionsWelcome-sessionsSection'));
 		this.buildSessionsOrPrompts(sessionsSection);
@@ -272,17 +282,13 @@ export class AgentSessionsWelcomePage extends EditorPane {
 	}
 
 	private buildLeftRail(container: HTMLElement): void {
+		const header = append(container, $('.agentSessionsWelcome-railHeader'));
+		append(header, $('span.agentSessionsWelcome-railTitle', {}, localize('sandbox', "Sandbox")));
+		this.buildIconButton(header, Codicon.layoutSidebarLeft, localize('toggleSidebar', "Toggle Sidebar"));
+
 		const nav = append(container, $('.agentSessionsWelcome-railNav'));
 		this.buildRailButton(nav, Codicon.edit, localize('newChat', "New chat"), () => this.chatWidget?.focusInput());
-		this.buildRailButton(nav, Codicon.search, localize('search', "Search"), () => this.commandService.executeCommand('workbench.action.quickOpen'));
-		this.buildRailButton(nav, Codicon.extensions, localize('plugins', "Plugins"), () => this.commandService.executeCommand('workbench.view.extensions'));
-		this.buildRailButton(nav, Codicon.clock, localize('automations', "Automations"));
-		this.buildRailButton(nav, Codicon.layout, localize('sites', "Sites"));
-
-		const workspaceSection = append(container, $('.agentSessionsWelcome-railSection'));
-		const workspaceHeader = append(workspaceSection, $('.agentSessionsWelcome-railSectionHeader'));
-		workspaceHeader.appendChild(renderIcon(Codicon.folder));
-		workspaceHeader.appendChild(document.createTextNode(this.getCurrentWorkspaceLabel()));
+		this.buildRailButton(nav, Codicon.search, localize('searchChats', "Search chats"), () => this.commandService.executeCommand('workbench.action.quickOpen'));
 	}
 
 	private buildRailButton(container: HTMLElement, icon: ThemeIcon, label: string, run?: () => void): void {
@@ -303,46 +309,64 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		button.appendChild(renderIcon(icon));
 	}
 
-	private getCurrentWorkspaceLabel(): string {
-		const workspace = this.workspaceContextService.getWorkspace();
-		return workspace.folders[0]?.name ?? workspace.name ?? localize('workspaceFallback', "Workspace");
+	private buildSuggestedPrompt(container: HTMLElement, prompt: string): void {
+		const button = append(container, $('button.agentSessionsWelcome-suggestedPrompt', {}, prompt)) as HTMLButtonElement;
+		button.type = 'button';
+		button.onclick = () => {
+			this.chatWidget?.setInput(prompt);
+			this.chatWidget?.focusInput();
+		};
 	}
 
 	private buildEnvironmentPanel(container: HTMLElement): void {
-		const header = append(container, $('.agentSessionsWelcome-environmentHeader'));
-		append(header, $('div', {}, localize('environment', "Environment")));
-		this.buildIconButton(header, Codicon.settingsGear, localize('environmentSettings', "Environment Settings"));
+		const header = append(container, $('.agentSessionsWelcome-artifactHeader'));
+		append(header, $('span.agentSessionsWelcome-artifactTitle', {}, localize('artifactTitle', "Landing Page")));
+		const actions = append(header, $('.agentSessionsWelcome-artifactActions'));
+		const toggle = append(actions, $('.agentSessionsWelcome-artifactToggle'));
+		this.buildArtifactToggleButton(toggle, Codicon.tools, localize('designView', "Design"), true);
+		this.buildArtifactToggleButton(toggle, Codicon.code, localize('codeView', "Code"), false);
+		this.buildIconButton(actions, Codicon.deviceDesktop, localize('viewportButton', "Viewport"));
+		this.buildIconButton(actions, Codicon.refresh, localize('refreshArtifact', "Refresh"));
+		this.buildIconButton(actions, Codicon.more, localize('artifactMoreActions', "More Actions"));
 
-		const rows = append(container, $('.agentSessionsWelcome-environmentRows'));
-		this.buildEnvironmentRow(rows, Codicon.diffAdded, localize('changes', "Changes"), $('span.agentSessionsWelcome-diffStat', {}, '+0 -0'));
-		this.buildEnvironmentRow(rows, Codicon.terminal, localize('local', "Local"));
-		this.buildEnvironmentRow(rows, Codicon.gitBranch, this.getCurrentWorkspaceLabel());
-		this.buildEnvironmentRow(rows, Codicon.sourceControl, localize('commitOrPush', "Commit or push"));
-		this.buildEnvironmentRow(rows, Codicon.github, localize('githubNotAuthenticated', "GitHub CLI not authenticated"), undefined, true);
-
-		append(container, $('.agentSessionsWelcome-panelDivider'));
-		append(container, $('div.agentSessionsWelcome-environmentSectionTitle', {}, localize('sideChats', "Side chats")));
-		this.buildEnvironmentRow(container, Codicon.comment, localize('sideChat', "Side chat"));
-
-		append(container, $('.agentSessionsWelcome-panelDivider'));
-		append(container, $('div.agentSessionsWelcome-environmentSectionTitle', {}, localize('sources', "Sources")));
-		append(container, $('div.agentSessionsWelcome-emptyPanelText', {}, localize('noSources', "No sources yet")));
+		const canvas = append(container, $('.agentSessionsWelcome-artifactCanvas'));
+		const empty = append(canvas, $('.agentSessionsWelcome-artifactEmptyState'));
+		const illustration = append(empty, $('.agentSessionsWelcome-artifactIllustration'));
+		append(illustration, $('.agentSessionsWelcome-artifactIllustrationShadow'));
+		const sheet = append(illustration, $('.agentSessionsWelcome-artifactIllustrationSheet'));
+		append(sheet, $('.agentSessionsWelcome-artifactIllustrationLine.lineOne'));
+		append(sheet, $('.agentSessionsWelcome-artifactIllustrationLine.lineTwo'));
+		append(sheet, $('.agentSessionsWelcome-artifactIllustrationLine.lineThree'));
+		append(empty, $('h2', {}, localize('noArtifactYet', "No artifact yet")));
+		append(empty, $('p', {}, localize('noArtifactDescription', "Ask Backboard to build something and the output will appear here.")));
+		const emptyActions = append(empty, $('.agentSessionsWelcome-artifactEmptyActions'));
+		const generateButton = append(emptyActions, $('button.agentSessionsWelcome-artifactPrimaryButton', {}, localize('generateArtifact', "Generate artifact"))) as HTMLButtonElement;
+		generateButton.type = 'button';
+		generateButton.onclick = () => {
+			const prompt = localize('generateArtifactPrompt', "Generate a landing page");
+			this.chatWidget?.setInput(prompt);
+			this.chatWidget?.focusInput();
+		};
+		const tryPromptButton = append(emptyActions, $('button.agentSessionsWelcome-artifactSecondaryButton', {}, localize('tryPrompt', "Try a prompt"))) as HTMLButtonElement;
+		tryPromptButton.type = 'button';
+		tryPromptButton.onclick = () => {
+			const prompt = localize('tryPromptValue', "Make a landing page");
+			this.chatWidget?.setInput(prompt);
+			this.chatWidget?.focusInput();
+		};
 	}
 
-	private buildEnvironmentRow(container: HTMLElement, icon: ThemeIcon, label: string, trailing?: HTMLElement, muted?: boolean): void {
-		const row = append(container, $('.agentSessionsWelcome-environmentRow'));
-		if (muted) {
-			row.classList.add('muted');
-		}
-		row.appendChild(renderIcon(icon));
-		append(row, $('span.agentSessionsWelcome-environmentLabel', {}, label));
-		if (trailing) {
-			row.appendChild(trailing);
-		}
+	private buildArtifactToggleButton(container: HTMLElement, icon: ThemeIcon, label: string, active: boolean): void {
+		const button = append(container, $('button.agentSessionsWelcome-artifactToggleButton')) as HTMLButtonElement;
+		button.type = 'button';
+		button.classList.toggle('active', active);
+		button.appendChild(renderIcon(icon));
+		append(button, $('span', {}, label));
 	}
 
 	private buildChatWidget(container: HTMLElement): void {
 		const chatWidgetContainer = append(container, $('.agentSessionsWelcome-chatWidget'));
+		this.chatWidgetContainer = chatWidgetContainer;
 
 		// Create editor overflow widgets container
 		const editorOverflowWidgetsDomNode = this.layoutService.getContainer(getWindow(chatWidgetContainer)).appendChild($('.chat-editor-overflow.monaco-editor'));
@@ -448,7 +472,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		this.contentDisposables.add(this.chatModelRef);
 		if (this.chatModelRef.object) {
 			this.chatWidget.setModel(this.chatModelRef.object);
-			this.chatWidget.setInputPlaceholder(BACKBOARD_WELCOME_PROMPT);
+			this.chatWidget.setInputPlaceholder(SANDBOX_INPUT_PLACEHOLDER);
 		}
 
 		// Focus the input when clicking anywhere in the chat widget area
@@ -770,7 +794,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			return;
 		}
 
-		const chatWidth = Math.min(1030, Math.max(320, this.lastDimension.width - 120));
+		const chatWidth = Math.max(260, this.chatWidgetContainer?.clientWidth ?? Math.min(540, this.lastDimension.width));
 		this.chatWidget.setInputPartMaxHeightOverride(WELCOME_CHAT_INPUT_MAX_HEIGHT_OVERRIDE);
 		this.chatWidget.layout(WELCOME_CHAT_INPUT_LAYOUT_HEIGHT, chatWidth);
 	}
@@ -780,23 +804,14 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			return;
 		}
 
-		// TODO: @osortega this is a weird way of doing this, maybe we handle the 2-colum layout in the control itself?
-		const sessionsWidth = Math.min(800, this.lastDimension.width - 80);
-		// Calculate height based on actual visible sessions (capped at MAX_SESSIONS)
-		// Use ITEM_HEIGHT per item from AgentSessionsListDelegate
-		// Give the list FULL height so virtualization renders all items
-		// CSS transforms handle the 2-column visual layout
+		const sessionsWidth = Math.max(180, this.sessionsControlContainer.clientWidth);
 		const visibleSessions = Math.min(
 			this.agentSessionsService.model.sessions.filter(s => !s.isArchived()).length,
 			MAX_SESSIONS
 		);
 		const sessionsHeight = visibleSessions * AgentSessionsListDelegate.ITEM_HEIGHT;
 		this.sessionsControl.layout(sessionsHeight, sessionsWidth);
-
-		// Set margin offset for 2-column layout: actual height - visual height
-		// Visual height = ceil(n/2) * ITEM_HEIGHT, so offset = floor(n/2) * ITEM_HEIGHT
-		const marginOffset = Math.floor(visibleSessions / 2) * AgentSessionsListDelegate.ITEM_HEIGHT;
-		this.sessionsControl.element!.style.marginBottom = `-${marginOffset}px`;
+		this.sessionsControl.element!.style.marginBottom = '0';
 	}
 
 	override focus(): void {

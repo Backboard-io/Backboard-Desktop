@@ -168,90 +168,154 @@
 	}
 }
 
-/* Backboard simple-mode shell for the standalone Agents window. */
+/* Sandbox shell: chat-first layout for the standalone Sandbox window. */
 .chat-viewpane.chat-view-simple-agents {
-	background:
-		linear-gradient(142deg, color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent), transparent 64%),
-		var(--vscode-editor-background);
+	--sandbox-rail-width: 260px;
+	--sandbox-chat-width: 540px;
+	--sandbox-border: var(--vscode-panel-border, color-mix(in srgb, var(--vscode-foreground) 12%, transparent));
+	--sandbox-muted: var(--vscode-descriptionForeground);
+	--sandbox-soft-background: color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-sideBar-background));
+	--sandbox-row-hover: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--vscode-foreground) 6%, transparent));
+	flex-direction: row !important;
+	align-items: stretch;
+	overflow: hidden;
+	background: var(--vscode-editor-background);
+	color: var(--vscode-foreground);
+	font-family: var(--vscode-font-family);
 }
 
 .chat-viewpane.chat-view-simple-agents .agent-sessions-container {
-	background:
-		linear-gradient(142deg, color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent), transparent 58%),
-		linear-gradient(104deg, color-mix(in srgb, var(--vscode-sideBar-background) 82%, var(--vscode-editor-background)), var(--vscode-sideBar-background));
-	border-right: 1px solid color-mix(in srgb, var(--vscode-panel-border) 78%, transparent) !important;
-	border-left: none !important;
-}
-
-.chat-viewpane.chat-view-simple-agents.has-sessions-control.sessions-control-orientation-sidebyside {
-	flex-direction: row;
+	display: flex;
+	flex: 0 0 var(--sandbox-rail-width);
+	width: var(--sandbox-rail-width);
+	min-width: var(--sandbox-rail-width);
+	max-width: var(--sandbox-rail-width);
+	min-height: 0;
+	background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	border-right: 1px solid var(--sandbox-border) !important;
+	border-left: 0 !important;
+	box-sizing: border-box;
 }
 
 .chat-viewpane.chat-view-simple-agents .agent-sessions-title-container {
-	min-height: 38px;
-	padding: 0 10px 0 14px;
-	border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 50%, transparent);
+	min-height: 44px;
+	padding: 0 8px 0 12px;
+	border-bottom: 0;
+	box-sizing: border-box;
 	font-size: 13px;
 	font-weight: 600;
 	letter-spacing: 0;
 	text-transform: none;
-	color: var(--vscode-foreground);
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
 }
 
 .chat-viewpane.chat-view-simple-agents .agent-sessions-title {
 	font-size: 13px;
+	line-height: 44px;
+	text-transform: none;
 }
 
-.chat-viewpane.chat-view-simple-agents .agent-sessions-toolbar .action-label,
-.chat-viewpane.chat-view-simple-agents .agent-sessions-new-button-container .monaco-button {
+.chat-viewpane.chat-view-simple-agents .agent-sessions-toolbar {
+	gap: 4px;
+}
+
+.chat-viewpane.chat-view-simple-agents .agent-sessions-toolbar .action-label {
 	border-radius: 6px;
+	color: var(--vscode-icon-foreground);
 }
 
-.chat-viewpane.chat-view-simple-agents.has-sessions-control.sessions-control-orientation-sidebyside .agent-sessions-new-button-container {
-	padding: 10px 12px;
+.chat-viewpane.chat-view-simple-agents .agent-sessions-toolbar .action-label:hover {
+	background: var(--sandbox-row-hover);
+}
+
+.chat-viewpane.chat-view-simple-agents.has-sessions-control.sessions-control-orientation-sidebyside .agent-sessions-new-button-container,
+.chat-viewpane.chat-view-simple-agents .agent-sessions-new-button-container {
+	padding: 4px 8px 8px;
+	box-sizing: border-box;
 }
 
 .chat-viewpane.chat-view-simple-agents .agent-sessions-new-button-container .monaco-button {
 	width: 100%;
+	height: 34px;
+	border: 1px solid var(--sandbox-border);
+	border-radius: 8px;
+	background: var(--vscode-button-secondaryBackground, var(--sandbox-soft-background));
+	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.chat-viewpane.chat-view-simple-agents .agent-sessions-new-button-container .monaco-button:hover {
+	background: var(--vscode-button-secondaryHoverBackground, var(--sandbox-row-hover));
 }
 
 .chat-viewpane.chat-view-simple-agents .agent-sessions-control-container {
-	padding-top: 6px;
+	flex: 1 1 auto;
+	min-height: 0;
+	padding: 0 8px 8px;
+	box-sizing: border-box;
 }
 
 .chat-viewpane.chat-view-simple-agents .chat-controls-container {
-	background-color: var(--vscode-editor-background);
+	flex: 0 0 min(var(--sandbox-chat-width), calc(100% - var(--sandbox-rail-width)));
+	width: min(var(--sandbox-chat-width), calc(100% - var(--sandbox-rail-width)));
+	min-width: 0;
+	min-height: 0;
+	border-right: 1px solid var(--sandbox-border);
+	background: var(--vscode-editor-background);
+	box-sizing: border-box;
 }
 
 .chat-viewpane.chat-view-simple-agents .chat-view-title-header {
-	min-height: 38px;
-	border-bottom-color: color-mix(in srgb, var(--vscode-panel-border) 55%, transparent);
+	min-height: 44px;
+	border-bottom: 1px solid var(--sandbox-border);
+	background: var(--vscode-editor-background);
+}
+
+.chat-viewpane.chat-view-simple-agents .chat-view-title-header .chat-title-label {
+	font-size: 13px;
+	font-weight: 600;
 }
 
 .chat-viewpane.chat-view-simple-agents .interactive-session {
-	max-width: 950px;
-	margin: 0 auto;
+	max-width: none;
+	margin: 0;
+}
+
+.chat-viewpane.chat-view-simple-agents .interactive-list,
+.chat-viewpane.chat-view-simple-agents .interactive-list .monaco-list,
+.chat-viewpane.chat-view-simple-agents .interactive-list .monaco-list-rows {
+	background: var(--vscode-editor-background) !important;
 }
 
 .chat-viewpane.chat-view-simple-agents .interactive-input-part {
-	padding-left: 18px;
-	padding-right: 18px;
+	padding: 0 16px 16px;
 }
 
-.chat-viewpane.chat-view-simple-agents.sessions-control-orientation-stacked .agent-sessions-container {
-	max-width: 950px;
-	background: transparent;
-	border-right: none !important;
-	border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 55%, transparent);
+.chat-viewpane.chat-view-simple-agents .interactive-input-part .chat-input-container {
+	overflow: hidden;
+	border: 1px solid var(--vscode-input-border, var(--sandbox-border));
+	border-radius: 14px;
+	background: var(--sandbox-soft-background);
+	box-shadow: none;
 }
 
-.chat-viewpane.chat-view-simple-agents.sessions-control-orientation-stacked .agent-sessions-title-container {
-	padding: 0 18px;
+.chat-viewpane.chat-view-simple-agents .interactive-input-part .monaco-editor,
+.chat-viewpane.chat-view-simple-agents .interactive-input-part .monaco-editor-background {
+	background: transparent !important;
 }
 
-@media (max-width: 700px) {
+.chat-viewpane.chat-view-simple-agents .monaco-sash.vertical {
+	opacity: 0;
+}
+
+@media (max-width: 900px) {
+	.chat-viewpane.chat-view-simple-agents {
+		--sandbox-rail-width: 220px;
+		--sandbox-chat-width: 420px;
+	}
+
 	.chat-viewpane.chat-view-simple-agents .interactive-input-part {
-		padding-left: 10px;
-		padding-right: 10px;
+		padding: 0 10px 12px;
 	}
 }

@@ -125,7 +125,7 @@ const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000;
 //#region Tree Delegate
 
 class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
-	private static readonly ITEM_HEIGHT = 54;
+	private static readonly ITEM_HEIGHT = 58;
 	/**
 	 * Phone layout uses a taller row so the inline action toolbar can
 	 * meet the 44px minimum touch target without overflowing. Sized to
@@ -134,7 +134,7 @@ class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
 	 * `sessionsList.css`.
 	 */
 	private static readonly ITEM_HEIGHT_PHONE = 76;
-	private static readonly SECTION_HEIGHT = 26;
+	private static readonly SECTION_HEIGHT = 32;
 	private static readonly SHOW_MORE_HEIGHT = 26;
 
 	constructor(
@@ -573,6 +573,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 
 interface ISessionSectionTemplate {
 	readonly container: HTMLElement;
+	readonly icon: HTMLElement;
 	readonly label: HTMLElement;
 	readonly count: HTMLElement;
 	readonly toolbar: MenuWorkbenchToolBar;
@@ -597,6 +598,7 @@ class SessionSectionRenderer implements ITreeRenderer<SessionListItem, FuzzyScor
 		const disposables = new DisposableStore();
 
 		container.classList.add('session-section');
+		const icon = DOM.append(container, $('span.session-section-icon.codicon.codicon-folder'));
 		const label = DOM.append(container, $('span.session-section-label'));
 		const count = DOM.append(container, $('span.session-section-count'));
 		const toolbarContainer = DOM.append(container, $('.session-section-toolbar'));
@@ -609,7 +611,7 @@ class SessionSectionRenderer implements ITreeRenderer<SessionListItem, FuzzyScor
 			menuOptions: { shouldForwardArgs: true },
 		}));
 
-		return { container, label, count, toolbar, chevron, contextKeyService, disposables };
+		return { container, icon, label, count, toolbar, chevron, contextKeyService, disposables };
 	}
 
 	renderElement(node: ITreeNode<SessionListItem, FuzzyScore>, _index: number, template: ISessionSectionTemplate): void {

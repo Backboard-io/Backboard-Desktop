@@ -380,7 +380,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		// Sessions Title
 		const sessionsTitleContainer = this.sessionsTitleContainer = append(sessionsContainer, $('.agent-sessions-title-container'));
 		const sessionsTitle = this.sessionsTitle = append(sessionsTitleContainer, $('span.agent-sessions-title'));
-		sessionsTitle.textContent = this.environmentService.isSessionsWindow ? localize('chats', "Chats") : localize('sessions', "Sessions");
+		sessionsTitle.textContent = this.environmentService.isSessionsWindow ? localize('sandbox', "Sandbox") : localize('sessions', "Sessions");
 		this._register(addDisposableListener(sessionsTitle, EventType.CLICK, () => {
 			this.sessionsControl?.scrollToTop();
 			this.sessionsControl?.focus();
@@ -404,7 +404,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		// New Session Button
 		const newSessionButtonContainer = this.sessionsNewButtonContainer = append(sessionsContainer, $('.agent-sessions-new-button-container'));
 		const newSessionButton = this._register(new Button(newSessionButtonContainer, { ...defaultButtonStyles, secondary: true }));
-		newSessionButton.label = this.environmentService.isSessionsWindow ? localize('newChat', "New chat") : localize('newSession', "New Session");
+		newSessionButton.label = this.environmentService.isSessionsWindow ? localize('new', "New") : localize('newSession', "New Session");
 		this._register(newSessionButton.onDidClick(() => this.commandService.executeCommand(ACTION_ID_NEW_CHAT)));
 
 		// Sessions Control
@@ -488,6 +488,8 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		let newSessionsContainerVisible: boolean;
 		if (!this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewSessionsEnabled)) {
 			newSessionsContainerVisible = false; // disabled in settings
+		} else if (this.environmentService.isSessionsWindow) {
+			newSessionsContainerVisible = true;
 		} else {
 
 			// Sessions control: stacked
@@ -629,7 +631,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 			const model = chatWidget.viewModel?.model;
 			this.titleControl?.update(model);
 			if (this.environmentService.isSessionsWindow) {
-				chatWidget.setInputPlaceholder(localize('backboardInputPlaceholder', "What are we building today?"));
+				chatWidget.setInputPlaceholder(localize('sandboxInputPlaceholder', "Describe what you want to build"));
 			}
 
 			if (this.sessionsViewerOrientation === AgentSessionsViewerOrientation.Stacked) {
@@ -1009,7 +1011,10 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		this._widget.setInputPartMaxHeightOverride(this.sessionsViewerOrientation === AgentSessionsViewerOrientation.Stacked ? remainingHeight : undefined);
 
 		// Chat Widget
-		this._widget.layout(remainingHeight - heightReduction, remainingWidth - widthReduction);
+		const chatWidgetWidth = this.environmentService.isSessionsWindow
+			? Math.max(ChatViewPane.CHAT_WIDGET_DEFAULT_WIDTH, Math.min(540, remainingWidth - widthReduction))
+			: remainingWidth - widthReduction;
+		this._widget.layout(remainingHeight - heightReduction, chatWidgetWidth);
 
 		// Remember last dimensions per orientation
 		this.lastDimensionsPerOrientation.set(this.sessionsViewerOrientation, { height, width });
@@ -1033,6 +1038,9 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 			// Update orientation based on available width
 			default:
 				newSessionsViewerOrientation = width >= ChatViewPane.SESSIONS_SIDEBAR_VIEW_MIN_WIDTH ? AgentSessionsViewerOrientation.SideBySide : AgentSessionsViewerOrientation.Stacked;
+		}
+		if (this.environmentService.isSessionsWindow) {
+			newSessionsViewerOrientation = AgentSessionsViewerOrientation.SideBySide;
 		}
 
 		this.sessionsViewerOrientation = newSessionsViewerOrientation;
@@ -1112,6 +1120,9 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 	}
 
 	private computeEffectiveSideBySideSessionsSidebarWidth(width: number, sessionsViewerSidebarWidth = this.sessionsViewerSidebarWidth): number {
+		if (this.environmentService.isSessionsWindow) {
+			return Math.max(220, Math.min(ChatViewPane.SESSIONS_SIDEBAR_DEFAULT_WIDTH, width - 540));
+		}
 		return Math.max(
 			ChatViewPane.SESSIONS_SIDEBAR_MIN_WIDTH,			// never smaller than min width for side by side sessions
 			Math.min(

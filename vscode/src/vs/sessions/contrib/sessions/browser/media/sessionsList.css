@@ -497,6 +497,61 @@
 	}
 }
 
+.agent-sessions-workbench .sessions-list-control .monaco-list-row:has(.session-item) {
+	margin: 0;
+	width: 100%;
+	border-radius: var(--vscode-cornerRadius-medium);
+}
+
+.agent-sessions-workbench .sessions-list-control .monaco-list-row:hover:not(.selected) {
+	background: var(--vscode-list-hoverBackground) !important;
+}
+
+.agent-sessions-workbench .sessions-list-control .session-item {
+	align-items: center;
+	padding: 0 8px;
+}
+
+.agent-sessions-workbench .sessions-list-control .session-item .session-icon {
+	align-items: center;
+	line-height: 1;
+}
+
+.agent-sessions-workbench .sessions-list-control .session-item .session-icon > .codicon,
+.agent-sessions-workbench .sessions-list-control .session-item .session-icon > .monaco-pixel-spinner {
+	width: 10px;
+	height: 10px;
+	font-size: 10px;
+	color: var(--vscode-charts-blue);
+}
+
+.agent-sessions-workbench .sessions-list-control .session-item .session-main {
+	padding-left: 10px;
+}
+
+.agent-sessions-workbench .sessions-list-control .session-item .session-title-row {
+	padding-bottom: 0;
+	line-height: 20px;
+}
+
+.agent-sessions-workbench .sessions-list-control .session-item .session-title {
+	font-size: var(--vscode-font-size);
+	font-weight: 500;
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+.agent-sessions-workbench .sessions-list-control .session-item .session-details-row {
+	display: none;
+}
+
+.agent-sessions-workbench .sessions-list-control .monaco-list-row .session-title-toolbar {
+	height: 20px;
+}
+
+.agent-sessions-workbench .sessions-list-control .monaco-list-row:has(.session-section) {
+	display: none !important;
+}
+
 /* ---- Mobile Layout: Touch Adaptations ---- */
 
 /* Always show inline toolbar on mobile (no hover dependency) */
@@ -606,4 +661,105 @@
 		align-items: center;
 		justify-content: center;
 	}
+}
+
+/* Chat-first Sandbox project list. */
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .monaco-list-row:has(.session-section) {
+	display: block !important;
+	margin: 0;
+	width: 100%;
+	border-radius: 0;
+	background: transparent !important;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-section {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	padding: 0 22px;
+	gap: 10px;
+	font-size: 14px;
+	line-height: 20px;
+	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-section-icon {
+	width: 18px;
+	font-size: 16px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-section-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-section-count,
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-section-toolbar,
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-section-chevron {
+	display: none !important;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .monaco-list-row:has(.session-item) {
+	margin: 0;
+	width: 100%;
+	border-radius: 0;
+	background: transparent !important;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .monaco-list-row:has(.session-item):hover,
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .monaco-list-row.focused:has(.session-item) {
+	background: transparent !important;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-item {
+	align-items: flex-start;
+	padding: 2px 22px 8px 54px;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-item .session-icon {
+	display: none;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-item .session-main {
+	padding-left: 0;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-item .session-title-row {
+	padding-bottom: 4px;
+	line-height: 22px;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-item .session-title {
+	font-size: 14px;
+	line-height: 20px;
+	font-weight: 500;
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-item .session-details-row {
+	display: flex !important;
+	gap: 5px;
+	font-size: 13px;
+	line-height: 18px;
+	max-height: 18px;
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.78;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-item .session-details-icon,
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-item .session-diff {
+	display: none;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .session-item .session-separator.has-separator::before {
+	content: '';
+}
+
+.agent-sessions-workbench:not(.phone-layout) .sessions-list-control .monaco-list-row .session-title-toolbar {
+	display: none !important;
 }

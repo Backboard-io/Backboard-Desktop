@@ -257,7 +257,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		this._createEditor(inputArea, editorOverflowWidgetsDomNode);
 		this._createInputToolbar(inputArea);
 
-		const newChatBottomContainer = dom.append(parent, dom.$('.new-chat-bottom-container'));
+		const newChatBottomContainer = dom.append(chatInputContainer, dom.$('.new-chat-bottom-container'));
 		const newChatControlsContainer = dom.append(newChatBottomContainer, dom.$('.new-chat-controls-container'));
 		if (this.options.renderSessionTypePickerInControls !== false) {
 			this.sessionTypePicker.render(newChatControlsContainer);
@@ -513,6 +513,17 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		loadingIcon.setAttribute('aria-hidden', 'true');
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), this._loadingSpinner, localize('loading', "Loading...")));
 		this._loadingSpinner.classList.toggle('visible', this.options.loading.get());
+
+		const voiceButton = dom.append(toolbar, dom.$('.sessions-chat-voice-button.codicon.codicon-mic-filled'));
+		const voiceLabel = localize('voiceInput', "Voice input");
+		voiceButton.tabIndex = 0;
+		voiceButton.role = 'button';
+		voiceButton.ariaLabel = voiceLabel;
+		this._register(this.hoverService.setupDelayedHover(voiceButton, {
+			content: voiceLabel,
+			position: { hoverPosition: HoverPosition.BELOW },
+			appearance: { showPointer: true }
+		}));
 
 		const sendButtonContainer = dom.append(toolbar, dom.$('.sessions-chat-send-button'));
 		const sendButton = this._sendButton = this._register(new Button(sendButtonContainer, {

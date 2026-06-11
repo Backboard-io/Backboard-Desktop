@@ -1193,3 +1193,136 @@
 		opacity: 1;
 	}
 }
+
+/* ---- Figma simple-mode desktop shell ---- */
+
+.agent-sessions-workbench:not(.phone-layout) {
+	--sandbox-simple-divider: var(--vscode-sideBar-border, var(--vscode-panel-border));
+	--sandbox-simple-muted: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout),
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) > .monaco-grid-view {
+	background: var(--vscode-editor-background);
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout)::before {
+	display: none;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.titlebar {
+	border-bottom: 1px solid var(--sandbox-simple-divider);
+	background: var(--vscode-titleBar-activeBackground);
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar {
+	border-right: 1px solid var(--sandbox-simple-divider);
+	background: var(--vscode-sideBar-background) !important;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar > .content,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar > .content .pane-body,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar > .content .monaco-scrollable-element,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar > .content .monaco-list,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar > .content .monaco-list-rows {
+	background: var(--vscode-sideBar-background) !important;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar {
+	margin: 0;
+	padding-left: 0;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	background: var(--vscode-editor-background);
+	overflow: hidden;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart {
+	border-right: 1px solid var(--sandbox-simple-divider);
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart > .content,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .content {
+	background: var(--vscode-editor-background);
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout).nomaineditorarea .part.auxiliarybar {
+	margin-left: 0;
+	border-radius: 0;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout).nopanel .part.sessionspart,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout).nopanel .part.auxiliarybar,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout).nopanel .monaco-grid-view .part.editor:not(.modal-editor-part) {
+	margin-bottom: 0;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .title {
+	display: none;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .content {
+	position: relative;
+	min-height: 100%;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .content > * {
+	display: none !important;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .content::before {
+	content: 'Landing Page';
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 48px;
+	display: flex;
+	align-items: center;
+	padding: 0 14px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--sandbox-simple-divider);
+	background: color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-editor-foreground) 4%);
+	color: var(--sandbox-simple-muted);
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .content::after {
+	content: 'No artifact yet\A Ask Backboard to build something and the output will appear here.';
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: min(360px, calc(100% - 48px));
+	transform: translate(-50%, -50%);
+	white-space: pre-line;
+	text-align: center;
+	color: var(--sandbox-simple-muted);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+/* Current Sandbox Simple Mode is chat-first: no default files/artifact column. */
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart {
+	border-right: 0;
+	background: var(--vscode-editor-background);
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart > .content {
+	background: var(--vscode-editor-background);
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .title {
+	display: flex;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .content > * {
+	display: revert !important;
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .content::before,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .content::after {
+	content: none;
+}

@@ -6,16 +6,14 @@
 import '../media/sessionsViewPane.css';
 import * as DOM from '../../../../../base/browser/dom.js';
 import { onUnexpectedError } from '../../../../../base/common/errors.js';
-import { KeybindingLabel } from '../../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
-import { Event } from '../../../../../base/common/event.js';
 import { autorun } from '../../../../../base/common/observable.js';
-import { isWeb, OS } from '../../../../../base/common/platform.js';
+import { isWeb } from '../../../../../base/common/platform.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IsAuxiliaryWindowContext, IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
 import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
-import { ServiceCollection } from '../../../../../platform/instantiation/common/serviceCollection.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
 import { IViewPaneOptions, IViewPaneLocationColors, ViewPane } from '../../../../../workbench/browser/parts/views/viewPane.js';
@@ -25,14 +23,9 @@ import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { localize } from '../../../../../nls.js';
 import { SessionsList, SessionsGrouping, SessionsSorting } from './sessionsList.js';
 import { ISession, SessionStatus } from '../../../../services/sessions/common/session.js';
-import { AICustomizationShortcutsWidget } from '../aiCustomizationShortcutsWidget.js';
 import { AgentHostShortcutsWidget } from '../agentHostShortcutsWidget.js';
 import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
-import { Button } from '../../../../../base/browser/ui/button/button.js';
-import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.js';
-import { defaultButtonStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
-import { asCssVariable } from '../../../../../platform/theme/common/colorRegistry.js';
-import { agentsBackground, agentsNewSessionButtonBackground, agentsNewSessionButtonBorder, agentsNewSessionButtonForeground, agentsNewSessionButtonHoverBackground } from '../../../../common/theme.js';
+import { agentsBackground } from '../../../../common/theme.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IHostService } from '../../../../../workbench/services/host/browser/host.js';
@@ -40,17 +33,15 @@ import { IWorkbenchLayoutService, Parts } from '../../../../../workbench/service
 import { logSessionsInteraction } from '../../../../common/sessionsTelemetry.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsViewService } from '../../../../browser/sessionsViewService.js';
-import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../../platform/actions/browser/toolbar.js';
-import { Menus } from '../../../../browser/menus.js';
 import { MobileSessionFilterChips } from '../../../../browser/parts/mobile/mobileSessionFilterChips.js';
 import { IMobileSortGroupSheetItem, showMobileSortGroupSheet } from '../../../../browser/parts/mobile/mobileSortGroupSheet.js';
 import { isPhoneLayout } from '../../../../browser/parts/mobile/mobileLayout.js';
 import { IsPhoneLayoutContext } from '../../../../common/contextkeys.js';
 import { ISessionsPartService } from '../../../../browser/parts/sessionsPartService.js';
+import { AICustomizationManagementCommands, AICustomizationManagementSection } from '../../../../../workbench/contrib/chat/browser/aiCustomization/aiCustomizationManagement.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
-const ACTION_ID_NEW_SESSION = 'workbench.action.sessions.newChat';
 const GROUPING_STORAGE_KEY = 'sessionsViewPane.grouping';
 const SORTING_STORAGE_KEY = 'sessionsViewPane.sorting';
 
@@ -85,7 +76,6 @@ export class SessionsView extends ViewPane {
 	private headerActions: HTMLElement | undefined;
 	private isFindWidgetOpen = false;
 	sessionsControl: SessionsList | undefined;
-	private _customizationsWidget: AICustomizationShortcutsWidget | undefined;
 	private currentGrouping: SessionsGrouping = SessionsGrouping.Workspace;
 	private currentSorting: SessionsSorting = SessionsSorting.Created;
 	private groupingContextKey: IContextKey | undefined;
@@ -102,6 +92,7 @@ export class SessionsView extends ViewPane {
 		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IOpenerService openerService: IOpenerService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IThemeService themeService: IThemeService,
 		@IHoverService hoverService: IHoverService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
@@ -179,17 +170,9 @@ export class SessionsView extends ViewPane {
 		// widget mounts inside it.
 		const phoneLayout = isPhoneLayout(this.layoutService);
 		if (!phoneLayout) {
-			headerLabel.textContent = localize('sessionsHeader', "Sandbox");
-
-			// Header actions (visual order: New, Filter, Search)
-			this.createNewSessionButton(headerActions);
-
-			const scopedInstantiationService = this._register(this.instantiationService.createChild(new ServiceCollection([IContextKeyService, this.scopedContextKeyService])));
-			this._register(scopedInstantiationService.createInstance(MenuWorkbenchToolBar, headerActions, Menus.SidebarSessionsHeader, {
-				hiddenItemStrategy: HiddenItemStrategy.NoHide,
-				telemetrySource: 'sessionsView.header',
-				toolbarOptions: { primaryGroup: () => true },
-			}));
+			headerLabel.textContent = localize('simpleChatHeader', "Sandbox");
+			const headerIcon = DOM.append(headerActions, $('span.simple-chat-header-icon.codicon.codicon-extensions'));
+			headerIcon.setAttribute('aria-hidden', 'true');
 		} else {
 			headerRow.classList.add('phone-layout-empty');
 		}
@@ -203,6 +186,10 @@ export class SessionsView extends ViewPane {
 		const filterChipsContainer = isPhoneLayout(this.layoutService)
 			? DOM.append(sessionsContent, $('.mobile-session-filter-chips-slot'))
 			: undefined;
+
+		if (!phoneLayout) {
+			this.createSimpleChatSidebarActions(sessionsContent);
+		}
 
 		// Sessions List Control
 		this.sessionsControlContainer = DOM.append(sessionsContent, $('.agent-sessions-control-container'));
@@ -295,16 +282,6 @@ export class SessionsView extends ViewPane {
 			}));
 		}
 
-		// AI Customization toolbar (bottom, fixed height)
-		this._customizationsWidget = this._register(this.instantiationService.createInstance(AICustomizationShortcutsWidget, sessionsContainer, {
-			onDidChangeLayout: () => {
-				if (this.viewPaneContainer) {
-					const { offsetHeight, offsetWidth } = this.viewPaneContainer;
-					this.layoutBody(offsetHeight, offsetWidth);
-				}
-			},
-		}));
-
 		// Agent Host toolbar (bottom, below customizations). Only rendered
 		// in the sessions window on web desktop layouts: electron has no
 		// host picker today (gated out at the menu level), phone layout
@@ -327,84 +304,34 @@ export class SessionsView extends ViewPane {
 		}
 	}
 
-	private createNewSessionButton(container: HTMLElement): void {
-		const newSessionButton = this._register(new Button(container, {
-			...defaultButtonStyles,
-			buttonSecondaryBackground: asCssVariable(agentsNewSessionButtonBackground),
-			buttonSecondaryForeground: asCssVariable(agentsNewSessionButtonForeground),
-			buttonSecondaryHoverBackground: asCssVariable(agentsNewSessionButtonHoverBackground),
-			buttonSecondaryBorder: asCssVariable(agentsNewSessionButtonBorder),
-			secondary: true,
-			supportIcons: true,
-		}));
-		newSessionButton.element.classList.add('agent-sessions-compact-new-button');
-		this._register(newSessionButton.onDidClick(() => {
+	private createSimpleChatSidebarActions(container: HTMLElement): void {
+		const actions = DOM.append(container, $('.simple-chat-sidebar-actions'));
+		this.createSimpleChatSidebarAction(actions, 'codicon-gear', localize('simpleChatSettings', "Settings"), () => {
+			void this.commandService.executeCommand('workbench.action.openSettings');
+		});
+		this.createSimpleChatSidebarAction(actions, 'codicon-add', localize('simpleChatNewChat', "New chat"), () => {
 			logSessionsInteraction(this.telemetryService, 'newSession');
 			this.sessionsViewService.openNewSession();
 			this.sessionsPartService.focusSession(this.sessionsManagementService.activeSession.get());
-		}));
+		});
+		this.createSimpleChatSidebarAction(actions, 'codicon-search', localize('simpleChatSearchChats', "Search chats"), () => this.openFind());
+		this.createSimpleChatSidebarAction(actions, 'codicon-server', localize('simpleChatConnectMcpServer', "Connect MCP server"), () => {
+			void this.commandService.executeCommand(AICustomizationManagementCommands.OpenEditor, AICustomizationManagementSection.McpServers);
+		});
 
-		const newSessionLabel = localize('newCompact', "New");
-		const buttonLabel = $('span.new-session-button-label', undefined, newSessionLabel);
-		const keybindingHint = $('span.new-session-keybinding-hint');
-		const keybindingHintLabel = this._register(new KeybindingLabel(keybindingHint, OS, {
-			disableTitle: true,
-			keybindingLabelBackground: 'transparent',
-			keybindingLabelForeground: 'inherit',
-			keybindingLabelBorder: 'transparent',
-			keybindingLabelBottomBorder: undefined,
-			keybindingLabelShadow: undefined,
-		}));
-		DOM.reset(newSessionButton.element, buttonLabel);
+		const recents = DOM.append(container, $('.simple-chat-recents-header'));
+		DOM.append(recents, $('span', undefined, localize('simpleChatProjects', "Projects")));
+	}
 
-		const getNewSessionKeybinding = () => {
-			const primaryKeybinding = this.keybindingService.lookupKeybinding(ACTION_ID_NEW_SESSION, this.scopedContextKeyService, true);
-			const resolvedKeybindings = this.keybindingService.lookupKeybindings(ACTION_ID_NEW_SESSION);
-			return primaryKeybinding ?? resolvedKeybindings[0];
-		};
-
-		this._register(this.hoverService.setupDelayedHover(newSessionButton.element, () => {
-			const keybindingLabel = getNewSessionKeybinding()?.getLabel() ?? undefined;
-			return {
-				content: keybindingLabel
-					? localize('newSessionButtonTitle', "New Sandbox ({0})", keybindingLabel)
-					: localize('newSessionButtonTitleWithoutKeybinding', "New Sandbox"),
-				appearance: { compact: true },
-				position: { hoverPosition: HoverPosition.BELOW },
-			};
-		}));
-
-		let lastRenderedKeybindingLabel: string | undefined | null = null;
-		let lastRenderedKeybindingAriaLabel: string | undefined | null = null;
-		const updateNewSessionButton = () => {
-			const keybinding = getNewSessionKeybinding();
-			const keybindingLabel = keybinding?.getLabel() ?? undefined;
-			const keybindingAriaLabel = keybinding?.getAriaLabel() ?? undefined;
-			if (lastRenderedKeybindingLabel === keybindingLabel && lastRenderedKeybindingAriaLabel === keybindingAriaLabel) {
-				return;
-			}
-
-			lastRenderedKeybindingLabel = keybindingLabel;
-			lastRenderedKeybindingAriaLabel = keybindingAriaLabel;
-
-			keybindingHintLabel.set(keybinding);
-			if (keybinding) {
-				if (keybindingHint.parentElement !== newSessionButton.element) {
-					DOM.append(newSessionButton.element, keybindingHint);
-				}
-			} else {
-				keybindingHint.remove();
-			}
-
-			newSessionButton.element.setAttribute('aria-label', keybindingAriaLabel
-				? localize('newSessionButtonAriaLabel', "New Sandbox ({0})", keybindingAriaLabel)
-				: localize('newSessionButtonAriaLabelWithoutKeybinding', "New Sandbox"));
-		};
-		this._register(Event.runAndSubscribe(this.keybindingService.onDidUpdateKeybindings, updateNewSessionButton));
+	private createSimpleChatSidebarAction(container: HTMLElement, iconClass: string, label: string, onClick: () => void): void {
+		const action = DOM.append(container, $('button.simple-chat-sidebar-action', { type: 'button', 'aria-label': label }));
+		DOM.append(action, $(`span.simple-chat-sidebar-action-icon.codicon.${iconClass}`));
+		DOM.append(action, $('span.simple-chat-sidebar-action-label', undefined, label));
+		this._register(DOM.addDisposableListener(action, DOM.EventType.CLICK, onClick));
 	}
 
 	focusCustomizations(): void {
-		this._customizationsWidget?.focus();
+		this.focus();
 	}
 
 	private restoreLastSelectedSession(): void {

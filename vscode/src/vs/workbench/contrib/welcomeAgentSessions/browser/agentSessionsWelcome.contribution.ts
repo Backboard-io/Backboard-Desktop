@@ -37,7 +37,7 @@ Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane
 	EditorPaneDescriptor.create(
 		AgentSessionsWelcomePage,
 		AgentSessionsWelcomePage.ID,
-		localize('agentSessionsWelcome', "Sandbox Welcome")
+		localize('agentSessionsWelcome', "Sandbox")
 	),
 	[
 		new SyncDescriptor(AgentSessionsWelcomeInput)
@@ -74,7 +74,7 @@ class AgentSessionsWelcomeEditorResolverContribution extends Disposable implemen
 			`${AgentSessionsWelcomeInput.RESOURCE.scheme}:${AgentSessionsWelcomeInput.RESOURCE.authority}/**`,
 			{
 				id: AgentSessionsWelcomePage.ID,
-				label: localize('agentSessionsWelcome.displayName', "Sandbox Welcome"),
+				label: localize('agentSessionsWelcome.displayName', "Sandbox"),
 				priority: RegisteredEditorPriority.builtin,
 			},
 			{
@@ -94,12 +94,12 @@ class AgentSessionsWelcomeEditorResolverContribution extends Disposable implemen
 	}
 }
 
-// Register command to open the Sandbox welcome page
+// Register command to open Sandbox
 registerAction2(class OpenAgentSessionsWelcomeAction extends Action2 {
 	constructor() {
 		super({
 			id: AgentSessionsWelcomePage.COMMAND_ID,
-			title: localize('openAgentSessionsWelcome', "Open Sandbox Welcome"),
+			title: localize('openAgentSessionsWelcome', "Open Sandbox"),
 			precondition: ChatContextKeys.enabled
 		});
 	}
