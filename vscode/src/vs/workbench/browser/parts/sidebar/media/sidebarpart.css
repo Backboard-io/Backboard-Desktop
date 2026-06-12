@@ -19,8 +19,8 @@
 .monaco-workbench .part.sidebar > .title {
 	background-color: var(--vscode-sideBarTitle-background);
 	box-sizing: border-box;
-	min-height: 36px;
-	height: 36px;
+	min-height: 34px;
+	height: 34px;
 	align-items: center;
 	padding: 0 6px 0 12px;
 	border-bottom: 1px solid var(--vscode-sideBar-border);
@@ -30,7 +30,7 @@
 	text-transform: none;
 	font-size: 12px;
 	font-weight: 600;
-	line-height: 36px;
+	line-height: 34px;
 }
 
 .monaco-workbench .viewlet .collapsible.header .title {
@@ -135,8 +135,8 @@
 }
 
 .monaco-workbench .part.sidebar .pane > .pane-header {
-	height: 36px;
-	line-height: 36px;
+	height: 32px;
+	line-height: 32px;
 	padding: 0 6px 0 8px;
 	background-color: var(--vscode-sideBarSectionHeader-background);
 	border-top: 0;
@@ -149,11 +149,19 @@
 }
 
 .monaco-workbench .part.sidebar .pane-body {
-	padding-top: 4px;
+	padding-top: 3px;
 }
 
 .monaco-workbench .part.sidebar .monaco-list-row {
 	width: calc(100% - 16px) !important;
 	margin-left: 8px;
 	border-radius: 4px;
+}
+
+.monaco-workbench .part.sidebar .monaco-list .monaco-list-row {
+	min-height: 22px;
+}
+
+.monaco-workbench .part.sidebar .monaco-list .monaco-list-row .monaco-icon-label {
+	font-size: 12px;
 }

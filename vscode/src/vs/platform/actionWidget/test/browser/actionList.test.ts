@@ -221,6 +221,19 @@ suite('ActionListWidget', () => {
 		assert.deepStrictEqual(getVisibleRowText(widget), ['Provider B', 'beta']);
 	});
 
+	test('filters action items by hidden filter text', () => {
+		const widget = createActionListWidget(disposables, {
+			items: [
+				{ ...action('alpha'), filterText: 'first provider' },
+				{ ...action('beta'), filterText: 'second provider' },
+			],
+		});
+
+		typeFilter(widget, 'second');
+
+		assert.deepStrictEqual(getVisibleRowText(widget), ['beta']);
+	});
+
 	test('leaves room for action widget chrome when clamping dynamic height', () => withWindowInnerHeight(300, () => {
 		const list = createActionList(disposables, Array.from({ length: 50 }, (_, i) => action(`item-${i}`)));
 

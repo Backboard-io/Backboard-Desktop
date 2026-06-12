@@ -755,6 +755,112 @@
 	padding: 8px 36px 18px 36px;
 }
 
+/* ---- Zed-style composer for active Sandbox sessions ---- */
+
+.agent-sessions-workbench .interactive-session .interactive-input-part:not(.compact) {
+	margin: 0 auto;
+	width: 100%;
+	max-width: 1030px;
+	padding: 8px 36px 18px 36px;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .interactive-session .interactive-input-and-side-toolbar {
+	align-items: stretch;
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-container {
+	min-height: 108px;
+	padding: 0 12px 8px 12px;
+	border-radius: 24px;
+	border-color: color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-input-border)) 72%, transparent);
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--vscode-agentsChatInput-background) 94%, var(--vscode-foreground) 6%) 0%, var(--vscode-agentsChatInput-background) 100%);
+	color: var(--vscode-agentsChatInput-foreground);
+	box-shadow:
+		0 18px 48px color-mix(in srgb, var(--vscode-widget-shadow, #000) 12%, transparent),
+		0 1px 0 color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-container:hover {
+	border-color: color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-input-border)) 90%, var(--vscode-foreground) 10%);
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-container.focused {
+	border-color: var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder));
+	box-shadow:
+		0 18px 48px color-mix(in srgb, var(--vscode-widget-shadow, #000) 12%, transparent),
+		0 0 0 1px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 35%, transparent);
+}
+
+.agent-sessions-workbench .interactive-session .chat-editor-container {
+	padding: 8px 2px 2px 2px;
+}
+
+.agent-sessions-workbench .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor,
+.agent-sessions-workbench .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
+	background-color: transparent !important;
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-toolbars {
+	min-height: 34px;
+	margin-top: 2px;
+	padding: 7px 0 0 0;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-input-border)) 45%, transparent);
+	flex-wrap: wrap;
+}
+
+.agent-sessions-workbench .interactive-session .chat-secondary-toolbar {
+	max-width: 1030px;
+	width: calc(100% - 72px);
+	margin: -14px auto 12px auto;
+	padding: 0 12px;
+	box-sizing: border-box;
+	justify-content: flex-end;
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-toolbar .action-label,
+.agent-sessions-workbench .interactive-session .chat-secondary-toolbar .action-label,
+.agent-sessions-workbench .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label,
+.agent-sessions-workbench .interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label,
+.agent-sessions-workbench .interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label {
+	min-height: 22px;
+	border-radius: var(--vscode-cornerRadius-small);
+	color: var(--vscode-icon-foreground);
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-toolbar .action-label:hover,
+.agent-sessions-workbench .interactive-session .chat-secondary-toolbar .action-label:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:has(> .action-label.codicon-arrow-up),
+.agent-sessions-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled):has(> .action-label.codicon-arrow-up:focus-visible),
+.agent-sessions-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up,
+.agent-sessions-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:has(> .action-label.codicon-arrow-up) > .action-label.codicon-arrow-up {
+	width: 24px;
+	height: 24px;
+	border-radius: var(--vscode-cornerRadius-small);
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label.codicon-arrow-up {
+	background: transparent;
+	color: var(--vscode-disabledForeground) !important;
+}
+
+.agent-sessions-workbench .interactive-session .chat-attached-context .chat-attached-context-attachment,
+.agent-sessions-workbench .sessions-chat-attachment-pill {
+	border-radius: var(--vscode-cornerRadius-small);
+	background: color-mix(in srgb, var(--vscode-agentsChatInput-background) 88%, var(--vscode-foreground) 12%);
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-container .chat-attached-context {
+	display: flex;
+	padding: 8px 0 0 0;
+}
+
 /* ---- Sessions Action Widget Pickers ---- */
 
 .agent-sessions-workbench .action-widget {

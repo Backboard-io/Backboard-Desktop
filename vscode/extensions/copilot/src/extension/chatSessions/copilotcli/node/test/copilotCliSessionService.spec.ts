@@ -42,7 +42,7 @@ import { IChatDelegationSummaryService } from '../../common/delegationSummarySer
 import { getCopilotCLISessionDir } from '../cliHelpers';
 import { ICopilotCLISDK } from '../copilotCli';
 import { CopilotCLISession, ICopilotCLISession } from '../copilotcliSession';
-import { COPILOT_CLI_CHAT_PANEL_SYSTEM_MESSAGE, CopilotCLISessionService, CopilotCLISessionWorkspaceTracker, ICopilotCLISessionItem } from '../copilotcliSessionService';
+import { getCopilotCLIChatPanelSystemMessage, CopilotCLISessionService, CopilotCLISessionWorkspaceTracker, ICopilotCLISessionItem } from '../copilotcliSessionService';
 import { CopilotCLIMCPHandler } from '../mcpHandler';
 import { MissionControlApiClient } from '../missionControlApiClient';
 import { IQuestion, IQuestionAnswer, IUserQuestionHandler } from '../userInputHelpers';
@@ -355,9 +355,10 @@ describe('CopilotCLISessionService', () => {
 			}));
 		});
 
-		it('passes the VS Code Copilot CLI identity system message to session manager', async () => {
+		it('passes the Backboard identity system message to session manager', async () => {
 			const createSessionSpy = vi.spyOn(manager, 'createSession');
-			await service.createSession({ model: 'gpt-test', ...sessionOptionsFor(URI.file('/tmp')) }, CancellationToken.None);
+			const workspace = URI.file('/tmp');
+			await service.createSession({ model: 'gpt-test', ...sessionOptionsFor(workspace) }, CancellationToken.None);
 
 			const callArgs = createSessionSpy.mock.calls[0][0];
 			expect(callArgs.systemMessage).toEqual({
@@ -365,17 +366,18 @@ describe('CopilotCLISessionService', () => {
 				sections: {
 					identity: {
 						action: 'replace',
-						content: COPILOT_CLI_CHAT_PANEL_SYSTEM_MESSAGE,
+						content: getCopilotCLIChatPanelSystemMessage(workspace),
 					},
 				},
 			});
 		});
 
-		it('preserves prompt variable context separately from the VS Code Copilot CLI identity system message', async () => {
+		it('preserves prompt variable context separately from the Backboard identity system message', async () => {
 			const variableContext = 'Resolved template variables are available here.';
 			vi.spyOn(NullPromptVariablesService.prototype, 'buildTemplateVariablesContext').mockReturnValue(variableContext);
 			const createSessionSpy = vi.spyOn(manager, 'createSession');
-			await service.createSession({ model: 'gpt-test', ...sessionOptionsFor(URI.file('/tmp')) }, CancellationToken.None);
+			const workspace = URI.file('/tmp');
+			await service.createSession({ model: 'gpt-test', ...sessionOptionsFor(workspace) }, CancellationToken.None);
 
 			const systemMessage = createSessionSpy.mock.calls[0][0].systemMessage;
 			expect(systemMessage?.mode).toBe('customize');
@@ -388,7 +390,7 @@ describe('CopilotCLISessionService', () => {
 				throw new Error('Expected replace identity section override');
 			}
 			expect(systemMessage.content).toBe(variableContext);
-			expect(identity.content).toBe(COPILOT_CLI_CHAT_PANEL_SYSTEM_MESSAGE);
+			expect(identity.content).toBe(getCopilotCLIChatPanelSystemMessage(workspace));
 			expect(identity.content).not.toContain(variableContext);
 		});
 
@@ -425,11 +427,12 @@ describe('CopilotCLISessionService', () => {
 			}), true);
 		});
 
-		it('passes the VS Code Copilot CLI identity system message when getting an existing session', async () => {
+		it('passes the Backboard identity system message when getting an existing session', async () => {
 			const targetId = 'system-message-get';
 			manager.sessions.set(targetId, new MockCliSdkSession(targetId, new Date()));
 			const getSessionSpy = vi.spyOn(manager, 'getSession');
-			await service.getSession({ sessionId: targetId, model: 'gpt-test', ...sessionOptionsFor(URI.file('/tmp')) }, CancellationToken.None);
+			const workspace = URI.file('/tmp');
+			await service.getSession({ sessionId: targetId, model: 'gpt-test', ...sessionOptionsFor(workspace) }, CancellationToken.None);
 
 			expect(getSessionSpy).toHaveBeenCalledWith(expect.objectContaining({
 				systemMessage: {
@@ -437,7 +440,7 @@ describe('CopilotCLISessionService', () => {
 					sections: {
 						identity: {
 							action: 'replace',
-							content: COPILOT_CLI_CHAT_PANEL_SYSTEM_MESSAGE,
+							content: getCopilotCLIChatPanelSystemMessage(workspace),
 						},
 					},
 				},

@@ -320,6 +320,7 @@
 	box-sizing: border-box;
 	overflow: hidden;
 	background-color: var(--vscode-editorGroupHeader-tabsBackground);
+	border-bottom: 1px solid var(--vscode-editorGroupHeader-tabsBorder);
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title:not(.tabs) {
@@ -337,6 +338,14 @@
 	background-color: var(--title-border-bottom-color);
 	width: 100%;
 	height: 1px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .editor-actions .action-label.codicon {
+	border-radius: 5px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .title .editor-actions .action-label.codicon:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container.empty > .title {

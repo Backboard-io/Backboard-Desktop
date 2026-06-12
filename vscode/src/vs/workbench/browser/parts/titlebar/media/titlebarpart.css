@@ -10,6 +10,7 @@
 	box-shadow: none;
 	border-bottom: 1px solid var(--vscode-titleBar-border);
 	font-size: 12px;
+	font-weight: 500;
 }
 
 .monaco-workbench.mac .part.titlebar {
@@ -137,7 +138,7 @@
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container .monaco-toolbar .actions-container {
-	gap: 4px;
+	gap: 3px;
 }
 
 /* Window Title Menu */

@@ -15,7 +15,10 @@
   "activationEvents": [
     "onStartupFinished",
     "onView:backboard.panel",
+    "onCommand:backboard.newChat",
+    "onCommand:backboard.showHistory",
     "onCommand:backboard.setApiKey",
+    "onCommand:backboard.refreshModels",
     "onCommand:backboard.openPanel",
     "onCommand:backboard.openRightPanel"
   ],
@@ -32,31 +35,71 @@
     "commands": [
       {
         "command": "backboard.openPanel",
-        "title": "Open Panel",
-        "category": "Backboard"
+        "title": "Open Backboard",
+        "category": "Backboard",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "backboard.openRightPanel",
-        "title": "Open Right Panel",
-        "category": "Backboard"
+        "title": "Open Backboard in Right Sidebar",
+        "category": "Backboard",
+        "icon": "$(layout-sidebar-right)"
+      },
+      {
+        "command": "backboard.newChat",
+        "title": "New Chat",
+        "category": "Backboard",
+        "icon": "$(add)"
+      },
+      {
+        "command": "backboard.showHistory",
+        "title": "Show History",
+        "category": "Backboard",
+        "icon": "$(history)"
       },
       {
         "command": "backboard.setApiKey",
         "title": "Set API Key",
-        "category": "Backboard"
+        "category": "Backboard",
+        "icon": "$(key)"
       },
       {
         "command": "backboard.refreshModels",
         "title": "Refresh Models",
-        "category": "Backboard"
+        "category": "Backboard",
+        "icon": "$(refresh)"
       }
     ],
+    "menus": {
+      "viewContainer/title": [
+        {
+          "command": "backboard.newChat",
+          "when": "viewContainer == backboard",
+          "group": "navigation@1"
+        },
+        {
+          "command": "backboard.showHistory",
+          "when": "viewContainer == backboard",
+          "group": "navigation@2"
+        },
+        {
+          "command": "backboard.refreshModels",
+          "when": "viewContainer == backboard",
+          "group": "navigation@3"
+        },
+        {
+          "command": "backboard.setApiKey",
+          "when": "viewContainer == backboard",
+          "group": "navigation@4"
+        }
+      ]
+    },
     "viewsContainers": {
       "secondarySidebar": [
         {
           "id": "backboard",
-          "title": "Backboard",
-          "icon": "$(sparkle)"
+          "title": "\u200B",
+          "icon": "media/ai_backboard.svg"
         }
       ]
     },
@@ -65,7 +108,7 @@
         {
           "id": "backboard.panel",
           "type": "webview",
-          "name": "Backboard"
+          "name": "\u200B"
         }
       ]
     },
@@ -76,7 +119,7 @@
           "backboard.apiKey": {
             "type": "string",
             "default": "",
-            "markdownDescription": "Backboard API key. If empty, the bridge uses `~/.backboard/config.json` or `BACKBOARD_API_KEY`.",
+            "markdownDescription": "Legacy Backboard API key fallback. Prefer the **Set API Key** command, which stores the key in `~/.backboard_ide/config.json`.",
             "scope": "machine-overridable"
           },
           "backboard.env": {
@@ -112,7 +155,7 @@
               "manual",
               "free"
             ],
-            "default": "agent",
+            "default": "free",
             "description": "Backboard tool mode."
           },
           "backboard.intensity": {
@@ -146,17 +189,17 @@
           "backboard.mcpFigma": {
             "type": "boolean",
             "default": false,
-            "description": "Send Figma MCP calls as enabled for Backboard turns."
+            "description": "Request Backboard-hosted Figma MCP tool intent for Backboard turns."
           },
           "backboard.mcpNotion": {
             "type": "boolean",
             "default": false,
-            "description": "Send Notion MCP calls as enabled for Backboard turns."
+            "description": "Request Backboard-hosted Notion MCP tool intent for Backboard turns."
           },
           "backboard.mcpGoogle": {
             "type": "boolean",
             "default": false,
-            "description": "Send Google MCP calls as enabled for Backboard turns."
+            "description": "Request Backboard-hosted Google MCP tool intent for Backboard turns."
           },
           "backboard.voiceMode": {
             "type": "string",
@@ -179,7 +222,8 @@
     ]
   },
   "scripts": {
-    "build-bridge": "cd ../../../zed && cargo build -p backboard_bridge",
+    "build-bridge": "cargo build --manifest-path ./rust/Cargo.toml -p backboard_bridge",
+    "package-bridge": "node ./scripts/package-bridge.js",
     "compile": "gulp compile-extension:backboard",
     "watch": "gulp watch-extension:backboard",
     "typecheck": "tsgo --project ./tsconfig.json --noEmit"

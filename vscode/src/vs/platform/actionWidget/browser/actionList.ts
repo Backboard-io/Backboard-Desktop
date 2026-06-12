@@ -68,6 +68,10 @@ export interface IActionListItem<T> {
 	readonly detail?: string;
 	readonly description?: string | IMarkdownString;
 	/**
+	 * Additional text used only by the filter input.
+	 */
+	readonly filterText?: string;
+	/**
 	 * Optional accessible description used in place of {@link description} for
 	 * screen reader labels. Useful when the visual description contains icons
 	 * or other non-textual content.
@@ -842,7 +846,7 @@ export class ActionListWidget<T> extends Disposable {
 			const matchesFilter = (item: IActionListItem<T>) => {
 				const label = (item.label ?? '').toLowerCase();
 				const descValue = typeof item.description === 'string' ? item.description : (item.description?.value ?? '');
-				return label.includes(filterLower) || descValue.toLowerCase().includes(filterLower);
+				return label.includes(filterLower) || descValue.toLowerCase().includes(filterLower) || !!item.filterText?.toLowerCase().includes(filterLower);
 			};
 
 			for (const item of this._allMenuItems) {

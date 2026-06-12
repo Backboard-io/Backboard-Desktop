@@ -1146,9 +1146,9 @@ menusExtensionPoint.setHandler(extensions => {
 					}
 				}
 
-				if (menu.id === MenuId.ViewContainerTitle && !menuItem.when?.includes('viewContainer == workbench.view.debug')) {
-					// Not a perfect check but enough to communicate that this proposed extension point is currently only for the debug view container
-					collector.error(localize('viewContainerTitle.when', "The {0} menu contribution must check {1} in its {2} clause.", '`viewContainer/title`', '`viewContainer == workbench.view.debug`', '"when"'));
+				if (menu.id === MenuId.ViewContainerTitle && !menuItem.when?.includes('viewContainer == workbench.view.debug') && !menuItem.when?.includes('viewContainer == backboard')) {
+					// Not a perfect check but enough to communicate that this proposed extension point is currently only for selected product-owned view containers.
+					collector.error(localize('viewContainerTitle.when', "The {0} menu contribution must check {1} or {2} in its {3} clause.", '`viewContainer/title`', '`viewContainer == workbench.view.debug`', '`viewContainer == backboard`', '"when"'));
 					continue;
 				}
 

@@ -103,9 +103,11 @@
 	cursor: pointer;
 	height: var(--editor-group-tab-height);
 	box-sizing: border-box;
-	padding-left: 10px;
+	padding-left: 9px;
+	border-right: 1px solid var(--vscode-tab-border);
 	outline-offset: -2px;
-	font-size: 13px;
+	font-size: 12px;
+	font-weight: 500;
 }
 
 /* Tab Background Color in/active group/tab */
@@ -147,10 +149,13 @@
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active {
 	box-shadow: none;
+	font-weight: 600;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:hover:not(.active) {
 	box-shadow: none;
+	background-color: var(--vscode-tab-hoverBackground);
+	color: var(--vscode-tab-hoverForeground);
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title > .tabs-and-actions-container.wrapping .tabs-container > .tab:last-child {
@@ -310,6 +315,10 @@
 	background-color: var(--tab-border-bottom-color);
 }
 
+.monaco-workbench .part.editor > .content .editor-group-container.active > .title:not(.two-tab-bars) .tabs-container > .tab.active.tab-border-bottom > .tab-border-bottom-container {
+	background-color: var(--vscode-focusBorder);
+}
+
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.dirty-border-top:not(:focus) > .tab-border-top-container {
 	z-index: 6;
 	top: 0;
@@ -323,6 +332,7 @@
 	margin-top: auto;
 	margin-bottom: auto;
 	line-height: var(--editor-group-tab-height); /* aligns icon and label vertically centered in the tab */
+	letter-spacing: 0;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.sizing-shrink .tab-label,
@@ -447,10 +457,15 @@
 
 .monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab > .tab-actions .action-label.codicon {
 	color: inherit;
-	font-size: 16px;
-	padding: 2px;
-	width: 16px;
-	height: 16px;
+	font-size: 14px;
+	padding: 3px;
+	width: 14px;
+	height: 14px;
+	border-radius: 5px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab > .tab-actions .action-label.codicon:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab.sticky.dirty > .tab-actions .action-label:not(:hover)::before,
@@ -507,7 +522,7 @@
 .monaco-workbench .part.editor > .content .editor-group-container > .title .editor-actions {
 	cursor: default;
 	flex: initial;
-	padding: 0 8px 0 4px;
+	padding: 0 7px 0 4px;
 	height: var(--editor-group-tab-height);
 }
 

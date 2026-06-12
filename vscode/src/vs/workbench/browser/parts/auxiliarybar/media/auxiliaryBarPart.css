@@ -14,6 +14,10 @@
 	background-color: var(--vscode-sideBar-background);
 }
 
+.monaco-workbench .part.auxiliarybar {
+	border-left: 1px solid var(--vscode-sideBar-border);
+}
+
 .monaco-workbench .part.auxiliarybar .title-actions .actions-container {
 	justify-content: flex-end;
 }
@@ -24,6 +28,7 @@
 
 .monaco-workbench .part.auxiliarybar > .title {
 	background-color: var(--vscode-sideBarTitle-background);
+	border-bottom: 1px solid var(--vscode-sideBar-border);
 }
 
 .monaco-workbench .part.auxiliarybar > .title > .title-label {
