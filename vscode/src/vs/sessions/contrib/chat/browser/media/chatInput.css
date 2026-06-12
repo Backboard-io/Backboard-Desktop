@@ -489,3 +489,120 @@
 	border-top-right-radius: 0;
 	border-top: none;
 }
+
+/* ---- Zed-style Sandbox Composer ---- */
+
+.agent-sessions-workbench .new-chat-input-container {
+	max-width: 1030px;
+	margin-top: 0;
+}
+
+.agent-sessions-workbench .new-chat-input-area {
+	min-height: 108px;
+	max-width: 1030px;
+	border-radius: 24px;
+	border-color: color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-input-border)) 72%, transparent);
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--vscode-agentsChatInput-background) 94%, var(--vscode-foreground) 6%) 0%, var(--vscode-agentsChatInput-background) 100%);
+	box-shadow:
+		0 18px 48px color-mix(in srgb, var(--vscode-widget-shadow, #000) 12%, transparent),
+		0 1px 0 color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
+.agent-sessions-workbench .new-chat-input-area:hover {
+	border-color: color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-input-border)) 90%, var(--vscode-foreground) 10%);
+}
+
+.agent-sessions-workbench .new-chat-input-area:focus-within {
+	border-color: var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder));
+	box-shadow:
+		0 18px 48px color-mix(in srgb, var(--vscode-widget-shadow, #000) 12%, transparent),
+		0 0 0 1px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 35%, transparent);
+}
+
+.agent-sessions-workbench .sessions-chat-editor {
+	padding: 8px 14px 2px 14px;
+}
+
+.agent-sessions-workbench .sessions-chat-editor .monaco-editor,
+.agent-sessions-workbench .sessions-chat-editor .monaco-editor .overflow-guard,
+.agent-sessions-workbench .sessions-chat-editor .monaco-editor-background {
+	border-radius: 22px 22px 0 0;
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar {
+	min-height: 34px;
+	margin: 2px 12px 0 12px;
+	padding: 7px 0 8px 0;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-input-border)) 45%, transparent);
+	flex-wrap: wrap;
+}
+
+.agent-sessions-workbench .new-chat-input-area .new-chat-bottom-container {
+	width: auto;
+	max-width: none;
+	margin: 0 12px 8px 12px;
+	padding: 2px 0 0 0;
+	display: flex;
+	min-height: 24px;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-input-border)) 18%, transparent);
+}
+
+.agent-sessions-workbench .new-chat-input-area .new-chat-bottom-container:empty {
+	display: none;
+}
+
+.agent-sessions-workbench .sessions-chat-attach-row {
+	padding: 8px 12px 0 12px;
+}
+
+.agent-sessions-workbench .sessions-chat-attach-button,
+.agent-sessions-workbench .sessions-chat-send-button,
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label,
+.agent-sessions-workbench .new-chat-bottom-container .action-label,
+.agent-sessions-workbench .new-chat-bottom-container .sessions-chat-picker-slot .action-label {
+	border-radius: var(--vscode-cornerRadius-small);
+}
+
+.agent-sessions-workbench .sessions-chat-attach-button {
+	width: 24px;
+	height: 24px;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label,
+.agent-sessions-workbench .new-chat-bottom-container .action-label,
+.agent-sessions-workbench .new-chat-bottom-container .sessions-chat-picker-slot .action-label {
+	height: 22px;
+	padding: 3px 7px;
+	color: var(--vscode-icon-foreground);
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label:hover,
+.agent-sessions-workbench .new-chat-bottom-container .action-label:hover,
+.agent-sessions-workbench .new-chat-bottom-container .sessions-chat-picker-slot .action-label:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .sessions-chat-send-button,
+.agent-sessions-workbench .sessions-chat-send-button .monaco-button {
+	width: 24px;
+	height: 24px;
+	min-width: 24px;
+	border-radius: var(--vscode-cornerRadius-small);
+}
+
+.agent-sessions-workbench .sessions-chat-send-button .monaco-button:not(.disabled) {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground) !important;
+}
+
+.agent-sessions-workbench .sessions-chat-send-button .monaco-button.disabled {
+	background: transparent;
+	color: var(--vscode-disabledForeground) !important;
+}
+
+.agent-sessions-workbench .new-chat-input-container > .chat-input-notification-container .chat-input-notification {
+	border-top-left-radius: 24px;
+	border-top-right-radius: 24px;
+}

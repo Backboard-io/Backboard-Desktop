@@ -959,6 +959,26 @@ suite('buildModelPickerItems', () => {
 		assert.strictEqual(gptItem.description, undefined);
 	});
 
+	test('model items include metadata for filtering', () => {
+		const auto = createAutoModel();
+		const modelA = createModel('gpt-4o', 'GPT-4o', 'copilot');
+		modelA.metadata = {
+			...modelA.metadata,
+			family: 'gpt-4',
+			detail: 'GitHub Copilot',
+			capabilities: { toolCalling: true, vision: true, agentMode: true },
+		} as ILanguageModelChatMetadata;
+		const items = callBuild([auto, modelA]);
+		const gptItem = getActionItems(items).find(a => a.label === 'GPT-4o');
+		assert.ok(gptItem);
+		assert.ok(gptItem.filterText?.includes('copilot-gpt-4o'));
+		assert.ok(gptItem.filterText?.includes('gpt 4o'));
+		assert.ok(gptItem.filterText?.includes('GitHub Copilot'));
+		assert.ok(gptItem.filterText?.includes('@capability:tools'));
+		assert.ok(gptItem.filterText?.includes('@capability:vision'));
+		assert.ok(gptItem.filterText?.includes('@capability:agent'));
+	});
+
 	test('promoted models show inline vendor label when multiple vendors exist across all models', () => {
 		const auto = createAutoModel();
 		const modelA = createModel('gpt-4o', 'GPT-4o', 'copilot');
@@ -1348,4 +1368,3 @@ suite('chat model picker - languageModelChatProvider visibility regression', () 
 		);
 	});
 });
-

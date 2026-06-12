@@ -84,36 +84,12 @@ export interface INewChatInputSendRequest {
 }
 
 /**
- * Randomized, friendly placeholders shown in the new-session chat input
- * to add a bit of personality. One is picked per widget instance, avoiding
- * an immediate repeat of the previous pick.
+ * Placeholder aligned with the Sandbox composer surface.
  */
-const RANDOM_PLACEHOLDERS = [
-	localize('sessionsChatInput.placeholder.whatAreYouBuilding', "What are you building?"),
-	localize('sessionsChatInput.placeholder.whatWillYouShipToday', "What will you ship today?"),
-	localize('sessionsChatInput.placeholder.describeWhatYouWantToBuild', "Describe what you want to build"),
-	localize('sessionsChatInput.placeholder.whatsYourNextMilestone', "What's your next milestone?"),
-	localize('sessionsChatInput.placeholder.whatAreYouTryingToAchieve', "What are you trying to achieve?"),
-	localize('sessionsChatInput.placeholder.pitchYourIdea', "Pitch your idea"),
-	localize('sessionsChatInput.placeholder.whatsTheGoal', "What's the goal?"),
-	localize('sessionsChatInput.placeholder.whatWillYouCreate', "What will you create?"),
-	localize('sessionsChatInput.placeholder.whatFeatureAreYouDreamingUp', "What feature are you dreaming up?"),
-	localize('sessionsChatInput.placeholder.describeTheOutcome', "Describe the outcome you want"),
-	localize('sessionsChatInput.placeholder.whatProblemAreYouSolving', "What problem are you solving?"),
-	localize('sessionsChatInput.placeholder.whatsNextOnYourRoadmap', "What's next on your roadmap?"),
-	localize('sessionsChatInput.placeholder.whatWouldYouLikeToAutomate', "What would you like to automate?"),
-	localize('sessionsChatInput.placeholder.whatWillYouLaunch', "What will you launch?"),
-	localize('sessionsChatInput.placeholder.describeYourMission', "Describe your mission"),
-];
+const DEFAULT_CHAT_INPUT_PLACEHOLDER = localize('sessionsChatInput.placeholder.messageBackboard', "Message Backboard - @ to include context");
 
-let lastPlaceholderIndex = -1;
-function getRandomChatInputPlaceholder(): string {
-	let index = Math.floor(Math.random() * RANDOM_PLACEHOLDERS.length);
-	if (index === lastPlaceholderIndex) {
-		index = (index + 1) % RANDOM_PLACEHOLDERS.length;
-	}
-	lastPlaceholderIndex = index;
-	return RANDOM_PLACEHOLDERS[index];
+function getChatInputPlaceholder(): string {
+	return DEFAULT_CHAT_INPUT_PLACEHOLDER;
 }
 
 // #region --- New Chat Widget ---
@@ -257,7 +233,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		this._createEditor(inputArea, editorOverflowWidgetsDomNode);
 		this._createInputToolbar(inputArea);
 
-		const newChatBottomContainer = dom.append(parent, dom.$('.new-chat-bottom-container'));
+		const newChatBottomContainer = dom.append(inputArea, dom.$('.new-chat-bottom-container'));
 		const newChatControlsContainer = dom.append(newChatBottomContainer, dom.$('.new-chat-controls-container'));
 		if (this.options.renderSessionTypePickerInControls !== false) {
 			this.sessionTypePicker.render(newChatControlsContainer);
@@ -353,7 +329,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 			...getSimpleEditorOptions(this.configurationService),
 			readOnly: false,
 			ariaLabel: this._getAriaLabel(),
-			placeholder: this.options.placeholder ?? getRandomChatInputPlaceholder(),
+			placeholder: this.options.placeholder ?? getChatInputPlaceholder(),
 			fontFamily: 'system-ui, -apple-system, sans-serif',
 			fontSize: 13,
 			lineHeight: 20,

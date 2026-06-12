@@ -10,8 +10,7 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use backboard::{
-    BackboardClient, BackboardConfig, BackboardModel, SendMessageRequest,
-    SubmitToolOutputsRequest,
+    BackboardClient, BackboardConfig, BackboardModel, SendMessageRequest, SubmitToolOutputsRequest,
 };
 use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
@@ -187,7 +186,12 @@ async fn handle_request(state: BridgeState, request: BridgeRequest) {
                 let request_id = request.request_id.clone();
                 let session_id = request.session_id.clone();
                 if let Err(error) = list_models(state.clone(), request).await {
-                    emit_error(&state.writer, &error, Some(&request_id), session_id.as_deref());
+                    emit_error(
+                        &state.writer,
+                        &error,
+                        Some(&request_id),
+                        session_id.as_deref(),
+                    );
                 }
             });
         }
@@ -198,7 +202,12 @@ async fn handle_request(state: BridgeState, request: BridgeRequest) {
                 let request_id = request.request_id.clone();
                 let session_id = request.session_id.clone();
                 if let Err(error) = run_tool(state.clone(), request).await {
-                    emit_error(&state.writer, &error, Some(&request_id), session_id.as_deref());
+                    emit_error(
+                        &state.writer,
+                        &error,
+                        Some(&request_id),
+                        session_id.as_deref(),
+                    );
                 }
             });
         }
@@ -208,7 +217,12 @@ async fn handle_request(state: BridgeState, request: BridgeRequest) {
                 let request_id = request.request_id.clone();
                 let session_id = request.session_id.clone();
                 if let Err(error) = send_prompt(state.clone(), request).await {
-                    emit_error(&state.writer, &error, Some(&request_id), session_id.as_deref());
+                    emit_error(
+                        &state.writer,
+                        &error,
+                        Some(&request_id),
+                        session_id.as_deref(),
+                    );
                 }
             });
         }
@@ -218,7 +232,12 @@ async fn handle_request(state: BridgeState, request: BridgeRequest) {
                 let request_id = request.request_id.clone();
                 let session_id = request.session_id.clone();
                 if let Err(error) = submit_tool_result(state.clone(), request).await {
-                    emit_error(&state.writer, &error, Some(&request_id), session_id.as_deref());
+                    emit_error(
+                        &state.writer,
+                        &error,
+                        Some(&request_id),
+                        session_id.as_deref(),
+                    );
                 }
             });
         }
@@ -237,15 +256,21 @@ async fn handle_request(state: BridgeState, request: BridgeRequest) {
 }
 
 async fn list_models(state: BridgeState, request: BridgeRequest) -> Result<()> {
-    let config = serde_json::from_value::<ConfigParams>(request.params.get("config").cloned().unwrap_or_default())
-        .unwrap_or(ConfigParams { env: None, api_url: None, api_key: None });
+    let config = serde_json::from_value::<ConfigParams>(
+        request.params.get("config").cloned().unwrap_or_default(),
+    )
+    .unwrap_or(ConfigParams {
+        env: None,
+        api_url: None,
+        api_key: None,
+    });
     let provider = request
         .params
         .get("provider")
         .and_then(Value::as_str)
         .map(str::to_string);
     let client = client_from_params(Some(&config))?;
-    let models = collect_visible_models(&client, provider.as_deref()).await?;
+    let models = collect_models(&client, provider.as_deref()).await?;
     state.writer.emit(base_event(
         "models",
         &request.request_id,
@@ -261,7 +286,10 @@ async fn list_models(state: BridgeState, request: BridgeRequest) -> Result<()> {
     Ok(())
 }
 
-async fn collect_visible_models(client: &BackboardClient, provider: Option<&str>) -> Result<Vec<BridgeModel>> {
+async fn collect_models(
+    client: &BackboardClient,
+    provider: Option<&str>,
+) -> Result<Vec<BridgeModel>> {
     let mut models = Vec::new();
     let mut seen = HashSet::new();
 
@@ -275,19 +303,38 @@ async fn collect_visible_models(client: &BackboardClient, provider: Option<&str>
     };
 
     if let Some(provider) = provider {
-        add_models(client.list_models(Some(provider), Some("llm"), Some(15_000)).await?);
+        add_models(
+            client
+                .list_models(Some(provider), Some("llm"), None)
+                .await?,
+        );
         return Ok(models);
     }
 
-    add_models(client.list_models(None, Some("llm"), Some(15_000)).await?);
+    add_models(client.list_models(None, Some("llm"), None).await?);
     for provider in client.list_providers().await.unwrap_or_default() {
-        if provider.to_lowercase().contains("featherless") {
-            continue;
-        }
-        add_models(client.list_models(Some(&provider), Some("llm"), Some(15_000)).await?);
+        add_models(
+            client
+                .list_models(Some(&provider), Some("llm"), None)
+                .await?,
+        );
     }
 
     Ok(models)
+}
+
+fn model_is_visible(model: &BackboardModel) -> bool {
+    let provider = model.provider.to_lowercase();
+    let name = model.name.to_lowercase();
+    let display_name = model
+        .display_name
+        .as_deref()
+        .unwrap_or_default()
+        .to_lowercase();
+    !provider.contains("featherless")
+        && !name.contains("featherless")
+        && !display_name.contains("featherless")
+        && !name.trim().is_empty()
 }
 
 fn list_tools(state: &BridgeState, request: &BridgeRequest) {
@@ -348,9 +395,11 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         .clone()
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let params: SendPromptParams = serde_json::from_value(request.params.clone())?;
-    let provider = params.provider.unwrap_or_else(|| DEFAULT_PROVIDER.to_string());
+    let provider = params
+        .provider
+        .unwrap_or_else(|| DEFAULT_PROVIDER.to_string());
     let model = params.model.unwrap_or_else(|| DEFAULT_MODEL.to_string());
-    let mode = params.mode.unwrap_or_else(|| "agent".to_string());
+    let mode = params.mode.unwrap_or_else(|| "free".to_string());
     let intensity = params
         .intensity
         .unwrap_or_else(|| DEFAULT_INTENSITY.to_string());
@@ -358,7 +407,9 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
     let cancel_flag = session_cancel_flag(&state, &session_id);
     cancel_flag.store(false, Ordering::SeqCst);
 
-    let thread_id = params.thread_id.or_else(|| session_thread_id(&state, &session_id));
+    let thread_id = params
+        .thread_id
+        .or_else(|| session_thread_id(&state, &session_id));
     let assistant_id = params
         .assistant_id
         .or_else(|| session_assistant_id(&state, &session_id));
@@ -455,7 +506,10 @@ async fn consume_stream(
         }
         let chunk = chunk?;
         record_binding(&state, session_id, &chunk);
-        let chunk_type = chunk.get("type").and_then(Value::as_str).unwrap_or_default();
+        let chunk_type = chunk
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
 
         if let Some(tool_calls) = tool_calls_required_by_chunk(&chunk) {
             let run_id = run_id_from_chunk(&chunk).or_else(|| session_run_id(&state, session_id));
@@ -648,7 +702,11 @@ fn dispose_session(state: &BridgeState, request: &BridgeRequest) {
 fn client_from_params(params: Option<&ConfigParams>) -> Result<BackboardClient> {
     let mut config = BackboardConfig::load_or_default();
     if let Some(params) = params {
-        if let Some(env) = params.env.as_deref().filter(|value| !value.trim().is_empty()) {
+        if let Some(env) = params
+            .env
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
             config.env = env.to_string();
         }
         if let Some(api_url) = params
@@ -723,7 +781,11 @@ fn blocked_tools(mode: &str) -> &'static [&'static str] {
     match mode {
         "ask" => &[
             "write",
+            "write_file",
+            "create_file",
+            "overwrite_file",
             "edit",
+            "edit_file",
             "search_replace",
             "delete_file",
             "create_directory",
@@ -754,7 +816,11 @@ fn all_tool_definitions() -> Vec<Value> {
         json!({"type":"function","function":{"name":"run_terminal_cmd","description":"Execute a shell command and render output in an IDE terminal.","parameters":{"type":"object","properties":{"command":{"type":"string"},"cmd":{"type":"string"},"description":{"type":"string"},"timeout":{"type":"integer"},"timeout_ms":{"type":"integer"},"working_directory":{"type":"string"},"cwd":{"type":"string"},"is_background":{"type":"boolean"}},"required":["command"]}}}),
         json!({"type":"function","function":{"name":"read_file","description":"Read a text file from the workspace. Supports offset and limit line ranges.","parameters":{"type":"object","properties":{"path":{"type":"string"},"target_file":{"type":"string"},"file_path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}}}),
         json!({"type":"function","function":{"name":"write","description":"Write a complete file in the workspace. Prefer edit for existing files.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"write_file","description":"Write a complete file in the workspace. Alias for write.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"create_file","description":"Create a file in the workspace, creating parent directories when the VS Code host supports it. Alias for write_file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"overwrite_file","description":"Overwrite a complete file in the workspace. Alias for write_file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"edit","description":"Perform exact string replacement in a file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}}}}}),
+        json!({"type":"function","function":{"name":"edit_file","description":"Perform exact string replacement in a file. Alias for edit.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"old_string":{"type":"string"},"oldString":{"type":"string"},"new_string":{"type":"string"},"newString":{"type":"string"},"replace_all":{"type":"boolean"},"replaceAll":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"search_replace","description":"Search and replace text in a file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"glob","description":"Find workspace files by glob pattern.","parameters":{"type":"object","properties":{"pattern":{"type":"string"},"target_directory":{"type":"string"}},"required":["pattern"]}}}),
         json!({"type":"function","function":{"name":"grep","description":"Search workspace text files using regular expressions.","parameters":{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"glob":{"type":"string"},"include":{"type":"string"},"output_mode":{"type":"string","enum":["content","files_with_matches","count"]},"case_insensitive":{"type":"boolean"},"context_lines":{"type":"integer"}},"required":["pattern"]}}}),
@@ -852,7 +918,11 @@ async fn web_search(args: &Value) -> Result<Value> {
         .await?;
     let data = serde_json::from_str::<Value>(&text)?;
     let mut results = Vec::new();
-    if let Some(text) = data.get("AbstractText").and_then(Value::as_str).filter(|text| !text.is_empty()) {
+    if let Some(text) = data
+        .get("AbstractText")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+    {
         results.push(json!({
             "title": data.get("Heading").and_then(Value::as_str).unwrap_or("DuckDuckGo result"),
             "url": data.get("AbstractURL").and_then(Value::as_str).unwrap_or_default(),
@@ -946,16 +1016,6 @@ fn string_arg(args: &Value, names: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn model_is_visible(model: &BackboardModel) -> bool {
-    let provider = model.provider.to_lowercase();
-    let name = model.name.to_lowercase();
-    let display_name = model.display_name.as_deref().unwrap_or_default().to_lowercase();
-    !provider.contains("featherless")
-        && !name.contains("featherless")
-        && !display_name.contains("featherless")
-        && !name.trim().is_empty()
-}
-
 fn to_bridge_model(model: BackboardModel) -> BridgeModel {
     BridgeModel {
         provider: model.provider,
@@ -992,7 +1052,14 @@ fn tool_calls_required_by_chunk(chunk: &Value) -> Option<Vec<Value>> {
 }
 
 fn run_id_from_chunk(chunk: &Value) -> Option<String> {
-    for pointer in ["/run_id", "/runId", "/id", "/run/id", "/data/run_id", "/data/runId"] {
+    for pointer in [
+        "/run_id",
+        "/runId",
+        "/id",
+        "/run/id",
+        "/data/run_id",
+        "/data/runId",
+    ] {
         if let Some(value) = chunk.pointer(pointer).and_then(Value::as_str)
             && !value.is_empty()
         {
@@ -1060,11 +1127,11 @@ fn session_cancel_flag(state: &BridgeState, session_id: &str) -> Arc<AtomicBool>
 }
 
 fn session_thread_id(state: &BridgeState, session_id: &str) -> Option<String> {
-    state
-        .sessions
-        .lock()
-        .ok()
-        .and_then(|sessions| sessions.get(session_id).and_then(|session| session.thread_id.clone()))
+    state.sessions.lock().ok().and_then(|sessions| {
+        sessions
+            .get(session_id)
+            .and_then(|session| session.thread_id.clone())
+    })
 }
 
 fn session_assistant_id(state: &BridgeState, session_id: &str) -> Option<String> {
@@ -1120,7 +1187,10 @@ fn base_event(kind: &str, request_id: &str, session_id: Option<&str>, mut extra:
         "bridgeProtocolVersion".to_string(),
         Value::Number(BRIDGE_PROTOCOL_VERSION.into()),
     );
-    event.insert("requestId".to_string(), Value::String(request_id.to_string()));
+    event.insert(
+        "requestId".to_string(),
+        Value::String(request_id.to_string()),
+    );
     event.insert(
         "sessionId".to_string(),
         session_id
@@ -1133,7 +1203,12 @@ fn base_event(kind: &str, request_id: &str, session_id: Option<&str>, mut extra:
     Value::Object(event)
 }
 
-fn emit_error(writer: &EventWriter, error: &anyhow::Error, request_id: Option<&str>, session_id: Option<&str>) {
+fn emit_error(
+    writer: &EventWriter,
+    error: &anyhow::Error,
+    request_id: Option<&str>,
+    session_id: Option<&str>,
+) {
     writer.emit(base_event(
         "error",
         request_id.unwrap_or_default(),
@@ -1153,7 +1228,9 @@ mod tests {
     use backboard::BackboardModel;
     use serde_json::json;
 
-    use super::{model_is_visible, normalize_tool_output, thinking_payload, tool_definitions, voice_payload};
+    use super::{
+        model_is_visible, normalize_tool_output, thinking_payload, tool_definitions, voice_payload,
+    };
 
     #[test]
     fn thinking_payload_omits_fast_and_uses_provider_shapes() {
@@ -1176,12 +1253,18 @@ mod tests {
     fn ask_mode_only_exposes_read_tools() {
         let names = tool_definitions("ask")
             .into_iter()
-            .filter_map(|tool| tool.pointer("/function/name").and_then(|value| value.as_str()).map(str::to_string))
+            .filter_map(|tool| {
+                tool.pointer("/function/name")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            })
             .collect::<Vec<_>>();
 
         assert!(names.contains(&"read_file".to_string()));
         assert!(names.contains(&"grep".to_string()));
         assert!(!names.contains(&"write".to_string()));
+        assert!(!names.contains(&"create_file".to_string()));
+        assert!(!names.contains(&"edit_file".to_string()));
         assert!(!names.contains(&"bash".to_string()));
     }
 
@@ -1189,7 +1272,11 @@ mod tests {
     fn full_access_advertises_zed_native_tool_names() {
         let names = tool_definitions("free")
             .into_iter()
-            .filter_map(|tool| tool.pointer("/function/name").and_then(|value| value.as_str()).map(str::to_string))
+            .filter_map(|tool| {
+                tool.pointer("/function/name")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            })
             .collect::<Vec<_>>();
 
         assert_eq!(
@@ -1199,7 +1286,11 @@ mod tests {
                 "run_terminal_cmd",
                 "read_file",
                 "write",
+                "write_file",
+                "create_file",
+                "overwrite_file",
                 "edit",
+                "edit_file",
                 "search_replace",
                 "glob",
                 "grep",
@@ -1272,6 +1363,11 @@ mod tests {
         }));
 
         assert_eq!(output["tool_call_id"], "call_1");
-        assert!(output["output"].as_str().unwrap().contains("\"success\":true"));
+        assert!(
+            output["output"]
+                .as_str()
+                .unwrap()
+                .contains("\"success\":true")
+        );
     }
 }

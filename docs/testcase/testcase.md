@@ -17,7 +17,7 @@ Color Theme (dark, HSL values for CSS variables):
 --background: 201 100% 13% (deep navy blue)
 --foreground: 0 0% 100% (white)
 --muted-foreground: 240 4% 66% (muted gray)
---primary: 0 0% 100%, --primary-foreground: 0 0% 4%
+--primary: 0 0% 100%, --primary-foreground: 0 0% 4%z
 --secondary: 0 0% 10%, --muted: 0 0% 10%, --accent: 0 0% 10%
 --border: 0 0% 18%, --input: 0 0% 18%
 

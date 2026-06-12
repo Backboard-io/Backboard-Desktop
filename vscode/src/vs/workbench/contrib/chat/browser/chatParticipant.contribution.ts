@@ -68,17 +68,8 @@ const chatViewDescriptor: IViewDescriptor = {
 		order: 1
 	},
 	ctorDescriptor: new SyncDescriptor(ChatViewPane),
-	when: ContextKeyExpr.and(
-		ChatContextKeys.accountPolicyGateActive.negate(),
-		ContextKeyExpr.or(
-			ContextKeyExpr.and(
-				ChatContextKeys.Setup.hidden.negate(),
-				ChatContextKeys.Setup.disabledInWorkspace.negate(),
-			),
-			ChatContextKeys.panelParticipantRegistered,
-			ChatContextKeys.extensionInvalid
-		)
-	)
+	// Backboard provides the right-side agent surface in this product build.
+	when: ContextKeyExpr.false()
 };
 Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([chatViewDescriptor], chatViewContainer);
 

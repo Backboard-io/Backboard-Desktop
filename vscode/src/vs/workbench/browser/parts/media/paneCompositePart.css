@@ -83,12 +83,13 @@
 
 .monaco-workbench .part.panel.pane-composite-part > .title {
 	box-sizing: border-box;
-	min-height: 48px;
-	height: 48px;
+	min-height: 40px;
+	height: 40px;
 	align-items: center;
 	gap: 8px;
-	padding: 6px 12px;
-	background-color: var(--vscode-sideBar-background, var(--vscode-panel-background));
+	padding: 5px 10px;
+	border-bottom: 1px solid var(--vscode-panel-border);
+	background-color: var(--vscode-panel-background);
 }
 
 .monaco-workbench .part.panel.pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar {
@@ -97,13 +98,13 @@
 
 .monaco-workbench .part.panel.pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item {
 	align-items: center;
-	height: 30px;
+	height: 28px;
 	margin: 0 1px;
-	padding: 0 9px;
+	padding: 0 8px;
 	border: 1px solid transparent;
-	border-radius: 8px;
+	border-radius: 6px;
 	text-transform: none;
-	font-size: 13px;
+	font-size: 12px;
 	font-weight: 500;
 	padding-bottom: 0;
 	padding-top: 0;
@@ -155,9 +156,9 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 28px;
-	height: 28px;
-	border-radius: 999px;
+	width: 26px;
+	height: 26px;
+	border-radius: 6px;
 	color: var(--vscode-icon-foreground) !important;
 }
 

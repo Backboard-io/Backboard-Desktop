@@ -207,6 +207,49 @@ function isMultiplierPricing(model: ILanguageModelChatMetadataAndIdentifier): bo
 	return model.metadata.multiplierNumeric !== undefined;
 }
 
+function appendFilterTextPart(parts: string[], value: string | undefined): void {
+	if (!value) {
+		return;
+	}
+	parts.push(value);
+	const normalized = value.replace(/[^a-zA-Z0-9]+/g, ' ').trim();
+	if (normalized && normalized !== value) {
+		parts.push(normalized);
+	}
+}
+
+function getModelFilterText(model: ILanguageModelChatMetadataAndIdentifier, providerLabel?: string): string {
+	const parts: string[] = [];
+	appendFilterTextPart(parts, model.identifier);
+	appendFilterTextPart(parts, model.metadata.name);
+	appendFilterTextPart(parts, model.metadata.id);
+	appendFilterTextPart(parts, model.metadata.vendor);
+	appendFilterTextPart(parts, model.metadata.family);
+	appendFilterTextPart(parts, model.metadata.version);
+	appendFilterTextPart(parts, model.metadata.detail);
+	appendFilterTextPart(parts, model.metadata.tooltip);
+	appendFilterTextPart(parts, model.metadata.targetChatSessionType);
+	appendFilterTextPart(parts, providerLabel);
+
+	const capabilities = model.metadata.capabilities;
+	if (capabilities?.toolCalling) {
+		parts.push('tools tool calling toolcalling @capability:tools @capability:toolcalling');
+	}
+	if (capabilities?.vision) {
+		parts.push('vision @capability:vision');
+	}
+	if (capabilities?.agentMode) {
+		parts.push('agent agent mode agentmode @capability:agent @capability:agentmode');
+	}
+	if (capabilities?.editTools) {
+		for (const editTool of capabilities.editTools) {
+			appendFilterTextPart(parts, editTool);
+		}
+	}
+
+	return parts.join(' ');
+}
+
 function createModelItem(
 	action: IActionWidgetDropdownAction & { section?: string },
 	model?: ILanguageModelChatMetadataAndIdentifier,
@@ -215,6 +258,7 @@ function createModelItem(
 	isUBB?: boolean,
 	ariaDescription?: string,
 	pinAction?: IAction,
+	filterText?: string,
 ): IActionListItem<IActionWidgetDropdownAction> {
 	const hover = model && openerService ? getModelHoverContent(model, openerService, isUBB) : undefined;
 	return {
@@ -222,6 +266,7 @@ function createModelItem(
 		kind: ActionListItemKind.Action,
 		label: action.label,
 		description: action.description,
+		filterText,
 		ariaDescription,
 		group: { title: '', icon: action.icon ?? ThemeIcon.fromId(action.checked ? Codicon.check.id : Codicon.blank.id) },
 		hideIcon: false,
@@ -498,7 +543,7 @@ export function buildModelPickerItems(
 			if (autoModel) {
 				markPlaced(autoModel.identifier, autoModel.metadata.id);
 				const { action: autoAction, ariaDescription: autoAriaDesc } = createModelAction(autoModel, selectedModelId, onSelect, languageModelsService!, undefined, undefined, isUBB);
-				items.push(createModelItem(autoAction, autoModel, openerService, undefined, isUBB, autoAriaDesc));
+				items.push(createModelItem(autoAction, autoModel, openerService, undefined, isUBB, autoAriaDesc, undefined, getModelFilterText(autoModel)));
 			}
 
 			// Precompute group labels needed for inline badges
@@ -533,8 +578,9 @@ export function buildModelPickerItems(
 					const groupLabel = showGroupLabel
 						? getProviderGroupForModel(model, modelToGroup, languageModelsService!).groupName
 						: undefined;
+					const providerLabel = getProviderGroupForModel(model, modelToGroup, languageModelsService!).groupName;
 					const { action: pinnedAction, ariaDescription: pinnedAriaDesc } = createModelAction(model, selectedModelId, onSelect, languageModelsService!, undefined, showGroupLabel, isUBB);
-					items.push(createModelItem(pinnedAction, model, openerService, groupLabel, isUBB, pinnedAriaDesc, makePinAction(model)));
+					items.push(createModelItem(pinnedAction, model, openerService, groupLabel, isUBB, pinnedAriaDesc, makePinAction(model), getModelFilterText(model, providerLabel)));
 				}
 			}
 
@@ -634,8 +680,9 @@ export function buildModelPickerItems(
 						const groupLabel = showGroupLabel
 							? getProviderGroupForModel(item.model, modelToGroup, languageModelsService!).groupName
 							: undefined;
+						const providerLabel = getProviderGroupForModel(item.model, modelToGroup, languageModelsService!).groupName;
 						const { action: promotedAction, ariaDescription: promotedAriaDesc } = createModelAction(item.model, selectedModelId, onSelect, languageModelsService!, undefined, showGroupLabel, isUBB);
-						items.push(createModelItem(promotedAction, item.model, openerService, groupLabel, isUBB, promotedAriaDesc, makePinAction(item.model)));
+						items.push(createModelItem(promotedAction, item.model, openerService, groupLabel, isUBB, promotedAriaDesc, makePinAction(item.model), getModelFilterText(item.model, providerLabel)));
 					} else {
 						items.push(createUnavailableModelItem(item.id, item.entry, item.reason, manageSettingsUrl, updateStateType, chatEntitlementService));
 					}
@@ -727,7 +774,7 @@ export function buildModelPickerItems(
 							items.push(createUnavailableModelItem(model.metadata.id, entry, 'update', manageSettingsUrl, updateStateType, chatEntitlementService, ModelPickerSection.Other));
 						} else {
 							const { action: bucketAction, ariaDescription: bucketAriaDesc } = createModelAction(model, selectedModelId, onSelect, languageModelsService!, ModelPickerSection.Other, showGroupHeaders, isUBB);
-							items.push(createModelItem(bucketAction, model, openerService, undefined, isUBB, bucketAriaDesc, makePinAction(model)));
+							items.push(createModelItem(bucketAction, model, openerService, undefined, isUBB, bucketAriaDesc, makePinAction(model), getModelFilterText(model, bucket.groupName)));
 						}
 					}
 				}
@@ -751,7 +798,7 @@ export function buildModelPickerItems(
 		const autoModel = models.find(m => isAutoModel(m));
 		if (autoModel) {
 			const { action: flatAutoAction, ariaDescription: flatAutoAriaDesc } = createModelAction(autoModel, selectedModelId, onSelect, languageModelsService!, undefined, undefined, isUBB);
-			items.push(createModelItem(flatAutoAction, autoModel, openerService, undefined, isUBB, flatAutoAriaDesc));
+			items.push(createModelItem(flatAutoAction, autoModel, openerService, undefined, isUBB, flatAutoAriaDesc, undefined, getModelFilterText(autoModel)));
 		}
 		const sortedModels = models
 			.filter(m => m !== autoModel)
@@ -761,7 +808,7 @@ export function buildModelPickerItems(
 			});
 		for (const model of sortedModels) {
 			const { action: flatAction, ariaDescription: flatAriaDesc } = createModelAction(model, selectedModelId, onSelect, languageModelsService!, undefined, undefined, isUBB);
-			items.push(createModelItem(flatAction, model, openerService, undefined, isUBB, flatAriaDesc));
+			items.push(createModelItem(flatAction, model, openerService, undefined, isUBB, flatAriaDesc, undefined, getModelFilterText(model)));
 		}
 	}
 

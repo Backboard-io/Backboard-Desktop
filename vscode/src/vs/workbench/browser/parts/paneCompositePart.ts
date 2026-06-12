@@ -217,6 +217,7 @@ export abstract class AbstractPaneCompositePart extends CompositePart<PaneCompos
 	}
 
 	protected override showComposite(composite: Composite): void {
+		this.updateBackboardSingleRowClass(composite.getId());
 		super.showComposite(composite);
 		this.layoutCompositeBar();
 		this.layoutEmptyMessage();
@@ -224,6 +225,7 @@ export abstract class AbstractPaneCompositePart extends CompositePart<PaneCompos
 
 	protected override hideActiveComposite(): Composite | undefined {
 		const composite = super.hideActiveComposite();
+		this.updateBackboardSingleRowClass();
 		this.layoutCompositeBar();
 		this.layoutEmptyMessage();
 		return composite;
@@ -591,15 +593,23 @@ export abstract class AbstractPaneCompositePart extends CompositePart<PaneCompos
 		}
 
 		this.contentDimension = new Dimension(width, height);
+		const hideTitleForBackboard = this.updateBackboardSingleRowClass();
 
 		// Layout contents
-		super.layout(this.contentDimension.width, this.contentDimension.height, top, left);
+		super.layout(this.contentDimension.width, hideTitleForBackboard ? this.contentDimension.height + 35 : this.contentDimension.height, top, left);
 
 		// Layout composite bar
 		this.layoutCompositeBar();
 
 		// Add empty pane message
 		this.layoutEmptyMessage();
+	}
+
+	private updateBackboardSingleRowClass(compositeId?: string): boolean {
+		const activeCompositeId = compositeId ?? this.getActivePaneComposite()?.getId() ?? this.getActiveComposite()?.getId();
+		const hideTitleForBackboard = !!activeCompositeId && activeCompositeId.toLowerCase().includes('backboard');
+		this.element?.classList.toggle('backboard-single-row', hideTitleForBackboard);
+		return hideTitleForBackboard;
 	}
 
 	private layoutCompositeBar(): void {
