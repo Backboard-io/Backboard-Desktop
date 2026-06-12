@@ -2685,25 +2685,38 @@ class BackboardBridge implements vscode.Disposable {
 	async send(command: string, sessionId: string | undefined, params: unknown, onEvent: ((event: BridgeEvent) => void | Promise<void>) | undefined, token: vscode.CancellationToken): Promise<BridgeEvent[]> {
 		const requestId = newId();
 		const child = this.ensureProcess();
+		const cancelRequest = () => {
+			this.write({ requestId: newId(), command: 'cancel', sessionId, params: { requestId } });
+			const pending = this.pending.get(requestId);
+			if (!pending) {
+				return;
+			}
+			this.pending.delete(requestId);
+			pending.events.push({ type: 'done', requestId, sessionId, stopReason: 'cancelled' });
+			pending.resolve(pending.events);
+		};
 		const promise = new Promise<BridgeEvent[]>((resolve, reject) => {
-			const disposable = token.onCancellationRequested(() => {
-				this.write({ requestId: newId(), command: 'cancel', sessionId, params: {} });
-				disposable.dispose();
-			});
+			let disposable: vscode.Disposable | undefined;
 			this.pending.set(requestId, {
 				events: [],
 				onEvent,
 				resolve: events => {
-					disposable.dispose();
+					disposable?.dispose();
 					resolve(events);
 				},
 				reject: error => {
-					disposable.dispose();
+					disposable?.dispose();
 					reject(error);
 				}
 			});
+			disposable = token.onCancellationRequested(cancelRequest);
+			if (token.isCancellationRequested) {
+				cancelRequest();
+			}
 		});
-		child.stdin.write(`${JSON.stringify({ requestId, command, sessionId, params })}\n`);
+		if (!token.isCancellationRequested) {
+			child.stdin.write(`${JSON.stringify({ requestId, command, sessionId, params })}\n`);
+		}
 		return promise;
 	}
 
@@ -3519,14 +3532,20 @@ function resolveWorkspaceUri(rawPath: string): vscode.Uri {
 	if (!rawPath) {
 		throw new Error('tool requires a path');
 	}
-	if (path.isAbsolute(rawPath)) {
-		return vscode.Uri.file(rawPath);
-	}
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri;
 	if (!root) {
 		throw new Error('No workspace folder is open.');
 	}
-	return vscode.Uri.joinPath(root, rawPath);
+	if (path.isAbsolute(rawPath)) {
+		throw new Error('Tool paths must be relative to the workspace.');
+	}
+	const rootPath = path.resolve(root.fsPath);
+	const resolvedPath = path.resolve(rootPath, rawPath);
+	const relativePath = path.relative(rootPath, resolvedPath);
+	if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+		throw new Error('Tool path escapes the workspace.');
+	}
+	return vscode.Uri.file(resolvedPath);
 }
 
 function parentUri(uri: vscode.Uri): vscode.Uri {

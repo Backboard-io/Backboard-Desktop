@@ -1,11 +1,13 @@
 use std::{
     collections::{HashMap, HashSet},
     io::{self, Write as _},
+    net::IpAddr,
     path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
 use anyhow::{Context as _, Result, anyhow};
@@ -31,6 +33,9 @@ const DEFAULT_TTS_FORMAT: &str = "mp3";
 const DEFAULT_STT_PROVIDER: &str = "openai";
 const DEFAULT_STT_MODEL: &str = "gpt-4o-mini-transcribe";
 const DEFAULT_STT_LANGUAGE: &str = "en";
+const WEB_FETCH_TIMEOUT_SECS: u64 = 15;
+const WEB_FETCH_MAX_BYTES: usize = 1_000_000;
+const WEB_FETCH_PREVIEW_CHARS: usize = 12_000;
 
 #[derive(Clone)]
 struct BridgeState {
@@ -668,6 +673,16 @@ async fn consume_stream(
 fn cancel_request(state: &BridgeState, request: &BridgeRequest) {
     if let Some(session_id) = request.session_id.as_deref() {
         session_cancel_flag(state, session_id).store(true, Ordering::SeqCst);
+        if let Some(target_request_id) = request.params.get("requestId").and_then(Value::as_str)
+            && target_request_id != request.request_id
+        {
+            state.writer.emit(base_event(
+                "done",
+                target_request_id,
+                Some(session_id),
+                json!({ "stopReason": "cancelled" }),
+            ));
+        }
         state.writer.emit(base_event(
             "done",
             &request.request_id,
@@ -708,6 +723,9 @@ fn dispose_session(state: &BridgeState, request: &BridgeRequest) {
     if let Some(session_id) = request.session_id.as_deref()
         && let Ok(mut sessions) = state.sessions.lock()
     {
+        if let Some(session) = sessions.get(session_id) {
+            session.cancel_flag.store(true, Ordering::SeqCst);
+        }
         sessions.remove(session_id);
     }
     state.writer.emit(base_event(
@@ -964,19 +982,81 @@ async fn web_search(args: &Value) -> Result<Value> {
 }
 
 async fn web_fetch(args: &Value) -> Result<Value> {
-    let url = string_arg(args, &["url"]).context("web_fetch requires url")?;
-    let text = reqwest::Client::new()
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
+    let url =
+        validate_web_fetch_url(&string_arg(args, &["url"]).context("web_fetch requires url")?)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
+        .redirect_policy(reqwest::redirect::Policy::none())
+        .build()?;
+    let response = client.get(url.clone()).send().await?.error_for_status()?;
+    let mut stream = response.bytes_stream();
+    let mut bytes = Vec::new();
+    let mut truncated = false;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if bytes.len() + chunk.len() > WEB_FETCH_MAX_BYTES {
+            let remaining = WEB_FETCH_MAX_BYTES.saturating_sub(bytes.len());
+            bytes.extend_from_slice(&chunk[..remaining]);
+            truncated = true;
+            break;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let text = String::from_utf8_lossy(&bytes);
     Ok(json!({
         "success": true,
-        "url": url,
-        "content": readable_text(&text).chars().take(12_000).collect::<String>(),
+        "url": url.as_str(),
+        "content": readable_text(text.as_ref()).chars().take(WEB_FETCH_PREVIEW_CHARS).collect::<String>(),
+        "truncated": truncated,
     }))
+}
+
+fn validate_web_fetch_url(raw_url: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(raw_url).context("web_fetch requires an absolute URL")?;
+    match url.scheme() {
+        "http" | "https" => {}
+        scheme => return Err(anyhow!("web_fetch does not allow `{scheme}` URLs")),
+    }
+
+    let host = url
+        .host_str()
+        .context("web_fetch requires a host")?
+        .trim_end_matches('.')
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
+        return Err(anyhow!("web_fetch cannot fetch local network hosts"));
+    }
+    if let Ok(ip) = host.parse::<IpAddr>()
+        && is_blocked_fetch_ip(ip)
+    {
+        return Err(anyhow!(
+            "web_fetch cannot fetch local or private network addresses"
+        ));
+    }
+
+    Ok(url)
+}
+
+fn is_blocked_fetch_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.is_broadcast()
+                || ip.is_multicast()
+        }
+        IpAddr::V6(ip) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || ip.is_multicast()
+        }
+    }
 }
 
 fn collect_duckduckgo_topic(topic: &Value, results: &mut Vec<Value>) {
@@ -1256,10 +1336,11 @@ mod tests {
     use backboard::BackboardModel;
     use serde_json::json;
 
-	use super::{
-		add_visible_models, is_featherless_provider, model_is_visible, normalize_tool_output,
-		thinking_payload, tool_calls_required_by_chunk, tool_definitions, voice_payload,
-	};
+    use super::{
+        add_visible_models, is_featherless_provider, model_is_visible, normalize_tool_output,
+        thinking_payload, tool_calls_required_by_chunk, tool_definitions, validate_web_fetch_url,
+        voice_payload,
+    };
 
     #[test]
     fn thinking_payload_omits_fast_and_uses_provider_shapes() {
@@ -1418,6 +1499,16 @@ mod tests {
         assert_eq!(payload["tts"]["model"], "gpt-4o-mini-tts");
         assert_eq!(payload["tts"]["voice"], "alloy");
         assert_eq!(voice_payload("off"), None);
+    }
+
+    #[test]
+    fn web_fetch_rejects_local_and_non_http_urls() {
+        assert!(validate_web_fetch_url("https://example.com/docs").is_ok());
+        assert!(validate_web_fetch_url("file:///etc/passwd").is_err());
+        assert!(validate_web_fetch_url("http://localhost:8000").is_err());
+        assert!(validate_web_fetch_url("http://127.0.0.1:8000").is_err());
+        assert!(validate_web_fetch_url("http://10.0.0.5").is_err());
+        assert!(validate_web_fetch_url("http://[::1]").is_err());
     }
 
     #[test]
