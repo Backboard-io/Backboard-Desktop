@@ -359,91 +359,6 @@
 	white-space: nowrap;
 }
 
-/* Simple-mode composer. */
-.agent-sessions-workbench .new-chat-input-container {
-	width: 100%;
-	max-width: none;
-	margin: 0;
-	display: none;
-}
-
-.agent-sessions-workbench .new-chat-input-area {
-	max-width: none;
-	min-height: 120px;
-	border-radius: var(--vscode-cornerRadius-large);
-	border-color: var(--vscode-focusBorder);
-	background: color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-editor-foreground) 4%);
-	box-shadow: none;
-}
-
-.agent-sessions-workbench .new-chat-input-area:focus-within {
-	border-color: var(--vscode-focusBorder);
-	box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder) 24%, transparent);
-}
-
-.agent-sessions-workbench .sessions-chat-editor {
-	padding: 8px 10px 0 10px;
-}
-
-.agent-sessions-workbench .sessions-chat-editor .monaco-editor {
-	font-family: var(--vscode-font-family);
-}
-
-.agent-sessions-workbench .sessions-chat-toolbar {
-	padding: 4px 8px 10px 8px;
-	gap: 6px;
-}
-
-.agent-sessions-workbench .sessions-chat-attach-button {
-	width: 26px;
-	height: 26px;
-	border-radius: var(--vscode-cornerRadius-small);
-	color: var(--vscode-descriptionForeground);
-}
-
-.agent-sessions-workbench .sessions-chat-config-toolbar .action-label {
-	height: 22px;
-	padding: 2px 7px;
-	border-radius: var(--vscode-cornerRadius-small);
-	color: var(--vscode-descriptionForeground);
-}
-
-.agent-sessions-workbench .sessions-chat-send-button,
-.agent-sessions-workbench .sessions-chat-send-button .monaco-button {
-	width: 26px;
-	height: 26px;
-	min-width: 26px;
-}
-
-.agent-sessions-workbench .sessions-chat-send-button .monaco-button.disabled {
-	color: var(--vscode-descriptionForeground) !important;
-	opacity: 0.45;
-}
-
-.agent-sessions-workbench .new-chat-bottom-container {
-	width: auto;
-	max-width: none;
-	margin: 0;
-	padding: 0 10px 10px 10px;
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	min-height: 24px;
-	box-sizing: border-box;
-}
-
-.agent-sessions-workbench .new-chat-bottom-container .action-label {
-	height: 20px;
-	padding: 2px 6px;
-	color: var(--vscode-descriptionForeground);
-	border-radius: var(--vscode-cornerRadius-small);
-}
-
-.agent-sessions-workbench .new-chat-bottom-container .action-label:hover {
-	background: var(--vscode-toolbar-hoverBackground);
-	color: var(--vscode-foreground);
-}
-
 .sessions-chat-attachment-pill .codicon {
 	font-size: 14px;
 	flex-shrink: 0;
@@ -624,7 +539,6 @@
 	border-top: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
 }
 
-.agent-sessions-workbench .sessions-chat-config-toolbar,
 .agent-sessions-workbench .new-chat-bottom-container .new-chat-controls-container {
 	display: none;
 }
