@@ -5,6 +5,17 @@
 
 .chat-setup-dialog {
 
+	&.backboard-signin-dialog .dialog-message-row > .dialog-icon.codicon.no-codicon {
+		color: var(--vscode-icon-foreground);
+		background-color: currentColor;
+		-webkit-mask: url('../../../../welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
+		mask: url('../../../../welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
+	}
+
+	&.backboard-signin-dialog .dialog-message-row > .dialog-icon.codicon.no-codicon::before {
+		content: '';
+	}
+
 	/* Continue Buttons */
 
 	.dialog-buttons-row > .dialog-buttons > .monaco-button.continue-button::before {
@@ -23,8 +34,17 @@
 		background-image: url('./github.svg');
 	}
 
-	.dialog-buttons-row > .dialog-buttons > .monaco-button.continue-button.google::before {
-		background-image: url('./google.svg');
+	.dialog-buttons-row > .dialog-buttons > .monaco-button.continue-button.backboard::before {
+		background-color: currentColor;
+		-webkit-mask: url('../../../../welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
+		mask: url('../../../../welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
+	}
+
+	.dialog-buttons-row > .dialog-buttons > .monaco-button.continue-button.api-key::before {
+		background-image: none;
+		background-color: currentColor;
+		-webkit-mask: url('../../../../welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
+		mask: url('../../../../welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
 	}
 
 	/* Link Buttons */
@@ -49,13 +69,4 @@
 		font-size: 11px;
 		color: var(--vscode-descriptionForeground);
 	}
-}
-
-.monaco-workbench.hc-light .chat-setup-dialog .dialog-buttons-row > .dialog-buttons > .monaco-button.continue-button.apple::before,
-.monaco-workbench.vs .chat-setup-dialog .dialog-buttons-row > .dialog-buttons > .monaco-button.continue-button.apple::before {
-	background-image: url('./apple-light.svg');
-}
-
-.chat-setup-dialog .dialog-buttons-row > .dialog-buttons > .monaco-button.continue-button.apple::before {
-	background-image: url('./apple-dark.svg');
 }

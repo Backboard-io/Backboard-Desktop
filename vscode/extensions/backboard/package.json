@@ -168,6 +168,18 @@
             "default": "fast",
             "description": "Reasoning intensity sent to Backboard."
           },
+          "backboard.memoryMode": {
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Readonly",
+              "off",
+              "ProAuto",
+              "ProReadonly"
+            ],
+            "default": "Auto",
+            "description": "Memory mode sent to Backboard turns. Pro modes use memory_pro and omit memory."
+          },
           "backboard.webSearch": {
             "type": "string",
             "enum": [
@@ -216,6 +228,11 @@
             "type": "string",
             "default": "",
             "description": "Path to the local backboard-bridge binary. Leave empty for the built-in development/package lookup."
+          },
+          "backboard.workspaceRoot": {
+            "type": "string",
+            "default": "",
+            "description": "Path to use as the Backboard panel workspace root. Supports ${workspaceFolder} and ${userHome}. Leave empty to use the open VS Code workspace folder. Can also be set with BACKBOARD_WORKSPACE_ROOT."
           }
         }
       }

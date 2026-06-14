@@ -325,7 +325,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 			constructor() {
 				super({
 					id: 'workbench.action.chat.triggerSetupForceSignIn',
-					title: localize2('forceSignIn', "Sign in to use GitHub Copilot")
+					title: localize2('forceSignIn', "Sign in to Backboard")
 				});
 			}
 
@@ -363,7 +363,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 			constructor() {
 				super({
 					id: 'workbench.action.chat.triggerSetupFromAccounts',
-					title: localize2('triggerChatSetupFromAccounts', "Sign in to use GitHub Copilot..."),
+					title: localize2('triggerChatSetupFromAccounts', "Sign in to Backboard..."),
 					menu: {
 						id: MenuId.AccountsContext,
 						group: '2_copilot',

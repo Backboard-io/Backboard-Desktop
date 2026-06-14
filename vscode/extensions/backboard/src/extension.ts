@@ -28,6 +28,7 @@ interface BridgeEvent {
 	readonly output?: unknown;
 	readonly status?: string;
 	readonly name?: string;
+	readonly data?: unknown;
 }
 
 interface BridgeModel {
@@ -37,6 +38,19 @@ interface BridgeModel {
 	readonly displayName?: string;
 	readonly contextLimit?: number;
 	readonly supportsThinking?: boolean;
+	readonly pricing?: string;
+	readonly inputPrice?: number;
+	readonly outputPrice?: number;
+	readonly inputPricePerMillion?: number;
+	readonly outputPricePerMillion?: number;
+	readonly promptPrice?: number;
+	readonly completionPrice?: number;
+}
+
+interface ModelCacheEntry {
+	readonly env: string;
+	readonly fetchedAt: number;
+	readonly models: BridgeModel[];
 }
 
 interface PendingRequest {
@@ -60,11 +74,18 @@ interface FileChangePayload {
 	readonly previewLines: readonly { readonly type: 'add' | 'remove' | 'context'; readonly text: string }[];
 }
 
+interface VoiceAttachment {
+	readonly data: readonly number[];
+	readonly fileName: string;
+	readonly mimeType: string;
+}
+
 interface PanelOptions {
 	readonly provider?: string;
 	readonly model?: string;
 	readonly mode?: string;
 	readonly intensity?: string;
+	readonly memoryMode?: string;
 	readonly webSearch?: string;
 	readonly imageGeneration?: string;
 	readonly voiceMode?: string;
@@ -74,6 +95,7 @@ interface PanelOptions {
 }
 
 type BackboardSettings = ReturnType<typeof readSettings>;
+const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
 
 export function activate(context: vscode.ExtensionContext): void {
 	const bridge = new BackboardBridge(context);
@@ -162,6 +184,48 @@ function backboardConfigPath(): string {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function redactSensitiveValues(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return value.map(item => redactSensitiveValues(item));
+	}
+	if (!isObjectRecord(value)) {
+		return value;
+	}
+	const redacted: Record<string, unknown> = {};
+	for (const [key, item] of Object.entries(value)) {
+		redacted[key] = /api[-_]?key|authorization|password|secret|token/i.test(key)
+			? '<redacted>'
+			: redactSensitiveValues(item);
+	}
+	return redacted;
+}
+
+function isVoiceAttachment(value: unknown): value is VoiceAttachment {
+	return isObjectRecord(value)
+		&& Array.isArray(value.data)
+		&& value.data.every(item => Number.isInteger(item) && item >= 0 && item <= 255)
+		&& typeof value.fileName === 'string'
+		&& value.fileName.trim().length > 0
+		&& typeof value.mimeType === 'string'
+		&& value.mimeType.trim().length > 0;
+}
+
+function isBridgeModel(value: unknown): value is BridgeModel {
+	if (!isObjectRecord(value)) {
+		return false;
+	}
+	return typeof value.provider === 'string' && value.provider.trim().length > 0
+		&& typeof value.name === 'string' && value.name.trim().length > 0;
+}
+
+function bridgeProviderKey(provider: string): string {
+	return provider.trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+function isVisibleBridgeModel(model: BridgeModel): boolean {
+	return !hiddenModelProviders.has(bridgeProviderKey(model.provider));
 }
 
 function isFileNotFoundError(error: unknown): boolean {
@@ -291,7 +355,6 @@ interface ResponseSink {
 	markdown(value: string | vscode.MarkdownString): void;
 	progress(value: string): void;
 	event?(type: string, payload: unknown): void;
-	question?(args: Record<string, unknown>, token: vscode.CancellationToken): Promise<string>;
 }
 
 function renderBridgeEvent(event: BridgeEvent, response: ResponseSink, currentToolRequest: ToolResultRequest | undefined): ToolResultRequest | undefined {
@@ -338,7 +401,6 @@ function renderBridgeEvent(event: BridgeEvent, response: ResponseSink, currentTo
 class BackboardPanelProvider implements vscode.WebviewViewProvider {
 	private view: vscode.WebviewView | undefined;
 	private runToken: vscode.CancellationTokenSource | undefined;
-	private pendingQuestion: { id: string; resolve: (value: string) => void; disposable: vscode.Disposable } | undefined;
 
 	constructor(private readonly bridge: BackboardBridge, private readonly context: vscode.ExtensionContext) {
 	}
@@ -355,12 +417,12 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.onDidReceiveMessage(message => {
 			if (message?.type === 'send' && typeof message.prompt === 'string') {
 				void this.sendPrompt(message.prompt, asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined);
-			} else if (message?.type === 'cancel') {
-				this.runToken?.cancel();
-			} else if (message?.type === 'questionResponse' || message?.type === 'dismissQuestion') {
-				this.resolveQuestion(message);
-			} else if (message?.type === 'reviewChanges') {
-				void vscode.commands.executeCommand('workbench.view.scm');
+				} else if (message?.type === 'sendVoice' && isVoiceAttachment(message.audio)) {
+					void this.sendPrompt(typeof message.prompt === 'string' ? message.prompt : '', asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, message.audio);
+				} else if (message?.type === 'cancel') {
+					this.runToken?.cancel();
+				} else if (message?.type === 'reviewChanges') {
+					void vscode.commands.executeCommand('workbench.view.scm');
 			} else if (message?.type === 'setApiKey') {
 				void setApiKey();
 			} else if (message?.type === 'insertActiveFile') {
@@ -370,7 +432,9 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			} else if (message?.type === 'insertBranchDiff') {
 				void postBranchDiff(webviewView.webview);
 			} else if (message?.type === 'ready' || message?.type === 'refreshModels') {
-				void postPanelState(this.bridge, webviewView.webview);
+				void postPanelState(this.bridge, webviewView.webview, message?.type === 'refreshModels');
+			} else if (message?.type === 'refreshUsage') {
+				void postUsageSnapshot(this.bridge, webviewView.webview);
 			} else if (message?.type === 'saveSettings') {
 				void savePanelOptions(asPanelOptions(message.options));
 			}
@@ -378,13 +442,14 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		void postPanelState(this.bridge, webviewView.webview);
 	}
 
-	private async sendPrompt(prompt: string, options: PanelOptions, chatId: string | undefined): Promise<void> {
+	private async sendPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment): Promise<void> {
 		const view = this.view;
-		if (!view || !prompt.trim()) {
+		if (!view || (!prompt.trim() && !audio)) {
 			return;
 		}
 		const settings = resolveTurnSettings(options);
-		const voiceBlock = unsupportedVoiceModeMessage(settings.voiceMode);
+		const voiceMode = audio && (settings.voiceMode === 'off' || settings.voiceMode === 'tts') ? 'conversation' : settings.voiceMode;
+		const voiceBlock = audio ? undefined : unsupportedVoiceModeMessage(voiceMode);
 		if (voiceBlock) {
 			await view.webview.postMessage({ type: 'status', text: voiceBlock });
 			return;
@@ -394,20 +459,23 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		const token = this.runToken.token;
 		const sessionId = `panel:${workspacePath() ?? 'default'}:${chatId || 'default'}`;
 		const sink = this.panelSink(view);
-		await view.webview.postMessage({ type: 'runStarted', prompt, chatId });
+		const content = prompt.trim() || 'Please transcribe this audio and respond.';
+		await view.webview.postMessage({ type: 'runStarted', prompt: content, chatId });
 		await view.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
 		const firstToolRequests: ToolResultRequest[] = [];
 		try {
 			await this.bridge.send('sendPrompt', sessionId, {
-				content: prompt,
+				content,
 				workspace: workspacePath(),
 				provider: settings.defaultProvider,
 				model: settings.defaultModel,
 				mode: settings.mode,
 				intensity: settings.intensity,
+				memoryMode: settings.memoryMode,
 				webSearch: settings.webSearch,
 				imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
-				voiceMode: settings.voiceMode,
+				voiceMode,
+				audioFile: audio,
 				mcpCalls: mcpCallsPayload(settings),
 				config: settings.config
 			}, event => {
@@ -450,40 +518,13 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			},
 			progress: value => {
 				void view.webview.postMessage({ type: 'status', text: value });
-			},
-			event: (type, payload) => {
-				void view.webview.postMessage({ type, payload });
-			},
-			question: (args, token) => {
-				return this.askQuestion(view.webview, args, token);
-			}
-		};
-	}
-
-	private async askQuestion(webview: vscode.Webview, args: Record<string, unknown>, token: vscode.CancellationToken): Promise<string> {
-		this.pendingQuestion?.resolve('No response.');
-		this.pendingQuestion?.disposable.dispose();
-		const id = newId();
-		const question = stringArg(args, 'question') || 'Backboard needs input.';
-		const options = arrayStringArg(args, 'options');
-		await webview.postMessage({ type: 'question', payload: { id, question, options } });
-		return new Promise(resolve => {
-			const disposable = token.onCancellationRequested(() => this.resolveQuestion({ type: 'dismissQuestion', id }));
-			this.pendingQuestion = { id, resolve, disposable };
-		});
-	}
-
-	private resolveQuestion(message: unknown): void {
-		const value = message as { id?: string; value?: string; type?: string };
-		const pending = this.pendingQuestion;
-		if (!pending || pending.id !== value.id) {
-			return;
+				},
+				event: (type, payload) => {
+					void view.webview.postMessage({ type, payload });
+				}
+			};
 		}
-		this.pendingQuestion = undefined;
-		pending.disposable.dispose();
-		pending.resolve(value.type === 'dismissQuestion' ? 'No response.' : value.value || 'No response.');
 	}
-}
 
 function webviewLocalResourceRoots(context: vscode.ExtensionContext): vscode.Uri[] {
 	return [
@@ -503,7 +544,8 @@ function iconBaseUri(context: vscode.ExtensionContext, webview: vscode.Webview):
 function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, iconBase: vscode.Uri, options: { readonly showHeader: boolean }): string {
 	const nonce = newId();
 	const csp = `default-src 'none'; img-src ${webview.cspSource} https: data: blob:; media-src ${webview.cspSource} https: data: blob:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';`;
-	const rootRows = `${options.showHeader ? '42px ' : ''}38px minmax(0, 1fr) auto`;
+	const backboardLogo = `${iconBase.toString()}/backboard_logo.svg`;
+	const rootRows = `${options.showHeader ? '42px ' : ''}35px minmax(0, 1fr) auto`;
 	const logLabel = options.showHeader ? 'aria-labelledby="chatTab"' : 'aria-label="Chat"';
 	const header = options.showHeader ? `
 			<div class="panelHeader">
@@ -558,6 +600,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			--bb-success-bg: color-mix(in srgb, #f0fbf4 82%, var(--vscode-editor-background, #ffffff));
 			--bb-shadow: color-mix(in srgb, var(--vscode-widget-shadow, #000000) 8%, transparent);
 			--bb-radius: 8px;
+			--bb-composer-safe-bottom: ${options.showHeader ? '0px' : '35px'};
 		}
 		html, body { width: 100%; height: 100%; overflow: hidden; }
 		body { padding: 0; margin: 0; color: var(--bb-text); background: var(--bb-bg); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
@@ -576,20 +619,22 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.headerIconButton .codicon { font-size: 15px; }
 		.historyHeaderButton { width: auto; min-width: 34px; grid-auto-flow: column; column-gap: 3px; padding: 0 5px; }
 		.tabCount { min-width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; padding: 0 3px; border-radius: 999px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-border) 58%, transparent); font-size: 10px; line-height: 14px; }
-		.recentTabsShell { position: relative; min-width: 0; min-height: 38px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; overflow: hidden; border-bottom: 1px solid var(--bb-border); background: var(--bb-bg); }
-		.recentTabsShell::after { content: ''; position: absolute; top: 0; right: 68px; bottom: 0; width: 34px; pointer-events: none; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bb-bg) 80%, transparent) 58%, var(--bb-bg)); }
-		.recentTabs { --recent-tab-width: calc((100% - 8px) / 3); min-width: 0; display: flex; align-items: center; gap: 4px; overflow-x: auto; overflow-y: hidden; padding: 5px 38px 5px 10px; scrollbar-width: none; }
+		.recentTabsShell { position: relative; min-width: 0; min-height: 35px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; overflow: hidden; border-bottom: 1px solid var(--bb-border); background: var(--bb-bg); }
+		.recentTabsShell::after { content: ''; position: absolute; top: 0; right: 56px; bottom: 0; width: 24px; pointer-events: none; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bb-bg) 80%, transparent) 58%, var(--bb-bg)); }
+		.recentTabs { min-width: 0; display: flex; align-items: center; gap: 2px; overflow-x: auto; overflow-y: hidden; padding: 5px 28px 5px 8px; scrollbar-width: none; }
 		.recentTabs::-webkit-scrollbar { display: none; }
-		.recentTab { width: var(--recent-tab-width); min-width: 0; height: 28px; flex: 0 0 var(--recent-tab-width); display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; color: var(--bb-muted); background: transparent; font-size: 12px; line-height: 16px; text-align: left; }
+		.recentTab { width: max-content; min-width: 36px; max-width: min(190px, calc(50vw - 52px)); height: 24px; flex: 0 1 auto; box-sizing: border-box; display: inline-flex; align-items: center; gap: 4px; padding: 0 3px 0 7px; border: 1px solid transparent; border-radius: 5px; color: var(--bb-muted); background: transparent; font-size: 11.5px; line-height: 15px; text-align: left; cursor: pointer; }
 		.recentTab:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
 		.recentTab.active { color: var(--bb-text); border-color: var(--bb-border); background: color-mix(in srgb, var(--vscode-editor-background, var(--bb-card)) 90%, var(--bb-bg)); box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--bb-primary) 42%, transparent); }
 		.recentTab:focus-visible { outline: 1px solid color-mix(in srgb, var(--bb-primary) 70%, transparent); outline-offset: 2px; }
 		.recentTab.running { color: var(--bb-muted); }
-		.recentTabIcon { width: 12px; flex: 0 0 auto; display: grid; place-items: center; }
-		.recentTabIcon .codicon { font-size: 12px; }
-		.recentTabLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.recentTabsActions { position: relative; z-index: 1; display: flex; align-items: center; gap: 3px; padding: 5px 10px 5px 3px; background: var(--bb-bg); }
-		.recentActionButton { height: 26px; min-width: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 3px; padding: 0 5px; border-radius: 6px; color: var(--bb-muted); background: transparent; }
+		.recentTabLabel { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.recentTabClose { width: 16px; height: 16px; flex: 0 0 auto; display: inline-grid; place-items: center; padding: 0; border-radius: 4px; color: var(--bb-muted); background: transparent; opacity: 0; }
+		.recentTab:hover .recentTabClose, .recentTab:focus-within .recentTabClose, .recentTab.active .recentTabClose { opacity: 1; }
+		.recentTabClose:hover { color: var(--bb-text); background: color-mix(in srgb, var(--bb-border) 62%, transparent); }
+		.recentTabClose .codicon { font-size: 12px; }
+		.recentTabsActions { position: relative; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 5px 8px 5px 2px; background: var(--bb-bg); }
+		.recentActionButton { height: 22px; min-width: 22px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px; border-radius: 5px; color: var(--bb-muted); background: transparent; }
 		.recentActionButton:hover, .recentActionButton.active { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
 		.recentActionButton .codicon { font-size: 14px; }
 			.checkpointStrip { display: none; min-width: 0; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--bb-border); background: color-mix(in srgb, var(--bb-bg) 94%, var(--bb-surface)); }
@@ -604,15 +649,20 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.viewStack { min-height: 0; overflow: hidden; background: var(--bb-bg); }
 		.viewPane { display: none; min-height: 0; height: 100%; }
 		.viewPane.active { display: flex; }
-		.composer { position: relative; padding: 0 10px 10px; background: linear-gradient(180deg, transparent, var(--bb-bg) 16px); }
+		.composer { position: relative; box-sizing: border-box; padding: 0 10px calc(10px + var(--bb-composer-safe-bottom) + env(safe-area-inset-bottom, 0px)); background: linear-gradient(180deg, transparent, var(--bb-bg) 16px); }
 		.stateControl { display: none; }
 			.log { overflow: auto; min-height: 0; padding: 16px 10px 14px; flex-direction: column; gap: 10px; background: var(--bb-bg); scrollbar-width: thin; }
-		.emptyState { margin: auto; max-width: 280px; display: grid; justify-items: center; gap: 8px; color: var(--bb-muted); text-align: center; font-size: 12px; line-height: 18px; transform: translateY(-5%); }
-		.emptyIcon { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--bb-border); border-radius: 7px; background: color-mix(in srgb, var(--vscode-editor-background, var(--bb-card)) 84%, var(--bb-bg)); }
-		.emptyIcon .codicon { color: color-mix(in srgb, var(--bb-primary) 78%, var(--bb-text)); font-size: 17px; }
+		.emptyState { margin: auto; display: grid; place-items: center; gap: 12px; transform: translateY(-8%); padding: 0 20px; }
+		.emptyIcon { width: 48px; height: 64px; display: block; color: color-mix(in srgb, var(--vscode-icon-foreground, var(--bb-text)) 62%, var(--bb-primary)); background: currentColor; opacity: .72; -webkit-mask: url('${backboardLogo}') center / contain no-repeat; mask: url('${backboardLogo}') center / contain no-repeat; transition: opacity .2s ease; }
+		.emptyState:hover .emptyIcon { opacity: .9; }
+		.emptyTagline { color: var(--bb-muted); font-size: 13px; line-height: 20px; text-align: center; max-width: 220px; }
+		.emptyHints { display: grid; gap: 4px; margin-top: 4px; }
+		.emptyHint { color: var(--bb-subtle); font-size: 11px; line-height: 16px; text-align: center; }
 			.messageCard { display: flex; flex-direction: column; gap: 5px; width: fit-content; max-width: 92%; box-sizing: border-box; padding: 9px 10px; border-radius: 8px; overflow-wrap: anywhere; }
-			.messageCard.user { align-self: flex-end; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); }
-			.messageCard.assistant { align-self: flex-start; max-width: 100%; padding: 2px 0 3px; border-radius: 0; background: transparent; }
+			.messageCard.user { align-self: flex-end; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); box-shadow: 0 1px 3px color-mix(in srgb, var(--bb-primary) 24%, transparent); animation: bbFadeIn .2s ease; }
+			.messageCard.user:hover { box-shadow: 0 2px 8px color-mix(in srgb, var(--bb-primary) 30%, transparent); }
+			.messageCard.assistant { align-self: flex-start; max-width: 100%; padding: 2px 0 3px 10px; border-radius: 0; background: transparent; border-left: 2px solid color-mix(in srgb, var(--bb-primary) 22%, var(--bb-border)); animation: bbFadeIn .25s ease; }
+			@keyframes bbFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 			.messageHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 			.messageRole { color: var(--bb-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
 			.messageActions { display: none; align-items: center; gap: 3px; }
@@ -630,16 +680,31 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.queueActions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
 		.queueButton { min-height: 22px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 3px 7px; border-radius: 4px; color: var(--bb-muted); background: transparent; font-size: 11px; }
 		.queueButton:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
-		.statusRow { width: 100%; display: flex; align-items: center; gap: 6px; color: var(--bb-success); font-size: 12px; line-height: 16px; padding: 1px 2px; box-sizing: border-box; }
+		.statusRow { width: 100%; display: flex; align-items: center; gap: 6px; color: var(--bb-success); font-size: 12px; line-height: 16px; padding: 1px 2px; box-sizing: border-box; transition: color .2s ease; }
 		.statusRow.error { color: var(--vscode-errorForeground, var(--bb-danger)); }
 		.statusRow.muted { color: var(--bb-muted); }
+		.statusRow.muted .statusIcon { animation: bbPulse 1.6s ease-in-out infinite; }
+		@keyframes bbPulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 		.statusIcon { width: 12px; height: 12px; flex: 0 0 auto; display: grid; place-items: center; }
 		.statusIcon .codicon { font-size: 12px; }
-			.toolRow { width: fit-content; max-width: 100%; min-height: 20px; box-sizing: border-box; display: flex; align-items: center; gap: 7px; padding: 2px 8px; border-radius: 999px; color: var(--bb-success); background: color-mix(in srgb, var(--bb-border) 34%, transparent); font-size: 12px; line-height: 16px; }
-		.toolRow.started { color: var(--bb-muted); }
-		.toolRow.failed, .toolRow.denied { color: var(--bb-danger); }
-		.toolRow .codicon { font-size: 13px; }
-		.toolLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.toolCard { width: min(560px, 100%); box-sizing: border-box; overflow: hidden; border: 1px solid var(--bb-border); border-radius: 7px; color: var(--bb-text); background: color-mix(in srgb, var(--bb-card) 88%, transparent); font-size: 12px; line-height: 16px; }
+		.toolCard.started { border-color: color-mix(in srgb, var(--bb-primary) 42%, var(--bb-border)); }
+		.toolCard.finished { border-color: color-mix(in srgb, var(--bb-success) 34%, var(--bb-border)); }
+		.toolCard.failed, .toolCard.denied { border-color: color-mix(in srgb, var(--bb-danger) 42%, var(--bb-border)); }
+		.toolHead { min-height: 32px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 9px; }
+		.toolStatusIcon { width: 16px; height: 16px; display: grid; place-items: center; color: var(--bb-success); }
+		.toolCard.started .toolStatusIcon { color: var(--bb-muted); }
+		.toolCard.started .toolStatusIcon .codicon { animation: bbSpin 1.2s linear infinite; }
+		@keyframes bbSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+		.toolCard.failed .toolStatusIcon, .toolCard.denied .toolStatusIcon { color: var(--bb-danger); }
+		.toolStatusIcon .codicon { font-size: 14px; }
+		.toolMain { min-width: 0; display: grid; gap: 1px; }
+		.toolLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+		.toolMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-muted); font-size: 11px; line-height: 14px; }
+		.toolToggle { width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border-radius: 4px; color: var(--bb-muted); background: transparent; }
+		.toolToggle:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
+		.toolDetails { display: none; max-height: 220px; overflow: auto; border-top: 1px solid var(--bb-border); padding: 7px 9px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-bg) 70%, transparent); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; line-height: 15px; white-space: pre-wrap; word-break: break-word; }
+		.toolCard.open .toolDetails { display: block; }
 		.usageRow { width: 100%; box-sizing: border-box; display: flex; align-items: flex-start; gap: 8px; padding: 3px 2px; color: var(--bb-muted); font-size: 12px; line-height: 16px; }
 		.usageToggle { --usage-percent: 0; position: relative; width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; padding: 0; border-radius: 50%; color: var(--bb-text); background: conic-gradient(var(--bb-primary) calc(var(--usage-percent) * 1%), color-mix(in srgb, var(--bb-border) 60%, transparent) 0); }
 		.usageToggle::before { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bb-bg); }
@@ -690,7 +755,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.historyPane { overflow: auto; flex-direction: column; gap: 7px; padding: 8px 10px 10px; background: var(--bb-bg); scrollbar-width: thin; }
 		.historyList { display: flex; flex-direction: column; gap: 4px; }
 		.historyEmpty { margin: auto; max-width: 240px; color: var(--bb-muted); text-align: center; font-size: 12px; line-height: 18px; }
-		.historyItem { width: 100%; min-height: 46px; box-sizing: border-box; display: grid; gap: 3px; padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; color: var(--bb-text); background: transparent; text-align: left; }
+		.historyItem { width: 100%; min-height: 46px; box-sizing: border-box; display: grid; gap: 3px; padding: 7px 8px; border: 1px solid transparent; border-radius: 7px; color: var(--bb-text); background: transparent; text-align: left; transition: border-color .15s ease, background .15s ease; }
 		.historyItem:hover { border-color: var(--bb-border); background: color-mix(in srgb, var(--bb-card) 74%, transparent); }
 		.historyItem.active { border-color: color-mix(in srgb, var(--bb-primary) 48%, var(--bb-border)); background: color-mix(in srgb, var(--bb-primary) 10%, transparent); }
 		.historyItemTitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; line-height: 16px; }
@@ -698,33 +763,39 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.historyItemStatus { flex: 0 0 auto; color: var(--bb-success); }
 		.historyItemStatus.running { color: var(--bb-muted); }
 		.historyItemStatus.failed, .historyItemStatus.cancelled { color: var(--bb-danger); }
-		.status { max-width: 760px; margin: 0 auto; color: var(--bb-muted); font-size: 11px; padding: 0 1px 5px; min-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		form { display: block; max-width: 760px; margin: 0 auto; }
-		.composerCard { min-height: 98px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--bb-border); border-radius: 8px; background: color-mix(in srgb, var(--vscode-input-background, var(--bb-card)) 92%, var(--bb-bg)); overflow: hidden; box-shadow: none; transition: border-color .12s ease, box-shadow .12s ease, background .12s ease; }
-		.composerCard:hover { border-color: color-mix(in srgb, var(--bb-border) 68%, var(--bb-primary) 16%); }
-		.composerCard:focus-within { border-color: color-mix(in srgb, var(--bb-primary) 58%, var(--bb-border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bb-primary) 16%, transparent); }
+		.status { width: 100%; box-sizing: border-box; margin: 0 auto; color: var(--bb-muted); font-size: 11px; padding: 0 1px 5px; min-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		form { display: block; width: 100%; margin: 0 auto; }
+		.composerCard { min-height: 98px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--bb-border); border-radius: 10px; background: color-mix(in srgb, var(--vscode-input-background, var(--bb-card)) 92%, var(--bb-bg)); overflow: hidden; box-shadow: 0 1px 3px color-mix(in srgb, var(--bb-shadow) 40%, transparent); transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+		.composerCard:hover { border-color: color-mix(in srgb, var(--bb-border) 60%, var(--bb-primary) 20%); box-shadow: 0 2px 8px color-mix(in srgb, var(--bb-shadow) 60%, transparent); }
+		.composerCard:focus-within { border-color: color-mix(in srgb, var(--bb-primary) 62%, var(--bb-border)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--bb-primary) 14%, transparent), 0 2px 8px color-mix(in srgb, var(--bb-shadow) 50%, transparent); }
 		textarea { width: 100%; min-height: 44px; max-height: 132px; box-sizing: border-box; resize: vertical; padding: 0; border: 0; outline: 0; line-height: 20px; background: transparent; color: var(--bb-text); font-family: var(--vscode-font-family); font-size: 13px; }
 		textarea::placeholder { color: var(--bb-muted); }
 		.composerRule { display: none; }
-		.composerBar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; padding: 0; }
-		.barLeft, .barRight { display: flex; align-items: center; gap: 7px; min-width: 0; }
-		.barLeft { flex: 1; }
-		.barRight { justify-content: flex-end; }
+		.composerBar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 24px; padding: 0; overflow: hidden; }
+		.barLeft, .barRight { display: flex; align-items: center; min-width: 0; }
+		.barLeft { flex: 1 1 auto; gap: 8px; overflow: hidden; }
+		.barRight { flex: 0 0 auto; justify-content: flex-end; gap: 11px; overflow: hidden; }
 		button { border: 0; cursor: pointer; font-family: var(--vscode-font-family); }
-		.iconButton { width: 26px; height: 26px; display: inline-grid; place-items: center; padding: 0; border-radius: 6px; color: var(--bb-muted); background: transparent; line-height: 1; flex: 0 0 auto; }
+		.iconButton { width: 20px; height: 22px; min-width: 20px; display: inline-grid; place-items: center; padding: 0; border-radius: 0; color: var(--bb-muted); background: transparent; line-height: 1; flex: 0 0 auto; }
 		.iconButton .codicon { font-size: 16px; }
-		.iconButton:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
-		.iconButton.active { color: var(--bb-primary); background: color-mix(in srgb, var(--bb-primary) 12%, transparent); }
-		.iconButton.recording { color: var(--bb-danger); background: color-mix(in srgb, var(--bb-danger) 14%, transparent); }
+		.iconButton:hover { color: var(--bb-text); background: transparent; }
+		.iconButton.active { color: var(--bb-primary); background: transparent; }
+		.iconButton.recording { color: var(--bb-danger); background: transparent; }
 		.iconButton:disabled { cursor: default; color: var(--vscode-disabledForeground); background: transparent; outline: 0; }
+		.composerMenuButton { width: 28px; min-width: 28px; grid-template-columns: 1fr auto; padding: 0; }
+		.composerMenuButton .codicon-add { font-size: 16px; }
+		.composerMenuButton .codicon-chevron-down { margin-left: -5px; font-size: 11px; }
+		.featureButton.active { color: var(--bb-primary); }
+		.usageFeatureButton.hasUsage { color: var(--bb-text); }
 		.composerCard.recording { border-color: var(--bb-danger); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bb-danger) 32%, transparent); }
-		.sendButton.ready { color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); }
-		.sendButton.ready:hover { background: var(--vscode-button-hoverBackground, color-mix(in srgb, var(--bb-primary) 86%, var(--bb-text))); }
-		.modelButton, .modeButton { min-width: 48px; height: 26px; display: flex; align-items: center; gap: 5px; padding: 0 7px; border-radius: 6px; color: var(--bb-muted); background: transparent; font-size: 12px; overflow: hidden; }
-		.modelButton { min-width: 96px; }
-		.modelButton:hover, .modeButton:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
-		.modelButton.active, .modeButton.active { color: var(--bb-primary); background: color-mix(in srgb, var(--bb-primary) 12%, transparent); }
-		.modeGlyph { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 2px; background: var(--bb-muted); }
+		.sendButton.ready { color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); box-shadow: 0 1px 3px color-mix(in srgb, var(--bb-primary) 28%, transparent); transition: background .15s ease, box-shadow .15s ease; }
+		.sendButton.ready:hover { background: var(--vscode-button-hoverBackground, color-mix(in srgb, var(--bb-primary) 86%, var(--bb-text))); box-shadow: 0 2px 6px color-mix(in srgb, var(--bb-primary) 36%, transparent); }
+		.modelButton, .modeButton { min-width: 0; height: 22px; display: flex; align-items: center; gap: 5px; padding: 0; border-radius: 0; color: var(--bb-muted); background: transparent; font-size: 12px; overflow: hidden; flex: 0 1 auto; }
+		.modeButton { max-width: 128px; }
+		.modelButton { max-width: min(320px, 46vw); }
+		.modelButton:hover, .modeButton:hover { color: var(--bb-text); background: transparent; }
+		.modelButton.active, .modeButton.active { color: var(--bb-primary); background: transparent; }
+		.modeGlyph { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 2px; background: currentColor; opacity: .85; }
 		.modelIcon { width: 13px; height: 13px; flex: 0 0 auto; display: inline-grid; place-items: center; overflow: hidden; border-radius: 3px; }
 		.modelIcon img, .choiceIcon img, .providerSwitchIcon img { width: 100%; height: 100%; display: block; object-fit: contain; }
 		.modelIcon .codicon { font-size: 13px; }
@@ -732,56 +803,75 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.modelPrefix { color: var(--bb-muted); }
 		.modelValue { color: color-mix(in srgb, var(--bb-text) 80%, var(--bb-muted)); }
 		.modelLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.drawerButton { min-height: 26px; display: inline-flex; align-items: center; gap: 5px; color: var(--bb-text); background: var(--bb-card); border: 1px solid var(--bb-border); border-radius: 6px; padding: 4px 9px; font-size: 12px; }
-		.drawerButton:hover { border-color: color-mix(in srgb, var(--bb-primary) 42%, var(--bb-border)); background: color-mix(in srgb, var(--bb-primary) 9%, var(--bb-card)); }
-		.popover { position: fixed; z-index: 20; width: min(390px, calc(100vw - 20px)); max-height: min(520px, calc(100vh - 24px)); display: none; overflow: hidden; border: 1px solid color-mix(in srgb, var(--bb-border) 72%, var(--bb-primary) 16%); border-radius: 10px; background: var(--vscode-editorWidget-background, var(--bb-bg)); color: var(--bb-text); box-shadow: 0 12px 30px color-mix(in srgb, var(--vscode-widget-shadow, #000) 30%, transparent); }
-		.popover[data-kind="model"] { max-height: min(660px, calc(100vh - 24px)); }
+		@media (max-width: 520px) {
+			.composerBar { gap: 8px; }
+			.barLeft { gap: 6px; }
+			.barRight { gap: 8px; }
+			.modeButton { max-width: 92px; }
+			.modelButton { max-width: min(210px, 42vw); }
+			.modelPrefix { display: none; }
+		}
+		.drawerButton { min-height: 22px; display: inline-flex; align-items: center; gap: 5px; color: var(--vscode-textLink-foreground, var(--bb-primary)); background: transparent; border: 0; border-radius: 0; padding: 0; font-size: 11.5px; }
+		.drawerButton:hover { color: var(--vscode-textLink-activeForeground, var(--bb-text)); background: transparent; }
+		.popover { position: fixed; z-index: 20; width: min(390px, calc(100vw - 8px)); max-height: min(390px, calc(100vh - 8px)); display: none; overflow: hidden; border: 1px solid var(--vscode-focusBorder, var(--bb-border)); border-radius: 8px; background: var(--vscode-quickInput-background, var(--vscode-editorWidget-background, var(--bb-bg))); color: var(--bb-text); box-shadow: 0 16px 36px color-mix(in srgb, var(--vscode-widget-shadow, #000) 34%, transparent); }
 		.popover.open { display: flex; flex-direction: column; }
 		.popoverHeader { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 8px 12px; border-bottom: 1px solid var(--bb-border); background: color-mix(in srgb, var(--bb-card) 74%, transparent); }
+		.popoverHeader { display: none; }
 		.popoverTitle { font-size: 13px; font-weight: 650; }
-		.popoverBody { overflow: auto; padding: 10px; display: grid; gap: 10px; }
-		.popover[data-kind="model"] .popoverBody { padding: 0; gap: 0; }
+		.popoverBody { overflow: auto; overflow-x: hidden; padding: 0; display: grid; gap: 0; }
 		.popoverSection { display: grid; gap: 4px; }
-		.popover[data-kind="model"] .popoverSection { padding: 8px; border-top: 1px solid var(--bb-border); }
+		.popoverSection { padding: 1px 3px 3px; border-top: 0; }
 		.popoverSectionTitle { color: var(--bb-muted); font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; padding: 0 4px 3px; }
-		.choiceRow { width: 100%; min-height: 42px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 9px; border: 1px solid transparent; border-radius: 8px; color: var(--bb-text); background: transparent; text-align: left; }
-		.choiceRow:hover { background: color-mix(in srgb, var(--bb-primary) 8%, var(--bb-card)); border-color: color-mix(in srgb, var(--bb-primary) 24%, transparent); }
-		.choiceRow.selected { background: color-mix(in srgb, var(--bb-primary) 14%, var(--bb-card)); border-color: color-mix(in srgb, var(--bb-primary) 54%, transparent); color: var(--bb-text); }
+		.popoverSectionTitle { padding: 3px 6px 2px; color: var(--vscode-descriptionForeground, var(--bb-muted)); font-size: 10.5px; font-weight: 600; line-height: 13px; text-transform: none; letter-spacing: 0; }
+		.choiceRow { width: 100%; min-height: 24px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 5px 0 8px; border: 1px solid transparent; border-radius: 3px; color: var(--bb-text); background: transparent; text-align: left; }
+		.choiceRow:hover { background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--bb-primary) 8%, transparent)); border-color: transparent; }
+		.choiceRow.selected { background: var(--vscode-list-focusBackground, color-mix(in srgb, var(--bb-primary) 14%, transparent)); border-color: transparent; color: var(--vscode-list-focusForeground, var(--bb-text)); }
 		.choiceRow.disabled { cursor: default; color: var(--vscode-disabledForeground); }
 		.choiceRow.disabled:hover { background: transparent; border-color: transparent; }
-		.choiceIcon { width: 24px; height: 24px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 6px; color: var(--bb-primary); background: color-mix(in srgb, var(--bb-primary) 12%, transparent); }
-		.choiceIcon .codicon { font-size: 14px; }
-		.choiceMain { display: grid; gap: 3px; min-width: 0; flex: 1; }
-		.choiceLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 550; }
-		.choiceMeta { color: var(--bb-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 15px; }
-		.choiceRow.selected .choiceMeta { color: color-mix(in srgb, var(--bb-text) 72%, var(--bb-muted)); }
-		.popoverActions { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px; }
+		.choiceIcon { width: 13px; height: 13px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 0; color: var(--vscode-descriptionForeground, var(--bb-muted)); background: transparent; }
+		.choiceIcon .codicon { font-size: 12px; }
+		.choiceMain { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 0; }
+		.choiceLabel { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; line-height: 16px; }
+		.choiceMeta { min-width: 0; max-width: 54%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; color: var(--vscode-descriptionForeground, var(--bb-muted)); font-size: 10px; line-height: 14px; text-align: right; }
+		.choiceRow.selected .choiceMeta { color: var(--vscode-list-focusForeground, var(--bb-text)); opacity: .78; }
+		.choiceRow > .codicon-check { width: 12px; flex: 0 0 auto; color: var(--vscode-focusBorder, var(--bb-primary)); font-size: 12px; }
+		.popoverActions { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 8px 5px; }
 		.popoverSearch { width: 100%; height: 32px; box-sizing: border-box; padding: 5px 9px; border: 1px solid var(--bb-border); border-radius: 8px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); outline: 0; font-size: 12px; }
 		.popoverSearch:focus { border-color: var(--bb-primary); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bb-primary) 30%, transparent); }
-		.modelFilterWrap { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--bb-bg)) 96%, var(--bb-bg)); border-bottom: 1px solid var(--bb-border); }
-		.modelFilterBar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px; }
-		.modelFilterButton { min-width: 34px; height: 32px; display: inline-grid; place-items: center; padding: 0 9px; border: 1px solid var(--bb-border); border-radius: 8px; color: var(--bb-muted); background: var(--vscode-input-background); }
-		.modelFilterButton:hover, .modelFilterButton.active { color: var(--bb-primary); border-color: color-mix(in srgb, var(--bb-primary) 42%, var(--bb-border)); background: color-mix(in srgb, var(--bb-primary) 10%, var(--vscode-input-background)); }
-		.modelFilterButton .codicon { font-size: 15px; }
-		.providerFilterModal { position: absolute; top: 48px; right: 10px; width: min(280px, calc(100% - 20px)); max-height: min(320px, calc(100vh - 170px)); overflow: auto; display: grid; gap: 8px; padding: 10px; border: 1px solid color-mix(in srgb, var(--bb-border) 76%, var(--bb-primary) 16%); border-radius: 10px; background: var(--vscode-editorWidget-background, var(--bb-bg)); box-shadow: 0 14px 34px color-mix(in srgb, var(--vscode-widget-shadow, #000) 36%, transparent); }
-		.filterHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-		.filterTitle { font-size: 13px; font-weight: 650; }
-		.filterMeta { color: var(--bb-muted); font-size: 11px; }
-		.providerSwitchList { display: grid; gap: 6px; }
-		.providerSwitch { width: 100%; min-height: 34px; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--bb-border); border-radius: 8px; color: var(--bb-muted); background: transparent; text-align: left; }
-		.providerSwitch:hover { color: var(--bb-text); border-color: color-mix(in srgb, var(--bb-primary) 34%, var(--bb-border)); background: color-mix(in srgb, var(--bb-primary) 7%, transparent); }
-		.providerSwitch.active { color: var(--bb-text); background: color-mix(in srgb, var(--bb-primary) 9%, transparent); border-color: color-mix(in srgb, var(--bb-primary) 38%, var(--bb-border)); }
-		.providerSwitchIcon { width: 18px; height: 18px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 5px; }
+		.popoverSearch { height: 28px; padding: 0 8px; border: 0; border-radius: 0; color: var(--vscode-input-foreground, var(--bb-text)); background: transparent; font-size: 12px; }
+		.popoverSearch:focus { border-color: transparent; box-shadow: inset 2px 0 0 var(--vscode-focusBorder, var(--bb-primary)); }
+		.modelFilterWrap { position: sticky; top: 0; z-index: 5; background: var(--vscode-quickInput-background, var(--vscode-editorWidget-background, var(--bb-bg))); border-bottom: 1px solid var(--bb-border); }
+		.modelFilterBar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px; min-height: 28px; padding: 0; }
+		.modelFilterButton { min-width: 40px; height: 22px; display: inline-flex; align-items: center; justify-content: center; margin-right: 4px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; color: var(--bb-text); background: transparent; font-size: 11.5px; font-weight: 600; }
+		.modelFilterButton:hover, .modelFilterButton.active { color: var(--bb-text); border-color: var(--vscode-focusBorder, var(--bb-border)); background: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--bb-primary) 10%, transparent)); }
+		.providerFilterPane { display: grid; gap: 0; padding: 5px 0 3px; }
+		.filterHeader { display: grid; gap: 2px; padding: 4px 10px 5px; }
+		.filterTitle { color: var(--bb-text); font-size: 12px; font-weight: 600; line-height: 15px; }
+		.filterMeta { color: var(--vscode-descriptionForeground, var(--bb-muted)); font-size: 11px; line-height: 14px; }
+		.providerSwitchList { display: grid; gap: 0; }
+		.providerSwitch { width: 100%; min-height: 24px; display: flex; align-items: center; gap: 7px; padding: 0 8px; border: 0; border-radius: 0; color: var(--bb-text); background: transparent; text-align: left; font-size: 12px; }
+		.providerSwitch:hover { color: var(--bb-text); background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--bb-primary) 8%, transparent)); }
+		.providerSwitch.active { color: var(--bb-text); background: transparent; }
+		.providerSwitch.focused { background: var(--vscode-list-focusBackground, var(--vscode-list-hoverBackground, color-mix(in srgb, var(--bb-primary) 12%, transparent))); color: var(--vscode-list-focusForeground, var(--bb-text)); }
+		.providerSwitchIcon { width: 13px; height: 13px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 3px; }
 		.providerSwitchName { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.providerSwitchToggle { width: 28px; height: 16px; flex: 0 0 auto; position: relative; border-radius: 999px; background: color-mix(in srgb, var(--bb-border) 72%, transparent); }
-		.providerSwitchToggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--bb-muted); transition: transform 120ms ease, background 120ms ease; }
-		.providerSwitch.active .providerSwitchToggle { background: color-mix(in srgb, var(--bb-primary) 34%, transparent); }
-		.providerSwitch.active .providerSwitchToggle::after { transform: translateX(12px); background: var(--bb-primary); }
-		.modelChoice { min-height: 50px; padding: 9px 10px; }
-		.modelChoice .choiceLabel { font-size: 13px; }
-		.modelChoice .choiceMeta { font-size: 11px; }
-		.modelProviderPill { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-border) 55%, transparent); font-size: 10px; }
-		.choiceRow.selected .modelProviderPill { color: var(--bb-primary); background: color-mix(in srgb, var(--bb-primary) 14%, transparent); }
+		.providerSwitchToggle { width: 12px; height: 12px; flex: 0 0 auto; display: grid; place-items: center; order: -1; border: 1px solid var(--bb-border); border-radius: 2px; color: transparent; background: var(--vscode-input-background, transparent); }
+		.providerSwitch.active .providerSwitchToggle { color: var(--vscode-focusBorder, var(--bb-primary)); border-color: var(--vscode-focusBorder, var(--bb-primary)); }
+		.providerSwitchToggle .codicon { font-size: 10px; }
+		.providerFilterDone { min-height: 24px; justify-self: start; margin: 4px 8px 0; padding: 0; color: var(--vscode-textLink-foreground, var(--bb-primary)); background: transparent; font-size: 11.5px; }
+		.providerFilterDone:hover { color: var(--vscode-textLink-activeForeground, var(--bb-text)); }
+		.modelChoice { min-height: 24px; padding: 0 5px 0 8px; border-radius: 3px; gap: 6px; }
+		.modelChoice:hover { background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--bb-primary) 8%, transparent)); border-color: transparent; }
+		.modelChoice.selected { background: var(--vscode-list-focusBackground, color-mix(in srgb, var(--bb-primary) 14%, transparent)); border-color: transparent; color: var(--vscode-list-focusForeground, var(--bb-text)); }
+		.modelChoice .choiceIcon { width: 13px; height: 13px; color: var(--vscode-descriptionForeground, var(--bb-muted)); background: transparent; border-radius: 0; }
+		.modelChoice .choiceIcon .codicon { font-size: 12px; }
+		.modelChoice .choiceMain { display: block; min-width: 0; flex: 1 1 0; }
+		.modelChoice .choiceLabel { font-size: 12px; font-weight: 500; line-height: 16px; }
+		.modelChoice .choiceMeta { display: none; }
+		.modelChoiceMeta { min-width: 0; width: 158px; overflow: hidden; text-overflow: clip; white-space: nowrap; flex: 0 0 158px; color: var(--vscode-descriptionForeground, var(--bb-muted)); font-size: 10px; line-height: 14px; text-align: right; }
+		.modelChoice .codicon-check { width: 12px; flex: 0 0 auto; color: var(--vscode-focusBorder, var(--bb-primary)); font-size: 12px; }
+		.modelChoiceCheckSpacer { width: 12px; flex: 0 0 auto; }
+		.modelProviderPill { display: none; }
 	</style>
 	</head>
 		<body>
@@ -792,8 +882,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				<div class="viewStack">
 				<div id="log" class="log viewPane active" role="tabpanel" ${logLabel}>
 					<div id="emptyState" class="emptyState">
-						<div class="emptyIcon"><span class="codicon codicon-sparkle"></span></div>
-							<div>Message Backboard about this workspace.</div>
+						<div class="emptyIcon" aria-hidden="true"></div>
+						<div class="emptyTagline">Ask anything about your code</div>
+						<div class="emptyHints">
+							<div class="emptyHint">Try: "Explain this function"</div>
+							<div class="emptyHint">Try: "Find bugs in my code"</div>
+						</div>
 					</div>
 				</div>
 				${historyPane}
@@ -811,6 +905,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				<option value="fast">Fast</option>
 				<option value="balanced">Balanced</option>
 				<option value="deep">Deep</option>
+			</select>
+			<select id="memoryMode" class="stateControl" aria-hidden="true">
+				<option value="Auto">Memory Lite</option>
+				<option value="Readonly">Memory Read Only</option>
+				<option value="off">Off</option>
+				<option value="ProAuto">Memory Pro</option>
+				<option value="ProReadonly">Memory Pro Read Only</option>
 			</select>
 			<select id="webSearch" class="stateControl" aria-hidden="true">
 				<option value="off">Off</option>
@@ -844,10 +945,16 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 						<div class="composerRule"></div>
 						<div class="composerBar">
 							<div class="barLeft">
-								<button id="plusBtn" class="modeButton" type="button" title="Composer menu" aria-label="Composer menu"><span class="modeGlyph"></span><span id="modeLabel" class="modeLabel">Agent</span><span class="codicon codicon-chevron-down"></span></button>
+								<button id="plusBtn" class="iconButton composerMenuButton" type="button" title="Composer menu" aria-label="Composer menu"><span class="codicon codicon-add"></span><span class="codicon codicon-chevron-down"></span></button>
+								<button id="modeBtn" class="modeButton" type="button" title="Mode and reasoning" aria-label="Mode and reasoning"><span class="modeGlyph"></span><span id="modeLabel" class="modeLabel">Agent</span><span class="codicon codicon-chevron-down"></span></button>
 								<button id="modelBtn" class="modelButton" type="button" title="Backboard model" aria-label="Backboard model"><span id="modelIcon" class="modelIcon"><span class="codicon codicon-server"></span></span><span class="modelPrefix">Model</span><span id="modelLabel" class="modelValue">Auto</span><span class="codicon codicon-chevron-down"></span></button>
 							</div>
 							<div class="barRight">
+								<button id="reasoningBtn" class="iconButton featureButton" type="button" title="Reasoning effort" aria-label="Reasoning effort"><span class="codicon codicon-settings-gear"></span></button>
+								<button id="webBtn" class="iconButton featureButton" type="button" title="Web search" aria-label="Web search"><span class="codicon codicon-globe"></span></button>
+								<button id="imageBtn" class="iconButton featureButton" type="button" title="Image output" aria-label="Image output"><span class="codicon codicon-device-camera-video"></span></button>
+								<button id="mcpBtn" class="iconButton featureButton" type="button" title="MCP tools" aria-label="MCP tools"><span class="codicon codicon-tools"></span></button>
+								<button id="usageBtn" class="iconButton featureButton usageFeatureButton" type="button" title="Usage details" aria-label="Usage details"><span class="codicon codicon-pulse"></span></button>
 								<button id="voiceBtn" class="iconButton" type="button" title="Start speech-to-text" aria-label="Start speech-to-text"><span class="codicon codicon-mic"></span></button>
 								<button id="sendBtn" class="iconButton sendButton" type="submit" title="Send" aria-label="Send" disabled><span class="codicon codicon-send"></span></button>
 							</div>
@@ -858,6 +965,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 	</div>
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
+		const root = document.querySelector('.root');
 		const log = document.getElementById('log');
 		const status = document.getElementById('status');
 		let emptyState = document.getElementById('emptyState');
@@ -883,7 +991,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		const newChatButton = document.getElementById('newChatBtn');
 		const buttons = {
 			plus: document.getElementById('plusBtn'),
+			mode: document.getElementById('modeBtn'),
 			model: document.getElementById('modelBtn'),
+			reasoning: document.getElementById('reasoningBtn'),
+			web: document.getElementById('webBtn'),
+			image: document.getElementById('imageBtn'),
+			mcp: document.getElementById('mcpBtn'),
+			usage: document.getElementById('usageBtn'),
 			voice: document.getElementById('voiceBtn'),
 			send: document.getElementById('sendBtn')
 		};
@@ -896,6 +1010,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			model: document.getElementById('model'),
 			mode: document.getElementById('mode'),
 			intensity: document.getElementById('intensity'),
+			memoryMode: document.getElementById('memoryMode'),
 			webSearch: document.getElementById('webSearch'),
 			imageGeneration: document.getElementById('imageGeneration'),
 			voiceMode: document.getElementById('voiceMode'),
@@ -920,12 +1035,14 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		let currentAssistantCard = undefined;
 		let activeToolRows = [];
 		let fileChanges = [];
+		let latestUsage = undefined;
+		let accountUsage = undefined;
+		let currentWorkspace = typeof persistedState.currentWorkspace === 'string' ? persistedState.currentWorkspace : '';
 		let restoringHistory = false;
-		let voiceRecognition = undefined;
+		let voiceRecorder = undefined;
+		let voiceStream = undefined;
+		let voiceChunks = [];
 		let voiceRecording = false;
-		let voiceBaseText = '';
-		let voiceFinalText = '';
-		let voiceStopRequested = false;
 		const iconBase = ${JSON.stringify(iconBase.toString())};
 		const providerIconFiles = {
 			'anthropic': 'ai_anthropic.svg',
@@ -970,6 +1087,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				model: controls.model.value,
 				mode: controls.mode.value,
 				intensity: controls.intensity.value,
+				memoryMode: controls.memoryMode.value,
 				webSearch: controls.webSearch.value,
 				imageGeneration: controls.imageGeneration.value,
 				voiceMode: controls.voiceMode.value,
@@ -981,15 +1099,41 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function saveOptions() {
 			vscode.postMessage({ type: 'saveSettings', options: options() });
 		}
-			function toolName(tool) {
-				return tool && tool.function && tool.function.name || tool && (tool.name || tool.tool_name || tool.toolName || tool.function_name || tool.functionName) || 'tool';
+		function toolName(tool) {
+			return tool && tool.function && tool.function.name || tool && (tool.name || tool.tool_name || tool.toolName || tool.function_name || tool.functionName) || 'tool';
+		}
+		function toolArgs(tool) {
+			const raw = tool && tool.function && tool.function.arguments || tool && (tool.arguments || tool.args || tool.input);
+			if (!raw) {
+				return {};
 			}
+			if (typeof raw === 'string') {
+				try {
+					return JSON.parse(raw);
+				} catch {
+					return { input: raw };
+				}
+			}
+			return typeof raw === 'object' ? raw : {};
+		}
 		function renderToolCount() {
 			toolCount.textContent = tools.length ? tools.length + ' tools enabled' : 'Tools loading';
 		}
+		function workspaceLabel() {
+			if (!currentWorkspace) {
+				return '';
+			}
+			const parts = currentWorkspace.split(/[\\/]+/).filter(Boolean);
+			return parts[parts.length - 1] || currentWorkspace;
+		}
 		function updateStatus(text) {
 			const value = text || 'Ready.';
-			status.textContent = value;
+			status.textContent = value === 'Ready.' && currentWorkspace ? 'Ready in ' + workspaceLabel() + '.' : value;
+			status.title = currentWorkspace || value;
+		}
+		function refreshWorkspaceStatus() {
+			const value = status.textContent || 'Ready.';
+			updateStatus(value.startsWith('Ready') ? 'Ready.' : value);
 		}
 		function ensureEmptyState() {
 			emptyState = document.getElementById('emptyState');
@@ -1001,10 +1145,22 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			emptyState.className = 'emptyState';
 			const emptyIcon = document.createElement('div');
 			emptyIcon.className = 'emptyIcon';
-			emptyIcon.appendChild(icon('sparkle'));
-			const emptyText = document.createElement('div');
-			emptyText.textContent = 'Open a chat to start Backboard.';
-			emptyState.append(emptyIcon, emptyText);
+			emptyIcon.setAttribute('aria-hidden', 'true');
+			emptyState.append(emptyIcon);
+			const emptyTagline = document.createElement('div');
+			emptyTagline.className = 'emptyTagline';
+			emptyTagline.textContent = 'Ask anything about your code';
+			emptyState.append(emptyTagline);
+			const emptyHints = document.createElement('div');
+			emptyHints.className = 'emptyHints';
+			const hint1 = document.createElement('div');
+			hint1.className = 'emptyHint';
+			hint1.textContent = 'Try: "Explain this function"';
+			const hint2 = document.createElement('div');
+			hint2.className = 'emptyHint';
+			hint2.textContent = 'Try: "Find bugs in my code"';
+			emptyHints.append(hint1, hint2);
+			emptyState.append(emptyHints);
 			return emptyState;
 		}
 		function syncEmptyState() {
@@ -1018,6 +1174,11 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const node = ensureEmptyState();
 			return [...log.children].some(child => child !== node);
 		}
+		function syncRootHeight() {
+			if (root instanceof HTMLElement) {
+				root.style.height = window.innerHeight + 'px';
+			}
+		}
 		function historyTitle(promptText) {
 			const words = String(promptText || '').trim().split(/\\s+/).filter(Boolean);
 			return words.slice(0, 8).join(' ') || 'Untitled chat';
@@ -1030,6 +1191,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				activeView,
 				activeHistoryId,
 				promptQueue,
+				currentWorkspace,
 				historyEntries: historyEntries.slice(0, 40)
 			});
 		}
@@ -1069,32 +1231,33 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				empty.className = 'recentTab active';
 				empty.type = 'button';
 				empty.title = 'New chat';
-				const iconNode = document.createElement('span');
-				iconNode.className = 'recentTabIcon';
-				iconNode.appendChild(icon('comment-discussion'));
 				const label = document.createElement('span');
 				label.className = 'recentTabLabel';
 				label.textContent = 'New chat';
-				empty.append(iconNode, label);
+				empty.append(label);
 				recentTabs.appendChild(empty);
 				return;
 			}
 			for (const entry of entries) {
-				const button = document.createElement('button');
+				const button = document.createElement('div');
 				const statusClass = String(entry.status || '').toLowerCase();
 				button.className = 'recentTab' + (entry.id === activeHistoryId ? ' active' : '') + (statusClass === 'running' ? ' running' : '');
-				button.type = 'button';
 				button.dataset.historyId = entry.id;
 				button.setAttribute('role', 'tab');
 				button.setAttribute('aria-selected', entry.id === activeHistoryId ? 'true' : 'false');
+				button.tabIndex = 0;
 				button.title = entry.title || historyTitle(entry.prompt);
-				const iconNode = document.createElement('span');
-				iconNode.className = 'recentTabIcon';
-				iconNode.appendChild(icon(statusClass === 'running' ? 'sync' : 'comment-discussion'));
 				const label = document.createElement('span');
 				label.className = 'recentTabLabel';
 				label.textContent = entry.title || historyTitle(entry.prompt);
-				button.append(iconNode, label);
+				const close = document.createElement('button');
+				close.className = 'recentTabClose';
+				close.type = 'button';
+				close.dataset.closeHistoryId = entry.id;
+				close.title = 'Close chat';
+				close.setAttribute('aria-label', 'Close chat');
+				close.appendChild(icon('close'));
+				button.append(label, close);
 				recentTabs.appendChild(button);
 			}
 		}
@@ -1277,6 +1440,39 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			renderCheckpoints();
 			persistPanelState();
 		}
+		function closeHistoryEntry(id) {
+			if (!id) {
+				return;
+			}
+			if (runInProgress && id === activeHistoryId) {
+				updateStatus('Cancel or finish the current run before closing this chat.');
+				return;
+			}
+			const index = historyEntries.findIndex(item => item.id === id);
+			if (index < 0) {
+				return;
+			}
+			const wasActive = id === activeHistoryId;
+			if (wasActive) {
+				saveActiveHistory();
+			}
+			historyEntries = historyEntries.filter(item => item.id !== id);
+			if (wasActive) {
+				const next = historyEntries[Math.min(index, historyEntries.length - 1)];
+				activeHistoryId = undefined;
+				if (next) {
+					restoreHistoryEntry(next.id);
+				} else {
+					clearConversation();
+					setActiveView('chat');
+				}
+			} else {
+				renderHistory();
+				renderRecentTabs();
+				renderCheckpoints();
+				persistPanelState();
+			}
+		}
 		function startNewChat() {
 			if (runInProgress) {
 				updateStatus('Cancel or finish the current run before starting a new chat.');
@@ -1291,9 +1487,22 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			button.classList.toggle('active', !!active);
 		}
 		function syncComposerButtons() {
-			const hasPlusFeature = activePopover === 'menu' || controls.intensity.value !== 'fast' || controls.mode.value !== 'free' || controls.webSearch.value === 'Auto' || controls.imageGeneration.value === 'auto' || controls.mcpFigma.checked || controls.mcpNotion.checked || controls.mcpGoogle.checked;
-			setActive(buttons.plus, hasPlusFeature);
+			const hasReasoning = controls.intensity.value !== 'fast';
+			const hasMode = controls.mode.value !== 'free';
+			const hasWeb = controls.webSearch.value === 'Auto';
+			const hasImage = controls.imageGeneration.value === 'auto';
+			const hasMcp = controls.mcpFigma.checked || controls.mcpNotion.checked || controls.mcpGoogle.checked;
+			setActive(buttons.plus, activePopover === 'menu');
+			setActive(buttons.mode, activePopover === 'reasoning' || hasMode);
 			setActive(buttons.model, activePopover === 'model');
+			setActive(buttons.reasoning, activePopover === 'reasoning' || hasReasoning);
+			setActive(buttons.web, activePopover === 'web' || hasWeb);
+			setActive(buttons.image, activePopover === 'image' || hasImage);
+			setActive(buttons.mcp, activePopover === 'mcp' || hasMcp);
+			setActive(buttons.usage, activePopover === 'usage');
+			buttons.usage.classList.toggle('hasUsage', !!latestUsage);
+			buttons.usage.title = latestUsage ? 'Usage: ' + latestUsage.summary : 'Usage details';
+			buttons.usage.setAttribute('aria-label', buttons.usage.title);
 			setActive(buttons.voice, voiceRecording);
 			const hasPrompt = prompt.value.trim().length > 0;
 			buttons.send.disabled = !hasPrompt;
@@ -1304,98 +1513,99 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function setVoiceRecording(recording) {
 			voiceRecording = recording;
 			buttons.voice.classList.toggle('recording', recording);
-			buttons.voice.title = recording ? 'Stop speech-to-text' : 'Start speech-to-text';
+			buttons.voice.title = recording ? 'Stop voice recording' : 'Start voice recording';
 			buttons.voice.setAttribute('aria-label', buttons.voice.title);
 			document.querySelector('.composerCard')?.classList.toggle('recording', recording);
 			syncComposerButtons();
 		}
-		function applyVoiceTranscript(finalText, interimText) {
-			const transcript = [finalText, interimText].filter(Boolean).join(' ').trim();
-			prompt.value = [voiceBaseText, transcript].filter(Boolean).join(voiceBaseText && transcript ? ' ' : '');
-			prompt.selectionStart = prompt.selectionEnd = prompt.value.length;
+		function voiceMimeType() {
+			if (typeof MediaRecorder === 'undefined') {
+				return '';
+			}
+			return ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/mpeg'].find(type => MediaRecorder.isTypeSupported(type)) || '';
+		}
+		function stopVoiceStream() {
+			if (voiceStream) {
+				for (const track of voiceStream.getTracks()) {
+					track.stop();
+				}
+			}
+			voiceStream = undefined;
+		}
+		async function submitVoiceBlob(blob) {
+			if (!blob.size) {
+				updateStatus('Voice recording stopped. No audio captured.');
+				return;
+			}
+			const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+			const mimeType = blob.type || 'audio/webm';
+			const extension = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('mpeg') ? 'mp3' : mimeType.includes('wav') ? 'wav' : 'webm';
+			const nextOptions = { ...options(), voiceMode: controls.voiceMode.value === 'stt' ? 'stt' : 'conversation' };
+			updateStatus('Sending voice to Backboard.');
+			vscode.postMessage({
+				type: 'sendVoice',
+				prompt: prompt.value.trim(),
+				options: nextOptions,
+				chatId: activeHistoryId,
+				audio: {
+					data: bytes,
+					fileName: 'backboard-voice.' + extension,
+					mimeType
+				}
+			});
+			prompt.value = '';
 			syncComposerButtons();
 		}
 		function stopVoiceCapture() {
-			voiceStopRequested = true;
-			if (voiceRecognition) {
-				try {
-					voiceRecognition.stop();
-				} catch {
-					// Recognition may already have stopped.
-				}
+			if (voiceRecorder && voiceRecorder.state !== 'inactive') {
+				voiceRecorder.stop();
+				return;
 			}
-			if (!voiceRecognition) {
-				setVoiceRecording(false);
-			}
+			setVoiceRecording(false);
+			stopVoiceStream();
 		}
-		function toggleVoiceCapture() {
+		async function toggleVoiceCapture() {
 			if (voiceRecording) {
 				stopVoiceCapture();
 				return;
 			}
-			const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-			if (!Recognition) {
-				updateStatus('Speech-to-text is not available in this webview.');
+			if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+				updateStatus('Microphone recording is not available in this webview.');
 				return;
 			}
 			closePopover();
-			voiceBaseText = prompt.value.trim();
-			voiceFinalText = '';
-			voiceStopRequested = false;
-			voiceRecognition = new Recognition();
-			voiceRecognition.continuous = true;
-			voiceRecognition.interimResults = true;
-			voiceRecognition.lang = navigator.language || 'en-US';
-			setVoiceRecording(true);
-			updateStatus('Speech-to-text listening. Click mic again to stop.');
-			voiceRecognition.onstart = () => {
-				setVoiceRecording(true);
-				updateStatus('Speech-to-text listening. Click mic again to stop.');
-			};
-			voiceRecognition.onresult = event => {
-				let interimText = '';
-				for (let index = event.resultIndex; index < event.results.length; index++) {
-					const text = event.results[index][0]?.transcript || '';
-					if (event.results[index].isFinal) {
-						voiceFinalText = (voiceFinalText + ' ' + text).trim();
-					} else {
-						interimText += text;
-					}
-				}
-				applyVoiceTranscript(voiceFinalText, interimText);
-			};
-			voiceRecognition.onerror = event => {
-				if (voiceStopRequested && event.error === 'aborted') {
-					updateStatus(prompt.value.trim() ? 'Voice input stopped.' : 'Voice input stopped. No speech captured.');
-					voiceRecognition = undefined;
-					setVoiceRecording(false);
-					prompt.focus();
-					return;
-				}
-				const reason = event.error === 'not-allowed' || event.error === 'service-not-allowed'
-					? 'Microphone access denied.'
-					: 'Voice input failed.';
-				updateStatus(reason);
-				voiceRecognition = undefined;
-				setVoiceRecording(false);
-			};
-			voiceRecognition.onend = () => {
-				voiceRecognition = undefined;
-				setVoiceRecording(false);
-				if (voiceStopRequested) {
-					updateStatus(prompt.value.trim() ? 'Voice input stopped.' : 'Voice input stopped. No speech captured.');
-					prompt.focus();
-				} else {
-					updateStatus(prompt.value.trim() ? 'Voice input paused.' : 'Voice input stopped.');
-				}
-			};
+			voiceChunks = [];
 			try {
-				voiceRecognition.start();
-			} catch {
-				voiceRecognition = undefined;
-				voiceStopRequested = false;
+				voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+				const mimeType = voiceMimeType();
+				voiceRecorder = new MediaRecorder(voiceStream, mimeType ? { mimeType } : undefined);
+				voiceRecorder.ondataavailable = event => {
+					if (event.data?.size) {
+						voiceChunks.push(event.data);
+					}
+				};
+				voiceRecorder.onerror = () => {
+					updateStatus('Voice recording failed.');
+					setVoiceRecording(false);
+					stopVoiceStream();
+				};
+				voiceRecorder.onstop = () => {
+					const blob = new Blob(voiceChunks, { type: voiceRecorder?.mimeType || mimeType || 'audio/webm' });
+					voiceRecorder = undefined;
+					voiceChunks = [];
+					setVoiceRecording(false);
+					stopVoiceStream();
+					void submitVoiceBlob(blob);
+				};
+				voiceRecorder.start();
+				setVoiceRecording(true);
+				updateStatus('Recording voice. Click mic again to send.');
+			} catch (error) {
+				voiceRecorder = undefined;
+				voiceChunks = [];
 				setVoiceRecording(false);
-				updateStatus('Voice input could not start.');
+				stopVoiceStream();
+				updateStatus(error instanceof Error && /permission|denied|notallowed/i.test(error.message) ? 'Microphone access denied.' : 'Voice recording could not start.');
 			}
 		}
 		function insertAtCursor(text) {
@@ -1477,25 +1687,68 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			return [providerDisplayName(provider), selected?.displayName || selected?.name || controls.model.value].filter(Boolean).join(' / ');
 		}
 		function isVisibleModel(model) {
-			return providerKey(model.provider) !== 'featherless';
+			return !['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics'].includes(providerKey(model.provider));
 		}
 		function section(title, content) {
 			return '<div class="popoverSection"><div class="popoverSectionTitle">' + escapeHtml(title) + '</div>' + content + '</div>';
 		}
-			function choice(action, value, label, meta, selected, disabled, extraAttrs, icon) {
-				const iconHtml = icon ? '<span class="choiceIcon"><span class="codicon codicon-' + attr(icon) + '"></span></span>' : '';
-				return '<button class="choiceRow' + (selected ? ' selected' : '') + (disabled ? ' disabled' : '') + '" type="button" data-action="' + attr(action) + '" data-value="' + attr(value) + '" ' + (disabled ? 'disabled' : '') + ' ' + (extraAttrs || '') + '>' + iconHtml + '<span class="choiceMain"><span class="choiceLabel">' + escapeHtml(label) + '</span>' + (meta ? '<span class="choiceMeta">' + escapeHtml(meta) + '</span>' : '') + '</span>' + (selected ? '<span class="codicon codicon-check"></span>' : '') + '</button>';
+		function numericModelValue(model, keys) {
+			for (const key of keys) {
+				const value = model?.[key];
+				if (typeof value === 'number' && Number.isFinite(value)) {
+					return value;
+				}
+				if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+					return Number(value);
+				}
 			}
-			function modelChoice(model, provider, selected) {
-				const meta = [model.name, model.contextLimit ? model.contextLimit + ' tokens' : '', model.supportsThinking ? 'thinking' : '', model.supplemental ? 'OpenRouter' : ''].filter(Boolean).join(' / ');
-				return '<button class="choiceRow modelChoice' + (selected ? ' selected' : '') + '" type="button" data-action="chooseModel" data-value="' + attr(model.name) + '" data-provider="' + attr(provider) + '" data-model="' + attr(model.name) + '">' + providerIconHtml(provider, 'choiceIcon') + '<span class="choiceMain"><span class="choiceLabel">' + escapeHtml(model.displayName || model.name) + '</span><span class="choiceMeta">' + escapeHtml(meta) + '</span></span><span class="modelProviderPill">' + escapeHtml(providerDisplayName(provider)) + '</span>' + (selected ? '<span class="codicon codicon-check"></span>' : '') + '</button>';
+			return undefined;
+		}
+		function formatModelPrice(value) {
+			return '$' + value.toFixed(2) + '/M';
+		}
+		function modelPricePair(model) {
+			const explicitInput = numericModelValue(model, ['inputPricePerMillion', 'inputPrice', 'promptPrice', 'promptPricePerMillion']);
+			const explicitOutput = numericModelValue(model, ['outputPricePerMillion', 'outputPrice', 'completionPrice', 'completionPricePerMillion']);
+			if (explicitInput !== undefined && explicitOutput !== undefined) {
+				return [explicitInput, explicitOutput];
 			}
+			const id = [model?.provider, model?.name, model?.displayName].filter(Boolean).join(' ').toLowerCase().replace(/[._]/g, '-');
+			if (id.includes('claude-haiku-4-5') || id.includes('claude-haiku-4.5')) {
+				return [1, 5];
+			}
+			if (id.includes('claude-sonnet-4')) {
+				return [3, 15];
+			}
+			if (id.includes('claude-opus-4-5') || id.includes('claude-opus-4.5') || id.includes('claude-opus-4-6') || id.includes('claude-opus-4-7') || id.includes('claude-opus-4-8')) {
+				return [5, 25];
+			}
+			if (id.includes('claude-opus-4')) {
+				return [15, 75];
+			}
+			return undefined;
+		}
+		function modelPriceLabel(model) {
+			if (typeof model?.pricing === 'string' && model.pricing.trim() !== '') {
+				return model.pricing;
+			}
+			const pair = modelPricePair(model);
+			return pair ? formatModelPrice(pair[0]) + ' in, ' + formatModelPrice(pair[1]) + ' out' : '';
+		}
+		function choice(action, value, label, meta, selected, disabled, extraAttrs, icon) {
+			const iconHtml = icon ? '<span class="choiceIcon"><span class="codicon codicon-' + attr(icon) + '"></span></span>' : '';
+			return '<button class="choiceRow' + (selected ? ' selected' : '') + (disabled ? ' disabled' : '') + '" type="button" data-action="' + attr(action) + '" data-value="' + attr(value) + '" ' + (disabled ? 'disabled' : '') + ' ' + (extraAttrs || '') + '>' + iconHtml + '<span class="choiceMain"><span class="choiceLabel">' + escapeHtml(label) + '</span>' + (meta ? '<span class="choiceMeta">' + escapeHtml(meta) + '</span>' : '') + '</span>' + (selected ? '<span class="codicon codicon-check"></span>' : '') + '</button>';
+		}
+		function modelChoice(model, provider, selected) {
+			const price = modelPriceLabel(model);
+			return '<button class="choiceRow modelChoice' + (selected ? ' selected' : '') + '" type="button" data-action="chooseModel" data-value="' + attr(model.name) + '" data-provider="' + attr(provider) + '" data-model="' + attr(model.name) + '">' + providerIconHtml(provider, 'choiceIcon') + '<span class="choiceMain"><span class="choiceLabel">' + escapeHtml(model.displayName || model.name) + '</span><span class="choiceMeta">' + escapeHtml(model.name) + '</span></span><span class="modelChoiceMeta">' + escapeHtml(price) + '</span>' + (selected ? '<span class="codicon codicon-check"></span>' : '<span class="modelChoiceCheckSpacer"></span>') + '</button>';
+		}
 		function actionButton(action, label, icon) {
 			return '<button class="drawerButton" type="button" data-action="' + attr(action) + '">' + (icon ? '<span class="codicon codicon-' + attr(icon) + '"></span> ' : '') + escapeHtml(label) + '</button>';
 		}
 		function providerSwitch(provider, active) {
 			const icon = providerIconFile(provider) ? '<img src="' + attr(iconBase + '/' + providerIconFile(provider)) + '" alt="" loading="lazy">' : '<span class="codicon codicon-symbol-misc"></span>';
-			return '<button class="providerSwitch' + (active ? ' active' : '') + '" type="button" data-action="toggleProviderFilter" data-provider="' + attr(provider) + '" aria-pressed="' + (active ? 'true' : 'false') + '"><span class="providerSwitchIcon">' + icon + '</span><span class="providerSwitchName">' + escapeHtml(providerDisplayName(provider)) + '</span><span class="providerSwitchToggle" aria-hidden="true"></span></button>';
+			return '<button class="providerSwitch' + (active ? ' active' : '') + '" type="button" data-action="toggleProviderFilter" data-provider="' + attr(provider) + '" aria-pressed="' + (active ? 'true' : 'false') + '"><span class="providerSwitchIcon">' + icon + '</span><span class="providerSwitchName">' + escapeHtml(providerDisplayName(provider)) + '</span><span class="providerSwitchToggle" aria-hidden="true">' + (active ? '<span class="codicon codicon-check"></span>' : '') + '</span></button>';
 		}
 		function modelSource() {
 			const fallback = [{ provider: controls.provider.value || 'aws-bedrock', name: controls.model.value || 'anthropic.claude-sonnet-4-6', displayName: controls.model.value || 'anthropic.claude-sonnet-4-6' }];
@@ -1507,27 +1760,33 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function intensityLabel(value) {
 			return ({ fast: 'Fast', balanced: 'Balanced', deep: 'Deep' })[value] || value;
 		}
+		function memoryLabel(value) {
+			return ({ Auto: 'Memory Lite', Readonly: 'Memory Read Only', off: 'Off', ProAuto: 'Memory Pro', ProReadonly: 'Memory Pro Read Only' })[value] || value;
+		}
 		function syncModeLabels() {
 			const label = modeLabel(controls.mode.value);
 			modeLabelNode.textContent = label;
 			headerBadge.textContent = label;
+			buttons.mode.title = label + ' / ' + intensityLabel(controls.intensity.value);
+			buttons.mode.setAttribute('aria-label', buttons.mode.title);
 		}
 		function voiceLabel(value) {
 			return ({ off: 'Off', tts: 'TTS', stt: 'STT', conversation: 'Conversation' })[value] || value;
 		}
 		function renderMenuPopover() {
 			return section('Context', [
-				choice('insertActiveFile', '', 'Active file', 'Attach the file in the focused editor.', false, false, '', 'file-code'),
-				choice('insertSelection', '', 'Selection', 'Attach selected code with file and line range.', false, false, '', 'selection'),
-				choice('insertBranchDiff', '', 'Branch diff', 'Attach the current git diff.', false, false, '', 'git-compare'),
-				choice('insertContextType', 'file', 'Files and folders', 'Insert @file context.', false, false, '', 'folder'),
-				choice('insertContextType', 'symbol', 'Symbols', 'Insert @symbol context.', false, false, '', 'symbol-class'),
-				choice('insertContextType', 'rule', 'Rules', 'Insert @rule context.', false, false, '', 'key'),
-				choice('openImage', '', 'Image output', controls.imageGeneration.value === 'auto' ? 'Image generation is on.' : 'Enable generated media for this turn.', controls.imageGeneration.value === 'auto', false, '', 'device-camera-video')
+				choice('insertActiveFile', '', 'Active file', '', false, false, '', 'file-code'),
+				choice('insertSelection', '', 'Selection', '', false, false, '', 'selection'),
+				choice('insertBranchDiff', '', 'Branch diff', '', false, false, '', 'git-compare'),
+				choice('insertContextType', 'file', 'Files and folders', '@file', false, false, '', 'folder'),
+				choice('insertContextType', 'symbol', 'Symbols', '@symbol', false, false, '', 'symbol-class'),
+				choice('insertContextType', 'rule', 'Rules', '@rule', false, false, '', 'key'),
+				choice('openImage', '', 'Image output', controls.imageGeneration.value === 'auto' ? 'Auto' : 'Off', controls.imageGeneration.value === 'auto', false, '', 'device-camera-video')
 			].join(''))
 				+ section('Agent', [
 					choice('openModel', '', 'Model', currentModelLabel(), false, false, '', 'server'),
 					choice('openReasoning', '', 'Mode and reasoning', modeLabel(controls.mode.value) + ' / ' + intensityLabel(controls.intensity.value), controls.mode.value !== 'free' || controls.intensity.value !== 'fast', false, '', 'settings-gear'),
+					choice('openMemory', '', 'Memory', memoryLabel(controls.memoryMode.value), controls.memoryMode.value !== 'off', false, '', 'database'),
 					choice('openWeb', '', 'Web search', controls.webSearch.value === 'Auto' ? 'Auto' : 'Off', controls.webSearch.value === 'Auto', false, '', 'globe'),
 					choice('openMcp', '', 'MCP tools', [controls.mcpFigma.checked ? 'Figma' : '', controls.mcpNotion.checked ? 'Notion' : '', controls.mcpGoogle.checked ? 'Google' : ''].filter(Boolean).join(', ') || 'Off', controls.mcpFigma.checked || controls.mcpNotion.checked || controls.mcpGoogle.checked, false, '', 'tools'),
 					choice('openSettings', '', 'Settings', tools.length ? tools.length + ' tools enabled' : 'Tools loading', false, false, '', 'settings')
@@ -1537,18 +1796,20 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function renderModelPopover() {
 			const source = modelSource();
 			const query = modelFilter.trim().toLowerCase();
-			const allProviders = [...new Set(source.map(model => model.provider))].sort();
+			const allProviders = [...new Set(source.map(model => model.provider))].sort((left, right) => providerDisplayName(left).localeCompare(providerDisplayName(right)));
 			const providerFiltered = source.filter(model => !disabledModelProviders.has(model.provider));
 			const filtered = query
 				? providerFiltered.filter(model => [model.provider, model.displayName, model.name].filter(Boolean).join(' ').toLowerCase().includes(query))
 				: providerFiltered;
-			const providers = [...new Set(filtered.map(model => model.provider))].sort();
-			const activeProviderCount = allProviders.length - disabledModelProviders.size;
-			const search = '<div class="modelFilterBar"><input id="modelFilter" class="popoverSearch" type="search" placeholder="Filter models" value="' + attr(modelFilter) + '" autocomplete="off"><button class="modelFilterButton' + (modelProviderFiltersOpen ? ' active' : '') + '" type="button" data-action="toggleModelProviderFilters" title="Model Providers" aria-label="Model providers" aria-expanded="' + (modelProviderFiltersOpen ? 'true' : 'false') + '"><span class="codicon codicon-filter"></span></button></div>';
-			const providerFilters = modelProviderFiltersOpen
-				? '<div class="providerFilterModal"><div class="filterHeader"><span class="filterTitle">Model Providers</span><span class="filterMeta">' + activeProviderCount + ' / ' + allProviders.length + ' on</span></div><div class="providerSwitchList">' + allProviders.map(provider => providerSwitch(provider, !disabledModelProviders.has(provider))).join('') + '</div></div>'
-				: '';
-			const filterWrap = '<div class="modelFilterWrap">' + search + providerFilters + '</div>';
+			const providers = [...new Set(filtered.map(model => model.provider))].sort((left, right) => providerDisplayName(left).localeCompare(providerDisplayName(right)));
+			const search = '<div class="modelFilterBar"><input id="modelFilter" class="popoverSearch" type="search" placeholder="Select a model..." value="' + attr(modelFilter) + '" autocomplete="off"><button class="modelFilterButton' + (modelProviderFiltersOpen ? ' active' : '') + '" type="button" data-action="toggleModelProviderFilters" title="Filter by provider" aria-label="Filter by provider" aria-expanded="' + (modelProviderFiltersOpen ? 'true' : 'false') + '">Filter</button></div>';
+			const filterWrap = '<div class="modelFilterWrap">' + search + '</div>';
+			if (modelProviderFiltersOpen) {
+				const allActive = disabledModelProviders.size === 0;
+				const allProvidersRow = '<button class="providerSwitch' + (allActive ? ' active' : '') + '" type="button" data-action="setAllProviderFilters" aria-pressed="' + (allActive ? 'true' : 'false') + '"><span class="providerSwitchName">All providers</span><span class="providerSwitchToggle" aria-hidden="true">' + (allActive ? '<span class="codicon codicon-check"></span>' : '') + '</span></button>';
+				const providerRows = allProviders.map(provider => providerSwitch(provider, !disabledModelProviders.has(provider))).join('');
+				return filterWrap + '<div class="providerFilterPane"><div class="filterHeader"><span class="filterTitle">Filter by provider</span><span class="filterMeta">Choose one or more providers, then press Done.</span></div><div class="providerSwitchList">' + allProvidersRow + providerRows + '</div><button class="providerFilterDone" type="button" data-action="doneModelProviderFilters">Done</button></div>';
+			}
 			const noModelsMeta = query ? 'Try a different text filter.' : disabledModelProviders.size ? 'Enable a provider filter.' : 'Refresh models or set an API key.';
 			const sections = providers.length ? providers.map(provider => {
 				const rows = filtered
@@ -1561,61 +1822,90 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		}
 		function renderReasoningPopover() {
 			const modes = [
-				['agent', 'Agent', 'Use Backboard tools with approvals and edits.'],
-				['ask', 'Ask', 'Answer without making editor changes.'],
-				['manual', 'Manual', 'Ask before host-dependent actions.'],
-				['free', 'Full Access', 'Allow feasible host tools with fewer prompts.']
+				['agent', 'Agent', ''],
+				['ask', 'Ask', ''],
+				['manual', 'Manual', ''],
+				['free', 'Full Access', '']
 			].map(([value, label, meta]) => choice('chooseMode', value, label, meta, controls.mode.value === value, false)).join('');
 			const intensities = [
-				['fast', 'Fast', 'Lowest latency.'],
-				['balanced', 'Balanced', 'More reasoning for harder tasks.'],
-				['deep', 'Deep', 'Highest reasoning budget.']
+				['fast', 'Fast', ''],
+				['balanced', 'Balanced', ''],
+				['deep', 'Deep', '']
 			].map(([value, label, meta]) => choice('chooseIntensity', value, label, meta, controls.intensity.value === value, false)).join('');
 			return section('Mode', modes) + section('Reasoning', intensities);
 		}
+		function renderMemoryPopover() {
+			return section('Memory', [
+				choice('chooseMemory', 'Auto', 'Memory Lite', '', controls.memoryMode.value === 'Auto', false),
+				choice('chooseMemory', 'Readonly', 'Read Only', '', controls.memoryMode.value === 'Readonly', false),
+				choice('chooseMemory', 'off', 'Off', '', controls.memoryMode.value === 'off', false),
+				choice('chooseMemory', 'ProAuto', 'Memory Pro', '', controls.memoryMode.value === 'ProAuto', false),
+				choice('chooseMemory', 'ProReadonly', 'Pro Read Only', '', controls.memoryMode.value === 'ProReadonly', false)
+			].join(''));
+		}
 		function renderWebPopover() {
 			return section('Web Search', [
-				choice('chooseWeb', 'off', 'Off', 'Do not request web_search/web_fetch unless the model calls tools explicitly.', controls.webSearch.value === 'off', false),
-				choice('chooseWeb', 'Auto', 'Auto', 'Allow Backboard to include web search intent for this turn.', controls.webSearch.value === 'Auto', false)
+				choice('chooseWeb', 'off', 'Off', '', controls.webSearch.value === 'off', false),
+				choice('chooseWeb', 'Auto', 'Auto', '', controls.webSearch.value === 'Auto', false)
 			].join(''));
 		}
 		function renderImagePopover() {
 			return section('Image', [
-				choice('chooseImage', 'off', 'Off', 'Disable image generation payloads.', controls.imageGeneration.value === 'off', false),
-				choice('chooseImage', 'auto', 'Auto', 'Let Backboard return generated media when useful.', controls.imageGeneration.value === 'auto', false)
+				choice('chooseImage', 'off', 'Off', '', controls.imageGeneration.value === 'off', false),
+				choice('chooseImage', 'auto', 'Auto', '', controls.imageGeneration.value === 'auto', false)
 			].join(''));
 		}
 		function renderVoicePopover() {
 			return section('Voice', [
-				choice('chooseVoice', 'off', 'Off', 'No voice payload requested.', controls.voiceMode.value === 'off', false),
-				choice('chooseVoice', 'tts', 'TTS', 'Allow assistant audio output when Backboard returns it.', controls.voiceMode.value === 'tts', false),
-				choice('chooseVoice', 'stt', 'STT', 'Audio input capture is not implemented in the VS Code host yet.', controls.voiceMode.value === 'stt', true),
-				choice('chooseVoice', 'conversation', 'Conversation', 'Live audio conversation is not implemented in the VS Code host yet.', controls.voiceMode.value === 'conversation', true)
+				choice('chooseVoice', 'off', 'Off', '', controls.voiceMode.value === 'off', false),
+				choice('chooseVoice', 'tts', 'TTS', '', controls.voiceMode.value === 'tts', false),
+				choice('chooseVoice', 'stt', 'STT', '', controls.voiceMode.value === 'stt', true),
+				choice('chooseVoice', 'conversation', 'Conversation', '', controls.voiceMode.value === 'conversation', true)
 			].join(''));
 		}
 		function renderMcpPopover() {
 			return section('MCP Servers', [
-				choice('toggleMcp', 'figma', 'Figma MCP', 'Request Backboard-hosted Figma MCP tool intent.', controls.mcpFigma.checked, false),
-				choice('toggleMcp', 'notion', 'Notion MCP', 'Request Backboard-hosted Notion MCP tool intent.', controls.mcpNotion.checked, false),
-				choice('toggleMcp', 'google', 'Google MCP', 'Request Backboard-hosted Google MCP tool intent.', controls.mcpGoogle.checked, false)
-			].join('')) + section('Tools', choice('disabled', '', tools.length + ' bridge tools advertised', 'VS Code sends hosted MCP intent; local ContextServer MCP execution is only available in Zed for now.', false, true));
+				choice('toggleMcp', 'figma', 'Figma MCP', '', controls.mcpFigma.checked, false),
+				choice('toggleMcp', 'notion', 'Notion MCP', '', controls.mcpNotion.checked, false),
+				choice('toggleMcp', 'google', 'Google MCP', '', controls.mcpGoogle.checked, false)
+			].join('')) + section('Tools', choice('disabled', '', 'Bridge tools', String(tools.length), false, true));
 		}
 		function renderSettingsPopover() {
 			return section('Current Turn', [
 				choice('openModel', '', 'Model', currentModelLabel(), false, false),
 				choice('openReasoning', '', 'Mode and reasoning', modeLabel(controls.mode.value) + ' / ' + intensityLabel(controls.intensity.value), false, false),
+				choice('openMemory', '', 'Memory', memoryLabel(controls.memoryMode.value), false, false),
 				choice('openMcp', '', 'MCP', [controls.mcpFigma.checked ? 'Figma' : '', controls.mcpNotion.checked ? 'Notion' : '', controls.mcpGoogle.checked ? 'Google' : ''].filter(Boolean).join(', ') || 'Off', false, false)
 			].join('')) + '<div class="popoverActions">' + actionButton('refreshModels', 'Refresh Models', 'refresh') + actionButton('setApiKey', 'API Key', 'key') + '</div>';
+		}
+		function renderUsagePopover() {
+			const refresh = '<div class="popoverActions">' + actionButton('refreshUsage', 'Refresh Usage', 'refresh') + '</div>';
+			if (!latestUsage && !accountUsage) {
+				return section('Usage', choice('disabled', '', 'No usage yet', 'Refresh billing usage or run a Backboard turn.', false, true, '', 'pulse')) + refresh;
+			}
+			const account = accountUsage
+				? section('Account', choice('disabled', '', 'Billing usage', accountUsage.summary, false, true, '', 'pulse') + accountUsage.metrics.map(([label, value]) => choice('disabled', '', label, value, false, true, '', 'dashboard')).join(''))
+				: '';
+			if (!latestUsage) {
+				return account + refresh;
+			}
+			const summary = section('Latest Run', choice('disabled', '', 'Latest run', latestUsage.summary, false, true, '', 'pulse'));
+			const metrics = latestUsage.metrics.length
+				? latestUsage.metrics.map(([label, value]) => choice('disabled', '', label, value, false, true, '', 'dashboard')).join('')
+				: choice('disabled', '', 'Usage details', 'No metric fields were reported.', false, true, '', 'dashboard');
+			return account + summary + section('Metrics', metrics) + refresh;
 		}
 		function renderPopover(name) {
 			const renderers = {
 				menu: ['Composer Menu', renderMenuPopover],
 				model: ['Model', renderModelPopover],
 				reasoning: ['Mode and Reasoning', renderReasoningPopover],
+				memory: ['Memory', renderMemoryPopover],
 				web: ['Web', renderWebPopover],
 				image: ['Image', renderImagePopover],
 				voice: ['Voice', renderVoicePopover],
 				mcp: ['MCP Tools', renderMcpPopover],
+				usage: ['Usage', renderUsagePopover],
 				settings: ['Composer Settings', renderSettingsPopover]
 			};
 			const renderer = renderers[name] || renderers.settings;
@@ -1624,12 +1914,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			popoverBody.innerHTML = renderer[1]();
 		}
 		function positionPopover(anchorButton) {
-			const width = Math.min(activePopover === 'model' ? 520 : 390, window.innerWidth - 20);
+			const width = Math.min(620, window.innerWidth - 8);
 			popover.style.width = width + 'px';
 			const rect = anchorButton.getBoundingClientRect();
 			const popoverRect = popover.getBoundingClientRect();
-			const left = Math.max(10, Math.min(window.innerWidth - popoverRect.width - 10, rect.left + rect.width / 2 - popoverRect.width / 2));
-			const top = Math.max(10, rect.top - popoverRect.height - 8);
+			const left = Math.max(4, Math.min(window.innerWidth - popoverRect.width - 4, rect.left + rect.width / 2 - popoverRect.width / 2));
+			const top = Math.max(4, rect.top - popoverRect.height - 4);
 			popover.style.left = left + 'px';
 			popover.style.top = top + 'px';
 		}
@@ -1662,6 +1952,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			modelProviderFiltersOpen = false;
 			prompt.focus();
 			syncComposerButtons();
+		}
+		function requestUsageSnapshot() {
+			updateStatus('Loading Backboard usage.');
+			vscode.postMessage({ type: 'refreshUsage' });
 		}
 		function chooseSelect(select, value, close) {
 			setSelect(select, value);
@@ -1718,6 +2012,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			renderModels();
 			setSelect(controls.mode, settings.mode || 'free');
 			setSelect(controls.intensity, settings.intensity || 'fast');
+			setSelect(controls.memoryMode, settings.memoryMode || 'Auto');
 			setSelect(controls.webSearch, settings.webSearch || 'off');
 			setSelect(controls.imageGeneration, settings.imageGeneration || 'off');
 			setSelect(controls.voiceMode, settings.voiceMode || 'off');
@@ -1739,8 +2034,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					}
 					renderModels();
 				}
-				if (control === controls.mode) {
+				if (control === controls.mode || control === controls.intensity) {
 					syncModeLabels();
+				}
+				if (control === controls.mode) {
 					vscode.postMessage({ type: 'refreshModels' });
 				}
 				saveOptions();
@@ -1755,7 +2052,16 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 		});
 		buttons.plus.addEventListener('click', event => openPopover('menu', event.currentTarget));
+		buttons.mode.addEventListener('click', event => openPopover('reasoning', event.currentTarget));
 		buttons.model.addEventListener('click', event => openPopover('model', event.currentTarget));
+		buttons.reasoning.addEventListener('click', event => openPopover('reasoning', event.currentTarget));
+		buttons.web.addEventListener('click', event => openPopover('web', event.currentTarget));
+		buttons.image.addEventListener('click', event => openPopover('image', event.currentTarget));
+		buttons.mcp.addEventListener('click', event => openPopover('mcp', event.currentTarget));
+		buttons.usage.addEventListener('click', event => {
+			requestUsageSnapshot();
+			openPopover('usage', event.currentTarget);
+		});
 		buttons.voice.addEventListener('click', toggleVoiceCapture);
 		newChatButton?.addEventListener('click', startNewChat);
 		inlineNewChatButton?.addEventListener('click', startNewChat);
@@ -1769,9 +2075,36 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 		});
 		recentTabs?.addEventListener('click', event => {
-			const target = event.target instanceof Element ? event.target.closest('[data-history-id]') : undefined;
-			if (target) {
-				restoreHistoryEntry(target.dataset.historyId || '');
+			const eventTarget = event.target;
+			const target = eventTarget instanceof Element
+				? eventTarget
+				: eventTarget instanceof Node ? eventTarget.parentElement : undefined;
+			const closeTarget = target?.closest('[data-close-history-id]');
+			if (closeTarget) {
+				event.stopPropagation();
+				closeHistoryEntry(closeTarget.dataset.closeHistoryId || '');
+				return;
+			}
+			const tabTarget = target?.closest('[data-history-id]');
+			if (tabTarget) {
+				restoreHistoryEntry(tabTarget.dataset.historyId || '');
+			}
+		});
+		recentTabs?.addEventListener('keydown', event => {
+			if (event.key !== 'Enter' && event.key !== ' ') {
+				return;
+			}
+			const eventTarget = event.target;
+			const target = eventTarget instanceof Element
+				? eventTarget
+				: eventTarget instanceof Node ? eventTarget.parentElement : undefined;
+			if (target?.closest('[data-close-history-id]')) {
+				return;
+			}
+			const tabTarget = target?.closest('[data-history-id]');
+			if (tabTarget) {
+				event.preventDefault();
+				restoreHistoryEntry(tabTarget.dataset.historyId || '');
 			}
 		});
 		checkpointList?.addEventListener('click', event => {
@@ -1842,10 +2175,15 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 		});
 		popoverBody.addEventListener('click', event => {
-			const target = event.target instanceof Element ? event.target.closest('[data-action]') : undefined;
+			const eventTarget = event.target;
+			const target = (eventTarget instanceof Element
+				? eventTarget
+				: eventTarget instanceof Node ? eventTarget.parentElement : undefined
+				)?.closest('[data-action]');
 			if (!target || target.classList.contains('disabled')) {
 				return;
 			}
+			event.stopPropagation();
 			const action = target.dataset.action;
 			const value = target.dataset.value || '';
 			if (action === 'insertContextType') {
@@ -1864,6 +2202,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				chooseSelect(controls.mode, value, false);
 			} else if (action === 'chooseIntensity') {
 				chooseSelect(controls.intensity, value, false);
+			} else if (action === 'chooseMemory') {
+				chooseSelect(controls.memoryMode, value, true);
 			} else if (action === 'chooseWeb') {
 				chooseSelect(controls.webSearch, value, true);
 			} else if (action === 'chooseImage') {
@@ -1881,8 +2221,20 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				if (activeAnchor) {
 					positionPopover(activeAnchor);
 				}
+			} else if (action === 'setAllProviderFilters') {
+				disabledModelProviders.clear();
+				renderPopover('model');
+				if (activeAnchor) {
+					positionPopover(activeAnchor);
+				}
 			} else if (action === 'toggleModelProviderFilters') {
 				modelProviderFiltersOpen = !modelProviderFiltersOpen;
+				renderPopover('model');
+				if (activeAnchor) {
+					positionPopover(activeAnchor);
+				}
+			} else if (action === 'doneModelProviderFilters') {
+				modelProviderFiltersOpen = false;
 				renderPopover('model');
 				if (activeAnchor) {
 					positionPopover(activeAnchor);
@@ -1913,19 +2265,23 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			} else if (action === 'refreshModels') {
 				vscode.postMessage({ type: 'refreshModels' });
 				closePopover();
+			} else if (action === 'refreshUsage') {
+				requestUsageSnapshot();
 			} else if (action === 'setApiKey') {
 				vscode.postMessage({ type: 'setApiKey' });
 				closePopover();
 			} else if (action === 'openModel') {
 				openPopover('model', buttons.model);
 			} else if (action === 'openReasoning') {
-				openPopover('reasoning', buttons.plus);
+				openPopover('reasoning', buttons.mode);
+			} else if (action === 'openMemory') {
+				openPopover('memory', buttons.plus);
 			} else if (action === 'openWeb') {
-				openPopover('web', buttons.plus);
+				openPopover('web', buttons.web);
 			} else if (action === 'openImage') {
-				openPopover('image', buttons.plus);
+				openPopover('image', buttons.image);
 			} else if (action === 'openMcp') {
-				openPopover('mcp', buttons.plus);
+				openPopover('mcp', buttons.mcp);
 			} else if (action === 'openSettings') {
 				openPopover('settings', buttons.plus);
 			} else if (action === 'cancelRun') {
@@ -1933,19 +2289,22 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				closePopover();
 			}
 		});
-		document.addEventListener('click', event => {
+		document.addEventListener('pointerdown', event => {
 			if (!activePopover) {
 				return;
 			}
-			const target = event.target;
-			if (!(target instanceof Element)) {
+			const eventTarget = event.target;
+			const target = eventTarget instanceof Element
+				? eventTarget
+				: eventTarget instanceof Node ? eventTarget.parentElement : undefined;
+			if (!target) {
 				return;
 			}
-			if (popover.contains(target) || Object.values(buttons).some(button => button.contains(target)) || newChatButton?.contains(target) || inlineNewChatButton?.contains(target) || inlineHistoryButton?.contains(target)) {
+			if (popover.contains(target) || activeAnchor?.contains(target)) {
 				return;
 			}
 			closePopover();
-		});
+		}, true);
 		document.addEventListener('keydown', event => {
 			if (event.key === 'Escape' && activePopover) {
 				event.preventDefault();
@@ -1953,6 +2312,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 		});
 		window.addEventListener('resize', () => {
+			syncRootHeight();
 			if (activePopover && activeAnchor) {
 				positionPopover(activeAnchor);
 			}
@@ -1985,7 +2345,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			activeToolRows = [];
 			fileChanges = [];
 			promptQueue = [];
+			latestUsage = undefined;
 			activeHistoryId = undefined;
+			syncComposerButtons();
 			renderRecentTabs();
 			renderCheckpoints();
 			scrollConversation();
@@ -2120,24 +2482,94 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			scrollConversation();
 			return row;
 		}
+		function toolStatusLabel(status) {
+			return ({ started: 'Running', finished: 'Finished', failed: 'Failed', denied: 'Denied' })[status] || 'Updated';
+		}
+		function toolStatusIconName(status) {
+			return status === 'failed' || status === 'denied' ? 'error' : status === 'started' ? 'sync' : 'check';
+		}
+		function toolPrimaryDetail(item) {
+			const args = item?.args || {};
+			if (typeof args.command === 'string' || typeof args.cmd === 'string') {
+				return args.command || args.cmd;
+			}
+			if (typeof args.path === 'string' || typeof args.file_path === 'string' || typeof args.filePath === 'string') {
+				return args.path || args.file_path || args.filePath;
+			}
+			if (typeof args.pattern === 'string') {
+				return args.pattern;
+			}
+			if (typeof item?.error === 'string') {
+				return item.error;
+			}
+			const output = item?.output;
+			return typeof output === 'string' ? output : '';
+		}
+		function toolDetailsText(item) {
+			const parts = [];
+			if (item?.args && Object.keys(item.args).length) {
+				parts.push('Input\\n' + JSON.stringify(item.args, null, 2));
+			}
+			if (item?.output !== undefined) {
+				parts.push('Output\\n' + (typeof item.output === 'string' ? item.output : JSON.stringify(item.output, null, 2)));
+			}
+			if (item?.error) {
+				parts.push('Error\\n' + String(item.error));
+			}
+			return parts.join('\\n\\n');
+		}
+		function clippedToolText(value) {
+			const text = String(value || '');
+			const max = 12000;
+			return text.length > max ? text.slice(0, max) + '\\n\\n[truncated]' : text;
+		}
 		function appendTool(item) {
-				const status = item?.status || 'updated';
-				const name = item?.name || 'tool';
-				let existingIndex = -1;
-				for (let index = activeToolRows.length - 1; index >= 0; index--) {
-					if (activeToolRows[index].name === name) {
-						existingIndex = index;
-						break;
-					}
+			const status = item?.status || 'updated';
+			const name = item?.name || 'tool';
+			let existingIndex = -1;
+			for (let index = activeToolRows.length - 1; index >= 0; index--) {
+				if (activeToolRows[index].name === name) {
+					existingIndex = index;
+					break;
 				}
+			}
 			const row = existingIndex >= 0 ? activeToolRows[existingIndex].row : document.createElement('div');
-			const label = existingIndex >= 0 ? activeToolRows[existingIndex].label : document.createElement('span');
-				row.className = 'toolRow ' + status;
-				row.textContent = '';
-				row.appendChild(icon(status === 'failed' || status === 'denied' ? 'error' : status === 'started' ? 'sync' : 'check'));
-				label.className = 'toolLabel';
-				label.textContent = (status === 'finished' ? 'Used ' : status === 'started' ? 'Using ' : status.charAt(0).toUpperCase() + status.slice(1) + ' ') + name;
-				row.appendChild(label);
+			const detail = toolPrimaryDetail(item);
+			const details = toolDetailsText(item);
+			row.className = 'toolCard ' + status;
+			row.textContent = '';
+			const head = document.createElement('div');
+			head.className = 'toolHead';
+			const statusIcon = document.createElement('span');
+			statusIcon.className = 'toolStatusIcon';
+			statusIcon.appendChild(icon(toolStatusIconName(status)));
+			const main = document.createElement('span');
+			main.className = 'toolMain';
+			const label = document.createElement('span');
+			label.className = 'toolLabel';
+			label.textContent = toolStatusLabel(status) + ' ' + name;
+			const meta = document.createElement('span');
+			meta.className = 'toolMeta';
+			meta.textContent = detail || (details ? 'View details' : 'Local Backboard tool');
+			main.append(label, meta);
+			const toggle = document.createElement('button');
+			toggle.className = 'toolToggle';
+			toggle.type = 'button';
+			toggle.title = 'Show tool details';
+			toggle.setAttribute('aria-label', 'Show tool details');
+			toggle.appendChild(icon('chevron-down'));
+			head.append(statusIcon, main, toggle);
+			const body = document.createElement('pre');
+			body.className = 'toolDetails';
+			body.textContent = clippedToolText(details || 'No details reported.');
+			toggle.addEventListener('click', () => {
+				const open = row.classList.toggle('open');
+				toggle.title = open ? 'Hide tool details' : 'Show tool details';
+				toggle.setAttribute('aria-label', toggle.title);
+				toggle.textContent = '';
+				toggle.appendChild(icon(open ? 'chevron-up' : 'chevron-down'));
+			});
+			row.append(head, body);
 			if (existingIndex >= 0) {
 				activeToolRows.splice(existingIndex, 1);
 			} else {
@@ -2283,8 +2715,57 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				metrics
 			};
 		}
+		function normalizeBillingSnapshot(payload) {
+			const source = payload && typeof payload === 'object' ? payload : {};
+			const balance = source.balance && typeof source.balance === 'object' ? source.balance : {};
+			const summary = source.summary && typeof source.summary === 'object' ? source.summary : {};
+			const recent = source.recent && typeof source.recent === 'object' ? source.recent : {};
+			const metrics = [];
+			const balanceUsd = firstNumber(balance, ['balance_usd', 'balanceUsd', 'balance']);
+			const totalSpending = firstNumber(summary, ['total_spending_usd', 'totalSpendingUsd', 'spending']);
+			const tokenSpend = firstNumber(summary, ['token_usage_usd', 'tokenUsageUsd']);
+			const inputTokens = firstNumber(summary, ['token_input_tokens', 'tokenInputTokens', 'input_tokens']);
+			const outputTokens = firstNumber(summary, ['token_output_tokens', 'tokenOutputTokens', 'output_tokens']);
+			const reads = firstNumber(summary, ['reads_count', 'readsCount', 'vector_reads']);
+			const writes = firstNumber(summary, ['writes_count', 'writesCount', 'memory_writes']);
+			const recentData = Array.isArray(recent.data) ? recent.data : Array.isArray(recent.usage) ? recent.usage : [];
+			if (balanceUsd !== undefined) {
+				metrics.push(['Balance', formatMoney(balanceUsd)]);
+			}
+			if (totalSpending !== undefined) {
+				metrics.push(['Period Spend', formatMoney(totalSpending)]);
+			}
+			if (tokenSpend !== undefined) {
+				metrics.push(['Token Spend', formatMoney(tokenSpend)]);
+			}
+			if (inputTokens !== undefined || outputTokens !== undefined) {
+				metrics.push(['Tokens', [inputTokens !== undefined ? formatNumber(inputTokens) + ' in' : undefined, outputTokens !== undefined ? formatNumber(outputTokens) + ' out' : undefined].filter(Boolean).join(' / ')]);
+			}
+			if (reads !== undefined) {
+				metrics.push(['Reads', formatNumber(reads)]);
+			}
+			if (writes !== undefined) {
+				metrics.push(['Writes', formatNumber(writes)]);
+			}
+			if (recentData.length) {
+				metrics.push(['Recent Events', formatNumber(recentData.length)]);
+			}
+			return {
+				percent: 0,
+				summary: [balanceUsd !== undefined ? 'Balance ' + formatMoney(balanceUsd) : undefined, totalSpending !== undefined ? 'Period ' + formatMoney(totalSpending) : undefined].filter(Boolean).join(' · ') || 'Billing usage',
+				metrics
+			};
+		}
 		function appendUsage(payload) {
 			const usage = normalizeUsagePayload(payload);
+			latestUsage = usage;
+			syncComposerButtons();
+			if (activePopover === 'usage') {
+				renderPopover('usage');
+				if (activeAnchor) {
+					positionPopover(activeAnchor);
+				}
+			}
 			const row = document.createElement('div');
 			row.className = 'usageRow';
 			const toggle = document.createElement('button');
@@ -2585,7 +3066,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					renderHistory();
 				}
 			} else if (message.type === 'settings') {
+				currentWorkspace = typeof message.workspace === 'string' ? message.workspace : currentWorkspace;
 				applySettings(message.settings);
+				refreshWorkspaceStatus();
 			} else if (message.type === 'command') {
 				if (message.command === 'newChat') {
 					startNewChat();
@@ -2626,16 +3109,26 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				renderMedia(message.type, message.payload);
 			} else if (message.type === 'usage') {
 				appendUsage(message.payload);
-				} else if (message.type === 'sessionBinding') {
-					updateStatus('Connected to Backboard.');
-				} else if (message.type === 'toolRequested') {
-					const calls = message.payload || [];
-					for (const call of calls) {
-						appendTool({ status: 'started', name: toolName(call) });
+			} else if (message.type === 'usageSnapshot') {
+				accountUsage = normalizeBillingSnapshot(message.payload);
+				updateStatus('Usage loaded.');
+				syncComposerButtons();
+				if (activePopover === 'usage') {
+					renderPopover('usage');
+					if (activeAnchor) {
+						positionPopover(activeAnchor);
 					}
-				} else if (message.type === 'toolFinished') {
-					appendTool(message.payload || {});
 				}
+			} else if (message.type === 'sessionBinding') {
+				updateStatus('Connected to Backboard.');
+			} else if (message.type === 'toolRequested') {
+				const calls = message.payload || [];
+				for (const call of calls) {
+					appendTool({ status: 'started', name: toolName(call), args: toolArgs(call) });
+				}
+			} else if (message.type === 'toolFinished') {
+				appendTool(message.payload || {});
+			}
 		});
 		applySettings({});
 		renderToolCount();
@@ -2643,6 +3136,11 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		renderQueue();
 		setActiveView(activeView);
 		syncEmptyState();
+		syncRootHeight();
+		requestAnimationFrame(() => {
+			syncRootHeight();
+			requestAnimationFrame(syncRootHeight);
+		});
 		vscode.postMessage({ type: 'ready' });
 	</script>
 </body>
@@ -2650,9 +3148,11 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 }
 
 class BackboardBridge implements vscode.Disposable {
+	private static readonly modelCacheTtl = 24 * 60 * 60 * 1000;
 	private child: cp.ChildProcessWithoutNullStreams | undefined;
 	private readonly pending = new Map<string, PendingRequest>();
 	private readonly output = vscode.window.createOutputChannel('Backboard Bridge');
+	private pendingModelRefresh: Promise<BridgeModel[]> | undefined;
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 	}
@@ -2663,12 +3163,68 @@ class BackboardBridge implements vscode.Disposable {
 	}
 
 	refreshModels(): void {
-		void this.listModels(new vscode.CancellationTokenSource().token);
+		void this.listModels(new vscode.CancellationTokenSource().token, true);
 	}
 
-	async listModels(token: vscode.CancellationToken): Promise<BridgeModel[]> {
+	async cachedModels(): Promise<BridgeModel[] | undefined> {
+		const entry = await this.readModelCache();
+		return entry?.models;
+	}
+
+	async listModels(token: vscode.CancellationToken, forceRefresh = false): Promise<BridgeModel[]> {
+		const cached = await this.readModelCache();
+		if (!forceRefresh && cached && Date.now() - cached.fetchedAt < BackboardBridge.modelCacheTtl) {
+			return cached.models;
+		}
+		if (this.pendingModelRefresh) {
+			return this.pendingModelRefresh;
+		}
+		this.pendingModelRefresh = this.fetchAndCacheModels(token);
+		try {
+			return await this.pendingModelRefresh;
+		} finally {
+			this.pendingModelRefresh = undefined;
+		}
+	}
+
+	private async fetchAndCacheModels(token: vscode.CancellationToken): Promise<BridgeModel[]> {
 		const events = await this.send('listModels', undefined, { config: readSettings().config }, undefined, token);
-		return events.find(event => event.type === 'models')?.models ?? [];
+		const models = (events.find(event => event.type === 'models')?.models ?? []).filter(isVisibleBridgeModel);
+		await this.writeModelCache(models);
+		return models;
+	}
+
+	private modelCachePath(): string {
+		return path.join(this.context.globalStorageUri.fsPath, 'models.json');
+	}
+
+	private async readModelCache(): Promise<ModelCacheEntry | undefined> {
+		try {
+			const parsed: unknown = JSON.parse(await fs.promises.readFile(this.modelCachePath(), 'utf8'));
+			const env = isObjectRecord(parsed) ? stringValueFromRecord(parsed.env) : undefined;
+			if (!isObjectRecord(parsed) || env !== currentBackboardEnv() || typeof parsed.fetchedAt !== 'number' || !Array.isArray(parsed.models)) {
+				return undefined;
+			}
+			return { env, fetchedAt: parsed.fetchedAt, models: parsed.models.filter(isBridgeModel).filter(isVisibleBridgeModel) };
+		} catch (error) {
+			if (isFileNotFoundError(error) || error instanceof SyntaxError) {
+				return undefined;
+			}
+			throw error;
+		}
+	}
+
+	private async writeModelCache(models: BridgeModel[]): Promise<void> {
+		const cachePath = this.modelCachePath();
+		await fs.promises.mkdir(path.dirname(cachePath), { recursive: true });
+		const tempPath = path.join(path.dirname(cachePath), `models.${process.pid}.${Date.now()}.tmp`);
+		const entry: ModelCacheEntry = {
+			env: currentBackboardEnv(),
+			fetchedAt: Date.now(),
+			models: models.filter(isBridgeModel).filter(isVisibleBridgeModel)
+		};
+		await fs.promises.writeFile(tempPath, `${JSON.stringify(entry, undefined, '\t')}\n`, 'utf8');
+		await fs.promises.rename(tempPath, cachePath);
 	}
 
 	async listTools(mode: string, token: vscode.CancellationToken): Promise<unknown[]> {
@@ -2682,9 +3238,15 @@ class BackboardBridge implements vscode.Disposable {
 		return result?.output ?? { success: false, error: `Rust tool ${name} did not return output.` };
 	}
 
+	async callApi(command: string, params: Record<string, unknown>, token: vscode.CancellationToken): Promise<unknown> {
+		const events = await this.send(command, undefined, { ...params, config: readSettings().config }, undefined, token);
+		return events.find(event => event.type === 'apiResponse')?.data;
+	}
+
 	async send(command: string, sessionId: string | undefined, params: unknown, onEvent: ((event: BridgeEvent) => void | Promise<void>) | undefined, token: vscode.CancellationToken): Promise<BridgeEvent[]> {
 		const requestId = newId();
 		const child = this.ensureProcess();
+		this.logBridgeRequest(requestId, command, sessionId, params);
 		const cancelRequest = () => {
 			this.write({ requestId: newId(), command: 'cancel', sessionId, params: { requestId } });
 			const pending = this.pending.get(requestId);
@@ -2728,8 +3290,15 @@ class BackboardBridge implements vscode.Disposable {
 		if (!fs.existsSync(bridgePath)) {
 			throw new Error(`Backboard bridge binary not found at ${bridgePath}. Build it with: npm --prefix extensions/backboard run build-bridge`);
 		}
+		const cwd = workspacePath() ?? os.homedir();
+		this.output.appendLine(`[${new Date().toISOString()}] Starting Backboard bridge`);
+		this.output.appendLine(`  bridgePath: ${bridgePath}`);
+		this.output.appendLine(`  bridgeDirectory: ${path.dirname(bridgePath)}`);
+		this.output.appendLine(`  cwd: ${cwd}`);
+		this.output.appendLine(`  workspaceRoot: ${workspacePath() ?? '<none>'}`);
+		this.output.appendLine(`  configuredWorkspaceRoot: ${configuredWorkspaceRoot() ?? '<none>'}`);
 		this.child = cp.spawn(bridgePath, [], {
-			cwd: workspacePath() ?? os.homedir(),
+			cwd,
 			stdio: ['pipe', 'pipe', 'pipe']
 		});
 		readline.createInterface({ input: this.child.stdout }).on('line', line => this.handleLine(line));
@@ -2759,6 +3328,20 @@ class BackboardBridge implements vscode.Disposable {
 
 	private write(payload: unknown): void {
 		this.child?.stdin.write(`${JSON.stringify(payload)}\n`);
+	}
+
+	private logBridgeRequest(requestId: string, command: string, sessionId: string | undefined, params: unknown): void {
+		const payload = {
+			requestId,
+			command,
+			sessionId,
+			workspaceRoot: workspacePath() ?? null,
+			configuredWorkspaceRoot: configuredWorkspaceRoot() ?? null,
+			processCwd: process.cwd(),
+			params: redactSensitiveValues(params)
+		};
+		this.output.appendLine(`[${new Date().toISOString()}] VS Code -> Backboard bridge`);
+		this.output.appendLine(JSON.stringify(payload, undefined, '\t'));
 	}
 
 	private handleLine(line: string): void {
@@ -2856,8 +3439,6 @@ async function executeTool(bridge: BackboardBridge, name: string, args: Record<s
 			return runCodeTool(args, response, token);
 		case 'todo_write':
 			return `Todo list updated: ${asCompactJson(args.todos ?? [])}`;
-		case 'ask_user_question':
-			return askUserQuestion(args, response, token);
 		case 'sleep':
 			return sleepTool(args, token);
 		case 'task':
@@ -2903,7 +3484,7 @@ async function globFiles(args: Record<string, unknown>): Promise<string> {
 	const pattern = stringArg(args, 'pattern') || '**/*';
 	const base = stringArg(args, 'target_directory');
 	const fullPattern = base ? path.posix.join(base.replace(/\\/g, '/'), pattern) : pattern;
-	const files = await vscode.workspace.findFiles(fullPattern, '**/{node_modules,.git,target,out,dist}/**', 300);
+	const files = await vscode.workspace.findFiles(workspacePattern(fullPattern), '**/{node_modules,.git,target,out,dist}/**', 300);
 	return files.map(uri => vscode.workspace.asRelativePath(uri)).join('\n');
 }
 
@@ -2915,7 +3496,7 @@ async function grepFiles(args: Record<string, unknown>): Promise<string> {
 	const include = stringArg(args, 'glob', 'include') || '**/*';
 	const rootPath = stringArg(args, 'path');
 	const fullPattern = rootPath ? path.posix.join(rootPath.replace(/\\/g, '/'), include) : include;
-	const files = await vscode.workspace.findFiles(fullPattern, '**/{node_modules,.git,target,out,dist}/**', 500);
+	const files = await vscode.workspace.findFiles(workspacePattern(fullPattern), '**/{node_modules,.git,target,out,dist}/**', 500);
 	const matches: string[] = [];
 	const flags = boolArg(args, 'case_insensitive') ? 'i' : '';
 	const regex = new RegExp(pattern, flags);
@@ -2955,7 +3536,7 @@ async function codebaseSearch(args: Record<string, unknown>): Promise<string> {
 	}
 	const limit = numberArg(args, 'num_results') ?? 15;
 	const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-	const files = await vscode.workspace.findFiles('**/*', '**/{node_modules,.git,target,out,dist}/**', 800);
+	const files = await vscode.workspace.findFiles(workspacePattern('**/*'), '**/{node_modules,.git,target,out,dist}/**', 800);
 	const scored: { uri: vscode.Uri; score: number; preview: string }[] = [];
 	for (const uri of files) {
 		const bytes = await tryReadFile(uri);
@@ -3102,7 +3683,7 @@ async function runShellTool(args: Record<string, unknown>, response: ResponseSin
 	if (!command) {
 		throw new Error('shell tool requires command');
 	}
-	const cwd = stringArg(args, 'working_directory', 'cwd') || workspacePath() || os.homedir();
+	const cwd = resolveShellCwd(stringArg(args, 'working_directory', 'cwd'));
 	response.progress(command);
 	const isBackground = boolArg(args, 'is_background');
 	const timeout = numberArg(args, 'timeout_ms', 'timeout') ?? 120_000;
@@ -3189,6 +3770,23 @@ async function runShellTool(args: Record<string, unknown>, response: ResponseSin
 	return result;
 }
 
+function resolveShellCwd(rawCwd: string | undefined): string {
+	const root = workspaceFolderUri();
+	if (!root) {
+		return os.homedir();
+	}
+	const rootPath = path.resolve(root.fsPath);
+	if (!rawCwd) {
+		return rootPath;
+	}
+	const resolved = path.isAbsolute(rawCwd) ? path.resolve(rawCwd) : path.resolve(rootPath, rawCwd);
+	const relative = path.relative(rootPath, resolved);
+	if (relative.startsWith('..') || path.isAbsolute(relative)) {
+		return rootPath;
+	}
+	return resolved;
+}
+
 function toTerminalText(value: string): string {
 	return value.replace(/\r?\n/g, '\r\n');
 }
@@ -3206,18 +3804,6 @@ async function runCodeTool(args: Record<string, unknown>, response: ResponseSink
 		? `node -e ${shellQuote(code)}`
 		: `python3 -c ${shellQuote(code)}`;
 	return runShellTool({ ...args, command }, response, token);
-}
-
-async function askUserQuestion(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken): Promise<string> {
-	if (response.question) {
-		return response.question(args, token);
-	}
-	const question = stringArg(args, 'question');
-	const options = arrayStringArg(args, 'options');
-	const choice = options.length
-		? await vscode.window.showInformationMessage(question, { modal: true }, ...options)
-		: await vscode.window.showInputBox({ title: 'Backboard Question', prompt: question, ignoreFocusOut: true });
-	return choice ?? 'No response.';
 }
 
 async function sleepTool(args: Record<string, unknown>, token: vscode.CancellationToken): Promise<string> {
@@ -3321,6 +3907,7 @@ function readSettings(): {
 	readonly defaultModel: string;
 	readonly mode: string;
 	readonly intensity: string;
+	readonly memoryMode: string;
 	readonly webSearch: string;
 	readonly imageGeneration: string;
 	readonly voiceMode: string;
@@ -3337,6 +3924,7 @@ function readSettings(): {
 		defaultModel: config.get<string>('defaultModel') || 'anthropic.claude-sonnet-4-6',
 		mode: config.get<string>('mode') || 'free',
 		intensity: config.get<string>('intensity') || 'fast',
+		memoryMode: config.get<string>('memoryMode') || 'Auto',
 		webSearch: config.get<string>('webSearch') || 'off',
 		imageGeneration: config.get<string>('imageGeneration') || 'off',
 		voiceMode: config.get<string>('voiceMode') || 'off',
@@ -3359,6 +3947,7 @@ function resolveTurnSettings(options: PanelOptions): BackboardSettings {
 		defaultModel: options.model || settings.defaultModel,
 		mode: options.mode || settings.mode,
 		intensity: options.intensity || settings.intensity,
+		memoryMode: options.memoryMode || settings.memoryMode,
 		webSearch: options.webSearch || settings.webSearch,
 		imageGeneration: options.imageGeneration || settings.imageGeneration,
 		voiceMode: options.voiceMode || settings.voiceMode,
@@ -3387,6 +3976,7 @@ function asPanelOptions(value: unknown): PanelOptions {
 		model: stringValue(raw.model),
 		mode: stringValue(raw.mode),
 		intensity: stringValue(raw.intensity),
+		memoryMode: stringValue(raw.memoryMode),
 		webSearch: stringValue(raw.webSearch),
 		imageGeneration: stringValue(raw.imageGeneration),
 		voiceMode: stringValue(raw.voiceMode),
@@ -3403,6 +3993,7 @@ async function savePanelOptions(options: PanelOptions): Promise<void> {
 		['defaultModel', options.model],
 		['mode', options.mode],
 		['intensity', options.intensity],
+		['memoryMode', options.memoryMode],
 		['webSearch', options.webSearch],
 		['imageGeneration', options.imageGeneration],
 		['voiceMode', options.voiceMode],
@@ -3415,27 +4006,53 @@ async function savePanelOptions(options: PanelOptions): Promise<void> {
 		.map(([key, value]) => config.update(key, value, vscode.ConfigurationTarget.Global)));
 }
 
-async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview): Promise<void> {
+async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, forceModelRefresh = false): Promise<void> {
 	const settings = readSettings();
 	await webview.postMessage({ type: 'settings', settings: publicSettings(settings), workspace: workspacePath() });
+	try {
+		const cachedModels = forceModelRefresh ? undefined : await bridge.cachedModels();
+		if (cachedModels) {
+			await webview.postMessage({ type: 'models', models: cachedModels });
+		}
+		await webview.postMessage({ type: 'status', text: cachedModels && !forceModelRefresh ? 'Checking Backboard models.' : 'Loading Backboard models.' });
+		const models = await bridge.listModels(new vscode.CancellationTokenSource().token, forceModelRefresh);
+		await webview.postMessage({ type: 'models', models });
+		await webview.postMessage({ type: 'status', text: 'Ready.' });
+	} catch (error) {
+		const cachedModels = await bridge.cachedModels();
+		if (cachedModels) {
+			await webview.postMessage({ type: 'models', models: cachedModels });
+			await webview.postMessage({ type: 'status', text: 'Using cached Backboard models.' });
+		} else {
+			await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
+			if (isBackboardAuthError(error)) {
+				await webview.postMessage({ type: 'status', text: 'Set a Backboard API key, BACKBOARD_API_KEY, or ~/.backboard_ide/config.json to load models.' });
+			} else {
+				await webview.postMessage({ type: 'status', text: 'Could not load models.' });
+			}
+		}
+	}
 	try {
 		const tools = await bridge.listTools(settings.mode, new vscode.CancellationTokenSource().token);
 		await webview.postMessage({ type: 'tools', tools });
 	} catch {
 		await webview.postMessage({ type: 'tools', tools: [] });
 	}
+}
+
+async function postUsageSnapshot(bridge: BackboardBridge, webview: vscode.Webview): Promise<void> {
+	const tokenSource = new vscode.CancellationTokenSource();
 	try {
-		await webview.postMessage({ type: 'status', text: 'Loading Backboard models.' });
-		const models = await bridge.listModels(new vscode.CancellationTokenSource().token);
-		await webview.postMessage({ type: 'models', models });
-		await webview.postMessage({ type: 'status', text: 'Ready.' });
+		const [balance, summary, recent] = await Promise.all([
+			bridge.callApi('getBillingBalance', {}, tokenSource.token),
+			bridge.callApi('getUsageSummary', { query: { range: 'period' } }, tokenSource.token),
+			bridge.callApi('getRecentUsage', { query: { page: 1, pageSize: 20 } }, tokenSource.token)
+		]);
+		await webview.postMessage({ type: 'usageSnapshot', payload: { balance, summary, recent } });
 	} catch (error) {
-		await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
-		if (isBackboardAuthError(error)) {
-			await webview.postMessage({ type: 'status', text: 'Set a Backboard API key, BACKBOARD_API_KEY, or ~/.backboard_ide/config.json to load models.' });
-		} else {
-			await webview.postMessage({ type: 'status', text: 'Could not load models.' });
-		}
+		await webview.postMessage({ type: 'status', text: error instanceof Error ? error.message : String(error) });
+	} finally {
+		tokenSource.dispose();
 	}
 }
 
@@ -3507,6 +4124,7 @@ function publicSettings(settings: BackboardSettings): PanelOptions {
 		model: settings.defaultModel,
 		mode: settings.mode,
 		intensity: settings.intensity,
+		memoryMode: settings.memoryMode,
 		webSearch: settings.webSearch,
 		imageGeneration: settings.imageGeneration,
 		voiceMode: settings.voiceMode,
@@ -3525,14 +4143,57 @@ function booleanValue(value: unknown): boolean | undefined {
 }
 
 function workspacePath(): string | undefined {
-	return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+	return workspaceFolderUri()?.fsPath;
+}
+
+function workspaceFolderUri(): vscode.Uri | undefined {
+	const configuredRoot = configuredWorkspaceRoot();
+	if (configuredRoot) {
+		return vscode.Uri.file(configuredRoot);
+	}
+	const folders = vscode.workspace.workspaceFolders;
+	if (!folders?.length) {
+		return undefined;
+	}
+	const activeEditorFolder = vscode.window.activeTextEditor
+		? vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri)
+		: undefined;
+	if (activeEditorFolder) {
+		return activeEditorFolder.uri;
+	}
+	for (const editor of vscode.window.visibleTextEditors) {
+		const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+		if (folder) {
+			return folder.uri;
+		}
+	}
+	return folders[0].uri;
+}
+
+function configuredWorkspaceRoot(): string | undefined {
+	const raw = vscode.workspace.getConfiguration('backboard').get<string>('workspaceRoot')?.trim()
+		|| process.env.BACKBOARD_WORKSPACE_ROOT?.trim()
+		|| process.env.BACKBOARD_IDE_WORKSPACE_ROOT?.trim();
+	const firstFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+	const configured = raw
+		?.replace(/\$\{workspaceFolder\}/g, firstFolder ?? '')
+		.replace(/\$\{userHome\}/g, os.homedir());
+	if (!configured) {
+		return undefined;
+	}
+	return path.resolve(firstFolder ?? os.homedir(), configured);
+}
+
+function workspacePattern(pattern: string): vscode.GlobPattern {
+	const root = workspaceFolderUri();
+	return root ? new vscode.RelativePattern(root, pattern) : pattern;
 }
 
 function resolveWorkspaceUri(rawPath: string): vscode.Uri {
 	if (!rawPath) {
 		throw new Error('tool requires a path');
 	}
-	const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+	const root = workspaceFolderUri();
 	if (!root) {
 		throw new Error('No workspace folder is open.');
 	}

@@ -12,7 +12,8 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use backboard::{
-    BackboardClient, BackboardConfig, BackboardModel, SendMessageRequest, SubmitToolOutputsRequest,
+    AudioAttachment, BackboardClient, BackboardConfig, BackboardModel, RecentUsageQuery,
+    SendMessageRequest, SubmitToolOutputsRequest, UsageSummaryQuery, message_request_log_json,
 };
 use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
@@ -97,7 +98,11 @@ struct SendPromptParams {
     #[serde(default)]
     image_generation: Option<String>,
     #[serde(default)]
+    memory_mode: Option<String>,
+    #[serde(default)]
     voice_mode: Option<String>,
+    #[serde(default)]
+    audio_file: Option<AudioFileParams>,
     #[serde(default)]
     mcp_calls: Option<Value>,
     #[serde(default)]
@@ -108,6 +113,14 @@ struct SendPromptParams {
     max_tokens: Option<u32>,
     #[serde(default)]
     config: Option<ConfigParams>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AudioFileParams {
+    data: Vec<u8>,
+    file_name: String,
+    mime_type: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,6 +141,33 @@ struct RunToolParams {
     name: String,
     #[serde(default)]
     args: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiEndpointParams {
+    #[serde(default)]
+    config: Option<ConfigParams>,
+    #[serde(default)]
+    body: Option<Value>,
+    #[serde(default)]
+    query: Option<Value>,
+    #[serde(default)]
+    file_path: Option<PathBuf>,
+    #[serde(default)]
+    assistant_id: Option<String>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    document_id: Option<String>,
+    #[serde(default)]
+    memory_id: Option<String>,
+    #[serde(default)]
+    operation_id: Option<String>,
+    #[serde(default)]
+    model_name: Option<String>,
+    #[serde(default)]
+    provider_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -250,6 +290,21 @@ async fn handle_request(state: BridgeState, request: BridgeRequest) {
         "cancel" => cancel_request(&state, &request),
         "getSession" => get_session(&state, &request),
         "disposeSession" => dispose_session(&state, &request),
+        command if is_api_command(command) => {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let request_id = request.request_id.clone();
+                let session_id = request.session_id.clone();
+                if let Err(error) = call_api_endpoint(state.clone(), request).await {
+                    emit_error(
+                        &state.writer,
+                        &error,
+                        Some(&request_id),
+                        session_id.as_deref(),
+                    );
+                }
+            });
+        }
         command => {
             emit_error(
                 &state.writer,
@@ -413,6 +468,297 @@ async fn run_tool(state: BridgeState, request: BridgeRequest) -> Result<()> {
     Ok(())
 }
 
+fn is_api_command(command: &str) -> bool {
+    matches!(
+        command,
+        "createAssistant"
+            | "listAssistants"
+            | "getAssistant"
+            | "updateAssistant"
+            | "deleteAssistant"
+            | "createAssistantThread"
+            | "listAssistantThreads"
+            | "listAssistantDocuments"
+            | "uploadAssistantDocument"
+            | "sendMessage"
+            | "submitToolOutputsSimple"
+            | "listThreads"
+            | "getThread"
+            | "deleteThread"
+            | "listThreadDocuments"
+            | "uploadThreadDocument"
+            | "addThreadMessage"
+            | "getDocumentStatus"
+            | "deleteDocument"
+            | "listMemories"
+            | "searchMemories"
+            | "addMemory"
+            | "getMemory"
+            | "updateMemory"
+            | "deleteMemory"
+            | "getMemoryOperationStatus"
+            | "getModel"
+            | "listProviders"
+            | "listModelsByProvider"
+            | "listEmbeddingModels"
+            | "listEmbeddingProviders"
+            | "getEmbeddingModel"
+            | "getBillingBalance"
+            | "getRecentUsage"
+            | "getUsageSummary"
+    )
+}
+
+async fn call_api_endpoint(state: BridgeState, request: BridgeRequest) -> Result<()> {
+    let command = request.command.clone();
+    let params: ApiEndpointParams = serde_json::from_value(request.params.clone())?;
+    let client = client_from_params(params.config.as_ref())?;
+    let output = match command.as_str() {
+        "createAssistant" => client.create_assistant_value(api_body(&params)).await?,
+        "listAssistants" => json!({ "assistants": client.list_assistants().await? }),
+        "getAssistant" => {
+            client
+                .get_assistant(&required(params.assistant_id.as_deref(), "assistantId")?)
+                .await?
+        }
+        "updateAssistant" => {
+            client
+                .update_assistant_value(
+                    &required(params.assistant_id.as_deref(), "assistantId")?,
+                    api_body(&params),
+                )
+                .await?
+        }
+        "deleteAssistant" => {
+            client
+                .delete_assistant(&required(params.assistant_id.as_deref(), "assistantId")?)
+                .await?
+        }
+        "createAssistantThread" => {
+            client
+                .create_thread(&required(params.assistant_id.as_deref(), "assistantId")?)
+                .await?
+        }
+        "listAssistantThreads" => json!({
+            "threads": client
+                .list_threads(Some(&required(params.assistant_id.as_deref(), "assistantId")?))
+                .await?
+        }),
+        "listAssistantDocuments" => {
+            client
+                .list_assistant_documents(&required(params.assistant_id.as_deref(), "assistantId")?)
+                .await?
+        }
+        "uploadAssistantDocument" => {
+            client
+                .upload_document(
+                    &required(params.assistant_id.as_deref(), "assistantId")?,
+                    &required_path(params.file_path.as_ref(), "filePath")?,
+                )
+                .await?
+        }
+        "sendMessage" => client.send_message_value(api_body(&params)).await?,
+        "submitToolOutputsSimple" => client.submit_tool_outputs_simple(api_body(&params)).await?,
+        "listThreads" => json!({ "threads": client.list_threads(None).await? }),
+        "getThread" => {
+            client
+                .get_thread(&required(params.thread_id.as_deref(), "threadId")?)
+                .await?
+        }
+        "deleteThread" => {
+            client
+                .delete_thread(&required(params.thread_id.as_deref(), "threadId")?)
+                .await?
+        }
+        "listThreadDocuments" => {
+            client
+                .list_thread_documents(&required(params.thread_id.as_deref(), "threadId")?)
+                .await?
+        }
+        "uploadThreadDocument" => {
+            client
+                .upload_thread_document(
+                    &required(params.thread_id.as_deref(), "threadId")?,
+                    &required_path(params.file_path.as_ref(), "filePath")?,
+                )
+                .await?
+        }
+        "addThreadMessage" => {
+            client
+                .add_thread_message(
+                    &required(params.thread_id.as_deref(), "threadId")?,
+                    api_body(&params),
+                )
+                .await?
+        }
+        "getDocumentStatus" => {
+            client
+                .get_document_status(&required(params.document_id.as_deref(), "documentId")?)
+                .await?
+        }
+        "deleteDocument" => {
+            client
+                .delete_document(&required(params.document_id.as_deref(), "documentId")?)
+                .await?
+        }
+        "listMemories" => json!({
+            "memories": client
+                .list_memories(&required(params.assistant_id.as_deref(), "assistantId")?)
+                .await?
+        }),
+        "searchMemories" => {
+            client
+                .search_memories(
+                    &required(params.assistant_id.as_deref(), "assistantId")?,
+                    api_body(&params),
+                )
+                .await?
+        }
+        "addMemory" => {
+            client
+                .add_memory_value(
+                    &required(params.assistant_id.as_deref(), "assistantId")?,
+                    api_body(&params),
+                )
+                .await?
+        }
+        "getMemory" => {
+            client
+                .get_memory(
+                    &required(params.assistant_id.as_deref(), "assistantId")?,
+                    &required(params.memory_id.as_deref(), "memoryId")?,
+                )
+                .await?
+        }
+        "updateMemory" => {
+            client
+                .update_memory(
+                    &required(params.assistant_id.as_deref(), "assistantId")?,
+                    &required(params.memory_id.as_deref(), "memoryId")?,
+                    api_body(&params),
+                )
+                .await?
+        }
+        "deleteMemory" => {
+            client
+                .delete_memory(
+                    &required(params.assistant_id.as_deref(), "assistantId")?,
+                    &required(params.memory_id.as_deref(), "memoryId")?,
+                )
+                .await?
+        }
+        "getMemoryOperationStatus" => {
+            client
+                .get_memory_operation_status(&required(
+                    params.operation_id.as_deref(),
+                    "operationId",
+                )?)
+                .await?
+        }
+        "getModel" => {
+            client
+                .get_model(&required(params.model_name.as_deref(), "modelName")?)
+                .await?
+        }
+        "listProviders" => json!({ "providers": client.list_providers().await? }),
+        "listModelsByProvider" => json!({
+            "models": client
+                .list_models_by_provider(
+                    &required(params.provider_name.as_deref(), "providerName")?,
+                    None,
+                )
+                .await?
+                .into_iter()
+                .map(to_bridge_model)
+                .collect::<Vec<_>>()
+        }),
+        "listEmbeddingModels" => client.list_embedding_models().await?,
+        "listEmbeddingProviders" => client.list_embedding_providers().await?,
+        "getEmbeddingModel" => {
+            client
+                .get_embedding_model(&required(params.model_name.as_deref(), "modelName")?)
+                .await?
+        }
+        "getBillingBalance" => client.get_billing_balance().await?,
+        "getRecentUsage" => client
+            .get_recent_usage(recent_usage_query(params.query.as_ref()))
+            .await?
+            .unwrap_or_else(|| json!({})),
+        "getUsageSummary" => {
+            client
+                .get_usage_summary(usage_summary_query(params.query.as_ref()))
+                .await?
+        }
+        _ => unreachable!("API command checked before dispatch"),
+    };
+
+    state.writer.emit(base_event(
+        "apiResponse",
+        &request.request_id,
+        request.session_id.as_deref(),
+        json!({ "command": command, "data": output }),
+    ));
+    state.writer.emit(base_event(
+        "done",
+        &request.request_id,
+        request.session_id.as_deref(),
+        json!({ "stopReason": "end_turn" }),
+    ));
+    Ok(())
+}
+
+fn api_body(params: &ApiEndpointParams) -> Value {
+    params.body.clone().unwrap_or_else(|| json!({}))
+}
+
+fn required(value: Option<&str>, name: &str) -> Result<String> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .with_context(|| format!("{name} is required"))
+}
+
+fn required_path(value: Option<&PathBuf>, name: &str) -> Result<PathBuf> {
+    value
+        .cloned()
+        .with_context(|| format!("{name} is required"))
+}
+
+fn recent_usage_query(query: Option<&Value>) -> RecentUsageQuery {
+    RecentUsageQuery {
+        page: query
+            .and_then(|value| u64_arg(value, &["page"]))
+            .and_then(|value| u32::try_from(value).ok()),
+        model: query.and_then(|value| string_arg(value, &["model", "modelName", "model_name"])),
+        input_tokens: query.and_then(|value| u64_arg(value, &["inputTokens", "input_tokens"])),
+        output_tokens: query.and_then(|value| u64_arg(value, &["outputTokens", "output_tokens"])),
+        start: query.and_then(|value| string_arg(value, &["start"])),
+        end: query.and_then(|value| string_arg(value, &["end"])),
+        credit_type: query.and_then(|value| string_arg(value, &["creditType", "credit_type"])),
+        sort_by: query.and_then(|value| string_arg(value, &["sortBy", "sort_by"])),
+        sort_order: query.and_then(|value| string_arg(value, &["sortOrder", "sort_order"])),
+        page_size: query
+            .and_then(|value| u64_arg(value, &["pageSize", "page_size"]))
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(100),
+    }
+}
+
+fn usage_summary_query(query: Option<&Value>) -> UsageSummaryQuery {
+    UsageSummaryQuery {
+        range: query.and_then(|value| string_arg(value, &["range"])),
+    }
+}
+
+fn u64_arg(args: &Value, names: &[&str]) -> Option<u64> {
+    names.iter().find_map(|name| {
+        let value = args.get(*name)?;
+        value
+            .as_u64()
+            .or_else(|| value.as_str().and_then(|text| text.parse::<u64>().ok()))
+    })
+}
+
 async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
     let session_id = request
         .session_id
@@ -428,6 +774,12 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         .intensity
         .unwrap_or_else(|| DEFAULT_INTENSITY.to_string());
     let voice_mode = params.voice_mode.unwrap_or_else(|| "off".to_string());
+    let audio_file = params.audio_file.map(|audio| AudioAttachment {
+        data: audio.data,
+        file_name: audio.file_name,
+        mime_type: audio.mime_type,
+    });
+    let (memory, memory_pro) = memory_payload(params.memory_mode.as_deref().unwrap_or("Auto"));
     let cancel_flag = session_cancel_flag(&state, &session_id);
     cancel_flag.store(false, Ordering::SeqCst);
 
@@ -446,35 +798,36 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         json!({ "message": "Sending to Backboard." }),
     ));
 
-    let stream = client
-        .send_message_stream(SendMessageRequest {
-            thread_id,
-            assistant_id,
-            content,
-            provider: Some(provider.clone()),
-            model: Some(model.clone()),
-            memory: "Auto".to_string(),
-            thinking: thinking_payload(&intensity, &provider, &model),
-            tools: Some(tool_definitions(&mode)),
-            web_search: params.web_search.unwrap_or_else(|| "off".to_string()),
-            image_generation: params.image_generation.clone(),
-            image_model_provider: params
-                .image_generation
-                .as_deref()
-                .filter(|value| *value == "auto")
-                .map(|_| DEFAULT_IMAGE_PROVIDER.to_string()),
-            image_model_name: params
-                .image_generation
-                .as_deref()
-                .filter(|value| *value == "auto")
-                .map(|_| DEFAULT_IMAGE_MODEL.to_string()),
-            voice: voice_payload(&voice_mode),
-            send_to_llm: send_to_llm_for_voice(&voice_mode),
-            mcp_calls: params.mcp_calls,
-            max_tokens: params.max_tokens,
-            audio_file: None,
-        })
-        .await?;
+    let send_request = SendMessageRequest {
+        thread_id,
+        assistant_id,
+        content,
+        provider: Some(provider.clone()),
+        model: Some(model.clone()),
+        memory,
+        memory_pro,
+        thinking: thinking_payload(&intensity, &provider, &model),
+        tools: Some(tool_definitions(&mode)),
+        web_search: params.web_search.unwrap_or_else(|| "off".to_string()),
+        image_generation: params.image_generation.clone(),
+        image_model_provider: params
+            .image_generation
+            .as_deref()
+            .filter(|value| *value == "auto")
+            .map(|_| DEFAULT_IMAGE_PROVIDER.to_string()),
+        image_model_name: params
+            .image_generation
+            .as_deref()
+            .filter(|value| *value == "auto")
+            .map(|_| DEFAULT_IMAGE_MODEL.to_string()),
+        voice: voice_payload(&voice_mode),
+        send_to_llm: send_to_llm_for_voice(&voice_mode),
+        mcp_calls: params.mcp_calls,
+        max_tokens: params.max_tokens,
+        audio_file,
+    };
+    log_backboard_request(&send_request, params.workspace.as_ref(), &mode)?;
+    let stream = client.send_message_stream(send_request).await?;
 
     consume_stream(state, &request.request_id, &session_id, stream).await
 }
@@ -764,14 +1117,171 @@ fn client_from_params(params: Option<&ConfigParams>) -> Result<BackboardClient> 
     BackboardClient::from_config(config)
 }
 
+fn log_backboard_request(
+    request: &SendMessageRequest,
+    workspace: Option<&PathBuf>,
+    mode: &str,
+) -> Result<()> {
+    let body = message_request_log_json(request, true);
+    let cwd = std::env::current_dir()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "<unknown>".to_string());
+    eprintln!(
+        "[{}] Backboard bridge -> Backboard API",
+        chrono_like_timestamp()
+    );
+    eprintln!(
+        "  workspaceRoot: {}",
+        workspace
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<none>".to_string())
+    );
+    eprintln!(
+        "  workspaceDirectory: {}",
+        workspace
+            .and_then(|path| path.parent())
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<none>".to_string())
+    );
+    eprintln!("  bridgeCwd: {cwd}");
+    eprintln!("  mode: {mode}");
+    eprintln!("{}", serde_json::to_string_pretty(&body)?);
+    Ok(())
+}
+
+fn chrono_like_timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("unix_ms={}", now.as_millis())
+}
+
 fn augment_prompt(content: &str, workspace: Option<&PathBuf>, mode: &str) -> String {
     let Some(workspace) = workspace else {
         return content.to_string();
     };
+    let workspace = workspace.display();
+    let available_tools = tool_names_for_prompt(mode);
     format!(
-        "Backboard is running inside VS Code.\nWorkspace: {}\nMode: {mode}\n\nUser request:\n{content}",
-        workspace.display()
+        r#"You are the Backboard Studio coding agent running inside the Backboard VS Code IDE. You help users complete software engineering tasks by understanding their codebase, making careful changes, and explaining your work clearly. Use your broad knowledge of programming languages, frameworks, design patterns, and engineering best practices to solve problems pragmatically.
+
+## Communication
+
+- Default to a tone that is concise, direct, and friendly. Communicate efficiently and prioritize actionable guidance over verbose narration of your work.
+- Format responses in markdown. Use backticks for file paths, directories, commands, functions, classes, and other code identifiers.
+- Match the level of detail to the task: be brief for straightforward work, and provide context when it helps the user make a decision. Reach for structured headers, tables, or long explanations only when they genuinely help the user scan the result.
+- Be accurate and truthful. Ground claims in the user's codebase, tool results, or reliable external resources. Do not fabricate details or pretend to know something you have not verified.
+- Prioritize technical correctness over affirming the user's assumptions. If something seems wrong or risky, say so respectfully and explain the reasoning.
+- Be transparent about uncertainty. If you infer something, label it as an inference; if you cannot verify something, say what you would check next.
+- Do not over-apologize when results are unexpected. Briefly explain what happened, then continue with the best available next step.
+
+## Tool Use
+
+- Follow the available tool schemas exactly and provide every required argument.
+- Use only the tools that are currently available. Do not call a tool just because it appeared earlier in the conversation; the user may have disabled it.
+- Prefer the most direct tool for the job. Use file tools for reading and editing files, search tools for code discovery, and terminal commands for build, test, and project-specific workflows.
+- Before acting, gather enough context to avoid guessing. Do not use placeholders, invented paths, or assumed command arguments in tool calls.
+- You can call multiple tools in a single response. If multiple tool calls have no dependency on each other, make the independent calls in parallel where the host supports it. If one operation depends on another, run them sequentially.
+- When running commands that may run indefinitely or for a long time, such as builds, tests, servers, or file watchers, specify a bounded timeout when the tool supports one. If a command times out, report that clearly and let the user decide whether to rerun it with a longer timeout.
+- Avoid HTML entity escaping; use plain characters instead.
+- Before a group of related tool calls, send a brief one- to two-sentence preamble explaining what you're about to do, so the user can follow along. Skip the preamble for trivial single reads or when continuing a clearly described step.
+- Available tools for this turn: {available_tools}
+
+## Task Execution
+
+- Keep going until the user's task is completely resolved before ending your turn and yielding back to the user. Only terminate your turn when you are sure the problem is solved.
+- Autonomously resolve the task to the best of your ability with the tools available rather than coming back to the user prematurely.
+- Do not ask clarification questions as a default response. Gather evidence with tools first. Only stop for user input when the information is genuinely unavailable from the project and proceeding would be risky.
+- Do not guess or make up an answer.
+- For implementation requests, inspect files or run relevant tools before claiming work is complete. Do not claim source, UI, or configuration changes were made unless a tool call actually changed or verified files.
+
+## Workspace
+
+- The target workspace root is exactly: {workspace}
+- Treat this target workspace as the current project and the only default directory for user work.
+- Do not infer the current folder from the VS Code extension install path, process cwd, or any path containing /ide/vscode unless the target workspace itself is that path.
+- When the user asks what folder or directory you are in, answer with the exact target workspace root above.
+- All relative file, grep, glob, shell, and edit tool paths are relative to the target workspace root unless the user explicitly provides another path.
+- Current Backboard mode for this turn: {mode}
+
+## Searching and Reading
+
+- If you are unsure how to fulfill the user's request, gather more information with tool calls.
+- Before reading or editing a file, first know its full project-relative path. Do not guess file paths.
+- Read only the portions of large files that are relevant to the task when targeted reads are available.
+- When looking for symbols in the project, prefer grep/search tools. As you learn about the structure of the project, scope searches to targeted subtrees instead of repeatedly searching the whole repository.
+
+## Making Code Changes
+
+- Fix the problem at the root cause rather than applying surface-level patches, when possible.
+- Avoid unneeded complexity in your solution.
+- Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task.
+- Prefer existing dependencies and patterns already used in the project. Add new dependencies only when they are justified by the task.
+- Keep user work safe. Do not overwrite, remove, or revert changes you did not make unless the user explicitly asks.
+- Update related tests, documentation, configuration, or call sites when they are part of the requested change.
+- Do not fix unrelated bugs or broken tests. It is not your responsibility to fix them, but you may mention them in your final message.
+- Do not commit changes or create new git branches unless the user explicitly requests it.
+- Do not add comments that merely restate the code. Add comments only when they explain non-obvious intent, constraints, or tradeoffs.
+- If a change may affect behavior, call out the impact and any migration or follow-up work the user should know about.
+
+## Ambition vs. Precision
+
+- For tasks with no prior context, feel free to be ambitious and demonstrate creativity with your implementation.
+- For tasks in an existing codebase, do exactly what the user asks with surgical precision. Treat the surrounding codebase with respect, and do not overstep by changing filenames, variables, architecture, or unrelated behavior unnecessarily.
+- Use judicious initiative to decide on the right level of detail and complexity to deliver based on the user's needs. Provide high-value touches when scope is vague, and targeted work when scope is tight.
+
+## Validation
+
+- If the codebase has tests or the ability to build or run, consider using them to verify that your work is complete.
+- Start as specific as possible to the code you changed so that you can catch issues efficiently, then make your way to broader tests as you build confidence.
+- Do not claim validation passed unless you actually ran it and saw it pass.
+- If validation fails, report the failing command and the relevant error. Fix issues you caused when you can identify the root cause.
+- If you cannot run validation, state that clearly and explain why.
+
+## Fixing Diagnostics
+
+1. Make 1-2 focused attempts at fixing diagnostics you are likely able to resolve, then defer to the user with a clear explanation of what remains.
+2. Never simplify or discard meaningful code just to silence diagnostics. Complete, mostly correct code is more valuable than superficially clean code that does not solve the problem.
+
+## Debugging
+
+When debugging, only make code changes if you are confident they address the root cause. Otherwise, first gather evidence and isolate the problem.
+
+1. Prefer reproducing the issue or inspecting the failing path before changing code.
+2. Address the root cause instead of the symptoms.
+3. Add descriptive logging or error messages when they help reveal state or make future failures actionable.
+4. Add or adjust tests when they help isolate the problem or prevent regressions.
+
+## Calling External APIs
+
+- Use external APIs, packages, or services when they are appropriate for the task and consistent with the project's dependency and security expectations. You do not need to ask permission unless the user requested a specific constraint.
+- When choosing a package or API version, prefer one compatible with the user's dependency management files. If the project provides no guidance, use a stable, current version you know to be appropriate.
+- If an external API requires an API key or secret, tell the user. Never hardcode secrets or place them where they may be exposed.
+- Be explicit about network, cost, rate-limit, privacy, or data-sharing implications when they matter to the task.
+
+## Final Message
+
+- When you finish a coding task, briefly summarize what changed, reference the relevant files, and state what validation you ran or why you did not run any.
+- Reference files by their project-relative path so the user can click through.
+- If there is an obvious follow-up the user may want, offer it as a question rather than doing it unprompted.
+
+User request:
+{content}"#
     )
+}
+
+fn tool_names_for_prompt(mode: &str) -> String {
+    tool_definitions(mode)
+        .into_iter()
+        .filter_map(|tool| {
+            tool.pointer("/function/name")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn thinking_payload(intensity: &str, provider: &str, model: &str) -> Option<Value> {
@@ -799,6 +1309,16 @@ fn thinking_payload(intensity: &str, provider: &str, model: &str) -> Option<Valu
         Some(json!({ "max_tokens": if deep { 4096 } else { 1024 } }))
     } else {
         None
+    }
+}
+
+fn memory_payload(memory_mode: &str) -> (Option<String>, Option<String>) {
+    match memory_mode {
+        "Readonly" => (Some("Readonly".to_string()), None),
+        "off" => (None, None),
+        "ProAuto" => (None, Some("Auto".to_string())),
+        "ProReadonly" => (None, Some("Readonly".to_string())),
+        _ => (Some("Auto".to_string()), None),
     }
 }
 
@@ -877,7 +1397,6 @@ fn all_tool_definitions() -> Vec<Value> {
         json!({"type":"function","function":{"name":"repl","description":"Persistent REPL compatibility tool. VS Code host executes this as a snippet.","parameters":{"type":"object","properties":{"code":{"type":"string"},"language":{"type":"string"},"reset":{"type":"boolean"}},"required":["code"]}}}),
         json!({"type":"function","function":{"name":"run_code","description":"Execute a one-off code snippet.","parameters":{"type":"object","properties":{"code":{"type":"string"},"language":{"type":"string","enum":["python","node","typescript","shell","ruby","go"]},"timeout":{"type":"integer"},"description":{"type":"string"}},"required":["code"]}}}),
         json!({"type":"function","function":{"name":"computer","description":"Desktop automation. This VS Code bridge reports it unsupported until desktop automation is ported.","parameters":{"type":"object","properties":{"action":{"type":"string"},"x":{"type":"integer"},"y":{"type":"integer"},"text":{"type":"string"},"key":{"type":"string"}},"required":["action"]}}}),
-        json!({"type":"function","function":{"name":"ask_user_question","description":"Ask the user for required input.","parameters":{"type":"object","properties":{"question":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},"allow_multiple":{"type":"boolean"}},"required":["question"]}}}),
     ]
 }
 
@@ -1331,15 +1850,15 @@ fn emit_error(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::{collections::HashSet, path::PathBuf};
 
     use backboard::BackboardModel;
     use serde_json::json;
 
     use super::{
-        add_visible_models, is_featherless_provider, model_is_visible, normalize_tool_output,
-        thinking_payload, tool_calls_required_by_chunk, tool_definitions, validate_web_fetch_url,
-        voice_payload,
+        add_visible_models, augment_prompt, is_featherless_provider, model_is_visible,
+        normalize_tool_output, thinking_payload, tool_calls_required_by_chunk, tool_definitions,
+        validate_web_fetch_url, voice_payload,
     };
 
     #[test]
@@ -1376,6 +1895,21 @@ mod tests {
         assert!(!names.contains(&"create_file".to_string()));
         assert!(!names.contains(&"edit_file".to_string()));
         assert!(!names.contains(&"bash".to_string()));
+    }
+
+    #[test]
+    fn augmented_prompt_uses_backboard_studio_agent_prompt() {
+        let workspace = PathBuf::from("/tmp/example-workspace");
+        let prompt = augment_prompt("make the UI better", Some(&workspace), "free");
+
+        assert!(prompt.contains("You are the Backboard Studio coding agent"));
+        assert!(prompt.contains("The target workspace root is exactly: /tmp/example-workspace"));
+        assert!(prompt.contains("Available tools for this turn:"));
+        assert!(prompt.contains("read_file"));
+        assert!(prompt.contains("write_file"));
+        assert!(prompt.contains("Do not ask clarification questions as a default response."));
+        assert!(!prompt.contains("Backboard is running inside VS Code."));
+        assert!(!prompt.contains("ask_user_question"));
     }
 
     #[test]
@@ -1420,7 +1954,6 @@ mod tests {
                 "repl",
                 "run_code",
                 "computer",
-                "ask_user_question",
             ]
         );
     }

@@ -566,8 +566,10 @@ pub struct SendMessageRequest {
     pub provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default = "default_memory")]
-    pub memory: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_pro: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -592,10 +594,6 @@ pub struct SendMessageRequest {
     pub audio_file: Option<AudioAttachment>,
 }
 
-fn default_memory() -> String {
-    "Auto".into()
-}
-
 fn default_web_search() -> String {
     "off".into()
 }
@@ -608,7 +606,8 @@ impl Default for SendMessageRequest {
             content: String::new(),
             provider: None,
             model: None,
-            memory: default_memory(),
+            memory: Some("Auto".to_string()),
+            memory_pro: None,
             thinking: None,
             tools: None,
             web_search: default_web_search(),
@@ -640,12 +639,30 @@ pub struct MessageThreadBinding {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct RecentUsageQuery {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_name: Option<String>,
+    pub page: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credit_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<String>,
     pub page_size: u32,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct UsageSummaryQuery {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -767,6 +784,30 @@ impl BackboardClient {
         .await
     }
 
+    pub async fn update_assistant_value(
+        &self,
+        assistant_id: &str,
+        request: Value,
+    ) -> Result<Value> {
+        self.json_value(
+            self.client
+                .put(self.url(&format!("/assistants/{assistant_id}")))
+                .headers(self.json_headers()?)
+                .body(serde_json::to_vec(&request)?),
+        )
+        .await
+    }
+
+    pub async fn create_assistant_value(&self, request: Value) -> Result<Value> {
+        self.json_value(
+            self.client
+                .post(self.url("/assistants"))
+                .headers(self.json_headers()?)
+                .body(serde_json::to_vec(&request)?),
+        )
+        .await
+    }
+
     pub async fn get_assistant(&self, assistant_id: &str) -> Result<Value> {
         self.json(
             self.client
@@ -780,6 +821,15 @@ impl BackboardClient {
         self.json(
             self.client
                 .get(self.url("/assistants"))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
+    pub async fn delete_assistant(&self, assistant_id: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .delete(self.url(&format!("/assistants/{assistant_id}")))
                 .headers(self.json_headers()?),
         )
         .await
@@ -817,9 +867,46 @@ impl BackboardClient {
         .await
     }
 
+    pub async fn delete_thread(&self, thread_id: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .delete(self.url(&format!("/threads/{thread_id}")))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
+    pub async fn list_assistant_documents(&self, assistant_id: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .get(self.url(&format!("/assistants/{assistant_id}/documents")))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
+    pub async fn list_thread_documents(&self, thread_id: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .get(self.url(&format!("/threads/{thread_id}/documents")))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
     pub async fn send_message(&self, request: SendMessageRequest) -> Result<Value> {
         self.json(self.message_request_builder(self.url("/threads/messages"), request, false)?)
             .await
+    }
+
+    pub async fn send_message_value(&self, request: Value) -> Result<Value> {
+        self.json_value(
+            self.client
+                .post(self.url("/threads/messages"))
+                .headers(self.json_headers()?)
+                .body(serde_json::to_vec(&request)?),
+        )
+        .await
     }
 
     pub async fn send_message_in_thread(
@@ -880,6 +967,42 @@ impl BackboardClient {
         .await
     }
 
+    pub async fn upload_thread_document(&self, thread_id: &str, file_path: &Path) -> Result<Value> {
+        let file_name = file_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("document")
+            .to_string();
+        let bytes = std::fs::read(file_path)
+            .with_context(|| format!("reading document {}", file_path.display()))?;
+        let form = Form::new().part("file", Part::bytes(bytes).file_name(file_name));
+        self.json_value(
+            self.client
+                .post(self.url(&format!("/threads/{thread_id}/documents")))
+                .header("X-API-Key", self.api_key_header()?)
+                .multipart(form),
+        )
+        .await
+    }
+
+    pub async fn get_document_status(&self, document_id: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .get(self.url(&format!("/documents/{document_id}/status")))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
+    pub async fn delete_document(&self, document_id: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .delete(self.url(&format!("/documents/{document_id}")))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
     pub async fn list_memories(&self, assistant_id: &str) -> Result<Vec<Value>> {
         self.json(
             self.client
@@ -902,6 +1025,68 @@ impl BackboardClient {
                 .body(serde_json::to_vec(
                     &json!({ "content": content.into(), "tags": tags }),
                 )?),
+        )
+        .await
+    }
+
+    pub async fn search_memories(&self, assistant_id: &str, request: Value) -> Result<Value> {
+        self.json_value(
+            self.client
+                .post(self.url(&format!("/assistants/{assistant_id}/memories/search")))
+                .headers(self.json_headers()?)
+                .body(serde_json::to_vec(&request)?),
+        )
+        .await
+    }
+
+    pub async fn add_memory_value(&self, assistant_id: &str, request: Value) -> Result<Value> {
+        self.json_value(
+            self.client
+                .post(self.url(&format!("/assistants/{assistant_id}/memories")))
+                .headers(self.json_headers()?)
+                .body(serde_json::to_vec(&request)?),
+        )
+        .await
+    }
+
+    pub async fn get_memory(&self, assistant_id: &str, memory_id: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .get(self.url(&format!("/assistants/{assistant_id}/memories/{memory_id}")))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
+    pub async fn update_memory(
+        &self,
+        assistant_id: &str,
+        memory_id: &str,
+        request: Value,
+    ) -> Result<Value> {
+        self.json_value(
+            self.client
+                .put(self.url(&format!("/assistants/{assistant_id}/memories/{memory_id}")))
+                .headers(self.json_headers()?)
+                .body(serde_json::to_vec(&request)?),
+        )
+        .await
+    }
+
+    pub async fn delete_memory(&self, assistant_id: &str, memory_id: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .delete(self.url(&format!("/assistants/{assistant_id}/memories/{memory_id}")))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
+    pub async fn get_memory_operation_status(&self, operation_id: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .get(self.url(&format!("/assistants/memories/operations/{operation_id}")))
+                .headers(self.json_headers()?),
         )
         .await
     }
@@ -1008,6 +1193,45 @@ impl BackboardClient {
             .unwrap_or_default())
     }
 
+    pub async fn get_model(&self, model_name: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .get(self.url(&format!("/models/{}", urlencoding::encode(model_name))))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
+    pub async fn list_embedding_models(&self) -> Result<Value> {
+        self.json_value(
+            self.client
+                .get(self.url("/models/embedding/all"))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
+    pub async fn list_embedding_providers(&self) -> Result<Value> {
+        self.json_value(
+            self.client
+                .get(self.url("/models/embedding/providers"))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
+    pub async fn get_embedding_model(&self, model_name: &str) -> Result<Value> {
+        self.json_value(
+            self.client
+                .get(self.url(&format!(
+                    "/models/embedding/{}",
+                    urlencoding::encode(model_name)
+                )))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
     pub async fn submit_tool_outputs(
         &self,
         thread_id: &str,
@@ -1044,6 +1268,26 @@ impl BackboardClient {
         Ok(Box::pin(sse_json_stream(response)))
     }
 
+    pub async fn submit_tool_outputs_simple(&self, request: Value) -> Result<Value> {
+        self.json_value(
+            self.client
+                .post(self.url("/threads/tool-outputs"))
+                .headers(self.json_headers()?)
+                .body(serde_json::to_vec(&request)?),
+        )
+        .await
+    }
+
+    pub async fn add_thread_message(&self, thread_id: &str, request: Value) -> Result<Value> {
+        self.json_value(
+            self.client
+                .post(self.url(&format!("/threads/{thread_id}/messages")))
+                .headers(self.json_headers()?)
+                .body(serde_json::to_vec(&request)?),
+        )
+        .await
+    }
+
     pub async fn cancel_run(&self, thread_id: &str, run_id: &str) -> Result<bool> {
         let response = self
             .client
@@ -1055,16 +1299,33 @@ impl BackboardClient {
     }
 
     pub async fn get_recent_usage(&self, query: RecentUsageQuery) -> Result<Option<Value>> {
-        let page_size = query.page_size.clamp(1, 100).to_string();
-        let mut params = vec![("page", "1".to_string()), ("page_size", page_size)];
-        if let Some(model_name) = query.model_name {
-            params.push(("model_name", model_name));
+        let mut params = vec![
+            ("page", query.page.unwrap_or(1).to_string()),
+            ("page_size", query.page_size.clamp(1, 100).to_string()),
+        ];
+        if let Some(model) = query.model {
+            params.push(("model", model));
         }
         if let Some(input_tokens) = query.input_tokens {
             params.push(("input_tokens", input_tokens.to_string()));
         }
         if let Some(output_tokens) = query.output_tokens {
             params.push(("output_tokens", output_tokens.to_string()));
+        }
+        if let Some(start) = query.start {
+            params.push(("start", start));
+        }
+        if let Some(end) = query.end {
+            params.push(("end", end));
+        }
+        if let Some(credit_type) = query.credit_type {
+            params.push(("credit_type", credit_type));
+        }
+        if let Some(sort_by) = query.sort_by {
+            params.push(("sort_by", sort_by));
+        }
+        if let Some(sort_order) = query.sort_order {
+            params.push(("sort_order", sort_order));
         }
         let response = self
             .client
@@ -1078,6 +1339,29 @@ impl BackboardClient {
         } else {
             Ok(None)
         }
+    }
+
+    pub async fn get_billing_balance(&self) -> Result<Value> {
+        self.json_value(
+            self.client
+                .get(self.url("/billing/balance"))
+                .headers(self.json_headers()?),
+        )
+        .await
+    }
+
+    pub async fn get_usage_summary(&self, query: UsageSummaryQuery) -> Result<Value> {
+        let mut params = Vec::new();
+        if let Some(range) = query.range {
+            params.push(("range", range));
+        }
+        self.json_value(
+            self.client
+                .get(self.url("/billing/usage/summary"))
+                .headers(self.json_headers()?)
+                .query(&params),
+        )
+        .await
     }
 
     fn url(&self, path: &str) -> String {
@@ -1122,6 +1406,12 @@ impl BackboardClient {
         let response = request.send().await?;
         let response = self.ensure_success(response).await?;
         parse_json_response(response).await
+    }
+
+    async fn json_value(&self, request: reqwest::RequestBuilder) -> Result<Value> {
+        let response = request.send().await?;
+        let response = self.ensure_success(response).await?;
+        parse_json_value_response(response).await
     }
 
     async fn ensure_success(&self, response: Response) -> Result<Response> {
@@ -1206,13 +1496,26 @@ async fn parse_json_response<T: serde::de::DeserializeOwned>(response: Response)
     Ok(serde_json::from_str(&text)?)
 }
 
+async fn parse_json_value_response(response: Response) -> Result<Value> {
+    let text = response.text().await?;
+    if text.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    Ok(serde_json::from_str(&text)?)
+}
+
 fn message_form(request: &SendMessageRequest, stream: bool) -> Result<Vec<(String, String)>> {
     let mut form = vec![
         ("content".to_string(), request.content.clone()),
         ("stream".to_string(), stream.to_string()),
-        ("memory".to_string(), request.memory.clone()),
         ("web_search".to_string(), request.web_search.clone()),
     ];
+    if let Some(memory) = request.memory.clone() {
+        form.push(("memory".to_string(), memory));
+    }
+    if let Some(memory_pro) = request.memory_pro.clone() {
+        form.push(("memory_pro".to_string(), memory_pro));
+    }
     if let Some(thread_id) = request.thread_id.clone() {
         form.push(("thread_id".to_string(), thread_id));
     }
@@ -1259,8 +1562,13 @@ fn message_json(request: &SendMessageRequest, stream: bool) -> Value {
     let mut body = Map::new();
     body.insert("content".to_string(), request.content.clone().into());
     body.insert("stream".to_string(), stream.into());
-    body.insert("memory".to_string(), request.memory.clone().into());
     body.insert("web_search".to_string(), request.web_search.clone().into());
+    if let Some(memory) = request.memory.clone() {
+        body.insert("memory".to_string(), memory.into());
+    }
+    if let Some(memory_pro) = request.memory_pro.clone() {
+        body.insert("memory_pro".to_string(), memory_pro.into());
+    }
     if let Some(thread_id) = request.thread_id.clone() {
         body.insert("thread_id".to_string(), thread_id.into());
     }
@@ -1304,6 +1612,23 @@ fn message_json(request: &SendMessageRequest, stream: bool) -> Value {
         body.insert("tools".to_string(), tools.into());
     }
     Value::Object(body)
+}
+
+pub fn message_request_log_json(request: &SendMessageRequest, stream: bool) -> Value {
+    let mut body = message_json(request, stream);
+    if let Some(audio) = request.audio_file.as_ref() {
+        if let Some(map) = body.as_object_mut() {
+            map.insert(
+                "audio_file".to_string(),
+                json!({
+                    "file_name": audio.file_name,
+                    "mime_type": audio.mime_type,
+                    "bytes": audio.data.len()
+                }),
+            );
+        }
+    }
+    body
 }
 
 fn message_multipart_form(request: SendMessageRequest, stream: bool) -> Result<Form> {

@@ -8,12 +8,13 @@ import { $ } from '../../../../../base/browser/dom.js';
 import { IButton } from '../../../../../base/browser/ui/button/button.js';
 import { Dialog, DialogContentsAlignment } from '../../../../../base/browser/ui/dialog/dialog.js';
 import { coalesce } from '../../../../../base/common/arrays.js';
-import { Codicon } from '../../../../../base/common/codicons.js';
+import { VSBuffer } from '../../../../../base/common/buffer.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { toErrorMessage } from '../../../../../base/common/errorMessage.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Lazy } from '../../../../../base/common/lazy.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { localize } from '../../../../../nls.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
@@ -30,16 +31,48 @@ import { ChatEntitlement, ChatEntitlementContext, ChatEntitlementService, IChatE
 import { IChatWidgetService } from '../chat.js';
 import { ChatSetupController } from './chatSetupController.js';
 import { IChatSetupResult, ChatSetupAnonymous, InstallChatEvent, InstallChatClassification, ChatSetupStrategy, ChatSetupResultValue } from './chatSetup.js';
-import { GitHubPaths, IDefaultAccountService } from '../../../../../platform/defaultAccount/common/defaultAccount.js';
+import { IDefaultAccountService } from '../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
+import { IFileService, FileOperationResult, toFileOperationResult } from '../../../../../platform/files/common/files.js';
+import { IPathService } from '../../../../services/path/common/pathService.js';
+import { INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
 
 const defaultChat = {
-	publicCodeMatchesUrl: product.defaultChatAgent?.publicCodeMatchesUrl ?? '',
-	provider: product.defaultChatAgent?.provider ?? { default: { id: '', name: '' }, enterprise: { id: '', name: '' }, apple: { id: '', name: '' }, google: { id: '', name: '' } },
-	chatRefreshTokenCommand: product.defaultChatAgent?.chatRefreshTokenCommand ?? '',
-	termsStatementUrl: product.defaultChatAgent?.termsStatementUrl ?? '',
-	privacyStatementUrl: product.defaultChatAgent?.privacyStatementUrl ?? ''
+	provider: product.defaultChatAgent?.provider ?? { default: { id: '', name: '' } },
+	chatRefreshTokenCommand: product.defaultChatAgent?.chatRefreshTokenCommand ?? ''
 };
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeBackboardEnv(env: string | undefined): string {
+	switch ((env || 'prod').trim().toLowerCase()) {
+		case '':
+			return 'prod';
+		case 'production':
+			return 'prod';
+		case 'development':
+			return 'dev';
+		default:
+			return (env || 'prod').trim().toLowerCase();
+	}
+}
+
+function getBackboardEnvKeys(config: Record<string, unknown>): Record<string, string> {
+	const envKeys = config.env_keys;
+	if (!isObjectRecord(envKeys)) {
+		return {};
+	}
+
+	const result: Record<string, string> = {};
+	for (const [env, apiKey] of Object.entries(envKeys)) {
+		if (typeof apiKey === 'string') {
+			result[normalizeBackboardEnv(env)] = apiKey;
+		}
+	}
+	return result;
+}
 
 export class ChatSetup {
 
@@ -48,7 +81,7 @@ export class ChatSetup {
 		let instance = ChatSetup.instance;
 		if (!instance) {
 			instance = ChatSetup.instance = instantiationService.invokeFunction(accessor => {
-				return new ChatSetup(context, controller, accessor.get(ITelemetryService), accessor.get(IWorkbenchLayoutService), accessor.get(IKeybindingService), accessor.get(IChatEntitlementService) as ChatEntitlementService, accessor.get(ILogService), accessor.get(IChatWidgetService), accessor.get(IWorkspaceTrustRequestService), accessor.get(IMarkdownRendererService), accessor.get(IDefaultAccountService), accessor.get(IHostService));
+				return new ChatSetup(context, controller, accessor.get(ITelemetryService), accessor.get(IWorkbenchLayoutService), accessor.get(IKeybindingService), accessor.get(IChatEntitlementService) as ChatEntitlementService, accessor.get(ILogService), accessor.get(IChatWidgetService), accessor.get(IWorkspaceTrustRequestService), accessor.get(IMarkdownRendererService), accessor.get(IDefaultAccountService), accessor.get(IHostService), accessor.get(IFileService), accessor.get(IPathService), accessor.get(INotificationService));
 			});
 		}
 
@@ -72,6 +105,9 @@ export class ChatSetup {
 		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
 		@IDefaultAccountService private readonly defaultAccountService: IDefaultAccountService,
 		@IHostService private readonly hostService: IHostService,
+		@IFileService private readonly fileService: IFileService,
+		@IPathService private readonly pathService: IPathService,
+		@INotificationService private readonly notificationService: INotificationService,
 	) { }
 
 	skipDialog(): void {
@@ -129,11 +165,12 @@ export class ChatSetup {
 			setupStrategy = ChatSetupStrategy.SetupWithEnterpriseProvider; // users with a configured provider go through provider setup
 		}
 
-		if (setupStrategy !== ChatSetupStrategy.Canceled) {
+		const startsChatSetup = setupStrategy !== ChatSetupStrategy.Canceled && setupStrategy !== ChatSetupStrategy.SetupWithBackboardProvider && setupStrategy !== ChatSetupStrategy.SetupWithBackboardApiKey;
+		if (startsChatSetup) {
 			options?.onSignInStarted?.();
 		}
 
-		if (setupStrategy !== ChatSetupStrategy.Canceled && !options?.disableChatViewReveal) {
+		if (startsChatSetup && !options?.disableChatViewReveal) {
 			// Show the chat view now to better indicate progress
 			// while installing the extension or returning from sign in
 			this.widgetService.revealWidget();
@@ -156,6 +193,11 @@ export class ChatSetup {
 					break;
 				case ChatSetupStrategy.DefaultSetup:
 					success = await this.controller.value.setup({ ...options, forceAnonymous: options?.forceAnonymous });
+					break;
+				case ChatSetupStrategy.SetupWithBackboardApiKey:
+					success = await this.showBackboardApiKeyDialog();
+					break;
+				case ChatSetupStrategy.SetupWithBackboardProvider:
 					break;
 				case ChatSetupStrategy.Canceled:
 					this.context.update({ later: true });
@@ -185,9 +227,9 @@ export class ChatSetup {
 			buttons.map(button => button[0]),
 			createWorkbenchDialogOptions({
 				type: 'none',
-				extraClasses: ['chat-setup-dialog'],
+				extraClasses: ['chat-setup-dialog', 'backboard-signin-dialog'],
 				detail: ' ', // workaround allowing us to render the message in large
-				icon: options?.dialogIcon ?? Codicon.copilotLarge,
+				icon: options?.dialogIcon,
 				alignment: DialogContentsAlignment.Vertical,
 				cancelId: buttons.length,
 				disableCloseButton: options?.disableCloseButton ?? false,
@@ -209,29 +251,14 @@ export class ChatSetup {
 		let buttons: Array<ContinueWithButton>;
 		if (!options?.forceAnonymous && (this.context.state.entitlement === ChatEntitlement.Unknown || options?.forceSignInDialog)) {
 			const defaultProviderButton: ContinueWithButton = [localize('continueWith', "Continue with {0}", defaultChat.provider.default.name), ChatSetupStrategy.SetupWithoutEnterpriseProvider, styleButton('continue-button', 'default')];
-			const defaultProviderLink: ContinueWithButton = [defaultProviderButton[0], defaultProviderButton[1], styleButton('link-button')];
+			const backboardProviderButton: ContinueWithButton = [localize('continueWithBackboard', "Continue with Backboard"), ChatSetupStrategy.SetupWithBackboardProvider, styleButton('continue-button', 'backboard')];
+			const apiKeyButton: ContinueWithButton = [localize('continueWithApiKey', "Continue with API Key"), ChatSetupStrategy.SetupWithBackboardApiKey, styleButton('continue-button', 'api-key')];
 
-			const enterpriseProviderButton: ContinueWithButton = [localize('continueWith', "Continue with {0}", defaultChat.provider.enterprise.name), ChatSetupStrategy.SetupWithEnterpriseProvider, styleButton('continue-button', 'default')];
-			const enterpriseProviderLink: ContinueWithButton = [enterpriseProviderButton[0], enterpriseProviderButton[1], styleButton('link-button')];
-
-			const googleProviderButton: ContinueWithButton = [localize('continueWith', "Continue with {0}", defaultChat.provider.google.name), ChatSetupStrategy.SetupWithGoogleProvider, styleButton('continue-button', 'google')];
-			const appleProviderButton: ContinueWithButton = [localize('continueWith', "Continue with {0}", defaultChat.provider.apple.name), ChatSetupStrategy.SetupWithAppleProvider, styleButton('continue-button', 'apple')];
-
-			if (!this.defaultAccountService.getDefaultAccountAuthenticationProvider().enterprise) {
-				buttons = coalesce([
-					defaultProviderButton,
-					googleProviderButton,
-					appleProviderButton,
-					enterpriseProviderLink
-				]);
-			} else {
-				buttons = coalesce([
-					enterpriseProviderButton,
-					googleProviderButton,
-					appleProviderButton,
-					defaultProviderLink
-				]);
-			}
+			buttons = coalesce([
+				defaultProviderButton,
+				backboardProviderButton,
+				apiKeyButton
+			]);
 		} else {
 			buttons = [[localize('setupAIButton', "Use AI Features"), ChatSetupStrategy.DefaultSetup, undefined]];
 		}
@@ -253,7 +280,7 @@ export class ChatSetup {
 		}
 
 		if (this.context.state.entitlement === ChatEntitlement.Unknown || options?.forceSignInDialog) {
-			return localize('signIn', "Sign in to use GitHub Copilot");
+			return localize('signIn', "Sign in to Backboard");
 		}
 
 		return localize('startUsing', "Start using AI Features");
@@ -262,16 +289,98 @@ export class ChatSetup {
 	private createDialogFooter(disposables: DisposableStore, options?: { forceAnonymous?: ChatSetupAnonymous }): HTMLElement {
 		const element = $('.chat-setup-dialog-footer');
 
-
 		let footer: string;
 		if (options?.forceAnonymous || this.telemetryService.telemetryLevel === TelemetryLevel.NONE) {
-			footer = localize({ key: 'settingsAnonymous', comment: ['{Locked="["}', '{Locked="]({1})"}', '{Locked="]({2})"}'] }, "By continuing, you agree to {0}'s [Terms]({1}) and [Privacy Statement]({2}).", defaultChat.provider.default.name, defaultChat.termsStatementUrl, defaultChat.privacyStatementUrl);
+			footer = localize('backboardSettingsAnonymous', "Choose a sign-in method for Backboard. API keys are stored locally in ~/.backboard_ide/config.json.");
 		} else {
-			footer = localize({ key: 'settings', comment: ['{Locked="["}', '{Locked="]({1})"}', '{Locked="]({2})"}', '{Locked="]({4})"}', '{Locked="]({5})"}'] }, "By continuing, you agree to {0}'s [Terms]({1}) and [Privacy Statement]({2}). {3} Copilot may show [public code]({4}) suggestions and use your data to improve the product. You can change these [settings]({5}) anytime.", defaultChat.provider.default.name, defaultChat.termsStatementUrl, defaultChat.privacyStatementUrl, defaultChat.provider.default.name, defaultChat.publicCodeMatchesUrl, this.defaultAccountService.resolveGitHubUrl(GitHubPaths.copilotSettings));
+			footer = localize('backboardSettings', "Choose a sign-in method for Backboard. GitHub sign-in continues through GitHub; API keys are stored locally in ~/.backboard_ide/config.json.");
 		}
 		element.appendChild($('p', undefined, disposables.add(this.markdownRendererService.render(new MarkdownString(footer, { isTrusted: true }))).element));
 
 		return element;
+	}
+
+	private async showBackboardApiKeyDialog(): Promise<ChatSetupResultValue> {
+		const disposables = new DisposableStore();
+		const dialog = disposables.add(new Dialog(
+			this.layoutService.activeContainer,
+			localize('backboardApiKey.title', "Use a Backboard API Key"),
+			[
+				localize('backboardApiKey.save', "Save API Key")
+			],
+			createWorkbenchDialogOptions({
+				type: 'none',
+				extraClasses: ['chat-setup-dialog', 'backboard-signin-dialog', 'backboard-api-key-dialog'],
+				detail: localize('backboardApiKey.detail', "Enter your Backboard API key to use Backboard in this IDE."),
+				alignment: DialogContentsAlignment.Vertical,
+				cancelId: 1,
+				inputs: [{
+					placeholder: localize('backboardApiKey.placeholder', "Backboard API key"),
+					type: 'password'
+				}],
+				renderFooter: footer => {
+					footer.appendChild($('p.chat-setup-dialog-footer', undefined, localize('backboardApiKey.footer', "Stored in ~/.backboard_ide/config.json.")));
+				}
+			}, this.keybindingService, this.layoutService, this.hostService)
+		));
+
+		const { button, values } = await dialog.show();
+		disposables.dispose();
+
+		if (button !== 0) {
+			return undefined;
+		}
+
+		const apiKey = values?.[0]?.trim();
+		if (!apiKey) {
+			this.notificationService.notify({
+				severity: Severity.Warning,
+				message: localize('backboardApiKey.empty', "Enter a Backboard API key before saving.")
+			});
+			return undefined;
+		}
+
+		try {
+			await this.saveBackboardApiKey(apiKey);
+			return true;
+		} catch (error) {
+			this.notificationService.notify({
+				severity: Severity.Error,
+				message: localize('backboardApiKey.error', "Failed to save the Backboard API key: {0}", toErrorMessage(error))
+			});
+			return false;
+		}
+	}
+
+	private async readBackboardConfigJson(configResource: URI): Promise<Record<string, unknown>> {
+		try {
+			const content = await this.fileService.readFile(configResource);
+			const parsed: unknown = JSON.parse(content.value.toString());
+			return isObjectRecord(parsed) ? parsed : {};
+		} catch (error) {
+			if (error instanceof SyntaxError || (error instanceof Error && toFileOperationResult(error) === FileOperationResult.FILE_NOT_FOUND)) {
+				return {};
+			}
+			throw error;
+		}
+	}
+
+	private async saveBackboardApiKey(apiKey: string): Promise<void> {
+		const home = this.pathService.userHome({ preferLocal: true });
+		const configDir = URI.joinPath(home, '.backboard_ide');
+		const configResource = URI.joinPath(configDir, 'config.json');
+		const config = await this.readBackboardConfigJson(configResource);
+		const env = normalizeBackboardEnv(typeof config.env === 'string' ? config.env : undefined);
+		const envKeys = getBackboardEnvKeys(config);
+		envKeys[env] = apiKey;
+
+		await this.fileService.createFolder(configDir);
+		await this.fileService.writeFile(configResource, VSBuffer.fromString(`${JSON.stringify({
+			...config,
+			env,
+			api_key: apiKey,
+			env_keys: envKeys
+		}, undefined, '\t')}\n`), { atomic: { postfix: '.vsctmp' } });
 	}
 }
 
