@@ -3,33 +3,74 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { localize } from '../../../../nls.js';
-import { isMacintosh } from '../../../../base/common/platform.js';
 import { IProductOnboardingTheme } from '../../../../base/common/product.js';
+import { localize } from '../../../../nls.js';
 
 /**
- * Step identifiers for the onboarding walkthrough.
+ * Step identifiers for the Backboard onboarding walkthrough.
  */
 export const enum OnboardingStepId {
-	SignIn = 'onboarding.signIn',
-	Personalize = 'onboarding.personalize',
-	AiPreference = 'onboarding.aiPreference',
-	AgentSessions = 'onboarding.agentSessions',
+	Welcome = 'onboarding.backboard.welcome',
+	Experience = 'onboarding.backboard.experience',
+	Theme = 'onboarding.backboard.theme',
+	ImportSettings = 'onboarding.backboard.importSettings',
+	SignIn = 'onboarding.backboard.signIn',
+	ApiKey = 'onboarding.backboard.apiKey',
 }
+
+/**
+ * Backboard workspace entry points ported from the Zed onboarding flow.
+ */
+export const enum OnboardingExperience {
+	Simple = 'beginner',
+	Developer = 'developer',
+}
+
+export interface IOnboardingExperienceOption {
+	readonly id: OnboardingExperience;
+	readonly label: string;
+	readonly eyebrow: string;
+	readonly description: string;
+	readonly lightPreview: string;
+	readonly darkPreview: string;
+}
+
+export const ONBOARDING_EXPERIENCE_OPTIONS: readonly IOnboardingExperienceOption[] = [
+	{
+		id: OnboardingExperience.Simple,
+		label: localize('onboarding.backboard.experience.simple', "Simple"),
+		eyebrow: localize('onboarding.backboard.experience.simple.eyebrow', "Chat First"),
+		description: localize('onboarding.backboard.experience.simple.description', "A streamlined workspace for prompting, previewing, and iterating."),
+		lightPreview: 'onboarding-simple.png',
+		darkPreview: 'onboarding-simple-dark.png',
+	},
+	{
+		id: OnboardingExperience.Developer,
+		label: localize('onboarding.backboard.experience.developer', "Developer"),
+		eyebrow: localize('onboarding.backboard.experience.developer.eyebrow', "Editor First"),
+		description: localize('onboarding.backboard.experience.developer.description', "The full workspace with files, terminal, editor, and agents visible."),
+		lightPreview: 'onboarding-dev.png',
+		darkPreview: 'onboarding-dev-dark.png',
+	},
+];
 
 /**
  * Returns a localized title for each step.
  */
 export function getOnboardingStepTitle(stepId: OnboardingStepId): string {
 	switch (stepId) {
+		case OnboardingStepId.Welcome:
+			return localize('onboarding.backboard.step.welcome', "Welcome to Backboard Studio");
+		case OnboardingStepId.Experience:
+			return localize('onboarding.backboard.step.experience', "Choose Your Front Door");
+		case OnboardingStepId.Theme:
+			return localize('onboarding.backboard.step.theme', "Choose Your Theme");
+		case OnboardingStepId.ImportSettings:
+			return localize('onboarding.backboard.step.importSettings', "Bring Your Setup");
 		case OnboardingStepId.SignIn:
-			return localize('onboarding.step.signIn', "Sign In");
-		case OnboardingStepId.Personalize:
-			return localize('onboarding.step.personalize', "Make It Yours");
-		case OnboardingStepId.AiPreference:
-			return localize('onboarding.step.aiPreference', "Your AI Style");
-		case OnboardingStepId.AgentSessions:
-			return localize('onboarding.step.agentSessions', "Build with AI Agents");
+			return localize('onboarding.backboard.step.signIn', "Sign In to Backboard");
+		case OnboardingStepId.ApiKey:
+			return localize('onboarding.backboard.step.apiKey', "Set Up Your API Key");
 	}
 }
 
@@ -38,14 +79,18 @@ export function getOnboardingStepTitle(stepId: OnboardingStepId): string {
  */
 export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
 	switch (stepId) {
+		case OnboardingStepId.Welcome:
+			return localize('onboarding.backboard.step.welcome.subtitle', "Let's get your workspace set up.");
+		case OnboardingStepId.Experience:
+			return localize('onboarding.backboard.step.experience.subtitle', "Start where you feel most at home. You can switch modes any time.");
+		case OnboardingStepId.Theme:
+			return localize('onboarding.backboard.step.theme.subtitle', "Start with a look you like. You can change it anytime.");
+		case OnboardingStepId.ImportSettings:
+			return localize('onboarding.backboard.step.importSettings.subtitle', "One click. Skip it if you want a fresh start.");
 		case OnboardingStepId.SignIn:
-			return localize('onboarding.step.signIn.subtitle', "Sync settings, unlock AI features, and connect to GitHub");
-		case OnboardingStepId.Personalize:
-			return localize('onboarding.step.personalize.subtitle', "Choose your theme and keyboard mapping");
-		case OnboardingStepId.AiPreference:
-			return localize('onboarding.step.aiPreference.subtitle', "Choose how much AI collaboration fits your workflow");
-		case OnboardingStepId.AgentSessions:
-			return localize('onboarding.step.agentSessions.subtitle', "Open Chat anytime with {0}", isMacintosh ? '\u2318\u2303I' : 'Ctrl+Alt+I');
+			return localize('onboarding.backboard.step.signIn.subtitle', "Connect your Backboard account before you start building.");
+		case OnboardingStepId.ApiKey:
+			return localize('onboarding.backboard.step.apiKey.subtitle', "Create a key in Backboard, then import it here.");
 	}
 }
 
@@ -53,106 +98,32 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
  * Ordered step IDs for the onboarding flow.
  */
 export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
+	OnboardingStepId.Welcome,
+	OnboardingStepId.Experience,
+	OnboardingStepId.Theme,
+	OnboardingStepId.ImportSettings,
 	OnboardingStepId.SignIn,
-	OnboardingStepId.Personalize,
-	OnboardingStepId.AgentSessions,
+	OnboardingStepId.ApiKey,
 ];
 
 /**
- * Theme option for the onboarding personalization step.
+ * Theme option for the onboarding theme step.
  * Sourced from product.json via `onboardingThemes`.
  */
 export type IOnboardingThemeOption = IProductOnboardingTheme;
-
-/**
- * AI collaboration preference for the AI style step.
- */
-export const enum AiCollaborationMode {
-	CodeFirst = 'code-first',
-	Balanced = 'balanced',
-	AgentForward = 'agent-forward',
-}
-
-/**
- * AI collaboration preference option.
- */
-export interface IAiPreferenceOption {
-	readonly id: AiCollaborationMode;
-	readonly label: string;
-	readonly description: string;
-	readonly icon: string;
-}
-
-/**
- * AI collaboration preference options shown in the AI style step.
- */
-export const ONBOARDING_AI_PREFERENCE_OPTIONS: readonly IAiPreferenceOption[] = [
-	{
-		id: AiCollaborationMode.CodeFirst,
-		label: localize('onboarding.aiPref.codeFirst', "I Write the Code"),
-		description: localize('onboarding.aiPref.codeFirst.desc', "AI assists with suggestions and answers questions when you ask. You stay in control of every edit."),
-		icon: 'edit',
-	},
-	{
-		id: AiCollaborationMode.Balanced,
-		label: localize('onboarding.aiPref.balanced', "Side by Side"),
-		description: localize('onboarding.aiPref.balanced.desc', "Inline suggestions plus a chat panel for deeper collaboration. A balance of writing and delegating."),
-		icon: 'layoutSidebarRight',
-	},
-	{
-		id: AiCollaborationMode.AgentForward,
-		label: localize('onboarding.aiPref.agentForward', "AI Takes the Lead"),
-		description: localize('onboarding.aiPref.agentForward.desc', "Let the agent drive — describe what you want and review the result. Great for scaffolding and exploration."),
-		icon: 'copilot',
-	},
-];
 
 /**
  * Storage key for persisting onboarding completion state.
  */
 export const ONBOARDING_STORAGE_KEY = 'welcomeOnboarding.state';
 
-/**
- * Regex matching a single-word GHE instance slug (e.g. "octocat").
- * Only allows characters valid in DNS hostnames (letters, digits, hyphens).
- */
-export const GHE_DOMAIN_REGEX = /^[a-zA-Z0-9-]+$/;
+export type OnboardingDismissReason = 'complete' | 'skip';
 
-/**
- * Regex matching a full GHE instance URI (e.g. "https://octocat.ghe.com").
- */
-export const GHE_FULL_URI_REGEX = /^(https:\/\/)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.ghe\.com\/?$/;
-
-export const enum GheParseResultKind {
-	Empty = 'empty',
-	SingleWord = 'singleWord',
-	FullUri = 'fullUri',
-	Invalid = 'invalid',
-}
-
-export type GheParseResult =
-	| { readonly kind: GheParseResultKind.Empty }
-	| { readonly kind: GheParseResultKind.SingleWord; readonly resolvedUri: string }
-	| { readonly kind: GheParseResultKind.FullUri; readonly resolvedUri: string }
-	| { readonly kind: GheParseResultKind.Invalid };
-
-/**
- * Parses a GHE instance input value and returns the result kind and resolved URI.
- */
-export function parseGheInstanceInput(value: string): GheParseResult {
-	const trimmed = value.trim();
-	if (!trimmed) {
-		return { kind: GheParseResultKind.Empty };
-	}
-
-	if (GHE_DOMAIN_REGEX.test(trimmed)) {
-		return { kind: GheParseResultKind.SingleWord, resolvedUri: `https://${trimmed}.ghe.com` };
-	}
-
-	if (GHE_FULL_URI_REGEX.test(trimmed)) {
-		const resolvedUri = trimmed.toLowerCase().startsWith('https://') ? trimmed : `https://${trimmed}`;
-		return { kind: GheParseResultKind.FullUri, resolvedUri };
-	}
-
-	return { kind: GheParseResultKind.Invalid };
+export interface IBackboardOnboardingState {
+	readonly version: 1;
+	readonly completed: boolean;
+	readonly dismissedReason: OnboardingDismissReason;
+	readonly experience: OnboardingExperience;
+	readonly themeId: string;
+	readonly apiKeyImported: boolean;
 }

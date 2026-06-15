@@ -118,6 +118,9 @@ export class EditorGroupWatermark extends Disposable {
 			$('.backboard-empty-welcome-action-list', {}, ...actions),
 		);
 
+		const returnToOnboarding = $('button.backboard-empty-welcome-footer-link', { type: 'button' }, localize('watermark.backboardReturnToOnboarding', "Return to Onboarding")) as HTMLButtonElement;
+		this._register(addDisposableListener(returnToOnboarding, 'click', () => runCommand('workbench.action.welcomeOnboarding2026')));
+
 		const root = $('.editor-group-watermark');
 		const containerElement = append(root, $('.watermark-container'));
 		append(containerElement, $('.backboard-empty-welcome', {},
@@ -140,7 +143,7 @@ export class EditorGroupWatermark extends Disposable {
 				createActionRow('codicon-keyboard', localize('watermark.backboardCustomizeKeymaps', "Customize Keymaps"), 'workbench.action.openGlobalKeybindings'),
 				createActionRow('codicon-extensions', localize('watermark.backboardExploreExtensions', "Explore Extensions"), 'workbench.view.extensions'),
 			),
-			$('span.backboard-empty-welcome-footer-link', {}, localize('watermark.backboardReturnToOnboarding', "Return to Onboarding")),
+			returnToOnboarding,
 		));
 		const shortcuts = append(containerElement, $('.shortcuts'));
 

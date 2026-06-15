@@ -20,4 +20,9 @@ export interface IOnboardingService {
 	 * Show the onboarding modal.
 	 */
 	show(): void;
+
+	/**
+	 * Reset onboarding state in the current session and show the modal.
+	 */
+	reset(): void;
 }
