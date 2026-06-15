@@ -183,12 +183,63 @@
 	max-width: 600px;
 }
 
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center.ide-page-switch-container {
+	width: auto;
+	min-width: 306px;
+	max-width: none;
+	padding: 0;
+}
+
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center .action-item.command-center-quick-pick {
 	display: flex;
 	justify-content: start;
 	overflow: hidden;
 	margin: auto;
 	max-width: 600px;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center.ide-page-switch-container .action-item.command-center-quick-pick {
+	align-items: center;
+	height: 100%;
+	margin: 0;
+	max-width: none;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .ide-page-switch {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	height: 100%;
+	padding: 2px;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .ide-page-switch-button {
+	box-sizing: border-box;
+	height: 22px;
+	min-width: 94px;
+	padding: 0 11px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	line-height: 22px;
+	cursor: pointer;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .ide-page-switch-button:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .ide-page-switch-button.checked {
+	background-color: var(--vscode-commandCenter-activeBackground);
+	color: var(--vscode-commandCenter-activeForeground);
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .ide-page-switch-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center .action-item.command-center-quick-pick .search-icon {

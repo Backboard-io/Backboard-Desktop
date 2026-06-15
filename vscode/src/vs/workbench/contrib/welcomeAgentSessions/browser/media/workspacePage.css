@@ -1,0 +1,67 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.monaco-workbench .workspace-page {
+	position: absolute;
+	inset: 0;
+	background: var(--vscode-editor-background);
+	z-index: 2400;
+	outline: none;
+	padding-top: env(titlebar-area-height, 35px);
+	box-sizing: border-box;
+	visibility: hidden;
+	opacity: 0;
+	pointer-events: none;
+	contain: layout paint size;
+	transform: translateZ(0);
+	transition: opacity 80ms linear, visibility 0s linear 80ms;
+}
+
+.monaco-workbench .workspace-page.visible {
+	visibility: visible;
+	opacity: 1;
+	pointer-events: auto;
+	transition-delay: 0s;
+}
+
+.monaco-workbench .workspace-page-navbar {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	height: 44px;
+	border-bottom: 1px solid var(--vscode-titleBar-border, var(--vscode-editorGroup-border));
+	background: var(--vscode-titleBar-activeBackground);
+	box-sizing: border-box;
+}
+
+.monaco-workbench .workspace-page-navbar-button {
+	height: 28px;
+	min-width: 86px;
+	padding: 0 14px;
+	border: 0;
+	border-radius: 6px;
+	color: var(--vscode-titleBar-inactiveForeground);
+	background: transparent;
+	font: inherit;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.monaco-workbench .workspace-page-navbar-button:hover {
+	color: var(--vscode-titleBar-activeForeground);
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .workspace-page-navbar-button.checked {
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+}
+
+.monaco-workbench .workspace-page-navbar-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}

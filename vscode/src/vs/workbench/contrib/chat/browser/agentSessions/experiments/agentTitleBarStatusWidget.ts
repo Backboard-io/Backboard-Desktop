@@ -16,7 +16,6 @@ import { AgentStatusMode, IAgentTitleBarStatusService } from './agentTitleBarSta
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IKeybindingService } from '../../../../../../platform/keybinding/common/keybinding.js';
 import { EnterAgentSessionProjectionAction, ExitAgentSessionProjectionAction } from './agentSessionProjectionActions.js';
-import { UNIFIED_QUICK_ACCESS_ACTION_ID } from './unifiedQuickAccessActions.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
 import { AgentSessionStatus, IAgentSession, isSessionInProgressStatus } from '../agentSessionsModel.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../../../base/browser/ui/actionbar/actionViewItems.js';
@@ -73,6 +72,11 @@ type AgentStatusClickClassification = {
 // Action IDs
 const TOGGLE_CHAT_ACTION_ID = 'workbench.action.chat.toggle';
 const QUICK_OPEN_ACTION_ID = 'workbench.action.quickOpenWithModes';
+const AGENT_SESSIONS_WELCOME_INPUT_TYPE_ID = 'workbench.editors.agentSessionsWelcomeInput';
+const OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openWorkspaceInAgentsWindow';
+const OPEN_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.openWorkspacePage';
+const CLOSE_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.closeWorkspacePage';
+const WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY = 'workspacePageVisible';
 
 // Storage key for filter state
 const FILTER_STORAGE_KEY = 'agentSessions.filterExcludes.agentsessionsviewerfiltersubmenu';
@@ -80,6 +84,7 @@ const FILTER_STORAGE_KEY = 'agentSessions.filterExcludes.agentsessionsviewerfilt
 const PREVIOUS_FILTER_STORAGE_KEY = 'agentSessions.filterExcludes.previousUserFilter';
 
 type AgentStatusSettingMode = 'hidden' | 'badge' | 'compact';
+type TitlebarPage = 'sandbox' | 'editor' | 'workspace';
 
 function shouldForceHiddenAgentStatus(configurationService: IConfigurationService, contextKeyService: IContextKeyService): boolean {
 	// Hide all agent distractions while in Zen mode
@@ -226,7 +231,7 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 
 		// Re-render when Zen mode toggles, to hide all agent distractions
 		this._register(this.contextKeyService.onDidChangeContext(e => {
-			if (e.affectsSome(new Set([InEditorZenModeContext.key]))) {
+			if (e.affectsSome(new Set([InEditorZenModeContext.key, WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY]))) {
 				this._lastRenderState = undefined; // Force re-render
 				this._render();
 			}
@@ -340,6 +345,7 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 			const statusMode = getAgentStatusSettingMode(this.configurationService, this.contextKeyService);
 			const unifiedAgentsBarEnabled = this.configurationService.getValue<boolean>(ChatConfiguration.UnifiedAgentsBar) === true;
 			const viewSessionsEnabled = this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewSessionsEnabled) !== false;
+			const activeTitlebarPage = this._getActiveTitlebarPage();
 
 			// Build state key for comparison
 			const stateKey = JSON.stringify({
@@ -356,6 +362,7 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 				statusMode,
 				unifiedAgentsBarEnabled,
 				viewSessionsEnabled,
+				activeTitlebarPage,
 			});
 
 			// Skip re-render if state hasn't changed
@@ -514,117 +521,74 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 		const isCompactMode = true;
 		pill.classList.toggle('compact-mode', isCompactMode);
 
-		// Left icon container (sparkle by default, report+count when attention needed, search on hover)
-		const leftIcon = $('span.agent-status-left-icon');
-		if (hasAttentionNeeded) {
-			// Show report icon + count when sessions need attention
-			const reportIcon = renderIcon(Codicon.report);
-			const countSpan = $('span.agent-status-attention-count');
-			countSpan.textContent = String(attentionNeededSessions.length);
-			reset(leftIcon, reportIcon, countSpan);
-			leftIcon.classList.add('has-attention');
-		} else {
-			reset(leftIcon, renderIcon(Codicon.searchSparkle));
-		}
-		if (!isCompactMode) {
-			pill.appendChild(leftIcon);
-		}
-
-		// Input area wrapper - hover only activates here, not on badge sections
-		const inputArea = $('div.agent-status-input-area');
-		inputArea.setAttribute('role', 'button');
-		inputArea.setAttribute('aria-label', localize('openQuickAccess', "Open Quick Access"));
-		inputArea.tabIndex = 0;
-		this._rovingElements.push(inputArea);
-		pill.appendChild(inputArea);
-
-		// Label - always shows workspace name in compact mode
-		const label = $('span.agent-status-label');
-		const { progress: progressText } = this._getSessionNeedingAttention(attentionNeededSessions);
-		const defaultLabel = isCompactMode ? this._getLabel() : (progressText ?? this._getLabel());
-
-		if (!isCompactMode && progressText) {
-			label.classList.add('has-progress');
-		}
-
-		const hoverLabel = localize('askAnythingPlaceholder', "Ask anything or describe what to build");
-
-		label.textContent = defaultLabel;
-		inputArea.appendChild(label);
-
-		if (isCompactMode) {
-			// Compact mode: hover resets icon state but keeps workspace name
-			disposables.add(addDisposableListener(inputArea, EventType.MOUSE_ENTER, () => {
-				reset(leftIcon, renderIcon(Codicon.searchSparkle));
-				leftIcon.classList.remove('has-attention');
-				label.classList.remove('has-progress');
-			}));
-
-			disposables.add(addDisposableListener(inputArea, EventType.MOUSE_LEAVE, () => {
-				reset(leftIcon, renderIcon(Codicon.searchSparkle));
-			}));
-		} else {
-			// Send icon (hidden by default, shown on hover - only when not showing attention message)
-			const sendIcon = $('span.agent-status-send');
-			reset(sendIcon, renderIcon(Codicon.send));
-			sendIcon.classList.add('hidden');
-			inputArea.appendChild(sendIcon);
-
-			// Hover behavior - swap icon and label (only when showing default state).
-			if (!progressText) {
-				disposables.add(addDisposableListener(inputArea, EventType.MOUSE_ENTER, () => {
-					reset(leftIcon, renderIcon(Codicon.searchSparkle));
-					leftIcon.classList.remove('has-attention');
-					label.textContent = hoverLabel;
-					label.classList.remove('has-progress');
-					sendIcon.classList.remove('hidden');
-				}));
-
-				disposables.add(addDisposableListener(inputArea, EventType.MOUSE_LEAVE, () => {
-					reset(leftIcon, renderIcon(Codicon.searchSparkle));
-					label.textContent = defaultLabel;
-					sendIcon.classList.add('hidden');
-				}));
-			}
-		}
-
-		// Setup hover tooltip on input area
-		const hoverDelegate = getDefaultHoverDelegate('mouse');
-		disposables.add(this.hoverService.setupManagedHover(hoverDelegate, inputArea, () => {
-			const kbForTooltip = this.keybindingService.lookupKeybinding(UNIFIED_QUICK_ACCESS_ACTION_ID)?.getLabel();
-			return kbForTooltip
-				? localize('askTooltip', "Open Quick Access ({0})", kbForTooltip)
-				: localize('askTooltip2', "Open Quick Access");
-		}));
-
-		// Click handler - always open quick access in compact mode (attention sessions are handled by the badge)
-		disposables.add(addDisposableListener(inputArea, EventType.CLICK, (e) => {
-			e.preventDefault();
-			e.stopPropagation();
-			this.telemetryService.publicLog2<AgentStatusClickEvent, AgentStatusClickClassification>('agentStatusWidget.click', {
-				source: 'pill',
-				action: 'quickAccess',
-			});
-			const useUnifiedQuickAccess = this.configurationService.getValue<boolean>(ChatConfiguration.UnifiedAgentsBar) === true;
-			this.commandService.executeCommand(useUnifiedQuickAccess ? UNIFIED_QUICK_ACCESS_ACTION_ID : QUICK_OPEN_ACTION_ID);
-		}));
-
-		// Keyboard handler
-		disposables.add(addDisposableListener(inputArea, EventType.KEY_DOWN, (e) => {
-			if (e.key === 'Enter' || e.key === ' ') {
-				e.preventDefault();
-				e.stopPropagation();
-				this.telemetryService.publicLog2<AgentStatusClickEvent, AgentStatusClickClassification>('agentStatusWidget.click', {
-					source: 'pill',
-					action: 'quickAccess',
-				});
-				const useUnifiedQuickAccess = this.configurationService.getValue<boolean>(ChatConfiguration.UnifiedAgentsBar) === true;
-				this.commandService.executeCommand(useUnifiedQuickAccess ? UNIFIED_QUICK_ACCESS_ACTION_ID : QUICK_OPEN_ACTION_ID);
-			}
-		}));
+		this._renderTitlebarPageSwitch(disposables, pill);
 
 		// In compact mode, render status badge inline within the pill
 		this._renderStatusBadge(disposables, activeSessions, unreadSessions, attentionNeededSessions, pill);
+	}
+
+	private _renderTitlebarPageSwitch(disposables: DisposableStore, parent: HTMLElement): void {
+		const switchElement = $('div.agent-status-page-switch');
+		switchElement.setAttribute('role', 'tablist');
+		switchElement.setAttribute('aria-label', localize('ideViewSwitchAriaLabel', "IDE view"));
+		parent.appendChild(switchElement);
+
+		const buttons = [
+			this._createTitlebarSwitchButton(disposables, 'sandbox', localize('sandboxView', "Sandbox"), async () => {
+				await this.commandService.executeCommand(CLOSE_WORKSPACE_PAGE_COMMAND_ID);
+				return this.commandService.executeCommand(OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID);
+			}),
+			this._createTitlebarSwitchButton(disposables, 'editor', localize('editorView', "Editor"), async () => {
+				await this.commandService.executeCommand(CLOSE_WORKSPACE_PAGE_COMMAND_ID);
+				return this.commandService.executeCommand('workbench.action.focusActiveEditorGroup');
+			}),
+			this._createTitlebarSwitchButton(disposables, 'workspace', localize('workspaceView', "Workspace"), () => this.commandService.executeCommand(OPEN_WORKSPACE_PAGE_COMMAND_ID)),
+		];
+		for (const button of buttons) {
+			switchElement.appendChild(button);
+			this._rovingElements.push(button);
+		}
+
+		const activePage = this._getActiveTitlebarPage();
+		for (const button of buttons) {
+			const checked = button.dataset.page === activePage;
+			button.classList.toggle('checked', checked);
+			button.setAttribute('aria-selected', String(checked));
+			button.tabIndex = checked ? 0 : -1;
+		}
+
+		const hoverDelegate = getDefaultHoverDelegate('mouse');
+		disposables.add(this.hoverService.setupManagedHover(hoverDelegate, switchElement, localize('ideViewSwitchTooltip', "Switch between Sandbox, Editor, and Workspace")));
+	}
+
+	private _createTitlebarSwitchButton(disposables: DisposableStore, page: TitlebarPage, label: string, run: () => Promise<unknown>): HTMLButtonElement {
+		const button = $('button.agent-status-page-switch-button') as HTMLButtonElement;
+		button.type = 'button';
+		button.dataset.page = page;
+		button.textContent = label;
+		button.setAttribute('role', 'tab');
+		button.title = label;
+
+		disposables.add(addDisposableListener(button, EventType.CLICK, event => {
+			event.preventDefault();
+			event.stopPropagation();
+			run();
+		}));
+
+		return button;
+	}
+
+	private _getActiveTitlebarPage(): TitlebarPage {
+		if (this.contextKeyService.getContextKeyValue<boolean>(WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY)) {
+			return 'workspace';
+		}
+
+		switch (this.editorService.activeEditor?.typeId) {
+			case AGENT_SESSIONS_WELCOME_INPUT_TYPE_ID:
+				return 'sandbox';
+			default:
+				return 'editor';
+		}
 	}
 
 	private _renderSessionMode(disposables: DisposableStore): void {
@@ -1328,35 +1292,6 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 	// #endregion
 
 	// #region Session Helpers
-
-	/**
-	 * Get the session most urgently needing user attention (approval/confirmation/input).
-	 * Returns undefined if no sessions need attention.
-	 */
-	private _getSessionNeedingAttention(attentionNeededSessions: IAgentSession[]): { session: IAgentSession | undefined; progress: string | undefined } {
-		if (attentionNeededSessions.length === 0) {
-			return { session: undefined, progress: undefined };
-		}
-
-		// Sort by most recently started request
-		const sorted = [...attentionNeededSessions].sort((a, b) => {
-			const timeA = a.timing.lastRequestStarted ?? a.timing.created;
-			const timeB = b.timing.lastRequestStarted ?? b.timing.created;
-			return timeB - timeA;
-		});
-
-		const mostRecent = sorted[0];
-		if (!mostRecent.description) {
-			return { session: mostRecent, progress: mostRecent.label };
-		}
-
-		// Convert markdown to plain text if needed
-		const progress = typeof mostRecent.description === 'string'
-			? mostRecent.description
-			: renderAsPlaintext(mostRecent.description);
-
-		return { session: mostRecent, progress };
-	}
 
 	// #endregion
 

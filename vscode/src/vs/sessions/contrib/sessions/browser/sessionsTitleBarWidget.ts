@@ -4,24 +4,32 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/sessionsTitleBarWidget.css';
-import { $, addDisposableGenericMouseDownListener, addDisposableListener, EventType, reset } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, EventType, reset } from '../../../../base/browser/dom.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { MenuRegistry, SubmenuItemAction } from '../../../../platform/actions/common/actions.js';
-import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
-import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { ContextKeyExpr, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 import { Menus } from '../../../browser/menus.js';
 import { IWorkbenchContribution } from '../../../../workbench/common/contributions.js';
 import { IActionViewItemService } from '../../../../platform/actions/browser/actionViewItemService.js';
 import { autorun } from '../../../../base/common/observable.js';
-import { ThemeIcon } from '../../../../base/common/themables.js';
 import { IsAuxiliaryWindowContext } from '../../../../workbench/common/contextkeys.js';
 import { SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
 import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
-import { SHOW_SESSIONS_PICKER_COMMAND_ID } from './sessionsActions.js';
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
+import { SHOW_SESSIONS_PICKER_COMMAND_ID } from './sessionsActions.js';
+
+const OPEN_SESSION_IN_VSCODE_COMMAND_ID = 'agents.openSessionInVSCode';
+const OPEN_IN_VSCODE_COMMAND_ID = 'sessions.openInVSCode';
+const OPEN_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.openWorkspacePage';
+const CLOSE_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.closeWorkspacePage';
+const WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY = 'workspacePageVisible';
+const WORKSPACE_PAGE_CONTEXT_KEYS = new Set([WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY]);
+
+type TitlebarPage = 'sandbox' | 'editor' | 'workspace';
 
 /**
  * Sessions Title Bar Widget - renders the active chat session
@@ -53,6 +61,7 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@ISessionsProvidersService private readonly sessionsProvidersService: ISessionsProvidersService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 	) {
 		super(undefined, action, options);
 
@@ -77,6 +86,13 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 		this._register(this.sessionsProvidersService.onDidChangeProviders(() => {
 			this._lastRenderState = undefined;
 			this._render();
+		}));
+
+		this._register(this.contextKeyService.onDidChangeContext(event => {
+			if (event.affectsSome(WORKSPACE_PAGE_CONTEXT_KEYS)) {
+				this._lastRenderState = undefined;
+				this._render();
+			}
 		}));
 	}
 
@@ -111,12 +127,12 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 		this._isRendering = true;
 
 		try {
-			const icon = this._getActiveSessionIcon();
 			const sessionTitle = this._getSessionTitle() ?? localize('newSession', "New Sandbox");
 			const workspaceLabel = this._getRepositoryLabel();
 
 			// Build a render-state key from all displayed data
-			const renderState = `${icon?.id ?? ''}|${sessionTitle ?? ''}|${workspaceLabel ?? ''}`;
+			const activePage = this._getActivePage();
+			const renderState = `${sessionTitle ?? ''}|${workspaceLabel ?? ''}|${activePage}`;
 
 			// Skip re-render if state hasn't changed
 			if (this._lastRenderState === renderState) {
@@ -128,78 +144,81 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 			reset(this._container);
 			this._dynamicDisposables.clear();
 
-			// Set up container as the button directly
+			// Set up container as a tablist switch.
 			this._container.removeAttribute('aria-hidden');
-			this._container.setAttribute('role', 'button');
-			this._container.setAttribute('aria-label', localize('agentSessionsShowSessions', "Show Sandbox"));
-			this._container.tabIndex = 0;
+			this._container.setAttribute('role', 'tablist');
+			this._container.setAttribute('aria-label', localize('ideViewSwitchAriaLabel', "IDE view"));
+			this._container.tabIndex = -1;
 
-			// Session pill: icon + title + workspace together
-			const sessionPill = $('div.agent-sessions-titlebar-pill');
+			const buttons = [
+				this._createSwitchButton('sandbox', localize('sandboxView', "Sandbox"), () => this.commandService.executeCommand(CLOSE_WORKSPACE_PAGE_COMMAND_ID)),
+				this._createSwitchButton('editor', localize('editorView', "Editor"), async () => {
+					await this.commandService.executeCommand(CLOSE_WORKSPACE_PAGE_COMMAND_ID);
+					return this._openEditorWindow();
+				}),
+				this._createSwitchButton('workspace', localize('workspaceView', "Workspace"), () => this.commandService.executeCommand(OPEN_WORKSPACE_PAGE_COMMAND_ID)),
+			];
 
-			// Center group: icon + title + workspace name
-			const centerGroup = $('div.agent-sessions-titlebar-center');
-
-			// Kind icon at the beginning
-			if (icon) {
-				const iconEl = $('div.agent-sessions-titlebar-icon' + ThemeIcon.asCSSSelector(icon));
-				centerGroup.appendChild(iconEl);
+			for (const button of buttons) {
+				this._container.appendChild(button);
 			}
 
-			// Session title shown next to the icon
-			if (sessionTitle) {
-				const titleEl = $('div.agent-sessions-titlebar-title');
-				titleEl.textContent = sessionTitle;
-				centerGroup.appendChild(titleEl);
-			}
-
-			// Workspace name shown after the session title
-			if (workspaceLabel) {
-				const separatorEl = $('div.agent-sessions-titlebar-separator');
-				centerGroup.appendChild(separatorEl);
-
-				const workspaceEl = $('div.agent-sessions-titlebar-workspace');
-				workspaceEl.textContent = workspaceLabel;
-				centerGroup.appendChild(workspaceEl);
-			}
-
-			sessionPill.appendChild(centerGroup);
-
-			// Click handler on pill
-			this._dynamicDisposables.add(addDisposableGenericMouseDownListener(sessionPill, (e) => {
-				e.preventDefault();
-				e.stopPropagation();
-			}));
-			this._dynamicDisposables.add(addDisposableListener(sessionPill, EventType.CLICK, (e) => {
-				e.preventDefault();
-				e.stopPropagation();
-				this._showSessionsPicker();
-			}));
-
-			this._container.appendChild(sessionPill);
-
-			// Keyboard handler
-			this._dynamicDisposables.add(addDisposableListener(this._container, EventType.KEY_DOWN, (e: KeyboardEvent) => {
-				if (e.key === 'Enter' || e.key === ' ') {
-					e.preventDefault();
-					e.stopPropagation();
-					this._showSessionsPicker();
-				}
-			}));
+			this._updateChecked(buttons, activePage);
 		} finally {
 			this._isRendering = false;
 		}
 	}
 
-	/**
-	 * Get the icon for the active session's type.
-	 */
-	private _getActiveSessionIcon(): ThemeIcon | undefined {
-		const sessionData = this.sessionsManagementService.activeSession.get();
-		if (sessionData) {
-			return sessionData.icon;
+	private _createSwitchButton(page: TitlebarPage, label: string, run: () => Promise<unknown> | undefined): HTMLButtonElement {
+		const button = $('button.agent-sessions-titlebar-switch-button') as HTMLButtonElement;
+		button.type = 'button';
+		button.dataset.page = page;
+		button.textContent = label;
+		button.setAttribute('role', 'tab');
+		button.title = label;
+
+		this._dynamicDisposables.add(addDisposableListener(button, EventType.CLICK, event => {
+			event.preventDefault();
+			event.stopPropagation();
+			run();
+		}));
+		this._dynamicDisposables.add(addDisposableListener(button, EventType.KEY_DOWN, event => {
+			if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+				event.preventDefault();
+				event.stopPropagation();
+				this._focusAdjacentButton(button, event.key === 'ArrowRight');
+			}
+		}));
+
+		return button;
+	}
+
+	private _updateChecked(buttons: HTMLButtonElement[], activePage: TitlebarPage): void {
+		for (const button of buttons) {
+			const checked = button.dataset.page === activePage;
+			button.classList.toggle('checked', checked);
+			button.setAttribute('aria-selected', String(checked));
+			button.tabIndex = checked ? 0 : -1;
 		}
-		return undefined;
+	}
+
+	private _focusAdjacentButton(button: HTMLButtonElement, next: boolean): void {
+		const buttons = Array.from(button.parentElement?.querySelectorAll<HTMLButtonElement>('.agent-sessions-titlebar-switch-button') ?? []);
+		const index = buttons.indexOf(button);
+		if (index === -1) {
+			return;
+		}
+		const nextIndex = (index + (next ? 1 : -1) + buttons.length) % buttons.length;
+		buttons[nextIndex]?.focus();
+	}
+
+	private _openEditorWindow(): Promise<unknown> {
+		const commandId = CommandsRegistry.getCommand(OPEN_SESSION_IN_VSCODE_COMMAND_ID) ? OPEN_SESSION_IN_VSCODE_COMMAND_ID : OPEN_IN_VSCODE_COMMAND_ID;
+		return this.commandService.executeCommand(commandId);
+	}
+
+	private _getActivePage(): TitlebarPage {
+		return this.contextKeyService.getContextKeyValue<boolean>(WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY) ? 'workspace' : 'sandbox';
 	}
 
 	/**
@@ -224,9 +243,6 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 		return undefined;
 	}
 
-	private _showSessionsPicker(): void {
-		this.commandService.executeCommand(SHOW_SESSIONS_PICKER_COMMAND_ID);
-	}
 }
 
 /**
