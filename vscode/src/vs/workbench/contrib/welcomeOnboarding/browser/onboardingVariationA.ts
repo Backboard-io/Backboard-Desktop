@@ -14,6 +14,7 @@ import { Disposable, DisposableStore, toDisposable } from '../../../../base/comm
 import { FileAccess } from '../../../../base/common/network.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
+import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { Severity, INotificationService } from '../../../../platform/notification/common/notification.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -26,7 +27,8 @@ import { IAccessibilityService } from '../../../../platform/accessibility/common
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
-import { OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID } from '../../chat/common/constants.js';
+import { OPEN_AGENTS_WINDOW_COMMAND_ID } from '../../chat/common/constants.js';
+import { SessionType } from '../../chat/common/chatSessionsService.js';
 import { IOnboardingService } from '../common/onboardingService.js';
 import {
 	getOnboardingStepSubtitle,
@@ -69,6 +71,7 @@ type OnboardingActionEvent = {
 const BACKBOARD_SIGN_IN_URL = 'https://app.backboard.io/signup';
 const BACKBOARD_API_KEYS_URL = 'https://app.backboard.io/dashboard/api-keys';
 const BACKBOARD_API_KEY_PATTERN = /^espr_[A-Za-z0-9_-]{43}$/;
+const LOCAL_AGENT_HOST_PROVIDER_ID = 'local-agent-host';
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -153,6 +156,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		@IStorageService private readonly storageService: IStorageService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
+		@IClipboardService private readonly clipboardService: IClipboardService,
 	) {
 		super();
 
@@ -873,13 +877,18 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				this._updateButtonStates();
 				closeDialog();
 				this._dismiss('complete');
-				const commandId = this.selectedExperience === OnboardingExperience.Simple
-					? OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID
-					: 'backboard.openPanel';
+				const command = this.selectedExperience === OnboardingExperience.Simple
+					? this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID, {
+						preferredSessionType: {
+							providerId: LOCAL_AGENT_HOST_PROVIDER_ID,
+							sessionTypeId: SessionType.CopilotCLI,
+						}
+					})
+					: this.commandService.executeCommand('backboard.openPanel');
 				const failureMessage = this.selectedExperience === OnboardingExperience.Simple
 					? localize('onboarding.backboard.apiKey.openSandboxFailed', "Could not open Backboard Sandbox.")
 					: localize('onboarding.backboard.apiKey.openPanelFailed', "Could not open Backboard chat.");
-				void this.commandService.executeCommand(commandId).catch(err => {
+				void command.catch(err => {
 					this.notificationService.notify({
 						severity: Severity.Error,
 						message: failureMessage,
@@ -912,7 +921,27 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			if (keyboardEvent.keyCode === KeyCode.Enter) {
 				event.preventDefault();
 				void importApiKey();
+				return;
 			}
+
+			if ((event.metaKey || event.ctrlKey) && keyboardEvent.keyCode === KeyCode.KeyV) {
+				event.preventDefault();
+				void this.clipboardService.readText().then(text => {
+					this._insertApiKeyInputText(input, text);
+					errorText.textContent = '';
+				});
+			}
+		}));
+
+		this.stepDisposables.add(addDisposableListener(input, EventType.PASTE, (event: ClipboardEvent) => {
+			const text = event.clipboardData?.getData('text');
+			if (typeof text !== 'string') {
+				return;
+			}
+
+			event.preventDefault();
+			this._insertApiKeyInputText(input, text);
+			errorText.textContent = '';
 		}));
 
 		this.stepDisposables.add(addDisposableListener(input, EventType.INPUT, () => {
@@ -944,6 +973,21 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			overlay.classList.add('visible');
 			input.focus();
 		});
+	}
+
+	private _insertApiKeyInputText(input: HTMLInputElement, text: string): void {
+		const pasteText = text.trim();
+		if (!pasteText) {
+			return;
+		}
+
+		const start = input.selectionStart ?? input.value.length;
+		const end = input.selectionEnd ?? input.value.length;
+		input.setRangeText(pasteText, start, end, 'end');
+		const inputEvent = input.ownerDocument.createEvent('Event');
+		inputEvent.initEvent('input', true, true);
+		input.dispatchEvent(inputEvent);
+		input.focus();
 	}
 
 	private async _readBackboardConfigJson(configResource: URI): Promise<Record<string, unknown>> {
