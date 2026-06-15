@@ -785,6 +785,9 @@ export class ViewPaneContainer<MementoType extends object = object> extends Comp
 				this.logService.error(`Fail to render view ${viewDescriptor.id}`, error);
 				continue;
 			}
+			if (this.viewContainer.id === 'backboard' && viewDescriptor.id === 'backboard.panel') {
+				pane.headerVisible = false;
+			}
 			if (pane.draggableElement) {
 				const contextMenuDisposable = addDisposableListener(pane.draggableElement, 'contextmenu', e => {
 					e.stopPropagation();

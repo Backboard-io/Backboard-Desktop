@@ -360,7 +360,9 @@ export class AuxiliaryTitlebarPart extends TitlebarPart implements IAuxiliaryTit
 
 	private static COUNTER = 1;
 
-	get height() { return this.minimumHeight; }
+	override get minimumHeight(): number { return 0; }
+	override get maximumHeight(): number { return 0; }
+	get height() { return 0; }
 
 	constructor(
 		readonly container: HTMLElement,
@@ -416,7 +418,7 @@ export class TitleService extends MultiWindowParts<TitlebarPart> implements ITit
 	//#region Auxiliary Titlebar Parts
 
 	createAuxiliaryTitlebarPart(container: HTMLElement, editorGroupsContainer: IEditorGroupsContainer, instantiationService: IInstantiationService): IAuxiliaryTitlebarPart {
-		const titlebarPartContainer = $('.part.titlebar', { role: 'none' });
+		const titlebarPartContainer = $('.part.titlebar.auxiliary-titlebar', { role: 'none' });
 		titlebarPartContainer.style.position = 'relative';
 		container.insertBefore(titlebarPartContainer, container.firstChild);
 
@@ -425,7 +427,7 @@ export class TitleService extends MultiWindowParts<TitlebarPart> implements ITit
 		const titlebarPart = this.doCreateAuxiliaryTitlebarPart(titlebarPartContainer, editorGroupsContainer, instantiationService);
 		disposables.add(this.registerPart(titlebarPart));
 
-		disposables.add(Event.runAndSubscribe(titlebarPart.onDidChange, () => titlebarPartContainer.style.height = `${titlebarPart.height}px`));
+		disposables.add(Event.runAndSubscribe(titlebarPart.onDidChange, () => titlebarPartContainer.style.height = '0px'));
 		titlebarPart.create(titlebarPartContainer);
 
 		Event.once(titlebarPart.onWillDispose)(() => disposables.dispose());

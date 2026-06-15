@@ -25,6 +25,9 @@ import { ISessionsViewService } from '../sessionsViewService.js';
 import { IHoverService } from '../../../platform/hover/browser/hover.js';
 import { getDefaultHoverDelegate } from '../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { applySessionBarThemeColors } from './sessionBarStyles.js';
+import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
+import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../platform/actions/browser/toolbar.js';
+import { Menus } from '../menus.js';
 
 interface IChatTab {
 	readonly chat: IChat;
@@ -46,6 +49,7 @@ export class ChatCompositeBar extends Disposable {
 	private readonly _tabsRow: HTMLElement;
 	private readonly _tabsContainer: HTMLElement;
 	private readonly _tabsScrollbar: ScrollableElement;
+	private readonly _toolbar: MenuWorkbenchToolBar;
 	private readonly _tabs: IChatTab[] = [];
 	private readonly _tabDisposables = this._register(new DisposableStore());
 
@@ -79,6 +83,7 @@ export class ChatCompositeBar extends Disposable {
 		@IContextMenuService private readonly _contextMenuService: IContextMenuService,
 		@IQuickInputService private readonly _quickInputService: IQuickInputService,
 		@IHoverService private readonly _hoverService: IHoverService,
+		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
 
@@ -98,6 +103,15 @@ export class ChatCompositeBar extends Disposable {
 			useShadows: false,
 		}));
 		this._tabsRow.appendChild(this._tabsScrollbar.getDomNode());
+
+		const toolbarContainer = $('.chat-composite-bar-toolbar');
+		this._tabsRow.appendChild(toolbarContainer);
+		this._toolbar = this._register(instantiationService.createInstance(MenuWorkbenchToolBar, toolbarContainer, Menus.SessionBarToolbar, {
+			hiddenItemStrategy: HiddenItemStrategy.Ignore,
+			menuOptions: { shouldForwardArgs: true },
+			highlightToggledItems: true,
+			toolbarOptions: { primaryGroup: () => true, useSeparatorsInPrimaryActions: true },
+		}));
 
 		// Keep the visual scrollbar in sync with native scrolling inside the tabs container
 		this._register(addDisposableListener(this._tabsContainer, EventType.SCROLL, () => {
@@ -138,6 +152,7 @@ export class ChatCompositeBar extends Disposable {
 			return;
 		}
 		this._session = session;
+		this._toolbar.context = session;
 
 		const store = new DisposableStore();
 		this._sessionDisposables.value = store;

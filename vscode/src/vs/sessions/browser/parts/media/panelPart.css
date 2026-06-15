@@ -44,6 +44,10 @@
 	background-color: var(--vscode-agentsPanel-background);
 }
 
+.agent-sessions-workbench .part.panel.backboard-single-row > .title {
+	display: none !important;
+}
+
 /* Active/checked state: background container instead of underline */
 .agent-sessions-workbench .part.panel > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked {
 	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 5%, transparent) !important;

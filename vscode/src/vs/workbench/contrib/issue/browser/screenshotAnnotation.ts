@@ -39,9 +39,7 @@ const COLORS = [
 const LIGHT_SWATCH_COLORS = new Set(['#34c759', '#ffcc00', '#ffffff', 'transparent']);
 
 const FONT_FAMILIES = [
-	{ label: 'Sans-serif', value: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
-	{ label: 'Monospace', value: '"Cascadia Code", "Fira Code", Consolas, monospace' },
-	{ label: 'Serif', value: 'Georgia, "Times New Roman", serif' },
+	{ label: 'IBM Plex Mono', value: '"IBM Plex Mono", Monaco, Menlo, Consolas, "Courier New", monospace' },
 ];
 
 const DEFAULT_TEXT_BOX_WIDTH = 240;
@@ -1830,7 +1828,7 @@ export class ScreenshotAnnotationEditor {
 			case AnnotationTool.Text:
 				if (action.text && action.textPos) {
 					const fontSize = (action.fontSize || 16) * this.scale;
-					const fontFamily = action.fontFamily || 'sans-serif';
+					const fontFamily = action.fontFamily || '"IBM Plex Mono", Monaco, Menlo, Consolas, "Courier New", monospace';
 					const width = (action.textWidth ?? DEFAULT_TEXT_BOX_WIDTH) * this.scale;
 					this.ctx.font = `${fontSize}px ${fontFamily}`;
 					this.ctx.textBaseline = 'alphabetic';
@@ -2255,7 +2253,7 @@ export class ScreenshotAnnotationEditor {
 			case AnnotationTool.Text:
 				if (action.text && action.textPos) {
 					const fontSize = action.fontSize || 16;
-					const fontFamily = action.fontFamily || 'sans-serif';
+					const fontFamily = action.fontFamily || '"IBM Plex Mono", Monaco, Menlo, Consolas, "Courier New", monospace';
 					const textWidth = action.textWidth ?? DEFAULT_TEXT_BOX_WIDTH;
 					const layout = this.measureWrappedText(action.text, textWidth, fontSize, fontFamily);
 					return {

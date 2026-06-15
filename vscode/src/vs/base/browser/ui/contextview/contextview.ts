@@ -314,24 +314,24 @@ const SHADOW_ROOT_CSS = /* css */ `
 	}
 
 	:host {
-		font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "HelveticaNeue-Light", system-ui, "Ubuntu", "Droid Sans", sans-serif;
+		font-family: "IBM Plex Mono", Monaco, Menlo, Consolas, "Courier New", monospace;
 	}
 
-	:host-context(.mac) { font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif; }
-	:host-context(.mac:lang(zh-Hans)) { font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif; }
-	:host-context(.mac:lang(zh-Hant)) { font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif; }
-	:host-context(.mac:lang(ja)) { font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic Pro", sans-serif; }
-	:host-context(.mac:lang(ko)) { font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Nanum Gothic", "AppleGothic", sans-serif; }
+	:host-context(.mac) { font-family: "IBM Plex Mono", Monaco, Menlo, Courier, monospace; }
+	:host-context(.mac:lang(zh-Hans)) { font-family: "IBM Plex Mono", Monaco, Menlo, Courier, "PingFang SC", "Hiragino Sans GB", monospace; }
+	:host-context(.mac:lang(zh-Hant)) { font-family: "IBM Plex Mono", Monaco, Menlo, Courier, "PingFang TC", monospace; }
+	:host-context(.mac:lang(ja)) { font-family: "IBM Plex Mono", Monaco, Menlo, Courier, "Hiragino Kaku Gothic Pro", monospace; }
+	:host-context(.mac:lang(ko)) { font-family: "IBM Plex Mono", Monaco, Menlo, Courier, "Apple SD Gothic Neo", "Nanum Gothic", "AppleGothic", monospace; }
 
-	:host-context(.windows) { font-family: "IBM Plex Sans", "Segoe WPC", "Segoe UI", sans-serif; }
-	:host-context(.windows:lang(zh-Hans)) { font-family: "IBM Plex Sans", "Segoe WPC", "Segoe UI", "Microsoft YaHei", sans-serif; }
-	:host-context(.windows:lang(zh-Hant)) { font-family: "IBM Plex Sans", "Segoe WPC", "Segoe UI", "Microsoft Jhenghei", sans-serif; }
-	:host-context(.windows:lang(ja)) { font-family: "IBM Plex Sans", "Segoe WPC", "Segoe UI", "Yu Gothic UI", "Meiryo UI", sans-serif; }
-	:host-context(.windows:lang(ko)) { font-family: "IBM Plex Sans", "Segoe WPC", "Segoe UI", "Malgun Gothic", "Dotom", sans-serif; }
+	:host-context(.windows) { font-family: "IBM Plex Mono", Consolas, "Courier New", monospace; }
+	:host-context(.windows:lang(zh-Hans)) { font-family: "IBM Plex Mono", Consolas, "Courier New", "Microsoft YaHei", monospace; }
+	:host-context(.windows:lang(zh-Hant)) { font-family: "IBM Plex Mono", Consolas, "Courier New", "Microsoft Jhenghei", monospace; }
+	:host-context(.windows:lang(ja)) { font-family: "IBM Plex Mono", Consolas, "Courier New", "Yu Gothic UI", "Meiryo UI", monospace; }
+	:host-context(.windows:lang(ko)) { font-family: "IBM Plex Mono", Consolas, "Courier New", "Malgun Gothic", "Dotom", monospace; }
 
-	:host-context(.linux) { font-family: "IBM Plex Sans", system-ui, "Ubuntu", "Droid Sans", sans-serif; }
-	:host-context(.linux:lang(zh-Hans)) { font-family: "IBM Plex Sans", system-ui, "Ubuntu", "Droid Sans", "Source Han Sans SC", "Source Han Sans CN", "Source Han Sans", sans-serif; }
-	:host-context(.linux:lang(zh-Hant)) { font-family: "IBM Plex Sans", system-ui, "Ubuntu", "Droid Sans", "Source Han Sans TC", "Source Han Sans TW", "Source Han Sans", sans-serif; }
-	:host-context(.linux:lang(ja)) { font-family: "IBM Plex Sans", system-ui, "Ubuntu", "Droid Sans", "Source Han Sans J", "Source Han Sans JP", "Source Han Sans", sans-serif; }
-	:host-context(.linux:lang(ko)) { font-family: "IBM Plex Sans", system-ui, "Ubuntu", "Droid Sans", "Source Han Sans K", "Source Han Sans JR", "Source Han Sans", "UnDotum", "FBaekmuk Gulim", sans-serif; }
+	:host-context(.linux) { font-family: "IBM Plex Mono", "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", monospace; }
+	:host-context(.linux:lang(zh-Hans)) { font-family: "IBM Plex Mono", "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Source Han Sans SC", "Source Han Sans CN", "Source Han Sans", monospace; }
+	:host-context(.linux:lang(zh-Hant)) { font-family: "IBM Plex Mono", "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Source Han Sans TC", "Source Han Sans TW", "Source Han Sans", monospace; }
+	:host-context(.linux:lang(ja)) { font-family: "IBM Plex Mono", "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Source Han Sans J", "Source Han Sans JP", "Source Han Sans", monospace; }
+	:host-context(.linux:lang(ko)) { font-family: "IBM Plex Mono", "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Source Han Sans K", "Source Han Sans JR", "Source Han Sans", "UnDotum", "FBaekmuk Gulim", monospace; }
 `;

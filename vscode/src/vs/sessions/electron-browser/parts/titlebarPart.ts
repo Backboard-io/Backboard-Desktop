@@ -223,7 +223,11 @@ class AuxiliaryNativeTitlebarPart extends NativeTitlebarPart implements IAuxilia
 
 	private static COUNTER = 1;
 
-	get height() { return this.minimumHeight; }
+	override get minimumHeight(): number { return 0; }
+
+	override get maximumHeight(): number { return 0; }
+
+	get height() { return 0; }
 
 	constructor(
 		readonly container: HTMLElement,

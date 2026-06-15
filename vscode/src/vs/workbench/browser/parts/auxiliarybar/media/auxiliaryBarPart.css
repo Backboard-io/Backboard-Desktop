@@ -31,6 +31,14 @@
 	border-bottom: 1px solid var(--vscode-sideBar-border);
 }
 
+.monaco-workbench .part.auxiliarybar.backboard-single-row > .title {
+	display: none !important;
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-single-row > .header-or-footer {
+	display: none !important;
+}
+
 .monaco-workbench .part.auxiliarybar > .title > .title-label {
 	flex: 1;
 }

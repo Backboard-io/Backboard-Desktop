@@ -128,6 +128,7 @@ export abstract class AbstractPaneCompositePart extends CompositePart<PaneCompos
 
 	private globalToolBar: MenuWorkbenchToolBar | undefined;
 	private blockOpening: DeferredPromise<PaneComposite | undefined> | undefined = undefined;
+	private backboardChromeHidden = false;
 	protected contentDimension: Dimension | undefined;
 
 	constructor(
@@ -435,6 +436,7 @@ export abstract class AbstractPaneCompositePart extends CompositePart<PaneCompos
 		}
 
 		this.compositeBarPosition = newPosition;
+		this.updateBackboardSingleRowClass(undefined, false);
 
 		if (updateCompositeBarOption) {
 			this.layoutCompositeBar();
@@ -593,10 +595,10 @@ export abstract class AbstractPaneCompositePart extends CompositePart<PaneCompos
 		}
 
 		this.contentDimension = new Dimension(width, height);
-		const hideTitleForBackboard = this.updateBackboardSingleRowClass();
+		this.updateBackboardSingleRowClass(undefined, false);
 
 		// Layout contents
-		super.layout(this.contentDimension.width, hideTitleForBackboard ? this.contentDimension.height + 35 : this.contentDimension.height, top, left);
+		super.layout(this.contentDimension.width, this.contentDimension.height, top, left);
 
 		// Layout composite bar
 		this.layoutCompositeBar();
@@ -605,10 +607,27 @@ export abstract class AbstractPaneCompositePart extends CompositePart<PaneCompos
 		this.layoutEmptyMessage();
 	}
 
-	private updateBackboardSingleRowClass(compositeId?: string): boolean {
-		const activeCompositeId = compositeId ?? this.getActivePaneComposite()?.getId() ?? this.getActiveComposite()?.getId();
+	private updateBackboardSingleRowClass(compositeId?: string, relayout = true): boolean {
+		const activeCompositeId = compositeId ?? this.getActivePaneComposite()?.getId() ?? this.getActiveComposite()?.getId() ?? this.getLastActivePaneCompositeId();
 		const hideTitleForBackboard = !!activeCompositeId && activeCompositeId.toLowerCase().includes('backboard');
 		this.element?.classList.toggle('backboard-single-row', hideTitleForBackboard);
+		if (this.backboardChromeHidden !== hideTitleForBackboard) {
+			this.backboardChromeHidden = hideTitleForBackboard;
+			this.setTitleAreaVisibility(!hideTitleForBackboard, relayout);
+		}
+		if (hideTitleForBackboard) {
+			if (this.compositeBarPosition === CompositeBarPosition.TOP) {
+				this.setHeaderAreaVisibility(false, relayout);
+			} else if (this.compositeBarPosition === CompositeBarPosition.BOTTOM) {
+				this.setFooterAreaVisibility(false, relayout);
+			}
+		} else {
+			if (this.compositeBarPosition === CompositeBarPosition.TOP) {
+				this.setHeaderAreaVisibility(true, relayout);
+			} else if (this.compositeBarPosition === CompositeBarPosition.BOTTOM) {
+				this.setFooterAreaVisibility(true, relayout);
+			}
+		}
 		return hideTitleForBackboard;
 	}
 

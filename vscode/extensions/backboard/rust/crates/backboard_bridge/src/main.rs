@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     io::{self, Write as _},
     net::IpAddr,
     path::PathBuf,
@@ -37,6 +37,7 @@ const DEFAULT_STT_LANGUAGE: &str = "en";
 const WEB_FETCH_TIMEOUT_SECS: u64 = 15;
 const WEB_FETCH_MAX_BYTES: usize = 1_000_000;
 const WEB_FETCH_PREVIEW_CHARS: usize = 12_000;
+const BACKBOARD_SYSTEM_PROMPT: &str = include_str!("backboard_runtime_system_prompt.md");
 
 #[derive(Clone)]
 struct BridgeState {
@@ -179,6 +180,10 @@ struct BridgeModel {
     display_name: Option<String>,
     context_limit: Option<u64>,
     supports_thinking: Option<bool>,
+    #[serde(rename = "inputPricePerMillion")]
+    input_price_per_million: Option<f64>,
+    #[serde(rename = "outputPricePerMillion")]
+    output_price_per_million: Option<f64>,
 }
 
 #[tokio::main]
@@ -368,7 +373,7 @@ async fn collect_models(
     add_visible_models(
         &mut models,
         &mut seen,
-        client.list_models(None, None, None).await?,
+        client.list_models(None, Some("llm"), None).await?,
     );
     for provider in client.list_providers().await.unwrap_or_default() {
         if is_featherless_provider(&provider) {
@@ -398,7 +403,13 @@ fn add_visible_models(
 }
 
 fn model_is_visible(model: &BackboardModel) -> bool {
-    !model.name.trim().is_empty() && !is_featherless_provider(&model.provider)
+    !model.name.trim().is_empty()
+        && !is_featherless_provider(&model.provider)
+        && model
+            .model_type
+            .as_deref()
+            .map(|model_type| model_type.eq_ignore_ascii_case("llm"))
+            .unwrap_or(true)
 }
 
 fn is_featherless_provider(provider: &str) -> bool {
@@ -871,6 +882,7 @@ async fn consume_stream(
     session_id: &str,
     mut stream: std::pin::Pin<Box<dyn futures::Stream<Item = Result<Value>> + Send>>,
 ) -> Result<()> {
+    let mut streaming_tool_calls = StreamingToolCallAccumulator::default();
     while let Some(chunk) = stream.next().await {
         if session_cancel_flag(&state, session_id).load(Ordering::SeqCst) {
             state.writer.emit(base_event(
@@ -888,27 +900,19 @@ async fn consume_stream(
             .and_then(Value::as_str)
             .unwrap_or_default();
 
+        let saw_streaming_tool_call = streaming_tool_calls.push_chunk(&chunk);
+        if tool_call_stream_finished(&chunk)
+            && let Some(tool_calls) = streaming_tool_calls.take_tool_calls()
+        {
+            emit_tool_requested_events(&state, request_id, session_id, &chunk, tool_calls);
+            return Ok(());
+        }
+        if saw_streaming_tool_call {
+            continue;
+        }
+
         if let Some(tool_calls) = tool_calls_required_by_chunk(&chunk) {
-            let run_id = run_id_from_chunk(&chunk).or_else(|| session_run_id(&state, session_id));
-            if let Some(run_id) = run_id.as_deref() {
-                set_session_run_id(&state, session_id, Some(run_id.to_string()));
-            }
-            state.writer.emit(base_event(
-                "toolRequested",
-                request_id,
-                Some(session_id),
-                json!({
-                    "runId": run_id,
-                    "threadId": session_thread_id(&state, session_id),
-                    "toolCalls": tool_calls
-                }),
-            ));
-            state.writer.emit(base_event(
-                "done",
-                request_id,
-                Some(session_id),
-                json!({ "stopReason": "requires_tool_result" }),
-            ));
+            emit_tool_requested_events(&state, request_id, session_id, &chunk, tool_calls);
             return Ok(());
         }
 
@@ -1021,6 +1025,35 @@ async fn consume_stream(
         json!({ "stopReason": "end_turn" }),
     ));
     Ok(())
+}
+
+fn emit_tool_requested_events(
+    state: &BridgeState,
+    request_id: &str,
+    session_id: &str,
+    chunk: &Value,
+    tool_calls: Vec<Value>,
+) {
+    let run_id = run_id_from_chunk(chunk).or_else(|| session_run_id(state, session_id));
+    if let Some(run_id) = run_id.as_deref() {
+        set_session_run_id(state, session_id, Some(run_id.to_string()));
+    }
+    state.writer.emit(base_event(
+        "toolRequested",
+        request_id,
+        Some(session_id),
+        json!({
+            "runId": run_id,
+            "threadId": session_thread_id(state, session_id),
+            "toolCalls": tool_calls
+        }),
+    ));
+    state.writer.emit(base_event(
+        "done",
+        request_id,
+        Some(session_id),
+        json!({ "stopReason": "requires_tool_result" }),
+    ));
 }
 
 fn cancel_request(state: &BridgeState, request: &BridgeRequest) {
@@ -1159,116 +1192,29 @@ fn chrono_like_timestamp() -> String {
 }
 
 fn augment_prompt(content: &str, workspace: Option<&PathBuf>, mode: &str) -> String {
-    let Some(workspace) = workspace else {
-        return content.to_string();
-    };
-    let workspace = workspace.display();
+    let workspace = workspace
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<none supplied by host>".to_string());
     let available_tools = tool_names_for_prompt(mode);
     format!(
-        r#"You are the Backboard Studio coding agent running inside the Backboard VS Code IDE. You help users complete software engineering tasks by understanding their codebase, making careful changes, and explaining your work clearly. Use your broad knowledge of programming languages, frameworks, design patterns, and engineering best practices to solve problems pragmatically.
+        r#"{system_prompt}
 
-## Communication
+## Runtime Context
 
-- Default to a tone that is concise, direct, and friendly. Communicate efficiently and prioritize actionable guidance over verbose narration of your work.
-- Format responses in markdown. Use backticks for file paths, directories, commands, functions, classes, and other code identifiers.
-- Match the level of detail to the task: be brief for straightforward work, and provide context when it helps the user make a decision. Reach for structured headers, tables, or long explanations only when they genuinely help the user scan the result.
-- Be accurate and truthful. Ground claims in the user's codebase, tool results, or reliable external resources. Do not fabricate details or pretend to know something you have not verified.
-- Prioritize technical correctness over affirming the user's assumptions. If something seems wrong or risky, say so respectfully and explain the reasoning.
-- Be transparent about uncertainty. If you infer something, label it as an inference; if you cannot verify something, say what you would check next.
-- Do not over-apologize when results are unexpected. Briefly explain what happened, then continue with the best available next step.
-
-## Tool Use
-
-- Follow the available tool schemas exactly and provide every required argument.
-- Use only the tools that are currently available. Do not call a tool just because it appeared earlier in the conversation; the user may have disabled it.
-- Prefer the most direct tool for the job. Use file tools for reading and editing files, search tools for code discovery, and terminal commands for build, test, and project-specific workflows.
-- Before acting, gather enough context to avoid guessing. Do not use placeholders, invented paths, or assumed command arguments in tool calls.
-- You can call multiple tools in a single response. If multiple tool calls have no dependency on each other, make the independent calls in parallel where the host supports it. If one operation depends on another, run them sequentially.
-- When running commands that may run indefinitely or for a long time, such as builds, tests, servers, or file watchers, specify a bounded timeout when the tool supports one. If a command times out, report that clearly and let the user decide whether to rerun it with a longer timeout.
-- Avoid HTML entity escaping; use plain characters instead.
-- Before a group of related tool calls, send a brief one- to two-sentence preamble explaining what you're about to do, so the user can follow along. Skip the preamble for trivial single reads or when continuing a clearly described step.
+- Target workspace root: {workspace}
+- Current Backboard mode for this turn: {mode}
 - Available tools for this turn: {available_tools}
 
-## Task Execution
+Treat relative file, grep, glob, shell, and edit tool paths as relative to the target workspace root unless the user explicitly provides another path.
 
-- Keep going until the user's task is completely resolved before ending your turn and yielding back to the user. Only terminate your turn when you are sure the problem is solved.
-- Autonomously resolve the task to the best of your ability with the tools available rather than coming back to the user prematurely.
-- Do not ask clarification questions as a default response. Gather evidence with tools first. Only stop for user input when the information is genuinely unavailable from the project and proceeding would be risky.
-- Do not guess or make up an answer.
-- For implementation requests, inspect files or run relevant tools before claiming work is complete. Do not claim source, UI, or configuration changes were made unless a tool call actually changed or verified files.
+## User Request
 
-## Workspace
-
-- The target workspace root is exactly: {workspace}
-- Treat this target workspace as the current project and the only default directory for user work.
-- Do not infer the current folder from the VS Code extension install path, process cwd, or any path containing /ide/vscode unless the target workspace itself is that path.
-- When the user asks what folder or directory you are in, answer with the exact target workspace root above.
-- All relative file, grep, glob, shell, and edit tool paths are relative to the target workspace root unless the user explicitly provides another path.
-- Current Backboard mode for this turn: {mode}
-
-## Searching and Reading
-
-- If you are unsure how to fulfill the user's request, gather more information with tool calls.
-- Before reading or editing a file, first know its full project-relative path. Do not guess file paths.
-- Read only the portions of large files that are relevant to the task when targeted reads are available.
-- When looking for symbols in the project, prefer grep/search tools. As you learn about the structure of the project, scope searches to targeted subtrees instead of repeatedly searching the whole repository.
-
-## Making Code Changes
-
-- Fix the problem at the root cause rather than applying surface-level patches, when possible.
-- Avoid unneeded complexity in your solution.
-- Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task.
-- Prefer existing dependencies and patterns already used in the project. Add new dependencies only when they are justified by the task.
-- Keep user work safe. Do not overwrite, remove, or revert changes you did not make unless the user explicitly asks.
-- Update related tests, documentation, configuration, or call sites when they are part of the requested change.
-- Do not fix unrelated bugs or broken tests. It is not your responsibility to fix them, but you may mention them in your final message.
-- Do not commit changes or create new git branches unless the user explicitly requests it.
-- Do not add comments that merely restate the code. Add comments only when they explain non-obvious intent, constraints, or tradeoffs.
-- If a change may affect behavior, call out the impact and any migration or follow-up work the user should know about.
-
-## Ambition vs. Precision
-
-- For tasks with no prior context, feel free to be ambitious and demonstrate creativity with your implementation.
-- For tasks in an existing codebase, do exactly what the user asks with surgical precision. Treat the surrounding codebase with respect, and do not overstep by changing filenames, variables, architecture, or unrelated behavior unnecessarily.
-- Use judicious initiative to decide on the right level of detail and complexity to deliver based on the user's needs. Provide high-value touches when scope is vague, and targeted work when scope is tight.
-
-## Validation
-
-- If the codebase has tests or the ability to build or run, consider using them to verify that your work is complete.
-- Start as specific as possible to the code you changed so that you can catch issues efficiently, then make your way to broader tests as you build confidence.
-- Do not claim validation passed unless you actually ran it and saw it pass.
-- If validation fails, report the failing command and the relevant error. Fix issues you caused when you can identify the root cause.
-- If you cannot run validation, state that clearly and explain why.
-
-## Fixing Diagnostics
-
-1. Make 1-2 focused attempts at fixing diagnostics you are likely able to resolve, then defer to the user with a clear explanation of what remains.
-2. Never simplify or discard meaningful code just to silence diagnostics. Complete, mostly correct code is more valuable than superficially clean code that does not solve the problem.
-
-## Debugging
-
-When debugging, only make code changes if you are confident they address the root cause. Otherwise, first gather evidence and isolate the problem.
-
-1. Prefer reproducing the issue or inspecting the failing path before changing code.
-2. Address the root cause instead of the symptoms.
-3. Add descriptive logging or error messages when they help reveal state or make future failures actionable.
-4. Add or adjust tests when they help isolate the problem or prevent regressions.
-
-## Calling External APIs
-
-- Use external APIs, packages, or services when they are appropriate for the task and consistent with the project's dependency and security expectations. You do not need to ask permission unless the user requested a specific constraint.
-- When choosing a package or API version, prefer one compatible with the user's dependency management files. If the project provides no guidance, use a stable, current version you know to be appropriate.
-- If an external API requires an API key or secret, tell the user. Never hardcode secrets or place them where they may be exposed.
-- Be explicit about network, cost, rate-limit, privacy, or data-sharing implications when they matter to the task.
-
-## Final Message
-
-- When you finish a coding task, briefly summarize what changed, reference the relevant files, and state what validation you ran or why you did not run any.
-- Reference files by their project-relative path so the user can click through.
-- If there is an obvious follow-up the user may want, offer it as a question rather than doing it unprompted.
-
-User request:
-{content}"#
+{content}"#,
+        system_prompt = BACKBOARD_SYSTEM_PROMPT.trim(),
+        workspace = workspace,
+        mode = mode,
+        available_tools = available_tools,
+        content = content
     )
 }
 
@@ -1642,6 +1588,8 @@ fn to_bridge_model(model: BackboardModel) -> BridgeModel {
         display_name: model.display_name,
         context_limit: model.context_limit,
         supports_thinking: model.supports_thinking,
+        input_price_per_million: model.input_cost_per_1m_tokens,
+        output_price_per_million: model.output_cost_per_1m_tokens,
     }
 }
 
@@ -1662,10 +1610,18 @@ fn normalize_tool_output(value: Value) -> Value {
 fn tool_calls_required_by_chunk(chunk: &Value) -> Option<Vec<Value>> {
     for pointer in [
         "/tool_calls",
+        "/toolCalls",
         "/data/tool_calls",
+        "/data/toolCalls",
         "/required_action/submit_tool_outputs/tool_calls",
+        "/required_action/submit_tool_outputs/toolCalls",
+        "/requiredAction/submitToolOutputs/toolCalls",
         "/data/required_action/submit_tool_outputs/tool_calls",
+        "/data/required_action/submit_tool_outputs/toolCalls",
+        "/data/requiredAction/submitToolOutputs/toolCalls",
         "/run/required_action/submit_tool_outputs/tool_calls",
+        "/run/required_action/submit_tool_outputs/toolCalls",
+        "/run/requiredAction/submitToolOutputs/toolCalls",
     ] {
         if let Some(calls) = chunk.pointer(pointer).and_then(Value::as_array)
             && !calls.is_empty()
@@ -1673,7 +1629,143 @@ fn tool_calls_required_by_chunk(chunk: &Value) -> Option<Vec<Value>> {
             return Some(calls.to_vec());
         }
     }
+    for root in [Some(chunk), chunk.get("data"), chunk.get("chunk")] {
+        let Some(choices) = root
+            .and_then(|value| value.get("choices"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for choice in choices {
+            for pointer in ["/message/tool_calls", "/message/toolCalls"] {
+                if let Some(calls) = choice.pointer(pointer).and_then(Value::as_array)
+                    && !calls.is_empty()
+                {
+                    return Some(calls.to_vec());
+                }
+            }
+        }
+    }
     None
+}
+
+#[derive(Default)]
+struct StreamingToolCallAccumulator {
+    calls: BTreeMap<usize, StreamingToolCall>,
+}
+
+#[derive(Default)]
+struct StreamingToolCall {
+    id: Option<String>,
+    call_type: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+impl StreamingToolCallAccumulator {
+    fn push_chunk(&mut self, chunk: &Value) -> bool {
+        let mut found = false;
+        for root in [Some(chunk), chunk.get("data"), chunk.get("chunk")] {
+            let Some(choices) = root
+                .and_then(|value| value.get("choices"))
+                .and_then(Value::as_array)
+            else {
+                continue;
+            };
+            for choice in choices {
+                let Some(calls) = choice
+                    .pointer("/delta/tool_calls")
+                    .or_else(|| choice.pointer("/delta/toolCalls"))
+                    .and_then(Value::as_array)
+                else {
+                    continue;
+                };
+                found = true;
+                for (fallback_index, call) in calls.iter().enumerate() {
+                    let index = call
+                        .get("index")
+                        .and_then(Value::as_u64)
+                        .map(|value| value as usize)
+                        .unwrap_or(fallback_index);
+                    let entry = self.calls.entry(index).or_default();
+                    if let Some(id) = call.get("id").and_then(Value::as_str)
+                        && !id.is_empty()
+                    {
+                        entry.id = Some(id.to_string());
+                    }
+                    if let Some(call_type) = call.get("type").and_then(Value::as_str)
+                        && !call_type.is_empty()
+                    {
+                        entry.call_type = Some(call_type.to_string());
+                    }
+                    let function = call.get("function").unwrap_or(call);
+                    if let Some(name) = function.get("name").and_then(Value::as_str)
+                        && !name.is_empty()
+                    {
+                        entry.name = Some(name.to_string());
+                    }
+                    if let Some(arguments) = function
+                        .get("arguments")
+                        .or_else(|| function.get("args"))
+                        .or_else(|| function.get("input"))
+                    {
+                        if let Some(text) = arguments.as_str() {
+                            entry.arguments.push_str(text);
+                        } else if !arguments.is_null() {
+                            entry.arguments.push_str(&arguments.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    fn take_tool_calls(&mut self) -> Option<Vec<Value>> {
+        if self.calls.is_empty() {
+            return None;
+        }
+        let mut calls = Vec::with_capacity(self.calls.len());
+        for (_index, call) in std::mem::take(&mut self.calls) {
+            let id = call.id?;
+            let name = call.name?;
+            calls.push(json!({
+                "id": id,
+                "type": call.call_type.unwrap_or_else(|| "function".to_string()),
+                "function": {
+                    "name": name,
+                    "arguments": call.arguments,
+                }
+            }));
+        }
+        Some(calls)
+    }
+}
+
+fn tool_call_stream_finished(chunk: &Value) -> bool {
+    if matches!(
+        chunk.get("type").and_then(Value::as_str),
+        Some("tool_calls_done" | "tool_call_done" | "function_call_done")
+    ) {
+        return true;
+    }
+    for root in [Some(chunk), chunk.get("data"), chunk.get("chunk")] {
+        let Some(choices) = root
+            .and_then(|value| value.get("choices"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        if choices.iter().any(|choice| {
+            matches!(
+                choice.get("finish_reason").and_then(Value::as_str),
+                Some("tool_calls" | "function_call" | "tool_use")
+            )
+        }) {
+            return true;
+        }
+    }
+    false
 }
 
 fn run_id_from_chunk(chunk: &Value) -> Option<String> {
@@ -1856,9 +1948,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        add_visible_models, augment_prompt, is_featherless_provider, model_is_visible,
-        normalize_tool_output, thinking_payload, tool_calls_required_by_chunk, tool_definitions,
-        validate_web_fetch_url, voice_payload,
+        StreamingToolCallAccumulator, add_visible_models, augment_prompt, is_featherless_provider,
+        model_is_visible, normalize_tool_output, thinking_payload, tool_call_stream_finished,
+        tool_calls_required_by_chunk, tool_definitions, validate_web_fetch_url, voice_payload,
     };
 
     #[test]
@@ -1898,16 +1990,21 @@ mod tests {
     }
 
     #[test]
-    fn augmented_prompt_uses_backboard_studio_agent_prompt() {
+    fn augmented_prompt_uses_backboard_runtime_system_prompt() {
         let workspace = PathBuf::from("/tmp/example-workspace");
         let prompt = augment_prompt("make the UI better", Some(&workspace), "free");
 
-        assert!(prompt.contains("You are the Backboard Studio coding agent"));
-        assert!(prompt.contains("The target workspace root is exactly: /tmp/example-workspace"));
+        assert!(prompt.contains("# Backboard Runtime System Prompt"));
+        assert!(prompt.contains("Use the host's native function/tool-call channel"));
+        assert!(prompt.contains("Do not print tool-call JSON"));
+        assert!(prompt.contains("## Runtime Context"));
+        assert!(prompt.contains("Target workspace root: /tmp/example-workspace"));
         assert!(prompt.contains("Available tools for this turn:"));
         assert!(prompt.contains("read_file"));
         assert!(prompt.contains("write_file"));
-        assert!(prompt.contains("Do not ask clarification questions as a default response."));
+        assert!(prompt.contains("Do not display file contents or proposed patches in chat"));
+        assert!(prompt.contains("## User Request"));
+        assert!(prompt.contains("make the UI better"));
         assert!(!prompt.contains("Backboard is running inside VS Code."));
         assert!(!prompt.contains("ask_user_question"));
     }
@@ -1992,6 +2089,8 @@ mod tests {
                     name: "same".to_string(),
                     model_type: Some("llm".to_string()),
                     display_name: Some("First".to_string()),
+                    input_cost_per_1m_tokens: Some(1.25),
+                    output_cost_per_1m_tokens: Some(5.5),
                     ..Default::default()
                 },
                 BackboardModel {
@@ -2019,10 +2118,11 @@ mod tests {
             }],
         );
 
-        assert_eq!(models.len(), 2);
+        assert_eq!(models.len(), 1);
         assert_eq!(models[0].display_name.as_deref(), Some("First"));
         assert_eq!(models[0].model_type.as_deref(), Some("llm"));
-        assert_eq!(models[1].model_type.as_deref(), Some("reranker"));
+        assert_eq!(models[0].input_price_per_million, Some(1.25));
+        assert_eq!(models[0].output_price_per_million, Some(5.5));
     }
 
     #[test]
@@ -2083,5 +2183,73 @@ mod tests {
         .unwrap();
 
         assert_eq!(calls[0]["id"], "call_1");
+    }
+
+    #[test]
+    fn tool_calls_are_detected_inside_camel_case_envelope() {
+        let calls = tool_calls_required_by_chunk(&json!({
+            "type": "runRequiresAction",
+            "data": {
+                "requiredAction": {
+                    "submitToolOutputs": {
+                        "toolCalls": [
+                            {
+                                "id": "call_1",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": "{\"path\":\"README.md\"}"
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(calls[0]["id"], "call_1");
+    }
+
+    #[test]
+    fn openai_streaming_tool_call_deltas_are_accumulated() {
+        let mut accumulator = StreamingToolCallAccumulator::default();
+        assert!(accumulator.push_chunk(&json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\"path\""
+                        }
+                    }]
+                }
+            }]
+        })));
+        assert!(accumulator.push_chunk(&json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "function": {
+                            "arguments": ":\"README.md\"}"
+                        }
+                    }]
+                }
+            }]
+        })));
+        assert!(tool_call_stream_finished(&json!({
+            "choices": [{ "finish_reason": "tool_calls" }]
+        })));
+
+        let calls = accumulator.take_tool_calls().unwrap();
+        assert_eq!(calls[0]["id"], "call_1");
+        assert_eq!(calls[0]["function"]["name"], "read_file");
+        assert_eq!(
+            calls[0]["function"]["arguments"],
+            "{\"path\":\"README.md\"}"
+        );
     }
 }

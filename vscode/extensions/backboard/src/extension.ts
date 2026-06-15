@@ -43,12 +43,15 @@ interface BridgeModel {
 	readonly outputPrice?: number;
 	readonly inputPricePerMillion?: number;
 	readonly outputPricePerMillion?: number;
+	readonly inputCostPer1mTokens?: number;
+	readonly outputCostPer1mTokens?: number;
 	readonly promptPrice?: number;
 	readonly completionPrice?: number;
 }
 
 interface ModelCacheEntry {
 	readonly env: string;
+	readonly version?: number;
 	readonly fetchedAt: number;
 	readonly models: BridgeModel[];
 }
@@ -96,10 +99,13 @@ interface PanelOptions {
 
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
+let backboardToolOutput: vscode.OutputChannel | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
+	backboardToolOutput = vscode.window.createOutputChannel('Backboard Tools');
 	const bridge = new BackboardBridge(context);
 	const panelProvider = new BackboardPanelProvider(bridge, context);
+	context.subscriptions.push(backboardToolOutput);
 	context.subscriptions.push(bridge);
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', () => setApiKey()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => bridge.refreshModels()));
@@ -225,7 +231,11 @@ function bridgeProviderKey(provider: string): string {
 }
 
 function isVisibleBridgeModel(model: BridgeModel): boolean {
-	return !hiddenModelProviders.has(bridgeProviderKey(model.provider));
+	return !hiddenModelProviders.has(bridgeProviderKey(model.provider)) && isLlmBridgeModel(model);
+}
+
+function isLlmBridgeModel(model: BridgeModel): boolean {
+	return !model.modelType || model.modelType.trim().toLowerCase() === 'llm';
 }
 
 function isFileNotFoundError(error: unknown): boolean {
@@ -411,7 +421,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
 		this.view = webviewView;
-		webviewView.title = 'Backboard';
+		webviewView.title = '\u200B';
 		webviewView.webview.options = { enableScripts: true, localResourceRoots: webviewLocalResourceRoots(this.context) };
 		webviewView.webview.html = panelHtml(webviewView.webview, codiconsStylesheetUri(this.context, webviewView.webview), iconBaseUri(this.context, webviewView.webview), { showHeader: false });
 		webviewView.webview.onDidReceiveMessage(message => {
@@ -545,7 +555,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 	const nonce = newId();
 	const csp = `default-src 'none'; img-src ${webview.cspSource} https: data: blob:; media-src ${webview.cspSource} https: data: blob:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';`;
 	const backboardLogo = `${iconBase.toString()}/backboard_logo.svg`;
-	const rootRows = `${options.showHeader ? '42px ' : ''}35px minmax(0, 1fr) auto`;
+	const rootRows = `${options.showHeader ? '42px ' : ''}35px 24px minmax(0, 1fr) auto`;
 	const logLabel = options.showHeader ? 'aria-labelledby="chatTab"' : 'aria-label="Chat"';
 	const header = options.showHeader ? `
 			<div class="panelHeader">
@@ -600,11 +610,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			--bb-success-bg: color-mix(in srgb, #f0fbf4 82%, var(--vscode-editor-background, #ffffff));
 			--bb-shadow: color-mix(in srgb, var(--vscode-widget-shadow, #000000) 8%, transparent);
 			--bb-radius: 8px;
-			--bb-composer-safe-bottom: ${options.showHeader ? '0px' : '35px'};
+			--bb-composer-safe-bottom: 0px;
 		}
-		html, body { width: 100%; height: 100%; overflow: hidden; }
+		* { box-sizing: border-box; }
+		html, body { width: 100%; height: 100%; min-width: 0; overflow: hidden; }
 		body { padding: 0; margin: 0; color: var(--bb-text); background: var(--bb-bg); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
-		.root { display: grid; grid-template-rows: ${rootRows}; height: 100%; min-height: 300px; overflow: hidden; background: var(--bb-bg); }
+		.root { display: grid; grid-template-rows: ${rootRows}; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; background: var(--bb-bg); }
 		.panelHeader { min-height: 42px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 6px 12px; border-bottom: 1px solid var(--bb-border); background: color-mix(in srgb, var(--bb-surface) 86%, var(--bb-bg)); }
 		.brandMark { width: 24px; height: 24px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--bb-primary) 30%, var(--bb-border)); border-radius: 6px; color: var(--bb-primary); background: color-mix(in srgb, var(--bb-primary) 10%, transparent); }
 		.brandMark .codicon { font-size: 14px; }
@@ -619,13 +630,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.headerIconButton .codicon { font-size: 15px; }
 		.historyHeaderButton { width: auto; min-width: 34px; grid-auto-flow: column; column-gap: 3px; padding: 0 5px; }
 		.tabCount { min-width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; padding: 0 3px; border-radius: 999px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-border) 58%, transparent); font-size: 10px; line-height: 14px; }
-		.recentTabsShell { position: relative; min-width: 0; min-height: 35px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; overflow: hidden; border-bottom: 1px solid var(--bb-border); background: var(--bb-bg); }
-		.recentTabsShell::after { content: ''; position: absolute; top: 0; right: 56px; bottom: 0; width: 24px; pointer-events: none; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bb-bg) 80%, transparent) 58%, var(--bb-bg)); }
-		.recentTabs { min-width: 0; display: flex; align-items: center; gap: 2px; overflow-x: auto; overflow-y: hidden; padding: 5px 28px 5px 8px; scrollbar-width: none; }
+		.recentTabsShell { position: relative; min-width: 0; min-height: 32px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; overflow: hidden; border-bottom: 1px solid color-mix(in srgb, var(--bb-border) 78%, transparent); background: color-mix(in srgb, var(--bb-bg) 96%, var(--bb-surface)); }
+		.recentTabsShell::after { content: ''; position: absolute; top: 0; right: 54px; bottom: 0; width: 22px; pointer-events: none; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bb-bg) 84%, transparent) 58%, var(--bb-bg)); }
+		.recentTabs { min-width: 0; display: flex; align-items: center; gap: 1px; overflow-x: auto; overflow-y: hidden; padding: 4px 26px 4px 7px; scrollbar-width: none; }
 		.recentTabs::-webkit-scrollbar { display: none; }
-		.recentTab { width: max-content; min-width: 36px; max-width: min(190px, calc(50vw - 52px)); height: 24px; flex: 0 1 auto; box-sizing: border-box; display: inline-flex; align-items: center; gap: 4px; padding: 0 3px 0 7px; border: 1px solid transparent; border-radius: 5px; color: var(--bb-muted); background: transparent; font-size: 11.5px; line-height: 15px; text-align: left; cursor: pointer; }
+		.recentTab { width: max-content; min-width: 34px; max-width: min(176px, calc(50vw - 50px)); height: 23px; flex: 0 1 auto; display: inline-flex; align-items: center; gap: 4px; padding: 0 3px 0 7px; border: 1px solid transparent; border-radius: 4px; color: var(--bb-muted); background: transparent; font-size: 11.5px; line-height: 15px; text-align: left; cursor: pointer; }
 		.recentTab:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
-		.recentTab.active { color: var(--bb-text); border-color: var(--bb-border); background: color-mix(in srgb, var(--vscode-editor-background, var(--bb-card)) 90%, var(--bb-bg)); box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--bb-primary) 42%, transparent); }
+		.recentTab.active { color: var(--bb-text); border-color: color-mix(in srgb, var(--bb-border) 82%, transparent); background: color-mix(in srgb, var(--vscode-editor-background, var(--bb-card)) 88%, var(--bb-bg)); box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--bb-primary) 34%, transparent); }
 		.recentTab:focus-visible { outline: 1px solid color-mix(in srgb, var(--bb-primary) 70%, transparent); outline-offset: 2px; }
 		.recentTab.running { color: var(--bb-muted); }
 		.recentTabLabel { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -633,8 +644,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.recentTab:hover .recentTabClose, .recentTab:focus-within .recentTabClose, .recentTab.active .recentTabClose { opacity: 1; }
 		.recentTabClose:hover { color: var(--bb-text); background: color-mix(in srgb, var(--bb-border) 62%, transparent); }
 		.recentTabClose .codicon { font-size: 12px; }
-		.recentTabsActions { position: relative; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 5px 8px 5px 2px; background: var(--bb-bg); }
-		.recentActionButton { height: 22px; min-width: 22px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px; border-radius: 5px; color: var(--bb-muted); background: transparent; }
+		.recentTabsActions { position: relative; z-index: 1; display: flex; align-items: center; gap: 1px; padding: 4px 7px 4px 2px; background: var(--bb-bg); }
+		.recentActionButton { height: 22px; min-width: 22px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px; border-radius: 4px; color: var(--bb-muted); background: transparent; }
 		.recentActionButton:hover, .recentActionButton.active { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
 		.recentActionButton .codicon { font-size: 14px; }
 			.checkpointStrip { display: none; min-width: 0; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--bb-border); background: color-mix(in srgb, var(--bb-bg) 94%, var(--bb-surface)); }
@@ -646,33 +657,35 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.checkpointButton:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
 		.checkpointButton .codicon { font-size: 12px; }
 		.checkpointLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.viewStack { min-height: 0; overflow: hidden; background: var(--bb-bg); }
-		.viewPane { display: none; min-height: 0; height: 100%; }
+		.viewStack { min-width: 0; min-height: 0; display: flex; overflow: hidden; background: var(--bb-bg); }
+		.viewPane { display: none; width: 100%; min-width: 0; min-height: 0; height: 100%; }
 		.viewPane.active { display: flex; }
-		.composer { position: relative; box-sizing: border-box; padding: 0 10px calc(10px + var(--bb-composer-safe-bottom) + env(safe-area-inset-bottom, 0px)); background: linear-gradient(180deg, transparent, var(--bb-bg) 16px); }
+		.composer { position: relative; min-width: 0; min-height: 0; padding: 0 10px calc(10px + var(--bb-composer-safe-bottom) + env(safe-area-inset-bottom, 0px)); border-top: 1px solid color-mix(in srgb, var(--bb-border) 58%, transparent); background: color-mix(in srgb, var(--bb-bg) 96%, var(--bb-surface)); }
 		.stateControl { display: none; }
-			.log { overflow: auto; min-height: 0; padding: 16px 10px 14px; flex-direction: column; gap: 10px; background: var(--bb-bg); scrollbar-width: thin; }
+			.log { overflow-y: auto; overflow-x: hidden; min-width: 0; min-height: 0; padding: 14px 12px 18px; flex-direction: column; align-items: stretch; gap: 10px; background: var(--bb-bg); scrollbar-width: thin; overscroll-behavior: contain; }
+			.log > * { flex: 0 0 auto; }
 		.emptyState { margin: auto; display: grid; place-items: center; gap: 12px; transform: translateY(-8%); padding: 0 20px; }
 		.emptyIcon { width: 48px; height: 64px; display: block; color: color-mix(in srgb, var(--vscode-icon-foreground, var(--bb-text)) 62%, var(--bb-primary)); background: currentColor; opacity: .72; -webkit-mask: url('${backboardLogo}') center / contain no-repeat; mask: url('${backboardLogo}') center / contain no-repeat; transition: opacity .2s ease; }
 		.emptyState:hover .emptyIcon { opacity: .9; }
 		.emptyTagline { color: var(--bb-muted); font-size: 13px; line-height: 20px; text-align: center; max-width: 220px; }
 		.emptyHints { display: grid; gap: 4px; margin-top: 4px; }
 		.emptyHint { color: var(--bb-subtle); font-size: 11px; line-height: 16px; text-align: center; }
-			.messageCard { display: flex; flex-direction: column; gap: 5px; width: fit-content; max-width: 92%; box-sizing: border-box; padding: 9px 10px; border-radius: 8px; overflow-wrap: anywhere; }
-			.messageCard.user { align-self: flex-end; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); box-shadow: 0 1px 3px color-mix(in srgb, var(--bb-primary) 24%, transparent); animation: bbFadeIn .2s ease; }
-			.messageCard.user:hover { box-shadow: 0 2px 8px color-mix(in srgb, var(--bb-primary) 30%, transparent); }
-			.messageCard.assistant { align-self: flex-start; max-width: 100%; padding: 2px 0 3px 10px; border-radius: 0; background: transparent; border-left: 2px solid color-mix(in srgb, var(--bb-primary) 22%, var(--bb-border)); animation: bbFadeIn .25s ease; }
+			.messageCard { display: flex; flex-direction: column; gap: 7px; width: 100%; max-width: 100%; min-width: 0; padding: 0; border-radius: 6px; overflow-wrap: anywhere; word-break: normal; animation: bbFadeIn .16s ease; }
+			.messageCard.user { position: relative; align-self: stretch; padding: 2px 2px 4px; color: var(--bb-text); border: 0; background: transparent; box-shadow: none; }
+			.messageCard.user:hover { background: transparent; }
+			.messageCard.assistant { align-self: stretch; width: 100%; max-width: 100%; padding: 2px 2px 4px 10px; border-left: 2px solid color-mix(in srgb, var(--bb-border) 82%, transparent); border-radius: 0; background: transparent; box-shadow: none; }
 			@keyframes bbFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 			.messageHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 			.messageRole { color: var(--bb-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
 			.messageActions { display: none; align-items: center; gap: 3px; }
 			.messageCard.user:hover .messageActions, .messageCard.user:focus-within .messageActions { display: flex; }
-			.messageAction { width: 18px; height: 18px; display: inline-grid; place-items: center; padding: 0; border-radius: 4px; color: color-mix(in srgb, currentColor 82%, transparent); background: transparent; }
-			.messageAction:hover { color: currentColor; background: color-mix(in srgb, currentColor 14%, transparent); }
+			.messageAction { width: 18px; height: 18px; display: inline-grid; place-items: center; padding: 0; border-radius: 4px; color: var(--bb-muted); background: transparent; }
+			.messageAction:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
 			.messageAction .codicon { font-size: 13px; }
-			.messageText { color: var(--bb-text); font-size: 13px; line-height: 20px; white-space: pre-wrap; }
+			.messageText { min-width: 0; color: var(--bb-text); font-size: var(--vscode-font-size); line-height: 1.48; white-space: pre-wrap; overflow-wrap: anywhere; }
 			.messageCard.user .messageText, .messageCard.user .messageRole { color: inherit; }
 			.messageCard.assistant .messageHeader { display: none; }
+			.messageMeta { align-self: flex-start; min-height: 17px; display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border: 1px solid color-mix(in srgb, var(--bb-border) 70%, transparent); border-radius: 999px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-bg) 72%, transparent); font-size: 10.5px; line-height: 14px; font-variant-numeric: tabular-nums; }
 		.queueBlock { width: 100%; box-sizing: border-box; display: grid; gap: 6px; padding: 8px; border: 1px solid var(--bb-border); border-radius: 8px; background: color-mix(in srgb, var(--bb-card) 84%, transparent); }
 		.queueHeader { display: flex; align-items: center; gap: 7px; color: var(--bb-muted); font-size: 12px; font-weight: 600; }
 		.queueCard { display: grid; gap: 6px; padding: 7px; border: 1px solid color-mix(in srgb, var(--bb-border) 78%, transparent); border-radius: 7px; background: var(--bb-bg); }
@@ -680,30 +693,47 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.queueActions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
 		.queueButton { min-height: 22px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 3px 7px; border-radius: 4px; color: var(--bb-muted); background: transparent; font-size: 11px; }
 		.queueButton:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
-		.statusRow { width: 100%; display: flex; align-items: center; gap: 6px; color: var(--bb-success); font-size: 12px; line-height: 16px; padding: 1px 2px; box-sizing: border-box; transition: color .2s ease; }
+		.statusRow { width: 100%; min-height: 26px; display: flex; align-items: flex-start; gap: 8px; color: var(--bb-success); font-size: 12px; line-height: 17px; padding: 5px 2px; transition: color .2s ease; }
 		.statusRow.error { color: var(--vscode-errorForeground, var(--bb-danger)); }
 		.statusRow.muted { color: var(--bb-muted); }
 		.statusRow.muted .statusIcon { animation: bbPulse 1.6s ease-in-out infinite; }
 		@keyframes bbPulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 		.statusIcon { width: 12px; height: 12px; flex: 0 0 auto; display: grid; place-items: center; }
 		.statusIcon .codicon { font-size: 12px; }
-		.toolCard { width: min(560px, 100%); box-sizing: border-box; overflow: hidden; border: 1px solid var(--bb-border); border-radius: 7px; color: var(--bb-text); background: color-mix(in srgb, var(--bb-card) 88%, transparent); font-size: 12px; line-height: 16px; }
-		.toolCard.started { border-color: color-mix(in srgb, var(--bb-primary) 42%, var(--bb-border)); }
-		.toolCard.finished { border-color: color-mix(in srgb, var(--bb-success) 34%, var(--bb-border)); }
-		.toolCard.failed, .toolCard.denied { border-color: color-mix(in srgb, var(--bb-danger) 42%, var(--bb-border)); }
-		.toolHead { min-height: 32px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 9px; }
-		.toolStatusIcon { width: 16px; height: 16px; display: grid; place-items: center; color: var(--bb-success); }
+		.toolGroup { width: 100%; overflow: hidden; border: 1px solid color-mix(in srgb, var(--bb-border) 58%, transparent); border-radius: 5px; color: var(--bb-text); background: transparent; }
+		.toolGroup.failed { border-color: color-mix(in srgb, var(--bb-danger) 28%, var(--bb-border)); background: color-mix(in srgb, var(--bb-danger) 4%, transparent); }
+		.toolGroupHead { width: 100%; min-height: 28px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 4px 7px; color: var(--bb-text); background: transparent; text-align: left; }
+		.toolGroupStatus { width: 14px; height: 14px; display: grid; place-items: center; color: var(--bb-muted); }
+		.toolGroupStatus .codicon { font-size: 12px; }
+		.toolGroup.running .toolGroupStatus .codicon { animation: bbSpin 1.2s linear infinite; }
+		.toolGroup.failed .toolGroupStatus { color: var(--bb-danger); }
+		.toolGroupMain { min-width: 0; display: grid; gap: 1px; }
+		.toolGroupTitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 600; line-height: 15px; }
+		.toolGroupMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-muted); font-size: 10.5px; line-height: 14px; }
+		.toolGroupToggle { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border-radius: 3px; color: var(--bb-muted); background: transparent; }
+		.toolGroupToggle .codicon { font-size: 12px; }
+		.toolGroupToggle:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
+		.toolGroupBody { display: none; gap: 2px; padding: 0 6px 6px 6px; border-top: 1px solid color-mix(in srgb, var(--bb-border) 46%, transparent); }
+		.toolGroup.open .toolGroupBody { display: grid; }
+		.toolCard { width: 100%; align-self: stretch; overflow: hidden; border: 0; border-radius: 4px; color: var(--bb-text); background: transparent; font-size: 11px; line-height: 15px; }
+		.toolCard:hover { background: color-mix(in srgb, var(--bb-border) 22%, transparent); }
+		.toolCard.started, .toolCard.finished { background: transparent; }
+		.toolCard.failed, .toolCard.denied { background: color-mix(in srgb, var(--bb-danger) 5%, transparent); }
+		.toolHead { min-height: 26px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 6px; padding: 3px 4px; }
+		.toolStatusIcon { width: 14px; height: 14px; display: grid; place-items: center; color: var(--bb-muted); }
 		.toolCard.started .toolStatusIcon { color: var(--bb-muted); }
 		.toolCard.started .toolStatusIcon .codicon { animation: bbSpin 1.2s linear infinite; }
 		@keyframes bbSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 		.toolCard.failed .toolStatusIcon, .toolCard.denied .toolStatusIcon { color: var(--bb-danger); }
-		.toolStatusIcon .codicon { font-size: 14px; }
+		.toolStatusIcon .codicon { font-size: 12px; }
 		.toolMain { min-width: 0; display: grid; gap: 1px; }
-		.toolLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-		.toolMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-muted); font-size: 11px; line-height: 14px; }
-		.toolToggle { width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border-radius: 4px; color: var(--bb-muted); background: transparent; }
+		.toolLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; line-height: 14px; }
+		.toolMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-muted); font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; line-height: 14px; }
+		.toolDuration { min-width: 38px; flex: 0 0 auto; padding: 0 5px; border: 0; border-radius: 999px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-border) 22%, transparent); font-size: 10px; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; }
+		.toolToggle { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border-radius: 3px; color: var(--bb-muted); background: transparent; }
+		.toolToggle .codicon { font-size: 12px; }
 		.toolToggle:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
-		.toolDetails { display: none; max-height: 220px; overflow: auto; border-top: 1px solid var(--bb-border); padding: 7px 9px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-bg) 70%, transparent); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; line-height: 15px; white-space: pre-wrap; word-break: break-word; }
+		.toolDetails { display: none; max-height: 220px; overflow: auto; border-top: 1px solid color-mix(in srgb, var(--bb-border) 42%, transparent); padding: 6px 8px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-bg) 78%, transparent); font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; line-height: 14px; white-space: pre-wrap; word-break: break-word; }
 		.toolCard.open .toolDetails { display: block; }
 		.usageRow { width: 100%; box-sizing: border-box; display: flex; align-items: flex-start; gap: 8px; padding: 3px 2px; color: var(--bb-muted); font-size: 12px; line-height: 16px; }
 		.usageToggle { --usage-percent: 0; position: relative; width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; padding: 0; border-radius: 50%; color: var(--bb-text); background: conic-gradient(var(--bb-primary) calc(var(--usage-percent) * 1%), color-mix(in srgb, var(--bb-border) 60%, transparent) 0); }
@@ -719,24 +749,25 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.usageMetric { min-width: 0; display: grid; gap: 2px; }
 		.usageMetricLabel { color: var(--bb-muted); font-size: 10px; line-height: 13px; text-transform: uppercase; }
 		.usageMetricValue { color: var(--bb-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; }
-		.fileCard { width: 100%; box-sizing: border-box; overflow: hidden; border: 1px solid var(--bb-border); border-radius: 7px; background: var(--bb-card); }
-		.fileHeader { height: 30px; box-sizing: border-box; display: flex; align-items: center; gap: 7px; padding: 0 10px; border-bottom: 1px solid var(--bb-border); }
-		.fileName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-text); font-size: 12px; font-weight: 600; }
-		.fileCount { flex: 0 0 auto; font-size: 11px; font-weight: 600; }
+		.fileCard { width: 100%; overflow: hidden; border: 1px solid color-mix(in srgb, var(--bb-border) 72%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--bb-card) 54%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--bb-primary) 34%, transparent); }
+		.fileHeader { min-height: 34px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 7px 9px 7px 10px; border-bottom: 1px solid color-mix(in srgb, var(--bb-border) 70%, transparent); }
+		.fileName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-text); font-family: var(--vscode-editor-font-family, monospace); font-size: 11.5px; font-weight: 600; }
+		.fileCount { flex: 0 0 auto; font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
 		.fileCount.add { color: var(--bb-success); }
 		.fileCount.remove { color: var(--bb-danger); }
-		.diffLine { min-height: 16px; box-sizing: border-box; padding: 0 10px; color: var(--bb-text); font-family: var(--vscode-editor-font-family, monospace); font-size: 11.5px; line-height: 16px; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+		.diffLine { min-height: 18px; padding: 1px 10px; color: var(--bb-text); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; line-height: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
 		.diffLine.add { color: var(--bb-success); background: var(--bb-success-bg); }
 		.diffLine.remove { color: var(--bb-danger); background: var(--bb-danger-bg); }
-		.reviewWrap { width: 100%; box-sizing: border-box; padding: 0; }
-		.reviewCard { width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 5px; padding: 8px; border: 1px solid var(--bb-border); border-radius: 8px; background: var(--bb-card); }
-		.reviewHeader, .reviewFile { min-height: 24px; display: flex; align-items: center; gap: 7px; overflow: hidden; }
+		.reviewWrap { width: 100%; padding: 0; }
+		.reviewCard { width: 100%; display: flex; flex-direction: column; gap: 1px; padding: 7px 8px; border: 1px solid color-mix(in srgb, var(--bb-border) 78%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--bb-card) 70%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--bb-primary) 50%, transparent); }
+		.reviewHeader { min-height: 28px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 7px; }
+		.reviewFile { min-height: 25px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 7px; overflow: hidden; padding: 2px 0; border-top: 1px solid color-mix(in srgb, var(--bb-border) 46%, transparent); }
 		.typeDot { width: 16px; height: 16px; flex: 0 0 auto; display: grid; place-items: center; color: var(--bb-muted); }
 		.typeDot .codicon { font-size: 14px; }
-		.reviewTitle { color: var(--bb-text); font-size: 13px; font-weight: 600; }
-		.reviewFileName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-text); font-size: 12.5px; font-weight: 600; }
-		.reviewButton { min-width: 50px; min-height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 3px 8px; border-radius: 4px; color: #fff; background: var(--bb-primary); font-size: 11px; }
-		.reviewButton.secondary { color: var(--bb-primary); background: transparent; }
+		.reviewTitle { min-width: 0; color: var(--bb-text); font-size: 12.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.reviewFileName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-text); font-family: var(--vscode-editor-font-family, monospace); font-size: 11.5px; font-weight: 600; }
+		.reviewButton { min-width: 52px; min-height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 3px 9px; border-radius: 4px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); font-size: 11.5px; font-weight: 600; }
+		.reviewButton.secondary { color: var(--bb-muted); background: transparent; }
 		.reviewButton:disabled { cursor: default; color: var(--bb-muted); background: transparent; }
 		.questionCard { width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 7px; padding: 10px; border: 1px solid var(--bb-border); border-radius: 10px; background: var(--bb-bg); }
 		.questionHeader { display: flex; align-items: flex-start; gap: 7px; }
@@ -763,7 +794,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.historyItemStatus { flex: 0 0 auto; color: var(--bb-success); }
 		.historyItemStatus.running { color: var(--bb-muted); }
 		.historyItemStatus.failed, .historyItemStatus.cancelled { color: var(--bb-danger); }
-		.status { width: 100%; box-sizing: border-box; margin: 0 auto; color: var(--bb-muted); font-size: 11px; padding: 0 1px 5px; min-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.statusBar { width: 100%; min-width: 0; min-height: 24px; display: flex; align-items: center; gap: 7px; padding: 3px 10px 4px; border-bottom: 1px solid color-mix(in srgb, var(--bb-border) 68%, transparent); background: color-mix(in srgb, var(--bb-bg) 96%, var(--bb-surface)); }
+		.runClock { flex: 0 0 auto; min-width: 42px; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--bb-border) 62%, transparent); border-radius: 999px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-bg) 72%, transparent); font-size: 10.5px; line-height: 14px; font-variant-numeric: tabular-nums; }
+		.status { flex: 1 1 auto; min-width: 0; color: var(--bb-muted); font-size: 11px; min-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		form { display: block; width: 100%; margin: 0 auto; }
 		.composerCard { min-height: 98px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--bb-border); border-radius: 10px; background: color-mix(in srgb, var(--vscode-input-background, var(--bb-card)) 92%, var(--bb-bg)); overflow: hidden; box-shadow: 0 1px 3px color-mix(in srgb, var(--bb-shadow) 40%, transparent); transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
 		.composerCard:hover { border-color: color-mix(in srgb, var(--bb-border) 60%, var(--bb-primary) 20%); box-shadow: 0 2px 8px color-mix(in srgb, var(--bb-shadow) 60%, transparent); }
@@ -782,6 +815,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.iconButton.active { color: var(--bb-primary); background: transparent; }
 		.iconButton.recording { color: var(--bb-danger); background: transparent; }
 		.iconButton:disabled { cursor: default; color: var(--vscode-disabledForeground); background: transparent; outline: 0; }
+		.stopButton { display: none; color: var(--bb-danger); }
+		.stopButton.visible { display: inline-grid; }
+		.stopButton:hover { color: var(--vscode-errorForeground, var(--bb-danger)); background: color-mix(in srgb, var(--bb-danger) 12%, transparent); border-radius: 4px; }
 		.composerMenuButton { width: 28px; min-width: 28px; grid-template-columns: 1fr auto; padding: 0; }
 		.composerMenuButton .codicon-add { font-size: 16px; }
 		.composerMenuButton .codicon-chevron-down { margin-left: -5px; font-size: 11px; }
@@ -878,6 +914,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			<div class="root">
 				${header}
 				${recentTabs}
+				<div class="statusBar">
+					<div id="runClock" class="runClock" hidden>00:00</div>
+					<div id="status" class="status">Ready.</div>
+				</div>
 				${checkpointStrip}
 				<div class="viewStack">
 				<div id="log" class="log viewPane active" role="tabpanel" ${logLabel}>
@@ -938,7 +978,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				</div>
 				<div id="popoverBody" class="popoverBody"></div>
 			</div>
-			<div id="status" class="status">Ready.</div>
 			<form id="form">
 					<div class="composerCard">
 							<textarea id="prompt" placeholder="Message Backboard..."></textarea>
@@ -956,6 +995,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 								<button id="mcpBtn" class="iconButton featureButton" type="button" title="MCP tools" aria-label="MCP tools"><span class="codicon codicon-tools"></span></button>
 								<button id="usageBtn" class="iconButton featureButton usageFeatureButton" type="button" title="Usage details" aria-label="Usage details"><span class="codicon codicon-pulse"></span></button>
 								<button id="voiceBtn" class="iconButton" type="button" title="Start speech-to-text" aria-label="Start speech-to-text"><span class="codicon codicon-mic"></span></button>
+								<button id="stopBtn" class="iconButton stopButton" type="button" title="Stop generation" aria-label="Stop generation"><span class="codicon codicon-debug-stop"></span></button>
 								<button id="sendBtn" class="iconButton sendButton" type="submit" title="Send" aria-label="Send" disabled><span class="codicon codicon-send"></span></button>
 							</div>
 						</div>
@@ -968,6 +1008,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		const root = document.querySelector('.root');
 		const log = document.getElementById('log');
 		const status = document.getElementById('status');
+		const runClock = document.getElementById('runClock');
 		let emptyState = document.getElementById('emptyState');
 		const historyPane = document.getElementById('historyPane');
 		const historyList = document.getElementById('historyList');
@@ -999,6 +1040,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			mcp: document.getElementById('mcpBtn'),
 			usage: document.getElementById('usageBtn'),
 			voice: document.getElementById('voiceBtn'),
+			stop: document.getElementById('stopBtn'),
 			send: document.getElementById('sendBtn')
 		};
 		const tabButtons = {
@@ -1027,16 +1069,21 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		let activeHistoryId = typeof persistedState.activeHistoryId === 'string' ? persistedState.activeHistoryId : undefined;
 		let promptQueue = Array.isArray(persistedState.promptQueue) ? persistedState.promptQueue : [];
 		let runInProgress = false;
+		let stopRequested = false;
 		let activePopover = undefined;
 		let activeAnchor = undefined;
 		let modelFilter = '';
 		let disabledModelProviders = new Set();
 		let modelProviderFiltersOpen = false;
 		let currentAssistantCard = undefined;
+		let currentToolGroup = undefined;
 		let activeToolRows = [];
 		let fileChanges = [];
 		let latestUsage = undefined;
 		let accountUsage = undefined;
+		let runStartedAt = undefined;
+		let runTimer = undefined;
+		let currentPromptClock = undefined;
 		let currentWorkspace = typeof persistedState.currentWorkspace === 'string' ? persistedState.currentWorkspace : '';
 		let restoringHistory = false;
 		let voiceRecorder = undefined;
@@ -1102,6 +1149,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function toolName(tool) {
 			return tool && tool.function && tool.function.name || tool && (tool.name || tool.tool_name || tool.toolName || tool.function_name || tool.functionName) || 'tool';
 		}
+		function toolKey(tool) {
+			return tool && (tool.id || tool.call_id || tool.callId || tool.tool_call_id || tool.toolCallId) || toolName(tool);
+		}
 		function toolArgs(tool) {
 			const raw = tool && tool.function && tool.function.arguments || tool && (tool.arguments || tool.args || tool.input);
 			if (!raw) {
@@ -1125,6 +1175,56 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			const parts = currentWorkspace.split(/[\\/]+/).filter(Boolean);
 			return parts[parts.length - 1] || currentWorkspace;
+		}
+		function formatElapsed(ms) {
+			const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+			const hours = Math.floor(totalSeconds / 3600);
+			const minutes = Math.floor((totalSeconds % 3600) / 60);
+			const seconds = totalSeconds % 60;
+			const two = value => String(value).padStart(2, '0');
+			return hours ? hours + ':' + two(minutes) + ':' + two(seconds) : two(minutes) + ':' + two(seconds);
+		}
+		function updateRunClock() {
+			if (!runInProgress || runStartedAt === undefined) {
+				if (runClock) {
+					runClock.hidden = true;
+					runClock.textContent = '00:00';
+				}
+				return;
+			}
+			const elapsed = formatElapsed(Date.now() - runStartedAt);
+			if (runClock) {
+				runClock.hidden = false;
+				runClock.textContent = elapsed;
+				runClock.title = 'Running for ' + elapsed;
+			}
+			if (currentPromptClock) {
+				currentPromptClock.textContent = elapsed;
+				currentPromptClock.title = 'Prompt running for ' + elapsed;
+			}
+			for (const item of activeToolRows) {
+				if (item.duration && item.startedAt !== undefined) {
+					item.duration.textContent = formatElapsed(Date.now() - item.startedAt);
+				}
+			}
+		}
+		function startRunTimer(startedAt) {
+			runStartedAt = typeof startedAt === 'number' ? startedAt : Date.now();
+			window.clearInterval(runTimer);
+			updateRunClock();
+			runTimer = window.setInterval(updateRunClock, 1000);
+		}
+		function stopRunTimer() {
+			if (currentPromptClock && runStartedAt !== undefined) {
+				const elapsed = formatElapsed(Date.now() - runStartedAt);
+				currentPromptClock.textContent = elapsed;
+				currentPromptClock.title = 'Prompt ran for ' + elapsed;
+			}
+			window.clearInterval(runTimer);
+			runTimer = undefined;
+			runStartedAt = undefined;
+			currentPromptClock = undefined;
+			updateRunClock();
 		}
 		function updateStatus(text) {
 			const value = text || 'Ready.';
@@ -1176,7 +1276,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		}
 		function syncRootHeight() {
 			if (root instanceof HTMLElement) {
-				root.style.height = window.innerHeight + 'px';
+				const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight;
+				root.style.height = Math.max(0, Math.floor(viewportHeight)) + 'px';
 			}
 		}
 		function historyTitle(promptText) {
@@ -1394,6 +1495,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			restoringHistory = true;
 			log.innerHTML = checkpoint.html || '';
 			currentAssistantCard = undefined;
+			currentToolGroup = undefined;
 			activeToolRows = [];
 			fileChanges = Array.isArray(checkpoint.fileChanges) ? checkpoint.fileChanges.slice(0) : [];
 			promptQueue = Array.isArray(checkpoint.promptQueue) ? checkpoint.promptQueue.slice(0) : [];
@@ -1409,7 +1511,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			renderRecentTabs();
 			renderCheckpoints();
 			setActiveView('chat');
-			log.scrollTop = log.scrollHeight;
+			scrollConversation(true);
 			persistPanelState();
 			updateStatus('Checkpoint restored.');
 		}
@@ -1426,6 +1528,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			restoringHistory = true;
 			log.innerHTML = entry.html || '';
 			currentAssistantCard = undefined;
+			currentToolGroup = undefined;
 			activeToolRows = [];
 			fileChanges = Array.isArray(entry.fileChanges) ? entry.fileChanges.slice(0) : [];
 			promptQueue = Array.isArray(entry.promptQueue) ? entry.promptQueue.slice(0) : [];
@@ -1434,7 +1537,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			syncEmptyState();
 			renderQueue();
 			setActiveView('chat');
-			log.scrollTop = log.scrollHeight;
+			scrollConversation(true);
 			renderHistory();
 			renderRecentTabs();
 			renderCheckpoints();
@@ -1504,6 +1607,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			buttons.usage.title = latestUsage ? 'Usage: ' + latestUsage.summary : 'Usage details';
 			buttons.usage.setAttribute('aria-label', buttons.usage.title);
 			setActive(buttons.voice, voiceRecording);
+			buttons.stop.classList.toggle('visible', runInProgress);
+			buttons.stop.disabled = !runInProgress || stopRequested;
+			buttons.stop.title = stopRequested ? 'Stopping...' : 'Stop generation';
+			buttons.stop.setAttribute('aria-label', buttons.stop.title);
 			const hasPrompt = prompt.value.trim().length > 0;
 			buttons.send.disabled = !hasPrompt;
 			buttons.send.classList.toggle('ready', hasPrompt);
@@ -1686,8 +1793,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const selected = modelSource().find(model => model.provider === provider && model.name === controls.model.value);
 			return [providerDisplayName(provider), selected?.displayName || selected?.name || controls.model.value].filter(Boolean).join(' / ');
 		}
+		function currentModel() {
+			const provider = controls.provider.value;
+			return modelSource().find(model => model.provider === provider && model.name === controls.model.value);
+		}
 		function isVisibleModel(model) {
-			return !['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics'].includes(providerKey(model.provider));
+			const modelType = String(model?.modelType || model?.model_type || '').trim().toLowerCase();
+			return !['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics'].includes(providerKey(model.provider)) && (!modelType || modelType === 'llm');
 		}
 		function section(title, content) {
 			return '<div class="popoverSection"><div class="popoverSectionTitle">' + escapeHtml(title) + '</div>' + content + '</div>';
@@ -1708,8 +1820,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			return '$' + value.toFixed(2) + '/M';
 		}
 		function modelPricePair(model) {
-			const explicitInput = numericModelValue(model, ['inputPricePerMillion', 'inputPrice', 'promptPrice', 'promptPricePerMillion']);
-			const explicitOutput = numericModelValue(model, ['outputPricePerMillion', 'outputPrice', 'completionPrice', 'completionPricePerMillion']);
+			const explicitInput = numericModelValue(model, ['inputPricePerMillion', 'inputCostPer1mTokens', 'input_cost_per_1m_tokens', 'inputPrice', 'promptPrice', 'promptPricePerMillion']);
+			const explicitOutput = numericModelValue(model, ['outputPricePerMillion', 'outputCostPer1mTokens', 'output_cost_per_1m_tokens', 'outputPrice', 'completionPrice', 'completionPricePerMillion']);
 			if (explicitInput !== undefined && explicitOutput !== undefined) {
 				return [explicitInput, explicitOutput];
 			}
@@ -1733,7 +1845,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				return model.pricing;
 			}
 			const pair = modelPricePair(model);
-			return pair ? formatModelPrice(pair[0]) + ' in, ' + formatModelPrice(pair[1]) + ' out' : '';
+			return pair ? formatModelPrice(pair[0]) + ' in, ' + formatModelPrice(pair[1]) + ' out' : 'Pricing unavailable';
 		}
 		function choice(action, value, label, meta, selected, disabled, extraAttrs, icon) {
 			const iconHtml = icon ? '<span class="choiceIcon"><span class="codicon codicon-' + attr(icon) + '"></span></span>' : '';
@@ -1993,7 +2105,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				const option = document.createElement('option');
 				option.value = model.name;
 				option.textContent = [providerDisplayName(provider), model.displayName || model.name].filter(Boolean).join(' / ');
-				option.title = [providerDisplayName(provider), model.name, model.contextLimit ? model.contextLimit + ' tokens' : '', model.supportsThinking ? 'thinking' : ''].filter(Boolean).join(' / ');
+				option.title = [providerDisplayName(provider), model.name, model.contextLimit ? model.contextLimit + ' tokens' : '', model.supportsThinking ? 'thinking' : '', modelPriceLabel(model)].filter(Boolean).join(' / ');
 				controls.model.appendChild(option);
 			}
 			setSelect(controls.model, settings.model || '');
@@ -2062,7 +2174,19 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			requestUsageSnapshot();
 			openPopover('usage', event.currentTarget);
 		});
+		buttons.usage.addEventListener('mouseenter', event => openPopover('usage', event.currentTarget));
+		buttons.usage.addEventListener('focus', event => openPopover('usage', event.currentTarget));
 		buttons.voice.addEventListener('click', toggleVoiceCapture);
+		buttons.stop.addEventListener('click', () => {
+			if (!runInProgress) {
+				return;
+			}
+			stopRequested = true;
+			closePopover();
+			updateStatus('Stopping Backboard.');
+			vscode.postMessage({ type: 'cancel' });
+			syncComposerButtons();
+		});
 		newChatButton?.addEventListener('click', startNewChat);
 		inlineNewChatButton?.addEventListener('click', startNewChat);
 		inlineHistoryButton?.addEventListener('click', () => setActiveView(activeView === 'history' ? 'chat' : 'history'));
@@ -2317,6 +2441,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				positionPopover(activeAnchor);
 			}
 		});
+		window.visualViewport?.addEventListener('resize', syncRootHeight);
 		document.getElementById('form').addEventListener('submit', event => {
 			event.preventDefault();
 			const text = prompt.value.trim();
@@ -2332,25 +2457,48 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			prompt.value = '';
 			syncComposerButtons();
 		});
-		function scrollConversation() {
+		function isNearConversationBottom() {
+			return log.scrollHeight - log.scrollTop - log.clientHeight < 96;
+		}
+		function scrollConversation(force) {
+			const shouldStick = force || runInProgress || isNearConversationBottom();
 			syncEmptyState();
 			saveActiveHistory();
-			log.scrollTop = log.scrollHeight;
+			if (shouldStick) {
+				const scrollToLatest = () => {
+					log.scrollTop = log.scrollHeight;
+					const last = log.lastElementChild;
+					if (last && last !== emptyState) {
+						last.scrollIntoView({ block: 'end' });
+					}
+				};
+				scrollToLatest();
+				requestAnimationFrame(() => {
+					scrollToLatest();
+					requestAnimationFrame(() => {
+						scrollToLatest();
+					});
+				});
+			}
 		}
 		function clearConversation() {
 			saveActiveHistory();
 			log.textContent = '';
 			log.appendChild(ensureEmptyState());
 			currentAssistantCard = undefined;
+			currentToolGroup = undefined;
 			activeToolRows = [];
 			fileChanges = [];
 			promptQueue = [];
 			latestUsage = undefined;
 			activeHistoryId = undefined;
+			runInProgress = false;
+			stopRequested = false;
+			stopRunTimer();
 			syncComposerButtons();
 			renderRecentTabs();
 			renderCheckpoints();
-			scrollConversation();
+			scrollConversation(true);
 		}
 		function queuePrompt(text, queuedOptions) {
 			const value = String(text || '').trim();
@@ -2412,11 +2560,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				block.appendChild(card);
 			}
 			log.appendChild(block);
-			scrollConversation();
+			scrollConversation(true);
 		}
 		function sendPromptToHost(text, queuedOptions) {
 			const chatId = beginHistoryRun(text);
 			runInProgress = true;
+			startRunTimer(Date.now());
 			renderQueue();
 			vscode.postMessage({ type: 'send', chatId, prompt: text, options: queuedOptions || options() });
 		}
@@ -2437,6 +2586,19 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			span.className = 'codicon codicon-' + name;
 			return span;
 		}
+		function latestTranscriptNode() {
+			const children = Array.from(log.children);
+			for (let index = children.length - 1; index >= 0; index--) {
+				const child = children[index];
+				if (child !== emptyState) {
+					return child;
+				}
+			}
+			return undefined;
+		}
+		function breakAssistantStream() {
+			currentAssistantCard = undefined;
+		}
 			function appendMessage(role, text) {
 				const card = document.createElement('div');
 				card.className = 'messageCard ' + role;
@@ -2445,6 +2607,14 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				body.textContent = text || '';
 				card.appendChild(body);
 				if (role === 'user') {
+					if (runInProgress && runStartedAt !== undefined) {
+						const meta = document.createElement('div');
+						meta.className = 'messageMeta';
+						meta.textContent = formatElapsed(Date.now() - runStartedAt);
+						meta.title = 'Prompt running';
+						card.appendChild(meta);
+						currentPromptClock = meta;
+					}
 					const actions = document.createElement('div');
 					actions.className = 'messageActions';
 					const edit = document.createElement('button');
@@ -2470,6 +2640,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			return body;
 		}
 		function appendStatus(text, kind) {
+			breakAssistantStream();
 			const row = document.createElement('div');
 			row.className = 'statusRow ' + (kind || '');
 			const marker = document.createElement('span');
@@ -2523,17 +2694,103 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const max = 12000;
 			return text.length > max ? text.slice(0, max) + '\\n\\n[truncated]' : text;
 		}
+		function ensureToolGroup() {
+			if (currentToolGroup?.group?.isConnected && currentToolGroup?.body?.isConnected) {
+				return currentToolGroup;
+			}
+			const group = document.createElement('div');
+			group.className = 'toolGroup running';
+			const head = document.createElement('button');
+			head.className = 'toolGroupHead';
+			head.type = 'button';
+			head.title = 'Show commands';
+			head.setAttribute('aria-expanded', 'false');
+			const statusIcon = document.createElement('span');
+			statusIcon.className = 'toolGroupStatus';
+			statusIcon.appendChild(icon('sync'));
+			const main = document.createElement('span');
+			main.className = 'toolGroupMain';
+			const title = document.createElement('span');
+			title.className = 'toolGroupTitle';
+			title.textContent = 'Working...';
+			const meta = document.createElement('span');
+			meta.className = 'toolGroupMeta';
+			meta.textContent = 'Preparing commands';
+			main.append(title, meta);
+			const toggleIcon = icon('chevron-down');
+			toggleIcon.classList.add('toolGroupToggleIcon');
+			const toggle = document.createElement('span');
+			toggle.className = 'toolGroupToggle';
+			toggle.appendChild(toggleIcon);
+			head.append(statusIcon, main, toggle);
+			const body = document.createElement('div');
+			body.className = 'toolGroupBody';
+			head.addEventListener('click', () => {
+				const open = group.classList.toggle('open');
+				head.title = open ? 'Hide commands' : 'Show commands';
+				head.setAttribute('aria-expanded', open ? 'true' : 'false');
+				toggle.textContent = '';
+				toggle.appendChild(icon(open ? 'chevron-up' : 'chevron-down'));
+				scrollConversation();
+			});
+			group.append(head, body);
+			log.appendChild(group);
+			currentToolGroup = { group, body, title, meta, statusIcon, toggle };
+			updateToolGroupSummary();
+			return currentToolGroup;
+		}
+		function updateToolGroupSummary() {
+			const groupState = currentToolGroup;
+			if (!groupState?.group?.isConnected || !groupState?.body?.isConnected) {
+				return;
+			}
+			const cards = Array.from(groupState.body.querySelectorAll('.toolCard'));
+			const total = cards.length;
+			const running = cards.filter(card => card.classList.contains('started')).length;
+			const failed = cards.filter(card => card.classList.contains('failed') || card.classList.contains('denied')).length;
+			groupState.group.classList.toggle('running', running > 0);
+			groupState.group.classList.toggle('failed', failed > 0);
+			groupState.title.textContent = running > 0 ? 'Working...' : failed > 0 ? 'Finished with errors' : 'Finished working';
+			groupState.meta.textContent = total === 0
+				? 'Preparing commands'
+				: total + ' command' + (total === 1 ? '' : 's') + (running ? ', ' + running + ' running' : '') + (failed ? ', ' + failed + ' failed' : '');
+			groupState.statusIcon.textContent = '';
+			groupState.statusIcon.appendChild(icon(failed ? 'error' : running ? 'sync' : 'check'));
+		}
 		function appendTool(item) {
+			breakAssistantStream();
+			const groupState = ensureToolGroup();
 			const status = item?.status || 'updated';
 			const name = item?.name || 'tool';
+			const key = item?.key || toolKey(item);
+			if (status === 'failed' || status === 'denied') {
+				console.error('[Backboard tool failure]', {
+					status,
+					name,
+					key,
+					args: item?.args,
+					error: item?.error,
+					output: item?.output
+				});
+			}
 			let existingIndex = -1;
 			for (let index = activeToolRows.length - 1; index >= 0; index--) {
-				if (activeToolRows[index].name === name) {
+				if (activeToolRows[index].key === key) {
 					existingIndex = index;
 					break;
 				}
 			}
-			const row = existingIndex >= 0 ? activeToolRows[existingIndex].row : document.createElement('div');
+			if (existingIndex < 0 && status !== 'started') {
+				for (let index = activeToolRows.length - 1; index >= 0; index--) {
+					if (activeToolRows[index].name === name) {
+						existingIndex = index;
+						break;
+					}
+				}
+			}
+			const existing = existingIndex >= 0 ? activeToolRows[existingIndex] : undefined;
+			const row = existing ? existing.row : document.createElement('div');
+			const startedAt = existing?.startedAt ?? Date.now();
 			const detail = toolPrimaryDetail(item);
 			const details = toolDetailsText(item);
 			row.className = 'toolCard ' + status;
@@ -2552,13 +2809,16 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			meta.className = 'toolMeta';
 			meta.textContent = detail || (details ? 'View details' : 'Local Backboard tool');
 			main.append(label, meta);
+			const duration = document.createElement('span');
+			duration.className = 'toolDuration';
+			duration.textContent = status === 'started' ? formatElapsed(Date.now() - startedAt) : existing?.duration?.textContent || formatElapsed(Date.now() - startedAt);
 			const toggle = document.createElement('button');
 			toggle.className = 'toolToggle';
 			toggle.type = 'button';
 			toggle.title = 'Show tool details';
 			toggle.setAttribute('aria-label', 'Show tool details');
 			toggle.appendChild(icon('chevron-down'));
-			head.append(statusIcon, main, toggle);
+			head.append(statusIcon, main, duration, toggle);
 			const body = document.createElement('pre');
 			body.className = 'toolDetails';
 			body.textContent = clippedToolText(details || 'No details reported.');
@@ -2573,11 +2833,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			if (existingIndex >= 0) {
 				activeToolRows.splice(existingIndex, 1);
 			} else {
-				log.appendChild(row);
+				groupState.body.appendChild(row);
 			}
 			if (status === 'started') {
-				activeToolRows.push({ name, row, label });
+				activeToolRows.push({ key, name, row, label, duration, startedAt });
 			}
+			updateToolGroupSummary();
 			scrollConversation();
 		}
 		function numberValue(value) {
@@ -2637,6 +2898,25 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: value < 1 ? 4 : 2 }).format(value);
 		}
+		function estimateTokenCost(input, output, model) {
+			const pair = modelPricePair(model);
+			if (!pair) {
+				return undefined;
+			}
+			return ((input ?? 0) * pair[0] + (output ?? 0) * pair[1]) / 1000000;
+		}
+		function formatTokenSpeed(total, durationValue, durationKey) {
+			if (total === undefined || durationValue === undefined) {
+				return undefined;
+			}
+			const lowerKey = String(durationKey || '').toLowerCase();
+			const ms = lowerKey.includes('ms') || lowerKey.includes('millis') ? durationValue : durationValue >= 1000 ? durationValue : durationValue * 1000;
+			if (!Number.isFinite(ms) || ms <= 0) {
+				return undefined;
+			}
+			const tokensPerSecond = total / (ms / 1000);
+			return new Intl.NumberFormat(undefined, { maximumFractionDigits: tokensPerSecond < 10 ? 1 : 0 }).format(tokensPerSecond) + ' tok/s';
+		}
 		function labelFromKey(key) {
 			return String(key || '')
 				.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -2667,6 +2947,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const model = firstString(source, ['model', 'modelName', 'model_name']);
 			const timeKey = ['durationMs', 'durationInMillis', 'elapsedMs', 'timeMs', 'totalTimeMs', 'duration', 'elapsed', 'time'].find(key => numberValue(source[key]) !== undefined);
 			const spendKey = ['spendage', 'spend', 'cost', 'totalCost', 'total_cost', 'usd', 'amountUsd', 'amount_usd'].find(key => numberValue(source[key]) !== undefined);
+			const durationValue = timeKey ? numberValue(source[timeKey]) : undefined;
+			const reportedSpend = spendKey ? numberValue(source[spendKey]) : undefined;
+			const estimatedSpend = reportedSpend ?? estimateTokenCost(input, output, currentModel());
+			const tokenSpeed = formatTokenSpeed(total, durationValue, timeKey);
 			const known = new Set(['inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens', 'outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens', 'totalTokens', 'total_tokens', 'tokens', 'contextUsage', 'model', 'modelName', 'model_name', timeKey, spendKey].filter(Boolean));
 			const metrics = [];
 			if (input !== undefined) {
@@ -2697,10 +2981,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				metrics.push(['Model', model]);
 			}
 			if (timeKey) {
-				metrics.push(['Time', formatDuration(numberValue(source[timeKey]), timeKey)]);
+				metrics.push(['Time', formatDuration(durationValue, timeKey)]);
 			}
-			if (spendKey) {
-				metrics.push(['Spend', formatMoney(numberValue(source[spendKey]))]);
+			if (tokenSpeed) {
+				metrics.push(['Speed', tokenSpeed]);
+			}
+			if (estimatedSpend !== undefined) {
+				metrics.push([reportedSpend !== undefined ? 'Cost' : 'Est. Cost', formatMoney(estimatedSpend)]);
 			}
 			for (const [key, value] of Object.entries(source)) {
 				if (known.has(key) || value === undefined || value === null || typeof value === 'object') {
@@ -2711,7 +2998,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			return {
 				percent: Math.max(0, Math.min(100, computedPercent ?? 0)),
-				summary: [total !== undefined ? formatNumber(total) + ' tokens' : undefined, computedPercent !== undefined ? formatPercent(computedPercent) + ' context' : undefined, model].filter(Boolean).join(' · ') || 'Usage details',
+				summary: [total !== undefined ? formatNumber(total) + ' tokens' : undefined, estimatedSpend !== undefined ? formatMoney(estimatedSpend) : undefined, tokenSpeed, computedPercent !== undefined ? formatPercent(computedPercent) + ' context' : undefined, model].filter(Boolean).join(' · ') || 'Usage details',
 				metrics
 			};
 		}
@@ -2766,60 +3053,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					positionPopover(activeAnchor);
 				}
 			}
-			const row = document.createElement('div');
-			row.className = 'usageRow';
-			const toggle = document.createElement('button');
-			toggle.className = 'usageToggle';
-			toggle.type = 'button';
-			toggle.title = 'Show usage details';
-			toggle.setAttribute('aria-expanded', 'false');
-			toggle.style.setProperty('--usage-percent', String(usage.percent));
-			const wheelValue = document.createElement('span');
-			wheelValue.className = 'usageWheelValue';
-			wheelValue.textContent = usage.percent ? usage.percent < 1 ? '<1%' : Math.round(usage.percent) + '%' : 'i';
-			toggle.appendChild(wheelValue);
-			const main = document.createElement('div');
-			main.className = 'usageMain';
-			const summary = document.createElement('div');
-			summary.className = 'usageSummary';
-			const title = document.createElement('span');
-			title.className = 'usageTitle';
-			title.textContent = 'Usage';
-			const meta = document.createElement('span');
-			meta.className = 'usageMeta';
-			meta.textContent = usage.summary;
-			summary.append(title, meta);
-			const details = document.createElement('div');
-			details.className = 'usageDetails';
-			for (const [labelText, valueText] of usage.metrics) {
-				const metric = document.createElement('div');
-				metric.className = 'usageMetric';
-				const label = document.createElement('div');
-				label.className = 'usageMetricLabel';
-				label.textContent = labelText;
-				const value = document.createElement('div');
-				value.className = 'usageMetricValue';
-				value.textContent = valueText || '0';
-				metric.append(label, value);
-				details.appendChild(metric);
-			}
-			main.append(summary, details);
-			toggle.addEventListener('click', () => {
-				const open = !row.classList.contains('open');
-				row.classList.toggle('open', open);
-				toggle.title = open ? 'Hide usage details' : 'Show usage details';
-				toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-				scrollConversation();
-			});
-			row.append(toggle, main);
-			log.appendChild(row);
-			scrollConversation();
-			return row;
+			return undefined;
 		}
 		function appendFileChange(change) {
 			if (!change || !change.path) {
 				return;
 			}
+			breakAssistantStream();
 			fileChanges = fileChanges.filter(item => item.path !== change.path).concat(change);
 			const card = document.createElement('div');
 			card.className = 'fileCard';
@@ -2849,11 +3089,18 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			renderReviewBlock();
 			scrollConversation();
 		}
+		function fileChangeTotals() {
+			return fileChanges.reduce((totals, change) => ({
+				added: totals.added + (Number(change.added) || 0),
+				removed: totals.removed + (Number(change.removed) || 0)
+			}), { added: 0, removed: 0 });
+		}
 		function renderReviewBlock() {
 			document.getElementById('reviewBlock')?.remove();
 			if (!fileChanges.length) {
 				return;
 			}
+			const totals = fileChangeTotals();
 			const wrap = document.createElement('div');
 			wrap.id = 'reviewBlock';
 			wrap.className = 'reviewWrap';
@@ -2863,10 +3110,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			header.className = 'reviewHeader';
 			const dot = document.createElement('span');
 			dot.className = 'typeDot';
-			dot.appendChild(icon('question'));
+			dot.appendChild(icon('git-compare'));
 			const title = document.createElement('span');
 			title.className = 'reviewTitle';
-			title.textContent = fileChanges.length + ' ' + (fileChanges.length === 1 ? 'File' : 'Files');
+			title.textContent = 'Changed ' + fileChanges.length + ' ' + (fileChanges.length === 1 ? 'file' : 'files') + ', +' + totals.added + ' -' + totals.removed;
 			const spacer = document.createElement('span');
 			spacer.className = 'headerSpacer';
 			const undo = document.createElement('button');
@@ -2917,14 +3164,19 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				appendRow(role, text);
 				return;
 			}
-			const target = currentAssistantCard?.querySelector('.messageText') || appendMessage('assistant', '');
-			target.textContent += text || '';
+			const activeAssistant = currentAssistantCard && latestTranscriptNode() === currentAssistantCard ? currentAssistantCard : undefined;
+			const target = activeAssistant?.querySelector('.messageText') || appendMessage('assistant', '');
+			const incoming = text || '';
+			const current = target.textContent || '';
+			const spacer = current && incoming && /[.:!?)]$/.test(current) && /^[A-Z0-9"'(]/.test(incoming) ? ' ' : '';
+			target.textContent += spacer + incoming;
 			scrollConversation();
 		}
 		function renderQuestion(payload) {
 			if (!payload || !payload.id) {
 				return;
 			}
+			breakAssistantStream();
 			document.getElementById('question-' + payload.id)?.remove();
 			const card = document.createElement('div');
 			card.id = 'question-' + payload.id;
@@ -3015,6 +3267,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			return urls;
 		}
 		function renderMedia(role, payload) {
+			breakAssistantStream();
 			const row = document.createElement('div');
 			row.className = 'mediaBlock';
 			row.textContent = role === 'voice' ? 'Voice output' : 'Generated media';
@@ -3048,20 +3301,35 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					beginHistoryRun(message.prompt || '');
 				}
 				runInProgress = true;
+				stopRequested = false;
+				startRunTimer(Date.now());
 				setActiveView('chat');
 				appendMessage('user', message.prompt || '');
+				syncComposerButtons();
+				scrollConversation(true);
 			} else if (message.type === 'runFinished') {
 				runInProgress = false;
+				stopRequested = false;
+				stopRunTimer();
 				currentAssistantCard = undefined;
+				syncComposerButtons();
 				saveActiveHistory('Done');
 				renderHistory();
 				drainPromptQueue();
 			} else if (message.type === 'status') {
 				updateStatus(message.text || '');
 				if (/cancelled/i.test(message.text || '')) {
+					runInProgress = false;
+					stopRequested = false;
+					stopRunTimer();
+					syncComposerButtons();
 					saveActiveHistory('Cancelled');
 					renderHistory();
 				} else if (/failed/i.test(message.text || '')) {
+					runInProgress = false;
+					stopRequested = false;
+					stopRunTimer();
+					syncComposerButtons();
 					saveActiveHistory('Failed');
 					renderHistory();
 				}
@@ -3124,7 +3392,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			} else if (message.type === 'toolRequested') {
 				const calls = message.payload || [];
 				for (const call of calls) {
-					appendTool({ status: 'started', name: toolName(call), args: toolArgs(call) });
+					appendTool({ status: 'started', key: toolKey(call), name: toolName(call), args: toolArgs(call) });
 				}
 			} else if (message.type === 'toolFinished') {
 				appendTool(message.payload || {});
@@ -3149,6 +3417,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 
 class BackboardBridge implements vscode.Disposable {
 	private static readonly modelCacheTtl = 24 * 60 * 60 * 1000;
+	private static readonly modelCacheVersion = 2;
 	private child: cp.ChildProcessWithoutNullStreams | undefined;
 	private readonly pending = new Map<string, PendingRequest>();
 	private readonly output = vscode.window.createOutputChannel('Backboard Bridge');
@@ -3202,10 +3471,10 @@ class BackboardBridge implements vscode.Disposable {
 		try {
 			const parsed: unknown = JSON.parse(await fs.promises.readFile(this.modelCachePath(), 'utf8'));
 			const env = isObjectRecord(parsed) ? stringValueFromRecord(parsed.env) : undefined;
-			if (!isObjectRecord(parsed) || env !== currentBackboardEnv() || typeof parsed.fetchedAt !== 'number' || !Array.isArray(parsed.models)) {
+			if (!isObjectRecord(parsed) || env !== currentBackboardEnv() || parsed.version !== BackboardBridge.modelCacheVersion || typeof parsed.fetchedAt !== 'number' || !Array.isArray(parsed.models)) {
 				return undefined;
 			}
-			return { env, fetchedAt: parsed.fetchedAt, models: parsed.models.filter(isBridgeModel).filter(isVisibleBridgeModel) };
+			return { env, version: parsed.version, fetchedAt: parsed.fetchedAt, models: parsed.models.filter(isBridgeModel).filter(isVisibleBridgeModel) };
 		} catch (error) {
 			if (isFileNotFoundError(error) || error instanceof SyntaxError) {
 				return undefined;
@@ -3220,6 +3489,7 @@ class BackboardBridge implements vscode.Disposable {
 		const tempPath = path.join(path.dirname(cachePath), `models.${process.pid}.${Date.now()}.tmp`);
 		const entry: ModelCacheEntry = {
 			env: currentBackboardEnv(),
+			version: BackboardBridge.modelCacheVersion,
 			fetchedAt: Date.now(),
 			models: models.filter(isBridgeModel).filter(isVisibleBridgeModel)
 		};
@@ -3374,21 +3644,51 @@ async function executeToolCalls(bridge: BackboardBridge, toolCalls: unknown[], m
 		const call = parseToolCall(rawCall);
 		const allowed = await approveTool(call.name, call.args, mode);
 		if (!allowed) {
-			response.event?.('toolFinished', { status: 'denied', name: call.name, args: call.args });
+			logToolDiagnostic('denied', call);
+			response.event?.('toolFinished', { status: 'denied', key: call.id, name: call.name, args: call.args });
 			outputs.push(toolOutput(call.id, { success: false, content: 'User denied this tool call.' }));
 			continue;
 		}
 		try {
-			response.event?.('toolFinished', { status: 'started', name: call.name, args: call.args });
+			logToolDiagnostic('started', call);
+			response.event?.('toolFinished', { status: 'started', key: call.id, name: call.name, args: call.args });
 			const result = await executeTool(bridge, call.name, call.args, response, token);
-			response.event?.('toolFinished', { status: 'finished', name: call.name, output: result });
+			logToolDiagnostic('finished', call, result);
+			response.event?.('toolFinished', { status: 'finished', key: call.id, name: call.name, args: call.args, output: result });
 			outputs.push(toolOutput(call.id, { success: true, content: result }));
 		} catch (error) {
-			response.event?.('toolFinished', { status: 'failed', name: call.name, error: error instanceof Error ? error.message : String(error) });
-			outputs.push(toolOutput(call.id, { success: false, content: error instanceof Error ? error.message : String(error) }));
+			const message = error instanceof Error ? error.message : String(error);
+			logToolDiagnostic('failed', call, undefined, error);
+			response.event?.('toolFinished', { status: 'failed', key: call.id, name: call.name, args: call.args, error: message });
+			outputs.push(toolOutput(call.id, { success: false, content: message }));
 		}
 	}
 	return outputs;
+}
+
+function logToolDiagnostic(status: string, call: { id: string; name: string; args: Record<string, unknown> }, output?: unknown, error?: unknown): void {
+	const channel = backboardToolOutput;
+	if (!channel) {
+		return;
+	}
+	const timestamp = new Date().toISOString();
+	channel.appendLine(`[${timestamp}] ${status.toUpperCase()} ${call.name} (${call.id})`);
+	channel.appendLine(`args: ${safeDiagnosticJson(call.args)}`);
+	if (output !== undefined) {
+		channel.appendLine(`output: ${safeDiagnosticJson(output)}`);
+	}
+	if (error !== undefined) {
+		channel.appendLine(`error: ${error instanceof Error ? error.stack || error.message : String(error)}`);
+	}
+	channel.appendLine('');
+}
+
+function safeDiagnosticJson(value: unknown): string {
+	try {
+		return JSON.stringify(value, undefined, 2);
+	} catch {
+		return String(value);
+	}
 }
 
 async function approveTool(name: string, args: Record<string, unknown>, mode: string): Promise<boolean> {
@@ -4197,14 +4497,11 @@ function resolveWorkspaceUri(rawPath: string): vscode.Uri {
 	if (!root) {
 		throw new Error('No workspace folder is open.');
 	}
-	if (path.isAbsolute(rawPath)) {
-		throw new Error('Tool paths must be relative to the workspace.');
-	}
 	const rootPath = path.resolve(root.fsPath);
-	const resolvedPath = path.resolve(rootPath, rawPath);
+	const resolvedPath = path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(rootPath, rawPath);
 	const relativePath = path.relative(rootPath, resolvedPath);
 	if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-		throw new Error('Tool path escapes the workspace.');
+		throw new Error(`Tool path is outside the workspace. Path: ${rawPath}. Workspace: ${rootPath}.`);
 	}
 	return vscode.Uri.file(resolvedPath);
 }

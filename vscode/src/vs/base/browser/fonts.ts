@@ -9,12 +9,12 @@ import { isElectron, isMacintosh, isWindows } from '../common/platform.js';
 
 /**
  * The best font-family to be used in CSS:
- * - IBM Plex Sans preferred
- * - platform UI fonts retained as fallbacks
+ * - IBM Plex Mono preferred
+ * - platform monospace fonts retained as fallbacks
  *
  * Note: this currently does not adjust for different locales.
  */
-export const DEFAULT_FONT_FAMILY = isWindows ? '"IBM Plex Sans", "Segoe WPC", "Segoe UI", sans-serif' : isMacintosh ? '"IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif' : '"IBM Plex Sans", system-ui, "Ubuntu", "Droid Sans", sans-serif';
+export const DEFAULT_FONT_FAMILY = isWindows ? '"IBM Plex Mono", Consolas, "Courier New", monospace' : isMacintosh ? '"IBM Plex Mono", Monaco, Menlo, Courier, monospace' : '"IBM Plex Mono", "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", monospace';
 
 interface FontData {
 	readonly family: string;

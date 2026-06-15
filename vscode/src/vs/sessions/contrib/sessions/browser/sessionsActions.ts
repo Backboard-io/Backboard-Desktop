@@ -14,7 +14,7 @@ import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextke
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../../../platform/quickinput/common/quickInput.js';
-import { EditorAreaFocusContext, IsAuxiliaryWindowContext, IsSessionsWindowContext } from '../../../../workbench/common/contextkeys.js';
+import { EditorAreaFocusContext, IsAuxiliaryWindowContext, IsSessionsWindowContext, PanelMaximizedContext } from '../../../../workbench/common/contextkeys.js';
 import { Menus } from '../../../browser/menus.js';
 import { SessionsCategories } from '../../../common/categories.js';
 import { CanGoBackContext, CanGoForwardContext, ChatSessionProviderIdContext, MultipleSessionsVisibleContext, SessionIsArchivedContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsStickyContext, SessionsFocusContext, SessionSupportsMultipleChatsContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
@@ -473,6 +473,22 @@ registerAction2(class CloseSessionAction extends Action2 {
 		sessionsViewService.closeSession(session);
 		sessionsPartService.focusSession(sessionsManagementService.activeSession.get());
 	}
+});
+
+MenuRegistry.appendMenuItem(Menus.SessionBarToolbar, {
+	command: {
+		id: 'workbench.action.toggleMaximizedPanel',
+		title: localize('maximizePanel', "Maximize Panel"),
+		icon: Codicon.screenFull,
+		toggled: {
+			condition: PanelMaximizedContext,
+			title: localize('restorePanel', "Restore Panel"),
+			icon: Codicon.screenNormal,
+		},
+	},
+	group: '1_session',
+	order: 19,
+	when: ContextKeyExpr.and(IsAuxiliaryWindowContext, SessionIsCreatedContext),
 });
 
 registerAction2(class ToggleMaximizeSessionViewAction extends Action2 {

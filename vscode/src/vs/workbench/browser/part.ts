@@ -141,6 +141,45 @@ export abstract class Part<MementoType extends object = object> extends Componen
 		this.relayout();
 	}
 
+	protected setTitleAreaVisibility(visible: boolean, relayout = true): void {
+		if (!this.titleArea) {
+			return;
+		}
+
+		this.titleArea.style.display = visible ? '' : 'none';
+		this.partLayout?.setTitleVisibility(visible);
+
+		if (relayout) {
+			this.relayout();
+		}
+	}
+
+	protected setHeaderAreaVisibility(visible: boolean, relayout = true): void {
+		if (!this.headerArea) {
+			return;
+		}
+
+		this.headerArea.style.display = visible ? '' : 'none';
+		this.partLayout?.setHeaderVisibility(visible);
+
+		if (relayout) {
+			this.relayout();
+		}
+	}
+
+	protected setFooterAreaVisibility(visible: boolean, relayout = true): void {
+		if (!this.footerArea) {
+			return;
+		}
+
+		this.footerArea.style.display = visible ? '' : 'none';
+		this.partLayout?.setFooterVisibility(visible);
+
+		if (relayout) {
+			this.relayout();
+		}
+	}
+
 	protected removeHeaderArea(): void {
 		if (this.headerArea) {
 			this.headerArea.remove();
@@ -205,6 +244,7 @@ class PartLayout {
 	private static readonly TITLE_HEIGHT = 35;
 	private static readonly Footer_HEIGHT = 35;
 
+	private titleVisible: boolean = true;
 	private headerVisible: boolean = false;
 	private footerVisible: boolean = false;
 
@@ -214,7 +254,7 @@ class PartLayout {
 
 		// Title Size: Width (Fill), Height (Variable)
 		let titleSize: Dimension;
-		if (this.options.hasTitle) {
+		if (this.options.hasTitle && this.titleVisible) {
 			titleSize = new Dimension(width, Math.min(height, PartLayout.TITLE_HEIGHT));
 		} else {
 			titleSize = Dimension.None;
@@ -250,6 +290,10 @@ class PartLayout {
 		}
 
 		return { headerSize, titleSize, contentSize, footerSize };
+	}
+
+	setTitleVisibility(visible: boolean): void {
+		this.titleVisible = visible;
 	}
 
 	setFooterVisibility(visible: boolean): void {
