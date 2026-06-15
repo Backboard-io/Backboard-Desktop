@@ -51,7 +51,6 @@ export enum ChatSetupStrategy {
 	SetupWithEnterpriseProvider = 3,
 	SetupWithGoogleProvider = 4,
 	SetupWithAppleProvider = 5,
-	SetupWithBackboardProvider = 6,
 	SetupWithBackboardApiKey = 7
 }
 

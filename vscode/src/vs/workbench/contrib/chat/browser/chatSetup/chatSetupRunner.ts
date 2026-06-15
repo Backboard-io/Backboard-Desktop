@@ -165,7 +165,7 @@ export class ChatSetup {
 			setupStrategy = ChatSetupStrategy.SetupWithEnterpriseProvider; // users with a configured provider go through provider setup
 		}
 
-		const startsChatSetup = setupStrategy !== ChatSetupStrategy.Canceled && setupStrategy !== ChatSetupStrategy.SetupWithBackboardProvider && setupStrategy !== ChatSetupStrategy.SetupWithBackboardApiKey;
+		const startsChatSetup = setupStrategy !== ChatSetupStrategy.Canceled && setupStrategy !== ChatSetupStrategy.SetupWithBackboardApiKey;
 		if (startsChatSetup) {
 			options?.onSignInStarted?.();
 		}
@@ -196,8 +196,6 @@ export class ChatSetup {
 					break;
 				case ChatSetupStrategy.SetupWithBackboardApiKey:
 					success = await this.showBackboardApiKeyDialog();
-					break;
-				case ChatSetupStrategy.SetupWithBackboardProvider:
 					break;
 				case ChatSetupStrategy.Canceled:
 					this.context.update({ later: true });
@@ -251,12 +249,10 @@ export class ChatSetup {
 		let buttons: Array<ContinueWithButton>;
 		if (!options?.forceAnonymous && (this.context.state.entitlement === ChatEntitlement.Unknown || options?.forceSignInDialog)) {
 			const defaultProviderButton: ContinueWithButton = [localize('continueWith', "Continue with {0}", defaultChat.provider.default.name), ChatSetupStrategy.SetupWithoutEnterpriseProvider, styleButton('continue-button', 'default')];
-			const backboardProviderButton: ContinueWithButton = [localize('continueWithBackboard', "Continue with Backboard"), ChatSetupStrategy.SetupWithBackboardProvider, styleButton('continue-button', 'backboard')];
 			const apiKeyButton: ContinueWithButton = [localize('continueWithApiKey', "Continue with API Key"), ChatSetupStrategy.SetupWithBackboardApiKey, styleButton('continue-button', 'api-key')];
 
 			buttons = coalesce([
 				defaultProviderButton,
-				backboardProviderButton,
 				apiKeyButton
 			]);
 		} else {

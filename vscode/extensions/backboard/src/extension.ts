@@ -4081,7 +4081,7 @@ function resolveShellCwd(rawCwd: string | undefined): string {
 	}
 	const resolved = path.isAbsolute(rawCwd) ? path.resolve(rawCwd) : path.resolve(rootPath, rawCwd);
 	const relative = path.relative(rootPath, resolved);
-	if (relative.startsWith('..') || path.isAbsolute(relative)) {
+	if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
 		return rootPath;
 	}
 	return resolved;

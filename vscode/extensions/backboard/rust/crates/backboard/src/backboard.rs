@@ -1621,8 +1621,8 @@ pub fn message_request_log_json(request: &SendMessageRequest, stream: bool) -> V
             map.insert(
                 "audio_file".to_string(),
                 json!({
-                    "file_name": audio.file_name,
-                    "mime_type": audio.mime_type,
+                    "file_name": audio.file_name.clone(),
+                    "mime_type": audio.mime_type.clone(),
                     "bytes": audio.data.len()
                 }),
             );
