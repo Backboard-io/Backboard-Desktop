@@ -823,11 +823,10 @@ export class OpenAgentSessionInEditorGroupAction extends BaseOpenAgentSessionAct
 					primary: KeyMod.WinCtrl | KeyCode.Enter
 				},
 				weight: KeybindingWeight.WorkbenchContrib + 1,
-				when: ContextKeyExpr.and(ChatContextKeys.agentSessionsViewerFocused, IsSessionsWindowContext.negate()),
+				when: ChatContextKeys.agentSessionsViewerFocused,
 			},
 			menu: {
 				id: MenuId.AgentSessionsContext,
-				when: IsSessionsWindowContext.negate(),
 				order: 1,
 				group: 'navigation'
 			}

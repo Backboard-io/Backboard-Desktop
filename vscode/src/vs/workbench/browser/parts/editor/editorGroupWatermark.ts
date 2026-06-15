@@ -17,6 +17,7 @@ import { IKeybindingService } from '../../../../platform/keybinding/common/keybi
 import { IStorageService, StorageScope, StorageTarget, WillSaveStateReason } from '../../../../platform/storage/common/storage.js';
 import { defaultKeybindingLabelStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 
 interface WatermarkEntry {
 	readonly id: string;
@@ -88,12 +89,18 @@ export class EditorGroupWatermark extends Disposable {
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IStorageService private readonly storageService: IStorageService,
-		@ICommandService private readonly commandService: ICommandService
+		@ICommandService private readonly commandService: ICommandService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService
 	) {
 		super();
 
 		this.cachedWhen = this.storageService.getObject(EditorGroupWatermark.CACHED_WHEN, StorageScope.PROFILE, Object.create(null));
 		this.workbenchState = this.contextService.getWorkbenchState();
+
+		if (this.environmentService.isSessionsWindow) {
+			this.shortcuts = document.createElement('div');
+			return;
+		}
 
 		const runCommand = (command: string, ...args: unknown[]) => {
 			Promise.resolve(this.commandService.executeCommand(command, ...args)).catch(onUnexpectedError);
@@ -190,7 +197,7 @@ export class EditorGroupWatermark extends Disposable {
 		clearNode(this.shortcuts);
 		this.transientDisposables.clear();
 
-		if (!this.enabled) {
+		if (!this.enabled || this.environmentService.isSessionsWindow) {
 			return;
 		}
 

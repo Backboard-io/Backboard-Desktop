@@ -60,9 +60,9 @@ export class OpenSessionInVSCodeAction extends Action2 {
 
 		const folderUri = this.getFolderUriToOpen(sessionsManagementService, sessionsProvidersService, remoteAgentHostService);
 		if (!folderUri) {
-			return nativeHostService.openWindow();
+			return nativeHostService.openWindow({ forceReuseWindow: true });
 		}
-		return nativeHostService.openWindow([{ folderUri }], { forceNewWindow: true });
+		return nativeHostService.openWindow([{ folderUri }], { forceReuseWindow: true });
 	}
 
 	private getFolderUriToOpen(sessionsManagementService: ISessionsManagementService, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService): URI | undefined {

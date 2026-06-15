@@ -65,7 +65,6 @@ export class OpenInVSCodeAction extends Action2 {
 					: productService.urlProtocol;
 
 		const params = new URLSearchParams();
-		params.set('windowId', '_blank');
 
 		const activeSession = sessionsManagementService.activeSession.get();
 		if (!activeSession) {

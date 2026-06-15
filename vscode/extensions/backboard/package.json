@@ -19,6 +19,7 @@
     "onCommand:backboard.showHistory",
     "onCommand:backboard.setApiKey",
     "onCommand:backboard.refreshModels",
+    "onCommand:backboard.checkForUpdates",
     "onCommand:backboard.openPanel",
     "onCommand:backboard.openRightPanel"
   ],
@@ -68,6 +69,12 @@
         "title": "Refresh Models",
         "category": "Backboard",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "backboard.checkForUpdates",
+        "title": "Check for Updates",
+        "category": "Backboard",
+        "icon": "$(cloud-download)"
       }
     ],
     "menus": {
@@ -233,6 +240,27 @@
             "type": "string",
             "default": "",
             "description": "Path to use as the Backboard panel workspace root. Supports ${workspaceFolder} and ${userHome}. Leave empty to use the open VS Code workspace folder. Can also be set with BACKBOARD_WORKSPACE_ROOT."
+          },
+          "backboard.updates.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Check the Backboard Studio S3 manifest for IDE updates on startup."
+          },
+          "backboard.updates.manifestBaseUrl": {
+            "type": "string",
+            "default": "https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases",
+            "description": "Base URL for Backboard Studio update manifests."
+          },
+          "backboard.updates.manifestUrl": {
+            "type": "string",
+            "default": "",
+            "description": "Full Backboard Studio update manifest URL override. Leave empty to derive the URL from the base URL, channel, platform, and architecture."
+          },
+          "backboard.updates.checkIntervalMinutes": {
+            "type": "number",
+            "default": 360,
+            "minimum": 15,
+            "description": "How often Backboard Studio checks the S3 update manifest while the IDE is open."
           }
         }
       }

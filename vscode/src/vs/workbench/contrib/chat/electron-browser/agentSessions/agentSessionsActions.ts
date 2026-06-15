@@ -74,7 +74,10 @@ export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 		const nativeHostService = accessor.get(INativeHostService);
 		const workspaceContextService = accessor.get(IWorkspaceContextService);
 		const folderUri = workspaceContextService.getWorkspace().folders[0]?.uri;
-		await nativeHostService.openAgentsWindow({ folderUri: folderUri?.scheme === Schemas.file ? folderUri : undefined });
+		await nativeHostService.openAgentsWindow({
+			folderUri: folderUri?.scheme === Schemas.file ? folderUri : undefined,
+			forceReuseWindow: true,
+		});
 	}
 }
 
@@ -208,7 +211,7 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 		container.setAttribute('role', 'button');
 
 		const label = this.action.label;
-		const hoverText = this.keybindingService.appendKeybinding(localize('openInAgentsHover', "Open in Sandbox Window"), OPEN_AGENTS_WINDOW_COMMAND_ID);
+		const hoverText = this.keybindingService.appendKeybinding(localize('openInAgentsHover', "Open in Sandbox"), OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID);
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 

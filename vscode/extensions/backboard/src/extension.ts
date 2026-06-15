@@ -5,7 +5,10 @@
 
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as http from 'http';
+import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
@@ -56,6 +59,13 @@ interface ModelCacheEntry {
 	readonly models: BridgeModel[];
 }
 
+interface UpdateManifest {
+	readonly version: string;
+	readonly url: string;
+	readonly sha256?: string;
+	readonly size_bytes?: number;
+}
+
 interface PendingRequest {
 	readonly events: BridgeEvent[];
 	readonly onEvent?: (event: BridgeEvent) => void | Promise<void>;
@@ -99,7 +109,10 @@ interface PanelOptions {
 
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
+const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases';
+const dismissedUpdateVersionKey = 'backboard.update.dismissedVersion';
 let backboardToolOutput: vscode.OutputChannel | undefined;
+let backboardUpdateInstallInProgress = false;
 
 export function activate(context: vscode.ExtensionContext): void {
 	backboardToolOutput = vscode.window.createOutputChannel('Backboard Tools');
@@ -109,6 +122,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(bridge);
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', () => setApiKey()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => bridge.refreshModels()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.checkForUpdates', () => checkBackboardUpdates(context, true)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openRightPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.newChat', async () => {
@@ -120,6 +134,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		await panelProvider.postUiCommand('showHistory');
 	}));
 	context.subscriptions.push(vscode.window.registerWebviewViewProvider('backboard.panel', panelProvider, { webviewOptions: { retainContextWhenHidden: true } }));
+	startBackboardUpdateChecks(context);
 }
 
 export function deactivate(): void {
@@ -151,6 +166,429 @@ async function setApiKey(): Promise<boolean> {
 		return false;
 	}
 	return false;
+}
+
+function startBackboardUpdateChecks(context: vscode.ExtensionContext): void {
+	if (!vscode.workspace.getConfiguration('backboard').get<boolean>('updates.enabled', true)) {
+		return;
+	}
+
+	void checkBackboardUpdates(context, false);
+
+	const configuredMinutes = vscode.workspace.getConfiguration('backboard').get<number>('updates.checkIntervalMinutes', 360);
+	const intervalMinutes = Number.isFinite(configuredMinutes) ? Math.max(15, configuredMinutes) : 360;
+	const timer = setInterval(() => {
+		void checkBackboardUpdates(context, false);
+	}, intervalMinutes * 60 * 1000);
+	context.subscriptions.push({ dispose: () => clearInterval(timer) });
+}
+
+async function checkBackboardUpdates(context: vscode.ExtensionContext, manual: boolean): Promise<void> {
+	try {
+		const manifestUrl = getBackboardUpdateManifestUrl();
+		if (!manifestUrl) {
+			if (manual) {
+				await vscode.window.showWarningMessage('Backboard Studio updates are not supported on this platform.');
+			}
+			return;
+		}
+
+		const manifest = await fetchBackboardUpdateManifest(manifestUrl);
+		const currentVersion = readCurrentAppVersion();
+		if (!isNewerVersion(manifest.version, currentVersion)) {
+			if (manual) {
+				await vscode.window.showInformationMessage(`Backboard Studio is up to date. Current version: ${currentVersion}.`);
+			}
+			return;
+		}
+
+		if (!manual && context.globalState.get<string>(dismissedUpdateVersionKey) === manifest.version) {
+			return;
+		}
+
+		const canInstall = canInstallBackboardUpdate();
+		const message = `Backboard Studio ${manifest.version} is available. Current version: ${currentVersion}.`;
+		const actions = canInstall ? ['Install and Restart', 'Download DMG', 'Copy Link', 'Later'] : ['Download DMG', 'Copy Link', 'Later'];
+		const choice = await vscode.window.showInformationMessage(message, ...actions);
+		if (choice === 'Install and Restart') {
+			await installBackboardUpdate(manifest);
+		} else if (choice === 'Download DMG') {
+			await vscode.env.openExternal(vscode.Uri.parse(manifest.url));
+		} else if (choice === 'Copy Link') {
+			await vscode.env.clipboard.writeText(manifest.url);
+			await vscode.window.showInformationMessage('Backboard Studio update link copied.');
+		} else if (choice === 'Later') {
+			await context.globalState.update(dismissedUpdateVersionKey, manifest.version);
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		backboardToolOutput?.appendLine(`[updates] ${message}`);
+		if (manual) {
+			await vscode.window.showWarningMessage(`Could not check for Backboard Studio updates: ${message}`);
+		}
+	}
+}
+
+function canInstallBackboardUpdate(): boolean {
+	if (process.platform !== 'darwin') {
+		return false;
+	}
+	const appPath = currentMacAppPath();
+	return Boolean(appPath && path.basename(appPath) === 'Backboard Studio.app');
+}
+
+async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
+	if (backboardUpdateInstallInProgress) {
+		await vscode.window.showInformationMessage('Backboard Studio update installation is already running.');
+		return;
+	}
+	const appPath = currentMacAppPath();
+	if (!appPath || path.basename(appPath) !== 'Backboard Studio.app') {
+		await vscode.window.showWarningMessage('Automatic update install is only available from the packaged Backboard Studio app.');
+		return;
+	}
+
+	backboardUpdateInstallInProgress = true;
+	try {
+		const updateDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'backboard-studio-update-'));
+		const dmgPath = path.join(updateDirectory, `Backboard-Studio-${manifest.version}.dmg`);
+		await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: `Downloading Backboard Studio ${manifest.version}`,
+			cancellable: false
+		}, async progress => {
+			await downloadBackboardUpdate(manifest.url, dmgPath, progress);
+		});
+		await verifyBackboardUpdate(dmgPath, manifest);
+		await stageMacBackboardInstaller(dmgPath, appPath, manifest.version);
+		await vscode.window.showInformationMessage(`Backboard Studio ${manifest.version} is verified. Restarting to install.`);
+		await vscode.commands.executeCommand('workbench.action.quit');
+	} catch (error) {
+		backboardUpdateInstallInProgress = false;
+		const message = error instanceof Error ? error.message : String(error);
+		backboardToolOutput?.appendLine(`[updates] install failed: ${message}`);
+		await vscode.window.showWarningMessage(`Could not install Backboard Studio update: ${message}`);
+	}
+}
+
+function currentMacAppPath(): string | undefined {
+	const match = /^(.+?\.app)(?:\/|$)/.exec(process.execPath);
+	return match?.[1];
+}
+
+function downloadBackboardUpdate(rawUrl: string, destination: string, progress: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const request = downloadWithRedirects(rawUrl, destination, progress, 5, resolve, reject);
+		request.on('error', reject);
+	});
+}
+
+function downloadWithRedirects(
+	rawUrl: string,
+	destination: string,
+	progress: vscode.Progress<{ message?: string; increment?: number }>,
+	redirectLimit: number,
+	resolve: () => void,
+	reject: (error: Error) => void
+): http.ClientRequest {
+	const url = new URL(rawUrl);
+	const client = url.protocol === 'http:' ? http : https;
+	const request = client.get(url, { headers: { 'User-Agent': `Backboard-Studio/${readCurrentAppVersion()}` } }, response => {
+		const statusCode = response.statusCode ?? 0;
+		const location = response.headers.location;
+		if (statusCode >= 300 && statusCode < 400 && location && redirectLimit > 0) {
+			response.resume();
+			const nextRequest = downloadWithRedirects(new URL(location, url).toString(), destination, progress, redirectLimit - 1, resolve, reject);
+			nextRequest.on('error', reject);
+			return;
+		}
+		if (statusCode < 200 || statusCode >= 300) {
+			response.resume();
+			reject(new Error(`Update download failed with HTTP ${statusCode}.`));
+			return;
+		}
+
+		const expectedBytes = Number(response.headers['content-length']) || undefined;
+		let downloadedBytes = 0;
+		let lastPercent = 0;
+		const file = fs.createWriteStream(destination, { mode: 0o600 });
+		response.on('data', chunk => {
+			const size = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+			downloadedBytes += size;
+			if (expectedBytes) {
+				const percent = Math.min(100, Math.floor((downloadedBytes / expectedBytes) * 100));
+				if (percent > lastPercent) {
+					progress.report({ increment: percent - lastPercent, message: `${percent}%` });
+					lastPercent = percent;
+				}
+			} else {
+				progress.report({ message: `${Math.round(downloadedBytes / 1024 / 1024)} MB` });
+			}
+		});
+		response.pipe(file);
+		file.on('finish', () => file.close(error => {
+			if (error) {
+				reject(error);
+			} else {
+				resolve();
+			}
+		}));
+		file.on('error', error => {
+			response.destroy();
+			reject(error);
+		});
+	});
+	request.setTimeout(120_000, () => {
+		request.destroy(new Error('Update download timed out.'));
+	});
+	return request;
+}
+
+async function verifyBackboardUpdate(dmgPath: string, manifest: UpdateManifest): Promise<void> {
+	const stat = await fs.promises.stat(dmgPath);
+	if (manifest.size_bytes !== undefined && stat.size !== manifest.size_bytes) {
+		throw new Error(`Downloaded update size mismatch. Expected ${manifest.size_bytes} bytes, got ${stat.size}.`);
+	}
+	if (manifest.sha256) {
+		const actualSha256 = await sha256File(dmgPath);
+		if (actualSha256.toLowerCase() !== manifest.sha256.toLowerCase()) {
+			throw new Error(`Downloaded update SHA-256 mismatch. Expected ${manifest.sha256}, got ${actualSha256}.`);
+		}
+	}
+}
+
+function sha256File(filePath: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const hash = crypto.createHash('sha256');
+		const stream = fs.createReadStream(filePath);
+		stream.on('data', chunk => hash.update(chunk));
+		stream.on('error', reject);
+		stream.on('end', () => resolve(hash.digest('hex')));
+	});
+}
+
+async function stageMacBackboardInstaller(dmgPath: string, appPath: string, version: string): Promise<void> {
+	const installerPath = path.join(path.dirname(dmgPath), 'install-backboard-update.sh');
+	const logPath = path.join(os.tmpdir(), 'backboard-studio-update.log');
+	await fs.promises.writeFile(installerPath, macUpdateInstallerScript(), { mode: 0o700 });
+	const child = cp.spawn('/bin/zsh', [installerPath, dmgPath, appPath, String(process.pid), version, logPath], {
+		detached: true,
+		stdio: 'ignore'
+	});
+	child.unref();
+}
+
+function macUpdateInstallerScript(): string {
+	return `#!/bin/zsh
+set -euo pipefail
+
+DMG_PATH="$1"
+APP_PATH="$2"
+CURRENT_PID="$3"
+VERSION="$4"
+LOG_PATH="$5"
+APP_NAME="Backboard Studio.app"
+MOUNT_POINT="$(/usr/bin/mktemp -d /tmp/backboard-studio-update-mount.XXXXXX)"
+
+exec >>"$LOG_PATH" 2>&1
+echo "[$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')] Installing Backboard Studio $VERSION"
+
+cleanup() {
+  /usr/bin/hdiutil detach "$MOUNT_POINT" -quiet >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+/usr/bin/hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
+SOURCE_APP="$MOUNT_POINT/$APP_NAME"
+if [[ ! -d "$SOURCE_APP" ]]; then
+  echo "Mounted DMG did not contain $APP_NAME"
+  exit 1
+fi
+
+/usr/bin/osascript -e 'tell application id "io.backboard.studio" to quit' >/dev/null 2>&1 || true
+for _ in {1..120}; do
+  if ! /bin/ps -p "$CURRENT_PID" >/dev/null 2>&1; then
+    break
+  fi
+  /bin/sleep 1
+done
+
+replace_app() {
+  /bin/rm -rf "$APP_PATH"
+  /usr/bin/ditto "$SOURCE_APP" "$APP_PATH"
+  /bin/chmod -R u+rwX "$APP_PATH" >/dev/null 2>&1 || true
+}
+
+if [[ -w "$(dirname "$APP_PATH")" || -w "$APP_PATH" ]]; then
+  replace_app
+else
+  HELPER="$(/usr/bin/mktemp /tmp/backboard-studio-update-elevated.XXXXXX.sh)"
+  shell_quote() {
+    /usr/bin/python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$1"
+  }
+  {
+    echo '#!/bin/zsh'
+    echo 'set -euo pipefail'
+    printf 'SOURCE_APP=%s\\n' "$(shell_quote "$SOURCE_APP")"
+    printf 'APP_PATH=%s\\n' "$(shell_quote "$APP_PATH")"
+    echo '/bin/rm -rf "$APP_PATH"'
+    echo '/usr/bin/ditto "$SOURCE_APP" "$APP_PATH"'
+    echo '/bin/chmod -R a+rX "$APP_PATH" >/dev/null 2>&1 || true'
+  } > "$HELPER"
+  /bin/chmod 700 "$HELPER"
+  /usr/bin/osascript -e "do shell script \\"/bin/zsh $HELPER\\" with administrator privileges"
+  /bin/rm -f "$HELPER"
+fi
+
+cleanup
+/usr/bin/open "$APP_PATH"
+echo "[$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')] Installed Backboard Studio $VERSION"
+`;
+}
+
+function getBackboardUpdateManifestUrl(): string | undefined {
+	const config = vscode.workspace.getConfiguration('backboard');
+	const configuredManifestUrl = config.get<string>('updates.manifestUrl', '').trim();
+	const manifestUrlOverride = process.env.BBIDE_UPDATE_MANIFEST_URL || process.env.BACKBOARD_UPDATE_MANIFEST_URL || configuredManifestUrl;
+	if (manifestUrlOverride.trim()) {
+		return manifestUrlOverride.trim();
+	}
+
+	const platform = getUpdatePlatform();
+	const arch = getUpdateArch();
+	if (!platform || !arch) {
+		return undefined;
+	}
+
+	const configuredBaseUrl = config.get<string>('updates.manifestBaseUrl', defaultUpdateManifestBaseUrl).trim();
+	const manifestBaseUrl = (process.env.BBIDE_UPDATE_MANIFEST_BASE_URL || process.env.BACKBOARD_UPDATE_MANIFEST_BASE_URL || configuredBaseUrl || defaultUpdateManifestBaseUrl)
+		.trim()
+		.replace(/\/+$/, '');
+	return `${manifestBaseUrl}/stable/latest/bbide/${platform}-${arch}.json`;
+}
+
+function getUpdatePlatform(): string | undefined {
+	switch (process.platform) {
+		case 'darwin':
+			return 'macos';
+		case 'win32':
+			return 'windows';
+		default:
+			return undefined;
+	}
+}
+
+function getUpdateArch(): string | undefined {
+	switch (process.arch) {
+		case 'arm64':
+			return 'aarch64';
+		case 'x64':
+			return 'x86_64';
+		default:
+			return undefined;
+	}
+}
+
+async function fetchBackboardUpdateManifest(manifestUrl: string): Promise<UpdateManifest> {
+	const body = await fetchText(manifestUrl, 5);
+	const parsed = JSON.parse(body) as unknown;
+	if (!isObjectRecord(parsed)) {
+		throw new Error('Update manifest is not an object.');
+	}
+	const version = typeof parsed.version === 'string' ? parsed.version.trim() : '';
+	const url = typeof parsed.url === 'string' ? parsed.url.trim() : '';
+	if (!version || !url) {
+		throw new Error('Update manifest is missing version or url.');
+	}
+	return {
+		version,
+		url,
+		sha256: typeof parsed.sha256 === 'string' ? parsed.sha256 : undefined,
+		size_bytes: typeof parsed.size_bytes === 'number' ? parsed.size_bytes : undefined
+	};
+}
+
+function fetchText(rawUrl: string, redirectLimit: number): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const url = new URL(rawUrl);
+		const client = url.protocol === 'http:' ? http : https;
+		const request = client.get(url, { headers: { 'User-Agent': `Backboard-Studio/${readCurrentAppVersion()}` } }, response => {
+			const statusCode = response.statusCode ?? 0;
+			const location = response.headers.location;
+			if (statusCode >= 300 && statusCode < 400 && location && redirectLimit > 0) {
+				response.resume();
+				resolve(fetchText(new URL(location, url).toString(), redirectLimit - 1));
+				return;
+			}
+			if (statusCode < 200 || statusCode >= 300) {
+				response.resume();
+				reject(new Error(`Update manifest request failed with HTTP ${statusCode}.`));
+				return;
+			}
+
+			const chunks: Buffer[] = [];
+			response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+			response.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+		});
+		request.setTimeout(15_000, () => {
+			request.destroy(new Error('Update manifest request timed out.'));
+		});
+		request.on('error', reject);
+	});
+}
+
+function readCurrentAppVersion(): string {
+	const envVersion = process.env.BACKBOARD_STUDIO_VERSION || process.env.BBIDE_VERSION;
+	if (envVersion?.trim()) {
+		return envVersion.trim();
+	}
+
+	const infoPlist = path.join(path.dirname(process.execPath), '..', 'Info.plist');
+	try {
+		const plist = fs.readFileSync(infoPlist, 'utf8');
+		const value = readPlistString(plist, 'CFBundleShortVersionString') || readPlistString(plist, 'CFBundleVersion');
+		if (value) {
+			return value;
+		}
+	} catch {
+		// Development hosts may not run from a packaged macOS app bundle.
+	}
+
+	return vscode.version;
+}
+
+function readPlistString(plist: string, key: string): string | undefined {
+	const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const match = new RegExp(`<key>${escapedKey}</key>\\s*<string>([^<]+)</string>`).exec(plist);
+	return match?.[1]?.trim();
+}
+
+function isNewerVersion(candidate: string, current: string): boolean {
+	const candidateParts = parseVersion(candidate);
+	const currentParts = parseVersion(current);
+	if (!candidateParts || !currentParts) {
+		return candidate !== current;
+	}
+
+	for (let index = 0; index < Math.max(candidateParts.length, currentParts.length); index++) {
+		const candidatePart = candidateParts[index] ?? 0;
+		const currentPart = currentParts[index] ?? 0;
+		if (candidatePart > currentPart) {
+			return true;
+		}
+		if (candidatePart < currentPart) {
+			return false;
+		}
+	}
+	return false;
+}
+
+function parseVersion(version: string): number[] | undefined {
+	const match = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(version.trim());
+	if (!match) {
+		return undefined;
+	}
+	return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)];
 }
 
 async function handleBackboardError(webview: vscode.Webview, error: unknown): Promise<void> {
@@ -2694,6 +3132,26 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const max = 12000;
 			return text.length > max ? text.slice(0, max) + '\\n\\n[truncated]' : text;
 		}
+		function appendToolOutput(payload) {
+			const key = payload?.key;
+			const text = typeof payload?.text === 'string' ? payload.text : '';
+			if (!key || !text) {
+				return;
+			}
+			const row = log.querySelector('.toolCard[data-tool-key="' + CSS.escape(String(key)) + '"]');
+			const details = row?.querySelector('.toolDetails');
+			if (!(details instanceof HTMLElement)) {
+				return;
+			}
+			const current = details.textContent === 'No details reported.' ? '' : details.textContent || '';
+			details.textContent = clippedToolText(current + text);
+			row.classList.add('hasTerminal');
+			const meta = row.querySelector('.toolMeta');
+			if (meta && text.trim()) {
+				meta.textContent = text.trim().split(/\\r?\\n/).pop()?.slice(0, 220) || meta.textContent;
+			}
+			scrollConversation();
+		}
 		function ensureToolGroup() {
 			if (currentToolGroup?.group?.isConnected && currentToolGroup?.body?.isConnected) {
 				return currentToolGroup;
@@ -2794,6 +3252,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const detail = toolPrimaryDetail(item);
 			const details = toolDetailsText(item);
 			row.className = 'toolCard ' + status;
+			row.dataset.toolKey = String(key);
 			row.textContent = '';
 			const head = document.createElement('div');
 			head.className = 'toolHead';
@@ -2821,7 +3280,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			head.append(statusIcon, main, duration, toggle);
 			const body = document.createElement('pre');
 			body.className = 'toolDetails';
-			body.textContent = clippedToolText(details || 'No details reported.');
+			const previousDetails = existing?.row?.querySelector('.toolDetails')?.textContent;
+			body.textContent = clippedToolText(details || previousDetails || 'No details reported.');
 			toggle.addEventListener('click', () => {
 				const open = row.classList.toggle('open');
 				toggle.title = open ? 'Hide tool details' : 'Show tool details';
@@ -3394,6 +3854,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				for (const call of calls) {
 					appendTool({ status: 'started', key: toolKey(call), name: toolName(call), args: toolArgs(call) });
 				}
+			} else if (message.type === 'toolOutput') {
+				appendToolOutput(message.payload || {});
 			} else if (message.type === 'toolFinished') {
 				appendTool(message.payload || {});
 			}
@@ -3652,7 +4114,7 @@ async function executeToolCalls(bridge: BackboardBridge, toolCalls: unknown[], m
 		try {
 			logToolDiagnostic('started', call);
 			response.event?.('toolFinished', { status: 'started', key: call.id, name: call.name, args: call.args });
-			const result = await executeTool(bridge, call.name, call.args, response, token);
+			const result = await executeTool(bridge, call.name, call.args, response, token, call.id);
 			logToolDiagnostic('finished', call, result);
 			response.event?.('toolFinished', { status: 'finished', key: call.id, name: call.name, args: call.args, output: result });
 			outputs.push(toolOutput(call.id, { success: true, content: result }));
@@ -3700,7 +4162,7 @@ async function approveTool(name: string, args: Record<string, unknown>, mode: st
 	return choice === 'Allow';
 }
 
-async function executeTool(bridge: BackboardBridge, name: string, args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken): Promise<string> {
+async function executeTool(bridge: BackboardBridge, name: string, args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken, toolKey?: string): Promise<string> {
 	switch (name) {
 		case 'read_file':
 			return readFile(args);
@@ -3733,10 +4195,10 @@ async function executeTool(bridge: BackboardBridge, name: string, args: Record<s
 			return createDirectoryTool(args);
 		case 'bash':
 		case 'run_terminal_cmd':
-			return runShellTool(args, response, token);
+			return runShellTool(args, response, token, toolKey);
 		case 'run_code':
 		case 'repl':
-			return runCodeTool(args, response, token);
+			return runCodeTool(args, response, token, toolKey);
 		case 'todo_write':
 			return `Todo list updated: ${asCompactJson(args.todos ?? [])}`;
 		case 'sleep':
@@ -3978,7 +4440,7 @@ async function createDirectoryTool(args: Record<string, unknown>): Promise<strin
 	return `Created ${vscode.workspace.asRelativePath(uri)}`;
 }
 
-async function runShellTool(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken): Promise<string> {
+async function runShellTool(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken, toolKey?: string): Promise<string> {
 	const command = stringArg(args, 'command', 'cmd');
 	if (!command) {
 		throw new Error('shell tool requires command');
@@ -3988,13 +4450,17 @@ async function runShellTool(args: Record<string, unknown>, response: ResponseSin
 	const isBackground = boolArg(args, 'is_background');
 	const timeout = numberArg(args, 'timeout_ms', 'timeout') ?? 120_000;
 	const maxBuffer = 1024 * 1024;
-	const writer = new vscode.EventEmitter<string>();
 	let child: cp.ChildProcessWithoutNullStreams | undefined;
 	let settled = false;
 	let buffered = '';
 	let truncated = false;
 	let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 	const cancelDisposables: vscode.Disposable[] = [];
+	const streamToolOutput = (text: string): void => {
+		if (toolKey) {
+			response.event?.('toolOutput', { key: toolKey, text });
+		}
+	};
 	const appendOutput = (chunk: Buffer | string): void => {
 		const text = chunk.toString();
 		if (!truncated) {
@@ -4006,7 +4472,7 @@ async function runShellTool(args: Record<string, unknown>, response: ResponseSin
 				buffered += text;
 			}
 		}
-		writer.fire(toTerminalText(text));
+		streamToolOutput(text);
 	};
 	let finish: (value: string) => void = () => {};
 	const result = new Promise<string>(resolve => {
@@ -4019,49 +4485,37 @@ async function runShellTool(args: Record<string, unknown>, response: ResponseSin
 				clearTimeout(timeoutHandle);
 			}
 			cancelDisposables.splice(0).forEach(disposable => disposable.dispose());
-			writer.dispose();
 			resolve(value);
 		};
 	});
-	const pty: vscode.Pseudoterminal = {
-		onDidWrite: writer.event,
-		open: () => {
-			writer.fire(toTerminalText(`$ ${command}\n`));
-			child = cp.spawn(command, [], { cwd, shell: true, env: process.env });
-			child.stdout.on('data', appendOutput);
-			child.stderr.on('data', appendOutput);
-			child.on('error', error => {
-				appendOutput(`\n[Command failed: ${error.message}]\n`);
-				finish(buffered);
-			});
-			child.on('close', (code, signal) => {
-				const exitText = code === 0 || code === null && !signal
-					? ''
-					: `\n[Command exited ${signal ? `with signal ${signal}` : `with code ${code}`}]\n`;
-				if (exitText) {
-					appendOutput(exitText);
-				}
-				finish(buffered);
-			});
-			if (!isBackground) {
-				timeoutHandle = setTimeout(() => {
-					appendOutput(`\n[Command timed out after ${Math.round(timeout / 1000)}s]\n`);
-					child?.kill();
-					finish(buffered);
-				}, timeout);
-			}
-		},
-		close: () => {
-			if (!settled && child && !child.killed) {
-				child.kill();
-			}
+	streamToolOutput(`$ ${command}\n`);
+	child = cp.spawn(command, [], { cwd, shell: true, env: process.env });
+	child.stdout.on('data', appendOutput);
+	child.stderr.on('data', appendOutput);
+	child.on('error', error => {
+		appendOutput(`\n[Command failed: ${error.message}]\n`);
+		finish(buffered);
+	});
+	child.on('close', (code, signal) => {
+		const exitText = code === 0 || code === null && !signal
+			? ''
+			: `\n[Command exited ${signal ? `with signal ${signal}` : `with code ${code}`}]\n`;
+		if (exitText) {
+			appendOutput(exitText);
 		}
-	};
-	const terminal = vscode.window.createTerminal({ name: 'Backboard', pty });
-	terminal.show(true);
+		finish(buffered);
+	});
+	if (!isBackground) {
+		timeoutHandle = setTimeout(() => {
+			appendOutput(`\n[Command timed out after ${Math.round(timeout / 1000)}s]\n`);
+			child?.kill();
+			finish(buffered);
+		}, timeout);
+	}
 	cancelDisposables.push(token.onCancellationRequested(() => {
 		child?.kill();
-		finish(buffered ? `${buffered}\n[Command cancelled]\n` : 'Command cancelled.');
+		appendOutput(buffered ? '\n[Command cancelled]\n' : 'Command cancelled.');
+		finish(buffered || 'Command cancelled.');
 	}));
 	if (isBackground) {
 		void result;
@@ -4087,23 +4541,19 @@ function resolveShellCwd(rawCwd: string | undefined): string {
 	return resolved;
 }
 
-function toTerminalText(value: string): string {
-	return value.replace(/\r?\n/g, '\r\n');
-}
-
-async function runCodeTool(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken): Promise<string> {
+async function runCodeTool(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken, toolKey?: string): Promise<string> {
 	const code = stringArg(args, 'code');
 	if (!code) {
 		throw new Error('run_code/repl requires code');
 	}
 	const language = (stringArg(args, 'language') || 'python').toLowerCase();
 	if (language === 'shell') {
-		return runShellTool({ ...args, command: code }, response, token);
+		return runShellTool({ ...args, command: code }, response, token, toolKey);
 	}
 	const command = language === 'node' || language === 'typescript'
 		? `node -e ${shellQuote(code)}`
 		: `python3 -c ${shellQuote(code)}`;
-	return runShellTool({ ...args, command }, response, token);
+	return runShellTool({ ...args, command }, response, token, toolKey);
 }
 
 async function sleepTool(args: Record<string, unknown>, token: vscode.CancellationToken): Promise<string> {

@@ -628,23 +628,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		}
 	}
 
-	private _loadPartVisibility(storageService: IStorageService): { editor?: boolean; auxiliaryBar?: boolean; sidebar?: boolean } {
-		if (this.layoutPolicy.viewportClass.get() === 'phone') {
-			return {};
-		}
-
-		const raw = storageService.get(Workbench._PART_VISIBILITY_KEY, StorageScope.WORKSPACE);
-		if (raw) {
-			try {
-				return JSON.parse(raw);
-			} catch {
-				// Corrupted data — remove the bad key so we don't keep warning on every startup
-				storageService.remove(Workbench._PART_VISIBILITY_KEY, StorageScope.WORKSPACE);
-			}
-		}
-		return {};
-	}
-
 	private _savePartVisibility(): void {
 		if (this.layoutPolicy.viewportClass.get() === 'phone') {
 			return;
@@ -714,8 +697,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.partVisibility.auxiliaryBar = visibilityDefaults.auxiliaryBar;
 		this.partVisibility.panel = visibilityDefaults.panel;
 		this.partVisibility.sessions = visibilityDefaults.sessions;
-		const savedPartVisibility = this._loadPartVisibility(storageService);
-		this.partVisibility.editor = savedPartVisibility.editor ?? visibilityDefaults.editor;
+		this.partVisibility.editor = visibilityDefaults.editor;
 		this.partVisibility.auxiliaryBar = visibilityDefaults.auxiliaryBar;
 		this.partVisibility.sidebar = visibilityDefaults.sidebar;
 
