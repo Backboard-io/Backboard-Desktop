@@ -79,7 +79,7 @@ struct ConfigParams {
     #[serde(default)]
     api_url: Option<String>,
     #[serde(default)]
-    api_key: Option<String>,
+    access_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -332,7 +332,7 @@ async fn list_models(state: BridgeState, request: BridgeRequest) -> Result<()> {
     .unwrap_or(ConfigParams {
         env: None,
         api_url: None,
-        api_key: None,
+        access_token: None,
     });
     let provider = request
         .params
@@ -1218,12 +1218,15 @@ fn client_from_params(params: Option<&ConfigParams>) -> Result<BackboardClient> 
         {
             config.api_url = Some(api_url.to_string());
         }
-        if let Some(api_key) = params
-            .api_key
+        if let Some(access_token) = params
+            .access_token
             .as_deref()
             .filter(|value| !value.trim().is_empty())
         {
-            config.api_key = Some(api_key.to_string());
+            config
+                .oauth
+                .get_or_insert_with(Default::default)
+                .access_token = Some(access_token.to_string());
         }
     }
     BackboardClient::from_config(config)

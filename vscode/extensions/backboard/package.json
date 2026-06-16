@@ -19,6 +19,8 @@
     "onCommand:backboard.showHistory",
     "onCommand:backboard.setApiKey",
     "onCommand:backboard.signIn",
+    "onCommand:backboard.copyOAuthRedirectUri",
+    "onCommand:backboard.completeOAuthCallback",
     "onCommand:backboard.refreshModels",
     "onCommand:backboard.checkForUpdates",
     "onCommand:backboard.openPanel",
@@ -70,6 +72,18 @@
         "title": "Sign In",
         "category": "Backboard",
         "icon": "$(account)"
+      },
+      {
+        "command": "backboard.copyOAuthRedirectUri",
+        "title": "Copy OAuth Redirect URI",
+        "category": "Backboard",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "backboard.completeOAuthCallback",
+        "title": "Complete OAuth Callback",
+        "category": "Backboard",
+        "icon": "$(sign-in)"
       },
       {
         "command": "backboard.refreshModels",
@@ -130,12 +144,6 @@
       {
         "title": "Backboard",
         "properties": {
-          "backboard.apiKey": {
-            "type": "string",
-            "default": "",
-            "markdownDescription": "Legacy Backboard API key fallback. Prefer the **Set API Key** command, which stores the key in `~/.backboard_ide/config.json`.",
-            "scope": "machine-overridable"
-          },
           "backboard.env": {
             "type": "string",
             "enum": [
@@ -150,6 +158,11 @@
             "type": "string",
             "default": "",
             "description": "Custom Backboard API base URL. Overrides the environment when set."
+          },
+          "backboard.oauthRedirectUri": {
+            "type": "string",
+            "default": "",
+            "description": "OAuth redirect URI for Backboard sign in. Leave empty to use http://127.0.0.1:49321/auth/callback, which the IDE listens on during sign in. Register this exact URI in the Backboard OAuth app."
           },
           "backboard.defaultProvider": {
             "type": "string",

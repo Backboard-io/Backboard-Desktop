@@ -105,6 +105,7 @@ interface PanelOptions {
 	readonly mcpFigma?: boolean;
 	readonly mcpNotion?: boolean;
 	readonly mcpGoogle?: boolean;
+	readonly authenticated?: boolean;
 }
 
 type BackboardSettings = ReturnType<typeof readSettings>;
@@ -114,8 +115,7 @@ const dismissedUpdateVersionKey = 'backboard.update.dismissedVersion';
 const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
 const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
 const backboardOAuthClientId = 'Backboard_oauth_BGmuDtqCPmPgmIqWZ2ORvdqpl8fdKFQY';
-const backboardOAuthClientSecret = 'Backboard_oauth_sec_9i8a29N_Fg1xtgMKjWBXAp1z2uiMVz23ZuVWbLS6xOg';
-const backboardOAuthRedirectUri = 'https://app.backboard.io/api/oauth/ide/callback';
+const defaultBackboardOAuthRedirectUri = 'http://127.0.0.1:49321/auth/callback';
 const backboardOAuthScope = 'openid email profile';
 let backboardToolOutput: vscode.OutputChannel | undefined;
 let backboardUpdateInstallInProgress = false;
@@ -127,8 +127,14 @@ export function activate(context: vscode.ExtensionContext): void {
 	const panelProvider = new BackboardPanelProvider(bridge, context);
 	context.subscriptions.push(backboardToolOutput);
 	context.subscriptions.push(bridge);
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', () => setApiKey()));
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.signIn', () => signInBackboard(context)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', async () => {
+		if (await setApiKey()) {
+			bridge.restart();
+		}
+	}));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.signIn', () => signInBackboard(bridge)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.copyOAuthRedirectUri', () => copyBackboardOAuthRedirectUri()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.completeOAuthCallback', () => completeBackboardOAuthCallbackFromInput()));
 	context.subscriptions.push(vscode.window.registerUriHandler({
 		handleUri: uri => handleBackboardOAuthCallback(uri)
 	}));
@@ -144,6 +150,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		await openBackboardView();
 		await panelProvider.postUiCommand('showHistory');
 	}));
+	const configWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardConfigPath()), path.basename(backboardConfigPath())));
+	context.subscriptions.push(configWatcher);
+	context.subscriptions.push(configWatcher.onDidCreate(() => panelProvider.refreshState()));
+	context.subscriptions.push(configWatcher.onDidChange(() => panelProvider.refreshState()));
+	context.subscriptions.push(configWatcher.onDidDelete(() => panelProvider.refreshState()));
 	context.subscriptions.push(vscode.window.registerWebviewViewProvider('backboard.panel', panelProvider, { webviewOptions: { retainContextWhenHidden: true } }));
 	startBackboardUpdateChecks(context);
 }
@@ -174,24 +185,26 @@ async function setApiKey(): Promise<boolean> {
 			return true;
 		}
 		await clearBackboardConfigApiKey();
-		return false;
+		return true;
 	}
 	return false;
 }
 
-async function signInBackboard(context: vscode.ExtensionContext): Promise<boolean> {
+async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
 	const state = crypto.randomBytes(24).toString('base64url');
 	const nonce = crypto.randomBytes(24).toString('base64url');
 	const codeVerifier = crypto.randomBytes(32).toString('base64url');
 	const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+	let callbackServer: vscode.Disposable | undefined;
 
 	try {
-		backboardToolOutput?.appendLine(`[oauth] Redirect URI: ${backboardOAuthRedirectUri}`);
-		backboardToolOutput?.appendLine(`[oauth] Editor callback URI: ${vscode.env.uriScheme}://${context.extension.id}/auth/callback`);
+		const redirectUri = await backboardOAuthCallbackUri();
+		backboardToolOutput?.appendLine(`[oauth] Redirect URI: ${redirectUri}`);
+		callbackServer = await startBackboardOAuthCallbackServer(redirectUri);
 		const codePromise = waitForBackboardOAuthCode(state);
 		const params = new URLSearchParams({
 			client_id: backboardOAuthClientId,
-			redirect_uri: backboardOAuthRedirectUri,
+			redirect_uri: redirectUri,
 			response_type: 'code',
 			scope: backboardOAuthScope,
 			state,
@@ -199,19 +212,80 @@ async function signInBackboard(context: vscode.ExtensionContext): Promise<boolea
 			code_challenge_method: 'S256',
 			nonce
 		});
-		backboardToolOutput?.appendLine('[oauth] Opening Backboard sign in.');
-		await vscode.env.openExternal(vscode.Uri.parse(`${backboardOAuthAuthorizeUrl}?${params}`));
+		const authorizeUrl = `${backboardOAuthAuthorizeUrl}?${params}`;
+		backboardToolOutput?.appendLine(`[oauth] Opening Backboard authorize URL first: ${authorizeUrl}`);
+		backboardToolOutput?.appendLine(`[oauth] After Allow, Backboard redirects to the registered callback URI above.`);
+		await openBackboardOAuthAuthorizeUrl(authorizeUrl);
 
 		const code = await codePromise;
+		callbackServer?.dispose();
+		callbackServer = undefined;
 		backboardToolOutput?.appendLine('[oauth] Received Backboard authorization code; exchanging for tokens.');
-		const tokens = await exchangeBackboardOAuthCode(code, backboardOAuthRedirectUri, codeVerifier);
-		await saveBackboardOAuthTokens(tokens);
-		await vscode.window.showInformationMessage('Signed in to Backboard.');
-		return true;
+		const tokens = await exchangeBackboardOAuthCode(code, redirectUri, codeVerifier);
+			const saveResult = await saveBackboardOAuthTokens(tokens);
+			bridge.restart();
+			if (saveResult.apiKeySaved) {
+				backboardToolOutput?.appendLine(`[oauth] API KEY HAS BEEN TAKEN and saved to ${backboardConfigPath()}.`);
+				void vscode.window.showInformationMessage('Backboard sign in complete. API KEY HAS BEEN TAKEN and saved to ~/.backboard_ide/config.json.');
+			} else if (!backboardConfigApiKey(await readBackboardConfigJson())) {
+				const choice = await vscode.window.showWarningMessage(
+					'Signed in to Backboard, but NO API KEY was returned. Set an organization API key to send IDE requests.',
+				'Set API Key'
+			);
+			if (choice === 'Set API Key') {
+				await setApiKey();
+				}
+			} else {
+				void vscode.window.showInformationMessage('Backboard sign in complete. Existing API key remains saved in ~/.backboard_ide/config.json.');
+			}
+			return true;
 	} catch (error) {
 		backboardToolOutput?.appendLine(`[oauth] sign in failed: ${error instanceof Error ? error.message : String(error)}`);
 		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
 		return false;
+	} finally {
+		callbackServer?.dispose();
+	}
+}
+
+function openBackboardOAuthAuthorizeUrl(authorizeUrl: string): Promise<void> {
+	if (process.platform === 'darwin') {
+		return new Promise((resolve, reject) => {
+			cp.execFile('/usr/bin/open', [authorizeUrl], error => {
+				if (error) {
+					reject(error);
+				} else {
+					resolve();
+				}
+			});
+		});
+	}
+	return Promise.resolve(vscode.env.openExternal(vscode.Uri.parse(authorizeUrl))).then(() => undefined);
+}
+
+async function copyBackboardOAuthRedirectUri(): Promise<void> {
+	const redirectUri = defaultBackboardOAuthRedirectUri;
+	await vscode.env.clipboard.writeText(redirectUri);
+	backboardToolOutput?.appendLine(`[oauth] Copied redirect URI: ${redirectUri}`);
+	await vscode.window.showInformationMessage(`Copied Backboard OAuth redirect URI. Register this exact URI in Backboard: ${redirectUri}`);
+}
+
+async function completeBackboardOAuthCallbackFromInput(): Promise<void> {
+	const value = await vscode.window.showInputBox({
+		title: 'Backboard OAuth Callback URL',
+		ignoreFocusOut: true,
+		prompt: 'Paste the full callback URL from the browser, including code and state.'
+	});
+	if (value === undefined) {
+		return;
+	}
+	try {
+		const uri = vscode.Uri.parse(value.trim());
+		if (!completeBackboardOAuthCallback(uri.query)) {
+			await vscode.window.showErrorMessage('Backboard sign in failed: no pending sign in or invalid callback URL.');
+		}
+	} catch (error) {
+		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
@@ -232,24 +306,160 @@ function waitForBackboardOAuthCode(state: string): Promise<string> {
 	});
 }
 
+async function backboardOAuthCallbackUri(): Promise<string> {
+	const configured = vscode.workspace.getConfiguration('backboard').get<string>('oauthRedirectUri')?.trim();
+	if (configured) {
+		return configured;
+	}
+	return defaultBackboardOAuthRedirectUri;
+}
+
+function startBackboardOAuthCallbackServer(redirectUri: string): Promise<vscode.Disposable | undefined> {
+	const parsed = new URL(redirectUri);
+	if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
+		return Promise.resolve(undefined);
+	}
+	const port = Number(parsed.port);
+	if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+		return Promise.reject(new Error(`Backboard OAuth redirect URI must include a valid localhost port: ${redirectUri}`));
+	}
+
+	return new Promise((resolve, reject) => {
+		const server = http.createServer((request, response) => {
+			const requestUrl = new URL(request.url ?? '/', redirectUri);
+			if (requestUrl.pathname !== parsed.pathname) {
+				response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+				response.end('Not Found');
+				return;
+			}
+
+			const handled = completeBackboardOAuthCallback(requestUrl.searchParams.toString());
+			response.writeHead(handled ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' });
+			const title = handled ? 'Backboard sign in complete' : 'Backboard sign in could not be completed';
+			const message = handled ? 'You can close this tab and return to Backboard Studio.' : 'Return to Backboard Studio and start sign in again.';
+			const accentColor = handled ? '#1677ff' : '#dc2626';
+			const iconPath = handled
+				? '<path d="M8.8 12.2 11 14.4 15.7 9.6" /><circle cx="12" cy="12" r="8.5" />'
+				: '<path d="M12 7.8v4.7" /><path d="M12 16.2h.01" /><circle cx="12" cy="12" r="8.5" />';
+			response.end(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>
+:root {
+	color-scheme: light dark;
+	--bg: #f6f8fb;
+	--panel: #ffffff;
+	--text: #101828;
+	--muted: #5f6b7a;
+	--border: #d8dee8;
+	--accent: ${accentColor};
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0e1116;
+		--panel: #161b22;
+		--text: #f4f7fb;
+		--muted: #a7b0bd;
+		--border: #2b3440;
+	}
+}
+* { box-sizing: border-box; }
+body {
+	margin: 0;
+	min-height: 100vh;
+	display: grid;
+	place-items: center;
+	padding: 32px;
+	background: var(--bg);
+	color: var(--text);
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+main {
+	width: min(520px, 100%);
+	padding: 32px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--panel);
+	box-shadow: 0 16px 48px rgba(15, 23, 42, 0.12);
+}
+.mark {
+	width: 48px;
+	height: 48px;
+	display: grid;
+	place-items: center;
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	color: var(--accent);
+}
+svg {
+	width: 28px;
+	height: 28px;
+	stroke: currentColor;
+	stroke-width: 2;
+	fill: none;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+h1 {
+	margin: 24px 0 10px;
+	font-size: 28px;
+	line-height: 1.2;
+	letter-spacing: 0;
+}
+p {
+	margin: 0;
+	color: var(--muted);
+	font-size: 16px;
+	line-height: 1.5;
+}
+</style>
+</head>
+<body>
+<main>
+<div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24">${iconPath}</svg></div>
+<h1>${title}</h1>
+<p>${message}</p>
+</main>
+</body>
+</html>`);
+		});
+		server.once('error', error => reject(new Error(`Could not start Backboard OAuth callback server on ${redirectUri}: ${error.message}`)));
+		server.listen(port, parsed.hostname, () => {
+			backboardToolOutput?.appendLine(`[oauth] Listening for callback on ${redirectUri}`);
+			resolve({
+				dispose: () => {
+					server.close();
+				}
+			});
+		});
+	});
+}
+
 function handleBackboardOAuthCallback(uri: vscode.Uri): void {
 	if (uri.path !== '/auth/callback') {
 		return;
 	}
 
+	completeBackboardOAuthCallback(uri.query);
+}
+
+function completeBackboardOAuthCallback(queryString: string): boolean {
 	const pending = pendingBackboardOAuth;
 	if (!pending) {
 		backboardToolOutput?.appendLine('[oauth] Ignoring Backboard callback because no sign in is pending.');
-		return;
+		return false;
 	}
 
-	const query = new URLSearchParams(uri.query);
+	const query = new URLSearchParams(queryString);
 	const state = query.get('state')?.trim();
 	if (state !== pending.state) {
 		pendingBackboardOAuth = undefined;
 		clearTimeout(pending.timeout);
 		pending.reject(new Error('OAuth state did not match.'));
-		return;
+		return true;
 	}
 
 	const error = query.get('error')?.trim();
@@ -258,7 +468,7 @@ function handleBackboardOAuthCallback(uri: vscode.Uri): void {
 		pendingBackboardOAuth = undefined;
 		clearTimeout(pending.timeout);
 		pending.reject(new Error(description ? `${error}: ${description}` : error));
-		return;
+		return true;
 	}
 
 	const code = query.get('code')?.trim();
@@ -266,12 +476,13 @@ function handleBackboardOAuthCallback(uri: vscode.Uri): void {
 		pendingBackboardOAuth = undefined;
 		clearTimeout(pending.timeout);
 		pending.reject(new Error('Missing Backboard authorization code.'));
-		return;
+		return true;
 	}
 
 	pendingBackboardOAuth = undefined;
 	clearTimeout(pending.timeout);
 	pending.resolve(code);
+	return true;
 }
 
 async function exchangeBackboardOAuthCode(code: string, redirectUri: string, codeVerifier: string): Promise<BackboardOAuthTokens> {
@@ -280,10 +491,9 @@ async function exchangeBackboardOAuthCode(code: string, redirectUri: string, cod
 		code,
 		redirect_uri: redirectUri,
 		client_id: backboardOAuthClientId,
-		client_secret: backboardOAuthClientSecret,
 		code_verifier: codeVerifier
 	});
-	const responseText = await postForm(backboardOAuthTokenUrl, body);
+	const responseText = await postForm(backboardOAuthTokenUrl, body, 'Backboard token request');
 	const tokens: unknown = JSON.parse(responseText);
 	if (!isObjectRecord(tokens)) {
 		throw new Error('Backboard token response was not an object.');
@@ -294,7 +504,7 @@ async function exchangeBackboardOAuthCode(code: string, redirectUri: string, cod
 	return tokens;
 }
 
-function postForm(urlString: string, body: URLSearchParams): Promise<string> {
+function postForm(urlString: string, body: URLSearchParams, label: string): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
 		const requestUrl = new URL(urlString);
 		const requestBody = body.toString();
@@ -311,7 +521,7 @@ function postForm(urlString: string, body: URLSearchParams): Promise<string> {
 				const responseText = Buffer.concat(chunks).toString('utf8');
 				const statusCode = response.statusCode ?? 0;
 				if (statusCode < 200 || statusCode >= 300) {
-					reject(new Error(`Backboard token request returned HTTP ${statusCode}: ${responseText}`));
+					reject(new Error(`${label} returned HTTP ${statusCode}: ${responseText}`));
 					return;
 				}
 				resolve(responseText);
@@ -746,12 +956,14 @@ function parseVersion(version: string): number[] | undefined {
 	return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)];
 }
 
-async function handleBackboardError(webview: vscode.Webview, error: unknown): Promise<void> {
+async function handleBackboardError(webview: vscode.Webview, error: unknown, bridge?: BackboardBridge): Promise<void> {
 	if (isBackboardAuthError(error)) {
-		await webview.postMessage({ type: 'status', text: 'Backboard API key required.' });
-		const choice = await vscode.window.showInformationMessage('Backboard needs an API key. The Set API Key command stores it in ~/.backboard_ide/config.json.', 'Set API Key');
+		await webview.postMessage({ type: 'status', text: 'Backboard authentication required.' });
+		const choice = await vscode.window.showInformationMessage('Backboard needs an API key or OAuth sign in. The Set API Key command stores it in ~/.backboard_ide/config.json.', 'Set API Key');
 		if (choice === 'Set API Key') {
-			await setApiKey();
+			if (await setApiKey()) {
+				bridge?.restart();
+			}
 		}
 		return;
 	}
@@ -760,7 +972,7 @@ async function handleBackboardError(webview: vscode.Webview, error: unknown): Pr
 
 function isBackboardAuthError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error);
-	return /api key|unauthorized|forbidden|\b401\b|\b403\b/i.test(message);
+	return /api key|auth(?:entication|orization)?|unauthorized|forbidden|\b401\b|\b403\b/i.test(message);
 }
 
 function unsupportedVoiceModeMessage(voiceMode: string): string | undefined {
@@ -778,6 +990,8 @@ interface BackboardConfigJson {
 }
 
 interface BackboardOAuthTokens {
+	readonly api_key?: string | null;
+	readonly apiKey?: string | null;
 	readonly access_token?: string;
 	readonly refresh_token?: string;
 	readonly token_type?: string;
@@ -795,6 +1009,11 @@ interface BackboardOAuthPending {
 	readonly resolve: (code: string) => void;
 	readonly reject: (error: Error) => void;
 	readonly timeout: NodeJS.Timeout;
+}
+
+interface BackboardOAuthSaveResult {
+	readonly apiKeySaved: boolean;
+	readonly assistantId?: string;
 }
 
 function backboardConfigPath(): string {
@@ -924,14 +1143,18 @@ function backboardConfigApiKey(config: BackboardConfigJson): string | undefined 
 	return stringValueFromRecord(backboardConfigEnvKeys(config)[env]);
 }
 
-function configuredBackboardApiKey(): string | undefined {
-	if (backboardConfigApiKey(readBackboardConfigJsonSync())) {
-		return undefined;
-	}
-	if (stringValueFromRecord(process.env.BACKBOARD_API_KEY)) {
-		return undefined;
-	}
-	return vscode.workspace.getConfiguration('backboard').get<string>('apiKey')?.trim() || undefined;
+function backboardConfigAccessToken(config: BackboardConfigJson): string | undefined {
+	const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
+	return stringValueFromRecord(oauth?.access_token);
+}
+
+function configuredBackboardAccessToken(): string | undefined {
+	return backboardConfigAccessToken(readBackboardConfigJsonSync());
+}
+
+function hasBackboardCredentials(): boolean {
+	const config = readBackboardConfigJsonSync();
+	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
 }
 
 async function writeBackboardConfigJson(config: BackboardConfigJson): Promise<void> {
@@ -960,14 +1183,16 @@ async function saveBackboardConfigApiKey(apiKey: string): Promise<void> {
 	});
 }
 
-async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens): Promise<void> {
+async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens): Promise<BackboardOAuthSaveResult> {
 	const accessToken = stringValueFromRecord(tokens.access_token);
 	if (!accessToken) {
 		throw new Error('Backboard token response did not include an access token.');
 	}
+	const directApiKey = stringValueFromRecord(tokens.api_key) ?? stringValueFromRecord(tokens.apiKey);
 	const backboardApiKey = stringValueFromRecord(tokens.backboard_api_key);
 	const personalApiKey = stringValueFromRecord(tokens.personal_api_key);
-	const usableApiKey = backboardApiKey ?? personalApiKey;
+	const usableApiKey = directApiKey ?? backboardApiKey ?? personalApiKey;
+	const assistantId = stringValueFromRecord(tokens.assistant_id);
 
 	const config = await readBackboardConfigJson();
 	const env = normalizeBackboardEnv(stringValueFromRecord(config.env) || currentBackboardEnv());
@@ -988,13 +1213,15 @@ async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens): Promise<v
 			expires_in: typeof tokens.expires_in === 'number' ? tokens.expires_in : undefined,
 			scope: stringValueFromRecord(tokens.scope),
 			id_token: stringValueFromRecord(tokens.id_token),
-			assistant_id: stringValueFromRecord(tokens.assistant_id),
+			assistant_id: assistantId,
+			api_key: directApiKey,
 			backboard_api_key: backboardApiKey,
 			personal_api_key: personalApiKey,
 			selected_client_name: stringValueFromRecord(tokens.selected_client_name),
 			obtained_at: new Date().toISOString()
 		}
 	});
+	return { apiKeySaved: Boolean(usableApiKey), assistantId };
 }
 
 async function clearBackboardConfigApiKey(): Promise<void> {
@@ -1069,6 +1296,13 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		return this.view?.webview.postMessage({ type: 'command', command }) ?? false;
 	}
 
+	refreshState(): void {
+		const view = this.view;
+		if (view) {
+			void postPanelState(this.bridge, view.webview);
+		}
+	}
+
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
 		this.view = webviewView;
 		webviewView.title = '\u200B';
@@ -1077,15 +1311,26 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.onDidReceiveMessage(message => {
 			if (message?.type === 'send' && typeof message.prompt === 'string') {
 				void this.sendPrompt(message.prompt, asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined);
-				} else if (message?.type === 'sendVoice' && isVoiceAttachment(message.audio)) {
-					void this.sendPrompt(typeof message.prompt === 'string' ? message.prompt : '', asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, message.audio);
-				} else if (message?.type === 'cancel') {
-					this.runToken?.cancel();
-				} else if (message?.type === 'reviewChanges') {
-					void vscode.commands.executeCommand('workbench.view.scm');
-			} else if (message?.type === 'setApiKey') {
-				void setApiKey();
-			} else if (message?.type === 'insertActiveFile') {
+			} else if (message?.type === 'sendVoice' && isVoiceAttachment(message.audio)) {
+				void this.sendPrompt(typeof message.prompt === 'string' ? message.prompt : '', asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, message.audio);
+			} else if (message?.type === 'cancel') {
+				this.runToken?.cancel();
+			} else if (message?.type === 'reviewChanges') {
+				void vscode.commands.executeCommand('workbench.view.scm');
+				} else if (message?.type === 'setApiKey') {
+					void setApiKey().then(changed => {
+						if (changed) {
+							this.bridge.restart();
+							void postPanelState(this.bridge, webviewView.webview, true);
+						}
+					});
+				} else if (message?.type === 'signIn') {
+					void signInBackboard(this.bridge).then(changed => {
+						if (changed) {
+							void postPanelState(this.bridge, webviewView.webview, true);
+						}
+					});
+				} else if (message?.type === 'insertActiveFile') {
 				void postComposerContext(webviewView.webview, 'activeFile');
 			} else if (message?.type === 'insertSelection') {
 				void postComposerContext(webviewView.webview, 'selection');
@@ -1167,7 +1412,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		} catch (error) {
 			await view.webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
 			await view.webview.postMessage({ type: 'runFinished', chatId });
-			await handleBackboardError(view.webview, error);
+			await handleBackboardError(view.webview, error, this.bridge);
 		}
 	}
 
@@ -1265,7 +1510,18 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		* { box-sizing: border-box; }
 		html, body { width: 100%; height: 100%; min-width: 0; overflow: hidden; }
 		body { padding: 0; margin: 0; color: var(--bb-text); background: var(--bb-bg); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
-		.root { display: grid; grid-template-rows: ${rootRows}; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; background: var(--bb-bg); }
+			.root { position: relative; display: grid; grid-template-rows: ${rootRows}; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; background: var(--bb-bg); }
+			.root > :not(.authOverlay) { transition: filter .18s ease, opacity .18s ease; }
+			.root.authRequired > :not(.authOverlay) { filter: blur(4px); opacity: .48; pointer-events: none; user-select: none; }
+			.authOverlay { position: absolute; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center; padding: 22px; background: color-mix(in srgb, var(--bb-bg) 38%, transparent); }
+			.root.authRequired .authOverlay { display: flex; }
+			.authCard { width: min(280px, 100%); display: grid; justify-items: center; gap: 12px; padding: 22px 18px; border: 1px solid color-mix(in srgb, var(--bb-border) 82%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--bb-card) 94%, var(--bb-bg)); box-shadow: 0 18px 48px color-mix(in srgb, var(--bb-shadow) 80%, transparent); text-align: center; }
+			.authLogo { width: 52px; height: 68px; display: block; color: color-mix(in srgb, var(--vscode-icon-foreground, var(--bb-text)) 62%, var(--bb-primary)); background: currentColor; -webkit-mask: url('${backboardLogo}') center / contain no-repeat; mask: url('${backboardLogo}') center / contain no-repeat; }
+			.authTitle { color: var(--bb-text); font-size: 15px; font-weight: 650; line-height: 20px; }
+			.authText { max-width: 230px; color: var(--bb-muted); font-size: 12px; line-height: 17px; }
+			.authButton { min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 5px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); font-size: 12px; font-weight: 600; }
+			.authButton:hover { background: var(--vscode-button-hoverBackground, color-mix(in srgb, var(--bb-primary) 84%, var(--bb-text))); }
+			.authButton .codicon { font-size: 14px; }
 		.panelHeader { min-height: 42px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 6px 12px; border-bottom: 1px solid var(--bb-border); background: color-mix(in srgb, var(--bb-surface) 86%, var(--bb-bg)); }
 		.brandMark { width: 24px; height: 24px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--bb-primary) 30%, var(--bb-border)); border-radius: 6px; color: var(--bb-primary); background: color-mix(in srgb, var(--bb-primary) 10%, transparent); }
 		.brandMark .codicon { font-size: 14px; }
@@ -1650,9 +1906,17 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 							</div>
 						</div>
 					</div>
-			</form>
+				</form>
+			</div>
+				<div id="authOverlay" class="authOverlay" role="dialog" aria-live="polite" aria-label="Backboard sign in required">
+					<div class="authCard">
+						<div class="authLogo" aria-hidden="true"></div>
+						<div class="authTitle">Sign in required</div>
+						<div class="authText">Sign in with Backboard to use the auxiliary bar.</div>
+						<button id="authSignInBtn" class="authButton" type="button"><span class="codicon codicon-account"></span><span>Sign in with Backboard</span></button>
+					</div>
+				</div>
 		</div>
-	</div>
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
 		const root = document.querySelector('.root');
@@ -1670,8 +1934,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		const inlineHistoryButton = document.getElementById('inlineHistoryBtn');
 		const checkpointStrip = document.getElementById('checkpointStrip');
 		const checkpointList = document.getElementById('checkpointList');
-		const prompt = document.getElementById('prompt');
-		const toolCount = document.getElementById('toolCount');
+			const prompt = document.getElementById('prompt');
+			const authSignInButton = document.getElementById('authSignInBtn');
+			const toolCount = document.getElementById('toolCount');
 		const popover = document.getElementById('popover');
 		const popoverTitle = document.getElementById('popoverTitle');
 		const popoverBody = document.getElementById('popoverBody');
@@ -1713,7 +1978,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		const persistedState = vscode.getState() || {};
 		let models = [];
 		let tools = [];
-		let settings = {};
+			let settings = {};
+			let authenticated = false;
 		let activeView = persistedState.activeView === 'history' ? 'history' : 'chat';
 		let historyEntries = Array.isArray(persistedState.historyEntries) ? persistedState.historyEntries : [];
 		let activeHistoryId = typeof persistedState.activeHistoryId === 'string' ? persistedState.activeHistoryId : undefined;
@@ -1881,10 +2147,22 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			status.textContent = value === 'Ready.' && currentWorkspace ? 'Ready in ' + workspaceLabel() + '.' : value;
 			status.title = currentWorkspace || value;
 		}
-		function refreshWorkspaceStatus() {
-			const value = status.textContent || 'Ready.';
-			updateStatus(value.startsWith('Ready') ? 'Ready.' : value);
-		}
+			function refreshWorkspaceStatus() {
+				const value = status.textContent || 'Ready.';
+				updateStatus(value.startsWith('Ready') ? 'Ready.' : value);
+			}
+			function setAuthenticated(value) {
+				authenticated = !!value;
+				root.classList.toggle('authRequired', !authenticated);
+				prompt.disabled = !authenticated;
+				if (!authenticated) {
+					closePopover();
+					updateStatus('Sign in required.');
+				} else if ((status.textContent || '').includes('Sign in required')) {
+					updateStatus('Ready.');
+				}
+				syncComposerButtons();
+			}
 		function ensureEmptyState() {
 			emptyState = document.getElementById('emptyState');
 			if (emptyState) {
@@ -2239,7 +2517,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function setActive(button, active) {
 			button.classList.toggle('active', !!active);
 		}
-		function syncComposerButtons() {
+			function syncComposerButtons() {
 			const hasReasoning = controls.intensity.value !== 'fast';
 			const hasMode = controls.mode.value !== 'free';
 			const hasWeb = controls.webSearch.value === 'Auto';
@@ -2261,12 +2539,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			buttons.stop.disabled = !runInProgress || stopRequested;
 			buttons.stop.title = stopRequested ? 'Stopping...' : 'Stop generation';
 			buttons.stop.setAttribute('aria-label', buttons.stop.title);
-			const hasPrompt = prompt.value.trim().length > 0;
-			buttons.send.disabled = !hasPrompt;
-			buttons.send.classList.toggle('ready', hasPrompt);
-			buttons.send.title = runInProgress ? 'Queue Prompt' : 'Send';
-			buttons.send.setAttribute('aria-label', buttons.send.title);
-		}
+				const hasPrompt = prompt.value.trim().length > 0;
+				buttons.send.disabled = !authenticated || !hasPrompt;
+				buttons.send.classList.toggle('ready', authenticated && hasPrompt);
+				buttons.send.title = !authenticated ? 'Sign in required' : runInProgress ? 'Queue Prompt' : 'Send';
+				buttons.send.setAttribute('aria-label', buttons.send.title);
+			}
 		function setVoiceRecording(recording) {
 			voiceRecording = recording;
 			buttons.voice.classList.toggle('recording', recording);
@@ -2769,9 +3047,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			modelIcon.innerHTML = unwrapModelIconHtml(providerIconHtml(provider, 'modelIcon'));
 			buttons.model.title = currentModelLabel();
 		}
-		function applySettings(next) {
-			settings = { ...settings, ...(next || {}) };
-			renderModels();
+			function applySettings(next) {
+				settings = { ...settings, ...(next || {}) };
+				setAuthenticated(settings.authenticated === true);
+				renderModels();
 			setSelect(controls.mode, settings.mode || 'free');
 			setSelect(controls.intensity, settings.intensity || 'fast');
 			setSelect(controls.memoryMode, settings.memoryMode || 'Auto');
@@ -2806,7 +3085,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				syncComposerButtons();
 			});
 		}
-		prompt.addEventListener('input', syncComposerButtons);
+			prompt.addEventListener('input', syncComposerButtons);
+			authSignInButton?.addEventListener('click', () => {
+				vscode.postMessage({ type: 'signIn' });
+			});
 		prompt.addEventListener('keydown', event => {
 			if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
 				event.preventDefault();
@@ -3092,9 +3374,14 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 		});
 		window.visualViewport?.addEventListener('resize', syncRootHeight);
-		document.getElementById('form').addEventListener('submit', event => {
-			event.preventDefault();
-			const text = prompt.value.trim();
+			document.getElementById('form').addEventListener('submit', event => {
+				event.preventDefault();
+				if (!authenticated) {
+					updateStatus('Sign in required.');
+					authSignInButton?.focus();
+					return;
+				}
+				const text = prompt.value.trim();
 			if (!text) {
 				syncComposerButtons();
 				return;
@@ -4134,6 +4421,16 @@ class BackboardBridge implements vscode.Disposable {
 		this.output.dispose();
 	}
 
+	restart(): void {
+		this.pendingModelRefresh = undefined;
+		if (!this.child || this.child.killed) {
+			this.pending.clear();
+			return;
+		}
+		this.output.appendLine(`[${new Date().toISOString()}] Restarting Backboard bridge after credential change`);
+		this.child.kill();
+	}
+
 	refreshModels(): void {
 		void this.listModels(new vscode.CancellationTokenSource().token, true);
 	}
@@ -4905,11 +5202,11 @@ function readSettings(): {
 	readonly mcpFigma: boolean;
 	readonly mcpNotion: boolean;
 	readonly mcpGoogle: boolean;
-	readonly config: { readonly env: string; readonly apiUrl?: string; readonly apiKey?: string };
+	readonly config: { readonly env: string; readonly apiUrl?: string; readonly accessToken?: string };
 } {
 	const config = vscode.workspace.getConfiguration('backboard');
 	const apiUrl = config.get<string>('apiUrl')?.trim() || undefined;
-	const apiKey = configuredBackboardApiKey();
+	const accessToken = configuredBackboardAccessToken();
 	return {
 		defaultProvider: config.get<string>('defaultProvider') || 'aws-bedrock',
 		defaultModel: config.get<string>('defaultModel') || 'anthropic.claude-sonnet-4-6',
@@ -4925,7 +5222,7 @@ function readSettings(): {
 		config: {
 			env: config.get<string>('env') || 'prod',
 			apiUrl,
-			apiKey
+			accessToken
 		}
 	};
 }
@@ -5015,12 +5312,12 @@ async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, 
 			await webview.postMessage({ type: 'models', models: cachedModels });
 			await webview.postMessage({ type: 'status', text: 'Using cached Backboard models.' });
 		} else {
-			await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
-			if (isBackboardAuthError(error)) {
-				await webview.postMessage({ type: 'status', text: 'Set a Backboard API key, BACKBOARD_API_KEY, or ~/.backboard_ide/config.json to load models.' });
-			} else {
-				await webview.postMessage({ type: 'status', text: 'Could not load models.' });
-			}
+				await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
+				if (isBackboardAuthError(error)) {
+					await webview.postMessage({ type: 'status', text: 'Sign in or set a Backboard API key in ~/.backboard_ide/config.json to load models.' });
+				} else {
+					await webview.postMessage({ type: 'status', text: 'Could not load models.' });
+				}
 		}
 	}
 	try {
@@ -5121,7 +5418,8 @@ function publicSettings(settings: BackboardSettings): PanelOptions {
 		voiceMode: settings.voiceMode,
 		mcpFigma: settings.mcpFigma,
 		mcpNotion: settings.mcpNotion,
-		mcpGoogle: settings.mcpGoogle
+		mcpGoogle: settings.mcpGoogle,
+		authenticated: hasBackboardCredentials()
 	};
 }
 
