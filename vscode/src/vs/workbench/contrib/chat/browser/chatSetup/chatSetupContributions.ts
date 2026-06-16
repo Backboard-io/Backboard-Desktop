@@ -397,8 +397,9 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 					title: localize('signInIndicatorTitleBarAction', 'Sign In'),
 					f1: false,
 					menu: [{
-						id: MenuId.TitleBarAdjacentCenter,
-						order: 0, // same position as the update button
+						id: MenuId.TitleBar,
+						group: 'navigation',
+						order: 9999,
 						when: ContextKeyExpr.and(
 							IsWebContext.negate(),
 							ChatContextKeys.Entitlement.signedOut,
@@ -419,7 +420,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 
 				telemetryService.publicLog2<WorkbenchActionExecutedEvent, WorkbenchActionExecutedClassification>('workbenchActionExecuted', { id: CHAT_SETUP_ACTION_ID, from: 'titlebar' });
 
-				return commandService.executeCommand(CHAT_SETUP_ACTION_ID);
+				return commandService.executeCommand(CHAT_SETUP_ACTION_ID, undefined, { setupStrategy: ChatSetupStrategy.SetupWithBackboardProvider });
 			}
 		}
 
@@ -654,7 +655,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 
 	private registerSignInTitleBarEntry(actionViewItemService: IActionViewItemService): void {
 		this._register(actionViewItemService.register(
-			MenuId.TitleBarAdjacentCenter,
+			MenuId.TitleBar,
 			SIGN_IN_TITLE_BAR_ACTION_ID,
 			(action, options) => new SignInTitleBarEntry(action, options)
 		));

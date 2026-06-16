@@ -10,7 +10,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { LayoutSettings } from '../../../services/layout/browser/layoutService.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ContextKeyExpr, ContextKeyExpression, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
-import { ACCOUNTS_ACTIVITY_ID, GLOBAL_ACTIVITY_ID } from '../../../common/activity.js';
+import { GLOBAL_ACTIVITY_ID } from '../../../common/activity.js';
 import { IAction } from '../../../../base/common/actions.js';
 import { IsMainWindowFullscreenContext, IsCompactTitleBarContext, TitleBarStyleContext, TitleBarVisibleContext } from '../../../common/contextkeys.js';
 import { CustomTitleBarVisibility, TitleBarSetting, TitlebarStyle } from '../../../../platform/window/common/window.js';
@@ -273,15 +273,6 @@ registerAction2(class ToggleEditorActions extends Action2 {
 });
 
 // --- Toolbar actions --- //
-
-export const ACCOUNTS_ACTIVITY_TILE_ACTION: IAction = {
-	id: ACCOUNTS_ACTIVITY_ID,
-	label: localize('accounts', "Accounts"),
-	tooltip: localize('accounts', "Accounts"),
-	class: undefined,
-	enabled: true,
-	run: function (): void { }
-};
 
 export const GLOBAL_ACTIVITY_TITLE_ACTION: IAction = {
 	id: GLOBAL_ACTIVITY_ID,

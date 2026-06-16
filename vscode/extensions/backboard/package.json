@@ -18,6 +18,7 @@
     "onCommand:backboard.newChat",
     "onCommand:backboard.showHistory",
     "onCommand:backboard.setApiKey",
+    "onCommand:backboard.signIn",
     "onCommand:backboard.refreshModels",
     "onCommand:backboard.checkForUpdates",
     "onCommand:backboard.openPanel",
@@ -63,6 +64,12 @@
         "title": "Set API Key",
         "category": "Backboard",
         "icon": "$(key)"
+      },
+      {
+        "command": "backboard.signIn",
+        "title": "Sign In",
+        "category": "Backboard",
+        "icon": "$(account)"
       },
       {
         "command": "backboard.refreshModels",

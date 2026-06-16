@@ -111,8 +111,14 @@ type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
 const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases';
 const dismissedUpdateVersionKey = 'backboard.update.dismissedVersion';
+const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
+const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
+const backboardOAuthClientId = 'Backboard_oauth_UJ962-3pQDh3bxVNA0-CFtV7iKGWksIf';
+const backboardOAuthClientSecret = 'Backboard_oauth_sec_oMaX9JHd8jTxcqdz436oc7peEXclx0MDQrZ3nrSr_u0';
+const backboardOAuthScope = 'openid email profile';
 let backboardToolOutput: vscode.OutputChannel | undefined;
 let backboardUpdateInstallInProgress = false;
+let pendingBackboardOAuth: BackboardOAuthPending | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
 	backboardToolOutput = vscode.window.createOutputChannel('Backboard Tools');
@@ -121,6 +127,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(backboardToolOutput);
 	context.subscriptions.push(bridge);
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', () => setApiKey()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.signIn', () => signInBackboard(context)));
+	context.subscriptions.push(vscode.window.registerUriHandler({
+		handleUri: uri => handleBackboardOAuthCallback(uri)
+	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => bridge.refreshModels()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.checkForUpdates', () => checkBackboardUpdates(context, true)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openRightPanel', () => openBackboardView()));
@@ -166,6 +176,150 @@ async function setApiKey(): Promise<boolean> {
 		return false;
 	}
 	return false;
+}
+
+async function signInBackboard(context: vscode.ExtensionContext): Promise<boolean> {
+	const state = crypto.randomBytes(24).toString('base64url');
+	const nonce = crypto.randomBytes(24).toString('base64url');
+	const codeVerifier = crypto.randomBytes(32).toString('base64url');
+	const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+	try {
+		const redirectUri = await vscode.env.asExternalUri(vscode.Uri.parse(`${vscode.env.uriScheme}://${context.extension.id}/auth/callback`));
+		backboardToolOutput?.appendLine(`[oauth] Redirect URI: ${redirectUri.toString(true)}`);
+		const codePromise = waitForBackboardOAuthCode(state);
+		const params = new URLSearchParams({
+			client_id: backboardOAuthClientId,
+			redirect_uri: redirectUri.toString(true),
+			response_type: 'code',
+			scope: backboardOAuthScope,
+			state,
+			code_challenge: codeChallenge,
+			code_challenge_method: 'S256',
+			nonce
+		});
+		backboardToolOutput?.appendLine('[oauth] Opening Backboard sign in.');
+		await vscode.env.openExternal(vscode.Uri.parse(`${backboardOAuthAuthorizeUrl}?${params}`));
+
+		const code = await codePromise;
+		backboardToolOutput?.appendLine('[oauth] Received Backboard authorization code; exchanging for tokens.');
+		const tokens = await exchangeBackboardOAuthCode(code, redirectUri.toString(true), codeVerifier);
+		await saveBackboardOAuthTokens(tokens);
+		await vscode.window.showInformationMessage('Signed in to Backboard.');
+		return true;
+	} catch (error) {
+		backboardToolOutput?.appendLine(`[oauth] sign in failed: ${error instanceof Error ? error.message : String(error)}`);
+		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
+		return false;
+	}
+}
+
+function waitForBackboardOAuthCode(state: string): Promise<string> {
+	pendingBackboardOAuth?.reject(new Error('A new Backboard sign in was started.'));
+	if (pendingBackboardOAuth) {
+		clearTimeout(pendingBackboardOAuth.timeout);
+	}
+
+	return new Promise<string>((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			if (pendingBackboardOAuth?.state === state) {
+				pendingBackboardOAuth = undefined;
+			}
+			reject(new Error('Timed out waiting for Backboard sign in callback.'));
+		}, 5 * 60 * 1000);
+		pendingBackboardOAuth = { state, resolve, reject, timeout };
+	});
+}
+
+function handleBackboardOAuthCallback(uri: vscode.Uri): void {
+	if (uri.path !== '/auth/callback') {
+		return;
+	}
+
+	const pending = pendingBackboardOAuth;
+	if (!pending) {
+		backboardToolOutput?.appendLine('[oauth] Ignoring Backboard callback because no sign in is pending.');
+		return;
+	}
+
+	const query = new URLSearchParams(uri.query);
+	const state = query.get('state')?.trim();
+	if (state !== pending.state) {
+		pendingBackboardOAuth = undefined;
+		clearTimeout(pending.timeout);
+		pending.reject(new Error('OAuth state did not match.'));
+		return;
+	}
+
+	const error = query.get('error')?.trim();
+	if (error) {
+		const description = query.get('error_description')?.trim();
+		pendingBackboardOAuth = undefined;
+		clearTimeout(pending.timeout);
+		pending.reject(new Error(description ? `${error}: ${description}` : error));
+		return;
+	}
+
+	const code = query.get('code')?.trim();
+	if (!code) {
+		pendingBackboardOAuth = undefined;
+		clearTimeout(pending.timeout);
+		pending.reject(new Error('Missing Backboard authorization code.'));
+		return;
+	}
+
+	pendingBackboardOAuth = undefined;
+	clearTimeout(pending.timeout);
+	pending.resolve(code);
+}
+
+async function exchangeBackboardOAuthCode(code: string, redirectUri: string, codeVerifier: string): Promise<BackboardOAuthTokens> {
+	const body = new URLSearchParams({
+		grant_type: 'authorization_code',
+		code,
+		redirect_uri: redirectUri,
+		client_id: backboardOAuthClientId,
+		client_secret: backboardOAuthClientSecret,
+		code_verifier: codeVerifier
+	});
+	const responseText = await postForm(backboardOAuthTokenUrl, body);
+	const tokens: unknown = JSON.parse(responseText);
+	if (!isObjectRecord(tokens)) {
+		throw new Error('Backboard token response was not an object.');
+	}
+	if (!stringValueFromRecord(tokens.access_token)) {
+		throw new Error('Backboard token response did not include an access token.');
+	}
+	return tokens;
+}
+
+function postForm(urlString: string, body: URLSearchParams): Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		const requestUrl = new URL(urlString);
+		const requestBody = body.toString();
+		const request = https.request(requestUrl, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+				'Content-Length': Buffer.byteLength(requestBody)
+			}
+		}, response => {
+			const chunks: Buffer[] = [];
+			response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+			response.on('end', () => {
+				const responseText = Buffer.concat(chunks).toString('utf8');
+				const statusCode = response.statusCode ?? 0;
+				if (statusCode < 200 || statusCode >= 300) {
+					reject(new Error(`Backboard token request returned HTTP ${statusCode}: ${responseText}`));
+					return;
+				}
+				resolve(responseText);
+			});
+		});
+		request.on('error', reject);
+		request.write(requestBody);
+		request.end();
+	});
 }
 
 function startBackboardUpdateChecks(context: vscode.ExtensionContext): void {
@@ -622,6 +776,24 @@ interface BackboardConfigJson {
 	readonly env_keys?: Record<string, string>;
 }
 
+interface BackboardOAuthTokens {
+	readonly access_token?: string;
+	readonly refresh_token?: string;
+	readonly token_type?: string;
+	readonly expires_in?: number;
+	readonly scope?: string;
+	readonly id_token?: string | null;
+	readonly assistant_id?: string | null;
+	readonly backboard_api_key?: string | null;
+}
+
+interface BackboardOAuthPending {
+	readonly state: string;
+	readonly resolve: (code: string) => void;
+	readonly reject: (error: Error) => void;
+	readonly timeout: NodeJS.Timeout;
+}
+
 function backboardConfigPath(): string {
 	return path.join(os.homedir(), '.backboard_ide', 'config.json');
 }
@@ -782,6 +954,39 @@ async function saveBackboardConfigApiKey(apiKey: string): Promise<void> {
 		env,
 		api_key: apiKey,
 		env_keys: envKeys
+	});
+}
+
+async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens): Promise<void> {
+	const accessToken = stringValueFromRecord(tokens.access_token);
+	if (!accessToken) {
+		throw new Error('Backboard token response did not include an access token.');
+	}
+	const backboardApiKey = stringValueFromRecord(tokens.backboard_api_key);
+
+	const config = await readBackboardConfigJson();
+	const env = normalizeBackboardEnv(stringValueFromRecord(config.env) || currentBackboardEnv());
+	const envKeys = backboardConfigEnvKeys(config);
+	if (backboardApiKey) {
+		envKeys[env] = backboardApiKey;
+	}
+
+	await writeBackboardConfigJson({
+		...config,
+		env,
+		api_key: backboardApiKey ?? config.api_key,
+		env_keys: envKeys,
+		oauth: {
+			access_token: accessToken,
+			refresh_token: stringValueFromRecord(tokens.refresh_token),
+			token_type: stringValueFromRecord(tokens.token_type),
+			expires_in: typeof tokens.expires_in === 'number' ? tokens.expires_in : undefined,
+			scope: stringValueFromRecord(tokens.scope),
+			id_token: stringValueFromRecord(tokens.id_token),
+			assistant_id: stringValueFromRecord(tokens.assistant_id),
+			backboard_api_key: backboardApiKey,
+			obtained_at: new Date().toISOString()
+		}
 	});
 }
 
@@ -2887,6 +3092,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				syncComposerButtons();
 				return;
 			}
+			if (text === '/retry') {
+				retryLastPrompt();
+				prompt.value = '';
+				syncComposerButtons();
+				return;
+			}
 			if (runInProgress) {
 				queuePrompt(text, options());
 			} else {
@@ -2952,6 +3163,29 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			renderQueue();
 			saveActiveHistory();
 			updateStatus(promptQueue.length + ' prompt' + (promptQueue.length === 1 ? '' : 's') + ' queued.');
+		}
+		function latestUserPrompt() {
+			const messages = Array.from(log.querySelectorAll('.messageCard.user .messageText'));
+			for (let index = messages.length - 1; index >= 0; index--) {
+				const value = messages[index].textContent?.trim();
+				if (value && value !== '/retry') {
+					return value;
+				}
+			}
+			const entry = activeHistoryEntry();
+			return entry?.prompt?.trim() || '';
+		}
+		function retryLastPrompt() {
+			const text = latestUserPrompt();
+			if (!text) {
+				updateStatus('No previous prompt to retry.');
+				return;
+			}
+			if (runInProgress) {
+				queuePrompt(text, options());
+			} else {
+				sendPromptToHost(text, options());
+			}
 		}
 		function renderQueue() {
 			document.getElementById('queueBlock')?.remove();
