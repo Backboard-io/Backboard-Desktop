@@ -331,7 +331,8 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			context: openConfig.context,
 			contextWindowId: openConfig.contextWindowId,
 			initialStartup: openConfig.initialStartup,
-			forceNewWindow: true,
+			forceNewWindow: !openConfig.forceReuseWindow,
+			forceReuseWindow: openConfig.forceReuseWindow,
 		};
 	}
 
@@ -772,7 +773,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	private resolveContextWindow(openConfig: IOpenConfiguration, forceNewWindow: boolean): { windowToUse: ICodeWindow | undefined; forceNewWindow: boolean } {
 		if (!forceNewWindow && typeof openConfig.contextWindowId === 'number') {
 			const contextWindow = this.getWindowById(openConfig.contextWindowId);
-			if (contextWindow?.config?.isSessionsWindow) {
+			if (contextWindow?.config?.isSessionsWindow && !openConfig.forceReuseWindow) {
 				return { windowToUse: undefined, forceNewWindow: true }; // do not replace the agents window
 			}
 			return { windowToUse: contextWindow, forceNewWindow };

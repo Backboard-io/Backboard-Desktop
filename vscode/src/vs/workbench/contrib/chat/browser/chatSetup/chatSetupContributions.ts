@@ -32,7 +32,7 @@ import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import product from '../../../../../platform/product/common/product.js';
-import { GitHubPaths, IDefaultAccountService } from '../../../../../platform/defaultAccount/common/defaultAccount.js';
+import { DefaultAccountStatus, DefaultAccountStatusContext, GitHubPaths, IDefaultAccountService } from '../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
@@ -397,11 +397,13 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 					title: localize('signInIndicatorTitleBarAction', 'Sign In'),
 					f1: false,
 					menu: [{
-						id: MenuId.TitleBarAdjacentCenter,
-						order: 0, // same position as the update button
+						id: MenuId.TitleBar,
+						group: 'navigation',
+						order: 9999,
 						when: ContextKeyExpr.and(
 							IsWebContext.negate(),
 							ChatContextKeys.Entitlement.signedOut,
+							DefaultAccountStatusContext.isEqualTo(DefaultAccountStatus.Unavailable),
 							ChatEntitlementContextKeys.hasByokModels.negate(),
 							ChatContextKeys.Setup.hidden.negate(),
 							ChatContextKeys.Setup.disabledInWorkspace.negate(),
@@ -419,7 +421,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 
 				telemetryService.publicLog2<WorkbenchActionExecutedEvent, WorkbenchActionExecutedClassification>('workbenchActionExecuted', { id: CHAT_SETUP_ACTION_ID, from: 'titlebar' });
 
-				return commandService.executeCommand(CHAT_SETUP_ACTION_ID);
+				return commandService.executeCommand(CHAT_SETUP_ACTION_ID, undefined, { setupStrategy: ChatSetupStrategy.SetupWithBackboardProvider });
 			}
 		}
 
@@ -433,6 +435,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 					ContextKeyExpr.and(
 						IsWebContext.negate(),
 						ChatContextKeys.Entitlement.signedOut,
+						DefaultAccountStatusContext.isEqualTo(DefaultAccountStatus.Unavailable),
 						ChatContextKeys.Setup.hidden.negate(),
 						ChatContextKeys.Setup.disabledInWorkspace.negate(),
 					)
@@ -654,7 +657,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 
 	private registerSignInTitleBarEntry(actionViewItemService: IActionViewItemService): void {
 		this._register(actionViewItemService.register(
-			MenuId.TitleBarAdjacentCenter,
+			MenuId.TitleBar,
 			SIGN_IN_TITLE_BAR_ACTION_ID,
 			(action, options) => new SignInTitleBarEntry(action, options)
 		));

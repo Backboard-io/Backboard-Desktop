@@ -19,8 +19,8 @@ import { localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
-import { IDefaultAccountProvider, IDefaultAccountService, ManagedSettingsFetchStatus } from '../../../../platform/defaultAccount/common/defaultAccount.js';
+import { IContextKey, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { DefaultAccountStatus, DefaultAccountStatusContext, IDefaultAccountProvider, IDefaultAccountService, ManagedSettingsFetchStatus } from '../../../../platform/defaultAccount/common/defaultAccount.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../platform/product/common/productService.js';
@@ -57,13 +57,6 @@ interface IDefaultAccountConfig {
 
 export const DEFAULT_ACCOUNT_SIGN_IN_COMMAND = 'workbench.actions.accounts.signIn';
 
-const enum DefaultAccountStatus {
-	Uninitialized = 'uninitialized',
-	Unavailable = 'unavailable',
-	Available = 'available',
-}
-
-const CONTEXT_DEFAULT_ACCOUNT_STATE = new RawContextKey<string>('defaultAccountStatus', DefaultAccountStatus.Uninitialized);
 const CACHED_POLICY_DATA_KEY = 'defaultAccount.cachedPolicyData';
 const ACCOUNT_DATA_POLL_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const MANAGED_SETTINGS_REQUEST_TIMEOUT_MS = 5000;
@@ -306,7 +299,7 @@ class DefaultAccountProvider extends Disposable implements IDefaultAccountProvid
 		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super();
-		this.accountStatusContext = CONTEXT_DEFAULT_ACCOUNT_STATE.bindTo(contextKeyService);
+		this.accountStatusContext = DefaultAccountStatusContext.bindTo(contextKeyService);
 		const cachedAccountData = this.getCachedAccountData();
 		this._policyData = cachedAccountData?.accountPolicyData ?? null;
 		this._copilotTokenInfo = cachedAccountData?.copilotTokenInfo ?? null;

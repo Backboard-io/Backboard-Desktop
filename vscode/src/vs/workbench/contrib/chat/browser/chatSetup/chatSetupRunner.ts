@@ -81,7 +81,7 @@ export class ChatSetup {
 		let instance = ChatSetup.instance;
 		if (!instance) {
 			instance = ChatSetup.instance = instantiationService.invokeFunction(accessor => {
-				return new ChatSetup(context, controller, accessor.get(ITelemetryService), accessor.get(IWorkbenchLayoutService), accessor.get(IKeybindingService), accessor.get(IChatEntitlementService) as ChatEntitlementService, accessor.get(ILogService), accessor.get(IChatWidgetService), accessor.get(IWorkspaceTrustRequestService), accessor.get(IMarkdownRendererService), accessor.get(IDefaultAccountService), accessor.get(IHostService), accessor.get(IFileService), accessor.get(IPathService), accessor.get(INotificationService));
+				return new ChatSetup(context, controller, accessor.get(ITelemetryService), accessor.get(IWorkbenchLayoutService), accessor.get(IKeybindingService), accessor.get(IChatEntitlementService) as ChatEntitlementService, accessor.get(ILogService), accessor.get(IChatWidgetService), accessor.get(IWorkspaceTrustRequestService), accessor.get(IMarkdownRendererService), accessor.get(IDefaultAccountService), accessor.get(IHostService), accessor.get(IFileService), accessor.get(IPathService), accessor.get(INotificationService), accessor.get(ICommandService));
 			});
 		}
 
@@ -108,6 +108,7 @@ export class ChatSetup {
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
 		@INotificationService private readonly notificationService: INotificationService,
+		@ICommandService private readonly commandService: ICommandService,
 	) { }
 
 	skipDialog(): void {
@@ -197,6 +198,9 @@ export class ChatSetup {
 				case ChatSetupStrategy.SetupWithBackboardApiKey:
 					success = await this.showBackboardApiKeyDialog();
 					break;
+				case ChatSetupStrategy.SetupWithBackboardProvider:
+					success = await this.openBackboardProviderSignIn();
+					break;
 				case ChatSetupStrategy.Canceled:
 					this.context.update({ later: true });
 					this.telemetryService.publicLog2<InstallChatEvent, InstallChatClassification>('commandCenter.chatInstall', { installResult: 'failedMaybeLater', installDuration: 0, signUpErrorCode: undefined, provider: undefined });
@@ -212,6 +216,18 @@ export class ChatSetup {
 		}
 
 		return { success, dialogSkipped };
+	}
+
+	private async openBackboardProviderSignIn(): Promise<ChatSetupResultValue> {
+		try {
+			return await this.commandService.executeCommand<boolean>('backboard.signIn') || undefined;
+		} catch (error) {
+			this.notificationService.notify({
+				severity: Severity.Error,
+				message: localize('backboardOAuth.error', "Backboard sign in failed: {0}", toErrorMessage(error))
+			});
+			return false;
+		}
 	}
 
 	private async showDialog(options?: { forceSignInDialog?: boolean; forceAnonymous?: ChatSetupAnonymous; dialogIcon?: ThemeIcon; dialogTitle?: string; disableCloseButton?: boolean; onSignInStarted?: () => void }): Promise<ChatSetupStrategy> {

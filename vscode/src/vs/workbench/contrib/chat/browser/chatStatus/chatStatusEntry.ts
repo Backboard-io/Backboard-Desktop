@@ -27,12 +27,13 @@ import { IContextKeyService } from '../../../../../platform/contextkey/common/co
 import { isWeb } from '../../../../../base/common/platform.js';
 import { InEditorZenModeContext } from '../../../../common/contextkeys.js';
 import { ChatConfiguration } from '../../common/constants.js';
+import { DefaultAccountStatus, DefaultAccountStatusContext } from '../../../../../platform/defaultAccount/common/defaultAccount.js';
 
 export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.chatStatusBarEntry';
 
-	private static readonly TITLE_BAR_CONTEXT_KEYS = new Set(['updateTitleBar', InEditorZenModeContext.key, ChatEntitlementContextKeys.hasByokModels.key]);
+	private static readonly TITLE_BAR_CONTEXT_KEYS = new Set(['updateTitleBar', InEditorZenModeContext.key, ChatEntitlementContextKeys.hasByokModels.key, DefaultAccountStatusContext.key]);
 
 	private entry: IStatusbarEntryAccessor | undefined = undefined;
 
@@ -179,7 +180,7 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 
 			// Signed out — keep showing Sign-in affordance even when BYOK models are present
 			// so air-gapped users can still authenticate to unlock the full Copilot experience.
-			else if (this.chatEntitlementService.entitlement === ChatEntitlement.Unknown) {
+			else if (this.chatEntitlementService.entitlement === ChatEntitlement.Unknown && this.isDefaultAccountUnavailable()) {
 				return this.getSetupEntryProps();
 			}
 
@@ -258,6 +259,10 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 			return false;
 		}
 
+		if (!this.isDefaultAccountUnavailable()) {
+			return false;
+		}
+
 		if (this.chatEntitlementService.sentiment.hidden || this.chatEntitlementService.sentiment.disabledInWorkspace) {
 			return false;
 		}
@@ -274,6 +279,10 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 
 		const signInTitleBarEnabled = this.configurationService.getValue<boolean>(ChatConfiguration.TitleBarSignInEnabled) !== false;
 		return signInTitleBarEnabled;
+	}
+
+	private isDefaultAccountUnavailable(): boolean {
+		return this.contextKeyService.getContextKeyValue(DefaultAccountStatusContext.key) === DefaultAccountStatus.Unavailable;
 	}
 
 	override dispose(): void {

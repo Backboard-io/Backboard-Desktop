@@ -742,6 +742,19 @@
 	margin-bottom: 18px;
 }
 
+.agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part):has(> .content.empty),
+.agent-sessions-workbench.shell-gradient-background.nopanel .monaco-grid-view .part.editor:not(.modal-editor-part):has(> .content.empty) {
+	margin: 0;
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+}
+
+.agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part):has(> .content.empty) > .content {
+	background: transparent;
+}
+
 .agent-sessions-workbench.shell-gradient-background .part.sessionspart .interactive-session .interactive-item-container,
 .agent-sessions-workbench.shell-gradient-background .chat-editor-relative .interactive-session .interactive-item-container,
 .agent-sessions-workbench.shell-gradient-background .part.sessionspart .interactive-session > .chat-suggest-next-widget,

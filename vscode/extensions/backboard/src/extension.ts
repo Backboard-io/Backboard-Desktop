@@ -5,7 +5,10 @@
 
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as http from 'http';
+import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
@@ -56,6 +59,13 @@ interface ModelCacheEntry {
 	readonly models: BridgeModel[];
 }
 
+interface UpdateManifest {
+	readonly version: string;
+	readonly url: string;
+	readonly sha256?: string;
+	readonly size_bytes?: number;
+}
+
 interface PendingRequest {
 	readonly events: BridgeEvent[];
 	readonly onEvent?: (event: BridgeEvent) => void | Promise<void>;
@@ -95,11 +105,21 @@ interface PanelOptions {
 	readonly mcpFigma?: boolean;
 	readonly mcpNotion?: boolean;
 	readonly mcpGoogle?: boolean;
+	readonly authenticated?: boolean;
 }
 
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
+const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases';
+const dismissedUpdateVersionKey = 'backboard.update.dismissedVersion';
+const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
+const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
+const backboardOAuthClientId = 'Backboard_oauth_BGmuDtqCPmPgmIqWZ2ORvdqpl8fdKFQY';
+const defaultBackboardOAuthRedirectUri = 'http://127.0.0.1:49321/auth/callback';
+const backboardOAuthScope = 'openid email profile';
 let backboardToolOutput: vscode.OutputChannel | undefined;
+let backboardUpdateInstallInProgress = false;
+let pendingBackboardOAuth: BackboardOAuthPending | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
 	backboardToolOutput = vscode.window.createOutputChannel('Backboard Tools');
@@ -107,8 +127,19 @@ export function activate(context: vscode.ExtensionContext): void {
 	const panelProvider = new BackboardPanelProvider(bridge, context);
 	context.subscriptions.push(backboardToolOutput);
 	context.subscriptions.push(bridge);
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', () => setApiKey()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', async () => {
+		if (await setApiKey()) {
+			bridge.restart();
+		}
+	}));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.signIn', () => signInBackboard(bridge)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.copyOAuthRedirectUri', () => copyBackboardOAuthRedirectUri()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.completeOAuthCallback', () => completeBackboardOAuthCallbackFromInput()));
+	context.subscriptions.push(vscode.window.registerUriHandler({
+		handleUri: uri => handleBackboardOAuthCallback(uri)
+	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => bridge.refreshModels()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.checkForUpdates', () => checkBackboardUpdates(context, true)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openRightPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.newChat', async () => {
@@ -119,7 +150,13 @@ export function activate(context: vscode.ExtensionContext): void {
 		await openBackboardView();
 		await panelProvider.postUiCommand('showHistory');
 	}));
+	const configWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardConfigPath()), path.basename(backboardConfigPath())));
+	context.subscriptions.push(configWatcher);
+	context.subscriptions.push(configWatcher.onDidCreate(() => panelProvider.refreshState()));
+	context.subscriptions.push(configWatcher.onDidChange(() => panelProvider.refreshState()));
+	context.subscriptions.push(configWatcher.onDidDelete(() => panelProvider.refreshState()));
 	context.subscriptions.push(vscode.window.registerWebviewViewProvider('backboard.panel', panelProvider, { webviewOptions: { retainContextWhenHidden: true } }));
+	startBackboardUpdateChecks(context);
 }
 
 export function deactivate(): void {
@@ -148,17 +185,797 @@ async function setApiKey(): Promise<boolean> {
 			return true;
 		}
 		await clearBackboardConfigApiKey();
-		return false;
+		return true;
 	}
 	return false;
 }
 
-async function handleBackboardError(webview: vscode.Webview, error: unknown): Promise<void> {
+async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
+	const state = crypto.randomBytes(24).toString('base64url');
+	const nonce = crypto.randomBytes(24).toString('base64url');
+	const codeVerifier = crypto.randomBytes(32).toString('base64url');
+	const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+	let callbackServer: vscode.Disposable | undefined;
+
+	try {
+		const redirectUri = await backboardOAuthCallbackUri();
+		backboardToolOutput?.appendLine(`[oauth] Redirect URI: ${redirectUri}`);
+		callbackServer = await startBackboardOAuthCallbackServer(redirectUri);
+		const codePromise = waitForBackboardOAuthCode(state);
+		const params = new URLSearchParams({
+			client_id: backboardOAuthClientId,
+			redirect_uri: redirectUri,
+			response_type: 'code',
+			scope: backboardOAuthScope,
+			state,
+			code_challenge: codeChallenge,
+			code_challenge_method: 'S256',
+			nonce
+		});
+		const authorizeUrl = `${backboardOAuthAuthorizeUrl}?${params}`;
+		backboardToolOutput?.appendLine(`[oauth] Opening Backboard authorize URL first: ${authorizeUrl}`);
+		backboardToolOutput?.appendLine(`[oauth] After Allow, Backboard redirects to the registered callback URI above.`);
+		await openBackboardOAuthAuthorizeUrl(authorizeUrl);
+
+		const code = await codePromise;
+		callbackServer?.dispose();
+		callbackServer = undefined;
+		backboardToolOutput?.appendLine('[oauth] Received Backboard authorization code; exchanging for tokens.');
+		const tokens = await exchangeBackboardOAuthCode(code, redirectUri, codeVerifier);
+			const saveResult = await saveBackboardOAuthTokens(tokens);
+			bridge.restart();
+			if (saveResult.apiKeySaved) {
+				backboardToolOutput?.appendLine(`[oauth] API KEY HAS BEEN TAKEN and saved to ${backboardConfigPath()}.`);
+				void vscode.window.showInformationMessage('Backboard sign in complete. API KEY HAS BEEN TAKEN and saved to ~/.backboard_ide/config.json.');
+			} else if (!backboardConfigApiKey(await readBackboardConfigJson())) {
+				const choice = await vscode.window.showWarningMessage(
+					'Signed in to Backboard, but NO API KEY was returned. Set an organization API key to send IDE requests.',
+				'Set API Key'
+			);
+			if (choice === 'Set API Key') {
+				await setApiKey();
+				}
+			} else {
+				void vscode.window.showInformationMessage('Backboard sign in complete. Existing API key remains saved in ~/.backboard_ide/config.json.');
+			}
+			return true;
+	} catch (error) {
+		backboardToolOutput?.appendLine(`[oauth] sign in failed: ${error instanceof Error ? error.message : String(error)}`);
+		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
+		return false;
+	} finally {
+		callbackServer?.dispose();
+	}
+}
+
+function openBackboardOAuthAuthorizeUrl(authorizeUrl: string): Promise<void> {
+	if (process.platform === 'darwin') {
+		return new Promise((resolve, reject) => {
+			cp.execFile('/usr/bin/open', [authorizeUrl], error => {
+				if (error) {
+					reject(error);
+				} else {
+					resolve();
+				}
+			});
+		});
+	}
+	return Promise.resolve(vscode.env.openExternal(vscode.Uri.parse(authorizeUrl))).then(() => undefined);
+}
+
+async function copyBackboardOAuthRedirectUri(): Promise<void> {
+	const redirectUri = defaultBackboardOAuthRedirectUri;
+	await vscode.env.clipboard.writeText(redirectUri);
+	backboardToolOutput?.appendLine(`[oauth] Copied redirect URI: ${redirectUri}`);
+	await vscode.window.showInformationMessage(`Copied Backboard OAuth redirect URI. Register this exact URI in Backboard: ${redirectUri}`);
+}
+
+async function completeBackboardOAuthCallbackFromInput(): Promise<void> {
+	const value = await vscode.window.showInputBox({
+		title: 'Backboard OAuth Callback URL',
+		ignoreFocusOut: true,
+		prompt: 'Paste the full callback URL from the browser, including code and state.'
+	});
+	if (value === undefined) {
+		return;
+	}
+	try {
+		const uri = vscode.Uri.parse(value.trim());
+		if (!completeBackboardOAuthCallback(uri.query)) {
+			await vscode.window.showErrorMessage('Backboard sign in failed: no pending sign in or invalid callback URL.');
+		}
+	} catch (error) {
+		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
+function waitForBackboardOAuthCode(state: string): Promise<string> {
+	pendingBackboardOAuth?.reject(new Error('A new Backboard sign in was started.'));
+	if (pendingBackboardOAuth) {
+		clearTimeout(pendingBackboardOAuth.timeout);
+	}
+
+	return new Promise<string>((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			if (pendingBackboardOAuth?.state === state) {
+				pendingBackboardOAuth = undefined;
+			}
+			reject(new Error('Timed out waiting for Backboard sign in callback.'));
+		}, 5 * 60 * 1000);
+		pendingBackboardOAuth = { state, resolve, reject, timeout };
+	});
+}
+
+async function backboardOAuthCallbackUri(): Promise<string> {
+	const configured = vscode.workspace.getConfiguration('backboard').get<string>('oauthRedirectUri')?.trim();
+	if (configured) {
+		return configured;
+	}
+	return defaultBackboardOAuthRedirectUri;
+}
+
+function startBackboardOAuthCallbackServer(redirectUri: string): Promise<vscode.Disposable | undefined> {
+	const parsed = new URL(redirectUri);
+	if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
+		return Promise.resolve(undefined);
+	}
+	const port = Number(parsed.port);
+	if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+		return Promise.reject(new Error(`Backboard OAuth redirect URI must include a valid localhost port: ${redirectUri}`));
+	}
+
+	return new Promise((resolve, reject) => {
+		const server = http.createServer((request, response) => {
+			const requestUrl = new URL(request.url ?? '/', redirectUri);
+			if (requestUrl.pathname !== parsed.pathname) {
+				response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+				response.end('Not Found');
+				return;
+			}
+
+				const handled = completeBackboardOAuthCallback(requestUrl.searchParams.toString());
+				response.writeHead(handled ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' });
+				const title = handled ? 'Backboard sign in complete' : 'Backboard sign in could not be completed';
+				const message = handled ? 'Returning you to Backboard Studio. This tab may close automatically.' : 'Return to Backboard Studio and start sign in again.';
+				const accentColor = handled ? '#1677ff' : '#dc2626';
+				const iconPath = handled
+					? '<path d="M8.8 12.2 11 14.4 15.7 9.6" /><circle cx="12" cy="12" r="8.5" />'
+					: '<path d="M12 7.8v4.7" /><path d="M12 16.2h.01" /><circle cx="12" cy="12" r="8.5" />';
+				const closeScript = handled ? `<script>
+	window.setTimeout(() => {
+		window.close();
+	}, 1200);
+</script>` : '';
+				response.end(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>
+:root {
+	color-scheme: light dark;
+	--bg: #f6f8fb;
+	--panel: #ffffff;
+	--text: #101828;
+	--muted: #5f6b7a;
+	--border: #d8dee8;
+	--accent: ${accentColor};
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0e1116;
+		--panel: #161b22;
+		--text: #f4f7fb;
+		--muted: #a7b0bd;
+		--border: #2b3440;
+	}
+}
+* { box-sizing: border-box; }
+body {
+	margin: 0;
+	min-height: 100vh;
+	display: grid;
+	place-items: center;
+	padding: 32px;
+	background: var(--bg);
+	color: var(--text);
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+main {
+	width: min(520px, 100%);
+	padding: 32px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--panel);
+	box-shadow: 0 16px 48px rgba(15, 23, 42, 0.12);
+}
+.mark {
+	width: 48px;
+	height: 48px;
+	display: grid;
+	place-items: center;
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	color: var(--accent);
+}
+svg {
+	width: 28px;
+	height: 28px;
+	stroke: currentColor;
+	stroke-width: 2;
+	fill: none;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+h1 {
+	margin: 24px 0 10px;
+	font-size: 28px;
+	line-height: 1.2;
+	letter-spacing: 0;
+}
+p {
+	margin: 0;
+	color: var(--muted);
+	font-size: 16px;
+	line-height: 1.5;
+}
+</style>
+</head>
+<body>
+<main>
+<div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24">${iconPath}</svg></div>
+<h1>${title}</h1>
+<p>${message}</p>
+</main>
+${closeScript}
+</body>
+</html>`);
+		});
+		server.once('error', error => reject(new Error(`Could not start Backboard OAuth callback server on ${redirectUri}: ${error.message}`)));
+		server.listen(port, parsed.hostname, () => {
+			backboardToolOutput?.appendLine(`[oauth] Listening for callback on ${redirectUri}`);
+			resolve({
+				dispose: () => {
+					server.close();
+				}
+			});
+		});
+	});
+}
+
+function handleBackboardOAuthCallback(uri: vscode.Uri): void {
+	if (uri.path !== '/auth/callback') {
+		return;
+	}
+
+	completeBackboardOAuthCallback(uri.query);
+}
+
+function completeBackboardOAuthCallback(queryString: string): boolean {
+	const pending = pendingBackboardOAuth;
+	if (!pending) {
+		backboardToolOutput?.appendLine('[oauth] Ignoring Backboard callback because no sign in is pending.');
+		return false;
+	}
+
+	const query = new URLSearchParams(queryString);
+	const state = query.get('state')?.trim();
+	if (state !== pending.state) {
+		pendingBackboardOAuth = undefined;
+		clearTimeout(pending.timeout);
+		pending.reject(new Error('OAuth state did not match.'));
+		return true;
+	}
+
+	const error = query.get('error')?.trim();
+	if (error) {
+		const description = query.get('error_description')?.trim();
+		pendingBackboardOAuth = undefined;
+		clearTimeout(pending.timeout);
+		pending.reject(new Error(description ? `${error}: ${description}` : error));
+		return true;
+	}
+
+	const code = query.get('code')?.trim();
+	if (!code) {
+		pendingBackboardOAuth = undefined;
+		clearTimeout(pending.timeout);
+		pending.reject(new Error('Missing Backboard authorization code.'));
+		return true;
+	}
+
+	pendingBackboardOAuth = undefined;
+	clearTimeout(pending.timeout);
+	pending.resolve(code);
+	return true;
+}
+
+async function exchangeBackboardOAuthCode(code: string, redirectUri: string, codeVerifier: string): Promise<BackboardOAuthTokens> {
+	const body = new URLSearchParams({
+		grant_type: 'authorization_code',
+		code,
+		redirect_uri: redirectUri,
+		client_id: backboardOAuthClientId,
+		code_verifier: codeVerifier
+	});
+	const responseText = await postForm(backboardOAuthTokenUrl, body, 'Backboard token request');
+	const tokens: unknown = JSON.parse(responseText);
+	if (!isObjectRecord(tokens)) {
+		throw new Error('Backboard token response was not an object.');
+	}
+	if (!stringValueFromRecord(tokens.access_token)) {
+		throw new Error('Backboard token response did not include an access token.');
+	}
+	return tokens;
+}
+
+function postForm(urlString: string, body: URLSearchParams, label: string): Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		const requestUrl = new URL(urlString);
+		const requestBody = body.toString();
+		const request = https.request(requestUrl, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+				'Content-Length': Buffer.byteLength(requestBody)
+			}
+		}, response => {
+			const chunks: Buffer[] = [];
+			response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+			response.on('end', () => {
+				const responseText = Buffer.concat(chunks).toString('utf8');
+				const statusCode = response.statusCode ?? 0;
+				if (statusCode < 200 || statusCode >= 300) {
+					reject(new Error(`${label} returned HTTP ${statusCode}: ${responseText}`));
+					return;
+				}
+				resolve(responseText);
+			});
+		});
+		request.on('error', reject);
+		request.write(requestBody);
+		request.end();
+	});
+}
+
+function startBackboardUpdateChecks(context: vscode.ExtensionContext): void {
+	if (!vscode.workspace.getConfiguration('backboard').get<boolean>('updates.enabled', true)) {
+		return;
+	}
+
+	void checkBackboardUpdates(context, false);
+
+	const configuredMinutes = vscode.workspace.getConfiguration('backboard').get<number>('updates.checkIntervalMinutes', 360);
+	const intervalMinutes = Number.isFinite(configuredMinutes) ? Math.max(15, configuredMinutes) : 360;
+	const timer = setInterval(() => {
+		void checkBackboardUpdates(context, false);
+	}, intervalMinutes * 60 * 1000);
+	context.subscriptions.push({ dispose: () => clearInterval(timer) });
+}
+
+async function checkBackboardUpdates(context: vscode.ExtensionContext, manual: boolean): Promise<void> {
+	try {
+		const manifestUrl = getBackboardUpdateManifestUrl();
+		if (!manifestUrl) {
+			if (manual) {
+				await vscode.window.showWarningMessage('Backboard Studio updates are not supported on this platform.');
+			}
+			return;
+		}
+
+		const manifest = await fetchBackboardUpdateManifest(manifestUrl);
+		const currentVersion = readCurrentAppVersion();
+		if (!isNewerVersion(manifest.version, currentVersion)) {
+			if (manual) {
+				await vscode.window.showInformationMessage(`Backboard Studio is up to date. Current version: ${currentVersion}.`);
+			}
+			return;
+		}
+
+		if (!manual && context.globalState.get<string>(dismissedUpdateVersionKey) === manifest.version) {
+			return;
+		}
+
+		const canInstall = canInstallBackboardUpdate();
+		const message = `Backboard Studio ${manifest.version} is available. Current version: ${currentVersion}.`;
+		const actions = canInstall ? ['Install and Restart', 'Download DMG', 'Copy Link', 'Later'] : ['Download DMG', 'Copy Link', 'Later'];
+		const choice = await vscode.window.showInformationMessage(message, ...actions);
+		if (choice === 'Install and Restart') {
+			await installBackboardUpdate(manifest);
+		} else if (choice === 'Download DMG') {
+			await vscode.env.openExternal(vscode.Uri.parse(manifest.url));
+		} else if (choice === 'Copy Link') {
+			await vscode.env.clipboard.writeText(manifest.url);
+			await vscode.window.showInformationMessage('Backboard Studio update link copied.');
+		} else if (choice === 'Later') {
+			await context.globalState.update(dismissedUpdateVersionKey, manifest.version);
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		backboardToolOutput?.appendLine(`[updates] ${message}`);
+		if (manual) {
+			await vscode.window.showWarningMessage(`Could not check for Backboard Studio updates: ${message}`);
+		}
+	}
+}
+
+function canInstallBackboardUpdate(): boolean {
+	if (process.platform !== 'darwin') {
+		return false;
+	}
+	const appPath = currentMacAppPath();
+	return Boolean(appPath && path.basename(appPath) === 'Backboard Studio.app');
+}
+
+async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
+	if (backboardUpdateInstallInProgress) {
+		await vscode.window.showInformationMessage('Backboard Studio update installation is already running.');
+		return;
+	}
+	const appPath = currentMacAppPath();
+	if (!appPath || path.basename(appPath) !== 'Backboard Studio.app') {
+		await vscode.window.showWarningMessage('Automatic update install is only available from the packaged Backboard Studio app.');
+		return;
+	}
+
+	backboardUpdateInstallInProgress = true;
+	try {
+		const updateDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'backboard-studio-update-'));
+		const dmgPath = path.join(updateDirectory, `Backboard-Studio-${manifest.version}.dmg`);
+		await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: `Downloading Backboard Studio ${manifest.version}`,
+			cancellable: false
+		}, async progress => {
+			await downloadBackboardUpdate(manifest.url, dmgPath, progress);
+		});
+		await verifyBackboardUpdate(dmgPath, manifest);
+		await stageMacBackboardInstaller(dmgPath, appPath, manifest.version);
+		await vscode.window.showInformationMessage(`Backboard Studio ${manifest.version} is verified. Restarting to install.`);
+		await vscode.commands.executeCommand('workbench.action.quit');
+	} catch (error) {
+		backboardUpdateInstallInProgress = false;
+		const message = error instanceof Error ? error.message : String(error);
+		backboardToolOutput?.appendLine(`[updates] install failed: ${message}`);
+		await vscode.window.showWarningMessage(`Could not install Backboard Studio update: ${message}`);
+	}
+}
+
+function currentMacAppPath(): string | undefined {
+	const match = /^(.+?\.app)(?:\/|$)/.exec(process.execPath);
+	return match?.[1];
+}
+
+function downloadBackboardUpdate(rawUrl: string, destination: string, progress: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const request = downloadWithRedirects(rawUrl, destination, progress, 5, resolve, reject);
+		request.on('error', reject);
+	});
+}
+
+function downloadWithRedirects(
+	rawUrl: string,
+	destination: string,
+	progress: vscode.Progress<{ message?: string; increment?: number }>,
+	redirectLimit: number,
+	resolve: () => void,
+	reject: (error: Error) => void
+): http.ClientRequest {
+	const url = new URL(rawUrl);
+	const client = url.protocol === 'http:' ? http : https;
+	const request = client.get(url, { headers: { 'User-Agent': `Backboard-Studio/${readCurrentAppVersion()}` } }, response => {
+		const statusCode = response.statusCode ?? 0;
+		const location = response.headers.location;
+		if (statusCode >= 300 && statusCode < 400 && location && redirectLimit > 0) {
+			response.resume();
+			const nextRequest = downloadWithRedirects(new URL(location, url).toString(), destination, progress, redirectLimit - 1, resolve, reject);
+			nextRequest.on('error', reject);
+			return;
+		}
+		if (statusCode < 200 || statusCode >= 300) {
+			response.resume();
+			reject(new Error(`Update download failed with HTTP ${statusCode}.`));
+			return;
+		}
+
+		const expectedBytes = Number(response.headers['content-length']) || undefined;
+		let downloadedBytes = 0;
+		let lastPercent = 0;
+		const file = fs.createWriteStream(destination, { mode: 0o600 });
+		response.on('data', chunk => {
+			const size = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+			downloadedBytes += size;
+			if (expectedBytes) {
+				const percent = Math.min(100, Math.floor((downloadedBytes / expectedBytes) * 100));
+				if (percent > lastPercent) {
+					progress.report({ increment: percent - lastPercent, message: `${percent}%` });
+					lastPercent = percent;
+				}
+			} else {
+				progress.report({ message: `${Math.round(downloadedBytes / 1024 / 1024)} MB` });
+			}
+		});
+		response.pipe(file);
+		file.on('finish', () => file.close(error => {
+			if (error) {
+				reject(error);
+			} else {
+				resolve();
+			}
+		}));
+		file.on('error', error => {
+			response.destroy();
+			reject(error);
+		});
+	});
+	request.setTimeout(120_000, () => {
+		request.destroy(new Error('Update download timed out.'));
+	});
+	return request;
+}
+
+async function verifyBackboardUpdate(dmgPath: string, manifest: UpdateManifest): Promise<void> {
+	const stat = await fs.promises.stat(dmgPath);
+	if (manifest.size_bytes !== undefined && stat.size !== manifest.size_bytes) {
+		throw new Error(`Downloaded update size mismatch. Expected ${manifest.size_bytes} bytes, got ${stat.size}.`);
+	}
+	if (manifest.sha256) {
+		const actualSha256 = await sha256File(dmgPath);
+		if (actualSha256.toLowerCase() !== manifest.sha256.toLowerCase()) {
+			throw new Error(`Downloaded update SHA-256 mismatch. Expected ${manifest.sha256}, got ${actualSha256}.`);
+		}
+	}
+}
+
+function sha256File(filePath: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const hash = crypto.createHash('sha256');
+		const stream = fs.createReadStream(filePath);
+		stream.on('data', chunk => hash.update(chunk));
+		stream.on('error', reject);
+		stream.on('end', () => resolve(hash.digest('hex')));
+	});
+}
+
+async function stageMacBackboardInstaller(dmgPath: string, appPath: string, version: string): Promise<void> {
+	const installerPath = path.join(path.dirname(dmgPath), 'install-backboard-update.sh');
+	const logPath = path.join(os.tmpdir(), 'backboard-studio-update.log');
+	await fs.promises.writeFile(installerPath, macUpdateInstallerScript(), { mode: 0o700 });
+	const child = cp.spawn('/bin/zsh', [installerPath, dmgPath, appPath, String(process.pid), version, logPath], {
+		detached: true,
+		stdio: 'ignore'
+	});
+	child.unref();
+}
+
+function macUpdateInstallerScript(): string {
+	return `#!/bin/zsh
+set -euo pipefail
+
+DMG_PATH="$1"
+APP_PATH="$2"
+CURRENT_PID="$3"
+VERSION="$4"
+LOG_PATH="$5"
+APP_NAME="Backboard Studio.app"
+MOUNT_POINT="$(/usr/bin/mktemp -d /tmp/backboard-studio-update-mount.XXXXXX)"
+
+exec >>"$LOG_PATH" 2>&1
+echo "[$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')] Installing Backboard Studio $VERSION"
+
+cleanup() {
+  /usr/bin/hdiutil detach "$MOUNT_POINT" -quiet >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+/usr/bin/hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
+SOURCE_APP="$MOUNT_POINT/$APP_NAME"
+if [[ ! -d "$SOURCE_APP" ]]; then
+  echo "Mounted DMG did not contain $APP_NAME"
+  exit 1
+fi
+
+/usr/bin/osascript -e 'tell application id "io.backboard.studio" to quit' >/dev/null 2>&1 || true
+for _ in {1..120}; do
+  if ! /bin/ps -p "$CURRENT_PID" >/dev/null 2>&1; then
+    break
+  fi
+  /bin/sleep 1
+done
+
+replace_app() {
+  /bin/rm -rf "$APP_PATH"
+  /usr/bin/ditto "$SOURCE_APP" "$APP_PATH"
+  /bin/chmod -R u+rwX "$APP_PATH" >/dev/null 2>&1 || true
+}
+
+if [[ -w "$(dirname "$APP_PATH")" || -w "$APP_PATH" ]]; then
+  replace_app
+else
+  HELPER="$(/usr/bin/mktemp /tmp/backboard-studio-update-elevated.XXXXXX.sh)"
+  shell_quote() {
+    /usr/bin/python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$1"
+  }
+  {
+    echo '#!/bin/zsh'
+    echo 'set -euo pipefail'
+    printf 'SOURCE_APP=%s\\n' "$(shell_quote "$SOURCE_APP")"
+    printf 'APP_PATH=%s\\n' "$(shell_quote "$APP_PATH")"
+    echo '/bin/rm -rf "$APP_PATH"'
+    echo '/usr/bin/ditto "$SOURCE_APP" "$APP_PATH"'
+    echo '/bin/chmod -R a+rX "$APP_PATH" >/dev/null 2>&1 || true'
+  } > "$HELPER"
+  /bin/chmod 700 "$HELPER"
+  /usr/bin/osascript -e "do shell script \\"/bin/zsh $HELPER\\" with administrator privileges"
+  /bin/rm -f "$HELPER"
+fi
+
+cleanup
+/usr/bin/open "$APP_PATH"
+echo "[$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')] Installed Backboard Studio $VERSION"
+`;
+}
+
+function getBackboardUpdateManifestUrl(): string | undefined {
+	const config = vscode.workspace.getConfiguration('backboard');
+	const configuredManifestUrl = config.get<string>('updates.manifestUrl', '').trim();
+	const manifestUrlOverride = process.env.BBIDE_UPDATE_MANIFEST_URL || process.env.BACKBOARD_UPDATE_MANIFEST_URL || configuredManifestUrl;
+	if (manifestUrlOverride.trim()) {
+		return manifestUrlOverride.trim();
+	}
+
+	const platform = getUpdatePlatform();
+	const arch = getUpdateArch();
+	if (!platform || !arch) {
+		return undefined;
+	}
+
+	const configuredBaseUrl = config.get<string>('updates.manifestBaseUrl', defaultUpdateManifestBaseUrl).trim();
+	const manifestBaseUrl = (process.env.BBIDE_UPDATE_MANIFEST_BASE_URL || process.env.BACKBOARD_UPDATE_MANIFEST_BASE_URL || configuredBaseUrl || defaultUpdateManifestBaseUrl)
+		.trim()
+		.replace(/\/+$/, '');
+	return `${manifestBaseUrl}/stable/latest/bbide/${platform}-${arch}.json`;
+}
+
+function getUpdatePlatform(): string | undefined {
+	switch (process.platform) {
+		case 'darwin':
+			return 'macos';
+		case 'win32':
+			return 'windows';
+		default:
+			return undefined;
+	}
+}
+
+function getUpdateArch(): string | undefined {
+	switch (process.arch) {
+		case 'arm64':
+			return 'aarch64';
+		case 'x64':
+			return 'x86_64';
+		default:
+			return undefined;
+	}
+}
+
+async function fetchBackboardUpdateManifest(manifestUrl: string): Promise<UpdateManifest> {
+	const body = await fetchText(manifestUrl, 5);
+	const parsed = JSON.parse(body) as unknown;
+	if (!isObjectRecord(parsed)) {
+		throw new Error('Update manifest is not an object.');
+	}
+	const version = typeof parsed.version === 'string' ? parsed.version.trim() : '';
+	const url = typeof parsed.url === 'string' ? parsed.url.trim() : '';
+	if (!version || !url) {
+		throw new Error('Update manifest is missing version or url.');
+	}
+	return {
+		version,
+		url,
+		sha256: typeof parsed.sha256 === 'string' ? parsed.sha256 : undefined,
+		size_bytes: typeof parsed.size_bytes === 'number' ? parsed.size_bytes : undefined
+	};
+}
+
+function fetchText(rawUrl: string, redirectLimit: number): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const url = new URL(rawUrl);
+		const client = url.protocol === 'http:' ? http : https;
+		const request = client.get(url, { headers: { 'User-Agent': `Backboard-Studio/${readCurrentAppVersion()}` } }, response => {
+			const statusCode = response.statusCode ?? 0;
+			const location = response.headers.location;
+			if (statusCode >= 300 && statusCode < 400 && location && redirectLimit > 0) {
+				response.resume();
+				resolve(fetchText(new URL(location, url).toString(), redirectLimit - 1));
+				return;
+			}
+			if (statusCode < 200 || statusCode >= 300) {
+				response.resume();
+				reject(new Error(`Update manifest request failed with HTTP ${statusCode}.`));
+				return;
+			}
+
+			const chunks: Buffer[] = [];
+			response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+			response.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+		});
+		request.setTimeout(15_000, () => {
+			request.destroy(new Error('Update manifest request timed out.'));
+		});
+		request.on('error', reject);
+	});
+}
+
+function readCurrentAppVersion(): string {
+	const envVersion = process.env.BACKBOARD_STUDIO_VERSION || process.env.BBIDE_VERSION;
+	if (envVersion?.trim()) {
+		return envVersion.trim();
+	}
+
+	const appPath = currentMacAppPath();
+	const infoPlistPaths = [
+		appPath ? path.join(appPath, 'Contents', 'Info.plist') : undefined,
+		path.join(path.dirname(process.execPath), '..', 'Info.plist')
+	].filter((value): value is string => Boolean(value));
+	for (const infoPlist of infoPlistPaths) {
+		try {
+			const plist = fs.readFileSync(infoPlist, 'utf8');
+			const value = readPlistString(plist, 'CFBundleShortVersionString') || readPlistString(plist, 'CFBundleVersion');
+			if (value) {
+				return value;
+			}
+		} catch {
+			// Development hosts may not run from a packaged macOS app bundle.
+		}
+	}
+
+	return vscode.version;
+}
+
+function readPlistString(plist: string, key: string): string | undefined {
+	const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const match = new RegExp(`<key>${escapedKey}</key>\\s*<string>([^<]+)</string>`).exec(plist);
+	return match?.[1]?.trim();
+}
+
+function isNewerVersion(candidate: string, current: string): boolean {
+	const candidateParts = parseVersion(candidate);
+	const currentParts = parseVersion(current);
+	if (!candidateParts || !currentParts) {
+		return candidate !== current;
+	}
+
+	for (let index = 0; index < Math.max(candidateParts.length, currentParts.length); index++) {
+		const candidatePart = candidateParts[index] ?? 0;
+		const currentPart = currentParts[index] ?? 0;
+		if (candidatePart > currentPart) {
+			return true;
+		}
+		if (candidatePart < currentPart) {
+			return false;
+		}
+	}
+	return false;
+}
+
+function parseVersion(version: string): number[] | undefined {
+	const match = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(version.trim());
+	if (!match) {
+		return undefined;
+	}
+	return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)];
+}
+
+async function handleBackboardError(webview: vscode.Webview, error: unknown, bridge?: BackboardBridge): Promise<void> {
 	if (isBackboardAuthError(error)) {
-		await webview.postMessage({ type: 'status', text: 'Backboard API key required.' });
-		const choice = await vscode.window.showInformationMessage('Backboard needs an API key. The Set API Key command stores it in ~/.backboard_ide/config.json.', 'Set API Key');
+		await webview.postMessage({ type: 'status', text: 'Backboard authentication required.' });
+		const choice = await vscode.window.showInformationMessage('Backboard needs an API key or OAuth sign in. The Set API Key command stores it in ~/.backboard_ide/config.json.', 'Set API Key');
 		if (choice === 'Set API Key') {
-			await setApiKey();
+			if (await setApiKey()) {
+				bridge?.restart();
+			}
 		}
 		return;
 	}
@@ -167,7 +984,7 @@ async function handleBackboardError(webview: vscode.Webview, error: unknown): Pr
 
 function isBackboardAuthError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error);
-	return /api key|unauthorized|forbidden|\b401\b|\b403\b/i.test(message);
+	return /api key|auth(?:entication|orization)?|unauthorized|forbidden|\b401\b|\b403\b/i.test(message);
 }
 
 function unsupportedVoiceModeMessage(voiceMode: string): string | undefined {
@@ -182,6 +999,33 @@ interface BackboardConfigJson {
 	readonly env?: string;
 	readonly api_key?: string;
 	readonly env_keys?: Record<string, string>;
+}
+
+interface BackboardOAuthTokens {
+	readonly api_key?: string | null;
+	readonly apiKey?: string | null;
+	readonly access_token?: string;
+	readonly refresh_token?: string;
+	readonly token_type?: string;
+	readonly expires_in?: number;
+	readonly scope?: string;
+	readonly id_token?: string | null;
+	readonly assistant_id?: string | null;
+	readonly backboard_api_key?: string | null;
+	readonly personal_api_key?: string | null;
+	readonly selected_client_name?: string | null;
+}
+
+interface BackboardOAuthPending {
+	readonly state: string;
+	readonly resolve: (code: string) => void;
+	readonly reject: (error: Error) => void;
+	readonly timeout: NodeJS.Timeout;
+}
+
+interface BackboardOAuthSaveResult {
+	readonly apiKeySaved: boolean;
+	readonly assistantId?: string;
 }
 
 function backboardConfigPath(): string {
@@ -311,14 +1155,18 @@ function backboardConfigApiKey(config: BackboardConfigJson): string | undefined 
 	return stringValueFromRecord(backboardConfigEnvKeys(config)[env]);
 }
 
-function configuredBackboardApiKey(): string | undefined {
-	if (backboardConfigApiKey(readBackboardConfigJsonSync())) {
-		return undefined;
-	}
-	if (stringValueFromRecord(process.env.BACKBOARD_API_KEY)) {
-		return undefined;
-	}
-	return vscode.workspace.getConfiguration('backboard').get<string>('apiKey')?.trim() || undefined;
+function backboardConfigAccessToken(config: BackboardConfigJson): string | undefined {
+	const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
+	return stringValueFromRecord(oauth?.access_token);
+}
+
+function configuredBackboardAccessToken(): string | undefined {
+	return backboardConfigAccessToken(readBackboardConfigJsonSync());
+}
+
+function hasBackboardCredentials(): boolean {
+	const config = readBackboardConfigJsonSync();
+	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
 }
 
 async function writeBackboardConfigJson(config: BackboardConfigJson): Promise<void> {
@@ -345,6 +1193,47 @@ async function saveBackboardConfigApiKey(apiKey: string): Promise<void> {
 		api_key: apiKey,
 		env_keys: envKeys
 	});
+}
+
+async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens): Promise<BackboardOAuthSaveResult> {
+	const accessToken = stringValueFromRecord(tokens.access_token);
+	if (!accessToken) {
+		throw new Error('Backboard token response did not include an access token.');
+	}
+	const directApiKey = stringValueFromRecord(tokens.api_key) ?? stringValueFromRecord(tokens.apiKey);
+	const backboardApiKey = stringValueFromRecord(tokens.backboard_api_key);
+	const personalApiKey = stringValueFromRecord(tokens.personal_api_key);
+	const usableApiKey = directApiKey ?? backboardApiKey ?? personalApiKey;
+	const assistantId = stringValueFromRecord(tokens.assistant_id);
+
+	const config = await readBackboardConfigJson();
+	const env = normalizeBackboardEnv(stringValueFromRecord(config.env) || currentBackboardEnv());
+	const envKeys = backboardConfigEnvKeys(config);
+	if (usableApiKey) {
+		envKeys[env] = usableApiKey;
+	}
+
+	await writeBackboardConfigJson({
+		...config,
+		env,
+		api_key: usableApiKey ?? config.api_key,
+		env_keys: envKeys,
+		oauth: {
+			access_token: accessToken,
+			refresh_token: stringValueFromRecord(tokens.refresh_token),
+			token_type: stringValueFromRecord(tokens.token_type),
+			expires_in: typeof tokens.expires_in === 'number' ? tokens.expires_in : undefined,
+			scope: stringValueFromRecord(tokens.scope),
+			id_token: stringValueFromRecord(tokens.id_token),
+			assistant_id: assistantId,
+			api_key: directApiKey,
+			backboard_api_key: backboardApiKey,
+			personal_api_key: personalApiKey,
+			selected_client_name: stringValueFromRecord(tokens.selected_client_name),
+			obtained_at: new Date().toISOString()
+		}
+	});
+	return { apiKeySaved: Boolean(usableApiKey), assistantId };
 }
 
 async function clearBackboardConfigApiKey(): Promise<void> {
@@ -419,6 +1308,13 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		return this.view?.webview.postMessage({ type: 'command', command }) ?? false;
 	}
 
+	refreshState(): void {
+		const view = this.view;
+		if (view) {
+			void postPanelState(this.bridge, view.webview);
+		}
+	}
+
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
 		this.view = webviewView;
 		webviewView.title = '\u200B';
@@ -427,15 +1323,26 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.onDidReceiveMessage(message => {
 			if (message?.type === 'send' && typeof message.prompt === 'string') {
 				void this.sendPrompt(message.prompt, asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined);
-				} else if (message?.type === 'sendVoice' && isVoiceAttachment(message.audio)) {
-					void this.sendPrompt(typeof message.prompt === 'string' ? message.prompt : '', asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, message.audio);
-				} else if (message?.type === 'cancel') {
-					this.runToken?.cancel();
-				} else if (message?.type === 'reviewChanges') {
-					void vscode.commands.executeCommand('workbench.view.scm');
-			} else if (message?.type === 'setApiKey') {
-				void setApiKey();
-			} else if (message?.type === 'insertActiveFile') {
+			} else if (message?.type === 'sendVoice' && isVoiceAttachment(message.audio)) {
+				void this.sendPrompt(typeof message.prompt === 'string' ? message.prompt : '', asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, message.audio);
+			} else if (message?.type === 'cancel') {
+				this.runToken?.cancel();
+			} else if (message?.type === 'reviewChanges') {
+				void vscode.commands.executeCommand('workbench.view.scm');
+				} else if (message?.type === 'setApiKey') {
+					void setApiKey().then(changed => {
+						if (changed) {
+							this.bridge.restart();
+							void postPanelState(this.bridge, webviewView.webview, true);
+						}
+					});
+				} else if (message?.type === 'signIn') {
+					void signInBackboard(this.bridge).then(changed => {
+						if (changed) {
+							void postPanelState(this.bridge, webviewView.webview, true);
+						}
+					});
+				} else if (message?.type === 'insertActiveFile') {
 				void postComposerContext(webviewView.webview, 'activeFile');
 			} else if (message?.type === 'insertSelection') {
 				void postComposerContext(webviewView.webview, 'selection');
@@ -517,7 +1424,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		} catch (error) {
 			await view.webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
 			await view.webview.postMessage({ type: 'runFinished', chatId });
-			await handleBackboardError(view.webview, error);
+			await handleBackboardError(view.webview, error, this.bridge);
 		}
 	}
 
@@ -615,7 +1522,18 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		* { box-sizing: border-box; }
 		html, body { width: 100%; height: 100%; min-width: 0; overflow: hidden; }
 		body { padding: 0; margin: 0; color: var(--bb-text); background: var(--bb-bg); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
-		.root { display: grid; grid-template-rows: ${rootRows}; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; background: var(--bb-bg); }
+			.root { position: relative; display: grid; grid-template-rows: ${rootRows}; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; background: var(--bb-bg); }
+			.root > :not(.authOverlay) { transition: filter .18s ease, opacity .18s ease; }
+			.root.authRequired > :not(.authOverlay) { filter: blur(4px); opacity: .48; pointer-events: none; user-select: none; }
+			.authOverlay { position: absolute; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center; padding: 22px; background: color-mix(in srgb, var(--bb-bg) 38%, transparent); }
+			.root.authRequired .authOverlay { display: flex; }
+			.authCard { width: min(280px, 100%); display: grid; justify-items: center; gap: 12px; padding: 22px 18px; border: 1px solid color-mix(in srgb, var(--bb-border) 82%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--bb-card) 94%, var(--bb-bg)); box-shadow: 0 18px 48px color-mix(in srgb, var(--bb-shadow) 80%, transparent); text-align: center; }
+			.authLogo { width: 52px; height: 68px; display: block; color: color-mix(in srgb, var(--vscode-icon-foreground, var(--bb-text)) 62%, var(--bb-primary)); background: currentColor; -webkit-mask: url('${backboardLogo}') center / contain no-repeat; mask: url('${backboardLogo}') center / contain no-repeat; }
+			.authTitle { color: var(--bb-text); font-size: 15px; font-weight: 650; line-height: 20px; }
+			.authText { max-width: 230px; color: var(--bb-muted); font-size: 12px; line-height: 17px; }
+			.authButton { min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 5px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); font-size: 12px; font-weight: 600; }
+			.authButton:hover { background: var(--vscode-button-hoverBackground, color-mix(in srgb, var(--bb-primary) 84%, var(--bb-text))); }
+			.authButton .codicon { font-size: 14px; }
 		.panelHeader { min-height: 42px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 6px 12px; border-bottom: 1px solid var(--bb-border); background: color-mix(in srgb, var(--bb-surface) 86%, var(--bb-bg)); }
 		.brandMark { width: 24px; height: 24px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--bb-primary) 30%, var(--bb-border)); border-radius: 6px; color: var(--bb-primary); background: color-mix(in srgb, var(--bb-primary) 10%, transparent); }
 		.brandMark .codicon { font-size: 14px; }
@@ -818,9 +1736,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.stopButton { display: none; color: var(--bb-danger); }
 		.stopButton.visible { display: inline-grid; }
 		.stopButton:hover { color: var(--vscode-errorForeground, var(--bb-danger)); background: color-mix(in srgb, var(--bb-danger) 12%, transparent); border-radius: 4px; }
-		.composerMenuButton { width: 28px; min-width: 28px; grid-template-columns: 1fr auto; padding: 0; }
-		.composerMenuButton .codicon-add { font-size: 16px; }
-		.composerMenuButton .codicon-chevron-down { margin-left: -5px; font-size: 11px; }
 		.featureButton.active { color: var(--bb-primary); }
 		.usageFeatureButton.hasUsage { color: var(--bb-text); }
 		.composerCard.recording { border-color: var(--bb-danger); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bb-danger) 32%, transparent); }
@@ -984,15 +1899,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 						<div class="composerRule"></div>
 						<div class="composerBar">
 							<div class="barLeft">
-								<button id="plusBtn" class="iconButton composerMenuButton" type="button" title="Composer menu" aria-label="Composer menu"><span class="codicon codicon-add"></span><span class="codicon codicon-chevron-down"></span></button>
 								<button id="modeBtn" class="modeButton" type="button" title="Mode and reasoning" aria-label="Mode and reasoning"><span class="modeGlyph"></span><span id="modeLabel" class="modeLabel">Agent</span><span class="codicon codicon-chevron-down"></span></button>
 								<button id="modelBtn" class="modelButton" type="button" title="Backboard model" aria-label="Backboard model"><span id="modelIcon" class="modelIcon"><span class="codicon codicon-server"></span></span><span class="modelPrefix">Model</span><span id="modelLabel" class="modelValue">Auto</span><span class="codicon codicon-chevron-down"></span></button>
 							</div>
 							<div class="barRight">
-								<button id="reasoningBtn" class="iconButton featureButton" type="button" title="Reasoning effort" aria-label="Reasoning effort"><span class="codicon codicon-settings-gear"></span></button>
 								<button id="webBtn" class="iconButton featureButton" type="button" title="Web search" aria-label="Web search"><span class="codicon codicon-globe"></span></button>
 								<button id="imageBtn" class="iconButton featureButton" type="button" title="Image output" aria-label="Image output"><span class="codicon codicon-device-camera-video"></span></button>
-								<button id="mcpBtn" class="iconButton featureButton" type="button" title="MCP tools" aria-label="MCP tools"><span class="codicon codicon-tools"></span></button>
 								<button id="usageBtn" class="iconButton featureButton usageFeatureButton" type="button" title="Usage details" aria-label="Usage details"><span class="codicon codicon-pulse"></span></button>
 								<button id="voiceBtn" class="iconButton" type="button" title="Start speech-to-text" aria-label="Start speech-to-text"><span class="codicon codicon-mic"></span></button>
 								<button id="stopBtn" class="iconButton stopButton" type="button" title="Stop generation" aria-label="Stop generation"><span class="codicon codicon-debug-stop"></span></button>
@@ -1000,9 +1912,17 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 							</div>
 						</div>
 					</div>
-			</form>
+				</form>
+			</div>
+				<div id="authOverlay" class="authOverlay" role="dialog" aria-live="polite" aria-label="Backboard sign in required">
+					<div class="authCard">
+						<div class="authLogo" aria-hidden="true"></div>
+						<div class="authTitle">Sign in required</div>
+						<div class="authText">Sign in with Backboard to use the auxiliary bar.</div>
+						<button id="authSignInBtn" class="authButton" type="button"><span class="codicon codicon-account"></span><span>Sign in with Backboard</span></button>
+					</div>
+				</div>
 		</div>
-	</div>
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
 		const root = document.querySelector('.root');
@@ -1020,8 +1940,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		const inlineHistoryButton = document.getElementById('inlineHistoryBtn');
 		const checkpointStrip = document.getElementById('checkpointStrip');
 		const checkpointList = document.getElementById('checkpointList');
-		const prompt = document.getElementById('prompt');
-		const toolCount = document.getElementById('toolCount');
+			const prompt = document.getElementById('prompt');
+			const authSignInButton = document.getElementById('authSignInBtn');
+			const toolCount = document.getElementById('toolCount');
 		const popover = document.getElementById('popover');
 		const popoverTitle = document.getElementById('popoverTitle');
 		const popoverBody = document.getElementById('popoverBody');
@@ -1031,13 +1952,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		const headerBadge = document.getElementById('headerBadge');
 		const newChatButton = document.getElementById('newChatBtn');
 		const buttons = {
-			plus: document.getElementById('plusBtn'),
 			mode: document.getElementById('modeBtn'),
 			model: document.getElementById('modelBtn'),
-			reasoning: document.getElementById('reasoningBtn'),
 			web: document.getElementById('webBtn'),
 			image: document.getElementById('imageBtn'),
-			mcp: document.getElementById('mcpBtn'),
 			usage: document.getElementById('usageBtn'),
 			voice: document.getElementById('voiceBtn'),
 			stop: document.getElementById('stopBtn'),
@@ -1063,7 +1981,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		const persistedState = vscode.getState() || {};
 		let models = [];
 		let tools = [];
-		let settings = {};
+			let settings = {};
+			let authenticated = false;
 		let activeView = persistedState.activeView === 'history' ? 'history' : 'chat';
 		let historyEntries = Array.isArray(persistedState.historyEntries) ? persistedState.historyEntries : [];
 		let activeHistoryId = typeof persistedState.activeHistoryId === 'string' ? persistedState.activeHistoryId : undefined;
@@ -1231,10 +2150,22 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			status.textContent = value === 'Ready.' && currentWorkspace ? 'Ready in ' + workspaceLabel() + '.' : value;
 			status.title = currentWorkspace || value;
 		}
-		function refreshWorkspaceStatus() {
-			const value = status.textContent || 'Ready.';
-			updateStatus(value.startsWith('Ready') ? 'Ready.' : value);
-		}
+			function refreshWorkspaceStatus() {
+				const value = status.textContent || 'Ready.';
+				updateStatus(value.startsWith('Ready') ? 'Ready.' : value);
+			}
+			function setAuthenticated(value) {
+				authenticated = !!value;
+				root.classList.toggle('authRequired', !authenticated);
+				prompt.disabled = !authenticated;
+				if (!authenticated) {
+					closePopover();
+					updateStatus('Sign in required.');
+				} else if ((status.textContent || '').includes('Sign in required')) {
+					updateStatus('Ready.');
+				}
+				syncComposerButtons();
+			}
 		function ensureEmptyState() {
 			emptyState = document.getElementById('emptyState');
 			if (emptyState) {
@@ -1589,19 +2520,14 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function setActive(button, active) {
 			button.classList.toggle('active', !!active);
 		}
-		function syncComposerButtons() {
-			const hasReasoning = controls.intensity.value !== 'fast';
+			function syncComposerButtons() {
 			const hasMode = controls.mode.value !== 'free';
 			const hasWeb = controls.webSearch.value === 'Auto';
 			const hasImage = controls.imageGeneration.value === 'auto';
-			const hasMcp = controls.mcpFigma.checked || controls.mcpNotion.checked || controls.mcpGoogle.checked;
-			setActive(buttons.plus, activePopover === 'menu');
 			setActive(buttons.mode, activePopover === 'reasoning' || hasMode);
 			setActive(buttons.model, activePopover === 'model');
-			setActive(buttons.reasoning, activePopover === 'reasoning' || hasReasoning);
 			setActive(buttons.web, activePopover === 'web' || hasWeb);
 			setActive(buttons.image, activePopover === 'image' || hasImage);
-			setActive(buttons.mcp, activePopover === 'mcp' || hasMcp);
 			setActive(buttons.usage, activePopover === 'usage');
 			buttons.usage.classList.toggle('hasUsage', !!latestUsage);
 			buttons.usage.title = latestUsage ? 'Usage: ' + latestUsage.summary : 'Usage details';
@@ -1611,12 +2537,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			buttons.stop.disabled = !runInProgress || stopRequested;
 			buttons.stop.title = stopRequested ? 'Stopping...' : 'Stop generation';
 			buttons.stop.setAttribute('aria-label', buttons.stop.title);
-			const hasPrompt = prompt.value.trim().length > 0;
-			buttons.send.disabled = !hasPrompt;
-			buttons.send.classList.toggle('ready', hasPrompt);
-			buttons.send.title = runInProgress ? 'Queue Prompt' : 'Send';
-			buttons.send.setAttribute('aria-label', buttons.send.title);
-		}
+				const hasPrompt = prompt.value.trim().length > 0;
+				buttons.send.disabled = !authenticated || !hasPrompt;
+				buttons.send.classList.toggle('ready', authenticated && hasPrompt);
+				buttons.send.title = !authenticated ? 'Sign in required' : runInProgress ? 'Queue Prompt' : 'Send';
+				buttons.send.setAttribute('aria-label', buttons.send.title);
+			}
 		function setVoiceRecording(recording) {
 			voiceRecording = recording;
 			buttons.voice.classList.toggle('recording', recording);
@@ -1872,9 +2798,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function intensityLabel(value) {
 			return ({ fast: 'Fast', balanced: 'Balanced', deep: 'Deep' })[value] || value;
 		}
-		function memoryLabel(value) {
-			return ({ Auto: 'Memory Lite', Readonly: 'Memory Read Only', off: 'Off', ProAuto: 'Memory Pro', ProReadonly: 'Memory Pro Read Only' })[value] || value;
-		}
 		function syncModeLabels() {
 			const label = modeLabel(controls.mode.value);
 			modeLabelNode.textContent = label;
@@ -1884,26 +2807,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		}
 		function voiceLabel(value) {
 			return ({ off: 'Off', tts: 'TTS', stt: 'STT', conversation: 'Conversation' })[value] || value;
-		}
-		function renderMenuPopover() {
-			return section('Context', [
-				choice('insertActiveFile', '', 'Active file', '', false, false, '', 'file-code'),
-				choice('insertSelection', '', 'Selection', '', false, false, '', 'selection'),
-				choice('insertBranchDiff', '', 'Branch diff', '', false, false, '', 'git-compare'),
-				choice('insertContextType', 'file', 'Files and folders', '@file', false, false, '', 'folder'),
-				choice('insertContextType', 'symbol', 'Symbols', '@symbol', false, false, '', 'symbol-class'),
-				choice('insertContextType', 'rule', 'Rules', '@rule', false, false, '', 'key'),
-				choice('openImage', '', 'Image output', controls.imageGeneration.value === 'auto' ? 'Auto' : 'Off', controls.imageGeneration.value === 'auto', false, '', 'device-camera-video')
-			].join(''))
-				+ section('Agent', [
-					choice('openModel', '', 'Model', currentModelLabel(), false, false, '', 'server'),
-					choice('openReasoning', '', 'Mode and reasoning', modeLabel(controls.mode.value) + ' / ' + intensityLabel(controls.intensity.value), controls.mode.value !== 'free' || controls.intensity.value !== 'fast', false, '', 'settings-gear'),
-					choice('openMemory', '', 'Memory', memoryLabel(controls.memoryMode.value), controls.memoryMode.value !== 'off', false, '', 'database'),
-					choice('openWeb', '', 'Web search', controls.webSearch.value === 'Auto' ? 'Auto' : 'Off', controls.webSearch.value === 'Auto', false, '', 'globe'),
-					choice('openMcp', '', 'MCP tools', [controls.mcpFigma.checked ? 'Figma' : '', controls.mcpNotion.checked ? 'Notion' : '', controls.mcpGoogle.checked ? 'Google' : ''].filter(Boolean).join(', ') || 'Off', controls.mcpFigma.checked || controls.mcpNotion.checked || controls.mcpGoogle.checked, false, '', 'tools'),
-					choice('openSettings', '', 'Settings', tools.length ? tools.length + ' tools enabled' : 'Tools loading', false, false, '', 'settings')
-				].join(''))
-				+ section('Run', choice('cancelRun', '', 'Cancel current run', 'Stop the active Backboard request.', false, false, '', 'debug-stop'));
 		}
 		function renderModelPopover() {
 			const source = modelSource();
@@ -1946,15 +2849,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			].map(([value, label, meta]) => choice('chooseIntensity', value, label, meta, controls.intensity.value === value, false)).join('');
 			return section('Mode', modes) + section('Reasoning', intensities);
 		}
-		function renderMemoryPopover() {
-			return section('Memory', [
-				choice('chooseMemory', 'Auto', 'Memory Lite', '', controls.memoryMode.value === 'Auto', false),
-				choice('chooseMemory', 'Readonly', 'Read Only', '', controls.memoryMode.value === 'Readonly', false),
-				choice('chooseMemory', 'off', 'Off', '', controls.memoryMode.value === 'off', false),
-				choice('chooseMemory', 'ProAuto', 'Memory Pro', '', controls.memoryMode.value === 'ProAuto', false),
-				choice('chooseMemory', 'ProReadonly', 'Pro Read Only', '', controls.memoryMode.value === 'ProReadonly', false)
-			].join(''));
-		}
 		function renderWebPopover() {
 			return section('Web Search', [
 				choice('chooseWeb', 'off', 'Off', '', controls.webSearch.value === 'off', false),
@@ -1975,21 +2869,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				choice('chooseVoice', 'conversation', 'Conversation', '', controls.voiceMode.value === 'conversation', true)
 			].join(''));
 		}
-		function renderMcpPopover() {
-			return section('MCP Servers', [
-				choice('toggleMcp', 'figma', 'Figma MCP', '', controls.mcpFigma.checked, false),
-				choice('toggleMcp', 'notion', 'Notion MCP', '', controls.mcpNotion.checked, false),
-				choice('toggleMcp', 'google', 'Google MCP', '', controls.mcpGoogle.checked, false)
-			].join('')) + section('Tools', choice('disabled', '', 'Bridge tools', String(tools.length), false, true));
-		}
-		function renderSettingsPopover() {
-			return section('Current Turn', [
-				choice('openModel', '', 'Model', currentModelLabel(), false, false),
-				choice('openReasoning', '', 'Mode and reasoning', modeLabel(controls.mode.value) + ' / ' + intensityLabel(controls.intensity.value), false, false),
-				choice('openMemory', '', 'Memory', memoryLabel(controls.memoryMode.value), false, false),
-				choice('openMcp', '', 'MCP', [controls.mcpFigma.checked ? 'Figma' : '', controls.mcpNotion.checked ? 'Notion' : '', controls.mcpGoogle.checked ? 'Google' : ''].filter(Boolean).join(', ') || 'Off', false, false)
-			].join('')) + '<div class="popoverActions">' + actionButton('refreshModels', 'Refresh Models', 'refresh') + actionButton('setApiKey', 'API Key', 'key') + '</div>';
-		}
 		function renderUsagePopover() {
 			const refresh = '<div class="popoverActions">' + actionButton('refreshUsage', 'Refresh Usage', 'refresh') + '</div>';
 			if (!latestUsage && !accountUsage) {
@@ -2009,18 +2888,14 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		}
 		function renderPopover(name) {
 			const renderers = {
-				menu: ['Composer Menu', renderMenuPopover],
 				model: ['Model', renderModelPopover],
 				reasoning: ['Mode and Reasoning', renderReasoningPopover],
-				memory: ['Memory', renderMemoryPopover],
 				web: ['Web', renderWebPopover],
 				image: ['Image', renderImagePopover],
 				voice: ['Voice', renderVoicePopover],
-				mcp: ['MCP Tools', renderMcpPopover],
-				usage: ['Usage', renderUsagePopover],
-				settings: ['Composer Settings', renderSettingsPopover]
+				usage: ['Usage', renderUsagePopover]
 			};
-			const renderer = renderers[name] || renderers.settings;
+			const renderer = renderers[name] || renderers.model;
 			popover.dataset.kind = name;
 			popoverTitle.textContent = renderer[0];
 			popoverBody.innerHTML = renderer[1]();
@@ -2119,9 +2994,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			modelIcon.innerHTML = unwrapModelIconHtml(providerIconHtml(provider, 'modelIcon'));
 			buttons.model.title = currentModelLabel();
 		}
-		function applySettings(next) {
-			settings = { ...settings, ...(next || {}) };
-			renderModels();
+			function applySettings(next) {
+				settings = { ...settings, ...(next || {}) };
+				setAuthenticated(settings.authenticated === true);
+				renderModels();
 			setSelect(controls.mode, settings.mode || 'free');
 			setSelect(controls.intensity, settings.intensity || 'fast');
 			setSelect(controls.memoryMode, settings.memoryMode || 'Auto');
@@ -2156,20 +3032,20 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				syncComposerButtons();
 			});
 		}
-		prompt.addEventListener('input', syncComposerButtons);
+			prompt.addEventListener('input', syncComposerButtons);
+			authSignInButton?.addEventListener('click', () => {
+				vscode.postMessage({ type: 'signIn' });
+			});
 		prompt.addEventListener('keydown', event => {
 			if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
 				event.preventDefault();
 				document.getElementById('form').requestSubmit();
 			}
 		});
-		buttons.plus.addEventListener('click', event => openPopover('menu', event.currentTarget));
 		buttons.mode.addEventListener('click', event => openPopover('reasoning', event.currentTarget));
 		buttons.model.addEventListener('click', event => openPopover('model', event.currentTarget));
-		buttons.reasoning.addEventListener('click', event => openPopover('reasoning', event.currentTarget));
 		buttons.web.addEventListener('click', event => openPopover('web', event.currentTarget));
 		buttons.image.addEventListener('click', event => openPopover('image', event.currentTarget));
-		buttons.mcp.addEventListener('click', event => openPopover('mcp', event.currentTarget));
 		buttons.usage.addEventListener('click', event => {
 			requestUsageSnapshot();
 			openPopover('usage', event.currentTarget);
@@ -2326,8 +3202,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				chooseSelect(controls.mode, value, false);
 			} else if (action === 'chooseIntensity') {
 				chooseSelect(controls.intensity, value, false);
-			} else if (action === 'chooseMemory') {
-				chooseSelect(controls.memoryMode, value, true);
 			} else if (action === 'chooseWeb') {
 				chooseSelect(controls.webSearch, value, true);
 			} else if (action === 'chooseImage') {
@@ -2363,17 +3237,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				if (activeAnchor) {
 					positionPopover(activeAnchor);
 				}
-			} else if (action === 'toggleMcp') {
-				const map = { figma: controls.mcpFigma, notion: controls.mcpNotion, google: controls.mcpGoogle };
-				const input = map[value];
-				if (input) {
-					input.checked = !input.checked;
-					input.dispatchEvent(new Event('change'));
-					renderPopover(activePopover);
-					if (activeAnchor) {
-						positionPopover(activeAnchor);
-					}
-				}
 			} else if (action === 'chooseModel') {
 				const provider = target.dataset.provider || controls.provider.value;
 				const model = target.dataset.model || value;
@@ -2398,16 +3261,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				openPopover('model', buttons.model);
 			} else if (action === 'openReasoning') {
 				openPopover('reasoning', buttons.mode);
-			} else if (action === 'openMemory') {
-				openPopover('memory', buttons.plus);
 			} else if (action === 'openWeb') {
 				openPopover('web', buttons.web);
 			} else if (action === 'openImage') {
 				openPopover('image', buttons.image);
-			} else if (action === 'openMcp') {
-				openPopover('mcp', buttons.mcp);
-			} else if (action === 'openSettings') {
-				openPopover('settings', buttons.plus);
 			} else if (action === 'cancelRun') {
 				vscode.postMessage({ type: 'cancel' });
 				closePopover();
@@ -2442,10 +3299,21 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 		});
 		window.visualViewport?.addEventListener('resize', syncRootHeight);
-		document.getElementById('form').addEventListener('submit', event => {
-			event.preventDefault();
-			const text = prompt.value.trim();
+			document.getElementById('form').addEventListener('submit', event => {
+				event.preventDefault();
+				if (!authenticated) {
+					updateStatus('Sign in required.');
+					authSignInButton?.focus();
+					return;
+				}
+				const text = prompt.value.trim();
 			if (!text) {
+				syncComposerButtons();
+				return;
+			}
+			if (text === '/retry') {
+				retryLastPrompt();
+				prompt.value = '';
 				syncComposerButtons();
 				return;
 			}
@@ -2514,6 +3382,29 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			renderQueue();
 			saveActiveHistory();
 			updateStatus(promptQueue.length + ' prompt' + (promptQueue.length === 1 ? '' : 's') + ' queued.');
+		}
+		function latestUserPrompt() {
+			const messages = Array.from(log.querySelectorAll('.messageCard.user .messageText'));
+			for (let index = messages.length - 1; index >= 0; index--) {
+				const value = messages[index].textContent?.trim();
+				if (value && value !== '/retry') {
+					return value;
+				}
+			}
+			const entry = activeHistoryEntry();
+			return entry?.prompt?.trim() || '';
+		}
+		function retryLastPrompt() {
+			const text = latestUserPrompt();
+			if (!text) {
+				updateStatus('No previous prompt to retry.');
+				return;
+			}
+			if (runInProgress) {
+				queuePrompt(text, options());
+			} else {
+				sendPromptToHost(text, options());
+			}
 		}
 		function renderQueue() {
 			document.getElementById('queueBlock')?.remove();
@@ -2694,6 +3585,26 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const max = 12000;
 			return text.length > max ? text.slice(0, max) + '\\n\\n[truncated]' : text;
 		}
+		function appendToolOutput(payload) {
+			const key = payload?.key;
+			const text = typeof payload?.text === 'string' ? payload.text : '';
+			if (!key || !text) {
+				return;
+			}
+			const row = log.querySelector('.toolCard[data-tool-key="' + CSS.escape(String(key)) + '"]');
+			const details = row?.querySelector('.toolDetails');
+			if (!(details instanceof HTMLElement)) {
+				return;
+			}
+			const current = details.textContent === 'No details reported.' ? '' : details.textContent || '';
+			details.textContent = clippedToolText(current + text);
+			row.classList.add('hasTerminal');
+			const meta = row.querySelector('.toolMeta');
+			if (meta && text.trim()) {
+				meta.textContent = text.trim().split(/\\r?\\n/).pop()?.slice(0, 220) || meta.textContent;
+			}
+			scrollConversation();
+		}
 		function ensureToolGroup() {
 			if (currentToolGroup?.group?.isConnected && currentToolGroup?.body?.isConnected) {
 				return currentToolGroup;
@@ -2794,6 +3705,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const detail = toolPrimaryDetail(item);
 			const details = toolDetailsText(item);
 			row.className = 'toolCard ' + status;
+			row.dataset.toolKey = String(key);
 			row.textContent = '';
 			const head = document.createElement('div');
 			head.className = 'toolHead';
@@ -2821,7 +3733,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			head.append(statusIcon, main, duration, toggle);
 			const body = document.createElement('pre');
 			body.className = 'toolDetails';
-			body.textContent = clippedToolText(details || 'No details reported.');
+			const previousDetails = existing?.row?.querySelector('.toolDetails')?.textContent;
+			body.textContent = clippedToolText(details || previousDetails || 'No details reported.');
 			toggle.addEventListener('click', () => {
 				const open = row.classList.toggle('open');
 				toggle.title = open ? 'Hide tool details' : 'Show tool details';
@@ -3394,6 +4307,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				for (const call of calls) {
 					appendTool({ status: 'started', key: toolKey(call), name: toolName(call), args: toolArgs(call) });
 				}
+			} else if (message.type === 'toolOutput') {
+				appendToolOutput(message.payload || {});
 			} else if (message.type === 'toolFinished') {
 				appendTool(message.payload || {});
 			}
@@ -3429,6 +4344,16 @@ class BackboardBridge implements vscode.Disposable {
 	dispose(): void {
 		this.child?.kill();
 		this.output.dispose();
+	}
+
+	restart(): void {
+		this.pendingModelRefresh = undefined;
+		if (!this.child || this.child.killed) {
+			this.pending.clear();
+			return;
+		}
+		this.output.appendLine(`[${new Date().toISOString()}] Restarting Backboard bridge after credential change`);
+		this.child.kill();
 	}
 
 	refreshModels(): void {
@@ -3652,7 +4577,7 @@ async function executeToolCalls(bridge: BackboardBridge, toolCalls: unknown[], m
 		try {
 			logToolDiagnostic('started', call);
 			response.event?.('toolFinished', { status: 'started', key: call.id, name: call.name, args: call.args });
-			const result = await executeTool(bridge, call.name, call.args, response, token);
+			const result = await executeTool(bridge, call.name, call.args, response, token, call.id);
 			logToolDiagnostic('finished', call, result);
 			response.event?.('toolFinished', { status: 'finished', key: call.id, name: call.name, args: call.args, output: result });
 			outputs.push(toolOutput(call.id, { success: true, content: result }));
@@ -3700,7 +4625,7 @@ async function approveTool(name: string, args: Record<string, unknown>, mode: st
 	return choice === 'Allow';
 }
 
-async function executeTool(bridge: BackboardBridge, name: string, args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken): Promise<string> {
+async function executeTool(bridge: BackboardBridge, name: string, args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken, toolKey?: string): Promise<string> {
 	switch (name) {
 		case 'read_file':
 			return readFile(args);
@@ -3733,10 +4658,10 @@ async function executeTool(bridge: BackboardBridge, name: string, args: Record<s
 			return createDirectoryTool(args);
 		case 'bash':
 		case 'run_terminal_cmd':
-			return runShellTool(args, response, token);
+			return runShellTool(args, response, token, toolKey);
 		case 'run_code':
 		case 'repl':
-			return runCodeTool(args, response, token);
+			return runCodeTool(args, response, token, toolKey);
 		case 'todo_write':
 			return `Todo list updated: ${asCompactJson(args.todos ?? [])}`;
 		case 'sleep':
@@ -3978,7 +4903,7 @@ async function createDirectoryTool(args: Record<string, unknown>): Promise<strin
 	return `Created ${vscode.workspace.asRelativePath(uri)}`;
 }
 
-async function runShellTool(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken): Promise<string> {
+async function runShellTool(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken, toolKey?: string): Promise<string> {
 	const command = stringArg(args, 'command', 'cmd');
 	if (!command) {
 		throw new Error('shell tool requires command');
@@ -3988,13 +4913,17 @@ async function runShellTool(args: Record<string, unknown>, response: ResponseSin
 	const isBackground = boolArg(args, 'is_background');
 	const timeout = numberArg(args, 'timeout_ms', 'timeout') ?? 120_000;
 	const maxBuffer = 1024 * 1024;
-	const writer = new vscode.EventEmitter<string>();
 	let child: cp.ChildProcessWithoutNullStreams | undefined;
 	let settled = false;
 	let buffered = '';
 	let truncated = false;
 	let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 	const cancelDisposables: vscode.Disposable[] = [];
+	const streamToolOutput = (text: string): void => {
+		if (toolKey) {
+			response.event?.('toolOutput', { key: toolKey, text });
+		}
+	};
 	const appendOutput = (chunk: Buffer | string): void => {
 		const text = chunk.toString();
 		if (!truncated) {
@@ -4006,7 +4935,7 @@ async function runShellTool(args: Record<string, unknown>, response: ResponseSin
 				buffered += text;
 			}
 		}
-		writer.fire(toTerminalText(text));
+		streamToolOutput(text);
 	};
 	let finish: (value: string) => void = () => {};
 	const result = new Promise<string>(resolve => {
@@ -4019,49 +4948,37 @@ async function runShellTool(args: Record<string, unknown>, response: ResponseSin
 				clearTimeout(timeoutHandle);
 			}
 			cancelDisposables.splice(0).forEach(disposable => disposable.dispose());
-			writer.dispose();
 			resolve(value);
 		};
 	});
-	const pty: vscode.Pseudoterminal = {
-		onDidWrite: writer.event,
-		open: () => {
-			writer.fire(toTerminalText(`$ ${command}\n`));
-			child = cp.spawn(command, [], { cwd, shell: true, env: process.env });
-			child.stdout.on('data', appendOutput);
-			child.stderr.on('data', appendOutput);
-			child.on('error', error => {
-				appendOutput(`\n[Command failed: ${error.message}]\n`);
-				finish(buffered);
-			});
-			child.on('close', (code, signal) => {
-				const exitText = code === 0 || code === null && !signal
-					? ''
-					: `\n[Command exited ${signal ? `with signal ${signal}` : `with code ${code}`}]\n`;
-				if (exitText) {
-					appendOutput(exitText);
-				}
-				finish(buffered);
-			});
-			if (!isBackground) {
-				timeoutHandle = setTimeout(() => {
-					appendOutput(`\n[Command timed out after ${Math.round(timeout / 1000)}s]\n`);
-					child?.kill();
-					finish(buffered);
-				}, timeout);
-			}
-		},
-		close: () => {
-			if (!settled && child && !child.killed) {
-				child.kill();
-			}
+	streamToolOutput(`$ ${command}\n`);
+	child = cp.spawn(command, [], { cwd, shell: true, env: process.env });
+	child.stdout.on('data', appendOutput);
+	child.stderr.on('data', appendOutput);
+	child.on('error', error => {
+		appendOutput(`\n[Command failed: ${error.message}]\n`);
+		finish(buffered);
+	});
+	child.on('close', (code, signal) => {
+		const exitText = code === 0 || code === null && !signal
+			? ''
+			: `\n[Command exited ${signal ? `with signal ${signal}` : `with code ${code}`}]\n`;
+		if (exitText) {
+			appendOutput(exitText);
 		}
-	};
-	const terminal = vscode.window.createTerminal({ name: 'Backboard', pty });
-	terminal.show(true);
+		finish(buffered);
+	});
+	if (!isBackground) {
+		timeoutHandle = setTimeout(() => {
+			appendOutput(`\n[Command timed out after ${Math.round(timeout / 1000)}s]\n`);
+			child?.kill();
+			finish(buffered);
+		}, timeout);
+	}
 	cancelDisposables.push(token.onCancellationRequested(() => {
 		child?.kill();
-		finish(buffered ? `${buffered}\n[Command cancelled]\n` : 'Command cancelled.');
+		appendOutput(buffered ? '\n[Command cancelled]\n' : 'Command cancelled.');
+		finish(buffered || 'Command cancelled.');
 	}));
 	if (isBackground) {
 		void result;
@@ -4087,23 +5004,19 @@ function resolveShellCwd(rawCwd: string | undefined): string {
 	return resolved;
 }
 
-function toTerminalText(value: string): string {
-	return value.replace(/\r?\n/g, '\r\n');
-}
-
-async function runCodeTool(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken): Promise<string> {
+async function runCodeTool(args: Record<string, unknown>, response: ResponseSink, token: vscode.CancellationToken, toolKey?: string): Promise<string> {
 	const code = stringArg(args, 'code');
 	if (!code) {
 		throw new Error('run_code/repl requires code');
 	}
 	const language = (stringArg(args, 'language') || 'python').toLowerCase();
 	if (language === 'shell') {
-		return runShellTool({ ...args, command: code }, response, token);
+		return runShellTool({ ...args, command: code }, response, token, toolKey);
 	}
 	const command = language === 'node' || language === 'typescript'
 		? `node -e ${shellQuote(code)}`
 		: `python3 -c ${shellQuote(code)}`;
-	return runShellTool({ ...args, command }, response, token);
+	return runShellTool({ ...args, command }, response, token, toolKey);
 }
 
 async function sleepTool(args: Record<string, unknown>, token: vscode.CancellationToken): Promise<string> {
@@ -4214,11 +5127,11 @@ function readSettings(): {
 	readonly mcpFigma: boolean;
 	readonly mcpNotion: boolean;
 	readonly mcpGoogle: boolean;
-	readonly config: { readonly env: string; readonly apiUrl?: string; readonly apiKey?: string };
+	readonly config: { readonly env: string; readonly apiUrl?: string; readonly accessToken?: string };
 } {
 	const config = vscode.workspace.getConfiguration('backboard');
 	const apiUrl = config.get<string>('apiUrl')?.trim() || undefined;
-	const apiKey = configuredBackboardApiKey();
+	const accessToken = configuredBackboardAccessToken();
 	return {
 		defaultProvider: config.get<string>('defaultProvider') || 'aws-bedrock',
 		defaultModel: config.get<string>('defaultModel') || 'anthropic.claude-sonnet-4-6',
@@ -4234,7 +5147,7 @@ function readSettings(): {
 		config: {
 			env: config.get<string>('env') || 'prod',
 			apiUrl,
-			apiKey
+			accessToken
 		}
 	};
 }
@@ -4324,12 +5237,12 @@ async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, 
 			await webview.postMessage({ type: 'models', models: cachedModels });
 			await webview.postMessage({ type: 'status', text: 'Using cached Backboard models.' });
 		} else {
-			await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
-			if (isBackboardAuthError(error)) {
-				await webview.postMessage({ type: 'status', text: 'Set a Backboard API key, BACKBOARD_API_KEY, or ~/.backboard_ide/config.json to load models.' });
-			} else {
-				await webview.postMessage({ type: 'status', text: 'Could not load models.' });
-			}
+				await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
+				if (isBackboardAuthError(error)) {
+					await webview.postMessage({ type: 'status', text: 'Sign in or set a Backboard API key in ~/.backboard_ide/config.json to load models.' });
+				} else {
+					await webview.postMessage({ type: 'status', text: 'Could not load models.' });
+				}
 		}
 	}
 	try {
@@ -4430,7 +5343,8 @@ function publicSettings(settings: BackboardSettings): PanelOptions {
 		voiceMode: settings.voiceMode,
 		mcpFigma: settings.mcpFigma,
 		mcpNotion: settings.mcpNotion,
-		mcpGoogle: settings.mcpGoogle
+		mcpGoogle: settings.mcpGoogle,
+		authenticated: hasBackboardCredentials()
 	};
 }
 

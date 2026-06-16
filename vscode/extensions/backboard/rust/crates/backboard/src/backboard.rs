@@ -149,6 +149,14 @@ pub struct BackboardConfig {
     pub api_url: Option<String>,
     #[serde(default)]
     pub env_keys: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<BackboardOAuthConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+pub struct BackboardOAuthConfig {
+    #[serde(default)]
+    pub access_token: Option<String>,
 }
 
 fn default_env() -> String {
@@ -269,11 +277,19 @@ impl BackboardConfig {
                     .get(&self.env.to_lowercase())
                     .and_then(|key| non_empty_api_key(key))
             })
-            .or_else(|| {
-                std::env::var("BACKBOARD_API_KEY")
-                    .ok()
-                    .and_then(|key| non_empty_api_key(&key))
-            })
+    }
+
+    pub fn access_token(&self) -> Option<String> {
+        self.oauth
+            .as_ref()
+            .and_then(|oauth| oauth.access_token.as_deref())
+            .and_then(non_empty_api_key)
+    }
+
+    pub fn auth(&self) -> Option<BackboardAuth> {
+        self.api_key()
+            .map(BackboardAuth::ApiKey)
+            .or_else(|| self.access_token().map(BackboardAuth::OAuthAccessToken))
     }
 
     fn normalize_env(&mut self) {
@@ -498,6 +514,7 @@ impl Default for BackboardConfig {
             api_key: None,
             api_url: None,
             env_keys: HashMap::default(),
+            oauth: None,
         }
     }
 }
@@ -515,15 +532,61 @@ pub fn config_path() -> Result<PathBuf> {
 pub enum BackboardError {
     #[error("Backboard API key is missing. Run `backboard config set-api-key <key>`.")]
     MissingApiKey,
+    #[error("Backboard authentication is missing. Sign in to Backboard or set an API key.")]
+    MissingAuth,
     #[error("Backboard API returned {status}: {body}")]
     Api { status: StatusCode, body: String },
+}
+
+#[derive(Clone, Debug)]
+pub enum BackboardAuth {
+    ApiKey(String),
+    OAuthAccessToken(String),
+}
+
+impl BackboardAuth {
+    fn apply(&self, request: RequestBuilder) -> RequestBuilder {
+        match self {
+            Self::ApiKey(api_key) => request.header("X-API-Key", api_key),
+            Self::OAuthAccessToken(access_token) => request.bearer_auth(access_token),
+        }
+    }
+
+    fn headers(&self) -> Result<reqwest::header::HeaderMap> {
+        let mut headers = reqwest::header::HeaderMap::new();
+        match self {
+            Self::ApiKey(api_key) => {
+                headers.insert("X-API-Key", header_value(api_key, "Backboard API key")?);
+            }
+            Self::OAuthAccessToken(access_token) => {
+                let value = format!("Bearer {access_token}");
+                headers.insert(
+                    reqwest::header::AUTHORIZATION,
+                    header_value(&value, "Backboard OAuth access token")?,
+                );
+            }
+        }
+        Ok(headers)
+    }
+
+    fn api_key(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey(api_key) => Some(api_key),
+            Self::OAuthAccessToken(_) => None,
+        }
+    }
+}
+
+fn header_value(value: &str, label: &str) -> Result<reqwest::header::HeaderValue> {
+    reqwest::header::HeaderValue::from_str(value)
+        .with_context(|| format!("{label} is not a valid HTTP header value"))
 }
 
 #[derive(Clone)]
 pub struct BackboardClient {
     client: Client,
     base_url: String,
-    api_key: String,
+    auth: BackboardAuth,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -721,8 +784,8 @@ fn list_models_query_params(
 
 impl BackboardClient {
     pub fn from_config(config: BackboardConfig) -> Result<Self> {
-        let api_key = config.api_key().ok_or(BackboardError::MissingApiKey)?;
-        Ok(Self::new(config.base_url(), api_key))
+        let auth = config.auth().ok_or(BackboardError::MissingAuth)?;
+        Ok(Self::new_with_auth(config.base_url(), auth))
     }
 
     pub fn from_saved_config() -> Result<Self> {
@@ -730,6 +793,10 @@ impl BackboardClient {
     }
 
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
+        Self::new_with_auth(base_url, BackboardAuth::ApiKey(api_key.into()))
+    }
+
+    pub fn new_with_auth(base_url: impl Into<String>, auth: BackboardAuth) -> Self {
         let client = Client::builder()
             .http2_adaptive_window(true)
             .pool_max_idle_per_host(10)
@@ -741,7 +808,7 @@ impl BackboardClient {
         Self {
             client,
             base_url: base_url.into().trim_end_matches('/').to_string(),
-            api_key: api_key.into(),
+            auth,
         }
     }
 
@@ -751,9 +818,8 @@ impl BackboardClient {
 
     pub async fn warm_connection(&self) -> Result<()> {
         let response = self
-            .client
-            .get(self.base_url.clone())
-            .header("X-API-Key", self.api_key_header()?)
+            .auth
+            .apply(self.client.get(self.base_url.clone()))
             .send()
             .await?;
         response.bytes().await?;
@@ -924,12 +990,12 @@ impl BackboardClient {
         validate_message_request(&request, true)?;
         let client = self.client.clone();
         let url = self.url("/threads/messages");
-        let api_key = self.api_key_header()?;
+        let auth = self.auth.clone();
         Ok(retrying_sse_json_stream(move || {
             message_request_builder(
                 client.clone(),
                 url.clone(),
-                api_key.clone(),
+                auth.clone(),
                 request.clone(),
                 true,
             )
@@ -946,7 +1012,7 @@ impl BackboardClient {
     }
 
     pub fn realtime_voice_url(&self) -> String {
-        realtime_voice_url(&self.base_url, &self.api_key)
+        realtime_voice_url(&self.base_url, self.auth.api_key().unwrap_or_default())
     }
 
     pub async fn upload_document(&self, assistant_id: &str, file_path: &Path) -> Result<Value> {
@@ -959,9 +1025,11 @@ impl BackboardClient {
             .with_context(|| format!("reading document {}", file_path.display()))?;
         let form = Form::new().part("file", Part::bytes(bytes).file_name(file_name));
         self.json(
-            self.client
-                .post(self.url(&format!("/assistants/{assistant_id}/documents")))
-                .header("X-API-Key", self.api_key_header()?)
+            self.auth
+                .apply(
+                    self.client
+                        .post(self.url(&format!("/assistants/{assistant_id}/documents"))),
+                )
                 .multipart(form),
         )
         .await
@@ -977,9 +1045,11 @@ impl BackboardClient {
             .with_context(|| format!("reading document {}", file_path.display()))?;
         let form = Form::new().part("file", Part::bytes(bytes).file_name(file_name));
         self.json_value(
-            self.client
-                .post(self.url(&format!("/threads/{thread_id}/documents")))
-                .header("X-API-Key", self.api_key_header()?)
+            self.auth
+                .apply(
+                    self.client
+                        .post(self.url(&format!("/threads/{thread_id}/documents"))),
+                )
                 .multipart(form),
         )
         .await
@@ -1378,25 +1448,19 @@ impl BackboardClient {
         Ok(message_request_builder(
             self.client.clone(),
             url,
-            self.api_key_header()?,
+            self.auth.clone(),
             request,
             stream,
         ))
     }
 
     fn json_headers(&self) -> Result<reqwest::header::HeaderMap> {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("X-API-Key", self.api_key_header()?);
+        let mut headers = self.auth.headers()?;
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             reqwest::header::HeaderValue::from_static("application/json"),
         );
         Ok(headers)
-    }
-
-    fn api_key_header(&self) -> Result<reqwest::header::HeaderValue> {
-        reqwest::header::HeaderValue::from_str(&self.api_key)
-            .context("Backboard API key is not a valid HTTP header value")
     }
 
     async fn json<T: serde::de::DeserializeOwned>(
@@ -1648,11 +1712,11 @@ fn message_multipart_form(request: SendMessageRequest, stream: bool) -> Result<F
 fn message_request_builder(
     client: Client,
     url: String,
-    api_key: reqwest::header::HeaderValue,
+    auth: BackboardAuth,
     request: SendMessageRequest,
     stream: bool,
 ) -> RequestBuilder {
-    let builder = client.post(url).header("X-API-Key", api_key);
+    let builder = auth.apply(client.post(url));
     if request.audio_file.is_some() {
         builder.multipart(message_multipart_form(request, stream).unwrap_or_else(|_| Form::new()))
     } else {
@@ -1905,12 +1969,40 @@ mod tests {
     }
 
     #[test]
+    fn auth_prefers_api_key_over_oauth_access_token() {
+        let config = BackboardConfig {
+            api_key: Some("bb-key".to_string()),
+            oauth: Some(BackboardOAuthConfig {
+                access_token: Some("oauth-token".to_string()),
+            }),
+            ..BackboardConfig::default()
+        };
+
+        assert!(matches!(config.auth(), Some(BackboardAuth::ApiKey(value)) if value == "bb-key"));
+    }
+
+    #[test]
+    fn auth_falls_back_to_oauth_access_token() {
+        let config = BackboardConfig {
+            oauth: Some(BackboardOAuthConfig {
+                access_token: Some("  oauth-token  ".to_string()),
+            }),
+            ..BackboardConfig::default()
+        };
+
+        assert!(
+            matches!(config.auth(), Some(BackboardAuth::OAuthAccessToken(value)) if value == "oauth-token")
+        );
+    }
+
+    #[test]
     fn config_serializes_only_api_access_fields() {
         let config = BackboardConfig {
             env: "local".to_string(),
             api_key: Some("bb-key".to_string()),
             api_url: Some("http://localhost:8000".to_string()),
             env_keys: HashMap::from([("local".to_string(), "bb-key".to_string())]),
+            oauth: None,
         };
 
         let value = serde_json::to_value(config).unwrap();

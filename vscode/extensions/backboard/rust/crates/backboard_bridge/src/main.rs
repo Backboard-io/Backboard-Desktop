@@ -42,6 +42,8 @@ const BACKBOARD_SYSTEM_PROMPT: &str = include_str!("backboard_runtime_system_pro
 #[derive(Clone)]
 struct BridgeState {
     sessions: Arc<Mutex<HashMap<String, SessionState>>>,
+    tool_runs_in_flight: Arc<Mutex<HashSet<String>>>,
+    submitted_tool_runs: Arc<Mutex<HashSet<String>>>,
     writer: EventWriter,
 }
 
@@ -77,7 +79,7 @@ struct ConfigParams {
     #[serde(default)]
     api_url: Option<String>,
     #[serde(default)]
-    api_key: Option<String>,
+    access_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -190,6 +192,8 @@ struct BridgeModel {
 async fn main() -> Result<()> {
     let state = BridgeState {
         sessions: Arc::new(Mutex::new(HashMap::new())),
+        tool_runs_in_flight: Arc::new(Mutex::new(HashSet::new())),
+        submitted_tool_runs: Arc::new(Mutex::new(HashSet::new())),
         writer: EventWriter {
             stdout: Arc::new(Mutex::new(io::stdout())),
         },
@@ -328,7 +332,7 @@ async fn list_models(state: BridgeState, request: BridgeRequest) -> Result<()> {
     .unwrap_or(ConfigParams {
         env: None,
         api_url: None,
-        api_key: None,
+        access_token: None,
     });
     let provider = request
         .params
@@ -863,7 +867,23 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
         .into_iter()
         .map(normalize_tool_output)
         .collect::<Vec<_>>();
-    let stream = client
+    let submission_key = tool_outputs_submission_key(&session_id, &thread_id, &run_id);
+    if !try_begin_tool_outputs_submission(&state, &submission_key) {
+        state.writer.emit(base_event(
+            "progress",
+            &request.request_id,
+            Some(&session_id),
+            json!({ "message": "Tool outputs were already submitted for this run." }),
+        ));
+        state.writer.emit(base_event(
+            "done",
+            &request.request_id,
+            Some(&session_id),
+            json!({ "stopReason": "duplicate_tool_result" }),
+        ));
+        return Ok(());
+    }
+    let stream = match client
         .submit_tool_outputs_stream(
             &thread_id,
             &run_id,
@@ -872,8 +892,67 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
                 tools: params.tools,
             },
         )
-        .await?;
+        .await
+    {
+        Ok(stream) => {
+            finish_tool_outputs_submission(&state, &submission_key, true);
+            stream
+        }
+        Err(error) if is_duplicate_tool_outputs_error(&error) => {
+            finish_tool_outputs_submission(&state, &submission_key, true);
+            state.writer.emit(base_event(
+                "progress",
+                &request.request_id,
+                Some(&session_id),
+                json!({ "message": "Tool outputs were already submitted for this run." }),
+            ));
+            state.writer.emit(base_event(
+                "done",
+                &request.request_id,
+                Some(&session_id),
+                json!({ "stopReason": "duplicate_tool_result" }),
+            ));
+            return Ok(());
+        }
+        Err(error) => {
+            finish_tool_outputs_submission(&state, &submission_key, false);
+            return Err(error);
+        }
+    };
     consume_stream(state, &request.request_id, &session_id, stream).await
+}
+
+fn tool_outputs_submission_key(session_id: &str, thread_id: &str, run_id: &str) -> String {
+    format!("{session_id}\0{thread_id}\0{run_id}")
+}
+
+fn try_begin_tool_outputs_submission(state: &BridgeState, key: &str) -> bool {
+    let Ok(submitted) = state.submitted_tool_runs.lock() else {
+        return false;
+    };
+    if submitted.contains(key) {
+        return false;
+    }
+    drop(submitted);
+
+    state
+        .tool_runs_in_flight
+        .lock()
+        .is_ok_and(|mut in_flight| in_flight.insert(key.to_string()))
+}
+
+fn finish_tool_outputs_submission(state: &BridgeState, key: &str, submitted: bool) {
+    if let Ok(mut in_flight) = state.tool_runs_in_flight.lock() {
+        in_flight.remove(key);
+    }
+    if submitted && let Ok(mut submitted_runs) = state.submitted_tool_runs.lock() {
+        submitted_runs.insert(key.to_string());
+    }
+}
+
+fn is_duplicate_tool_outputs_error(error: &anyhow::Error) -> bool {
+    let message = error.to_string();
+    message.contains("Tool outputs for run ID") && message.contains("were already submitted")
 }
 
 async fn consume_stream(
@@ -1139,12 +1218,15 @@ fn client_from_params(params: Option<&ConfigParams>) -> Result<BackboardClient> 
         {
             config.api_url = Some(api_url.to_string());
         }
-        if let Some(api_key) = params
-            .api_key
+        if let Some(access_token) = params
+            .access_token
             .as_deref()
             .filter(|value| !value.trim().is_empty())
         {
-            config.api_key = Some(api_key.to_string());
+            config
+                .oauth
+                .get_or_insert_with(Default::default)
+                .access_token = Some(access_token.to_string());
         }
     }
     BackboardClient::from_config(config)
@@ -1942,15 +2024,22 @@ fn emit_error(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, path::PathBuf};
+    use std::{
+        collections::{HashMap, HashSet},
+        io,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
 
     use backboard::BackboardModel;
     use serde_json::json;
 
     use super::{
-        StreamingToolCallAccumulator, add_visible_models, augment_prompt, is_featherless_provider,
-        model_is_visible, normalize_tool_output, thinking_payload, tool_call_stream_finished,
-        tool_calls_required_by_chunk, tool_definitions, validate_web_fetch_url, voice_payload,
+        BridgeState, EventWriter, StreamingToolCallAccumulator, add_visible_models, augment_prompt,
+        is_duplicate_tool_outputs_error, is_featherless_provider, model_is_visible,
+        normalize_tool_output, thinking_payload, tool_call_stream_finished,
+        tool_calls_required_by_chunk, tool_definitions, tool_outputs_submission_key,
+        try_begin_tool_outputs_submission, validate_web_fetch_url, voice_payload,
     };
 
     #[test]
@@ -2158,6 +2247,38 @@ mod tests {
                 .unwrap()
                 .contains("\"success\":true")
         );
+    }
+
+    #[test]
+    fn duplicate_tool_output_runs_are_marked_once() {
+        let state = BridgeState {
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            tool_runs_in_flight: Arc::new(Mutex::new(HashSet::new())),
+            submitted_tool_runs: Arc::new(Mutex::new(HashSet::new())),
+            writer: EventWriter {
+                stdout: Arc::new(Mutex::new(io::stdout())),
+            },
+        };
+        let key = tool_outputs_submission_key("session", "thread", "run");
+
+        assert!(try_begin_tool_outputs_submission(&state, &key));
+        assert!(!try_begin_tool_outputs_submission(&state, &key));
+        super::finish_tool_outputs_submission(&state, &key, false);
+        assert!(try_begin_tool_outputs_submission(&state, &key));
+        super::finish_tool_outputs_submission(&state, &key, true);
+        assert!(!try_begin_tool_outputs_submission(&state, &key));
+    }
+
+    #[test]
+    fn duplicate_tool_output_api_error_is_detected() {
+        let error = anyhow::anyhow!(
+            "Backboard API returned 400 Bad Request: Tool outputs for run ID 'run_123' were already submitted."
+        );
+
+        assert!(is_duplicate_tool_outputs_error(&error));
+        assert!(!is_duplicate_tool_outputs_error(&anyhow::anyhow!(
+            "Backboard API returned 500 Internal Server Error"
+        )));
     }
 
     #[test]

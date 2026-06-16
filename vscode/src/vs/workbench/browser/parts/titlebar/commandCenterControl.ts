@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { isActiveDocument, reset } from '../../../../base/browser/dom.js';
+import { EventType, addDisposableListener, isActiveDocument, reset } from '../../../../base/browser/dom.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { getDefaultHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegate.js';
@@ -21,12 +21,19 @@ import { IInstantiationService } from '../../../../platform/instantiation/common
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { WindowTitle } from './windowTitle.js';
-import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
-import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { IEditorService } from '../../../services/editor/common/editorService.js';
 
-const AI_DISABLED_SETTING = 'chat.disableAIFeatures';
-const AGENT_STATUS_ENABLED_SETTING = 'chat.agentsControl.enabled';
+const AGENT_SESSIONS_WELCOME_INPUT_TYPE_ID = 'workbench.editors.agentSessionsWelcomeInput';
+const OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openWorkspaceInAgentsWindow';
+const OPEN_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.openWorkspacePage';
+const CLOSE_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.closeWorkspacePage';
+const WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY = 'workspacePageVisible';
+const WORKSPACE_PAGE_CONTEXT_KEYS = new Set([WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY]);
+
+type TitlebarPage = 'sandbox' | 'editor' | 'workspace';
 
 export class CommandCenterControl {
 
@@ -103,8 +110,9 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
 		@IHoverService private readonly _hoverService: IHoverService,
 		@IKeybindingService private _keybindingService: IKeybindingService,
 		@IInstantiationService private _instaService: IInstantiationService,
-		@IEditorGroupsService private _editorGroupService: IEditorGroupsService,
-		@IConfigurationService private _configurationService: IConfigurationService,
+		@ICommandService private readonly _commandService: ICommandService,
+		@IEditorService private readonly _editorService: IEditorService,
+		@IContextKeyService private readonly _contextKeyService: IContextKeyService,
 	) {
 		super(undefined, _submenu.actions.find(action => action.id === 'workbench.action.quickOpenWithModes') ?? _submenu.actions[0], options);
 		this._hoverDelegate = options.hoverDelegate ?? getDefaultHoverDelegate('mouse');
@@ -113,6 +121,7 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
 	override render(container: HTMLElement): void {
 		super.render(container);
 		container.classList.add('command-center-center');
+		container.classList.add('ide-page-switch-container');
 		container.classList.toggle('multiple', (this._submenu.actions.length > 1));
 
 		const hover = this._store.add(this._hoverService.setupManagedHover(this._hoverDelegate, container, this.getTooltip()));
@@ -157,81 +166,113 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
 							super(undefined, action, options);
 						}
 
+						override onClick(): void {
+							// Click handling is owned by the segmented switch buttons.
+						}
+
 						override render(container: HTMLElement): void {
 							super.render(container);
 							container.classList.toggle('command-center-quick-pick');
-							container.role = 'button';
-							container.setAttribute('aria-description', this.getTooltip());
+							container.role = 'presentation';
+							container.setAttribute('aria-label', localize('ideViewSwitch', "IDE View Switch"));
 
-							// When agent control mode is 'compact', hide search icon and left-align the label
-							// Backward compat: the old boolean setting (true) and the new default (undefined) both map to compact
-							const aiFeaturesDisabled = that._configurationService.getValue<boolean>(AI_DISABLED_SETTING) === true;
-							const aiCustomizationsDisabled = that._configurationService.getValue<boolean>('disableAICustomizations') === true
-								|| that._configurationService.getValue<boolean>('workbench.disableAICustomizations') === true;
-							const forcedHidden = aiFeaturesDisabled && aiCustomizationsDisabled;
-							const agentControlValue = that._configurationService.getValue(AGENT_STATUS_ENABLED_SETTING);
-							const isCompactMode = !forcedHidden && (agentControlValue === true || agentControlValue === undefined || agentControlValue === 'compact');
-							container.classList.toggle('compact-mode', isCompactMode);
+							const switchElement = document.createElement('div');
+							switchElement.classList.add('ide-page-switch');
+							switchElement.setAttribute('role', 'tablist');
+							switchElement.setAttribute('aria-label', localize('ideViewSwitchAriaLabel', "IDE view"));
 
-							const action = this.action;
-
-							// icon (search) - hidden in compact mode
-							const searchIcon = document.createElement('span');
-							searchIcon.ariaHidden = 'true';
-							searchIcon.className = action.class ?? '';
-							searchIcon.classList.add('search-icon');
-
-							// label: just workspace name and optional decorations
-							const label = this._getLabel();
-							const labelElement = document.createElement('span');
-							labelElement.classList.add('search-label');
-							labelElement.textContent = label;
-							if (isCompactMode) {
-								reset(container, labelElement);
-							} else {
-								reset(container, searchIcon, labelElement);
+							const buttons = [
+								this._createSwitchButton('sandbox', localize('sandboxView', "Sandbox"), async () => {
+									await that._commandService.executeCommand(CLOSE_WORKSPACE_PAGE_COMMAND_ID);
+									return that._commandService.executeCommand(OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID);
+								}),
+								this._createSwitchButton('editor', localize('editorView', "Editor"), async () => {
+									await that._commandService.executeCommand(CLOSE_WORKSPACE_PAGE_COMMAND_ID);
+									return that._commandService.executeCommand('workbench.action.focusActiveEditorGroup');
+								}),
+								this._createSwitchButton('workspace', localize('workspaceView', "Workspace"), () => that._commandService.executeCommand(OPEN_WORKSPACE_PAGE_COMMAND_ID)),
+							];
+							for (const button of buttons) {
+								switchElement.appendChild(button);
 							}
+							reset(container, switchElement);
 
 							const hover = this._store.add(that._hoverService.setupManagedHover(that._hoverDelegate, container, this.getTooltip()));
+							const updateChecked = () => {
+								const activePage = this._getActivePage();
+								for (const button of buttons) {
+									const checked = button.dataset.page === activePage;
+									button.classList.toggle('checked', checked);
+									button.setAttribute('aria-selected', String(checked));
+									button.tabIndex = checked ? 0 : -1;
+								}
+							};
+							updateChecked();
 
 							// update label & tooltip when window title changes
 							this._store.add(that._windowTitle.onDidChange(() => {
 								hover.update(this.getTooltip());
-								labelElement.textContent = this._getLabel();
 							}));
 
-							// update label & tooltip when tabs visibility changes
-							this._store.add(that._editorGroupService.onDidChangeEditorPartOptions(({ newPartOptions, oldPartOptions }) => {
-								if (newPartOptions.showTabs !== oldPartOptions.showTabs) {
-									hover.update(this.getTooltip());
-									labelElement.textContent = this._getLabel();
+							this._store.add(that._editorService.onDidActiveEditorChange(updateChecked));
+							this._store.add(that._editorService.onDidVisibleEditorsChange(updateChecked));
+							this._store.add(that._contextKeyService.onDidChangeContext(event => {
+								if (event.affectsSome(WORKSPACE_PAGE_CONTEXT_KEYS)) {
+									updateChecked();
 								}
 							}));
 						}
 
 						protected override getTooltip() {
-							return that.getTooltip();
+							return localize('ideViewSwitchTooltip', "Switch between Sandbox, Editor, and Workspace");
 						}
 
-						private _getLabel(): string {
-							const { prefix, suffix } = that._windowTitle.getTitleDecorations();
-							let label = that._windowTitle.workspaceName;
-							if (that._windowTitle.isCustomTitleFormat()) {
-								label = that._windowTitle.getWindowTitle();
-							} else if (that._editorGroupService.partOptions.showTabs === 'none') {
-								label = that._windowTitle.fileName ?? label;
+						private _createSwitchButton(page: TitlebarPage, label: string, run: () => Promise<unknown>): HTMLButtonElement {
+							const button = document.createElement('button');
+							button.type = 'button';
+							button.classList.add('ide-page-switch-button');
+							button.dataset.page = page;
+							button.textContent = label;
+							button.setAttribute('role', 'tab');
+							button.title = label;
+
+							this._store.add(addDisposableListener(button, EventType.CLICK, event => {
+								event.preventDefault();
+								event.stopPropagation();
+								run();
+							}));
+							this._store.add(addDisposableListener(button, EventType.KEY_DOWN, event => {
+								if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+									event.preventDefault();
+									event.stopPropagation();
+									this._focusAdjacentButton(button, event.key === 'ArrowRight');
+								}
+							}));
+
+							return button;
+						}
+
+						private _focusAdjacentButton(button: HTMLButtonElement, next: boolean): void {
+							const buttons = Array.from(button.parentElement?.querySelectorAll<HTMLButtonElement>('.ide-page-switch-button') ?? []);
+							const index = buttons.indexOf(button);
+							if (index === -1) {
+								return;
 							}
-							if (!label) {
-								label = localize('label.dfl', "Search");
-							}
-							if (prefix) {
-								label = localize('label1', "{0} {1}", prefix, label);
-							}
-							if (suffix) {
-								label = localize('label2', "{0} {1}", label, suffix);
+							const nextIndex = (index + (next ? 1 : -1) + buttons.length) % buttons.length;
+							buttons[nextIndex]?.focus();
+						}
+
+						private _getActivePage(): TitlebarPage {
+							if (that._contextKeyService.getContextKeyValue<boolean>(WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY)) {
+								return 'workspace';
 							}
 
-							return label.replaceAll(/\r\n|\r|\n/g, '\u23CE');
+							switch (that._editorService.activeEditor?.typeId) {
+								case AGENT_SESSIONS_WELCOME_INPUT_TYPE_ID:
+									return 'sandbox';
+								default:
+									return 'editor';
+							}
 						}
 					});
 				}
