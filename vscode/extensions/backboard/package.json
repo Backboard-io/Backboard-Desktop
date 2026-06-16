@@ -1,7 +1,7 @@
 {
   "name": "backboard",
   "displayName": "Backboard",
-  "description": "Backboard agent bridge for VS Code",
+  "description": "Backboard agent bridge for Backboard Studio",
   "version": "0.1.0",
   "publisher": "backboard",
   "license": "MIT",
@@ -119,6 +119,7 @@
           "backboard.apiKey": {
             "type": "string",
             "default": "",
+            "editPresentation": "secretText",
             "markdownDescription": "Legacy Backboard API key fallback. Prefer the **Set API Key** command, which stores the key in `~/.backboard_ide/config.json`.",
             "scope": "machine-overridable"
           },
@@ -200,7 +201,7 @@
           },
           "backboard.mcpFigma": {
             "type": "boolean",
-            "default": false,
+            "default": true,
             "description": "Request Backboard-hosted Figma MCP tool intent for Backboard turns."
           },
           "backboard.mcpNotion": {
@@ -232,7 +233,7 @@
           "backboard.workspaceRoot": {
             "type": "string",
             "default": "",
-            "description": "Path to use as the Backboard panel workspace root. Supports ${workspaceFolder} and ${userHome}. Leave empty to use the open VS Code workspace folder. Can also be set with BACKBOARD_WORKSPACE_ROOT."
+            "description": "Path to use as the Backboard panel workspace root. Supports ${workspaceFolder} and ${userHome}. Leave empty to use the open workspace folder. Can also be set with BACKBOARD_WORKSPACE_ROOT."
           }
         }
       }

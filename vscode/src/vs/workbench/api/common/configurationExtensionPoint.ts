@@ -101,10 +101,11 @@ const configurationEntrySchema: IJSONSchema = {
 							},
 							editPresentation: {
 								type: 'string',
-								enum: ['singlelineText', 'multilineText'],
+								enum: ['singlelineText', 'multilineText', 'secretText'],
 								enumDescriptions: [
 									nls.localize('scope.singlelineText.description', 'The value will be shown in an inputbox.'),
-									nls.localize('scope.multilineText.description', 'The value will be shown in a textarea.')
+									nls.localize('scope.multilineText.description', 'The value will be shown in a textarea.'),
+									nls.localize('scope.secretText.description', 'The value will be shown in a password input with a reveal button.')
 								],
 								default: 'singlelineText',
 								description: nls.localize('scope.editPresentation', 'When specified, controls the presentation format of the string setting.')

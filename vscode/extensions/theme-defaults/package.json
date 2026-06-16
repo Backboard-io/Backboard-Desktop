@@ -12,6 +12,37 @@
     "vscode": "*"
   },
   "contributes": {
+    "configurationDefaults": {
+      "workbench.colorTheme": "Light 2026",
+      "workbench.preferredLightColorTheme": "Light 2026",
+      "workbench.preferredDarkColorTheme": "Dark 2026",
+      "workbench.iconTheme": "vs-minimal",
+      "editor.fontFamily": "JetBrains Mono",
+      "editor.fontSize": 13,
+      "editor.fontWeight": "500",
+      "editor.lineHeight": 22,
+      "editor.insertSpaces": true,
+      "editor.tabSize": 2,
+      "editor.multiCursorModifier": "alt",
+      "editor.hover.enabled": "on",
+      "editor.hover.delay": 300,
+      "editor.cursorBlinking": "blink",
+      "editor.cursorStyle": "line",
+      "editor.renderLineHighlight": "all",
+      "editor.selectionHighlight": true,
+      "editor.snippetSuggestions": "inline",
+      "editor.bracketPairColorization.enabled": false,
+      "editor.parameterHints.enabled": false,
+      "terminal.integrated.fontFamily": "JetBrains Mono",
+      "terminal.integrated.fontSize": 13,
+      "diffEditor.renderSideBySide": true,
+      "files.trimTrailingWhitespace": true,
+      "files.insertFinalNewline": true,
+      "window.confirmBeforeClose": "never",
+      "window.restoreWindows": "all",
+      "workbench.editor.restoreViewState": true,
+      "workbench.editor.closeOnFileDelete": false
+    },
     "themes": [
       {
         "id": "Light 2026",

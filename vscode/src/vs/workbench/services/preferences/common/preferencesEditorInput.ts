@@ -8,6 +8,7 @@ import { Schemas } from '../../../../base/common/network.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import * as nls from '../../../../nls.js';
+import { IModalEditorOptions, IModalEditorOptionsProvider } from '../../../../platform/editor/common/editor.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 import { IUntypedEditorInput } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
@@ -16,14 +17,14 @@ import { Settings2EditorModel } from './preferencesModels.js';
 
 const SettingsEditorIcon = registerIcon('settings-editor-label-icon', Codicon.settings, nls.localize('settingsEditorLabelIcon', 'Icon of the settings editor label.'));
 
-export class SettingsEditor2Input extends EditorInput {
+export class SettingsEditor2Input extends EditorInput implements IModalEditorOptionsProvider {
 
 	static readonly ID: string = 'workbench.input.settings2';
 	private readonly _settingsModel: Settings2EditorModel;
 
 	readonly resource: URI = URI.from({
 		scheme: Schemas.vscodeSettings,
-		path: `settingseditor`
+		path: `settings`
 	});
 
 	constructor(
@@ -43,11 +44,15 @@ export class SettingsEditor2Input extends EditorInput {
 	}
 
 	override getName(): string {
-		return nls.localize('settingsEditor2InputName', "Settings");
+		return nls.localize('settingsEditor2InputName', "Backboard Settings");
 	}
 
 	override getIcon(): ThemeIcon {
 		return SettingsEditorIcon;
+	}
+
+	getModalEditorOptions(): IModalEditorOptions {
+		return { hiddenHeader: true };
 	}
 
 	override async resolve(): Promise<Settings2EditorModel> {

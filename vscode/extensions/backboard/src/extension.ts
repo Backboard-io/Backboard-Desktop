@@ -172,7 +172,7 @@ function isBackboardAuthError(error: unknown): boolean {
 
 function unsupportedVoiceModeMessage(voiceMode: string): string | undefined {
 	if (voiceMode === 'stt' || voiceMode === 'conversation') {
-		return 'Audio input is not implemented in the VS Code Backboard host yet. Use TTS or turn voice off.';
+		return 'Audio input is not implemented in the Backboard Studio host yet. Use TTS or turn voice off.';
 	}
 	return undefined;
 }
@@ -3610,7 +3610,7 @@ class BackboardBridge implements vscode.Disposable {
 			processCwd: process.cwd(),
 			params: redactSensitiveValues(params)
 		};
-		this.output.appendLine(`[${new Date().toISOString()}] VS Code -> Backboard bridge`);
+		this.output.appendLine(`[${new Date().toISOString()}] Backboard Studio -> Backboard bridge`);
 		this.output.appendLine(JSON.stringify(payload, undefined, '\t'));
 	}
 
@@ -4120,7 +4120,7 @@ async function sleepTool(args: Record<string, unknown>, token: vscode.Cancellati
 
 async function taskTool(args: Record<string, unknown>): Promise<string> {
 	const prompt = stringArg(args, 'prompt', 'description');
-	return `Sub-task requested: ${prompt}\n\nVS Code Backboard bridge recorded the task request. Parallel sub-agent execution is not available in this host yet.`;
+	return `Sub-task requested: ${prompt}\n\nBackboard Studio bridge recorded the task request. Parallel sub-agent execution is not available in this host yet.`;
 }
 
 async function tryStat(uri: vscode.Uri): Promise<vscode.FileStat | undefined> {

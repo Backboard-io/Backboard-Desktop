@@ -110,8 +110,8 @@ export class SettingsEditor2 extends EditorPane {
 	private static SETTING_UPDATE_FAST_DEBOUNCE: number = 200;
 	private static SETTING_UPDATE_SLOW_DEBOUNCE: number = 1000;
 	private static CONFIG_SCHEMA_UPDATE_DELAYER = 500;
-	private static TOC_MIN_WIDTH: number = 100;
-	private static TOC_RESET_WIDTH: number = 200;
+	private static TOC_MIN_WIDTH: number = 238;
+	private static TOC_RESET_WIDTH: number = 238;
 	private static EDITOR_MIN_WIDTH: number = 500;
 	// Below NARROW_TOTAL_WIDTH, we only render the editor rather than the ToC.
 	private static NARROW_TOTAL_WIDTH: number = this.TOC_RESET_WIDTH + this.EDITOR_MIN_WIDTH;
@@ -170,6 +170,7 @@ export class SettingsEditor2 extends EditorPane {
 	private rootElement!: HTMLElement;
 	private headerContainer!: HTMLElement;
 	private searchContainer: HTMLElement | null = null;
+	private headerControlsContainer!: HTMLElement;
 	private bodyContainer!: HTMLElement;
 	private searchWidget!: SuggestEnabledInput;
 	private countElement!: HTMLElement;
@@ -597,9 +598,12 @@ export class SettingsEditor2 extends EditorPane {
 
 		this.layoutSplitView(dimension);
 
-		const innerWidth = Math.min(this.headerContainer.clientWidth, dimension.width) - 24 * 2; // 24px padding on left and right;
+		const searchContainerWidth = this.searchContainer?.clientWidth;
+		const innerWidth = typeof searchContainerWidth === 'number'
+			? Math.min(searchContainerWidth, dimension.width)
+			: Math.min(this.headerContainer.clientWidth, dimension.width) - 24 * 2; // 24px header padding on left and right
 		// minus padding inside inputbox, controls width, and extra padding before countElement
-		const monacoWidth = innerWidth - 10 - this.controlsElement.clientWidth - 12;
+		const monacoWidth = Math.max(0, innerWidth - 10 - this.controlsElement.clientWidth - 12);
 		this.searchWidget.layout(new DOM.Dimension(monacoWidth, 20));
 
 		this.rootElement.classList.toggle('narrow-width', dimension.width < SettingsEditor2.NARROW_TOTAL_WIDTH);
@@ -754,7 +758,7 @@ export class SettingsEditor2 extends EditorPane {
 				}
 				return [];
 			}
-		}, searchBoxLabel, 'settingseditor:searchinput' + SettingsEditor2.NUM_INSTANCES++, {
+		}, searchBoxLabel, 'settings:searchinput' + SettingsEditor2.NUM_INSTANCES++, {
 			placeholderText: searchBoxLabel,
 			focusContextKey: this.searchFocusContextKey,
 			styleOverrides: {
@@ -771,10 +775,10 @@ export class SettingsEditor2 extends EditorPane {
 			this.searchInputDelayer.trigger(() => this.onSearchInputChanged(true));
 		}));
 
-		const headerControlsContainer = DOM.append(this.headerContainer, $('.settings-header-controls'));
-		headerControlsContainer.style.borderColor = asCssVariable(settingsHeaderBorder);
+		this.headerControlsContainer = DOM.append(this.headerContainer, $('.settings-header-controls'));
+		this.headerControlsContainer.style.borderColor = asCssVariable(settingsHeaderBorder);
 
-		const targetWidgetContainer = DOM.append(headerControlsContainer, $('.settings-target-container'));
+		const targetWidgetContainer = DOM.append(this.headerControlsContainer, $('.settings-target-container'));
 		this.settingsTargetsWidget = this._register(this.instantiationService.createInstance(SettingsTargetsWidget, targetWidgetContainer, { enableRemoteSettings: true }));
 		this.settingsTargetsWidget.settingsTarget = ConfigurationTarget.USER_LOCAL;
 		this._register(this.settingsTargetsWidget.onDidTargetChange(target => this.onDidSettingsTargetChange(target)));
@@ -786,7 +790,7 @@ export class SettingsEditor2 extends EditorPane {
 		}));
 
 		if (this.userDataSyncWorkbenchService.enabled && this.userDataSyncEnablementService.canToggleEnablement()) {
-			const syncControls = this._register(this.instantiationService.createInstance(SyncControls, this.window, headerControlsContainer));
+			const syncControls = this._register(this.instantiationService.createInstance(SyncControls, this.window, this.headerControlsContainer));
 			this._register(syncControls.onDidChangeLastSyncedLabel(lastSyncedLabel => {
 				this.lastSyncedLabel = lastSyncedLabel;
 				this.updateInputAriaLabel();
@@ -971,6 +975,18 @@ export class SettingsEditor2 extends EditorPane {
 
 		this.tocTreeContainer = $('.settings-toc-container');
 		this.settingsTreeContainer = $('.settings-tree-container');
+
+		const sidebarHeader = DOM.append(this.tocTreeContainer, $('.settings-sidebar-header'));
+		const account = DOM.append(sidebarHeader, $('.settings-account'));
+		DOM.append(account, $('.settings-account-avatar', {}, 'B'));
+		const accountText = DOM.append(account, $('.settings-account-text'));
+		DOM.append(accountText, $('.settings-account-name', {}, localize('settingsAccountName', "Backboard")));
+		if (this.searchContainer) {
+			DOM.append(sidebarHeader, this.searchContainer);
+		}
+		const searchCountContainer = DOM.append(sidebarHeader, $('.settings-search-count-container'));
+		DOM.append(searchCountContainer, this.countElement);
+		DOM.append(sidebarHeader, this.headerControlsContainer);
 
 		this.createTOC(this.tocTreeContainer);
 		this.createSettingsTree(this.settingsTreeContainer);
@@ -2099,7 +2115,7 @@ export class SettingsEditor2 extends EditorPane {
 		if (!this.isVisible()) {
 			return;
 		}
-		const listHeight = dimension.height - (72 + 11 + 14 /* header height + editor padding */);
+		const listHeight = Math.max(0, dimension.height - this.headerContainer.offsetHeight);
 
 		this.splitView.el.style.height = `${listHeight}px`;
 

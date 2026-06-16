@@ -710,6 +710,7 @@ export class ModalEditorPart {
 			const activeEditor = editorPart.activeGroup.activeEditor;
 			const editorModalOptions = isModalEditorOptionsProvider(activeEditor) ? activeEditor.getModalEditorOptions() : undefined;
 			modalElement.classList.toggle('compact-header', !!editorModalOptions?.compactHeader);
+			modalElement.classList.toggle('hidden-header', !!editorModalOptions?.hiddenHeader);
 			layoutModal();
 		}));
 

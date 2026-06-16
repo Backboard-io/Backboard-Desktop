@@ -22,7 +22,7 @@ import { RenderIndentGuides } from '../../../../base/browser/ui/tree/abstractTre
 import { IObjectTreeOptions } from '../../../../base/browser/ui/tree/objectTree.js';
 import { ObjectTreeModel } from '../../../../base/browser/ui/tree/objectTreeModel.js';
 import { ITreeFilter, ITreeModel, ITreeNode, ITreeRenderer, TreeFilterResult, TreeVisibility } from '../../../../base/browser/ui/tree/tree.js';
-import { Action, IAction, Separator } from '../../../../base/common/actions.js';
+import { Action, IAction, Separator, toAction } from '../../../../base/common/actions.js';
 import { distinct } from '../../../../base/common/arrays.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { onUnexpectedError } from '../../../../base/common/errors.js';
@@ -32,6 +32,7 @@ import { KeyCode } from '../../../../base/common/keyCodes.js';
 import { Disposable, DisposableStore, isDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { isIOS } from '../../../../base/common/platform.js';
 import { escapeRegExpCharacters } from '../../../../base/common/strings.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { isDefined, isUndefinedOrNull } from '../../../../base/common/types.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IMarkdownRendererService } from '../../../../platform/markdown/browser/markdownRenderer.js';
@@ -40,7 +41,7 @@ import { localize } from '../../../../nls.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ConfigurationTarget, IConfigurationService, getLanguageTagSettingPlainKey } from '../../../../platform/configuration/common/configuration.js';
-import { ConfigurationScope } from '../../../../platform/configuration/common/configurationRegistry.js';
+import { ConfigurationScope, EditPresentationTypes } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService, IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
@@ -1808,6 +1809,7 @@ abstract class AbstractSettingTextRenderer extends AbstractSettingRenderer imple
 		template.inputBox.value = dataElement.value;
 		template.inputBox.setEnabled(!dataElement.hasPolicyValue && !dataElement.isAgentsWindowReadOnly);
 		template.inputBox.setAriaLabel(dataElement.setting.key);
+		this.updateSecretPresentation(dataElement, template);
 		template.onChange = value => {
 			if (!renderValidations(dataElement, template, false)) {
 				onChange(value);
@@ -1815,6 +1817,33 @@ abstract class AbstractSettingTextRenderer extends AbstractSettingRenderer imple
 		};
 
 		renderValidations(dataElement, template, true);
+	}
+
+	private updateSecretPresentation(dataElement: SettingsTreeSettingElement, template: ISettingTextItemTemplate): void {
+		if (dataElement.setting.editPresentation !== EditPresentationTypes.Secret) {
+			template.inputBox.inputElement.type = 'text';
+			template.inputBox.setActions(undefined);
+			return;
+		}
+
+		let revealed = false;
+		const updateRevealState = () => {
+			template.inputBox.inputElement.type = revealed ? 'text' : 'password';
+			template.inputBox.setActions([toAction({
+				id: 'settings.secretText.reveal',
+				label: revealed
+					? localize('settings.secretText.hide', "Hide secret")
+					: localize('settings.secretText.reveal', "Show secret"),
+				class: ThemeIcon.asClassName(revealed ? Codicon.eyeClosed : Codicon.eye),
+				run: () => {
+					revealed = !revealed;
+					updateRevealState();
+					template.inputBox.focus();
+				}
+			})]);
+		};
+
+		updateRevealState();
 	}
 }
 
@@ -2611,7 +2640,7 @@ class SettingsTreeDelegate extends CachedListVirtualDelegate<SettingsTreeGroupCh
 
 	protected estimateHeight(element: SettingsTreeGroupChild): number {
 		if (element instanceof SettingsTreeGroupElement) {
-			return 42;
+			return 64;
 		}
 
 		return element instanceof SettingsTreeSettingElement && element.valueType === SettingValueType.Boolean ? 78 : 104;

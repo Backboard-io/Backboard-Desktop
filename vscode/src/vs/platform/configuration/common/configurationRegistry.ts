@@ -18,7 +18,8 @@ import product from '../../product/common/product.js';
 
 export enum EditPresentationTypes {
 	Multiline = 'multilineText',
-	Singleline = 'singlelineText'
+	Singleline = 'singlelineText',
+	Secret = 'secretText'
 }
 
 export const Extensions = {

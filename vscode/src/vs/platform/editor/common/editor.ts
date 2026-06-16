@@ -391,6 +391,13 @@ export interface IModalEditorOptions {
 	 * for editors that provide their own header chrome.
 	 */
 	readonly compactHeader?: boolean;
+
+	/**
+	 * When true, the modal editor hides its shared header completely.
+	 * Use this only for editors that provide all required chrome inside
+	 * their own content area.
+	 */
+	readonly hiddenHeader?: boolean;
 }
 
 /**
