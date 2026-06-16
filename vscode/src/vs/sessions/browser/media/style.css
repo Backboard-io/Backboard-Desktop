@@ -874,6 +874,336 @@
 	padding: 8px 0 0 0;
 }
 
+/* Running/loaded Sandbox chats use the workbench ChatWidget, not NewChatInput.
+ * Keep its controls inside one Backboard composer shell instead of letting the
+ * workbench secondary toolbar render as a detached row below the input. */
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .interactive-input-part:not(.compact) {
+	width: min(100%, 1320px);
+	max-width: 1320px;
+	min-height: 132px;
+	margin: 0 auto 18px auto;
+	padding: 0 18px 12px 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	box-sizing: border-box;
+	border: 1px solid color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-input-border)) 72%, transparent);
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--vscode-input-background, var(--vscode-agentsChatInput-background)) 94%, var(--vscode-editor-background));
+	box-shadow: 0 1px 3px color-mix(in srgb, var(--vscode-widget-shadow, #000) 12%, transparent);
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .interactive-input-part:not(.compact):has(.chat-input-container.focused) {
+	border-color: var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder));
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 24%, transparent);
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .interactive-input-and-side-toolbar {
+	flex: 1 1 auto;
+	min-height: 104px;
+	align-items: stretch;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-container {
+	min-height: 104px;
+	padding: 0;
+	border: 0 !important;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	overflow: visible;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-container::before,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-container::after {
+	display: none;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-editor-container {
+	padding: 16px 0 6px 0;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars {
+	display: grid;
+	grid-template-columns: minmax(220px, 1fr) minmax(0, max-content) 28px;
+	grid-template-rows: 28px;
+	min-height: 34px;
+	margin: auto 0 0 0;
+	padding: 10px 0 10px 0;
+	column-gap: 10px;
+	row-gap: 0;
+	align-items: center;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 10%, transparent);
+	flex-wrap: nowrap;
+	overflow: hidden;
+	white-space: nowrap;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbar {
+	grid-column: 1;
+	grid-row: 1;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-input-toolbar {
+	grid-column: 2;
+	grid-row: 1;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-status-container,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-status-toolbar {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-execute-toolbar {
+	grid-column: 3;
+	grid-row: 1;
+	justify-self: end;
+	align-self: center;
+	min-width: 28px;
+	height: 28px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	opacity: 1;
+	visibility: visible;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-execute-toolbar .monaco-action-bar,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-execute-toolbar .actions-container {
+	height: 28px;
+	display: flex;
+	align-items: center;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-execute-toolbar .action-item {
+	width: 28px;
+	height: 28px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-execute-toolbar .action-label {
+	width: 24px;
+	height: 24px;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-execute-toolbar .action-label.codicon-arrow-up,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-execute-toolbar .action-label.codicon-debug-stop {
+	font-size: 16px;
+	line-height: 24px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:empty,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:has(> .action-label:empty),
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:has(> .action-label.separator),
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:has(> .action-label[aria-hidden="true"]:not(.codicon)),
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-input-toolbar .monaco-action-bar .action-item:empty,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-input-toolbar .monaco-action-bar .action-item:has(> .action-label:empty),
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-input-toolbar .monaco-action-bar .action-item:has(> .action-label.separator),
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-input-toolbar .monaco-action-bar .action-item:has(> .action-label[aria-hidden="true"]:not(.codicon)) {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-status-toolbar .actions-container {
+	max-width: 260px;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: visible;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar:empty {
+	display: none;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .chat-secondary-generic-chips {
+	display: none;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .monaco-action-bar .action-item:empty,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .monaco-action-bar .action-item:has(> .action-label:empty),
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .monaco-action-bar .action-item:has(> .action-label.separator),
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .monaco-action-bar .action-item:has(> .action-label[aria-hidden="true"]:not(.codicon)) {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .chat-secondary-input-toolbar {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: visible;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .sessions-chat-agent-host-config,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .monaco-action-bar .actions-container,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .sessions-chat-agent-host-config,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .monaco-action-bar .actions-container {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	overflow: visible;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .sessions-chat-picker-slot .action-label,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .sessions-chat-picker-slot .action-label {
+	height: 24px;
+	min-width: 0;
+	padding: 0 2px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .sessions-chat-picker-slot .action-label:hover,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .sessions-chat-picker-slot .action-label[aria-expanded="true"],
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .sessions-chat-picker-slot .action-label:hover,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .sessions-chat-picker-slot .action-label[aria-expanded="true"] {
+	background: transparent;
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .sessions-chat-picker-slot .action-label > .codicon,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .sessions-chat-picker-slot .action-label > .codicon {
+	font-size: 16px;
+	color: currentColor;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .sessions-chat-dropdown-label,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .sessions-chat-dropdown-label {
+	font-size: 12px;
+	font-weight: 600;
+	color: currentColor;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .sessions-chat-config-icon-only .action-label,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .sessions-chat-config-icon-only .action-label {
+	position: relative;
+	width: 24px;
+	min-width: 24px;
+	max-width: 24px;
+	height: 24px;
+	justify-content: center;
+	padding: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .sessions-chat-config-icon-only .action-label:hover,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .sessions-chat-config-icon-only .action-label[aria-expanded="true"],
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .sessions-chat-config-icon-only .action-label:hover,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .sessions-chat-config-icon-only .action-label[aria-expanded="true"] {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbars > .chat-secondary-input-toolbar .sessions-chat-config-icon-only .sessions-chat-dropdown-label,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .sessions-chat-config-icon-only .sessions-chat-dropdown-label {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	margin: -1px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .agent-host-chat-input-picker-slot .action-label {
+	position: relative;
+	width: 24px;
+	min-width: 24px;
+	max-width: 24px;
+	height: 24px;
+	justify-content: center;
+	padding: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	gap: 0;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .agent-host-chat-input-picker-slot .action-label .codicon:not(.codicon-chevron-down) {
+	font-size: 16px;
+	margin: 0;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .agent-host-chat-input-picker-slot .action-label .codicon-chevron-down,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .agent-host-chat-input-picker-label {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	margin: -1px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-input-toolbar .agent-host-chat-input-picker-slot,
+.agent-sessions-workbench .part.sessionspart .chat-view-chat .interactive-session .chat-secondary-toolbar .agent-host-chat-input-picker-slot {
+	flex: 0 0 24px;
+	width: 24px;
+	max-width: 24px;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-toolbar .sessions-chat-permission-picker .action-label,
+.agent-sessions-workbench .interactive-session .chat-secondary-toolbar .sessions-chat-permission-picker .action-label {
+	position: relative;
+	width: 24px;
+	min-width: 24px;
+	max-width: 24px;
+	height: 24px;
+	justify-content: center;
+	padding: 0;
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-toolbar .sessions-chat-permission-picker .chat-input-picker-label,
+.agent-sessions-workbench .interactive-session .chat-secondary-toolbar .sessions-chat-permission-picker .chat-input-picker-label,
+.agent-sessions-workbench .interactive-session .chat-input-toolbar .sessions-chat-permission-picker .sessions-chat-dropdown-label,
+.agent-sessions-workbench .interactive-session .chat-secondary-toolbar .sessions-chat-permission-picker .sessions-chat-dropdown-label {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	margin: -1px;
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-status-toolbar .action-label {
+	width: 24px;
+	min-width: 24px;
+	max-width: 24px;
+	height: 24px;
+	padding: 0;
+	justify-content: center;
+	font-size: 0;
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-status-toolbar .action-label::before,
+.agent-sessions-workbench .interactive-session .chat-input-status-toolbar .action-label > .codicon {
+	font-size: 16px;
+	margin: 0;
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-status-toolbar .actions-container > .action-item:has(> .action-label:not(:has(.codicon))),
+.agent-sessions-workbench .interactive-session .chat-input-status-toolbar .actions-container > .action-item:has(> .action-label.separator) {
+	display: none;
+}
+
 /* ---- Sessions Action Widget Pickers ---- */
 
 .agent-sessions-workbench .action-widget {

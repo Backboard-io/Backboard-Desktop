@@ -38,6 +38,10 @@ const MOBILE_CHAT_INPUT_CONFIG_PICKER_ID = 'sessions.agentHost.mobileChatInputCo
 
 function getModeIcon(value: string | undefined): ThemeIcon | undefined {
 	switch (value) {
+		case 'agent': return Codicon.comment;
+		case 'ask': return Codicon.search;
+		case 'manual': return Codicon.edit;
+		case 'free': return Codicon.rocket;
 		case 'plan': return Codicon.checklist;
 		case 'autopilot': return Codicon.rocket;
 		case 'interactive': return Codicon.comment;

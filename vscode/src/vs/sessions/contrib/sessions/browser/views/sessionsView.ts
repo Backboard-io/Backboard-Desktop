@@ -38,7 +38,6 @@ import { IMobileSortGroupSheetItem, showMobileSortGroupSheet } from '../../../..
 import { isPhoneLayout } from '../../../../browser/parts/mobile/mobileLayout.js';
 import { IsPhoneLayoutContext } from '../../../../common/contextkeys.js';
 import { ISessionsPartService } from '../../../../browser/parts/sessionsPartService.js';
-import { AICustomizationManagementCommands, AICustomizationManagementSection } from '../../../../../workbench/contrib/chat/browser/aiCustomization/aiCustomizationManagement.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
@@ -315,9 +314,6 @@ export class SessionsView extends ViewPane {
 			this.sessionsPartService.focusSession(this.sessionsManagementService.activeSession.get());
 		});
 		this.createSimpleChatSidebarAction(actions, 'codicon-search', localize('simpleChatSearchChats', "Search chats"), () => this.openFind());
-		this.createSimpleChatSidebarAction(actions, 'codicon-server', localize('simpleChatConnectMcpServer', "Connect MCP server"), () => {
-			void this.commandService.executeCommand(AICustomizationManagementCommands.OpenEditor, AICustomizationManagementSection.McpServers);
-		});
 
 		const recents = DOM.append(container, $('.simple-chat-recents-header'));
 		DOM.append(recents, $('span', undefined, localize('simpleChatProjects', "Projects")));

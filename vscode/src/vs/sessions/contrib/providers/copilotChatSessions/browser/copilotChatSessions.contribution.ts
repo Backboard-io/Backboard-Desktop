@@ -12,6 +12,7 @@ import { ISessionsProvidersService } from '../../../../services/sessions/browser
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { IConfigurationRegistry, Extensions as ConfigurationExtensions } from '../../../../../platform/configuration/common/configurationRegistry.js';
 import { localize } from '../../../../../nls.js';
+import { IWorkbenchEnvironmentService } from '../../../../../workbench/services/environment/common/environmentService.js';
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'sessions',
@@ -47,8 +48,13 @@ class DefaultSessionsProviderContribution extends Disposable implements IWorkben
 	constructor(
 		@IInstantiationService instantiationService: IInstantiationService,
 		@ISessionsProvidersService sessionsProvidersService: ISessionsProvidersService,
+		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
 	) {
 		super();
+
+		if (environmentService.isSessionsWindow) {
+			return;
+		}
 
 		const provider = this._register(instantiationService.createInstance(CopilotChatSessionsProvider));
 		this._register(sessionsProvidersService.registerProvider(provider));

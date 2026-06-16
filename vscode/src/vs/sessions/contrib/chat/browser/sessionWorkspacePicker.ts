@@ -871,8 +871,11 @@ export class WorkspacePicker extends Disposable {
 		const icon = workspace ? workspace.icon : Codicon.project;
 
 		this._triggerElement.setAttribute('aria-label', workspace
-			? localize('workspacePicker.selectedAriaLabel', "New session in {0}", label)
-			: localize('workspacePicker.pickAriaLabel', "Start by picking a workspace"));
+			? localize('workspacePicker.selectedAriaLabel', "Change workspace. Current workspace: {0}", label)
+			: localize('workspacePicker.pickAriaLabel', "Pick a workspace"));
+		this._triggerElement.title = workspace
+			? localize('workspacePicker.selectedTitle', "Change workspace ({0})", label)
+			: localize('workspacePicker.pickTitle', "Pick a workspace");
 
 		dom.append(this._triggerElement, renderIcon(icon));
 		const labelSpan = dom.append(this._triggerElement, dom.$('span.sessions-chat-dropdown-label'));

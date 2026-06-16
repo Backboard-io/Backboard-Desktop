@@ -235,7 +235,11 @@ suite('isWellKnownModeSchema', () => {
 		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['interactive'] })), true);
 	});
 
-	test('rejects schemas missing the required "interactive" value', () => {
+	test('matches Backboard-style agent modes', () => {
+		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['agent', 'ask', 'manual', 'free'] })), true);
+	});
+
+	test('rejects schemas missing a recognized baseline mode', () => {
 		assert.strictEqual(isWellKnownModeSchema(schema({ enum: ['plan'] })), false);
 	});
 

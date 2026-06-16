@@ -137,6 +137,49 @@
 	color: var(--vscode-descriptionForeground);
 }
 
+/* Backboard Sandbox uses the compact composer controls inside the input box.
+ * Keep the legacy in-session chat overrides from collapsing those controls. */
+.agent-sessions-workbench .new-chat-in-session .new-chat-widget-content {
+	max-width: 1320px;
+	padding: 4px 10px !important;
+	margin: 0 auto !important;
+}
+
+.agent-sessions-workbench .new-chat-in-session .new-chat-input-container,
+.agent-sessions-workbench .new-chat-in-session .new-chat-input-area {
+	width: 100%;
+	max-width: none;
+}
+
+.agent-sessions-workbench .new-chat-in-session .new-chat-input-area {
+	padding: 0;
+	min-height: 158px;
+	border-radius: 12px;
+}
+
+.agent-sessions-workbench .new-chat-in-session .sessions-chat-editor {
+	padding: 14px 18px 0 18px;
+}
+
+.agent-sessions-workbench .new-chat-in-session .sessions-chat-toolbar {
+	min-height: 36px;
+	margin: auto 18px 0 18px;
+	padding: 10px 0 11px 0;
+	gap: 8px;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 10%, transparent);
+}
+
+.agent-sessions-workbench .new-chat-in-session .sessions-chat-toolbar .action-label {
+	height: 24px;
+	padding: 0 2px;
+	font-size: 12px;
+}
+
+.agent-sessions-workbench .new-chat-in-session .sessions-chat-toolbar .action-label .codicon {
+	font-size: 16px;
+}
+
+
 .new-chat-in-session .sub-session-tip-icon {
 	flex-shrink: 0;
 	color: var(--vscode-descriptionForeground);

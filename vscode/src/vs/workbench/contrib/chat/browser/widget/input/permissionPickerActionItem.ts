@@ -197,6 +197,11 @@ export class PermissionPickerActionItem extends ChatInputPickerActionViewItem {
 		}, pickerOptions, actionWidgetService, keybindingService, contextKeyService, telemetryService);
 	}
 
+	override render(container: HTMLElement): void {
+		super.render(container);
+		container.classList.add('sessions-chat-permission-picker');
+	}
+
 	protected override renderLabel(element: HTMLElement): IDisposable | null {
 		this.setAriaLabelAttributes(element);
 

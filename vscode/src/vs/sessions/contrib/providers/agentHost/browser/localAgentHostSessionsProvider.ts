@@ -10,8 +10,10 @@ import { basename, dirname } from '../../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
+import { SessionConfigKey } from '../../../../../platform/agentHost/common/sessionConfigKeys.js';
 import { toAgentHostUri } from '../../../../../platform/agentHost/common/agentHostUri.js';
 import { IAgentConnection, IAgentHostService, type IAgentSessionMetadata } from '../../../../../platform/agentHost/common/agentService.js';
+import type { RootState } from '../../../../../platform/agentHost/common/state/protocol/state.js';
 import type { ISessionGitState } from '../../../../../platform/agentHost/common/state/sessionState.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -25,7 +27,7 @@ import { IChatSessionsService } from '../../../../../workbench/contrib/chat/comm
 import { ILanguageModelsService } from '../../../../../workbench/contrib/chat/common/languageModels.js';
 import { LOCAL_AGENT_HOST_PROVIDER_ID, LocalAgentHostDefaultProviderSettingId } from '../../../../common/agentHostSessionsProvider.js';
 import { buildAgentHostSessionWorkspace, readBranchProtectionPatterns } from '../../../../common/agentHostSessionWorkspace.js';
-import { IGitHubInfo, ISessionWorkspace, ISessionWorkspaceBrowseAction, SESSION_WORKSPACE_GROUP_LOCAL } from '../../../../services/sessions/common/session.js';
+import { IGitHubInfo, ISession, ISessionType, ISessionWorkspace, ISessionWorkspaceBrowseAction, SESSION_WORKSPACE_GROUP_LOCAL } from '../../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 import { IGitHubService } from '../../../github/browser/githubService.js';
 import { BaseAgentHostSessionsProvider } from './baseAgentHostSessionsProvider.js';
@@ -125,6 +127,41 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 
 	protected get authenticationPending(): IObservable<boolean> { return this._agentHostService.authenticationPending; }
 
+	override getSessionTypes(repositoryUri: URI): ISessionType[] {
+		return super.getSessionTypes(repositoryUri).filter(sessionType => sessionType.id === 'backboard');
+	}
+
+	override getSessions(): ISession[] {
+		return super.getSessions().filter(session => session.sessionType === 'backboard');
+	}
+
+	override getSessionByResource(resource: URI): ISession | undefined {
+		const session = super.getSessionByResource(resource);
+		return session?.sessionType === 'backboard' ? session : undefined;
+	}
+
+	protected override _initialNewSessionConfig(sessionType?: ISessionType): Record<string, unknown> | undefined {
+		const config = super._initialNewSessionConfig(sessionType);
+		if (sessionType?.id !== 'backboard') {
+			return config;
+		}
+		return {
+			...(config ?? {}),
+			[SessionConfigKey.Mode]: 'free',
+		};
+	}
+
+	protected override _syncSessionTypesFromRootState(rootState: RootState): void {
+		super._syncSessionTypesFromRootState({
+			...rootState,
+			agents: rootState.agents.filter(agent => agent.provider === 'backboard'),
+		});
+	}
+
+	protected override _shouldIncludeAgentSession(agentProvider: string): boolean {
+		return agentProvider === 'backboard';
+	}
+
 	/**
 	 * Local resource scheme: `agent-host-${provider}`. Must match the type
 	 * string registered by AgentHostContribution. Distinct from the logical
@@ -148,12 +185,7 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 	}
 
 	protected _formatSessionTypeLabel(agentLabel: string): string {
-		// Use the unadorned agent label (e.g. "Copilot") rather than tagging it
-		// with `[Agent Host]`. The session type id is shared with the extension-host
-		// Copilot CLI provider, so the filter menu / new-session picker entry
-		// covers both sets of sessions; the `[Agent Host]` tag belongs on the
-		// per-session workspace label, not the type label.
-		return agentLabel;
+		return agentLabel || localize('backboardSessionTypeLabel', "Backboard");
 	}
 
 	protected override _diffUriMapper(): (uri: URI) => URI {

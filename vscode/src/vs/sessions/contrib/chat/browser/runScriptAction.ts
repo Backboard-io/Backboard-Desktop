@@ -20,6 +20,7 @@ import { MenuId, registerAction2, Action2, MenuRegistry, SubmenuItemAction } fro
 import { IActionWidgetService } from '../../../../platform/actionWidget/browser/actionWidget.js';
 import { IActionWidgetDropdownAction } from '../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { BrowserViewCommandId } from '../../../../platform/browserView/common/browserView.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { KeybindingsRegistry, KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
@@ -221,7 +222,11 @@ export class RunScriptContribution extends Disposable implements IWorkbenchContr
 
 				const { tasks, session, pinnedBrowser, browserUrl } = activeState;
 				if (pinnedBrowser) {
-					await that._commandService.executeCommand('simpleBrowser.show', browserUrl);
+					await that._commandService.executeCommand(BrowserViewCommandId.Open, {
+						url: browserUrl,
+						openToSide: true,
+						reuseUrlFilter: browserUrl,
+					});
 					return;
 				}
 
@@ -819,7 +824,11 @@ class RunScriptActionViewItem extends BaseActionViewItem {
 				}
 			],
 			run: async () => {
-				await this._commandService.executeCommand('simpleBrowser.show', browserUrl);
+				await this._commandService.executeCommand(BrowserViewCommandId.Open, {
+					url: browserUrl,
+					openToSide: true,
+					reuseUrlFilter: browserUrl,
+				});
 			},
 		});
 

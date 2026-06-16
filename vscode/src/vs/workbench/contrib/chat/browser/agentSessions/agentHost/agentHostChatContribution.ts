@@ -28,7 +28,7 @@ import { AgentHostLanguageModelProvider } from './agentHostLanguageModelProvider
 import { AgentHostSessionHandler } from './agentHostSessionHandler.js';
 import { IAgentHostActiveClientService } from './agentHostActiveClientService.js';
 import { AgentHostSessionListController } from './agentHostSessionListController.js';
-import { AICustomizationSources } from '../../../common/aiCustomizationWorkspaceService.js';
+import { AICustomizationManagementSection, AICustomizationSources } from '../../../common/aiCustomizationWorkspaceService.js';
 
 export { AgentHostSessionHandler } from './agentHostSessionHandler.js';
 export { AgentHostSessionListController } from './agentHostSessionListController.js';
@@ -137,6 +137,7 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 		const sessionType = `agent-host-${agent.provider}`;
 		const agentId = sessionType;
 		const vendor = sessionType;
+		const isBackboard = agent.provider === 'backboard';
 
 		// In the Agents app, the agent-host displayName is unambiguous because
 		// only agent-host sessions exist there. In VS Code, the same picker
@@ -175,16 +176,18 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 		const agentRegistration = store.add(this._activeClientService.registerForAgent(sessionType));
 		const syncProvider = agentRegistration.syncProvider;
 
-		const itemProvider = store.add(this._instantiationService.createInstance(AgentCustomizationItemProvider, 'local', undefined));
+		const itemProvider = isBackboard
+			? undefined
+			: store.add(this._instantiationService.createInstance(AgentCustomizationItemProvider, 'local', undefined));
 		// `[Agent Host]` suffix disambiguates from the extension-host Copilot CLI harness, which uses the same displayName.
 		store.add(this._customizationHarnessService.registerExternalHarness({
 			id: sessionType,
-			label: localize('agentHostHarnessLabel.local', "{0} [Agent Host]", agent.displayName),
+			label: isBackboard ? agent.displayName : localize('agentHostHarnessLabel.local', "{0} [Agent Host]", agent.displayName),
 			icon: ThemeIcon.fromId(Codicon.server.id),
-			hiddenSections: [],
+			hiddenSections: isBackboard ? Object.values(AICustomizationManagementSection) : [],
 			hideGenerateButton: true,
-			getStorageSourceFilter: () => ({ sources: AICustomizationSources.all }),
-			syncProvider,
+			getStorageSourceFilter: () => ({ sources: isBackboard ? [] : AICustomizationSources.all }),
+			syncProvider: isBackboard ? undefined : syncProvider,
 			itemProvider,
 		}));
 

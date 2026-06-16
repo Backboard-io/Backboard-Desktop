@@ -19,6 +19,7 @@ import { IModelService } from '../../../../editor/common/services/model.js';
 import { SuggestController } from '../../../../editor/contrib/suggest/browser/suggestController.js';
 import { SnippetController2 } from '../../../../editor/contrib/snippet/browser/snippetController2.js';
 import { PlaceholderTextContribution } from '../../../../editor/contrib/placeholderText/browser/placeholderTextContribution.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
@@ -62,6 +63,7 @@ import { INewChatModelPickerService, NewChatModelPickerService } from './newChat
 import { ModelPicker, ModelPickerActionViewItem } from './modelPicker.js';
 import { ISessionInputContext, SessionInputContext } from './sessionInputContext.js';
 import { AGENT_SESSIONS_SCOPED_INPUT_HISTORY_SETTING } from './sessionsChatHistory.js';
+import { MobileAgentHostSessionConfigPicker } from '../../providers/agentHost/browser/agentHostSessionConfigPicker.js';
 
 
 const STORAGE_KEY_DRAFT_STATE = 'sessions.draftState';
@@ -171,6 +173,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 			minEditorHeight?: number;
 			placeholder?: string;
 			renderSessionTypePickerInControls?: boolean;
+			renderControlsInToolbar?: boolean;
 			supportsBackground?: boolean;
 		},
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
@@ -182,6 +185,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		@IStorageService private readonly storageService: IStorageService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super();
 		this._scopedInstantiationService = this._register(this.instantiationService.createChild(new ServiceCollection(
@@ -257,40 +261,19 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		this._createEditor(inputArea, editorOverflowWidgetsDomNode);
 		this._createInputToolbar(inputArea);
 
-		const newChatBottomContainer = dom.append(chatInputContainer, dom.$('.new-chat-bottom-container'));
-		const newChatControlsContainer = dom.append(newChatBottomContainer, dom.$('.new-chat-controls-container'));
-		if (this.options.renderSessionTypePickerInControls !== false) {
-			this.sessionTypePicker.render(newChatControlsContainer);
+		if (!this.options.renderControlsInToolbar) {
+			const newChatBottomContainer = dom.append(chatInputContainer, dom.$('.new-chat-bottom-container'));
+			this._createSessionControlToolbar(newChatBottomContainer, true);
+
+			// On phone, the chip lane is horizontally scrollable when its
+			// content overflows the viewport. Native touch scroll is blocked
+			// because each chip registers a `Gesture.addTarget` handler in
+			// `renderPickerTrigger` that calls `preventDefault` on
+			// `touchmove`, swallowing the pan. The helper below installs a
+			// pointer-event-based scroll handler that no-ops on desktop and
+			// kicks in once a drag crosses a small threshold on phone.
+			this._register(installMobileChipLaneScroll(newChatBottomContainer, this.layoutService));
 		}
-		this._register(this._scopedInstantiationService.createInstance(MenuWorkbenchToolBar, dom.append(newChatControlsContainer, dom.$('')), Menus.NewSessionControl, {
-			hiddenItemStrategy: HiddenItemStrategy.NoHide,
-		}));
-
-		const repoConfigContainer = dom.append(newChatBottomContainer, dom.$('.new-chat-repo-config-container'));
-		this._register(this._scopedInstantiationService.createInstance(MenuWorkbenchToolBar, repoConfigContainer, Menus.NewSessionRepositoryConfig, {
-			hiddenItemStrategy: HiddenItemStrategy.NoHide,
-		}));
-
-		// On phone, the chip lane is horizontally scrollable when its
-		// content overflows the viewport. Native touch scroll is blocked
-		// because each chip registers a `Gesture.addTarget` handler in
-		// `renderPickerTrigger` that calls `preventDefault` on
-		// `touchmove`, swallowing the pan. The helper below installs a
-		// pointer-event-based scroll handler that no-ops on desktop and
-		// kicks in once a drag crosses a small threshold on phone.
-		this._register(installMobileChipLaneScroll(newChatBottomContainer, this.layoutService));
-
-		// Status indicators (e.g. OpenTelemetry pill) for the new-session view.
-		const statusContainer = dom.append(repoConfigContainer, dom.$('.new-chat-status-toolbar'));
-		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, statusContainer, MenuId.ChatInputStatus, {
-			hiddenItemStrategy: HiddenItemStrategy.NoHide,
-			actionViewItemProvider: (action) => {
-				if (action instanceof MenuItemAction) {
-					return this.instantiationService.createInstance(ChatInputStatusActionViewItem, action);
-				}
-				return undefined;
-			},
-		}));
 
 		// Restore draft input state from storage
 		this._restoreState();
@@ -487,9 +470,34 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		}));
 	}
 
+	private _createFolderButton(container: HTMLElement): void {
+		const folderButton = dom.append(container, dom.$('.sessions-chat-folder-button'));
+		const folderButtonLabel = localize('changeWorkspaceFolder', "Change Workspace Folder...");
+		folderButton.tabIndex = 0;
+		folderButton.role = 'button';
+		folderButton.ariaLabel = folderButtonLabel;
+		this._register(this.hoverService.setupDelayedHover(folderButton, {
+			content: folderButtonLabel,
+			position: { hoverPosition: HoverPosition.BELOW },
+			appearance: { showPointer: true }
+		}));
+		dom.append(folderButton, renderIcon(Codicon.folderOpened));
+		const openFolder = () => {
+			void this.commandService.executeCommand('workbench.action.files.openFolder');
+		};
+		this._register(dom.addDisposableListener(folderButton, dom.EventType.CLICK, openFolder));
+		this._register(dom.addDisposableListener(folderButton, dom.EventType.KEY_DOWN, e => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				dom.EventHelper.stop(e, true);
+				openFolder();
+			}
+		}));
+	}
+
 	private _createInputToolbar(container: HTMLElement): void {
 		const toolbar = dom.append(container, dom.$('.sessions-chat-toolbar'));
 
+		this._createFolderButton(toolbar);
 		this._createAttachButton(toolbar);
 
 		// Session config pickers (mode, model) — rendered via MenuWorkbenchToolBar
@@ -506,6 +514,10 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 			},
 		}));
 
+		if (this.options.renderControlsInToolbar) {
+			this._createSessionRepositoryToolbar(toolbar, false);
+		}
+
 		dom.append(toolbar, dom.$('.sessions-chat-toolbar-spacer'));
 
 		this._loadingSpinner = dom.append(toolbar, dom.$('.sessions-chat-loading-spinner'));
@@ -513,17 +525,6 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 		loadingIcon.setAttribute('aria-hidden', 'true');
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), this._loadingSpinner, localize('loading', "Loading...")));
 		this._loadingSpinner.classList.toggle('visible', this.options.loading.get());
-
-		const voiceButton = dom.append(toolbar, dom.$('.sessions-chat-voice-button.codicon.codicon-mic-filled'));
-		const voiceLabel = localize('voiceInput', "Voice input");
-		voiceButton.tabIndex = 0;
-		voiceButton.role = 'button';
-		voiceButton.ariaLabel = voiceLabel;
-		this._register(this.hoverService.setupDelayedHover(voiceButton, {
-			content: voiceLabel,
-			position: { hoverPosition: HoverPosition.BELOW },
-			appearance: { showPointer: true }
-		}));
 
 		const sendButtonContainer = dom.append(toolbar, dom.$('.sessions-chat-send-button'));
 		const sendButton = this._sendButton = this._register(new Button(sendButtonContainer, {
@@ -533,9 +534,48 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 				: localize('send', "Send"),
 			ariaLabel: localize('send', "Send"),
 		}));
-		sendButton.icon = Codicon.arrowUp;
+		sendButton.icon = Codicon.send;
 		// Hold Alt while clicking Send to start the session in the background.
 		this._register(sendButton.onDidClick(e => this._send(!!this.options.supportsBackground && !!(e as MouseEvent | KeyboardEvent | undefined)?.altKey)));
+	}
+
+	private _createSessionControlToolbar(container: HTMLElement, includeRepositoryContainer: boolean, includeRepositoryConfig = true): void {
+		const newChatControlsContainer = dom.append(container, dom.$('.new-chat-controls-container'));
+		if (this.options.renderSessionTypePickerInControls !== false) {
+			this.sessionTypePicker.render(newChatControlsContainer, { className: 'sessions-chat-inline-session-type' });
+		}
+		this._register(this._scopedInstantiationService.createInstance(MenuWorkbenchToolBar, dom.append(newChatControlsContainer, dom.$('')), Menus.NewSessionControl, {
+			hiddenItemStrategy: HiddenItemStrategy.NoHide,
+		}));
+
+		if (!includeRepositoryConfig) {
+			return;
+		}
+		this._createSessionRepositoryToolbar(container, includeRepositoryContainer);
+	}
+
+	private _createSessionRepositoryToolbar(container: HTMLElement, includeRepositoryContainer: boolean): void {
+		const repoConfigContainer = dom.append(container, dom.$(includeRepositoryContainer ? '.new-chat-repo-config-container' : '.new-chat-repo-config-container.sessions-chat-inline-repo-config'));
+		if (includeRepositoryContainer) {
+			this._register(this._scopedInstantiationService.createInstance(MenuWorkbenchToolBar, repoConfigContainer, Menus.NewSessionRepositoryConfig, {
+				hiddenItemStrategy: HiddenItemStrategy.NoHide,
+			}));
+		} else {
+			const picker = this._register(this._scopedInstantiationService.createInstance(MobileAgentHostSessionConfigPicker, this.options.session));
+			picker.render(repoConfigContainer);
+		}
+
+		// Status indicators (e.g. OpenTelemetry pill) for the new-session view.
+		const statusContainer = dom.append(repoConfigContainer, dom.$('.new-chat-status-toolbar'));
+		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, statusContainer, MenuId.ChatInputStatus, {
+			hiddenItemStrategy: HiddenItemStrategy.NoHide,
+			actionViewItemProvider: (action) => {
+				if (action instanceof MenuItemAction) {
+					return this.instantiationService.createInstance(ChatInputStatusActionViewItem, action);
+				}
+				return undefined;
+			},
+		}));
 	}
 
 	// --- Input History (IHistoryNavigationWidget) ---

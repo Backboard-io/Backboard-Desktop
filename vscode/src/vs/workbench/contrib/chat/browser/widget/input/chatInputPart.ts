@@ -2522,8 +2522,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.attachmentsContainer = elements.attachmentsContainer;
 		this.attachedContextContainer = elements.attachedContextContainer;
 		const toolbarsContainer = elements.inputToolbars;
-		this.secondaryToolbarContainer = elements.secondaryToolbar;
-		if (this.options.renderStyle === 'compact') {
+		const detachedSecondaryToolbarContainer = elements.secondaryToolbar;
+		this.secondaryToolbarContainer = this.options.isSessionsWindow ? toolbarsContainer : detachedSecondaryToolbarContainer;
+		if (this.options.isSessionsWindow) {
+			dom.hide(detachedSecondaryToolbarContainer);
+		} else if (this.options.renderStyle === 'compact') {
 			this.secondaryToolbarContainer.style.display = 'none';
 		}
 		this.chatEditingSessionWidgetContainer = elements.chatEditingSessionWidgetContainer;
@@ -2542,6 +2545,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		if (this.options.isSessionsWindow || this.options.renderStyle === 'compact') {
 			toolbarsContainer.prepend(this.contextUsageWidgetContainer);
+		}
+		if (this.options.isSessionsWindow) {
+			toolbarsContainer.appendChild(this.statusToolbarContainer);
 		}
 
 		// Context usage widget — will be positioned in the toolbar after toolbars are created

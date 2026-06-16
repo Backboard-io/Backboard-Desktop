@@ -4,8 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
+import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { ConfigSchema, SessionModelInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { nullExtensionDescription } from '../../../../../services/extensions/common/extensions.js';
 import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelChatProvider, ILanguageModelConfigurationSchema } from '../../../common/languageModels.js';
@@ -40,7 +42,10 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 		return this._models
 			.filter(m => m.policyState !== 'disabled')
 			.map(m => {
-				const multiplierNumeric = typeof m._meta?.multiplierNumeric === 'number' ? m._meta.multiplierNumeric : undefined;
+				const upstreamProvider = typeof m._meta?.upstreamProvider === 'string' ? m._meta.upstreamProvider : undefined;
+				const upstreamProviderLabel = typeof m._meta?.upstreamProviderLabel === 'string' ? m._meta.upstreamProviderLabel : undefined;
+				const inputCost = typeof m._meta?.inputCost === 'number' ? m._meta.inputCost : undefined;
+				const outputCost = typeof m._meta?.outputCost === 'number' ? m._meta.outputCost : undefined;
 				return {
 					identifier: `${this._vendor}:${m.id}`,
 					metadata: {
@@ -49,13 +54,15 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 						id: m.id,
 						vendor: this._vendor,
 						version: '1.0',
-						family: m.id,
+						detail: upstreamProviderLabel,
+						family: upstreamProvider ?? m.id,
 						maxInputTokens: m.maxContextWindow ?? 0,
 						maxOutputTokens: 0,
 						isDefaultForLocation: {},
 						isUserSelectable: true,
-						pricing: multiplierNumeric !== undefined ? `${multiplierNumeric}x` : undefined,
-						multiplierNumeric,
+						inputCost,
+						outputCost,
+						statusIcon: getAgentHostModelIcon(upstreamProvider),
 						targetChatSessionType: this._sessionType,
 						capabilities: {
 							vision: m.supportsVision ?? false,
@@ -96,5 +103,33 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 
 	async provideTokenCount(): Promise<number> {
 		return 0;
+	}
+}
+
+function getAgentHostModelIcon(provider: string | undefined): ThemeIcon {
+	switch (provider) {
+		case 'anthropic':
+		case 'aws-bedrock':
+			return Codicon.claude;
+		case 'openai':
+		case 'openai-compatible':
+			return Codicon.openai;
+		case 'google':
+		case 'google-ai':
+			return Codicon.sparkle;
+		case 'mistral':
+		case 'deepseek':
+		case 'x-ai':
+		case 'xai':
+		case 'cohere':
+		case 'cerebras':
+		case 'openrouter':
+			return Codicon.robot;
+		case 'lmstudio':
+		case 'lm-studio':
+		case 'ollama':
+			return Codicon.server;
+		default:
+			return Codicon.sparkle;
 	}
 }

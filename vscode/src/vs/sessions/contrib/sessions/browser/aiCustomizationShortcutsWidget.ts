@@ -19,13 +19,14 @@ import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultS
 import { IMcpService } from '../../../../workbench/contrib/mcp/common/mcpTypes.js';
 import { IAICustomizationItemsModel } from '../../../../workbench/contrib/chat/browser/aiCustomization/aiCustomizationItemsModel.js';
 import { ICustomizationHarnessService } from '../../../../workbench/contrib/chat/common/customizationHarnessService.js';
-import { CUSTOMIZATION_ITEMS, SESSIONS_CUSTOMIZATIONS_SIDEBAR_MODE_SETTING, SessionsCustomizationsSidebarMode } from './customizationsToolbar.contribution.js';
+import { CUSTOMIZATION_ITEMS, findHarnessIdForSession, SESSIONS_CUSTOMIZATIONS_SIDEBAR_MODE_SETTING, SessionsCustomizationsSidebarMode } from './customizationsToolbar.contribution.js';
 import { Menus } from '../../../browser/menus.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 import { AICustomizationManagementEditor } from '../../../../workbench/contrib/chat/browser/aiCustomization/aiCustomizationManagementEditor.js';
 import { AICustomizationManagementEditorInput } from '../../../../workbench/contrib/chat/browser/aiCustomization/aiCustomizationManagementEditorInput.js';
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
+import { AICustomizationManagementSection } from '../../../../workbench/contrib/chat/common/aiCustomizationWorkspaceService.js';
 
 const $ = DOM.$;
 
@@ -167,9 +168,15 @@ export class AICustomizationShortcutsWidget extends Disposable {
 	}
 
 	private async _openWelcomePage(): Promise<void> {
-		const sessionResource = this.sessionsManagementService.activeSession.get()?.resource;
-		if (sessionResource) {
-			this.harnessService.setActiveSession(sessionResource);
+		const session = this.sessionsManagementService.activeSession.get();
+		if (session) {
+			const harnessId = findHarnessIdForSession(session, this.harnessService);
+			this.harnessService.setActiveSession(harnessId ? this.harnessService.getSessionResourceForHarness(harnessId) : session.resource);
+		}
+
+		const hiddenSections = new Set(this.harnessService.getActiveDescriptor().hiddenSections ?? []);
+		if (Object.values(AICustomizationManagementSection).every(section => hiddenSections.has(section))) {
+			return;
 		}
 
 		const input = AICustomizationManagementEditorInput.getOrCreate();

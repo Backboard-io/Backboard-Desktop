@@ -1,0 +1,3 @@
+rust/target/**
+out/**/*.map
+*.tsbuildinfo

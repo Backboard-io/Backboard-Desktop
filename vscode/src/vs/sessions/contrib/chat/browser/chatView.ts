@@ -10,6 +10,7 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
+import { localize } from '../../../../nls.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../../workbench/common/theme.js';
 import { ChatWidget } from '../../../../workbench/contrib/chat/browser/widget/chatWidget.js';
@@ -195,8 +196,14 @@ export class ChatView extends AbstractChatView {
 				return;
 			}
 			this._modelRef.value = ref;
-			this._updateWidgetLockState(getChatSessionType(ref.object.sessionResource));
+			const sessionType = getChatSessionType(ref.object.sessionResource);
+			this._updateWidgetLockState(sessionType);
 			this._widget.setModel(ref.object);
+			if (sessionType === 'agent-host-backboard') {
+				this._widget.setInputPlaceholder(localize('sessionsChatInput.messageBackboardPlaceholder', "Message Backboard..."));
+			} else {
+				this._widget.resetInputPlaceholder();
+			}
 		}, err => {
 			if (!token.isCancellationRequested) {
 				this.logService.error('[ChatView] Failed to load chat model for chat', err);

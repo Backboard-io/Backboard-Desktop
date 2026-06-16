@@ -24,6 +24,18 @@ import { hasKey } from '../../../../../../base/common/types.js';
 import { localize } from '../../../../../../nls.js';
 import type { IRange } from '../../../../../../editor/common/core/range.js';
 
+const INTERNAL_TRACE_TOOL_NAMES = new Set([
+	'create_file',
+	'delete_file',
+	'edit_file',
+	'glob',
+	'grep',
+	'list_dir',
+	'read_file',
+	'search_file_content',
+	'write_file',
+]);
+
 /**
  * Constructs a terminal tool session ID from a terminal URI and backend session.
  * The ID is a JSON string containing both so consumers can parse out either.
@@ -210,7 +222,7 @@ export function turnsToHistory(backendSession: URI, turns: readonly Turn[], part
 		}
 
 		// Error message for failed turns
-		if (turn.state === TurnState.Error && turn.error) {
+		if (turn.state === TurnState.Error && turn.error && !isInternalToolOutputSubmissionError(turn.error.errorType, turn.error.message)) {
 			parts.push({ kind: 'markdownContent', content: new MarkdownString(`\n\nError: (${turn.error.errorType}) ${turn.error.message}`) });
 		}
 
@@ -573,7 +585,7 @@ export function completedToolCallToSerialized(tc: ICompletedToolCall, subAgentIn
 	if (isSubagent && tc.status === ToolCallStatus.Completed) {
 		const resultText = getToolOutputText(tc);
 		const pastTenseMsg = isSuccess
-			? stringOrMarkdownToString(tc.pastTenseMessage, connectionAuthority) ?? invocationMsg
+			? toolStatusMessage(tc.pastTenseMessage, connectionAuthority) ?? invocationMsg
 			: invocationMsg;
 		return {
 			kind: 'toolInvocationSerialized',
@@ -609,7 +621,7 @@ export function completedToolCallToSerialized(tc: ICompletedToolCall, subAgentIn
 	}
 
 	const pastTenseMsg = isSuccess
-		? stringOrMarkdownToString(tc.pastTenseMessage, connectionAuthority) ?? invocationMsg
+		? toolStatusMessage(tc.pastTenseMessage, connectionAuthority) ?? invocationMsg
 		: invocationMsg;
 	const resultDetails = !toolSpecificData && (tc.status !== ToolCallStatus.Completed || getToolFileEdits(tc).length === 0)
 		? getToolInputOutputDetails(tc, !isSuccess, getToolErrorString(tc))
@@ -627,10 +639,10 @@ export function completedToolCallToSerialized(tc: ICompletedToolCall, subAgentIn
 			? { type: ToolConfirmKind.ConfirmationNotNeeded }
 			: { type: ToolConfirmKind.Denied },
 		isComplete: true,
-		presentation: undefined,
+		presentation: shouldHideInternalTraceTool(tc) ? ToolInvocationPresentation.Hidden : undefined,
 		subAgentInvocationId: subAgentInvocationId,
 		toolSpecificData,
-		resultDetails,
+		resultDetails: shouldHideInternalTraceTool(tc) ? undefined : resultDetails,
 	};
 }
 
@@ -849,8 +861,89 @@ function isSkillFileUri(uri: URI): boolean {
  * is provided.
  */
 export function rawMarkdownToString(content: string, connectionAuthority: string | undefined): MarkdownString {
-	const rewritten = connectionAuthority ? rewriteMarkdownLinks(content, connectionAuthority) : content;
+	const visibleContent = sanitizeInternalToolTraceContent(content);
+	const rewritten = connectionAuthority ? rewriteMarkdownLinks(visibleContent, connectionAuthority) : visibleContent;
 	return new MarkdownString(rewritten);
+}
+
+export function isInternalToolOutputSubmissionError(errorType: string | undefined, message: string | undefined): boolean {
+	return errorType === 'BackboardError' && /^Tool outputs? for run ID '[^']+' were already submitted\./.test(message ?? '');
+}
+
+export function shouldHideInternalTraceTool(tc: Pick<ToolCallState, 'toolName'>): boolean {
+	return INTERNAL_TRACE_TOOL_NAMES.has(tc.toolName);
+}
+
+export function sanitizeInternalToolTraceContent(content: string): string {
+	const withoutTraceSegments = stripLooseInternalTraceLines(stripBracketedInternalTraceSegments(content));
+	return withoutTraceSegments
+		.replace(/Error:\s*\(BackboardError\)\s*Tool outputs? for run ID '[^']+' were already submitted\.[\s\S]*?(?=\n{2,}|$)/g, '')
+		.replace(/[ \t]+\n/g, '\n')
+		.replace(/\n{3,}/g, '\n\n')
+		.trimEnd();
+}
+
+function stripLooseInternalTraceLines(content: string): string {
+	return content
+		.replace(/^\s*\[Called(?:\]|[^\]\n]*(?:\]|:))[^\n]*(?:\n|$)/gm, '')
+		.replace(/^\s*\[Tool output(?:\]|[^\]\n]*(?:\]|:))[^\n]*(?:\n|$)/gm, '')
+		.replace(/^\s*\[Tool outputs? for run ID[^\n]*(?:\n|$)/gm, '');
+}
+
+function stripBracketedInternalTraceSegments(content: string): string {
+	let result = '';
+	let index = 0;
+	while (index < content.length) {
+		if (content[index] === '[' && isInternalTracePrefix(content, index + 1)) {
+			const end = findBracketedTraceEnd(content, index);
+			if (end >= 0) {
+				index = end + 1;
+				continue;
+			}
+			break;
+		}
+		result += content[index];
+		index++;
+	}
+	return result;
+}
+
+function isInternalTracePrefix(content: string, index: number): boolean {
+	return /^(?:Called [\w.-]+ with parameters:|Tool output:|Tool outputs? for run ID\b)/.test(content.slice(index));
+}
+
+function findBracketedTraceEnd(content: string, start: number): number {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let index = start; index < content.length; index++) {
+		const ch = content[index];
+		if (inString) {
+			if (escaped) {
+				escaped = false;
+			} else if (ch === '\\') {
+				escaped = true;
+			} else if (ch === '"') {
+				inString = false;
+			}
+			continue;
+		}
+		if (ch === '"') {
+			inString = true;
+			continue;
+		}
+		if (ch === '[') {
+			depth++;
+			continue;
+		}
+		if (ch === ']') {
+			depth--;
+			if (depth === 0) {
+				return index;
+			}
+		}
+	}
+	return -1;
 }
 
 /**
@@ -867,9 +960,39 @@ export function stringOrMarkdownToString(value: StringOrMarkdown | undefined, co
 		return undefined;
 	}
 	if (typeof value === 'string') {
-		return value;
+		return sanitizeInternalToolTraceContent(value);
 	}
 	return rawMarkdownToString(value.markdown, connectionAuthority);
+}
+
+function stripTrailingJsonToolDetails(value: string | IMarkdownString): string | IMarkdownString {
+	const raw = typeof value === 'string' ? value : value.value;
+	const match = /\n+\s*([\[{][\s\S]*)$/m.exec(raw);
+	if (!match) {
+		return value;
+	}
+	try {
+		JSON.parse(match[1]);
+	} catch {
+		return value;
+	}
+	const visible = raw.slice(0, match.index).trimEnd();
+	if (!visible) {
+		return value;
+	}
+	return typeof value === 'string'
+		? visible
+		: new MarkdownString(visible, {
+			isTrusted: value.isTrusted,
+			supportThemeIcons: value.supportThemeIcons,
+			supportHtml: value.supportHtml,
+			supportAlertSyntax: value.supportAlertSyntax,
+		});
+}
+
+function toolStatusMessage(value: StringOrMarkdown | undefined, connectionAuthority: string | undefined): string | IMarkdownString | undefined {
+	const converted = stringOrMarkdownToString(value, connectionAuthority);
+	return converted ? stripTrailingJsonToolDetails(converted) : undefined;
 }
 
 /**
@@ -939,7 +1062,7 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
 			{
 				invocationMessage: stringOrMarkdownToString(tc.invocationMessage, connectionAuthority),
 				confirmationMessages,
-				presentation: ToolInvocationPresentation.HiddenAfterComplete,
+				presentation: shouldHideInternalTraceTool(tc) ? ToolInvocationPresentation.Hidden : ToolInvocationPresentation.HiddenAfterComplete,
 				toolSpecificData,
 			},
 			toolData,
@@ -951,6 +1074,9 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
 
 	const invocation = new ChatToolInvocation(undefined, toolData, tc.toolCallId, subAgentInvocationId, undefined);
 	invocation.invocationMessage = stringOrMarkdownToString(tc.invocationMessage, connectionAuthority) ?? localize('ahp.running', "Running {0}...", tc.displayName);
+	if (shouldHideInternalTraceTool(tc)) {
+		invocation.presentation = ToolInvocationPresentation.Hidden;
+	}
 
 	if (isTerminalToolCall(tc)) {
 		// Set terminal toolSpecificData eagerly so the renderer shows a
@@ -994,6 +1120,9 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
 export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: ToolCallState, sessionResource: URI, connectionAuthority: string | undefined): void {
 	if (tc.status !== ToolCallStatus.Running) {
 		return;
+	}
+	if (shouldHideInternalTraceTool(tc)) {
+		existing.presentation = ToolInvocationPresentation.Hidden;
 	}
 	existing.invocationMessage = stringOrMarkdownToString(tc.invocationMessage, connectionAuthority) ?? existing.invocationMessage;
 
@@ -1112,7 +1241,7 @@ export function finalizeToolInvocation(invocation: ChatToolInvocation, tc: ToolC
 			terminalCommandState: { exitCode: isCompleted && tc.success ? 0 : 1 },
 		};
 	} else if (isCompleted && tc.pastTenseMessage) {
-		invocation.pastTenseMessage = stringOrMarkdownToString(tc.pastTenseMessage, connectionAuthority);
+		invocation.pastTenseMessage = toolStatusMessage(tc.pastTenseMessage, connectionAuthority);
 	}
 
 	const isFailure = (isCompleted && !tc.success) || isCancelled;
@@ -1124,11 +1253,15 @@ export function finalizeToolInvocation(invocation: ChatToolInvocation, tc: ToolC
 	if (fileEdits.length > 0 && !isFailure) {
 		invocation.presentation = ToolInvocationPresentation.Hidden;
 	}
+	if (shouldHideInternalTraceTool(tc) && !isFailure) {
+		invocation.presentation = ToolInvocationPresentation.Hidden;
+	}
 
 	const resultDetails = !isTerminal
 		&& invocation.toolSpecificData?.kind !== 'subagent'
 		&& getToolKind(tc) !== 'search'
 		&& fileEdits.length === 0
+		&& !shouldHideInternalTraceTool(tc)
 		? getToolInputOutputDetails(tc, isFailure, errorString)
 		: undefined;
 	const result: IToolResult | undefined = isFailure || resultDetails
