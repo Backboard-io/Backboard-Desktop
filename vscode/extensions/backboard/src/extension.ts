@@ -333,15 +333,20 @@ function startBackboardOAuthCallbackServer(redirectUri: string): Promise<vscode.
 				return;
 			}
 
-			const handled = completeBackboardOAuthCallback(requestUrl.searchParams.toString());
-			response.writeHead(handled ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' });
-			const title = handled ? 'Backboard sign in complete' : 'Backboard sign in could not be completed';
-			const message = handled ? 'You can close this tab and return to Backboard Studio.' : 'Return to Backboard Studio and start sign in again.';
-			const accentColor = handled ? '#1677ff' : '#dc2626';
-			const iconPath = handled
-				? '<path d="M8.8 12.2 11 14.4 15.7 9.6" /><circle cx="12" cy="12" r="8.5" />'
-				: '<path d="M12 7.8v4.7" /><path d="M12 16.2h.01" /><circle cx="12" cy="12" r="8.5" />';
-			response.end(`<!doctype html>
+				const handled = completeBackboardOAuthCallback(requestUrl.searchParams.toString());
+				response.writeHead(handled ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' });
+				const title = handled ? 'Backboard sign in complete' : 'Backboard sign in could not be completed';
+				const message = handled ? 'Returning you to Backboard Studio. This tab may close automatically.' : 'Return to Backboard Studio and start sign in again.';
+				const accentColor = handled ? '#1677ff' : '#dc2626';
+				const iconPath = handled
+					? '<path d="M8.8 12.2 11 14.4 15.7 9.6" /><circle cx="12" cy="12" r="8.5" />'
+					: '<path d="M12 7.8v4.7" /><path d="M12 16.2h.01" /><circle cx="12" cy="12" r="8.5" />';
+				const closeScript = handled ? `<script>
+	window.setTimeout(() => {
+		window.close();
+	}, 1200);
+</script>` : '';
+				response.end(`<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -423,6 +428,7 @@ p {
 <h1>${title}</h1>
 <p>${message}</p>
 </main>
+${closeScript}
 </body>
 </html>`);
 		});
