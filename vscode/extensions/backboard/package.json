@@ -6,7 +6,7 @@
   "publisher": "backboard",
   "license": "MIT",
   "engines": {
-    "vscode": "^1.125.0"
+    "vscode": "^2.0.2"
   },
   "main": "./out/extension",
   "categories": [

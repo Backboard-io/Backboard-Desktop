@@ -22,12 +22,9 @@ export const OPEN_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.openWorkspacePag
 export const CLOSE_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.closeWorkspacePage';
 export const WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY = 'workspacePageVisible';
 
-const OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openWorkspaceInAgentsWindow';
-const FOCUS_ACTIVE_EDITOR_GROUP_COMMAND_ID = 'workbench.action.focusActiveEditorGroup';
 const OPEN_BACKBOARD_RIGHT_PANEL_COMMAND_ID = 'backboard.openRightPanel';
 const WORKSPACE_CARD_SLOTS = 6;
 
-type WorkspacePageMode = 'sandbox' | 'editor' | 'workspace';
 type WorkspaceTone = 'live' | 'needsInput' | 'done' | 'failed';
 
 export const WorkspacePageVisibleContext = new RawContextKey<boolean>(
@@ -46,7 +43,6 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 	private workspaceShell: HTMLElement | undefined;
 	private workspaceMain: HTMLElement | undefined;
 	private statusBar: HTMLElement | undefined;
-	private navButtons: HTMLButtonElement[] = [];
 
 	constructor(
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
@@ -92,7 +88,6 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		container.setAttribute('role', 'main');
 		container.setAttribute('aria-label', localize('workspacePageLabel', "Workspace"));
 		container.setAttribute('aria-hidden', 'true');
-		container.appendChild(this.createNavbar());
 
 		this.body = $('div.workspace-page-body');
 		container.appendChild(this.body);
@@ -428,76 +423,6 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		} catch {
 			// The Backboard extension owns this command and may not be available in all builds.
 		}
-	}
-
-	private createNavbar(): HTMLElement {
-		const nav = $('div.workspace-page-navbar');
-		nav.setAttribute('role', 'tablist');
-		nav.setAttribute('aria-label', localize('workspacePageNavbarAriaLabel', "IDE view"));
-
-		this.navButtons = [
-			this.createNavbarButton('sandbox', localize('sandboxView', "Sandbox"), async () => {
-				this.hide();
-				await this.commandService.executeCommand(OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID);
-			}),
-			this.createNavbarButton('editor', localize('editorView', "Editor"), async () => {
-				this.hide();
-				await this.commandService.executeCommand(FOCUS_ACTIVE_EDITOR_GROUP_COMMAND_ID);
-			}),
-			this.createNavbarButton('workspace', localize('workspaceView', "Workspace"), async () => {
-				this.show();
-			}),
-		];
-
-		for (const button of this.navButtons) {
-			nav.appendChild(button);
-		}
-
-		this.updateNavbarChecked();
-		return nav;
-	}
-
-	private createNavbarButton(mode: WorkspacePageMode, label: string, run: () => void | Promise<void>): HTMLButtonElement {
-		const button = $('button.workspace-page-navbar-button') as HTMLButtonElement;
-		button.type = 'button';
-		button.dataset.mode = mode;
-		button.textContent = label;
-		button.setAttribute('role', 'tab');
-		button.title = label;
-
-		this._register(addDisposableListener(button, EventType.CLICK, event => {
-			event.preventDefault();
-			event.stopPropagation();
-			void run();
-		}));
-		this._register(addDisposableListener(button, EventType.KEY_DOWN, event => {
-			if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-				event.preventDefault();
-				event.stopPropagation();
-				this.focusAdjacentNavbarButton(button, event.key === 'ArrowRight');
-			}
-		}));
-
-		return button;
-	}
-
-	private updateNavbarChecked(): void {
-		for (const button of this.navButtons) {
-			const checked = button.dataset.mode === 'workspace';
-			button.classList.toggle('checked', checked);
-			button.setAttribute('aria-selected', String(checked));
-			button.tabIndex = checked ? 0 : -1;
-		}
-	}
-
-	private focusAdjacentNavbarButton(button: HTMLButtonElement, next: boolean): void {
-		const index = this.navButtons.indexOf(button);
-		if (index === -1) {
-			return;
-		}
-
-		const nextIndex = (index + (next ? 1 : -1) + this.navButtons.length) % this.navButtons.length;
-		this.navButtons[nextIndex]?.focus();
 	}
 }
 

@@ -27,49 +27,6 @@
 	transition-delay: 0s;
 }
 
-.monaco-workbench .workspace-page-navbar {
-	position: relative;
-	box-sizing: border-box;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	gap: 2px;
-	height: env(titlebar-area-height, 35px);
-	padding: 2px;
-	background: var(--vscode-titleBar-activeBackground);
-	color: var(--vscode-commandCenter-foreground);
-	-webkit-app-region: drag;
-}
-
-.monaco-workbench .workspace-page-navbar-button {
-	box-sizing: border-box;
-	height: 22px;
-	min-width: 94px;
-	padding: 0 11px;
-	border: 0;
-	border-radius: 4px;
-	background: transparent;
-	color: inherit;
-	font: inherit;
-	line-height: 22px;
-	cursor: pointer;
-	-webkit-app-region: no-drag;
-}
-
-.monaco-workbench .workspace-page-navbar-button:hover {
-	background: var(--vscode-toolbar-hoverBackground);
-}
-
-.monaco-workbench .workspace-page-navbar-button.checked {
-	color: var(--vscode-commandCenter-activeForeground);
-	background: var(--vscode-commandCenter-activeBackground);
-}
-
-.monaco-workbench .workspace-page-navbar-button:focus-visible {
-	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: -1px;
-}
-
 .monaco-workbench .workspace-page-body {
 	--workspace-page-background: var(--vscode-editor-background, #141414);
 	--workspace-page-surface: #181818;

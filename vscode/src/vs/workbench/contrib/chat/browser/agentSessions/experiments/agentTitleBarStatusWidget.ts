@@ -19,17 +19,16 @@ import { EnterAgentSessionProjectionAction, ExitAgentSessionProjectionAction } f
 import { IAgentSessionsService } from '../agentSessionsService.js';
 import { AgentSessionStatus, IAgentSession, isSessionInProgressStatus } from '../agentSessionsModel.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../../../base/browser/ui/actionbar/actionViewItems.js';
-import { IAction, Separator, SubmenuAction, toAction } from '../../../../../../base/common/actions.js';
+import { IAction, SubmenuAction } from '../../../../../../base/common/actions.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../../platform/workspace/common/workspace.js';
 import { IEditorGroupsService } from '../../../../../services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../../services/editor/common/editorService.js';
 import { renderAsPlaintext } from '../../../../../../base/browser/markdownRenderer.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
-import { IMenuService, MenuId, MenuItemAction, SubmenuItemAction } from '../../../../../../platform/actions/common/actions.js';
+import { IMenuService, MenuId, SubmenuItemAction } from '../../../../../../platform/actions/common/actions.js';
 import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { InEditorZenModeContext } from '../../../../../common/contextkeys.js';
 import { HiddenItemStrategy, WorkbenchToolBar } from '../../../../../../platform/actions/browser/toolbar.js';
-import { DropdownWithPrimaryActionViewItem } from '../../../../../../platform/actions/browser/dropdownWithPrimaryActionViewItem.js';
 import { createActionViewItem } from '../../../../../../platform/actions/browser/menuEntryActionViewItem.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
 import { FocusAgentSessionsAction } from '../agentSessionsActions.js';
@@ -50,7 +49,6 @@ type AgentStatusClickAction =
 	| 'openSession'
 	| 'quickAccess'
 	| 'focusSessionsView'
-	| 'toggleChat'
 	| 'setupChat'
 	| 'applyFilter'
 	| 'clearFilter'
@@ -70,7 +68,6 @@ type AgentStatusClickClassification = {
 };
 
 // Action IDs
-const TOGGLE_CHAT_ACTION_ID = 'workbench.action.chat.toggle';
 const QUICK_OPEN_ACTION_ID = 'workbench.action.quickOpenWithModes';
 const AGENT_SESSIONS_WELCOME_INPUT_TYPE_ID = 'workbench.editors.agentSessionsWelcomeInput';
 const OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openWorkspaceInAgentsWindow';
@@ -155,9 +152,6 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 	/** Reusable menu for CommandCenterCenter items (e.g., debug toolbar) */
 	private readonly _commandCenterMenu;
 
-	/** Menu for ChatTitleBarMenu items (same as chat controls dropdown) */
-	private readonly _chatTitleBarMenu;
-
 	constructor(
 		action: IAction,
 		private readonly _windowTitle: WindowTitle,
@@ -183,9 +177,6 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 
 		// Create menu for CommandCenterCenter to get items like debug toolbar
 		this._commandCenterMenu = this._register(this.menuService.createMenu(MenuId.CommandCenterCenter, this.contextKeyService));
-
-		// Create menu for ChatTitleBarMenu to show in sparkle section dropdown
-		this._chatTitleBarMenu = this._register(this.menuService.createMenu(MenuId.ChatTitleBarMenu, this.contextKeyService));
 
 		// Re-render when control mode or session info changes
 		this._register(this.agentTitleBarStatusService.onDidChangeMode(() => {
@@ -514,9 +505,6 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 		}
 		this._container.appendChild(pill);
 
-		// Render command center items (like debug toolbar) inside the pill
-		this._renderCommandCenterToolbar(disposables, pill);
-
 		// Compact mode is always true when rendering chat input mode (caller already checked for compact)
 		const isCompactMode = true;
 		pill.classList.toggle('compact-mode', isCompactMode);
@@ -794,8 +782,7 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 
 	/**
 	 * Render the status badge showing in-progress, needs-input, and/or unread session counts.
-	 * Shows split UI with sparkle icon on left, then unread, needs-input, and active indicators.
-	 * Always renders the sparkle icon section.
+	 * Shows split UI with unread, needs-input, and active indicators.
 	 */
 	private _renderStatusBadge(disposables: DisposableStore, activeSessions: IAgentSession[], unreadSessions: IAgentSession[], attentionNeededSessions: IAgentSession[], inlineContainer?: HTMLElement): void {
 		if (!this._container) {
@@ -819,89 +806,16 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 			this._container.appendChild(badge);
 		}
 
-		// Sparkle dropdown button section (always visible on left) - proper button with dropdown menu
-		const sparkleContainer = $('span.agent-status-badge-section.sparkle');
-		sparkleContainer.tabIndex = 0;
-
-		// Get menu actions for dropdown with proper group separators
-		const menuActions: IAction[] = Separator.join(...this._chatTitleBarMenu.getActions({ shouldForwardArgs: true }).map(([, actions]) => actions));
-
-		const primaryActionId = TOGGLE_CHAT_ACTION_ID;
-		const primaryActionTitle = localize('toggleChat', "Toggle Chat");
-		const primaryActionIcon = Codicon.chatSparkle;
-
-		// Create primary action
-		const primaryAction = this.instantiationService.createInstance(MenuItemAction, {
-			id: primaryActionId,
-			title: primaryActionTitle,
-			icon: primaryActionIcon,
-		}, undefined, undefined, undefined, undefined);
-
-		// Create dropdown action (empty label prevents default tooltip - we have our own hover)
-		const dropdownAction = toAction({
-			id: 'agentStatus.sparkle.dropdown',
-			label: localize('agentStatus.sparkle.dropdown', "More Actions"),
-			run() { }
-		});
-
-		// Create the dropdown with primary action button
-		const sparkleDropdown = this.instantiationService.createInstance(
-			DropdownWithPrimaryActionViewItem,
-			primaryAction,
-			dropdownAction,
-			menuActions,
-			'agent-status-sparkle-dropdown',
-			{ skipTelemetry: true }
-		);
-		sparkleDropdown.render(sparkleContainer);
-		disposables.add(sparkleDropdown);
-
-		// Capture-phase listener for ArrowLeft/ArrowRight/Home/End to prevent DropdownWithPrimaryActionViewItem
-		// from consuming these keys internally. This ensures the outer roving tabindex handles navigation.
-		disposables.add(addDisposableListener(sparkleContainer, EventType.KEY_DOWN, (e) => {
-			if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
-				const idx = this._rovingElements.indexOf(sparkleContainer);
-				if (idx === -1) {
-					return;
-				}
-				const nextIndex = this._getNextRovingIndex(idx, e.key);
-				if (nextIndex !== undefined && nextIndex !== idx) {
-					e.preventDefault();
-					e.stopImmediatePropagation();
-					this._moveRovingFocus(idx, nextIndex);
-				}
-			}
-		}, true /* useCapture */));
-
-		// Add keyboard handler for Enter/Space on the sparkle container
-		disposables.add(addDisposableListener(sparkleContainer, EventType.KEY_DOWN, (e) => {
-			if (e.key === 'Enter' || e.key === ' ') {
-				e.preventDefault();
-				e.stopPropagation();
-				this.commandService.executeCommand(primaryActionId);
-			} else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-				// Open dropdown menu with arrow keys
-				e.preventDefault();
-				e.stopPropagation();
-				sparkleDropdown.showDropdown();
-			}
-		}));
-
 		// Hover delegate for status sections
 		const hoverDelegate = getDefaultHoverDelegate('mouse');
 
 		// Only show status indicators if chat.viewSessions.enabled is true
 		const viewSessionsEnabled = this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewSessionsEnabled) !== false;
 
-		// When compact mode is active, show status indicators before the sparkle button:
-		// [needs-input, active, unread, sparkle] (populating inward)
-		// Otherwise, keep original order: [sparkle, unread, active, needs-input]
+		// When compact mode is active, show status indicators from right to left:
+		// [needs-input, active, unread] (populating inward)
+		// Otherwise, keep original order: [unread, active, needs-input]
 		const reverseOrder = !!inlineContainer;
-
-		if (!reverseOrder) {
-			// Original order: sparkle first
-			badge.appendChild(sparkleContainer);
-		}
 
 		// Build status sections but don't append yet - we need to control order
 		let unreadSection: HTMLElement | undefined;
@@ -1018,20 +932,20 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 
 		// Append status sections in the correct order and register for roving tabindex
 		if (reverseOrder) {
-			// [needs-input, active, unread, sparkle] — populates inward
+			// [needs-input, active, unread] - populates inward
 			if (needsInputSection) { badge.appendChild(needsInputSection); this._rovingElements.push(needsInputSection); }
 			if (activeSection) { badge.appendChild(activeSection); this._rovingElements.push(activeSection); }
 			if (unreadSection) { badge.appendChild(unreadSection); this._rovingElements.push(unreadSection); }
-			badge.appendChild(sparkleContainer);
-			this._rovingElements.push(sparkleContainer);
 		} else {
-			// Original: [sparkle (already appended), unread, active, needs-input]
-			this._rovingElements.push(sparkleContainer);
+			// Original: [unread, active, needs-input]
 			if (unreadSection) { badge.appendChild(unreadSection); this._rovingElements.push(unreadSection); }
 			if (activeSection) { badge.appendChild(activeSection); this._rovingElements.push(activeSection); }
 			if (needsInputSection) { badge.appendChild(needsInputSection); this._rovingElements.push(needsInputSection); }
 		}
 
+		if (!inlineContainer && !unreadSection && !activeSection && !needsInputSection) {
+			badge.remove();
+		}
 	}
 
 	/**

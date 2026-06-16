@@ -5,6 +5,7 @@
 
 import { ICopilotTokenInfo, IDefaultAccount, IDefaultAccountAuthenticationProvider, IPolicyData } from '../../../base/common/defaultAccount.js';
 import { Event } from '../../../base/common/event.js';
+import { RawContextKey } from '../../contextkey/common/contextkey.js';
 import { createDecorator } from '../../instantiation/common/instantiation.js';
 
 /**
@@ -15,6 +16,14 @@ export const GitHubPaths = {
 	billingBudgets: 'settings/copilot/features?utm_source=vscode',
 	copilotUpgrade: 'github-copilot/upgrade?utm_source=vscode',
 } as const;
+
+export const enum DefaultAccountStatus {
+	Uninitialized = 'uninitialized',
+	Unavailable = 'unavailable',
+	Available = 'available',
+}
+
+export const DefaultAccountStatusContext = new RawContextKey<string>('defaultAccountStatus', DefaultAccountStatus.Uninitialized);
 
 /**
  * Outcome of the last `/copilot_internal/managed_settings` fetch.

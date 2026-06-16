@@ -914,15 +914,21 @@ function readCurrentAppVersion(): string {
 		return envVersion.trim();
 	}
 
-	const infoPlist = path.join(path.dirname(process.execPath), '..', 'Info.plist');
-	try {
-		const plist = fs.readFileSync(infoPlist, 'utf8');
-		const value = readPlistString(plist, 'CFBundleShortVersionString') || readPlistString(plist, 'CFBundleVersion');
-		if (value) {
-			return value;
+	const appPath = currentMacAppPath();
+	const infoPlistPaths = [
+		appPath ? path.join(appPath, 'Contents', 'Info.plist') : undefined,
+		path.join(path.dirname(process.execPath), '..', 'Info.plist')
+	].filter((value): value is string => Boolean(value));
+	for (const infoPlist of infoPlistPaths) {
+		try {
+			const plist = fs.readFileSync(infoPlist, 'utf8');
+			const value = readPlistString(plist, 'CFBundleShortVersionString') || readPlistString(plist, 'CFBundleVersion');
+			if (value) {
+				return value;
+			}
+		} catch {
+			// Development hosts may not run from a packaged macOS app bundle.
 		}
-	} catch {
-		// Development hosts may not run from a packaged macOS app bundle.
 	}
 
 	return vscode.version;
@@ -1730,9 +1736,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.stopButton { display: none; color: var(--bb-danger); }
 		.stopButton.visible { display: inline-grid; }
 		.stopButton:hover { color: var(--vscode-errorForeground, var(--bb-danger)); background: color-mix(in srgb, var(--bb-danger) 12%, transparent); border-radius: 4px; }
-		.composerMenuButton { width: 28px; min-width: 28px; grid-template-columns: 1fr auto; padding: 0; }
-		.composerMenuButton .codicon-add { font-size: 16px; }
-		.composerMenuButton .codicon-chevron-down { margin-left: -5px; font-size: 11px; }
 		.featureButton.active { color: var(--bb-primary); }
 		.usageFeatureButton.hasUsage { color: var(--bb-text); }
 		.composerCard.recording { border-color: var(--bb-danger); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bb-danger) 32%, transparent); }
@@ -1896,15 +1899,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 						<div class="composerRule"></div>
 						<div class="composerBar">
 							<div class="barLeft">
-								<button id="plusBtn" class="iconButton composerMenuButton" type="button" title="Composer menu" aria-label="Composer menu"><span class="codicon codicon-add"></span><span class="codicon codicon-chevron-down"></span></button>
 								<button id="modeBtn" class="modeButton" type="button" title="Mode and reasoning" aria-label="Mode and reasoning"><span class="modeGlyph"></span><span id="modeLabel" class="modeLabel">Agent</span><span class="codicon codicon-chevron-down"></span></button>
 								<button id="modelBtn" class="modelButton" type="button" title="Backboard model" aria-label="Backboard model"><span id="modelIcon" class="modelIcon"><span class="codicon codicon-server"></span></span><span class="modelPrefix">Model</span><span id="modelLabel" class="modelValue">Auto</span><span class="codicon codicon-chevron-down"></span></button>
 							</div>
 							<div class="barRight">
-								<button id="reasoningBtn" class="iconButton featureButton" type="button" title="Reasoning effort" aria-label="Reasoning effort"><span class="codicon codicon-settings-gear"></span></button>
 								<button id="webBtn" class="iconButton featureButton" type="button" title="Web search" aria-label="Web search"><span class="codicon codicon-globe"></span></button>
 								<button id="imageBtn" class="iconButton featureButton" type="button" title="Image output" aria-label="Image output"><span class="codicon codicon-device-camera-video"></span></button>
-								<button id="mcpBtn" class="iconButton featureButton" type="button" title="MCP tools" aria-label="MCP tools"><span class="codicon codicon-tools"></span></button>
 								<button id="usageBtn" class="iconButton featureButton usageFeatureButton" type="button" title="Usage details" aria-label="Usage details"><span class="codicon codicon-pulse"></span></button>
 								<button id="voiceBtn" class="iconButton" type="button" title="Start speech-to-text" aria-label="Start speech-to-text"><span class="codicon codicon-mic"></span></button>
 								<button id="stopBtn" class="iconButton stopButton" type="button" title="Stop generation" aria-label="Stop generation"><span class="codicon codicon-debug-stop"></span></button>
@@ -1952,13 +1952,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		const headerBadge = document.getElementById('headerBadge');
 		const newChatButton = document.getElementById('newChatBtn');
 		const buttons = {
-			plus: document.getElementById('plusBtn'),
 			mode: document.getElementById('modeBtn'),
 			model: document.getElementById('modelBtn'),
-			reasoning: document.getElementById('reasoningBtn'),
 			web: document.getElementById('webBtn'),
 			image: document.getElementById('imageBtn'),
-			mcp: document.getElementById('mcpBtn'),
 			usage: document.getElementById('usageBtn'),
 			voice: document.getElementById('voiceBtn'),
 			stop: document.getElementById('stopBtn'),
@@ -2524,18 +2521,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			button.classList.toggle('active', !!active);
 		}
 			function syncComposerButtons() {
-			const hasReasoning = controls.intensity.value !== 'fast';
 			const hasMode = controls.mode.value !== 'free';
 			const hasWeb = controls.webSearch.value === 'Auto';
 			const hasImage = controls.imageGeneration.value === 'auto';
-			const hasMcp = controls.mcpFigma.checked || controls.mcpNotion.checked || controls.mcpGoogle.checked;
-			setActive(buttons.plus, activePopover === 'menu');
 			setActive(buttons.mode, activePopover === 'reasoning' || hasMode);
 			setActive(buttons.model, activePopover === 'model');
-			setActive(buttons.reasoning, activePopover === 'reasoning' || hasReasoning);
 			setActive(buttons.web, activePopover === 'web' || hasWeb);
 			setActive(buttons.image, activePopover === 'image' || hasImage);
-			setActive(buttons.mcp, activePopover === 'mcp' || hasMcp);
 			setActive(buttons.usage, activePopover === 'usage');
 			buttons.usage.classList.toggle('hasUsage', !!latestUsage);
 			buttons.usage.title = latestUsage ? 'Usage: ' + latestUsage.summary : 'Usage details';
@@ -2806,9 +2798,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function intensityLabel(value) {
 			return ({ fast: 'Fast', balanced: 'Balanced', deep: 'Deep' })[value] || value;
 		}
-		function memoryLabel(value) {
-			return ({ Auto: 'Memory Lite', Readonly: 'Memory Read Only', off: 'Off', ProAuto: 'Memory Pro', ProReadonly: 'Memory Pro Read Only' })[value] || value;
-		}
 		function syncModeLabels() {
 			const label = modeLabel(controls.mode.value);
 			modeLabelNode.textContent = label;
@@ -2818,26 +2807,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		}
 		function voiceLabel(value) {
 			return ({ off: 'Off', tts: 'TTS', stt: 'STT', conversation: 'Conversation' })[value] || value;
-		}
-		function renderMenuPopover() {
-			return section('Context', [
-				choice('insertActiveFile', '', 'Active file', '', false, false, '', 'file-code'),
-				choice('insertSelection', '', 'Selection', '', false, false, '', 'selection'),
-				choice('insertBranchDiff', '', 'Branch diff', '', false, false, '', 'git-compare'),
-				choice('insertContextType', 'file', 'Files and folders', '@file', false, false, '', 'folder'),
-				choice('insertContextType', 'symbol', 'Symbols', '@symbol', false, false, '', 'symbol-class'),
-				choice('insertContextType', 'rule', 'Rules', '@rule', false, false, '', 'key'),
-				choice('openImage', '', 'Image output', controls.imageGeneration.value === 'auto' ? 'Auto' : 'Off', controls.imageGeneration.value === 'auto', false, '', 'device-camera-video')
-			].join(''))
-				+ section('Agent', [
-					choice('openModel', '', 'Model', currentModelLabel(), false, false, '', 'server'),
-					choice('openReasoning', '', 'Mode and reasoning', modeLabel(controls.mode.value) + ' / ' + intensityLabel(controls.intensity.value), controls.mode.value !== 'free' || controls.intensity.value !== 'fast', false, '', 'settings-gear'),
-					choice('openMemory', '', 'Memory', memoryLabel(controls.memoryMode.value), controls.memoryMode.value !== 'off', false, '', 'database'),
-					choice('openWeb', '', 'Web search', controls.webSearch.value === 'Auto' ? 'Auto' : 'Off', controls.webSearch.value === 'Auto', false, '', 'globe'),
-					choice('openMcp', '', 'MCP tools', [controls.mcpFigma.checked ? 'Figma' : '', controls.mcpNotion.checked ? 'Notion' : '', controls.mcpGoogle.checked ? 'Google' : ''].filter(Boolean).join(', ') || 'Off', controls.mcpFigma.checked || controls.mcpNotion.checked || controls.mcpGoogle.checked, false, '', 'tools'),
-					choice('openSettings', '', 'Settings', tools.length ? tools.length + ' tools enabled' : 'Tools loading', false, false, '', 'settings')
-				].join(''))
-				+ section('Run', choice('cancelRun', '', 'Cancel current run', 'Stop the active Backboard request.', false, false, '', 'debug-stop'));
 		}
 		function renderModelPopover() {
 			const source = modelSource();
@@ -2880,15 +2849,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			].map(([value, label, meta]) => choice('chooseIntensity', value, label, meta, controls.intensity.value === value, false)).join('');
 			return section('Mode', modes) + section('Reasoning', intensities);
 		}
-		function renderMemoryPopover() {
-			return section('Memory', [
-				choice('chooseMemory', 'Auto', 'Memory Lite', '', controls.memoryMode.value === 'Auto', false),
-				choice('chooseMemory', 'Readonly', 'Read Only', '', controls.memoryMode.value === 'Readonly', false),
-				choice('chooseMemory', 'off', 'Off', '', controls.memoryMode.value === 'off', false),
-				choice('chooseMemory', 'ProAuto', 'Memory Pro', '', controls.memoryMode.value === 'ProAuto', false),
-				choice('chooseMemory', 'ProReadonly', 'Pro Read Only', '', controls.memoryMode.value === 'ProReadonly', false)
-			].join(''));
-		}
 		function renderWebPopover() {
 			return section('Web Search', [
 				choice('chooseWeb', 'off', 'Off', '', controls.webSearch.value === 'off', false),
@@ -2909,21 +2869,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				choice('chooseVoice', 'conversation', 'Conversation', '', controls.voiceMode.value === 'conversation', true)
 			].join(''));
 		}
-		function renderMcpPopover() {
-			return section('MCP Servers', [
-				choice('toggleMcp', 'figma', 'Figma MCP', '', controls.mcpFigma.checked, false),
-				choice('toggleMcp', 'notion', 'Notion MCP', '', controls.mcpNotion.checked, false),
-				choice('toggleMcp', 'google', 'Google MCP', '', controls.mcpGoogle.checked, false)
-			].join('')) + section('Tools', choice('disabled', '', 'Bridge tools', String(tools.length), false, true));
-		}
-		function renderSettingsPopover() {
-			return section('Current Turn', [
-				choice('openModel', '', 'Model', currentModelLabel(), false, false),
-				choice('openReasoning', '', 'Mode and reasoning', modeLabel(controls.mode.value) + ' / ' + intensityLabel(controls.intensity.value), false, false),
-				choice('openMemory', '', 'Memory', memoryLabel(controls.memoryMode.value), false, false),
-				choice('openMcp', '', 'MCP', [controls.mcpFigma.checked ? 'Figma' : '', controls.mcpNotion.checked ? 'Notion' : '', controls.mcpGoogle.checked ? 'Google' : ''].filter(Boolean).join(', ') || 'Off', false, false)
-			].join('')) + '<div class="popoverActions">' + actionButton('refreshModels', 'Refresh Models', 'refresh') + actionButton('setApiKey', 'API Key', 'key') + '</div>';
-		}
 		function renderUsagePopover() {
 			const refresh = '<div class="popoverActions">' + actionButton('refreshUsage', 'Refresh Usage', 'refresh') + '</div>';
 			if (!latestUsage && !accountUsage) {
@@ -2943,18 +2888,14 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		}
 		function renderPopover(name) {
 			const renderers = {
-				menu: ['Composer Menu', renderMenuPopover],
 				model: ['Model', renderModelPopover],
 				reasoning: ['Mode and Reasoning', renderReasoningPopover],
-				memory: ['Memory', renderMemoryPopover],
 				web: ['Web', renderWebPopover],
 				image: ['Image', renderImagePopover],
 				voice: ['Voice', renderVoicePopover],
-				mcp: ['MCP Tools', renderMcpPopover],
-				usage: ['Usage', renderUsagePopover],
-				settings: ['Composer Settings', renderSettingsPopover]
+				usage: ['Usage', renderUsagePopover]
 			};
-			const renderer = renderers[name] || renderers.settings;
+			const renderer = renderers[name] || renderers.model;
 			popover.dataset.kind = name;
 			popoverTitle.textContent = renderer[0];
 			popoverBody.innerHTML = renderer[1]();
@@ -3101,13 +3042,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				document.getElementById('form').requestSubmit();
 			}
 		});
-		buttons.plus.addEventListener('click', event => openPopover('menu', event.currentTarget));
 		buttons.mode.addEventListener('click', event => openPopover('reasoning', event.currentTarget));
 		buttons.model.addEventListener('click', event => openPopover('model', event.currentTarget));
-		buttons.reasoning.addEventListener('click', event => openPopover('reasoning', event.currentTarget));
 		buttons.web.addEventListener('click', event => openPopover('web', event.currentTarget));
 		buttons.image.addEventListener('click', event => openPopover('image', event.currentTarget));
-		buttons.mcp.addEventListener('click', event => openPopover('mcp', event.currentTarget));
 		buttons.usage.addEventListener('click', event => {
 			requestUsageSnapshot();
 			openPopover('usage', event.currentTarget);
@@ -3264,8 +3202,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				chooseSelect(controls.mode, value, false);
 			} else if (action === 'chooseIntensity') {
 				chooseSelect(controls.intensity, value, false);
-			} else if (action === 'chooseMemory') {
-				chooseSelect(controls.memoryMode, value, true);
 			} else if (action === 'chooseWeb') {
 				chooseSelect(controls.webSearch, value, true);
 			} else if (action === 'chooseImage') {
@@ -3301,17 +3237,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				if (activeAnchor) {
 					positionPopover(activeAnchor);
 				}
-			} else if (action === 'toggleMcp') {
-				const map = { figma: controls.mcpFigma, notion: controls.mcpNotion, google: controls.mcpGoogle };
-				const input = map[value];
-				if (input) {
-					input.checked = !input.checked;
-					input.dispatchEvent(new Event('change'));
-					renderPopover(activePopover);
-					if (activeAnchor) {
-						positionPopover(activeAnchor);
-					}
-				}
 			} else if (action === 'chooseModel') {
 				const provider = target.dataset.provider || controls.provider.value;
 				const model = target.dataset.model || value;
@@ -3336,16 +3261,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				openPopover('model', buttons.model);
 			} else if (action === 'openReasoning') {
 				openPopover('reasoning', buttons.mode);
-			} else if (action === 'openMemory') {
-				openPopover('memory', buttons.plus);
 			} else if (action === 'openWeb') {
 				openPopover('web', buttons.web);
 			} else if (action === 'openImage') {
 				openPopover('image', buttons.image);
-			} else if (action === 'openMcp') {
-				openPopover('mcp', buttons.mcp);
-			} else if (action === 'openSettings') {
-				openPopover('settings', buttons.plus);
 			} else if (action === 'cancelRun') {
 				vscode.postMessage({ type: 'cancel' });
 				closePopover();
