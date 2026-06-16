@@ -113,8 +113,9 @@ const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central
 const dismissedUpdateVersionKey = 'backboard.update.dismissedVersion';
 const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
 const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
-const backboardOAuthClientId = 'Backboard_oauth_UJ962-3pQDh3bxVNA0-CFtV7iKGWksIf';
-const backboardOAuthClientSecret = 'Backboard_oauth_sec_oMaX9JHd8jTxcqdz436oc7peEXclx0MDQrZ3nrSr_u0';
+const backboardOAuthClientId = 'Backboard_oauth_BGmuDtqCPmPgmIqWZ2ORvdqpl8fdKFQY';
+const backboardOAuthClientSecret = 'Backboard_oauth_sec_9i8a29N_Fg1xtgMKjWBXAp1z2uiMVz23ZuVWbLS6xOg';
+const backboardOAuthRedirectUri = 'https://app.backboard.io/api/oauth/ide/callback';
 const backboardOAuthScope = 'openid email profile';
 let backboardToolOutput: vscode.OutputChannel | undefined;
 let backboardUpdateInstallInProgress = false;
@@ -185,12 +186,12 @@ async function signInBackboard(context: vscode.ExtensionContext): Promise<boolea
 	const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
 
 	try {
-		const redirectUri = await vscode.env.asExternalUri(vscode.Uri.parse(`${vscode.env.uriScheme}://${context.extension.id}/auth/callback`));
-		backboardToolOutput?.appendLine(`[oauth] Redirect URI: ${redirectUri.toString(true)}`);
+		backboardToolOutput?.appendLine(`[oauth] Redirect URI: ${backboardOAuthRedirectUri}`);
+		backboardToolOutput?.appendLine(`[oauth] Editor callback URI: ${vscode.env.uriScheme}://${context.extension.id}/auth/callback`);
 		const codePromise = waitForBackboardOAuthCode(state);
 		const params = new URLSearchParams({
 			client_id: backboardOAuthClientId,
-			redirect_uri: redirectUri.toString(true),
+			redirect_uri: backboardOAuthRedirectUri,
 			response_type: 'code',
 			scope: backboardOAuthScope,
 			state,
@@ -203,7 +204,7 @@ async function signInBackboard(context: vscode.ExtensionContext): Promise<boolea
 
 		const code = await codePromise;
 		backboardToolOutput?.appendLine('[oauth] Received Backboard authorization code; exchanging for tokens.');
-		const tokens = await exchangeBackboardOAuthCode(code, redirectUri.toString(true), codeVerifier);
+		const tokens = await exchangeBackboardOAuthCode(code, backboardOAuthRedirectUri, codeVerifier);
 		await saveBackboardOAuthTokens(tokens);
 		await vscode.window.showInformationMessage('Signed in to Backboard.');
 		return true;
@@ -785,6 +786,8 @@ interface BackboardOAuthTokens {
 	readonly id_token?: string | null;
 	readonly assistant_id?: string | null;
 	readonly backboard_api_key?: string | null;
+	readonly personal_api_key?: string | null;
+	readonly selected_client_name?: string | null;
 }
 
 interface BackboardOAuthPending {
@@ -963,18 +966,20 @@ async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens): Promise<v
 		throw new Error('Backboard token response did not include an access token.');
 	}
 	const backboardApiKey = stringValueFromRecord(tokens.backboard_api_key);
+	const personalApiKey = stringValueFromRecord(tokens.personal_api_key);
+	const usableApiKey = backboardApiKey ?? personalApiKey;
 
 	const config = await readBackboardConfigJson();
 	const env = normalizeBackboardEnv(stringValueFromRecord(config.env) || currentBackboardEnv());
 	const envKeys = backboardConfigEnvKeys(config);
-	if (backboardApiKey) {
-		envKeys[env] = backboardApiKey;
+	if (usableApiKey) {
+		envKeys[env] = usableApiKey;
 	}
 
 	await writeBackboardConfigJson({
 		...config,
 		env,
-		api_key: backboardApiKey ?? config.api_key,
+		api_key: usableApiKey ?? config.api_key,
 		env_keys: envKeys,
 		oauth: {
 			access_token: accessToken,
@@ -985,6 +990,8 @@ async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens): Promise<v
 			id_token: stringValueFromRecord(tokens.id_token),
 			assistant_id: stringValueFromRecord(tokens.assistant_id),
 			backboard_api_key: backboardApiKey,
+			personal_api_key: personalApiKey,
+			selected_client_name: stringValueFromRecord(tokens.selected_client_name),
 			obtained_at: new Date().toISOString()
 		}
 	});
