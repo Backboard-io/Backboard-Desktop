@@ -72,19 +72,54 @@ else {
 			licenseUrl: 'https://github.com/microsoft/vscode/blob/main/LICENSE.txt',
 			serverLicenseUrl: 'https://github.com/microsoft/vscode/blob/main/LICENSE.txt',
 			defaultChatAgent: {
-				extensionId: 'GitHub.copilot',
-				chatExtensionId: 'GitHub.copilot-chat',
+				extensionId: 'backboard.core',
+				chatExtensionId: 'backboard.core',
+				chatExtensionOutputId: 'Backboard.log',
+				chatExtensionOutputExtensionStateCommand: '',
+				documentationUrl: 'https://app.backboard.io',
+				skusDocumentationUrl: 'https://app.backboard.io',
+				publicCodeMatchesUrl: 'https://app.backboard.io',
+				managePlanUrl: 'https://app.backboard.io',
+				upgradePlanUrl: 'https://app.backboard.io',
+				signUpUrl: 'https://app.backboard.io',
+				termsStatementUrl: 'https://app.backboard.io/terms',
+				privacyStatementUrl: 'https://app.backboard.io/privacy',
 				provider: {
 					default: {
-						id: 'github',
-						name: 'GitHub',
+						id: 'backboard',
+						name: 'Backboard',
 					},
 					enterprise: {
-						id: 'github-enterprise',
-						name: 'GitHub Enterprise',
-					}
+						id: 'backboard',
+						name: 'Backboard',
+					},
+					google: {
+						id: 'backboard',
+						name: 'Backboard',
+					},
+					apple: {
+						id: 'backboard',
+						name: 'Backboard',
+					},
 				},
-				providerScopes: []
+				providerExtensionId: '',
+				providerUriSetting: 'backboard.apiUrl',
+				providerScopes: [],
+				entitlementUrl: '',
+				entitlementSignupLimitedUrl: '',
+				tokenEntitlementUrl: '',
+				mcpRegistryDataUrl: '',
+				managedSettingsUrl: '',
+				chatQuotaExceededContext: 'backboard.chat.quotaExceeded',
+				completionsQuotaExceededContext: 'backboard.completions.quotaExceeded',
+				walkthroughCommand: '',
+				completionsMenuCommand: '',
+				chatRefreshTokenCommand: 'backboard.signIn',
+				generateCommitMessageCommand: '',
+				resolveMergeConflictsCommand: '',
+				completionsAdvancedSetting: 'backboard.advanced',
+				completionsEnablementSetting: 'backboard.enable',
+				nextEditSuggestionsSetting: 'backboard.nextEditSuggestions.enabled',
 			}
 		});
 	}

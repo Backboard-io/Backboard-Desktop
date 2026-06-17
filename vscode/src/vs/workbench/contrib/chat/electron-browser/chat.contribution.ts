@@ -46,6 +46,7 @@ import { IPluginGitService } from '../common/plugins/pluginGitService.js';
 import { registerChatDeveloperActions } from './actions/chatDeveloperActions.js';
 import { registerChatExportZipAction } from './actions/chatExportZip.js';
 import { registerExportAgentTracesDbAction } from './actions/exportAgentTracesDb.js';
+import { registerBackboardSsoActions } from './actions/backboardSsoActions.js';
 import { shouldWarnForSessionShutdown } from './chatLifecycle.js';
 import { HoldToVoiceChatInChatViewAction, InlineVoiceChatAction, KeywordActivationContribution, QuickVoiceChatAction, ReadChatResponseAloud, StartVoiceChatAction, StopListeningAction, StopListeningAndSubmitAction, StopReadAloud, StopReadChatItemAloud, VoiceChatInChatViewAction } from './actions/voiceChatActions.js';
 import { OpenWorkspaceInAgentsWindowAction, OpenWorkspaceInAgentsContribution, OpenAgentsWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution, ToggleOpenInAgentsWindowTitleBarAction } from './agentSessions/agentSessionsActions.js';
@@ -253,6 +254,7 @@ registerAction2(StopReadAloud);
 registerChatDeveloperActions();
 registerChatExportZipAction();
 registerExportAgentTracesDbAction();
+registerBackboardSsoActions();
 
 registerWorkbenchContribution2(KeywordActivationContribution.ID, KeywordActivationContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(NativeBuiltinToolsContribution.ID, NativeBuiltinToolsContribution, WorkbenchPhase.AfterRestored);
@@ -270,24 +272,24 @@ registerWorkbenchContribution2(AgentsHandoffInputTipContribution.ID, AgentsHando
 // to start.
 const AGENT_HOST_REGISTRATION_TIMEOUT_MS = 30_000;
 
-function getCopilotAgentInfo(rootState: RootState | Error | undefined): AgentInfo | undefined {
+function getBackboardAgentInfo(rootState: RootState | Error | undefined): AgentInfo | undefined {
 	if (!rootState || rootState instanceof Error) {
 		return undefined;
 	}
-	return rootState.agents.find(a => a.provider === 'copilotcli');
+	return rootState.agents.find(a => a.provider === 'backboard');
 }
 
 /**
  * Resolve the actual session-content-provider scheme registered by the local
  * agent host. The agent host registers chat sessions under
- * `agent-host-${agent.provider}` (e.g. `agent-host-copilotcli`) only after it
+ * `agent-host-${agent.provider}` (e.g. `agent-host-backboard`) only after it
  * surfaces an `AgentInfo` via `rootState`. This is asynchronous, so the static
  * `agent-host-copilot` umbrella commands need to wait for that registration
  * before opening a session — otherwise we'd build a URI with a scheme that has
  * no content provider and fall back to a fresh local chat session.
  */
 async function resolveAgentHostSessionType(agentHostService: IAgentHostService): Promise<string> {
-	const agent = getCopilotAgentInfo(agentHostService.rootState.value);
+	const agent = getBackboardAgentInfo(agentHostService.rootState.value);
 	if (agent) {
 		return `agent-host-${agent.provider}`;
 	}
@@ -297,7 +299,7 @@ async function resolveAgentHostSessionType(agentHostService: IAgentHostService):
 	const cts = new CancellationTokenSource();
 	const waitForAgent = new Promise<AgentInfo | undefined>(res => {
 		const sub = agentHostService.rootState.onDidChange(state => {
-			const found = getCopilotAgentInfo(state);
+			const found = getBackboardAgentInfo(state);
 			if (found) {
 				sub.dispose();
 				res(found);
@@ -317,7 +319,7 @@ async function resolveAgentHostSessionType(agentHostService: IAgentHostService):
 		}),
 	]);
 	if (!resolved) {
-		throw new Error('Agent host did not register a copilotcli agent within the timeout period. Ensure the agent host is enabled and running.');
+		throw new Error('Agent host did not register a backboard agent within the timeout period. Ensure the agent host is enabled and running.');
 	}
 	return `agent-host-${resolved.provider}`;
 }

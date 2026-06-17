@@ -231,12 +231,13 @@ export function isSupportedChatFileScheme(accessor: ServicesAccessor, scheme: st
  * Returns the effective default session type for a new chat in the VS Code
  * editor window, honoring the experimental
  * {@link ChatConfiguration.EditorDefaultProvider} setting:
- * - `'copilotAh'` selects the Agent Host Copilot CLI when its contribution is registered.
+ * - `'copilotAh'` selects the Agent Host Copilot slot when its contribution is registered.
  * - `'copilotEh'` selects the Extension Host Copilot CLI when its contribution is
  *   registered and it is not hidden by {@link ChatConfiguration.CopilotCliHideExtensionHostEditor}.
  *
- * Falls back to {@link localChatSessionType} when local is enabled, or when no
- * visible non-local provider is available.
+ * Backboard owns the Agent Host Copilot slot in this product, so prefer that
+ * provider for normal editor chat as soon as it is registered. Falls back to
+ * {@link localChatSessionType} when no visible non-local provider is available.
  */
 export function getDefaultNewChatSessionType(
 	configurationService: IConfigurationService,
@@ -250,6 +251,10 @@ export function getDefaultNewChatSessionType(
 
 	if (defaultType && isVisibleEditorChatSessionType(defaultType, configurationService, chatSessionsService)) {
 		return defaultType;
+	}
+
+	if (isVisibleEditorChatSessionType(SessionType.AgentHostCopilot, configurationService, chatSessionsService)) {
+		return SessionType.AgentHostCopilot;
 	}
 
 	if (isEditorLocalAgentEnabled(configurationService)) {

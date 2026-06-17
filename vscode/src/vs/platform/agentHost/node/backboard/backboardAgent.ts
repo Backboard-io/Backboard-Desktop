@@ -341,7 +341,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				nextToolRequest = continuationToolRequests.shift();
 			}
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message = backboardDisplayErrorMessage(error instanceof Error ? error.message : String(error));
 			if (isDuplicateToolOutputError(message)) {
 				this._logService.info(`[Backboard] Suppressed duplicate tool-output submission error: ${message}`);
 			} else {
@@ -530,7 +530,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				this._fire(session.sessionUri, {
 					type: ActionType.ChatError,
 					turnId,
-					error: { errorType: 'BackboardError', message: event.message ?? 'Backboard request failed.' },
+					error: { errorType: 'BackboardError', message: backboardDisplayErrorMessage(event.message ?? 'Backboard request failed.') },
 				});
 				return;
 		}
@@ -1222,6 +1222,13 @@ function isDuplicateToolOutputError(message: string | undefined): boolean {
 	return typeof message === 'string'
 		&& message.includes('Tool outputs for run ID')
 		&& message.includes('were already submitted');
+}
+
+function backboardDisplayErrorMessage(message: string): string {
+	if (/api key|authentication|unauthorized|missing auth/i.test(message)) {
+		return `${message} Run "Backboard: Sign In" from the Command Palette to save credentials in ~/.backboard_ide/config.json.`;
+	}
+	return message;
 }
 
 function normalizeBackboardModelSelection(model: ModelSelection | undefined): ModelSelection | undefined {

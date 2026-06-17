@@ -73,7 +73,7 @@ export function getAgentSessionProviderName(provider: AgentSessionTarget): strin
 		case AgentSessionProviders.Growth:
 			return 'Growth';
 		case AgentSessionProviders.AgentHostCopilot:
-			return localize('chat.session.providerLabel.agentHostCopilot', "Copilot CLI [Agent Host]");
+			return localize('chat.session.providerLabel.agentHostCopilot', "Backboard");
 		default:
 			return provider;
 	}
@@ -148,7 +148,7 @@ export const CHAT_DELEGATE_TO_AGENT_HOST_SESSION_COMMAND_ID = 'workbench.action.
  * such as the attached context entries survive the command invocation.
  */
 export interface IAgentHostDelegationRequest {
-	/** The target agent host session type, e.g. `agent-host-copilotcli`. */
+	/** The target agent host session type, e.g. `agent-host-backboard`. */
 	readonly type: string;
 	/** Human readable name of the target session type. */
 	readonly displayName: string;
@@ -190,7 +190,7 @@ export function getAgentSessionProviderDescription(provider: AgentSessionTarget)
 		case AgentSessionProviders.Growth:
 			return localize('chat.session.providerDescription.growth', "Learn about Copilot features.");
 		case AgentSessionProviders.AgentHostCopilot:
-			return 'Run a Copilot SDK agent in a dedicated process.';
+			return localize('chat.session.providerDescription.agentHostCopilot', "Run Backboard Copilot in a dedicated agent-host process.");
 		default:
 			return '';
 	}
