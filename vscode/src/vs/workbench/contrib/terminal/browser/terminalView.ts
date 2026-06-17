@@ -114,6 +114,7 @@ export class TerminalViewPane extends ViewPane {
 		this._register(this._terminalProfileService.onDidChangeAvailableProfiles(profiles => this._updateTabActionBar(profiles)));
 		this._viewShowing = TerminalContextKeys.viewShowing.bindTo(this._contextKeyService);
 		this._register(this.onDidChangeBodyVisibility(e => {
+			this._terminalTabbedView?.setPanelTitleTabsVisible(e);
 			if (e) {
 				this._terminalTabbedView?.rerenderTabs();
 			}

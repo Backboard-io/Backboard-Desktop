@@ -30,6 +30,16 @@ function code() {
 		node build/lib/preLaunch.ts
 	fi
 
+	if [[ "$OSTYPE" == "darwin"* ]]; then
+		BACKBOARD_VERSION="${BACKBOARD_STUDIO_VERSION:-${BBIDE_VERSION:-$(node -p "require('./product.json').backboardStudioVersion || ''")}}"
+		INFO_PLIST="./.build/electron/$NAME.app/Contents/Info.plist"
+		if [[ -n "$BACKBOARD_VERSION" && -f "$INFO_PLIST" ]]; then
+			/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BACKBOARD_VERSION" "$INFO_PLIST" >/dev/null 2>&1 || true
+			/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BACKBOARD_VERSION" "$INFO_PLIST" >/dev/null 2>&1 || true
+			export BACKBOARD_STUDIO_VERSION="$BACKBOARD_VERSION"
+		fi
+	fi
+
 	# Manage built-in extensions
 	if [[ "$1" == "--builtin" ]]; then
 		exec "$CODE" build/builtin

@@ -10,7 +10,7 @@ import { localize } from '../../../../nls.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { MenuRegistry, SubmenuItemAction } from '../../../../platform/actions/common/actions.js';
-import { ContextKeyExpr, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 import { Menus } from '../../../browser/menus.js';
 import { IWorkbenchContribution } from '../../../../workbench/common/contributions.js';
@@ -24,12 +24,9 @@ import { SHOW_SESSIONS_PICKER_COMMAND_ID } from './sessionsActions.js';
 
 const OPEN_SESSION_IN_VSCODE_COMMAND_ID = 'agents.openSessionInVSCode';
 const OPEN_IN_VSCODE_COMMAND_ID = 'sessions.openInVSCode';
-const OPEN_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.openWorkspacePage';
 const CLOSE_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.closeWorkspacePage';
-const WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY = 'workspacePageVisible';
-const WORKSPACE_PAGE_CONTEXT_KEYS = new Set([WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY]);
 
-type TitlebarPage = 'sandbox' | 'editor' | 'workspace';
+type TitlebarPage = 'sandbox' | 'editor';
 
 /**
  * Sessions Title Bar Widget - renders the active chat session
@@ -61,7 +58,6 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@ISessionsProvidersService private readonly sessionsProvidersService: ISessionsProvidersService,
 		@ICommandService private readonly commandService: ICommandService,
-		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 	) {
 		super(undefined, action, options);
 
@@ -86,13 +82,6 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 		this._register(this.sessionsProvidersService.onDidChangeProviders(() => {
 			this._lastRenderState = undefined;
 			this._render();
-		}));
-
-		this._register(this.contextKeyService.onDidChangeContext(event => {
-			if (event.affectsSome(WORKSPACE_PAGE_CONTEXT_KEYS)) {
-				this._lastRenderState = undefined;
-				this._render();
-			}
 		}));
 	}
 
@@ -156,7 +145,6 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 					await this.commandService.executeCommand(CLOSE_WORKSPACE_PAGE_COMMAND_ID);
 					return this._openEditorWindow();
 				}),
-				this._createSwitchButton('workspace', localize('workspaceView', "Workspace"), () => this.commandService.executeCommand(OPEN_WORKSPACE_PAGE_COMMAND_ID)),
 			];
 
 			for (const button of buttons) {
@@ -218,7 +206,7 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 	}
 
 	private _getActivePage(): TitlebarPage {
-		return this.contextKeyService.getContextKeyValue<boolean>(WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY) ? 'workspace' : 'sandbox';
+		return 'sandbox';
 	}
 
 	/**

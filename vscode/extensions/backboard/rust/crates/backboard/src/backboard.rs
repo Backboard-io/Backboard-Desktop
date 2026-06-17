@@ -637,6 +637,8 @@ pub struct SendMessageRequest {
     pub thinking: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
     #[serde(default = "default_web_search")]
     pub web_search: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -673,6 +675,7 @@ impl Default for SendMessageRequest {
             memory_pro: None,
             thinking: None,
             tools: None,
+            parallel_tool_calls: None,
             web_search: default_web_search(),
             image_generation: None,
             image_model_provider: None,
@@ -1619,6 +1622,12 @@ fn message_form(request: &SendMessageRequest, stream: bool) -> Result<Vec<(Strin
     if let Some(tools) = request.tools.clone() {
         form.push(("tools".to_string(), serde_json::to_string(&tools)?));
     }
+    if let Some(parallel_tool_calls) = request.parallel_tool_calls {
+        form.push((
+            "parallel_tool_calls".to_string(),
+            parallel_tool_calls.to_string(),
+        ));
+    }
     Ok(form)
 }
 
@@ -1674,6 +1683,12 @@ fn message_json(request: &SendMessageRequest, stream: bool) -> Value {
     }
     if let Some(tools) = request.tools.clone() {
         body.insert("tools".to_string(), tools.into());
+    }
+    if let Some(parallel_tool_calls) = request.parallel_tool_calls {
+        body.insert(
+            "parallel_tool_calls".to_string(),
+            parallel_tool_calls.into(),
+        );
     }
     Value::Object(body)
 }
@@ -2333,6 +2348,7 @@ mod tests {
             })),
             send_to_llm: Some(true),
             mcp_calls: Some(json!(["figma"])),
+            parallel_tool_calls: Some(false),
             ..SendMessageRequest::default()
         };
 
@@ -2350,6 +2366,7 @@ mod tests {
         }));
         assert!(form.contains(&("send_to_llm".to_string(), "true".to_string())));
         assert!(form.contains(&("mcp_calls".to_string(), "[\"figma\"]".to_string())));
+        assert!(form.contains(&("parallel_tool_calls".to_string(), "false".to_string())));
     }
 
     #[test]
@@ -2368,6 +2385,7 @@ mod tests {
                 }
             })),
             send_to_llm: Some(true),
+            parallel_tool_calls: Some(false),
             ..SendMessageRequest::default()
         };
 
@@ -2379,6 +2397,7 @@ mod tests {
         assert_eq!(body["model_name"], "gpt-4o");
         assert_eq!(body["web_search"], "Auto");
         assert_eq!(body["send_to_llm"], "true");
+        assert_eq!(body["parallel_tool_calls"], false);
         assert_eq!(body["voice"]["tts"]["model"], "gpt-4o-mini-tts");
         assert!(body.get("provider").is_none());
         assert!(body.get("model").is_none());

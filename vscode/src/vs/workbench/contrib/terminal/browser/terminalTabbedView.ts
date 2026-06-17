@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { LayoutPriority, Orientation, Sizing, SplitView } from '../../../../base/browser/ui/splitview/splitview.js';
-import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { Event } from '../../../../base/common/event.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
@@ -43,6 +43,10 @@ export class TerminalTabbedView extends Disposable {
 	private _tabContainer: HTMLElement;
 	private _backboardTabBar: HTMLElement;
 	private _backboardTabList: HTMLElement;
+	private _panelTitleElement: HTMLElement | undefined;
+	private _panelTitleActionsElement: HTMLElement | undefined;
+	private _backboardTabsInPanelTitle = false;
+	private _backboardTabsVisibleInPanelTitle = false;
 	private readonly _backboardTabDisposables = this._register(new DisposableStore());
 
 	private _tabList: TerminalTabList;
@@ -93,6 +97,7 @@ export class TerminalTabbedView extends Disposable {
 		this._backboardTabBar = $('.backboard-terminal-tabs-bar');
 		this._backboardTabList = $('.backboard-terminal-tabs-list');
 		this._backboardTabBar.append(this._backboardTabList);
+		this._installBackboardTabsInPanelTitle(parentElement);
 
 		this._instanceMenu = this._register(menuService.createMenu(MenuId.TerminalInstanceContext, contextKeyService));
 		this._tabsListMenu = this._register(menuService.createMenu(MenuId.TerminalTabContext, contextKeyService));
@@ -113,7 +118,7 @@ export class TerminalTabbedView extends Disposable {
 		this._terminalTabsMouseContextKey = TerminalContextKeys.tabsMouse.bindTo(contextKeyService);
 
 		this._tabTreeIndex = 0;
-		this._terminalContainerIndex = 1;
+		this._terminalContainerIndex = this._backboardTabsInPanelTitle ? 0 : 1;
 
 		this._register(_configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration(TerminalSettingId.TabsEnabled) ||
@@ -181,14 +186,16 @@ export class TerminalTabbedView extends Disposable {
 	}
 
 	private _setupSplitView(terminalOuterContainer: HTMLElement): void {
-		this._splitView.addView({
-			element: this._backboardTabBar,
-			layout: height => this._layoutBackboardTabs(height),
-			minimumSize: TerminalTabsListSizes.BackboardTabBarHeight,
-			maximumSize: TerminalTabsListSizes.BackboardTabBarHeight,
-			onDidChange: () => Disposable.None,
-			priority: LayoutPriority.Low
-		}, TerminalTabsListSizes.BackboardTabBarHeight, this._tabTreeIndex);
+		if (!this._backboardTabsInPanelTitle) {
+			this._splitView.addView({
+				element: this._backboardTabBar,
+				layout: height => this._layoutBackboardTabs(height),
+				minimumSize: TerminalTabsListSizes.BackboardTabBarHeight,
+				maximumSize: TerminalTabsListSizes.BackboardTabBarHeight,
+				onDidChange: () => Disposable.None,
+				priority: LayoutPriority.Low
+			}, TerminalTabsListSizes.BackboardTabBarHeight, this._tabTreeIndex);
+		}
 
 		this._splitView.addView({
 			element: terminalOuterContainer,
@@ -198,6 +205,44 @@ export class TerminalTabbedView extends Disposable {
 			onDidChange: () => Disposable.None,
 			priority: LayoutPriority.High
 		}, Sizing.Distribute, this._terminalContainerIndex);
+	}
+
+	private _installBackboardTabsInPanelTitle(parentElement: HTMLElement): void {
+		const panelPart = parentElement.closest('.part.panel.pane-composite-part');
+		const title = panelPart?.querySelector<HTMLElement>(':scope > .title');
+		const titleActions = title?.querySelector<HTMLElement>(':scope > .title-actions');
+		if (!title || !titleActions) {
+			return;
+		}
+
+		this._panelTitleElement = title;
+		this._panelTitleActionsElement = titleActions;
+		this._backboardTabsInPanelTitle = true;
+		this.setPanelTitleTabsVisible(true);
+		this._register(toDisposable(() => {
+			this.setPanelTitleTabsVisible(false);
+			this._backboardTabBar.remove();
+		}));
+	}
+
+	setPanelTitleTabsVisible(visible: boolean): void {
+		if (!this._backboardTabsInPanelTitle || !this._panelTitleElement || !this._panelTitleActionsElement) {
+			return;
+		}
+
+		this._backboardTabsVisibleInPanelTitle = visible;
+		if (visible) {
+			if (this._backboardTabBar.parentElement !== this._panelTitleElement) {
+				this._panelTitleElement.insertBefore(this._backboardTabBar, this._panelTitleActionsElement);
+			}
+		} else {
+			this._backboardTabBar.remove();
+		}
+		this._updatePanelTitleTabsClass();
+	}
+
+	private _updatePanelTitleTabsClass(): void {
+		this._panelTitleElement?.classList.toggle('has-terminal-tabs', this._backboardTabsVisibleInPanelTitle && !this._backboardTabBar.classList.contains('empty'));
 	}
 
 	private _layoutBackboardTabs(height: number): void {
@@ -226,6 +271,7 @@ export class TerminalTabbedView extends Disposable {
 		this._backboardTabDisposables.clear();
 		const tabs = this._terminalGroupService.instances;
 		this._backboardTabBar.classList.toggle('empty', tabs.length === 0);
+		this._updatePanelTitleTabsClass();
 		const tabElements = tabs.map((instance, index) => {
 			const tab = $('.backboard-terminal-tab', { role: 'tab', title: instance.title || localize('terminalTab', "Terminal") },
 				$('span.backboard-terminal-tab-icon.codicon.codicon-terminal', { 'aria-hidden': 'true' }),

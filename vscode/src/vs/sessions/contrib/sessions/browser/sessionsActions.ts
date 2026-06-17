@@ -17,7 +17,7 @@ import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../.
 import { EditorAreaFocusContext, IsAuxiliaryWindowContext, IsSessionsWindowContext, PanelMaximizedContext } from '../../../../workbench/common/contextkeys.js';
 import { Menus } from '../../../browser/menus.js';
 import { SessionsCategories } from '../../../common/categories.js';
-import { CanGoBackContext, CanGoForwardContext, ChatSessionProviderIdContext, MultipleSessionsVisibleContext, SessionIsArchivedContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsStickyContext, SessionsFocusContext, SessionSupportsMultipleChatsContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { CanGoBackContext, CanGoForwardContext, ChatSessionProviderIdContext, MultipleSessionsVisibleContext, SessionIsArchivedContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsStickyContext, SessionsFocusContext, SessionSupportsMultipleChatsContext } from '../../../common/contextkeys.js';
 import { ANY_AGENT_HOST_PROVIDER_RE } from '../../../common/agentHostSessionsProvider.js';
 import { IActiveSession, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsViewService } from '../../../browser/sessionsViewService.js';
@@ -203,11 +203,6 @@ registerAction2(class GoBackAction extends Action2 {
 				when: ContextKeyExpr.and(IsSessionsWindowContext, EditorAreaFocusContext.toNegated()),
 			},
 			menu: [{
-				id: Menus.TitleBarCenterLeft,
-				group: 'navigation',
-				order: 1,
-				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
-			}, {
 				id: Menus.GoMenu,
 				group: '1_history_nav',
 				order: 1,
@@ -245,11 +240,6 @@ registerAction2(class GoForwardAction extends Action2 {
 				when: ContextKeyExpr.and(IsSessionsWindowContext, EditorAreaFocusContext.toNegated()),
 			},
 			menu: [{
-				id: Menus.TitleBarCenterLeft,
-				group: 'navigation',
-				order: 2,
-				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
-			}, {
 				id: Menus.GoMenu,
 				group: '1_history_nav',
 				order: 2,

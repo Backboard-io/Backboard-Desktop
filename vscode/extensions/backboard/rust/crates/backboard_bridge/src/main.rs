@@ -37,6 +37,7 @@ const DEFAULT_STT_LANGUAGE: &str = "en";
 const WEB_FETCH_TIMEOUT_SECS: u64 = 15;
 const WEB_FETCH_MAX_BYTES: usize = 1_000_000;
 const WEB_FETCH_PREVIEW_CHARS: usize = 12_000;
+const BACKBOARD_IMAGE_TOOL_NAMES: &[&str] = &["generate_image", "image_generate"];
 const BACKBOARD_SYSTEM_PROMPT: &str = include_str!("backboard_runtime_system_prompt.md");
 
 #[derive(Clone)]
@@ -813,6 +814,14 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         json!({ "message": "Sending to Backboard." }),
     ));
 
+    let backboard_image_generation =
+        backboard_image_generation_enabled(params.image_generation.as_deref());
+    let ignored_tool_call_names = if backboard_image_generation {
+        BACKBOARD_IMAGE_TOOL_NAMES
+    } else {
+        &[]
+    };
+
     let send_request = SendMessageRequest {
         thread_id,
         assistant_id,
@@ -822,7 +831,11 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         memory,
         memory_pro,
         thinking: thinking_payload(&intensity, &provider, &model),
-        tools: Some(tool_definitions(&mode)),
+        tools: Some(tool_definitions_for_request(
+            &mode,
+            backboard_image_generation,
+        )),
+        parallel_tool_calls: Some(false),
         web_search: params.web_search.unwrap_or_else(|| "off".to_string()),
         image_generation: params.image_generation.clone(),
         image_model_provider: params
@@ -844,7 +857,14 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
     log_backboard_request(&send_request, params.workspace.as_ref(), &mode)?;
     let stream = client.send_message_stream(send_request).await?;
 
-    consume_stream(state, &request.request_id, &session_id, stream).await
+    consume_stream(
+        state,
+        &request.request_id,
+        &session_id,
+        stream,
+        ignored_tool_call_names,
+    )
+    .await
 }
 
 async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Result<()> {
@@ -867,20 +887,10 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
         .into_iter()
         .map(normalize_tool_output)
         .collect::<Vec<_>>();
-    let submission_key = tool_outputs_submission_key(&session_id, &thread_id, &run_id);
+    let submission_key =
+        tool_outputs_submission_key(&session_id, &thread_id, &run_id, &tool_outputs);
     if !try_begin_tool_outputs_submission(&state, &submission_key) {
-        state.writer.emit(base_event(
-            "progress",
-            &request.request_id,
-            Some(&session_id),
-            json!({ "message": "Tool outputs were already submitted for this run." }),
-        ));
-        state.writer.emit(base_event(
-            "done",
-            &request.request_id,
-            Some(&session_id),
-            json!({ "stopReason": "duplicate_tool_result" }),
-        ));
+        emit_duplicate_tool_outputs_submitted(&state, &request.request_id, &session_id);
         return Ok(());
     }
     let stream = match client
@@ -900,18 +910,7 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
         }
         Err(error) if is_duplicate_tool_outputs_error(&error) => {
             finish_tool_outputs_submission(&state, &submission_key, true);
-            state.writer.emit(base_event(
-                "progress",
-                &request.request_id,
-                Some(&session_id),
-                json!({ "message": "Tool outputs were already submitted for this run." }),
-            ));
-            state.writer.emit(base_event(
-                "done",
-                &request.request_id,
-                Some(&session_id),
-                json!({ "stopReason": "duplicate_tool_result" }),
-            ));
+            emit_duplicate_tool_outputs_submitted(&state, &request.request_id, &session_id);
             return Ok(());
         }
         Err(error) => {
@@ -919,11 +918,53 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
             return Err(error);
         }
     };
-    consume_stream(state, &request.request_id, &session_id, stream).await
+    match consume_stream(state.clone(), &request.request_id, &session_id, stream, &[]).await {
+        Ok(()) => Ok(()),
+        Err(error) if is_duplicate_tool_outputs_error(&error) => {
+            finish_tool_outputs_submission(&state, &submission_key, true);
+            emit_duplicate_tool_outputs_submitted(&state, &request.request_id, &session_id);
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
 }
 
-fn tool_outputs_submission_key(session_id: &str, thread_id: &str, run_id: &str) -> String {
-    format!("{session_id}\0{thread_id}\0{run_id}")
+fn emit_duplicate_tool_outputs_submitted(state: &BridgeState, request_id: &str, session_id: &str) {
+    state.writer.emit(base_event(
+        "progress",
+        request_id,
+        Some(session_id),
+        json!({ "message": "Tool outputs were already submitted for this run." }),
+    ));
+    state.writer.emit(base_event(
+        "done",
+        request_id,
+        Some(session_id),
+        json!({ "stopReason": "duplicate_tool_result" }),
+    ));
+}
+
+fn tool_outputs_submission_key(
+    session_id: &str,
+    thread_id: &str,
+    run_id: &str,
+    tool_outputs: &[Value],
+) -> String {
+    let mut tool_call_ids = tool_outputs
+        .iter()
+        .filter_map(|output| {
+            output
+                .get("tool_call_id")
+                .or_else(|| output.get("toolCallId"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+        })
+        .collect::<Vec<_>>();
+    tool_call_ids.sort_unstable();
+    format!(
+        "{session_id}\0{thread_id}\0{run_id}\0{}",
+        tool_call_ids.join("\0")
+    )
 }
 
 fn try_begin_tool_outputs_submission(state: &BridgeState, key: &str) -> bool {
@@ -960,6 +1001,7 @@ async fn consume_stream(
     request_id: &str,
     session_id: &str,
     mut stream: std::pin::Pin<Box<dyn futures::Stream<Item = Result<Value>> + Send>>,
+    ignored_tool_call_names: &[&str],
 ) -> Result<()> {
     let mut streaming_tool_calls = StreamingToolCallAccumulator::default();
     while let Some(chunk) = stream.next().await {
@@ -982,6 +1024,7 @@ async fn consume_stream(
         let saw_streaming_tool_call = streaming_tool_calls.push_chunk(&chunk);
         if tool_call_stream_finished(&chunk)
             && let Some(tool_calls) = streaming_tool_calls.take_tool_calls()
+            && let Some(tool_calls) = filter_ignored_tool_calls(tool_calls, ignored_tool_call_names)
         {
             emit_tool_requested_events(&state, request_id, session_id, &chunk, tool_calls);
             return Ok(());
@@ -990,7 +1033,9 @@ async fn consume_stream(
             continue;
         }
 
-        if let Some(tool_calls) = tool_calls_required_by_chunk(&chunk) {
+        if let Some(tool_calls) = tool_calls_required_by_chunk(&chunk)
+            && let Some(tool_calls) = filter_ignored_tool_calls(tool_calls, ignored_tool_call_names)
+        {
             emit_tool_requested_events(&state, request_id, session_id, &chunk, tool_calls);
             return Ok(());
         }
@@ -1350,6 +1395,28 @@ fn memory_payload(memory_mode: &str) -> (Option<String>, Option<String>) {
     }
 }
 
+fn backboard_image_generation_enabled(image_generation: Option<&str>) -> bool {
+    image_generation.is_some_and(|value| value.eq_ignore_ascii_case("auto"))
+}
+
+fn tool_definitions_for_request(mode: &str, backboard_image_generation: bool) -> Vec<Value> {
+    tool_definitions(mode)
+        .into_iter()
+        .filter(|tool| {
+            if !backboard_image_generation {
+                return true;
+            }
+            tool.pointer("/function/name")
+                .and_then(Value::as_str)
+                .is_none_or(|name| {
+                    !BACKBOARD_IMAGE_TOOL_NAMES
+                        .iter()
+                        .any(|blocked| name.eq_ignore_ascii_case(blocked))
+                })
+        })
+        .collect()
+}
+
 fn tool_definitions(mode: &str) -> Vec<Value> {
     let blocked = blocked_tools(mode);
     all_tool_definitions()
@@ -1415,6 +1482,7 @@ fn all_tool_definitions() -> Vec<Value> {
         json!({"type":"function","function":{"name":"create_directory","description":"Create a workspace directory.","parameters":{"type":"object","properties":{"path":{"type":"string"},"target_directory":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"web_search","description":"Search the web for current information. Returns summarized results and URLs when available.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}),
         json!({"type":"function","function":{"name":"web_fetch","description":"Fetch URL content as readable text.","parameters":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}}}),
+        json!({"type":"function","function":{"name":"generate_image","description":"Request image generation through Backboard media generation. Use when the user explicitly asks to create, generate, draw, render, or make an image.","parameters":{"type":"object","properties":{"prompt":{"type":"string"},"description":{"type":"string"},"size":{"type":"string"},"style":{"type":"string"}},"required":["prompt"]}}}),
         json!({"type":"function","function":{"name":"todo_write","description":"Update the agent todo list.","parameters":{"type":"object","properties":{"merge":{"type":"boolean"},"todos":{"type":"array","items":{"type":"object"}}}}}}),
         json!({"type":"function","function":{"name":"read_lints","description":"Read VS Code diagnostics for the workspace or run explicit check commands.","parameters":{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"command":{"type":"string"},"cmd":{"type":"string"},"commands":{"type":"array","items":{"type":"string"}},"working_directory":{"type":"string"},"cwd":{"type":"string"},"timeout":{"type":"integer"}}}}}),
         json!({"type":"function","function":{"name":"task","description":"Run a focused read/search sub-task with local workspace tools.","parameters":{"type":"object","properties":{"prompt":{"type":"string"},"description":{"type":"string"}}}}}),
@@ -1731,6 +1799,34 @@ fn tool_calls_required_by_chunk(chunk: &Value) -> Option<Vec<Value>> {
     None
 }
 
+fn filter_ignored_tool_calls(
+    tool_calls: Vec<Value>,
+    ignored_tool_call_names: &[&str],
+) -> Option<Vec<Value>> {
+    if ignored_tool_call_names.is_empty() {
+        return Some(tool_calls);
+    }
+    let filtered = tool_calls
+        .into_iter()
+        .filter(|tool_call| {
+            tool_call_name(tool_call).is_none_or(|name| {
+                !ignored_tool_call_names
+                    .iter()
+                    .any(|ignored| name.eq_ignore_ascii_case(ignored))
+            })
+        })
+        .collect::<Vec<_>>();
+
+    (!filtered.is_empty()).then_some(filtered)
+}
+
+fn tool_call_name(tool_call: &Value) -> Option<&str> {
+    tool_call
+        .pointer("/function/name")
+        .and_then(Value::as_str)
+        .or_else(|| tool_call.get("name").and_then(Value::as_str))
+}
+
 #[derive(Default)]
 struct StreamingToolCallAccumulator {
     calls: BTreeMap<usize, StreamingToolCall>,
@@ -2035,11 +2131,13 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        BridgeState, EventWriter, StreamingToolCallAccumulator, add_visible_models, augment_prompt,
-        is_duplicate_tool_outputs_error, is_featherless_provider, model_is_visible,
-        normalize_tool_output, thinking_payload, tool_call_stream_finished,
-        tool_calls_required_by_chunk, tool_definitions, tool_outputs_submission_key,
-        try_begin_tool_outputs_submission, validate_web_fetch_url, voice_payload,
+        BACKBOARD_IMAGE_TOOL_NAMES, BACKBOARD_SYSTEM_PROMPT, BridgeState, EventWriter,
+        StreamingToolCallAccumulator, add_visible_models, augment_prompt,
+        filter_ignored_tool_calls, is_duplicate_tool_outputs_error, is_featherless_provider,
+        model_is_visible, normalize_tool_output, thinking_payload, tool_call_stream_finished,
+        tool_calls_required_by_chunk, tool_definitions, tool_definitions_for_request,
+        tool_outputs_submission_key, try_begin_tool_outputs_submission, validate_web_fetch_url,
+        voice_payload,
     };
 
     #[test]
@@ -2086,6 +2184,7 @@ mod tests {
         assert!(prompt.contains("# Backboard Runtime System Prompt"));
         assert!(prompt.contains("Use the host's native function/tool-call channel"));
         assert!(prompt.contains("Do not print tool-call JSON"));
+        assert!(prompt.contains("Call at most one tool in a single assistant turn"));
         assert!(prompt.contains("## Runtime Context"));
         assert!(prompt.contains("Target workspace root: /tmp/example-workspace"));
         assert!(prompt.contains("Available tools for this turn:"));
@@ -2096,6 +2195,20 @@ mod tests {
         assert!(prompt.contains("make the UI better"));
         assert!(!prompt.contains("Backboard is running inside VS Code."));
         assert!(!prompt.contains("ask_user_question"));
+    }
+
+    #[test]
+    fn runtime_system_prompt_documents_all_advertised_tools() {
+        for tool in tool_definitions("free") {
+            let name = tool
+                .pointer("/function/name")
+                .and_then(|value| value.as_str())
+                .expect("tool has a function name");
+            assert!(
+                BACKBOARD_SYSTEM_PROMPT.contains(&format!("`{name}`")),
+                "missing tool documentation for {name}"
+            );
+        }
     }
 
     #[test]
@@ -2130,6 +2243,7 @@ mod tests {
                 "create_directory",
                 "web_search",
                 "web_fetch",
+                "generate_image",
                 "todo_write",
                 "read_lints",
                 "task",
@@ -2142,6 +2256,21 @@ mod tests {
                 "computer",
             ]
         );
+    }
+
+    #[test]
+    fn backboard_image_generation_omits_local_image_tool_from_request_tools() {
+        let names = tool_definitions_for_request("free", true)
+            .into_iter()
+            .filter_map(|tool| {
+                tool.pointer("/function/name")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+
+        assert!(!names.contains(&"generate_image".to_string()));
+        assert!(names.contains(&"read_file".to_string()));
     }
 
     #[test]
@@ -2259,7 +2388,18 @@ mod tests {
                 stdout: Arc::new(Mutex::new(io::stdout())),
             },
         };
-        let key = tool_outputs_submission_key("session", "thread", "run");
+        let key = tool_outputs_submission_key(
+            "session",
+            "thread",
+            "run",
+            &[json!({ "tool_call_id": "call_1", "output": "ok" })],
+        );
+        let next_tool_key = tool_outputs_submission_key(
+            "session",
+            "thread",
+            "run",
+            &[json!({ "tool_call_id": "call_2", "output": "ok" })],
+        );
 
         assert!(try_begin_tool_outputs_submission(&state, &key));
         assert!(!try_begin_tool_outputs_submission(&state, &key));
@@ -2267,6 +2407,7 @@ mod tests {
         assert!(try_begin_tool_outputs_submission(&state, &key));
         super::finish_tool_outputs_submission(&state, &key, true);
         assert!(!try_begin_tool_outputs_submission(&state, &key));
+        assert!(try_begin_tool_outputs_submission(&state, &next_tool_key));
     }
 
     #[test]
@@ -2329,6 +2470,43 @@ mod tests {
         .unwrap();
 
         assert_eq!(calls[0]["id"], "call_1");
+    }
+
+    #[test]
+    fn ignored_image_tool_calls_are_not_submitted_as_local_tool_requests() {
+        let calls = vec![json!({
+            "id": "call_image",
+            "function": {
+                "name": "generate_image",
+                "arguments": "{\"prompt\":\"dog\"}"
+            }
+        })];
+
+        assert!(filter_ignored_tool_calls(calls, BACKBOARD_IMAGE_TOOL_NAMES).is_none());
+    }
+
+    #[test]
+    fn mixed_tool_calls_keep_non_ignored_tools() {
+        let calls = vec![
+            json!({
+                "id": "call_image",
+                "function": {
+                    "name": "generate_image",
+                    "arguments": "{\"prompt\":\"dog\"}"
+                }
+            }),
+            json!({
+                "id": "call_read",
+                "function": {
+                    "name": "read_file",
+                    "arguments": "{\"path\":\"README.md\"}"
+                }
+            }),
+        ];
+
+        let filtered = filter_ignored_tool_calls(calls, BACKBOARD_IMAGE_TOOL_NAMES).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0]["id"], "call_read");
     }
 
     #[test]

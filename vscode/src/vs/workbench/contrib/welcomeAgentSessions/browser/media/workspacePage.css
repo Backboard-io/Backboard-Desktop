@@ -62,6 +62,64 @@
 	background: var(--workspace-page-background);
 }
 
+.monaco-workbench .workspace-page-titlebar {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 35px;
+	min-height: 35px;
+	border-top: 1px solid var(--vscode-titleBar-border, var(--workspace-page-border));
+	border-bottom: 1px solid var(--vscode-titleBar-border, var(--workspace-page-border));
+	background: var(--vscode-titleBar-activeBackground, #0d1117);
+	color: var(--vscode-commandCenter-foreground, var(--vscode-titleBar-activeForeground));
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .workspace-page-switch {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	height: 28px;
+	min-width: 306px;
+	padding: 2px;
+	border: 1px solid var(--vscode-commandCenter-border);
+	border-radius: 6px;
+	background: var(--vscode-commandCenter-background);
+	color: var(--vscode-commandCenter-foreground);
+	overflow: hidden;
+}
+
+.monaco-workbench .workspace-page-switch-button {
+	box-sizing: border-box;
+	height: 22px;
+	min-width: 94px;
+	padding: 0 11px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	line-height: 22px;
+	letter-spacing: 0;
+	cursor: pointer;
+}
+
+.monaco-workbench .workspace-page-switch-button:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .workspace-page-switch-button.checked {
+	background-color: var(--vscode-commandCenter-activeBackground);
+	color: var(--vscode-commandCenter-activeForeground);
+}
+
+.monaco-workbench .workspace-page-switch-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
 .monaco-workbench .workspace-page-main {
 	box-sizing: border-box;
 	display: flex;
@@ -130,13 +188,36 @@
 	cursor: pointer;
 }
 
+.monaco-workbench .workspace-page-text-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	height: 28px;
+	padding: 0 10px;
+	border: 1px solid color-mix(in srgb, var(--workspace-page-accent) 42%, var(--workspace-page-border));
+	border-radius: 5px;
+	background: var(--workspace-page-accent-soft);
+	color: var(--workspace-page-text);
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 18px;
+	cursor: pointer;
+}
+
 .monaco-workbench .workspace-page-icon-button:hover {
 	background: var(--workspace-page-row-hover);
 	color: var(--workspace-page-text);
 }
 
+.monaco-workbench .workspace-page-text-button:hover {
+	background: color-mix(in srgb, var(--workspace-page-accent) 20%, transparent);
+}
+
 .monaco-workbench .workspace-page-icon-button:focus-visible,
-.monaco-workbench .workspace-page-agent-card:focus-visible {
+.monaco-workbench .workspace-page-text-button:focus-visible,
+.monaco-workbench .workspace-page-agent-card:focus-visible,
+.monaco-workbench .workspace-page-placeholder-card:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);
 	outline-offset: 1px;
 }
@@ -171,6 +252,11 @@
 
 .monaco-workbench .workspace-page-agent-card:hover {
 	border-color: color-mix(in srgb, var(--workspace-page-accent) 36%, var(--workspace-page-border));
+}
+
+.monaco-workbench .workspace-page-agent-card.selected {
+	border-color: color-mix(in srgb, var(--workspace-page-accent) 64%, var(--workspace-page-border));
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--workspace-page-accent) 48%, transparent);
 }
 
 .monaco-workbench .workspace-page-agent-card:focus-visible {
@@ -363,7 +449,12 @@
 .monaco-workbench .workspace-page-placeholder-card {
 	justify-content: space-between;
 	background: var(--workspace-page-placeholder);
-	pointer-events: none;
+	cursor: pointer;
+}
+
+.monaco-workbench .workspace-page-placeholder-card:hover {
+	border-color: color-mix(in srgb, var(--workspace-page-accent) 28%, var(--workspace-page-border));
+	background: color-mix(in srgb, var(--workspace-page-accent) 6%, var(--workspace-page-placeholder));
 }
 
 .monaco-workbench .workspace-page-placeholder-header,
@@ -390,6 +481,18 @@
 	width: 14px;
 	height: 14px;
 	border-radius: 4px;
+}
+
+.monaco-workbench .workspace-page-placeholder-add {
+	color: var(--workspace-page-muted);
+	font-size: 14px;
+}
+
+.monaco-workbench .workspace-page-placeholder-label {
+	color: var(--workspace-page-muted);
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 18px;
 }
 
 .monaco-workbench .workspace-page-placeholder-line {
@@ -458,6 +561,78 @@
 	font-size: 13px;
 }
 
+.monaco-workbench .workspace-page-terminal {
+	display: flex;
+	flex: 0 0 154px;
+	min-height: 0;
+	flex-direction: column;
+	border-bottom: 1px solid var(--workspace-page-border);
+	background: #101010;
+}
+
+.monaco-workbench .workspace-page-terminal.collapsed {
+	flex-basis: 31px;
+}
+
+.monaco-workbench .workspace-page-terminal-header {
+	display: grid;
+	grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+	flex: 0 0 31px;
+	min-height: 31px;
+	padding: 0 10px;
+	border-bottom: 1px solid var(--workspace-page-border);
+	color: var(--workspace-page-muted);
+	font-size: 11px;
+	line-height: 18px;
+}
+
+.monaco-workbench .workspace-page-terminal-title,
+.monaco-workbench .workspace-page-terminal-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.monaco-workbench .workspace-page-terminal-title {
+	color: var(--workspace-page-text);
+	font-weight: 600;
+}
+
+.monaco-workbench .workspace-page-terminal-meta {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .workspace-page-terminal-actions {
+	justify-content: flex-end;
+}
+
+.monaco-workbench .workspace-page-terminal-output {
+	box-sizing: border-box;
+	flex: 1 1 auto;
+	min-height: 0;
+	padding: 10px 12px;
+	overflow: auto;
+	font-family: var(--monaco-monospace-font);
+	font-size: 12px;
+	line-height: 18px;
+}
+
+.monaco-workbench .workspace-page-terminal-line {
+	overflow: hidden;
+	color: #c8c8c8;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .workspace-page-terminal-line:first-child {
+	color: var(--workspace-page-accent);
+}
+
 .monaco-workbench .workspace-page-statusbar {
 	display: flex;
 	align-items: center;
@@ -484,17 +659,13 @@
 }
 
 @media (max-width: 1100px) {
-	.monaco-workbench .workspace-page-main {
-		padding: 20px;
-	}
-
 	.monaco-workbench .workspace-page-agent-grid {
-		grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 }
 
 @media (max-width: 820px) {
-	.monaco-workbench .workspace-page-shell {
-		grid-template-columns: 1fr;
+	.monaco-workbench .workspace-page-agent-grid {
+		grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
 	}
 }

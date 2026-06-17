@@ -16,7 +16,7 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { IActionViewItemService } from '../../../../platform/actions/browser/actionViewItemService.js';
 import { ActionWidgetDropdownActionViewItem } from '../../../../platform/actions/browser/actionWidgetDropdownActionViewItem.js';
-import { MenuId, registerAction2, Action2, MenuRegistry, SubmenuItemAction } from '../../../../platform/actions/common/actions.js';
+import { MenuId, registerAction2, Action2, SubmenuItemAction } from '../../../../platform/actions/common/actions.js';
 import { IActionWidgetService } from '../../../../platform/actionWidget/browser/actionWidget.js';
 import { IActionWidgetDropdownAction } from '../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
@@ -31,7 +31,7 @@ import { logSessionsInteraction } from '../../../common/sessionsTelemetry.js';
 import { IWorkbenchLayoutService } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { SessionsCategories } from '../../../common/categories.js';
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
-import { ActiveSessionWorkspaceIsVirtualContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { ActiveSessionWorkspaceIsVirtualContext } from '../../../common/contextkeys.js';
 import { ISession } from '../../../services/sessions/common/session.js';
 import { IChatWidgetService } from '../../../../workbench/contrib/chat/browser/chat.js';
 import { Menus } from '../../../browser/menus.js';
@@ -846,41 +846,6 @@ class ChevronActionWidgetDropdown extends ActionWidgetDropdownActionViewItem {
 		return null;
 	}
 }
-
-// Register the Run split button submenu on the workbench title bar (background sessions only).
-// Placed in the center-right toolbar, immediately before the "Open in VS Code" action (order 7).
-MenuRegistry.appendMenuItem(Menus.TitleBarCenterRight, {
-	submenu: RunScriptDropdownMenuId,
-	isSplitButton: true,
-	title: localize2('run', "Run"),
-	icon: Codicon.play,
-	group: 'navigation',
-	order: 6,
-	when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), ActiveSessionWorkspaceIsVirtualContext.toNegated())
-});
-
-// Disabled placeholder shown in the titlebar when the active session does not support running scripts
-class RunScriptNotAvailableAction extends Action2 {
-	constructor() {
-		super({
-			id: 'workbench.action.agentSessions.runScript.notAvailable',
-			title: localize2('run', "Run"),
-			tooltip: localize('runScriptNotAvailableTooltip', "Run Task is not available for this session type"),
-			icon: Codicon.play,
-			precondition: ContextKeyExpr.false(),
-			menu: [{
-				id: Menus.TitleBarCenterRight,
-				group: 'navigation',
-				order: 6,
-				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), ActiveSessionWorkspaceIsVirtualContext)
-			}]
-		});
-	}
-
-	override run(): void { }
-}
-
-registerAction2(RunScriptNotAvailableAction);
 
 // Register F5 keybinding at module level to ensure it's in the registry
 // before the keybinding resolver is cached. The command handler is

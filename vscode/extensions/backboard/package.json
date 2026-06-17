@@ -6,14 +6,13 @@
   "publisher": "backboard",
   "license": "MIT",
   "engines": {
-    "vscode": "^2.0.2"
+    "vscode": "^1.125.0"
   },
   "main": "./out/extension",
   "categories": [
     "AI"
   ],
   "activationEvents": [
-    "onStartupFinished",
     "onView:backboard.panel",
     "onCommand:backboard.newChat",
     "onCommand:backboard.showHistory",
@@ -271,7 +270,7 @@
           "backboard.updates.enabled": {
             "type": "boolean",
             "default": true,
-            "description": "Check the Backboard Studio S3 manifest for IDE updates on startup."
+            "description": "Check the Backboard Studio S3 manifest for IDE updates after Backboard activates."
           },
           "backboard.updates.manifestBaseUrl": {
             "type": "string",

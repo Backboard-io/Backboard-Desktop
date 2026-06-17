@@ -20,12 +20,11 @@ suite('RunScriptContribution', () => {
 
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('contributes run dropdown to TitleBarCenterRight before Open in VS Code', () => {
+	test('does not contribute run dropdown to TitleBarCenterRight', () => {
 		const items = MenuRegistry.getMenuItems(titleBarCenterRightMenu);
 
 		const runAction = items.find(item => isISubmenuItem(item) && item.submenu.id === 'AgentSessionsRunScriptDropdown');
 
-		assert.ok(runAction, 'run dropdown should be contributed to TitleBarCenterRight');
-		assert.strictEqual(runAction.order, 6);
+		assert.strictEqual(runAction, undefined);
 	});
 });

@@ -32,7 +32,7 @@ import { SessionStatusIcon } from '../sessionStatusIcon.js';
 
 /**
  * The session header shown at the top of a session view. It surfaces the session
- * identity (status icon + title), a meta row (workspace · branch · diff stats),
+ * identity (status icon + title), a meta row (branch · diff stats),
  * and the session toolbars (e.g. Run, Open in VS Code, New Chat).
  *
  * It is intentionally decoupled from the {@link ChatCompositeBar} (the chat tab
@@ -95,7 +95,7 @@ export class SessionHeader extends Disposable {
 		this._container = $('.chat-composite-bar.session-header-bar');
 
 		// Header: a status icon column alongside a main column that stacks the title
-		// row (title + actions) and the meta row (workspace · branch · diff). This
+		// row (title + actions) and the meta row (branch · diff). This
 		// mirrors the sessions list so the meta row aligns under the title rather
 		// than under the status icon.
 		const header = $('.chat-composite-bar-header');
@@ -269,7 +269,7 @@ export class SessionHeader extends Disposable {
 		this._titleTextEl.textContent = session.title.read(reader) || localize('agentSessions.newSession', "New Sandbox");
 		this._titleEl.classList.toggle('editable', this._isTitleEditable());
 
-		// Meta row: workspace · branch · diff stats
+		// Meta row: branch · diff stats
 		reset(this._metaRow);
 		const workspace = session.workspace.read(reader);
 		const branch = workspace?.folders.find(folder => folder.gitRepository?.branchName)?.gitRepository?.branchName?.trim();
@@ -280,20 +280,6 @@ export class SessionHeader extends Disposable {
 				this._metaRow.appendChild($('span.chat-composite-bar-meta-separator'));
 			}
 		};
-
-		if (workspace?.label) {
-			// Mirror the sessions list / hover icon logic: cloud for virtual workspaces,
-			// folder when the session runs in the repo checkout, worktree otherwise.
-			const isWorkspaceFolder = workspace.folders.length > 0 && workspace.folders[0]?.gitRepository?.workTreeUri === undefined;
-			const workspaceIcon = workspace.isVirtualWorkspace ? Codicon.cloudCompact : isWorkspaceFolder ? Codicon.folderCompact : Codicon.worktreeCompact;
-			const workspaceEl = $('span.chat-composite-bar-meta-workspace');
-			workspaceEl.appendChild($('span.chat-composite-bar-meta-workspace-icon' + ThemeIcon.asCSSSelector(workspaceIcon)));
-			const workspaceLabel = $('span.chat-composite-bar-meta-workspace-label');
-			workspaceLabel.textContent = workspace.label;
-			workspaceEl.appendChild(workspaceLabel);
-			this._metaRow.appendChild(workspaceEl);
-			hasMeta = true;
-		}
 
 		if (branch) {
 			appendSeparator();

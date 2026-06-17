@@ -24,6 +24,7 @@
 	padding: 0 10px;
 	box-sizing: border-box;
 	container-type: inline-size;
+	overflow: visible;
 }
 
 /* Header: a status icon column next to a main column (title row + meta row).
@@ -144,7 +145,7 @@
 	margin-left: auto;
 }
 
-/* Meta row: workspace · branch · diff stats */
+/* Meta row: branch · diff stats */
 .chat-composite-bar-meta-row {
 	display: flex;
 	align-items: center;
@@ -158,7 +159,6 @@
 	white-space: nowrap;
 }
 
-.chat-composite-bar-meta-workspace-label,
 .chat-composite-bar-meta-branch-label {
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -166,7 +166,6 @@
 	min-width: 0;
 }
 
-.chat-composite-bar-meta-workspace,
 .chat-composite-bar-meta-branch {
 	display: inline-flex;
 	align-items: center;
@@ -175,7 +174,6 @@
 	overflow: hidden;
 }
 
-.monaco-workbench .chat-composite-bar-meta-workspace-icon.codicon[class*='codicon-'],
 .monaco-workbench .chat-composite-bar-meta-branch-icon.codicon[class*='codicon-'] {
 	display: inline-flex;
 	align-items: center;
@@ -209,7 +207,7 @@
 	display: flex;
 	align-items: center;
 	height: 35px;
-	overflow: hidden;
+	overflow: visible;
 	gap: 8px;
 }
 
@@ -234,6 +232,182 @@
 	align-items: center;
 	flex-shrink: 0;
 	margin-left: auto;
+}
+
+.chat-composite-bar-history {
+	position: relative;
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+}
+
+.chat-composite-bar-history.empty {
+	display: none;
+}
+
+.chat-composite-bar-history-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	height: 26px;
+	min-width: 36px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: color-mix(in srgb, var(--session-view-foreground) 8%, transparent);
+	color: var(--chat-tab-inactive-foreground);
+	font: inherit;
+	font-size: var(--vscode-agents-fontSize-label1, 12px);
+	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+	font-variant-numeric: tabular-nums;
+	cursor: pointer;
+}
+
+.chat-composite-bar-history-button:hover,
+.chat-composite-bar-history.open .chat-composite-bar-history-button {
+	background: color-mix(in srgb, var(--session-view-foreground) 14%, transparent);
+	color: var(--chat-tab-active-foreground);
+}
+
+.chat-composite-bar-history-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.chat-composite-bar-history-icon {
+	font-size: var(--vscode-codiconFontSize, 16px);
+}
+
+.chat-composite-bar-history-popover {
+	position: absolute;
+	top: calc(100% + 4px);
+	right: -2px;
+	z-index: 40;
+	display: none;
+	box-sizing: border-box;
+	width: min(284px, calc(100cqi - 12px));
+	max-height: min(238px, 50vh);
+	padding: 0;
+	border: 1px solid color-mix(in srgb, var(--session-view-foreground) 14%, transparent);
+	border-radius: var(--vscode-cornerRadius-large);
+	background: color-mix(in srgb, var(--vscode-agentsChatInput-background, var(--vscode-quickInput-background, var(--vscode-editorWidget-background))) 72%, transparent);
+	backdrop-filter: blur(24px) saturate(1.1);
+	-webkit-backdrop-filter: blur(24px) saturate(1.1);
+	box-shadow: var(--vscode-shadow-xl, 0 12px 32px color-mix(in srgb, var(--vscode-widget-shadow, #000) 36%, transparent));
+	color: var(--vscode-quickInput-foreground, var(--vscode-foreground));
+	overflow: hidden;
+}
+
+.chat-composite-bar-history.open .chat-composite-bar-history-popover {
+	display: block;
+}
+
+.chat-composite-bar-history-titlebar {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	height: 30px;
+	padding: 0 5px 0 10px;
+	box-sizing: border-box;
+	border-bottom: 1px solid color-mix(in srgb, var(--session-view-foreground) 10%, transparent);
+	color: var(--vscode-titleBar-activeForeground, var(--vscode-foreground));
+}
+
+.chat-composite-bar-history-title-icon {
+	font-size: var(--vscode-codiconFontSize, 16px);
+	color: var(--vscode-descriptionForeground);
+}
+
+.chat-composite-bar-history-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--vscode-agents-fontSize-label1, 12px);
+	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+}
+
+.chat-composite-bar-history-close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-icon-foreground);
+	cursor: pointer;
+}
+
+.chat-composite-bar-history-close:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.chat-composite-bar-history-close:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.chat-composite-bar-history-list {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	max-height: calc(min(238px, 50vh) - 30px);
+	padding: 4px;
+	box-sizing: border-box;
+	overflow-y: auto;
+}
+
+.chat-composite-bar-history-item {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	column-gap: 10px;
+	width: 100%;
+	min-height: 30px;
+	padding: 4px 7px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.chat-composite-bar-history-item:hover,
+.chat-composite-bar-history-item:focus-visible {
+	background: color-mix(in srgb, var(--vscode-list-hoverBackground) 72%, transparent);
+	outline: none;
+}
+
+.chat-composite-bar-history-item:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.chat-composite-bar-history-item-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--vscode-agents-fontSize-label1, 12px);
+	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+	color: var(--vscode-quickInput-foreground, var(--vscode-foreground));
+}
+
+.chat-composite-bar-history-item-meta {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--vscode-agents-fontSize-label2, 11px);
+	color: var(--vscode-descriptionForeground);
+	font-variant-numeric: tabular-nums;
 }
 
 /* Keep header toolbar buttons from dictating the row height */

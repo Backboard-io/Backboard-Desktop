@@ -6,7 +6,7 @@
 import './media/chatCompositeBar.css';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../base/common/event.js';
-import { $, addDisposableListener, DisposableResizeObserver, EventType, getWindow, reset } from '../../../base/browser/dom.js';
+import { $, addDisposableGenericMouseDownListener, addDisposableListener, DisposableResizeObserver, EventType, getWindow, reset } from '../../../base/browser/dom.js';
 import { ScrollableElement } from '../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { ScrollbarVisibility } from '../../../base/common/scrollable.js';
 import { autorun } from '../../../base/common/observable.js';
@@ -28,6 +28,7 @@ import { applySessionBarThemeColors } from './sessionBarStyles.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../platform/actions/browser/toolbar.js';
 import { Menus } from '../menus.js';
+import { fromNow } from '../../../base/common/date.js';
 
 interface IChatTab {
 	readonly chat: IChat;
@@ -50,6 +51,9 @@ export class ChatCompositeBar extends Disposable {
 	private readonly _tabsContainer: HTMLElement;
 	private readonly _tabsScrollbar: ScrollableElement;
 	private readonly _toolbar: MenuWorkbenchToolBar;
+	private readonly _historyContainer: HTMLElement;
+	private readonly _historyButton: HTMLButtonElement;
+	private readonly _historyList: HTMLElement;
 	private readonly _tabs: IChatTab[] = [];
 	private readonly _tabDisposables = this._register(new DisposableStore());
 
@@ -112,6 +116,55 @@ export class ChatCompositeBar extends Disposable {
 			highlightToggledItems: true,
 			toolbarOptions: { primaryGroup: () => true, useSeparatorsInPrimaryActions: true },
 		}));
+
+		this._historyContainer = $('.chat-composite-bar-history');
+		this._tabsRow.appendChild(this._historyContainer);
+
+		this._historyButton = $('button.chat-composite-bar-history-button') as HTMLButtonElement;
+		this._historyButton.type = 'button';
+		this._historyButton.setAttribute('aria-haspopup', 'dialog');
+		this._historyButton.setAttribute('aria-expanded', 'false');
+		this._historyContainer.appendChild(this._historyButton);
+
+		const historyPopover = $('.chat-composite-bar-history-popover');
+		historyPopover.setAttribute('role', 'dialog');
+		historyPopover.setAttribute('aria-label', localize('chatHistoryAriaLabel', "Chat History"));
+		const historyTitlebar = $('.chat-composite-bar-history-titlebar');
+		historyTitlebar.appendChild($('span.chat-composite-bar-history-title-icon' + ThemeIcon.asCSSSelector(Codicon.history)));
+		historyTitlebar.appendChild($('span.chat-composite-bar-history-title', undefined, localize('chatHistoryTitle', "History")));
+		const historyCloseButton = $('button.chat-composite-bar-history-close' + ThemeIcon.asCSSSelector(Codicon.close)) as HTMLButtonElement;
+		historyCloseButton.type = 'button';
+		historyCloseButton.title = localize('closeChatHistory', "Close Chat History");
+		historyCloseButton.setAttribute('aria-label', localize('closeChatHistory', "Close Chat History"));
+		historyTitlebar.appendChild(historyCloseButton);
+		historyPopover.appendChild(historyTitlebar);
+		this._historyList = $('.chat-composite-bar-history-list');
+		historyPopover.appendChild(this._historyList);
+		this._historyContainer.appendChild(historyPopover);
+
+		this._register(addDisposableListener(this._historyButton, EventType.CLICK, e => {
+			e.preventDefault();
+			e.stopPropagation();
+			this._setHistoryOpen(!this._historyContainer.classList.contains('open'));
+		}));
+		this._register(addDisposableListener(this._historyContainer, EventType.KEY_DOWN, (e: KeyboardEvent) => {
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				this._setHistoryOpen(false);
+				this._historyButton.focus();
+			}
+		}));
+		this._register(addDisposableListener(historyCloseButton, EventType.CLICK, e => {
+			e.preventDefault();
+			e.stopPropagation();
+			this._setHistoryOpen(false);
+			this._historyButton.focus();
+		}));
+		this._register(addDisposableGenericMouseDownListener(getWindow(this._container).document, e => {
+			if (this._historyContainer.classList.contains('open') && e.target instanceof Node && !this._historyContainer.contains(e.target)) {
+				this._setHistoryOpen(false);
+			}
+		}, true));
 
 		// Keep the visual scrollbar in sync with native scrolling inside the tabs container
 		this._register(addDisposableListener(this._tabsContainer, EventType.SCROLL, () => {
@@ -179,9 +232,11 @@ export class ChatCompositeBar extends Disposable {
 		this._tabs.length = 0;
 		reset(this._tabsContainer);
 
-		for (const chat of chats) {
-			this._createTab(chat, chat.resource.toString() === mainChatId);
+		const activeChat = chats.find(chat => chat.resource.toString() === activeChatId);
+		if (activeChat) {
+			this._createTab(activeChat, activeChat.resource.toString() === mainChatId);
 		}
+		this._rebuildHistory(chats, activeChatId);
 
 		this._updateActiveTab(activeChatId);
 		this._updateScrollDimensions();
@@ -314,6 +369,78 @@ export class ChatCompositeBar extends Disposable {
 		}));
 
 		this._tabs.push({ chat: chat, element: tab });
+	}
+
+	private _rebuildHistory(chats: readonly IChat[], activeChatId: string): void {
+		const historyChats = chats.filter(chat => chat.resource.toString() !== activeChatId);
+		this._historyContainer.classList.toggle('empty', historyChats.length === 0);
+		this._historyButton.disabled = historyChats.length === 0;
+		this._historyButton.title = localize('showChatHistory', "Show Chat History");
+		this._historyButton.setAttribute('aria-label', localize('showChatHistoryWithCount', "Show Chat History ({0})", historyChats.length));
+		this._historyButton.replaceChildren(
+			$('span.chat-composite-bar-history-icon' + ThemeIcon.asCSSSelector(Codicon.history)),
+			$('span.chat-composite-bar-history-count', undefined, String(historyChats.length))
+		);
+
+		reset(this._historyList);
+		for (const chat of historyChats) {
+			this._createHistoryItem(chat);
+		}
+
+		if (historyChats.length === 0) {
+			this._setHistoryOpen(false);
+		}
+	}
+
+	private _createHistoryItem(chat: IChat): void {
+		const item = $('button.chat-composite-bar-history-item') as HTMLButtonElement;
+		item.type = 'button';
+
+		const title = $('span.chat-composite-bar-history-item-title');
+		const meta = $('span.chat-composite-bar-history-item-meta');
+		item.appendChild(title);
+		item.appendChild(meta);
+
+		this._tabDisposables.add(autorun(reader => {
+			title.textContent = chat.title.read(reader);
+			const updatedAt = chat.updatedAt.read(reader);
+			const status = chat.status.read(reader);
+			meta.textContent = `${this._statusLabel(status)} · ${fromNow(updatedAt, true, true)}`;
+		}));
+
+		this._tabDisposables.add(addDisposableListener(item, EventType.CLICK, () => {
+			this._setHistoryOpen(false);
+			this._onTabClicked(chat);
+		}));
+		this._tabDisposables.add(addDisposableListener(item, EventType.KEY_DOWN, (e: KeyboardEvent) => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				this._setHistoryOpen(false);
+				this._onTabClicked(chat);
+			}
+		}));
+
+		this._historyList.appendChild(item);
+	}
+
+	private _statusLabel(status: SessionStatus): string {
+		switch (status) {
+			case SessionStatus.Untitled:
+				return localize('chatHistoryStatusUntitled', "Draft");
+			case SessionStatus.InProgress:
+				return localize('chatHistoryStatusInProgress', "Running");
+			case SessionStatus.NeedsInput:
+				return localize('chatHistoryStatusNeedsInput', "Needs Input");
+			case SessionStatus.Completed:
+				return localize('chatHistoryStatusCompleted', "Done");
+			case SessionStatus.Error:
+				return localize('chatHistoryStatusError', "Failed");
+		}
+	}
+
+	private _setHistoryOpen(open: boolean): void {
+		this._historyContainer.classList.toggle('open', open);
+		this._historyButton.setAttribute('aria-expanded', String(open));
 	}
 
 	private _onTabClicked(chat: IChat): void {

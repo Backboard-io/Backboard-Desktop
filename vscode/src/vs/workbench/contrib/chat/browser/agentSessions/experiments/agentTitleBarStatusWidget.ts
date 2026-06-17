@@ -71,9 +71,7 @@ type AgentStatusClickClassification = {
 const QUICK_OPEN_ACTION_ID = 'workbench.action.quickOpenWithModes';
 const AGENT_SESSIONS_WELCOME_INPUT_TYPE_ID = 'workbench.editors.agentSessionsWelcomeInput';
 const OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openWorkspaceInAgentsWindow';
-const OPEN_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.openWorkspacePage';
 const CLOSE_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.closeWorkspacePage';
-const WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY = 'workspacePageVisible';
 
 // Storage key for filter state
 const FILTER_STORAGE_KEY = 'agentSessions.filterExcludes.agentsessionsviewerfiltersubmenu';
@@ -81,7 +79,7 @@ const FILTER_STORAGE_KEY = 'agentSessions.filterExcludes.agentsessionsviewerfilt
 const PREVIOUS_FILTER_STORAGE_KEY = 'agentSessions.filterExcludes.previousUserFilter';
 
 type AgentStatusSettingMode = 'hidden' | 'badge' | 'compact';
-type TitlebarPage = 'sandbox' | 'editor' | 'workspace';
+type TitlebarPage = 'sandbox' | 'editor';
 
 function shouldForceHiddenAgentStatus(configurationService: IConfigurationService, contextKeyService: IContextKeyService): boolean {
 	// Hide all agent distractions while in Zen mode
@@ -222,7 +220,7 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 
 		// Re-render when Zen mode toggles, to hide all agent distractions
 		this._register(this.contextKeyService.onDidChangeContext(e => {
-			if (e.affectsSome(new Set([InEditorZenModeContext.key, WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY]))) {
+			if (e.affectsSome(new Set([InEditorZenModeContext.key]))) {
 				this._lastRenderState = undefined; // Force re-render
 				this._render();
 			}
@@ -530,7 +528,6 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 				await this.commandService.executeCommand(CLOSE_WORKSPACE_PAGE_COMMAND_ID);
 				return this.commandService.executeCommand('workbench.action.focusActiveEditorGroup');
 			}),
-			this._createTitlebarSwitchButton(disposables, 'workspace', localize('workspaceView', "Workspace"), () => this.commandService.executeCommand(OPEN_WORKSPACE_PAGE_COMMAND_ID)),
 		];
 		for (const button of buttons) {
 			switchElement.appendChild(button);
@@ -546,7 +543,7 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 		}
 
 		const hoverDelegate = getDefaultHoverDelegate('mouse');
-		disposables.add(this.hoverService.setupManagedHover(hoverDelegate, switchElement, localize('ideViewSwitchTooltip', "Switch between Sandbox, Editor, and Workspace")));
+		disposables.add(this.hoverService.setupManagedHover(hoverDelegate, switchElement, localize('ideViewSwitchTooltip', "Switch between Sandbox and Editor")));
 	}
 
 	private _createTitlebarSwitchButton(disposables: DisposableStore, page: TitlebarPage, label: string, run: () => Promise<unknown>): HTMLButtonElement {
@@ -567,10 +564,6 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 	}
 
 	private _getActiveTitlebarPage(): TitlebarPage {
-		if (this.contextKeyService.getContextKeyValue<boolean>(WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY)) {
-			return 'workspace';
-		}
-
 		switch (this.editorService.activeEditor?.typeId) {
 			case AGENT_SESSIONS_WELCOME_INPUT_TYPE_ID:
 				return 'sandbox';

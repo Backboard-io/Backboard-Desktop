@@ -775,15 +775,15 @@
 
 /* Backboard settings treatment, adapted from the Zed settings layout. */
 .settings-editor {
-	--bb-settings-panel-background: #fbfaf8;
-	--bb-settings-sidebar-background: #f8f7f4;
-	--bb-settings-row-border: #dedbd5;
-	--bb-settings-row-hover: #f0efeb;
-	--bb-settings-row-selected: #ebe9e3;
-	--bb-settings-muted-foreground: #536676;
-	--bb-settings-accent: #191817;
+	--bb-settings-panel-background: var(--vscode-editor-background);
+	--bb-settings-sidebar-background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	--bb-settings-row-border: var(--vscode-settings-headerBorder, var(--vscode-sideBar-border, var(--vscode-panel-border, transparent)));
+	--bb-settings-row-hover: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground, transparent));
+	--bb-settings-row-selected: var(--vscode-list-inactiveSelectionBackground, var(--vscode-list-activeSelectionBackground, var(--vscode-toolbar-activeBackground, transparent)));
+	--bb-settings-muted-foreground: var(--vscode-descriptionForeground);
+	--bb-settings-accent: var(--vscode-foreground);
 	--bb-settings-control-background: var(--vscode-input-background);
-	--bb-settings-control-border: #d7d3cc;
+	--bb-settings-control-border: var(--vscode-input-border, var(--vscode-settings-headerBorder, transparent));
 	font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	max-width: 1520px;
 	background: var(--bb-settings-panel-background);
@@ -1030,9 +1030,9 @@
 	height: calc(100% - 48px);
 	margin: 24px auto;
 	max-width: 1148px;
-	border: 1px solid #d7d3cc;
+	border: 1px solid var(--bb-settings-row-border);
 	border-radius: 12px;
-	box-shadow: 0 18px 42px #00000012;
+	box-shadow: 0 18px 42px var(--vscode-widget-shadow, transparent);
 	overflow: hidden;
 }
 
@@ -1047,7 +1047,7 @@
 	max-width: none;
 	margin: 0;
 	padding: 0;
-	border-bottom: 1px solid #d7d3cc;
+	border-bottom: 1px solid var(--bb-settings-row-border);
 }
 
 .monaco-workbench.vs-dark .settings-editor > .settings-header,
@@ -1063,7 +1063,7 @@
 	justify-content: center;
 	font-size: 13px;
 	font-weight: 500;
-	color: #111111;
+	color: var(--vscode-foreground);
 }
 
 .monaco-workbench.vs-dark .settings-titlebar,
@@ -1079,8 +1079,8 @@
 	height: 10px;
 	margin-top: -5px;
 	border-radius: 50%;
-	background: #bfbdb8;
-	box-shadow: 20px 0 0 #bfbdb8, 40px 0 0 #bfbdb8;
+	background: var(--vscode-descriptionForeground);
+	box-shadow: 20px 0 0 var(--vscode-descriptionForeground), 40px 0 0 var(--vscode-descriptionForeground);
 }
 
 .settings-editor > .settings-body {
@@ -1094,8 +1094,8 @@
 .settings-editor > .settings-body .settings-toc-container {
 	display: flex;
 	flex-direction: column;
-	background: #f7f6f3;
-	border-right: 1px solid #dedbd5;
+	background: var(--bb-settings-sidebar-background);
+	border-right: 1px solid var(--bb-settings-row-border);
 }
 
 .settings-sidebar-header {
@@ -1114,7 +1114,7 @@
 	width: 30px;
 	height: 40px;
 	flex: 0 0 auto;
-	background: #111111;
+	background: var(--vscode-foreground);
 	color: transparent;
 	font-size: 0;
 	-webkit-mask: url("../../../welcomeGettingStarted/browser/media/backboard_mark.svg") center / contain no-repeat;
@@ -1122,7 +1122,7 @@
 }
 
 .settings-account-name {
-	color: #111111;
+	color: var(--vscode-foreground);
 	font-size: 15px;
 	font-weight: 650;
 	line-height: 20px;
@@ -1135,9 +1135,9 @@
 
 .settings-sidebar-header > .search-container > .suggest-input-container {
 	height: 34px;
-	border: 1px solid #d7d3cc;
+	border: 1px solid var(--bb-settings-control-border);
 	border-radius: 7px;
-	background: #efeeeb;
+	background: var(--bb-settings-control-background);
 }
 
 .settings-sidebar-header > .search-container > .search-container-widgets {
@@ -1153,7 +1153,7 @@
 	margin: 0;
 	padding: 0;
 	border: 0;
-	border-top: 1px solid #dedbd5;
+	border-top: 1px solid var(--bb-settings-row-border);
 }
 
 .settings-sidebar-header > .settings-header-controls .settings-target-container {
@@ -1170,21 +1170,21 @@
 	border: 0;
 	border-radius: 6px;
 	padding: 5px 9px;
-	color: #5f5b55;
+	color: var(--bb-settings-muted-foreground);
 	font-size: 12px;
 	font-weight: 500;
 }
 
 .settings-sidebar-header > .settings-header-controls .settings-tabs-widget .action-label.checked {
-	background: #e7e5df;
-	color: #111111;
+	background: var(--bb-settings-row-selected);
+	color: var(--vscode-foreground);
 }
 
 .settings-editor > .settings-body .settings-toc-wrapper {
 	flex: 1 1 auto;
 	min-height: 0;
 	padding: 0 15px 16px;
-	border-top: 1px solid #dedbd5;
+	border-top: 1px solid var(--bb-settings-row-border);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row {
@@ -1194,19 +1194,19 @@
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row .settings-toc-entry {
 	line-height: 28px;
 	font-size: 13px;
-	color: #5b5752;
+	color: var(--bb-settings-muted-foreground);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected {
-	background: #e7e5df;
+	background: var(--bb-settings-row-selected);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected .settings-toc-entry {
-	color: #111111;
+	color: var(--vscode-foreground);
 }
 
 .settings-editor > .settings-body .settings-tree-container {
-	background: #fbfaf8;
+	background: var(--bb-settings-panel-background);
 }
 
 .settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents,
@@ -1218,7 +1218,7 @@
 
 .settings-editor > .settings-body .settings-tree-container .settings-group-title-label {
 	padding: 20px 0 10px;
-	border-bottom-color: #d7d3cc;
+	border-bottom-color: var(--bb-settings-row-border);
 	font-size: 15px;
 	font-weight: 650;
 }
@@ -1243,14 +1243,14 @@
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-label,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-category {
-	color: #111111;
+	color: var(--vscode-foreground);
 	font-size: 13px;
 	font-weight: 500;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description {
 	margin-top: 2px;
-	color: #5f5b55;
+	color: var(--bb-settings-muted-foreground);
 	font-size: 12px;
 	line-height: 16px;
 }
@@ -1266,10 +1266,10 @@
 .settings-editor > .settings-body .settings-tree-container .setting-item-control textarea,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button {
 	min-height: 30px;
-	border: 1px solid #d7d3cc;
+	border: 1px solid var(--bb-settings-control-border);
 	border-radius: 7px;
-	background: #ffffff;
-	color: #4d4944;
+	background: var(--bb-settings-control-background);
+	color: var(--vscode-input-foreground);
 	box-sizing: border-box;
 	text-decoration: none;
 }
@@ -1286,7 +1286,7 @@
 	height: 24px;
 	border: 0;
 	border-radius: 999px;
-	background: #7d7b77;
+	background: var(--vscode-settings-checkboxBackground, var(--vscode-input-background));
 	position: relative;
 }
 
@@ -1302,7 +1302,7 @@
 	width: 18px;
 	height: 18px;
 	border-radius: 50%;
-	background: #ffffff;
+	background: var(--vscode-settings-checkboxForeground, var(--vscode-input-foreground));
 	transition: transform 120ms ease;
 }
 
@@ -1329,6 +1329,19 @@
 /* Backboard settings correction: the Settings editor already lives in a framed
  * workbench surface, so avoid rendering a second window inside it. */
 .settings-editor {
+	--backboard-settings-background: var(--vscode-editor-background);
+	--backboard-settings-sidebar-background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	--backboard-settings-foreground: var(--vscode-foreground);
+	--backboard-settings-muted-foreground: var(--vscode-descriptionForeground);
+	--backboard-settings-border: var(--vscode-settings-headerBorder, var(--vscode-sideBar-border, var(--vscode-panel-border, transparent)));
+	--backboard-settings-input-background: var(--vscode-input-background);
+	--backboard-settings-input-foreground: var(--vscode-input-foreground);
+	--backboard-settings-input-border: var(--vscode-input-border, var(--vscode-settings-headerBorder, transparent));
+	--backboard-settings-focus-border: var(--vscode-focusBorder);
+	--backboard-settings-hover-background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground, transparent));
+	--backboard-settings-hover-foreground: var(--vscode-list-hoverForeground, var(--vscode-foreground));
+	--backboard-settings-selection-background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-list-activeSelectionBackground, var(--vscode-toolbar-activeBackground, transparent)));
+	--backboard-settings-selection-foreground: var(--vscode-list-inactiveSelectionForeground, var(--vscode-list-activeSelectionForeground, var(--vscode-foreground)));
 	height: 100%;
 	margin: 0;
 	max-width: none;
@@ -1336,7 +1349,7 @@
 	border-radius: 0;
 	box-shadow: none;
 	overflow: hidden;
-	background: #fbfaf8;
+	background: var(--backboard-settings-background);
 }
 
 .settings-editor > .settings-header {
@@ -1352,13 +1365,13 @@
 
 .settings-editor > .settings-body {
 	height: 100%;
-	background: #fbfaf8;
+	background: var(--backboard-settings-background);
 }
 
 .settings-editor > .settings-body > .monaco-split-view2 {
 	height: 100%;
 	margin-top: 0;
-	background: #fbfaf8;
+	background: var(--backboard-settings-background);
 }
 
 .settings-editor > .settings-body .settings-toc-container {
@@ -1370,14 +1383,14 @@
 	flex-direction: column;
 	pointer-events: auto;
 	box-shadow: none;
-	background: #f7f6f3;
-	border-right: 1px solid #dedbd5;
+	background: var(--backboard-settings-sidebar-background);
+	border-right: 1px solid var(--backboard-settings-border);
 }
 
 .settings-sidebar-header {
 	flex: 0 0 auto;
 	padding: 16px 14px 10px;
-	border-bottom: 1px solid #dedbd5;
+	border-bottom: 1px solid var(--backboard-settings-border);
 }
 
 .settings-account {
@@ -1390,8 +1403,8 @@
 
 .settings-sidebar-header > .search-container > .suggest-input-container {
 	height: 34px;
-	background: #ffffff;
-	border: 1px solid #d7d3cc;
+	background: var(--backboard-settings-input-background);
+	border: 1px solid var(--backboard-settings-input-border);
 	border-radius: 7px;
 }
 
@@ -1420,15 +1433,15 @@
 	border: 0;
 	border-radius: 5px;
 	background: transparent;
-	color: #5f5b55;
+	color: var(--backboard-settings-muted-foreground);
 	font-size: 11px;
 	font-weight: 650;
 	text-transform: uppercase;
 }
 
 .settings-sidebar-header > .settings-header-controls .settings-tabs-widget .action-label.checked {
-	color: #111111;
-	background: #e7e5df;
+	color: var(--backboard-settings-selection-foreground);
+	background: var(--backboard-settings-selection-background);
 }
 
 .settings-editor > .settings-body .settings-toc-wrapper {
@@ -1458,23 +1471,24 @@
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row .settings-toc-entry {
-	color: #5b5752;
+	color: var(--backboard-settings-muted-foreground);
 	font-size: 13px;
 	font-weight: 500;
 	line-height: 28px;
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected {
-	background: #e7e5df;
+	background: var(--backboard-settings-selection-background);
+	color: var(--backboard-settings-selection-foreground);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected .settings-toc-entry {
-	color: #111111;
+	color: var(--backboard-settings-selection-foreground);
 	font-weight: 650;
 }
 
 .settings-editor > .settings-body .settings-tree-container {
-	background: #fbfaf8;
+	background: var(--backboard-settings-background);
 }
 
 .settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents,
@@ -1498,7 +1512,7 @@
 
 .settings-editor > .settings-body .settings-tree-container .settings-group-title-label {
 	padding: 28px 0 10px;
-	border-bottom: 1px solid #d7d3cc;
+	border-bottom: 1px solid var(--backboard-settings-border);
 	font-size: 15px;
 	font-weight: 650;
 }
@@ -1520,7 +1534,7 @@
 
 /* Final sidebar polish. */
 .settings-editor > .settings-body .settings-toc-container {
-	background: #f8f7f4;
+	background: var(--backboard-settings-sidebar-background);
 	border-right: 0;
 }
 
@@ -1560,16 +1574,17 @@
 	max-width: 100%;
 	box-sizing: border-box;
 	height: 38px;
-	border-color: transparent !important;
+	border-color: var(--backboard-settings-input-border) !important;
 	border-radius: 8px;
-	background: #efeeeb;
-	box-shadow: inset 0 0 0 1px #dedbd5;
+	background: var(--backboard-settings-input-background);
+	color: var(--backboard-settings-input-foreground);
+	box-shadow: none;
 }
 
 .settings-sidebar-header > .search-container:focus-within > .suggest-input-container,
 .settings-sidebar-header > .search-container > .suggest-input-container.synthetic-focus {
-	border-color: transparent !important;
-	box-shadow: inset 0 0 0 1px #c8c3bb, 0 1px 3px #0000000f !important;
+	border-color: var(--backboard-settings-focus-border) !important;
+	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
 }
 
 .settings-sidebar-header > .search-container input {
@@ -1590,7 +1605,7 @@
 	width: 22px;
 	height: 22px;
 	border-radius: 5px;
-	color: #6d6963;
+	color: var(--backboard-settings-muted-foreground);
 }
 
 .settings-sidebar-header > .settings-header-controls {
@@ -1604,12 +1619,12 @@
 .settings-sidebar-header > .settings-header-controls .settings-tabs-widget > .monaco-action-bar .action-item .action-label {
 	height: 25px;
 	padding: 5px 9px;
-	color: #66625c;
+	color: var(--backboard-settings-muted-foreground);
 }
 
 .settings-sidebar-header > .settings-header-controls .settings-tabs-widget .action-label.checked {
-	background: #eceae5;
-	color: #191817;
+	background: var(--backboard-settings-selection-background);
+	color: var(--backboard-settings-selection-foreground);
 }
 
 .settings-editor > .settings-body .settings-toc-wrapper {
@@ -1624,15 +1639,17 @@
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected {
-	background: #eceae5;
+	background: var(--backboard-settings-selection-background);
+	color: var(--backboard-settings-selection-foreground);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row:not(.selected):hover {
-	background: #f0efeb;
+	background: var(--backboard-settings-hover-background);
+	color: var(--backboard-settings-hover-foreground);
 }
 
 .settings-editor > .settings-body .settings-tree-container {
-	box-shadow: -1px 0 0 #ebe8e2;
+	box-shadow: -1px 0 0 var(--backboard-settings-border);
 }
 
 /* Right pane rhythm. */
@@ -1646,7 +1663,7 @@
 .settings-editor > .settings-body .settings-tree-container .settings-group-title-label {
 	padding: 22px 0 10px;
 	margin: 0;
-	border-bottom: 1px solid #dedbd5;
+	border-bottom: 1px solid var(--backboard-settings-border);
 	font-size: 15px;
 	font-weight: 650;
 	line-height: 20px;
@@ -1675,7 +1692,7 @@
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a > code,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:hover > code,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:active > code {
-	color: #5f5b55;
+	color: var(--backboard-settings-muted-foreground);
 	font-family: inherit;
 	text-decoration: none;
 	background: transparent;
@@ -1705,24 +1722,24 @@
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:focus,
 .settings-editor > .settings-body .settings-tree-container .setting-item-control input:focus,
 .settings-editor > .settings-body .settings-tree-container .setting-item-control textarea:focus {
-	outline-color: #c8c3bb !important;
-	box-shadow: 0 0 0 1px #c8c3bb !important;
+	outline-color: var(--backboard-settings-focus-border) !important;
+	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
 }
 
 .settings-editor .monaco-inputbox.synthetic-focus,
 .settings-editor .monaco-inputbox:focus-within,
 .settings-editor .monaco-select-box.synthetic-focus,
 .settings-editor .monaco-select-box:focus-within {
-	outline-color: #c8c3bb !important;
-	border-color: #c8c3bb !important;
-	box-shadow: 0 0 0 1px #c8c3bb !important;
+	outline-color: var(--backboard-settings-focus-border) !important;
+	border-color: var(--backboard-settings-focus-border) !important;
+	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
 }
 
 .settings-account-name::after {
 	content: "Settings";
 	display: block;
 	margin-top: 1px;
-	color: #6d6963;
+	color: var(--backboard-settings-muted-foreground);
 	font-size: 12px;
 	font-weight: 500;
 	line-height: 16px;
@@ -1731,7 +1748,7 @@
 /* Expanded sidebar navigation. */
 .settings-editor > .settings-body .settings-toc-wrapper {
 	padding: 14px 16px 24px;
-	background: #f8f7f4;
+	background: var(--backboard-settings-sidebar-background);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list,
@@ -1742,7 +1759,7 @@
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row {
 	border-radius: 8px;
-	color: #56524d;
+	color: var(--backboard-settings-muted-foreground);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-contents {
@@ -1756,28 +1773,29 @@
 	height: 32px;
 	margin-left: 2px;
 	line-height: 32px;
-	color: #5f5b55;
+	color: var(--backboard-settings-muted-foreground);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row .settings-toc-entry {
 	line-height: 32px;
 	font-size: 13px;
 	font-weight: 560;
-	color: #56524d;
+	color: var(--backboard-settings-muted-foreground);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected {
-	background: #ebe9e3;
-	color: #171615;
+	background: var(--backboard-settings-selection-background);
+	color: var(--backboard-settings-selection-foreground);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected .settings-toc-entry {
-	color: #171615;
+	color: var(--backboard-settings-selection-foreground);
 	font-weight: 650;
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row:not(.selected):hover {
-	background: #f0efeb;
+	background: var(--backboard-settings-hover-background);
+	color: var(--backboard-settings-hover-foreground);
 }
 
 /* Keep right-pane section headers and focused rows neutral. */
@@ -1795,7 +1813,7 @@
 	background-color: transparent !important;
 }
 
-/* Backboard Settings is intentionally light, matching the product settings design. */
+/* Backboard Settings keeps the product layout while inheriting the active theme. */
 .monaco-workbench.vs-dark .settings-editor,
 .monaco-workbench.hc-black .settings-editor,
 .monaco-workbench.vs-dark .settings-editor > .settings-body,
@@ -1804,21 +1822,21 @@
 .monaco-workbench.hc-black .settings-editor > .settings-body > .monaco-split-view2,
 .monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container,
 .monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container {
-	background: #fbfaf8;
-	color: #191817;
+	background: var(--backboard-settings-background);
+	color: var(--backboard-settings-foreground);
 }
 
 .monaco-workbench.vs-dark .settings-editor > .settings-body .settings-toc-container,
 .monaco-workbench.hc-black .settings-editor > .settings-body .settings-toc-container,
 .monaco-workbench.vs-dark .settings-editor > .settings-body .settings-toc-wrapper,
 .monaco-workbench.hc-black .settings-editor > .settings-body .settings-toc-wrapper {
-	background: #f8f7f4 !important;
-	color: #56524d;
+	background: var(--backboard-settings-sidebar-background) !important;
+	color: var(--backboard-settings-muted-foreground);
 }
 
 .monaco-workbench.vs-dark .settings-account-avatar,
 .monaco-workbench.hc-black .settings-account-avatar {
-	background: #111111;
+	background: var(--backboard-settings-foreground);
 }
 
 .monaco-workbench.vs-dark .settings-account-name,
@@ -1827,14 +1845,14 @@
 .monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-label,
 .monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-category,
 .monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-category {
-	color: #191817;
+	color: var(--backboard-settings-foreground);
 }
 
 .monaco-workbench.vs-dark .settings-account-name::after,
 .monaco-workbench.hc-black .settings-account-name::after,
 .monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description,
 .monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description {
-	color: #6d6963;
+	color: var(--backboard-settings-muted-foreground);
 }
 
 .settings-sidebar-header > .settings-search-count-container {
@@ -1853,7 +1871,7 @@
 	border: 0;
 	border-radius: 0;
 	background: transparent;
-	color: #6d6963;
+	color: var(--backboard-settings-muted-foreground);
 	font-size: 11px;
 	font-weight: 500;
 	line-height: 16px;
@@ -1891,9 +1909,9 @@
 .monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-control input,
 .monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container .setting-item-control textarea,
 .monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-control textarea {
-	background: #ffffff;
-	color: #191817;
-	border-color: #d7d3cc;
+	background: var(--backboard-settings-input-background);
+	color: var(--backboard-settings-input-foreground);
+	border-color: var(--backboard-settings-input-border);
 }
 
 /* Backboard settings controls: keep compact controls readable and intentional. */
@@ -1927,11 +1945,11 @@
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button,
 .settings-editor > .settings-body .settings-tree-container .setting-list-widget .setting-list-object-list-row.select-container {
 	min-height: 34px;
-	border: 1px solid #d6d1c9;
+	border: 1px solid var(--backboard-settings-input-border);
 	border-radius: 9px;
-	background-color: #ffffff;
-	color: #34312d;
-	box-shadow: inset 0 0 0 1px #f3f1ed;
+	background-color: var(--backboard-settings-input-background);
+	color: var(--backboard-settings-input-foreground);
+	box-shadow: none;
 	font-size: 13px;
 	font-weight: 500;
 }
@@ -1960,12 +1978,12 @@
 	width: 22px;
 	height: 22px;
 	border-radius: 6px;
-	color: #6d6963;
+	color: var(--backboard-settings-muted-foreground);
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-control .monaco-inputbox .action-label:hover {
-	background: #f0efeb;
-	color: #191817;
+	background: var(--backboard-settings-hover-background);
+	color: var(--backboard-settings-hover-foreground);
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button {
@@ -1977,9 +1995,9 @@
 .settings-editor > .settings-body .settings-tree-container .setting-item-control input:hover,
 .settings-editor > .settings-body .settings-tree-container .setting-item-control textarea:hover,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:hover {
-	border-color: #c6c0b7;
-	background-color: #ffffff;
-	box-shadow: inset 0 0 0 1px #ebe8e2, 0 1px 4px #0000000d;
+	border-color: var(--backboard-settings-focus-border);
+	background-color: var(--backboard-settings-input-background);
+	box-shadow: none;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box:focus,
@@ -1987,15 +2005,15 @@
 .settings-editor > .settings-body .settings-tree-container .setting-item-control textarea:focus,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:focus {
 	outline: none !important;
-	border-color: #bdb7ad !important;
-	box-shadow: 0 0 0 2px #d9d4cc !important;
+	border-color: var(--backboard-settings-focus-border) !important;
+	box-shadow: 0 0 0 2px var(--backboard-settings-focus-border) !important;
 }
 
 .monaco-select-box-dropdown-container {
-	border: 1px solid #d6d1c9 !important;
+	border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, var(--vscode-focusBorder))) !important;
 	border-radius: 10px !important;
-	background: #ffffff !important;
-	box-shadow: 0 10px 24px #0000001a !important;
+	background: var(--vscode-dropdown-background, var(--vscode-input-background)) !important;
+	box-shadow: 0 10px 24px var(--vscode-widget-shadow, transparent) !important;
 	overflow: hidden;
 }
 
@@ -2005,7 +2023,7 @@
 }
 
 .monaco-select-box-dropdown-container > .select-box-dropdown-list-container .monaco-list .monaco-list-row.focused {
-	background: #ebe9e3 !important;
-	color: #191817 !important;
+	background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-inactiveSelectionBackground)) !important;
+	color: var(--vscode-list-activeSelectionForeground, var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground))) !important;
 	outline: none !important;
 }

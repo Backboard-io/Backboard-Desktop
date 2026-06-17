@@ -358,22 +358,18 @@ suite('LayoutController', () => {
 		);
 	});
 
-	test('remembers panel visibility per session', () => {
+	test('keeps panel hidden when it becomes visible', () => {
 		createLayoutController();
-		const session1 = makeSession(URI.parse('session:1'));
-		const session2 = makeSession(URI.parse('session:2'));
+		const session = makeSession(URI.parse('session:1'));
+		activeSessionObs.set(session, undefined);
+		setPartHiddenCalls = [];
 
-		activeSessionObs.set(session1, undefined);
 		onDidChangePartVisibility.fire({ partId: Parts.PANEL_PART, visible: true });
 
-		activeSessionObs.set(session2, undefined);
-
-		setPartHiddenCalls = [];
-		activeSessionObs.set(session1, undefined);
-
-		const panelCall = setPartHiddenCalls.find(c => c.part === Parts.PANEL_PART);
-		assert.ok(panelCall);
-		assert.strictEqual(panelCall!.hidden, false, 'panel should be visible for session 1');
+		assert.ok(
+			setPartHiddenCalls.some(c => c.part === Parts.PANEL_PART && c.hidden === true),
+			'panel should be hidden again'
+		);
 	});
 
 	// --- Turn completion ---

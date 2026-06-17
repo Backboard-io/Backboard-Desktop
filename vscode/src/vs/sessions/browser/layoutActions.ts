@@ -115,7 +115,7 @@ class TogglePanelVisibilityAction extends Action2 {
 	constructor() {
 		super({
 			id: TogglePanelVisibilityAction.ID,
-			title: localize2('togglePanel', 'Toggle Terminal Visibility'),
+			title: localize2('hideTerminal', 'Hide Terminal'),
 			category: Categories.View,
 			f1: true,
 			icon: panelCloseIcon
@@ -124,7 +124,7 @@ class TogglePanelVisibilityAction extends Action2 {
 
 	run(accessor: ServicesAccessor): void {
 		const layoutService = accessor.get(IWorkbenchLayoutService);
-		layoutService.setPartHidden(layoutService.isVisible(Parts.PANEL_PART), Parts.PANEL_PART);
+		layoutService.setPartHidden(true, Parts.PANEL_PART);
 	}
 }
 

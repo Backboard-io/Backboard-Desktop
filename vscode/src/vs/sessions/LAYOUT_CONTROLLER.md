@@ -14,13 +14,12 @@ The Agents window keeps a single **active session** but lets the user move betwe
 Each session "owns" a small amount of layout state — which side parts are visible and which
 editors are open — so that returning to a session restores the working context the user left it in.
 
-`LayoutController` owns three independent pieces of per-session state, all keyed by session
+`LayoutController` owns two independent pieces of per-session state, all keyed by session
 resource (`URI`) and persisted to workspace storage:
 
 | State | Storage map | Scope |
 |-------|-------------|-------|
 | Auxiliary bar (secondary side bar) | `_viewStateBySession` | visibility + active view container |
-| Panel (terminal / debug output) | `_panelVisibilityBySession` | visibility only |
 | Editor working set | `_workingSets` | open editors in the grid editor part |
 
 All state flows from the `activeSession` **observable** (never events). The controller derives
@@ -41,7 +40,7 @@ When more than one session is visible at once (the Sessions Part grid shows seve
 **all per-session sync is suppressed**:
 
 - The aux-bar / panel sync autoruns bail out early (`multipleSessionsVisibleObs`).
-- A dedicated autorun **clears** `_viewStateBySession`, `_panelVisibilityBySession`, and
+- A dedicated autorun **clears** `_viewStateBySession` and
   `_pendingTurnStateByResource` for every visible session.
 
 This guarantees that after collapsing back to a single session the **default visibility logic**
@@ -106,15 +105,10 @@ guard reliably covers exactly that reveal.
 
 ## 4. Panel
 
-`_syncPanelVisibility(resource)`:
+`_syncPanelVisibility()` always hides the bottom panel.
 
-- No active session → hide the panel.
-- Otherwise restore `_panelVisibilityBySession.get(resource)`, defaulting to **hidden** when there
-  is no record.
-
-The per-session record is updated whenever the user toggles the panel: an
-`onDidChangePartVisibility` listener for `PANEL_PART` writes the new visibility for the active
-session (suppressed while multiple sessions are visible).
+Sandbox does not use the bottom panel for terminal or task output. An `onDidChangePartVisibility`
+listener for `PANEL_PART` immediately hides the panel again if another contribution reveals it.
 
 ---
 
@@ -166,8 +160,9 @@ saved for the incoming session — it never applies `'empty'`, to avoid closing 
 ## 7. Key Invariants
 
 - **Observables, not events**, drive all session-switch logic.
-- **Multiple visible sessions** disable per-session view/panel sync and clear that state (working
+- **Multiple visible sessions** disable per-session view sync and clear that state (working
   sets preserved).
+- The bottom **panel is always hidden** in the Sandbox workbench.
 - **Default visibility** (§3.2 step 4) only applies when a session has no saved aux-bar state.
 - The **editor part implies the auxiliary bar** when it *becomes* visible (e.g. opening a file from
   chat), **except** during working-set restoration on session switch, where the session's saved

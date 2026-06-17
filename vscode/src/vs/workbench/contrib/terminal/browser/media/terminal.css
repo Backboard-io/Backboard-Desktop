@@ -41,7 +41,7 @@
 	padding-top: 8px;
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tabs-bar {
+.monaco-workbench .backboard-terminal-tabs-bar {
 	box-sizing: border-box;
 	display: flex;
 	align-items: stretch;
@@ -52,11 +52,11 @@
 	overflow: hidden;
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tabs-bar.empty {
+.monaco-workbench .backboard-terminal-tabs-bar.empty {
 	display: none;
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tabs-list {
+.monaco-workbench .backboard-terminal-tabs-list {
 	display: flex;
 	align-items: flex-end;
 	min-width: 0;
@@ -67,11 +67,11 @@
 	scrollbar-width: none;
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tabs-list::-webkit-scrollbar {
+.monaco-workbench .backboard-terminal-tabs-list::-webkit-scrollbar {
 	display: none;
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab {
+.monaco-workbench .backboard-terminal-tab {
 	box-sizing: border-box;
 	display: flex;
 	align-items: center;
@@ -93,30 +93,30 @@
 	cursor: pointer;
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab:hover {
+.monaco-workbench .backboard-terminal-tab:hover {
 	background-color: var(--vscode-list-hoverBackground);
 	color: var(--vscode-panelTitle-activeForeground);
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab.active {
+.monaco-workbench .backboard-terminal-tab.active {
 	background-color: var(--vscode-terminal-background, var(--vscode-editor-background));
 	color: var(--vscode-panelTitle-activeForeground);
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab-icon {
+.monaco-workbench .backboard-terminal-tab-icon {
 	flex: 0 0 auto;
 	color: var(--vscode-icon-foreground);
 	font-size: 14px;
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab-label {
+.monaco-workbench .backboard-terminal-tab-label {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab-close {
+.monaco-workbench .backboard-terminal-tab-close {
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -136,17 +136,58 @@
 	cursor: pointer;
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab:hover .backboard-terminal-tab-close,
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab.active .backboard-terminal-tab-close,
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab-close:focus-visible {
+.monaco-workbench .backboard-terminal-tab:hover .backboard-terminal-tab-close,
+.monaco-workbench .backboard-terminal-tab.active .backboard-terminal-tab-close,
+.monaco-workbench .backboard-terminal-tab-close:focus-visible {
 	opacity: 1;
 }
 
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab-close:hover,
-.monaco-workbench .pane-body.integrated-terminal .backboard-terminal-tab-close:focus-visible {
+.monaco-workbench .backboard-terminal-tab-close:hover,
+.monaco-workbench .backboard-terminal-tab-close:focus-visible {
 	background-color: var(--vscode-toolbar-hoverBackground);
 	outline: none;
 }
+
+.monaco-workbench .part.panel.pane-composite-part > .title.has-terminal-tabs > .backboard-terminal-tabs-bar {
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 30px;
+	min-height: 30px;
+	background-color: transparent;
+	border-bottom: 0;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title.has-terminal-tabs > .composite-bar-container,
+.monaco-workbench .part.panel.pane-composite-part > .title.has-terminal-tabs > .title-label {
+	display: none;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title.has-terminal-tabs > .backboard-terminal-tabs-bar > .backboard-terminal-tabs-list {
+	align-items: center;
+	height: 30px;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title.has-terminal-tabs .backboard-terminal-tab {
+	min-width: 132px;
+	max-width: 240px;
+	height: 30px;
+	border: 1px solid transparent;
+	border-radius: 6px;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title.has-terminal-tabs .backboard-terminal-tab.active {
+	border-color: var(--vscode-panel-border);
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title.has-terminal-tabs .backboard-terminal-tab-close {
+	width: 20px;
+	height: 20px;
+}
+
+.monaco-workbench .part.panel.pane-composite-part > .title.has-terminal-tabs > .title-actions {
+	flex: 0 0 auto;
+}
+
 .monaco-workbench .part.sidebar .pane-body.integrated-terminal .terminal-outer-container,
 .monaco-workbench .part.auxiliarybar .pane-body.integrated-terminal .terminal-outer-container {
 	background-color: var(--vscode-terminal-background, var(--vscode-sideBar-background));

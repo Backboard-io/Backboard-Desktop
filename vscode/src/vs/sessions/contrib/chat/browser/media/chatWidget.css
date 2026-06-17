@@ -508,7 +508,7 @@
 
 /* Simple-mode landing surface. */
 .agent-sessions-workbench .sessions-chat-widget {
-	background: var(--vscode-editor-background);
+	background: var(--vscode-agentsPanel-background);
 	color: var(--vscode-editor-foreground);
 }
 
@@ -516,7 +516,7 @@
 	align-items: stretch;
 	justify-content: stretch;
 	padding: 0;
-	background: var(--vscode-editor-background);
+	background: var(--vscode-agentsPanel-background);
 }
 
 .agent-sessions-workbench .simple-mode-chat-header {
@@ -528,7 +528,7 @@
 	padding: 0 10px 0 12px;
 	box-sizing: border-box;
 	border-bottom: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border));
-	background: var(--vscode-editor-background);
+	background: var(--vscode-agentsPanel-background);
 }
 
 .agent-sessions-workbench .simple-mode-chat-project-icon {
@@ -577,6 +577,7 @@
 	padding: 16px 16px 18px 16px;
 	box-sizing: border-box;
 	min-height: 0;
+	background: var(--vscode-agentsPanel-background);
 }
 
 .agent-sessions-workbench .new-session-workspace-picker-container {
@@ -656,7 +657,7 @@
 .agent-sessions-workbench .new-chat-widget-container {
 	align-items: stretch;
 	justify-content: center;
-	background: var(--vscode-editor-background);
+	background: var(--vscode-agentsPanel-background);
 	container-type: normal;
 	contain: none;
 }

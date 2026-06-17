@@ -193,6 +193,7 @@ export class ChatSubmitAction extends SubmitAction {
 			ChatContextKeys.inputHasSendableContent,
 			ContextKeyExpr.or(whenNotInProgress, ChatContextKeys.editingRequestType.isEqualTo(ChatContextKeys.EditingRequestType.Sent)),
 			ChatContextKeys.chatSessionOptionsValid,
+			ChatContextKeys.chatModeKind.isEqualTo(ChatModeKind.Ask),
 		);
 
 		super({
@@ -764,7 +765,8 @@ export class ChatEditingSessionSubmitAction extends SubmitAction {
 		const precondition = ContextKeyExpr.and(
 			ChatContextKeys.inputHasSendableContent,
 			notInProgressOrEditing,
-			ChatContextKeys.chatSessionOptionsValid
+			ChatContextKeys.chatSessionOptionsValid,
+			ChatContextKeys.chatModeKind.notEqualsTo(ChatModeKind.Ask)
 		);
 
 		super({
@@ -774,6 +776,14 @@ export class ChatEditingSessionSubmitAction extends SubmitAction {
 			category: CHAT_CATEGORY,
 			icon: Codicon.arrowUp,
 			precondition,
+			keybinding: {
+				when: ContextKeyExpr.and(
+					ChatContextKeys.inChatInput,
+					ChatContextKeys.withinEditSessionDiff.negate(),
+				),
+				primary: KeyCode.Enter,
+				weight: KeybindingWeight.EditorContrib
+			},
 			menu: [
 				{
 					id: MenuId.ChatExecute,

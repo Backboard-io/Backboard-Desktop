@@ -1,6 +1,7 @@
 {
 	"nameShort": "Backboard Studio",
 	"nameLong": "Backboard Studio",
+	"backboardStudioVersion": "2.0.2",
 	"applicationName": "code-oss",
 	"dataFolderName": ".vscode-oss",
 	"sharedDataFolderName": ".vscode-oss-shared",

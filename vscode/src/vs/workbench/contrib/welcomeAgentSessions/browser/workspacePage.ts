@@ -23,6 +23,10 @@ export const CLOSE_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.closeWorkspaceP
 export const WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY = 'workspacePageVisible';
 
 const OPEN_BACKBOARD_RIGHT_PANEL_COMMAND_ID = 'backboard.openRightPanel';
+const NEW_BACKBOARD_CHAT_COMMAND_ID = 'backboard.newChat';
+const OPEN_SANDBOX_COMMAND_ID = 'workbench.action.openWorkspaceInAgentsWindow';
+const FOCUS_EDITOR_COMMAND_ID = 'workbench.action.focusActiveEditorGroup';
+const TOGGLE_TERMINAL_COMMAND_ID = 'workbench.action.terminal.toggleTerminal';
 const WORKSPACE_CARD_SLOTS = 6;
 
 type WorkspaceTone = 'live' | 'needsInput' | 'done' | 'failed';
@@ -40,9 +44,13 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 	private readonly visibleContext: IContextKey<boolean>;
 	private container: HTMLElement | undefined;
 	private body: HTMLElement | undefined;
+	private workspaceHeader: HTMLElement | undefined;
 	private workspaceShell: HTMLElement | undefined;
 	private workspaceMain: HTMLElement | undefined;
+	private terminalPanel: HTMLElement | undefined;
 	private statusBar: HTMLElement | undefined;
+	private selectedSessionResource: string | undefined;
+	private terminalCollapsed = false;
 
 	constructor(
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
@@ -102,18 +110,32 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		}
 
 		const sessions = this.getVisibleSessions();
-		if (!this.workspaceShell || !this.workspaceMain || !this.statusBar) {
+		this.ensureSelectedSession(sessions);
+
+		if (!this.workspaceHeader || !this.workspaceShell || !this.workspaceMain || !this.terminalPanel || !this.statusBar) {
 			clearNode(this.body);
+			this.workspaceHeader = this.createWorkspaceHeader();
+			this.body.appendChild(this.workspaceHeader);
 			this.workspaceShell = this.createWorkspaceShell(sessions);
 			this.body.appendChild(this.workspaceShell);
+			this.terminalPanel = this.createTerminalPanel(sessions);
+			this.body.appendChild(this.terminalPanel);
 			this.statusBar = this.createStatusBar(sessions);
 			this.body.appendChild(this.statusBar);
 			return;
 		}
 
+		const workspaceHeader = this.createWorkspaceHeader();
+		this.body.replaceChild(workspaceHeader, this.workspaceHeader);
+		this.workspaceHeader = workspaceHeader;
+
 		const workspaceMain = this.createWorkspaceMain(sessions);
 		this.workspaceShell.replaceChild(workspaceMain, this.workspaceMain);
 		this.workspaceMain = workspaceMain;
+
+		const terminalPanel = this.createTerminalPanel(sessions);
+		this.body.replaceChild(terminalPanel, this.terminalPanel);
+		this.terminalPanel = terminalPanel;
 
 		const statusBar = this.createStatusBar(sessions);
 		this.body.replaceChild(statusBar, this.statusBar);
@@ -134,6 +156,19 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		return shell;
 	}
 
+	private createWorkspaceHeader(): HTMLElement {
+		const header = $('header.workspace-page-titlebar');
+		const switchElement = $('div.ide-page-switch.workspace-page-switch');
+		switchElement.setAttribute('role', 'tablist');
+		switchElement.setAttribute('aria-label', localize('workspacePage.switch.ariaLabel', "IDE view"));
+		switchElement.append(
+			this.createSwitchButton('sandbox', localize('workspacePage.switch.sandbox', "Sandbox"), false, () => this.openSandbox()),
+			this.createSwitchButton('editor', localize('workspacePage.switch.editor', "Editor"), false, () => this.openCodeEditor()),
+		);
+		header.appendChild(switchElement);
+		return header;
+	}
+
 	private createWorkspaceMain(sessions: readonly IAgentSession[]): HTMLElement {
 		const main = $('section.workspace-page-main');
 		main.setAttribute('aria-labelledby', 'workspace-page-heading');
@@ -151,10 +186,12 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		header.appendChild(heading);
 
 		const actions = $('div.workspace-page-header-actions');
-		actions.append(
-			this.createIconButton('filter', localize('workspacePage.action.filter', "Filter agents")),
-			this.createIconButton('sort-precedence', localize('workspacePage.action.sort', "Sort agents")),
-		);
+		const newAgentButton = this.createTextButton('add', localize('workspacePage.action.newAgent', "New Agent"));
+		this._register(addDisposableListener(newAgentButton, EventType.CLICK, event => {
+			event.stopPropagation();
+			void this.createNewAgent();
+		}));
+		actions.append(newAgentButton);
 		header.appendChild(actions);
 		main.appendChild(header);
 
@@ -164,7 +201,7 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		}
 
 		for (let i = sessions.length; i < WORKSPACE_CARD_SLOTS; i++) {
-			grid.appendChild(this.createPlaceholderCard());
+			grid.appendChild(this.createPlaceholderCard(i - sessions.length));
 		}
 		main.appendChild(grid);
 
@@ -175,15 +212,18 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		const tone = this.getTone(session);
 		const card = $('article.workspace-page-agent-card');
 		card.dataset.tone = tone;
+		if (this.getSessionResource(session) === this.selectedSessionResource) {
+			card.classList.add('selected');
+		}
 		card.tabIndex = 0;
 		card.setAttribute('role', 'button');
 		card.setAttribute('aria-label', localize('workspacePage.openAgent', "Open {0}", session.label));
 
-		this._register(addDisposableListener(card, EventType.CLICK, () => this.openAgentSession(session)));
+		this._register(addDisposableListener(card, EventType.CLICK, () => this.selectAgentSession(session)));
 		this._register(addDisposableListener(card, EventType.KEY_DOWN, event => {
 			if (event.key === 'Enter' || event.key === ' ') {
 				event.preventDefault();
-				void this.openAgentSession(session);
+				this.selectAgentSession(session);
 			}
 		}));
 
@@ -252,9 +292,22 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		return footer;
 	}
 
-	private createPlaceholderCard(): HTMLElement {
+	private createPlaceholderCard(index: number): HTMLElement {
 		const card = $('article.workspace-page-placeholder-card');
-		card.setAttribute('aria-hidden', 'true');
+		card.tabIndex = 0;
+		card.setAttribute('role', 'button');
+		card.setAttribute('aria-label', localize('workspacePage.placeholder.createAgent', "Create agent"));
+		card.title = localize('workspacePage.placeholder.createAgent', "Create agent");
+
+		this._register(addDisposableListener(card, EventType.CLICK, () => {
+			void this.createNewAgent();
+		}));
+		this._register(addDisposableListener(card, EventType.KEY_DOWN, event => {
+			if (event.key === 'Enter' || event.key === ' ') {
+				event.preventDefault();
+				void this.createNewAgent();
+			}
+		}));
 
 		const header = $('div.workspace-page-placeholder-header');
 		header.append($('span.workspace-page-placeholder-dot'), $('span.workspace-page-placeholder-line.name'), $('span.workspace-page-placeholder-spacer'), $('span.workspace-page-placeholder-line.pill'));
@@ -275,10 +328,60 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		card.appendChild(activity);
 
 		const footer = $('div.workspace-page-placeholder-footer');
-		footer.append($('span.workspace-page-placeholder-icon'), $('span.workspace-page-placeholder-spacer'), $('span.workspace-page-placeholder-line.model'));
+		const icon = $('span.codicon.codicon-add.workspace-page-placeholder-add');
+		const label = $('span.workspace-page-placeholder-label');
+		label.textContent = index === 0
+			? localize('workspacePage.placeholder.label', "New agent")
+			: localize('workspacePage.placeholder.labelShort', "Agent");
+		footer.append(icon, label, $('span.workspace-page-placeholder-spacer'), $('span.workspace-page-placeholder-line.model'));
 		card.appendChild(footer);
 
 		return card;
+	}
+
+	private createTerminalPanel(sessions: readonly IAgentSession[]): HTMLElement {
+		const panel = $('section.workspace-page-terminal');
+		panel.classList.toggle('collapsed', this.terminalCollapsed);
+		panel.setAttribute('aria-label', localize('workspacePage.terminal.label', "Workspace terminal"));
+
+		const header = $('div.workspace-page-terminal-header');
+		const title = $('div.workspace-page-terminal-title');
+		const titleIcon = $('span.codicon.codicon-terminal');
+		const titleText = $('span');
+		titleText.textContent = localize('workspacePage.terminal.title', "Terminal");
+		title.append(titleIcon, titleText);
+
+		const meta = $('span.workspace-page-terminal-meta');
+		const activeCount = sessions.filter(session => isSessionInProgressStatus(session.status)).length;
+		meta.textContent = activeCount === 1
+			? localize('workspacePage.terminal.oneRunning', "1 running")
+			: localize('workspacePage.terminal.running', "{0} running", activeCount);
+
+		const actions = $('div.workspace-page-terminal-actions');
+		const openTerminal = this.createIconButton('terminal', localize('workspacePage.terminal.openIntegrated', "Open integrated terminal"));
+		this._register(addDisposableListener(openTerminal, EventType.CLICK, () => {
+			void this.commandService.executeCommand(TOGGLE_TERMINAL_COMMAND_ID);
+		}));
+		const collapse = this.createIconButton(this.terminalCollapsed ? 'chevron-up' : 'chevron-down', this.terminalCollapsed ? localize('workspacePage.terminal.expand', "Expand terminal") : localize('workspacePage.terminal.collapse', "Collapse terminal"));
+		this._register(addDisposableListener(collapse, EventType.CLICK, () => {
+			this.terminalCollapsed = !this.terminalCollapsed;
+			this.render();
+		}));
+		actions.append(openTerminal, collapse);
+		header.append(title, meta, actions);
+		panel.appendChild(header);
+
+		if (!this.terminalCollapsed) {
+			const output = $('div.workspace-page-terminal-output');
+			for (const line of this.getTerminalLines(sessions)) {
+				const row = $('div.workspace-page-terminal-line');
+				row.textContent = line;
+				output.appendChild(row);
+			}
+			panel.appendChild(output);
+		}
+
+		return panel;
 	}
 
 	private createStatusBar(sessions: readonly IAgentSession[]): HTMLElement {
@@ -324,6 +427,71 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		iconElement.classList.add(`codicon-${icon}`);
 		button.appendChild(iconElement);
 		return button;
+	}
+
+	private createTextButton(icon: string, label: string): HTMLButtonElement {
+		const button = $('button.workspace-page-text-button') as HTMLButtonElement;
+		button.type = 'button';
+		const iconElement = $('span.codicon');
+		iconElement.classList.add(`codicon-${icon}`);
+		const labelElement = $('span');
+		labelElement.textContent = label;
+		button.append(iconElement, labelElement);
+		return button;
+	}
+
+	private createSwitchButton(page: string, label: string, checked: boolean, run: () => void | Promise<void>): HTMLButtonElement {
+		const button = $('button.ide-page-switch-button.workspace-page-switch-button') as HTMLButtonElement;
+		button.type = 'button';
+		button.dataset.page = page;
+		button.textContent = label;
+		button.title = label;
+		button.classList.toggle('checked', checked);
+		button.setAttribute('role', 'tab');
+		button.setAttribute('aria-selected', String(checked));
+		button.tabIndex = checked ? 0 : -1;
+		this._register(addDisposableListener(button, EventType.CLICK, event => {
+			event.preventDefault();
+			event.stopPropagation();
+			void run();
+		}));
+		this._register(addDisposableListener(button, EventType.KEY_DOWN, event => {
+			if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+				event.preventDefault();
+				event.stopPropagation();
+				this.focusAdjacentSwitchButton(button, event.key === 'ArrowRight');
+			}
+		}));
+		return button;
+	}
+
+	private focusAdjacentSwitchButton(button: HTMLButtonElement, next: boolean): void {
+		const buttons = Array.from(button.parentElement?.querySelectorAll<HTMLButtonElement>('.workspace-page-switch-button') ?? []);
+		const index = buttons.indexOf(button);
+		if (index === -1) {
+			return;
+		}
+		const nextIndex = (index + (next ? 1 : -1) + buttons.length) % buttons.length;
+		buttons[nextIndex]?.focus();
+	}
+
+	private ensureSelectedSession(sessions: readonly IAgentSession[]): void {
+		if (sessions.length === 0) {
+			this.selectedSessionResource = undefined;
+			return;
+		}
+
+		if (!this.selectedSessionResource || !sessions.some(session => this.getSessionResource(session) === this.selectedSessionResource)) {
+			this.selectedSessionResource = this.getSessionResource(sessions[0]);
+		}
+	}
+
+	private getSelectedSession(sessions: readonly IAgentSession[]): IAgentSession | undefined {
+		return sessions.find(session => this.getSessionResource(session) === this.selectedSessionResource) ?? sessions[0];
+	}
+
+	private getSessionResource(session: IAgentSession): string {
+		return session.resource.toString();
 	}
 
 	private getTone(session: IAgentSession): WorkspaceTone {
@@ -413,8 +581,65 @@ class WorkspacePageContribution extends Disposable implements IWorkbenchContribu
 		return sessions[0] ? this.getBranchLabel(sessions[0]) : localize('workspacePage.branch.main', "main");
 	}
 
-	private async openAgentSession(_session: IAgentSession): Promise<void> {
-		await this.openBackboardRightPanel();
+	private getChangeSummaryLabel(session: IAgentSession): string {
+		const summary = getAgentChangesSummary(session.changes);
+		if (!summary?.files) {
+			return localize('workspacePage.files.none', "No changes");
+		}
+		return summary.files === 1 ? localize('workspacePage.files.oneChanged', "1 file") : localize('workspacePage.files.countChanged', "{0} files", summary.files);
+	}
+
+	private getTerminalLines(sessions: readonly IAgentSession[]): string[] {
+		const selected = this.getSelectedSession(sessions);
+		const lines = [
+			localize('workspacePage.terminal.boot', "$ backboard workspace"),
+			sessions.length === 1 ? localize('workspacePage.terminal.sessionOne', "workspace: 1 visible agent") : localize('workspacePage.terminal.sessions', "workspace: {0} visible agents", sessions.length),
+		];
+
+		if (selected) {
+			lines.push(
+				localize('workspacePage.terminal.selected', "selected: {0}", selected.label),
+				localize('workspacePage.terminal.status', "status: {0}", this.getStatusLabel(selected).toLowerCase()),
+				localize('workspacePage.terminal.branch', "branch: {0}", this.getBranchLabel(selected)),
+				localize('workspacePage.terminal.files', "files: {0}", this.getChangeSummaryLabel(selected)),
+			);
+		} else {
+			lines.push(localize('workspacePage.terminal.empty', "no agent sessions yet"));
+		}
+
+		return lines;
+	}
+
+	private selectAgentSession(session: IAgentSession): void {
+		this.selectedSessionResource = this.getSessionResource(session);
+		this.render();
+		void this.openBackboardRightPanel();
+	}
+
+	private async createNewAgent(): Promise<void> {
+		try {
+			await this.commandService.executeCommand(NEW_BACKBOARD_CHAT_COMMAND_ID);
+		} catch {
+			await this.openBackboardRightPanel();
+		}
+	}
+
+	private async openSandbox(): Promise<void> {
+		this.hide();
+		try {
+			await this.commandService.executeCommand(OPEN_SANDBOX_COMMAND_ID);
+		} catch {
+			// The agents-window sandbox command may not be registered in every product build.
+		}
+	}
+
+	private async openCodeEditor(): Promise<void> {
+		this.hide();
+		try {
+			await this.commandService.executeCommand(FOCUS_EDITOR_COMMAND_ID);
+		} catch {
+			// Focusing the active editor is best-effort after hiding the workspace overlay.
+		}
 	}
 
 	private async openBackboardRightPanel(): Promise<void> {

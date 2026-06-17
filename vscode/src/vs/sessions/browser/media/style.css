@@ -29,7 +29,12 @@
 .agent-sessions-workbench.shell-gradient-background {
 	position: relative;
 	isolation: isolate;
-	background: var(--vscode-agents-background);
+	background: transparent;
+	background-color: transparent !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background {
+	background-color: transparent !important;
 }
 
 .agent-sessions-workbench.shell-gradient-background::before {
@@ -668,7 +673,7 @@
 /* ---- Full-screen Sandbox shell opened by "Open in Sandbox" ---- */
 
 .agent-sessions-workbench.shell-gradient-background {
-	background: var(--vscode-agents-background);
+	background: transparent;
 }
 
 .agent-sessions-workbench.shell-gradient-background::before {
@@ -687,9 +692,12 @@
 
 .agent-sessions-workbench.shell-gradient-background .part.sidebar {
 	border-right: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
-	background:
-		linear-gradient(180deg, color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 6%, transparent) 0%, transparent 36%),
-		color-mix(in srgb, var(--vscode-sideBar-background) 92%, var(--vscode-agents-background) 8%) !important;
+	background: color-mix(in srgb, var(--vscode-agentsPanel-background) 48%, transparent) !important;
+}
+
+.agent-sessions-workbench.shell-gradient-background .split-view-view:has(> .part.sidebar),
+.agent-sessions-workbench.shell-gradient-background .part.sidebar > .content {
+	background: transparent !important;
 }
 
 .agent-sessions-workbench.shell-gradient-background .part.sessionspart {
@@ -1652,7 +1660,7 @@
 
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout),
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) > .monaco-grid-view {
-	background: var(--vscode-editor-background);
+	background: transparent;
 }
 
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout)::before {
@@ -1666,7 +1674,7 @@
 
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar {
 	border-right: 1px solid var(--sandbox-simple-divider);
-	background: var(--vscode-sideBar-background) !important;
+	background: color-mix(in srgb, var(--vscode-agentsPanel-background) 48%, transparent) !important;
 }
 
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar > .content,
@@ -1674,7 +1682,7 @@
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar > .content .monaco-scrollable-element,
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar > .content .monaco-list,
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sidebar > .content .monaco-list-rows {
-	background: var(--vscode-sideBar-background) !important;
+	background: transparent !important;
 }
 
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart,
@@ -1684,7 +1692,7 @@
 	border: 0;
 	border-radius: 0;
 	box-shadow: none;
-	background: var(--vscode-editor-background);
+	background: var(--vscode-agentsPanel-background);
 	overflow: hidden;
 }
 
@@ -1694,7 +1702,7 @@
 
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart > .content,
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .content {
-	background: var(--vscode-editor-background);
+	background: var(--vscode-agentsPanel-background);
 }
 
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout).nomaineditorarea .part.auxiliarybar {
@@ -1756,11 +1764,21 @@
 /* Current Sandbox Simple Mode is chat-first: no default files/artifact column. */
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart {
 	border-right: 0;
-	background: var(--vscode-editor-background);
+	background: var(--vscode-agentsPanel-background);
 }
 
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart > .content {
-	background: var(--vscode-editor-background);
+	background: var(--vscode-agentsPanel-background);
+}
+
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart .interactive-session,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart .interactive-list,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart .interactive-list > .monaco-list,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart .interactive-list > .monaco-list > .monaco-scrollable-element,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart .interactive-list > .monaco-list > .monaco-scrollable-element > .monaco-list-rows,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart .interactive-input-part,
+.agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.sessionspart .interactive-input-and-side-toolbar {
+	background: var(--vscode-agentsPanel-background) !important;
 }
 
 .agent-sessions-workbench.shell-gradient-background:not(.phone-layout) .part.auxiliarybar > .title {

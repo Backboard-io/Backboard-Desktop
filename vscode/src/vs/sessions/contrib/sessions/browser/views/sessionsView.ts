@@ -305,15 +305,15 @@ export class SessionsView extends ViewPane {
 
 	private createSimpleChatSidebarActions(container: HTMLElement): void {
 		const actions = DOM.append(container, $('.simple-chat-sidebar-actions'));
-		this.createSimpleChatSidebarAction(actions, 'codicon-gear', localize('simpleChatSettings', "Settings"), () => {
+		this.createSimpleChatSidebarAction(actions, 'codicon-settings-compact', localize('simpleChatSettings', "Settings"), () => {
 			void this.commandService.executeCommand('workbench.action.openSettings');
 		});
-		this.createSimpleChatSidebarAction(actions, 'codicon-add', localize('simpleChatNewChat', "New chat"), () => {
+		this.createSimpleChatSidebarAction(actions, 'codicon-edit-sparkle', localize('simpleChatNewChat', "New chat"), () => {
 			logSessionsInteraction(this.telemetryService, 'newSession');
 			this.sessionsViewService.openNewSession();
 			this.sessionsPartService.focusSession(this.sessionsManagementService.activeSession.get());
 		});
-		this.createSimpleChatSidebarAction(actions, 'codicon-search', localize('simpleChatSearchChats', "Search chats"), () => this.openFind());
+		this.createSimpleChatSidebarAction(actions, 'codicon-search-compact', localize('simpleChatSearchChats', "Search chats"), () => this.openFind());
 
 		const recents = DOM.append(container, $('.simple-chat-recents-header'));
 		DOM.append(recents, $('span', undefined, localize('simpleChatProjects', "Projects")));

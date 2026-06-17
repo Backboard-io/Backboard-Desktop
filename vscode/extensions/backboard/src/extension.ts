@@ -59,6 +59,14 @@ interface ModelCacheEntry {
 	readonly models: BridgeModel[];
 }
 
+interface ToolCacheEntry {
+	readonly env: string;
+	readonly version?: number;
+	readonly mode: string;
+	readonly fetchedAt: number;
+	readonly tools: unknown[];
+}
+
 interface UpdateManifest {
 	readonly version: string;
 	readonly url: string;
@@ -69,6 +77,7 @@ interface UpdateManifest {
 interface PendingRequest {
 	readonly events: BridgeEvent[];
 	readonly onEvent?: (event: BridgeEvent) => void | Promise<void>;
+	readonly resetTimeout: () => void;
 	readonly resolve: (events: BridgeEvent[]) => void;
 	readonly reject: (error: Error) => void;
 }
@@ -931,6 +940,24 @@ function readCurrentAppVersion(): string {
 		}
 	}
 
+	const productJsonPaths = [
+		vscode.env.appRoot ? path.join(vscode.env.appRoot, 'product.json') : undefined,
+		path.join(process.cwd(), 'product.json')
+	].filter((value): value is string => Boolean(value));
+	for (const productJsonPath of productJsonPaths) {
+		try {
+			const parsed: unknown = JSON.parse(fs.readFileSync(productJsonPath, 'utf8'));
+			if (isObjectRecord(parsed)) {
+				const value = stringValueFromRecord(parsed.backboardStudioVersion);
+				if (value) {
+					return value;
+				}
+			}
+		} catch {
+			// Product metadata is best-effort; fall through to VS Code's API version.
+		}
+	}
+
 	return vscode.version;
 }
 
@@ -1338,6 +1365,8 @@ function enqueueToolResultRequest(queue: ToolResultRequest[], request: ToolResul
 class BackboardPanelProvider implements vscode.WebviewViewProvider {
 	private view: vscode.WebviewView | undefined;
 	private runToken: vscode.CancellationTokenSource | undefined;
+	private activePromptRun: Promise<void> | undefined;
+	private promptRunSerial = 0;
 
 	constructor(private readonly bridge: BackboardBridge, private readonly context: vscode.ExtensionContext) {
 	}
@@ -1360,9 +1389,9 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.html = panelHtml(webviewView.webview, codiconsStylesheetUri(this.context, webviewView.webview), iconBaseUri(this.context, webviewView.webview), { showHeader: false });
 		webviewView.webview.onDidReceiveMessage(message => {
 			if (message?.type === 'send' && typeof message.prompt === 'string') {
-				void this.sendPrompt(message.prompt, asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined);
+				this.runPrompt(message.prompt, asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined);
 			} else if (message?.type === 'sendVoice' && isVoiceAttachment(message.audio)) {
-				void this.sendPrompt(typeof message.prompt === 'string' ? message.prompt : '', asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, message.audio);
+				this.runPrompt(typeof message.prompt === 'string' ? message.prompt : '', asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, message.audio);
 			} else if (message?.type === 'cancel') {
 				this.runToken?.cancel();
 			} else if (message?.type === 'reviewChanges') {
@@ -1397,6 +1426,34 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		void postPanelState(this.bridge, webviewView.webview);
 	}
 
+	private runPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment): void {
+		const serial = ++this.promptRunSerial;
+		const previousRun = this.activePromptRun;
+		if (previousRun) {
+			this.runToken?.cancel();
+			void this.view?.webview.postMessage({ type: 'status', text: 'Waiting for the current Backboard turn to stop.' });
+		}
+		const run = (async () => {
+			if (previousRun) {
+				try {
+					await previousRun;
+				} catch {
+					// The previous run already reported its error to the webview.
+				}
+			}
+			if (serial !== this.promptRunSerial) {
+				return;
+			}
+			await this.sendPrompt(prompt, options, chatId, audio);
+		})();
+		this.activePromptRun = run;
+		void run.finally(() => {
+			if (this.activePromptRun === run) {
+				this.activePromptRun = undefined;
+			}
+		});
+	}
+
 	private async sendPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment): Promise<void> {
 		const view = this.view;
 		if (!view || (!prompt.trim() && !audio)) {
@@ -1415,11 +1472,13 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		const sessionId = `panel:${workspacePath() ?? 'default'}:${chatId || 'default'}`;
 		const sink = this.panelSink(view);
 		const content = prompt.trim() || 'Please transcribe this audio and respond.';
+		const imageGeneration = imageGenerationForPrompt(content, settings.imageGeneration);
 		await view.webview.postMessage({ type: 'runStarted', prompt: content, chatId });
 		await view.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
-		const firstToolRequests: ToolResultRequest[] = [];
+		const pendingToolRequests: ToolResultRequest[] = [];
 		const seenToolRequests = new Set<string>();
 		try {
+			let currentToolRequest: ToolResultRequest | undefined;
 			await this.bridge.send('sendPrompt', sessionId, {
 				content,
 				workspace: workspacePath(),
@@ -1429,34 +1488,45 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				intensity: settings.intensity,
 				memoryMode: settings.memoryMode,
 				webSearch: settings.webSearch,
-				imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
+				imageGeneration: imageGeneration === 'auto' ? 'auto' : undefined,
 				voiceMode,
 				audioFile: audio,
 				mcpCalls: mcpCallsPayload(settings),
 				config: settings.config
 			}, event => {
-				const toolRequest = renderBridgeEvent(event, sink, firstToolRequests.at(-1));
-				if (toolRequest && toolRequest !== firstToolRequests.at(-1)) {
-					enqueueToolResultRequest(firstToolRequests, toolRequest, seenToolRequests);
+				const toolRequest = renderBridgeEvent(event, sink, currentToolRequest);
+				if (toolRequest && toolRequest !== currentToolRequest) {
+					currentToolRequest = toolRequest;
+					enqueueToolResultRequest(pendingToolRequests, toolRequest, seenToolRequests);
 				}
 			}, token);
 
-			let nextToolRequest = firstToolRequests.shift();
+			const submitTools = await this.bridge.listTools(settings.mode, token).catch(() => undefined);
+			let nextToolRequest = pendingToolRequests.shift();
 			while (nextToolRequest && !token.isCancellationRequested) {
 				const toolOutputs = await executeToolCalls(this.bridge, nextToolRequest.toolCalls, settings.mode, sink, token);
-				const continuationToolRequests: ToolResultRequest[] = [];
+				if (token.isCancellationRequested) {
+					break;
+				}
+				if (toolOutputs.length !== nextToolRequest.toolCalls.length) {
+					await view.webview.postMessage({ type: 'status', text: 'Stopped before submitting incomplete tool outputs.' });
+					break;
+				}
+				let currentContinuationToolRequest: ToolResultRequest | undefined;
 				await this.bridge.send('submitToolResult', sessionId, {
 					threadId: nextToolRequest.threadId,
 					runId: nextToolRequest.runId,
 					toolOutputs,
+					tools: submitTools,
 					config: settings.config
 				}, event => {
-					const followupToolRequest = renderBridgeEvent(event, sink, continuationToolRequests.at(-1));
-					if (followupToolRequest && followupToolRequest !== continuationToolRequests.at(-1)) {
-						enqueueToolResultRequest(continuationToolRequests, followupToolRequest, seenToolRequests);
+					const followupToolRequest = renderBridgeEvent(event, sink, currentContinuationToolRequest);
+					if (followupToolRequest && followupToolRequest !== currentContinuationToolRequest) {
+						currentContinuationToolRequest = followupToolRequest;
+						enqueueToolResultRequest(pendingToolRequests, followupToolRequest, seenToolRequests);
 					}
 				}, token);
-				nextToolRequest = continuationToolRequests.shift();
+				nextToolRequest = pendingToolRequests.shift();
 			}
 			await view.webview.postMessage({ type: 'runFinished', chatId });
 			await view.webview.postMessage({ type: 'status', text: token.isCancellationRequested ? 'Cancelled.' : 'Done.' });
@@ -1618,6 +1688,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.viewPane { display: none; width: 100%; min-width: 0; min-height: 0; height: 100%; }
 		.viewPane.active { display: flex; }
 		.composer { position: relative; min-width: 0; min-height: 0; padding: 0 10px calc(10px + var(--bb-composer-safe-bottom) + env(safe-area-inset-bottom, 0px)); border-top: 1px solid color-mix(in srgb, var(--bb-border) 58%, transparent); background: color-mix(in srgb, var(--bb-bg) 96%, var(--bb-surface)); }
+		.changeStack { display: none; width: 100%; max-height: min(24vh, 168px); flex-direction: column; gap: 4px; overflow-x: hidden; overflow-y: auto; padding: 5px 0 6px; scrollbar-width: thin; }
+		.changeStack.visible { display: flex; }
 		.stateControl { display: none; }
 			.log { overflow-y: auto; overflow-x: hidden; min-width: 0; min-height: 0; padding: 14px 12px 18px; flex-direction: column; align-items: stretch; gap: 10px; background: var(--bb-bg); scrollbar-width: thin; overscroll-behavior: contain; }
 			.log > * { flex: 0 0 auto; }
@@ -1726,6 +1798,20 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.reviewButton { min-width: 52px; min-height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 3px 9px; border-radius: 4px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); font-size: 11.5px; font-weight: 600; }
 		.reviewButton.secondary { color: var(--bb-muted); background: transparent; }
 		.reviewButton:disabled { cursor: default; color: var(--bb-muted); background: transparent; }
+		.changeStack .reviewCard, .changeStack .fileCard { border-color: color-mix(in srgb, var(--bb-border) 50%, transparent); border-radius: 5px; background: transparent; box-shadow: none; }
+		.changeStack .reviewCard { padding: 4px 6px; }
+		.changeStack .reviewHeader { min-height: 22px; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; }
+		.changeStack .reviewTitle { font-size: 11px; font-weight: 600; color: var(--bb-muted); }
+		.changeStack .fileCard { flex: 0 0 auto; }
+		.changeStack .fileHeader { min-height: 24px; gap: 6px; padding: 4px 6px; border-bottom-color: color-mix(in srgb, var(--bb-border) 40%, transparent); }
+		.changeStack .fileName, .changeStack .reviewFileName { font-size: 11px; }
+		.changeStack .diffLine { min-height: 14px; padding: 0 8px; color: var(--bb-muted); background: transparent; font-size: 10.5px; line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+		.changeStack .diffLine.add { color: color-mix(in srgb, var(--bb-success) 76%, var(--bb-text)); background: transparent; }
+		.changeStack .diffLine.remove { color: color-mix(in srgb, var(--bb-danger) 76%, var(--bb-text)); background: transparent; }
+		.changeStack .typeDot { width: 14px; height: 14px; }
+		.changeStack .typeDot .codicon { font-size: 12px; }
+		.changeStack .reviewButton { min-width: 0; min-height: 20px; padding: 0 6px; color: var(--vscode-textLink-foreground, var(--bb-primary)); background: transparent; font-size: 11px; font-weight: 600; }
+		.changeStack .reviewButton:hover { background: var(--vscode-toolbar-hoverBackground); }
 		.questionCard { width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 7px; padding: 10px; border: 1px solid var(--bb-border); border-radius: 10px; background: var(--bb-bg); }
 		.questionHeader { display: flex; align-items: flex-start; gap: 7px; }
 		.questionTitle { flex: 1; min-width: 0; color: var(--bb-text); font-size: 13px; font-weight: 600; line-height: 18px; }
@@ -1932,6 +2018,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				</div>
 				<div id="popoverBody" class="popoverBody"></div>
 			</div>
+			<div id="changeStack" class="changeStack" aria-live="polite" aria-label="Pending file changes"></div>
 			<form id="form">
 					<div class="composerCard">
 							<textarea id="prompt" placeholder="Message Backboard..."></textarea>
@@ -1968,6 +2055,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		const log = document.getElementById('log');
 		const status = document.getElementById('status');
 		const runClock = document.getElementById('runClock');
+		const changeStack = document.getElementById('changeStack');
 		let emptyState = document.getElementById('emptyState');
 		const historyPane = document.getElementById('historyPane');
 		const historyList = document.getElementById('historyList');
@@ -2034,7 +2122,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		let disabledModelProviders = new Set();
 		let modelProviderFiltersOpen = false;
 		let currentAssistantCard = undefined;
-		let currentToolGroup = undefined;
 		let activeToolRows = [];
 		let fileChanges = [];
 		let latestUsage = undefined;
@@ -2240,6 +2327,19 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			node.style.display = log.children.length <= 1 ? 'grid' : 'none';
 		}
+		function removeLegacyChangeArtifacts() {
+			for (const node of Array.from(log.querySelectorAll('.fileCard, .reviewWrap, #reviewBlock'))) {
+				node.remove();
+			}
+		}
+		function spreadLegacyToolGroups() {
+			for (const group of Array.from(log.querySelectorAll('.toolGroup'))) {
+				for (const card of Array.from(group.querySelectorAll('.toolCard'))) {
+					group.parentElement?.insertBefore(card, group);
+				}
+				group.remove();
+			}
+		}
 		function hasConversationContent() {
 			const node = ensureEmptyState();
 			return [...log.children].some(child => child !== node);
@@ -2270,7 +2370,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			return historyEntries.find(item => item.id === activeHistoryId);
 		}
 		function saveActiveHistory(status) {
-			if (restoringHistory || !activeHistoryId || (!hasConversationContent() && !promptQueue.length)) {
+			if (restoringHistory || !activeHistoryId || (!hasConversationContent() && !promptQueue.length && !fileChanges.length)) {
 				return;
 			}
 			const entry = activeHistoryEntry();
@@ -2464,8 +2564,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			saveActiveHistory();
 			restoringHistory = true;
 			log.innerHTML = checkpoint.html || '';
+			removeLegacyChangeArtifacts();
+			spreadLegacyToolGroups();
 			currentAssistantCard = undefined;
-			currentToolGroup = undefined;
 			activeToolRows = [];
 			fileChanges = Array.isArray(checkpoint.fileChanges) ? checkpoint.fileChanges.slice(0) : [];
 			promptQueue = Array.isArray(checkpoint.promptQueue) ? checkpoint.promptQueue.slice(0) : [];
@@ -2476,6 +2577,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			entry.updatedAt = Date.now();
 			restoringHistory = false;
 			syncEmptyState();
+			renderChangeStack();
 			renderQueue();
 			renderHistory();
 			renderRecentTabs();
@@ -2497,14 +2599,16 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			saveActiveHistory();
 			restoringHistory = true;
 			log.innerHTML = entry.html || '';
+			removeLegacyChangeArtifacts();
+			spreadLegacyToolGroups();
 			currentAssistantCard = undefined;
-			currentToolGroup = undefined;
 			activeToolRows = [];
 			fileChanges = Array.isArray(entry.fileChanges) ? entry.fileChanges.slice(0) : [];
 			promptQueue = Array.isArray(entry.promptQueue) ? entry.promptQueue.slice(0) : [];
 			activeHistoryId = entry.id;
 			restoringHistory = false;
 			syncEmptyState();
+			renderChangeStack();
 			renderQueue();
 			setActiveView('chat');
 			scrollConversation(true);
@@ -3152,6 +3256,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				restoreCheckpoint(target.dataset.checkpointId || '');
 			}
 		});
+		changeStack?.addEventListener('click', event => {
+			const target = event.target instanceof Element ? event.target.closest('[data-log-action]') : undefined;
+			const action = target?.getAttribute('data-log-action');
+			if (action === 'reviewChanges') {
+				vscode.postMessage({ type: 'reviewChanges' });
+			}
+		});
 		log.addEventListener('click', event => {
 			const target = event.target instanceof Element ? event.target.closest('[data-log-action]') : undefined;
 			const action = target?.getAttribute('data-log-action');
@@ -3393,7 +3504,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			log.textContent = '';
 			log.appendChild(ensureEmptyState());
 			currentAssistantCard = undefined;
-			currentToolGroup = undefined;
 			activeToolRows = [];
 			fileChanges = [];
 			promptQueue = [];
@@ -3403,6 +3513,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			stopRequested = false;
 			stopRunTimer();
 			syncComposerButtons();
+			renderChangeStack();
 			renderRecentTabs();
 			renderCheckpoints();
 			scrollConversation(true);
@@ -3644,72 +3755,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			scrollConversation();
 		}
-		function ensureToolGroup() {
-			if (currentToolGroup?.group?.isConnected && currentToolGroup?.body?.isConnected) {
-				return currentToolGroup;
-			}
-			const group = document.createElement('div');
-			group.className = 'toolGroup running';
-			const head = document.createElement('button');
-			head.className = 'toolGroupHead';
-			head.type = 'button';
-			head.title = 'Show commands';
-			head.setAttribute('aria-expanded', 'false');
-			const statusIcon = document.createElement('span');
-			statusIcon.className = 'toolGroupStatus';
-			statusIcon.appendChild(icon('sync'));
-			const main = document.createElement('span');
-			main.className = 'toolGroupMain';
-			const title = document.createElement('span');
-			title.className = 'toolGroupTitle';
-			title.textContent = 'Working...';
-			const meta = document.createElement('span');
-			meta.className = 'toolGroupMeta';
-			meta.textContent = 'Preparing commands';
-			main.append(title, meta);
-			const toggleIcon = icon('chevron-down');
-			toggleIcon.classList.add('toolGroupToggleIcon');
-			const toggle = document.createElement('span');
-			toggle.className = 'toolGroupToggle';
-			toggle.appendChild(toggleIcon);
-			head.append(statusIcon, main, toggle);
-			const body = document.createElement('div');
-			body.className = 'toolGroupBody';
-			head.addEventListener('click', () => {
-				const open = group.classList.toggle('open');
-				head.title = open ? 'Hide commands' : 'Show commands';
-				head.setAttribute('aria-expanded', open ? 'true' : 'false');
-				toggle.textContent = '';
-				toggle.appendChild(icon(open ? 'chevron-up' : 'chevron-down'));
-				scrollConversation();
-			});
-			group.append(head, body);
-			log.appendChild(group);
-			currentToolGroup = { group, body, title, meta, statusIcon, toggle };
-			updateToolGroupSummary();
-			return currentToolGroup;
-		}
-		function updateToolGroupSummary() {
-			const groupState = currentToolGroup;
-			if (!groupState?.group?.isConnected || !groupState?.body?.isConnected) {
-				return;
-			}
-			const cards = Array.from(groupState.body.querySelectorAll('.toolCard'));
-			const total = cards.length;
-			const running = cards.filter(card => card.classList.contains('started')).length;
-			const failed = cards.filter(card => card.classList.contains('failed') || card.classList.contains('denied')).length;
-			groupState.group.classList.toggle('running', running > 0);
-			groupState.group.classList.toggle('failed', failed > 0);
-			groupState.title.textContent = running > 0 ? 'Working...' : failed > 0 ? 'Finished with errors' : 'Finished working';
-			groupState.meta.textContent = total === 0
-				? 'Preparing commands'
-				: total + ' command' + (total === 1 ? '' : 's') + (running ? ', ' + running + ' running' : '') + (failed ? ', ' + failed + ' failed' : '');
-			groupState.statusIcon.textContent = '';
-			groupState.statusIcon.appendChild(icon(failed ? 'error' : running ? 'sync' : 'check'));
-		}
 		function appendTool(item) {
 			breakAssistantStream();
-			const groupState = ensureToolGroup();
 			const status = item?.status || 'updated';
 			const name = item?.name || 'tool';
 			const key = item?.key || toolKey(item);
@@ -3785,12 +3832,11 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			if (existingIndex >= 0) {
 				activeToolRows.splice(existingIndex, 1);
 			} else {
-				groupState.body.appendChild(row);
+				log.appendChild(row);
 			}
 			if (status === 'started') {
 				activeToolRows.push({ key, name, row, label, duration, startedAt });
 			}
-			updateToolGroupSummary();
 			scrollConversation();
 		}
 		function numberValue(value) {
@@ -4013,6 +4059,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			breakAssistantStream();
 			fileChanges = fileChanges.filter(item => item.path !== change.path).concat(change);
+			renderChangeStack();
+			saveActiveHistory();
+		}
+		function createFileChangeCard(change) {
 			const card = document.createElement('div');
 			card.className = 'fileCard';
 			const header = document.createElement('div');
@@ -4037,9 +4087,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				row.textContent = (line.type === 'add' ? '+ ' : line.type === 'remove' ? '- ' : '  ') + (line.text || '');
 				card.appendChild(row);
 			}
-			log.appendChild(card);
-			renderReviewBlock();
-			scrollConversation();
+			return card;
 		}
 		function fileChangeTotals() {
 			return fileChanges.reduce((totals, change) => ({
@@ -4047,8 +4095,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				removed: totals.removed + (Number(change.removed) || 0)
 			}), { added: 0, removed: 0 });
 		}
-		function renderReviewBlock() {
-			document.getElementById('reviewBlock')?.remove();
+		function renderChangeStack() {
+			if (!changeStack) {
+				return;
+			}
+			changeStack.textContent = '';
+			changeStack.classList.toggle('visible', fileChanges.length > 0);
 			if (!fileChanges.length) {
 				return;
 			}
@@ -4066,41 +4118,19 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const title = document.createElement('span');
 			title.className = 'reviewTitle';
 			title.textContent = 'Changed ' + fileChanges.length + ' ' + (fileChanges.length === 1 ? 'file' : 'files') + ', +' + totals.added + ' -' + totals.removed;
-			const spacer = document.createElement('span');
-			spacer.className = 'headerSpacer';
-			const undo = document.createElement('button');
-			undo.className = 'reviewButton secondary';
-			undo.type = 'button';
-			undo.disabled = true;
-			undo.title = 'Undo All is not implemented yet.';
-			undo.textContent = 'Undo All';
 			const review = document.createElement('button');
 			review.className = 'reviewButton';
 			review.type = 'button';
 			review.textContent = 'Review';
 			review.dataset.logAction = 'reviewChanges';
-			header.append(dot, title, spacer, undo, review);
+			header.append(dot, title, review);
 			card.appendChild(header);
-			for (const change of fileChanges) {
-				const row = document.createElement('div');
-				row.className = 'reviewFile';
-				const fileDot = document.createElement('span');
-				fileDot.className = 'typeDot';
-				fileDot.appendChild(icon('info'));
-				const fileName = document.createElement('span');
-				fileName.className = 'reviewFileName';
-				fileName.textContent = change.path;
-				const added = document.createElement('span');
-				added.className = 'fileCount add';
-				added.textContent = '+' + (change.added || 0);
-				const removed = document.createElement('span');
-				removed.className = 'fileCount remove';
-				removed.textContent = '-' + (change.removed || 0);
-				row.append(fileDot, fileName, added, removed);
-				card.appendChild(row);
-			}
 			wrap.appendChild(card);
-			log.appendChild(wrap);
+			changeStack.appendChild(wrap);
+			for (const change of fileChanges) {
+				changeStack.appendChild(createFileChangeCard(change));
+			}
+			changeStack.scrollTop = changeStack.scrollHeight;
 		}
 		function appendRow(role, text) {
 			if (role === 'assistant' || role === 'user') {
@@ -4355,6 +4385,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		applySettings({});
 		renderToolCount();
 		renderHistory();
+		renderChangeStack();
 		renderQueue();
 		setActiveView(activeView);
 		syncEmptyState();
@@ -4372,10 +4403,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 class BackboardBridge implements vscode.Disposable {
 	private static readonly modelCacheTtl = 24 * 60 * 60 * 1000;
 	private static readonly modelCacheVersion = 2;
+	private static readonly toolCacheTtl = 24 * 60 * 60 * 1000;
+	private static readonly toolCacheVersion = 1;
 	private child: cp.ChildProcessWithoutNullStreams | undefined;
 	private readonly pending = new Map<string, PendingRequest>();
 	private readonly output = vscode.window.createOutputChannel('Backboard Bridge');
 	private pendingModelRefresh: Promise<BridgeModel[]> | undefined;
+	private readonly pendingToolRefreshes = new Map<string, Promise<unknown[]>>();
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 	}
@@ -4402,6 +4436,20 @@ class BackboardBridge implements vscode.Disposable {
 	async cachedModels(): Promise<BridgeModel[] | undefined> {
 		const entry = await this.readModelCache();
 		return entry?.models;
+	}
+
+	async cachedTools(mode: string): Promise<unknown[] | undefined> {
+		const entry = await this.readToolCache(mode);
+		return entry?.tools;
+	}
+
+	async hasFreshPanelMetadata(mode: string): Promise<boolean> {
+		const [modelCache, toolCache] = await Promise.all([this.readModelCache(), this.readToolCache(mode)]);
+		const now = Date.now();
+		return Boolean(
+			modelCache && now - modelCache.fetchedAt < BackboardBridge.modelCacheTtl
+			&& toolCache && now - toolCache.fetchedAt < BackboardBridge.toolCacheTtl
+		);
 	}
 
 	async listModels(token: vscode.CancellationToken, forceRefresh = false): Promise<BridgeModel[]> {
@@ -4461,9 +4509,64 @@ class BackboardBridge implements vscode.Disposable {
 		await fs.promises.rename(tempPath, cachePath);
 	}
 
-	async listTools(mode: string, token: vscode.CancellationToken): Promise<unknown[]> {
+	async listTools(mode: string, token: vscode.CancellationToken, forceRefresh = false): Promise<unknown[]> {
+		const cached = await this.readToolCache(mode);
+		if (!forceRefresh && cached && Date.now() - cached.fetchedAt < BackboardBridge.toolCacheTtl) {
+			return cached.tools;
+		}
+		const pending = this.pendingToolRefreshes.get(mode);
+		if (pending) {
+			return pending;
+		}
+		const refresh = this.fetchAndCacheTools(mode, token);
+		this.pendingToolRefreshes.set(mode, refresh);
+		try {
+			return await refresh;
+		} finally {
+			this.pendingToolRefreshes.delete(mode);
+		}
+	}
+
+	private async fetchAndCacheTools(mode: string, token: vscode.CancellationToken): Promise<unknown[]> {
 		const events = await this.send('listTools', undefined, { mode }, undefined, token);
-		return events.find(event => event.type === 'tools')?.tools ?? [];
+		const tools = events.find(event => event.type === 'tools')?.tools ?? [];
+		await this.writeToolCache(mode, tools);
+		return tools;
+	}
+
+	private toolCachePath(): string {
+		return path.join(this.context.globalStorageUri.fsPath, 'tools.json');
+	}
+
+	private async readToolCache(mode: string): Promise<ToolCacheEntry | undefined> {
+		try {
+			const parsed: unknown = JSON.parse(await fs.promises.readFile(this.toolCachePath(), 'utf8'));
+			const env = isObjectRecord(parsed) ? stringValueFromRecord(parsed.env) : undefined;
+			if (!isObjectRecord(parsed) || env !== currentBackboardEnv() || parsed.version !== BackboardBridge.toolCacheVersion || parsed.mode !== mode || typeof parsed.fetchedAt !== 'number' || !Array.isArray(parsed.tools)) {
+				return undefined;
+			}
+			return { env, version: parsed.version, mode, fetchedAt: parsed.fetchedAt, tools: parsed.tools };
+		} catch (error) {
+			if (isFileNotFoundError(error) || error instanceof SyntaxError) {
+				return undefined;
+			}
+			throw error;
+		}
+	}
+
+	private async writeToolCache(mode: string, tools: unknown[]): Promise<void> {
+		const cachePath = this.toolCachePath();
+		await fs.promises.mkdir(path.dirname(cachePath), { recursive: true });
+		const tempPath = path.join(path.dirname(cachePath), `tools.${process.pid}.${Date.now()}.tmp`);
+		const entry: ToolCacheEntry = {
+			env: currentBackboardEnv(),
+			version: BackboardBridge.toolCacheVersion,
+			mode,
+			fetchedAt: Date.now(),
+			tools
+		};
+		await fs.promises.writeFile(tempPath, `${JSON.stringify(entry, undefined, '\t')}\n`, 'utf8');
+		await fs.promises.rename(tempPath, cachePath);
 	}
 
 	async runRustTool(name: string, args: Record<string, unknown>, token: vscode.CancellationToken): Promise<unknown> {
@@ -4481,7 +4584,33 @@ class BackboardBridge implements vscode.Disposable {
 		const requestId = newId();
 		const child = this.ensureProcess();
 		this.logBridgeRequest(requestId, command, sessionId, params);
+		const timeoutMs = bridgeInactivityTimeoutMs(command);
+		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+		const clearTimeoutHandle = (): void => {
+			if (timeoutHandle) {
+				clearTimeout(timeoutHandle);
+				timeoutHandle = undefined;
+			}
+		};
+		const resetTimeout = (): void => {
+			clearTimeoutHandle();
+			if (timeoutMs <= 0) {
+				return;
+			}
+			timeoutHandle = setTimeout(() => {
+				const pending = this.pending.get(requestId);
+				if (!pending) {
+					return;
+				}
+				const message = `Backboard bridge did not respond to ${command} for ${Math.round(timeoutMs / 1000)}s.`;
+				this.output.appendLine(`[${new Date().toISOString()}] ${message}`);
+				this.pending.delete(requestId);
+				pending.reject(new Error(message));
+				this.child?.kill();
+			}, timeoutMs);
+		};
 		const cancelRequest = () => {
+			clearTimeoutHandle();
 			this.write({ requestId: newId(), command: 'cancel', sessionId, params: { requestId } });
 			const pending = this.pending.get(requestId);
 			if (!pending) {
@@ -4496,15 +4625,19 @@ class BackboardBridge implements vscode.Disposable {
 			this.pending.set(requestId, {
 				events: [],
 				onEvent,
+				resetTimeout,
 				resolve: events => {
+					clearTimeoutHandle();
 					disposable?.dispose();
 					resolve(events);
 				},
 				reject: error => {
+					clearTimeoutHandle();
 					disposable?.dispose();
 					reject(error);
 				}
 			});
+			resetTimeout();
 			disposable = token.onCancellationRequested(cancelRequest);
 			if (token.isCancellationRequested) {
 				cancelRequest();
@@ -4537,6 +4670,14 @@ class BackboardBridge implements vscode.Disposable {
 		});
 		readline.createInterface({ input: this.child.stdout }).on('line', line => this.handleLine(line));
 		this.child.stderr.on('data', chunk => this.output.append(chunk.toString()));
+		this.child.on('error', error => {
+			this.output.appendLine(`Bridge process error: ${error.message}`);
+			for (const pending of this.pending.values()) {
+				pending.reject(error);
+			}
+			this.pending.clear();
+			this.child = undefined;
+		});
 		this.child.on('exit', (code, signal) => {
 			this.output.appendLine(`Bridge exited code=${code ?? 'null'} signal=${signal ?? 'null'}`);
 			for (const pending of this.pending.values()) {
@@ -4553,11 +4694,26 @@ class BackboardBridge implements vscode.Disposable {
 		if (configured) {
 			return configured;
 		}
+		const development = this.resolveDevelopmentBridgePath();
+		if (development) {
+			return development;
+		}
 		const packaged = path.join(this.context.extensionPath, 'bin', process.platform === 'win32' ? 'backboard-bridge.exe' : 'backboard-bridge');
 		if (fs.existsSync(packaged)) {
 			return packaged;
 		}
 		return path.join(this.context.extensionPath, 'rust', 'target', 'debug', process.platform === 'win32' ? 'backboard-bridge.exe' : 'backboard-bridge');
+	}
+
+	private resolveDevelopmentBridgePath(): string | undefined {
+		const binaryName = process.platform === 'win32' ? 'backboard-bridge.exe' : 'backboard-bridge';
+		for (const profile of ['debug', 'release']) {
+			const candidate = path.join(this.context.extensionPath, 'rust', 'target', profile, binaryName);
+			if (fs.existsSync(candidate)) {
+				return candidate;
+			}
+		}
+		return undefined;
 	}
 
 	private write(payload: unknown): void {
@@ -4590,12 +4746,26 @@ class BackboardBridge implements vscode.Disposable {
 		if (!pending) {
 			return;
 		}
+		pending.resetTimeout();
 		pending.events.push(event);
 		void pending.onEvent?.(event);
 		if (event.type === 'done') {
 			this.pending.delete(event.requestId);
 			pending.resolve(pending.events);
 		}
+	}
+}
+
+function bridgeInactivityTimeoutMs(command: string): number {
+	switch (command) {
+		case 'submitToolResult':
+			return 120_000;
+		case 'sendPrompt':
+			return 120_000;
+		case 'listModels':
+			return 30_000;
+		default:
+			return 20_000;
 	}
 }
 
@@ -4680,6 +4850,9 @@ async function executeTool(bridge: BackboardBridge, name: string, args: Record<s
 		case 'web_fetch':
 		case 'computer':
 			return asCompactJson(await bridge.runRustTool(name, args, token));
+		case 'generate_image':
+		case 'image_generate':
+			return generateImageTool(args);
 		case 'read_lints':
 			return readLints(args, token);
 		case 'write':
@@ -4820,6 +4993,14 @@ async function codebaseSearch(args: Record<string, unknown>): Promise<string> {
 		.slice(0, limit)
 		.map(item => `${vscode.workspace.asRelativePath(item.uri)}: ${item.preview}`)
 		.join('\n');
+}
+
+function generateImageTool(args: Record<string, unknown>): string {
+	const prompt = stringArg(args, 'prompt', 'description', 'query', 'input') || 'the requested image';
+	return asCompactJson({
+		success: true,
+		content: `Image generation request acknowledged for: ${prompt}. Backboard media generation is enabled for this turn; continue by returning or streaming the generated image media instead of calling another local image tool.`
+	});
 }
 
 async function readLints(args: Record<string, unknown>, token: vscode.CancellationToken): Promise<string> {
@@ -5218,6 +5399,16 @@ function mcpCallsPayload(settings: BackboardSettings): string[] | undefined {
 	return enabled.length ? enabled : undefined;
 }
 
+function imageGenerationForPrompt(prompt: string, configured: string): string {
+	if (configured === 'auto') {
+		return configured;
+	}
+	return /\b(generate|create|make|draw|render)\b[\s\S]{0,80}\b(image|picture|photo|illustration|artwork)\b/i.test(prompt)
+		|| /\b(image|picture|photo|illustration|artwork)\b[\s\S]{0,80}\b(of|for|showing)\b/i.test(prompt)
+		? 'auto'
+		: configured;
+}
+
 function asPanelOptions(value: unknown): PanelOptions {
 	if (!value || typeof value !== 'object') {
 		return {};
@@ -5261,11 +5452,19 @@ async function savePanelOptions(options: PanelOptions): Promise<void> {
 async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, forceModelRefresh = false): Promise<void> {
 	const settings = readSettings();
 	await webview.postMessage({ type: 'settings', settings: publicSettings(settings), workspace: workspacePath() });
+	const cachedModels = forceModelRefresh ? undefined : await bridge.cachedModels();
+	const cachedTools = forceModelRefresh ? undefined : await bridge.cachedTools(settings.mode);
+	if (cachedModels) {
+		await webview.postMessage({ type: 'models', models: cachedModels });
+	}
+	if (cachedTools) {
+		await webview.postMessage({ type: 'tools', tools: cachedTools });
+	}
+	if (cachedModels && cachedTools && !forceModelRefresh && await bridge.hasFreshPanelMetadata(settings.mode)) {
+		await webview.postMessage({ type: 'status', text: 'Ready.' });
+		return;
+	}
 	try {
-		const cachedModels = forceModelRefresh ? undefined : await bridge.cachedModels();
-		if (cachedModels) {
-			await webview.postMessage({ type: 'models', models: cachedModels });
-		}
 		await webview.postMessage({ type: 'status', text: cachedModels && !forceModelRefresh ? 'Checking Backboard models.' : 'Loading Backboard models.' });
 		const models = await bridge.listModels(new vscode.CancellationTokenSource().token, forceModelRefresh);
 		await webview.postMessage({ type: 'models', models });
@@ -5285,10 +5484,10 @@ async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, 
 		}
 	}
 	try {
-		const tools = await bridge.listTools(settings.mode, new vscode.CancellationTokenSource().token);
+		const tools = await bridge.listTools(settings.mode, new vscode.CancellationTokenSource().token, forceModelRefresh);
 		await webview.postMessage({ type: 'tools', tools });
 	} catch {
-		await webview.postMessage({ type: 'tools', tools: [] });
+		await webview.postMessage({ type: 'tools', tools: cachedTools ?? [] });
 	}
 }
 

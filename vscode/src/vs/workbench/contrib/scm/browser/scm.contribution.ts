@@ -51,7 +51,7 @@ ModesRegistry.registerLanguage({
 	mimetypes: ['text/x-scm-input']
 });
 
-const sourceControlViewIcon = registerIcon('source-control-view-icon', Codicon.sourceControl, localize('sourceControlViewIcon', 'View icon of the Source Control view.'));
+const sourceControlViewIcon = registerIcon('source-control-view-icon', Codicon.gitBranch, localize('sourceControlViewIcon', 'View icon of the Source Control view.'));
 
 const viewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
 	id: VIEWLET_ID,

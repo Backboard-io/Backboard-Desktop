@@ -40,6 +40,7 @@ export class ViewDescriptorService extends Disposable implements IViewDescriptor
 
 	private static readonly VIEWS_CUSTOMIZATIONS = 'views.customizations';
 	private static readonly COMMON_CONTAINER_ID_PREFIX = 'workbench.views.service';
+	private static readonly TERMINAL_PANEL_CONTAINER_ID = 'terminal';
 
 	private readonly _onDidChangeContainer: Emitter<{ views: IViewDescriptor[]; from: ViewContainer; to: ViewContainer }> = this._register(new Emitter<{ views: IViewDescriptor[]; from: ViewContainer; to: ViewContainer }>());
 	readonly onDidChangeContainer: Event<{ views: IViewDescriptor[]; from: ViewContainer; to: ViewContainer }> = this._onDidChangeContainer.event;
@@ -312,7 +313,8 @@ export class ViewDescriptorService extends Disposable implements IViewDescriptor
 	}
 
 	getDefaultContainerById(viewId: string): ViewContainer | null {
-		return this.viewsRegistry.getViewContainer(viewId) ?? null;
+		const viewContainer = this.viewsRegistry.getViewContainer(viewId);
+		return viewContainer && this.isViewContainerEnabled(viewContainer) ? viewContainer : null;
 	}
 
 	getViewContainerModel(container: ViewContainer): ViewContainerModel {
@@ -328,6 +330,10 @@ export class ViewDescriptorService extends Disposable implements IViewDescriptor
 	}
 
 	private isViewContainerEnabled(viewContainer: ViewContainer): boolean {
+		const location = this.getViewContainerLocation(viewContainer);
+		if (location === ViewContainerLocation.Panel && viewContainer.id !== ViewDescriptorService.TERMINAL_PANEL_CONTAINER_ID) {
+			return false;
+		}
 		return this.isEnabled(viewContainer.windowEnablement);
 	}
 

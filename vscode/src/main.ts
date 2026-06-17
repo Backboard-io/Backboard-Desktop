@@ -20,6 +20,8 @@ import { getUNCHost, addUNCHostToAllowlist } from './vs/base/node/unc.js';
 import { INLSConfiguration } from './vs/nls.js';
 import { NativeParsedArgs } from './vs/platform/environment/common/argv.js';
 
+const DEV_PRODUCT_NAME = 'Code BBS';
+
 perf.mark('code/didStartMain');
 
 perf.mark('code/willLoadMainBundle', {
@@ -538,7 +540,7 @@ function configureCrashReporter(): void {
 	const uploadToServer = Boolean(!process.env['VSCODE_DEV'] && submitURL && !crashReporterDirectory);
 	crashReporter.start({
 		companyName,
-		productName: process.env['VSCODE_DEV'] ? `${productName} Dev` : productName,
+		productName: process.env['VSCODE_DEV'] ? DEV_PRODUCT_NAME : productName,
 		submitURL,
 		uploadToServer,
 		compress: true,

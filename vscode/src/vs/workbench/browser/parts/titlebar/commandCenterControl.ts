@@ -23,17 +23,13 @@ import { IQuickInputService } from '../../../../platform/quickinput/common/quick
 import { WindowTitle } from './windowTitle.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
-import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 
 const AGENT_SESSIONS_WELCOME_INPUT_TYPE_ID = 'workbench.editors.agentSessionsWelcomeInput';
 const OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openWorkspaceInAgentsWindow';
-const OPEN_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.openWorkspacePage';
 const CLOSE_WORKSPACE_PAGE_COMMAND_ID = 'workbench.action.closeWorkspacePage';
-const WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY = 'workspacePageVisible';
-const WORKSPACE_PAGE_CONTEXT_KEYS = new Set([WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY]);
 
-type TitlebarPage = 'sandbox' | 'editor' | 'workspace';
+type TitlebarPage = 'sandbox' | 'editor';
 
 export class CommandCenterControl {
 
@@ -112,7 +108,6 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
 		@IInstantiationService private _instaService: IInstantiationService,
 		@ICommandService private readonly _commandService: ICommandService,
 		@IEditorService private readonly _editorService: IEditorService,
-		@IContextKeyService private readonly _contextKeyService: IContextKeyService,
 	) {
 		super(undefined, _submenu.actions.find(action => action.id === 'workbench.action.quickOpenWithModes') ?? _submenu.actions[0], options);
 		this._hoverDelegate = options.hoverDelegate ?? getDefaultHoverDelegate('mouse');
@@ -190,7 +185,6 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
 									await that._commandService.executeCommand(CLOSE_WORKSPACE_PAGE_COMMAND_ID);
 									return that._commandService.executeCommand('workbench.action.focusActiveEditorGroup');
 								}),
-								this._createSwitchButton('workspace', localize('workspaceView', "Workspace"), () => that._commandService.executeCommand(OPEN_WORKSPACE_PAGE_COMMAND_ID)),
 							];
 							for (const button of buttons) {
 								switchElement.appendChild(button);
@@ -216,15 +210,10 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
 
 							this._store.add(that._editorService.onDidActiveEditorChange(updateChecked));
 							this._store.add(that._editorService.onDidVisibleEditorsChange(updateChecked));
-							this._store.add(that._contextKeyService.onDidChangeContext(event => {
-								if (event.affectsSome(WORKSPACE_PAGE_CONTEXT_KEYS)) {
-									updateChecked();
-								}
-							}));
 						}
 
 						protected override getTooltip() {
-							return localize('ideViewSwitchTooltip', "Switch between Sandbox, Editor, and Workspace");
+							return localize('ideViewSwitchTooltip', "Switch between Sandbox and Editor");
 						}
 
 						private _createSwitchButton(page: TitlebarPage, label: string, run: () => Promise<unknown>): HTMLButtonElement {
@@ -263,10 +252,6 @@ class CommandCenterCenterViewItem extends BaseActionViewItem {
 						}
 
 						private _getActivePage(): TitlebarPage {
-							if (that._contextKeyService.getContextKeyValue<boolean>(WORKSPACE_PAGE_VISIBLE_CONTEXT_KEY)) {
-								return 'workspace';
-							}
-
 							switch (that._editorService.activeEditor?.typeId) {
 								case AGENT_SESSIONS_WELCOME_INPUT_TYPE_ID:
 									return 'sandbox';

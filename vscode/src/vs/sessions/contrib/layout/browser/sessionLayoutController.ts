@@ -55,7 +55,6 @@ export class LayoutController extends Disposable {
 	static readonly ID = 'workbench.contrib.sessionsLayoutController';
 
 	private readonly _pendingTurnStateByResource = new ResourceMap<IPendingTurnState>();
-	private readonly _panelVisibilityBySession = new ResourceMap<boolean>();
 	private readonly _viewStateBySession: ResourceMap<ISessionViewState>;
 	private readonly _workingSets: ResourceMap<IEditorWorkingSet>;
 	private readonly _workingSetSequencer = new Sequencer();
@@ -134,7 +133,6 @@ export class LayoutController extends Disposable {
 					continue;
 				}
 				this._viewStateBySession.delete(session.resource);
-				this._panelVisibilityBySession.delete(session.resource);
 				this._pendingTurnStateByResource.delete(session.resource);
 			}
 		}));
@@ -168,11 +166,11 @@ export class LayoutController extends Disposable {
 
 		// Switch between sessions — sync panel visibility
 		this._register(autorun(reader => {
-			const activeSessionResource = activeSessionResourceObs.read(reader);
+			activeSessionResourceObs.read(reader);
 			if (multipleSessionsVisibleObs.read(reader)) {
 				return;
 			}
-			this._syncPanelVisibility(activeSessionResource);
+			this._syncPanelVisibility();
 		}));
 
 		// When a turn is completed, check if there were changes before the turn and
@@ -222,17 +220,14 @@ export class LayoutController extends Disposable {
 			}));
 		}
 
-		// Track panel visibility changes by the user
+		// Sandbox does not use the bottom panel; terminals and task output live
+		// outside of the primary sandbox surface.
 		this._register(this._layoutService.onDidChangePartVisibility(e => {
 			if (e.partId !== Parts.PANEL_PART) {
 				return;
 			}
-			if (multipleSessionsVisibleObs.get()) {
-				return;
-			}
-			const activeSession = this._sessionManagementService.activeSession.get();
-			if (activeSession) {
-				this._panelVisibilityBySession.set(activeSession.resource, e.visible);
+			if (e.visible) {
+				this._layoutService.setPartHidden(true, Parts.PANEL_PART);
 			}
 		}));
 
@@ -453,15 +448,8 @@ export class LayoutController extends Disposable {
 
 	// --- Panel ---
 
-	private _syncPanelVisibility(sessionResource: URI | undefined): void {
-		if (!sessionResource) {
-			this._layoutService.setPartHidden(true, Parts.PANEL_PART);
-			return;
-		}
-
-		const wasVisible = this._panelVisibilityBySession.get(sessionResource);
-		// Default to hidden if we have no record for this session
-		this._layoutService.setPartHidden(wasVisible !== true, Parts.PANEL_PART);
+	private _syncPanelVisibility(): void {
+		this._layoutService.setPartHidden(true, Parts.PANEL_PART);
 	}
 
 	// --- Editor working sets ---
