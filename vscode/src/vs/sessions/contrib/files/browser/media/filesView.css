@@ -11,6 +11,61 @@
 	box-sizing: border-box;
 }
 
+.sessions-files-view-body {
+	height: 100%;
+	overflow: auto;
+	padding: 6px 0;
+	box-sizing: border-box;
+	background-color: var(--vscode-agentsPanel-background);
+}
+
+.sessions-files-row {
+	width: 100%;
+	height: 24px;
+	border: 0;
+	background: transparent;
+	color: var(--vscode-foreground);
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	padding: 0 8px;
+	font: inherit;
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-files-row:hover {
+	background-color: var(--vscode-list-hoverBackground);
+}
+
+.sessions-files-row:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.sessions-files-row .codicon {
+	color: var(--vscode-descriptionForeground);
+	flex: 0 0 auto;
+}
+
+.sessions-files-twistie {
+	width: 12px;
+	font-size: 12px !important;
+}
+
+.sessions-files-icon {
+	width: 16px;
+	font-size: 15px !important;
+}
+
+.sessions-files-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
 /* Welcome/Empty state */
 .files-empty-view-body .files-empty-welcome {
 	display: flex;

@@ -1297,6 +1297,44 @@ function renderBridgeEvent(event: BridgeEvent, response: ResponseSink, currentTo
 	}
 }
 
+function toolResultRequestKey(request: ToolResultRequest): string {
+	const toolCallIds = request.toolCalls.map(toolCallIdentity).join(',');
+	return `${request.threadId ?? ''}:${request.runId ?? ''}:${toolCallIds}`;
+}
+
+function toolCallIdentity(raw: unknown): string {
+	const value = isObjectRecord(raw) ? raw : {};
+	const fn = isObjectRecord(value.function) ? value.function : {};
+	return firstStringProperty(value, ['id', 'tool_call_id', 'toolCallId', 'call_id', 'callId'])
+		?? firstStringProperty(fn, ['name'])
+		?? safeCompactString(raw);
+}
+
+function safeCompactString(value: unknown): string {
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
+}
+
+function enqueueToolResultRequest(queue: ToolResultRequest[], request: ToolResultRequest | undefined, seenRequests: Set<string>): void {
+	if (!request || request.toolCalls.length === 0) {
+		return;
+	}
+	const key = toolResultRequestKey(request);
+	if (seenRequests.has(key)) {
+		logToolDiagnostic('duplicate-tool-request-skipped', {
+			id: request.runId ?? 'unknown',
+			name: 'submit_tool_outputs',
+			args: { threadId: request.threadId, runId: request.runId, toolCalls: request.toolCalls.length }
+		});
+		return;
+	}
+	seenRequests.add(key);
+	queue.push(request);
+}
+
 class BackboardPanelProvider implements vscode.WebviewViewProvider {
 	private view: vscode.WebviewView | undefined;
 	private runToken: vscode.CancellationTokenSource | undefined;
@@ -1380,6 +1418,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		await view.webview.postMessage({ type: 'runStarted', prompt: content, chatId });
 		await view.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
 		const firstToolRequests: ToolResultRequest[] = [];
+		const seenToolRequests = new Set<string>();
 		try {
 			await this.bridge.send('sendPrompt', sessionId, {
 				content,
@@ -1398,7 +1437,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			}, event => {
 				const toolRequest = renderBridgeEvent(event, sink, firstToolRequests.at(-1));
 				if (toolRequest && toolRequest !== firstToolRequests.at(-1)) {
-					firstToolRequests.push(toolRequest);
+					enqueueToolResultRequest(firstToolRequests, toolRequest, seenToolRequests);
 				}
 			}, token);
 
@@ -1414,7 +1453,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				}, event => {
 					const followupToolRequest = renderBridgeEvent(event, sink, continuationToolRequests.at(-1));
 					if (followupToolRequest && followupToolRequest !== continuationToolRequests.at(-1)) {
-						continuationToolRequests.push(followupToolRequest);
+						enqueueToolResultRequest(continuationToolRequests, followupToolRequest, seenToolRequests);
 					}
 				}, token);
 				nextToolRequest = continuationToolRequests.shift();

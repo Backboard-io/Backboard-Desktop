@@ -16,17 +16,12 @@ import { observableConfigValue } from '../../../../platform/observable/common/pl
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
-import { ViewContainerLocation } from '../../../../workbench/common/views.js';
 import { IEditorGroupsService, IEditorWorkingSet } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
-import { IPaneCompositePartService } from '../../../../workbench/services/panecomposite/browser/panecomposite.js';
-import { IViewsService } from '../../../../workbench/services/views/common/viewsService.js';
 import { IActiveSession, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsViewService } from '../../../browser/sessionsViewService.js';
 import { SessionStatus } from '../../../services/sessions/common/session.js';
-import { CHANGES_VIEW_ID } from '../../changes/common/changes.js';
-import { SESSIONS_FILES_CONTAINER_ID } from '../../files/browser/files.contribution.js';
 
 interface IPendingTurnState {
 	readonly hadChangesBeforeSend: boolean;
@@ -79,8 +74,6 @@ export class LayoutController extends Disposable {
 		@ISessionsManagementService private readonly _sessionManagementService: ISessionsManagementService,
 		@ISessionsViewService private readonly _sessionsViewService: ISessionsViewService,
 		@IChatService private readonly _chatService: IChatService,
-		@IViewsService private readonly _viewsService: IViewsService,
-		@IPaneCompositePartService private readonly _paneCompositePartService: IPaneCompositePartService,
 		@IStorageService private readonly _storageService: IStorageService,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IEditorService private readonly _editorService: IEditorService,
@@ -343,41 +336,38 @@ export class LayoutController extends Disposable {
 
 	private _captureViewState(sessionResource: URI): void {
 		const auxiliaryBarVisible = this._layoutService.isVisible(Parts.AUXILIARYBAR_PART);
-		const activeViewContainerId = this._paneCompositePartService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)?.getId();
 		this._viewStateBySession.set(sessionResource, {
 			auxiliaryBarVisible,
-			auxiliaryBarActiveViewContainerId: activeViewContainerId,
+			auxiliaryBarActiveViewContainerId: undefined,
 		});
 	}
 
-	private _syncAuxiliaryBarVisibility(sessionResource: URI | undefined, hasWorkspace: boolean, isUntitled: boolean, hasChanges: boolean): void {
+	private _syncAuxiliaryBarVisibility(sessionResource: URI | undefined, hasWorkspace: boolean, isUntitled: boolean, _hasChanges: boolean): void {
 		if (!sessionResource || !hasWorkspace) {
 			return;
 		}
 
 		if (isUntitled) {
-			this._viewsService.openViewContainer(SESSIONS_FILES_CONTAINER_ID, false);
+			this._showSandboxOutput();
 			return;
 		}
 
-		// On session switch or initial load, restore the saved view state
+		// Restore only whether the right panel was hidden. Do not restore the
+		// active VS Code view container; Sandbox exposes a fixed Files/Changes/
+		// Preview switcher and should not resurrect arbitrary dragged views.
 		const savedState = this._viewStateBySession.get(sessionResource);
 		if (savedState) {
 			if (!savedState.auxiliaryBarVisible) {
 				this._layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
 				return;
 			}
-			if (savedState.auxiliaryBarActiveViewContainerId) {
-				this._viewsService.openViewContainer(savedState.auxiliaryBarActiveViewContainerId, false);
-				return;
-			}
 		}
 
-		if (hasChanges) {
-			this._viewsService.openView(CHANGES_VIEW_ID, false);
-		} else {
-			this._viewsService.openViewContainer(SESSIONS_FILES_CONTAINER_ID, false);
-		}
+		this._showSandboxOutput();
+	}
+
+	private _showSandboxOutput(): void {
+		this._layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
 	}
 
 	private _loadState(): void {

@@ -33,6 +33,10 @@ import { isWellKnownModeSchema } from '../agentHostPermissionPickerDelegate.js';
 
 function getAgentHostModeIcon(value: string | undefined): ThemeIcon | undefined {
 	switch (value) {
+		case 'agent': return Codicon.comment;
+		case 'ask': return Codicon.search;
+		case 'manual': return Codicon.edit;
+		case 'free': return Codicon.rocket;
 		case 'plan': return Codicon.checklist;
 		case 'autopilot': return Codicon.rocket;
 		case 'interactive': return Codicon.comment;
@@ -107,7 +111,7 @@ class MobileChatPhoneInputPresenter extends Disposable implements IChatPhonePres
 		const sheetItems: IMobilePickerSheetItem[] = [];
 
 		// If the active session is an agent-host session, show its
-		// agent-host config (interactive / plan / autopilot via
+		// agent-host config (provider-specific values via
 		// {@link SessionConfigKey.Mode}) and the resource-scheme-filtered
 		// model list — the same data path as the empty new-chat input
 		// picker (see `MobileChatInputConfigPicker`). The workbench

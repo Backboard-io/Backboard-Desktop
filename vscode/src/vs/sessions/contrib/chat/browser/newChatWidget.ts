@@ -24,6 +24,7 @@ import { NoAgentHostEmptyState } from './noAgentHostEmptyState.js';
 import { IChatRequestVariableEntry } from '../../../../workbench/contrib/chat/common/attachments/chatVariableEntries.js';
 import { IAgentHostFilterService } from '../../../services/agentHostFilter/common/agentHostFilter.js';
 import { IChatViewOptions } from '../../../browser/parts/chatView.js';
+import { LOCAL_AGENT_HOST_PROVIDER_ID } from '../../../common/agentHostSessionsProvider.js';
 
 // #region --- New Chat Widget ---
 
@@ -101,8 +102,9 @@ export class NewChatWidget extends Disposable {
 			canSendRequest,
 			loading,
 			historyKey: constObservable(undefined), // no persisted history for the new-session view
-			placeholder: localize('sessionsChatInput.askBackboardPlaceholder', "Ask Backboard..."),
+			placeholder: localize('sessionsChatInput.messageBackboardPlaceholder', "Message Backboard..."),
 			renderSessionTypePickerInControls: this._renderHarnessPickerInControls,
+			renderControlsInToolbar: true,
 			supportsBackground: true,
 		}));
 
@@ -206,7 +208,8 @@ export class NewChatWidget extends Disposable {
 			this._workspacePicker.setSelectedWorkspace(folderUri, { fireEvent: false });
 		}
 
-		return true;
+		return activeSession.providerId === LOCAL_AGENT_HOST_PROVIDER_ID
+			&& activeSession.sessionType === 'backboard';
 	}
 
 	private _isPreferredServable(folderUri: URI, pick: IPreferredSessionType): boolean {
@@ -228,7 +231,8 @@ export class NewChatWidget extends Disposable {
 	}
 
 	private _createSessionNow(folderUri: URI, pick: IPreferredSessionType | undefined): ISession | undefined {
-		const effectivePick = pick && this._isPreferredServable(folderUri, pick) ? pick : undefined;
+		const backboardPick = this._backboardPickForFolder(folderUri);
+		const effectivePick = backboardPick ?? (pick && this._isPreferredServable(folderUri, pick) ? pick : undefined);
 		const fallbackProviderId = this._workspacePicker.selectedResolved?.providerId;
 		try {
 			return this.sessionsViewService.openNewSession({
@@ -243,6 +247,13 @@ export class NewChatWidget extends Disposable {
 			this.logService.error('Failed to create new session:', e);
 			return undefined;
 		}
+	}
+
+	private _backboardPickForFolder(folderUri: URI): IPreferredSessionType | undefined {
+		return this.sessionsManagementService.getSessionTypesForFolder(folderUri).some(t =>
+			t.providerId === LOCAL_AGENT_HOST_PROVIDER_ID && t.sessionType.id === 'backboard')
+			? { providerId: LOCAL_AGENT_HOST_PROVIDER_ID, sessionTypeId: 'backboard' }
+			: undefined;
 	}
 
 	private _scheduleRecreateOnProviderChange(folderUri: URI, pick: IPreferredSessionType | undefined, created: ISession | undefined): void {

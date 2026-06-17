@@ -228,7 +228,7 @@ export class AgentHostSessionAdapter implements ISession {
 		this.modelSelection = metadata.model;
 		this.status = observableValue<SessionStatus>('status', metadata.status !== undefined ? mapProtocolStatus(metadata.status) : SessionStatus.Completed);
 		this.modelId = observableValue<string | undefined>('modelId', metadata.model ? `${resourceScheme}:${metadata.model.id}` : undefined);
-		this.mode = observableValue<{ readonly id: string; readonly kind: string } | undefined>('mode', metadata.agent ? { id: metadata.agent.uri, kind: AGENT_MODE_KIND } : undefined);
+		this.mode = observableValue<{ readonly id: string; readonly kind: string } | undefined>('mode', this.agentProvider === 'backboard' ? undefined : metadata.agent ? { id: metadata.agent.uri, kind: AGENT_MODE_KIND } : undefined);
 		this.lastTurnEnd = observableValue('lastTurnEnd', metadata.modifiedTime ? new Date(metadata.modifiedTime) : undefined);
 		this._activity = observableValue('activity', metadata.activity);
 		this._project = metadata.project;
@@ -485,7 +485,7 @@ export class AgentHostSessionAdapter implements ISession {
 				didChange = true;
 			}
 
-			const nextMode = metadata.agent ? { id: metadata.agent.uri, kind: AGENT_MODE_KIND } : undefined;
+			const nextMode = this.agentProvider === 'backboard' ? undefined : metadata.agent ? { id: metadata.agent.uri, kind: AGENT_MODE_KIND } : undefined;
 			if (!modeEquals(this.mode.get(), nextMode)) {
 				this.mode.set(nextMode, tx);
 				didChange = true;
@@ -1254,6 +1254,8 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	 */
 	protected abstract resourceSchemeForProvider(provider: string): string;
 
+	protected _shouldIncludeAgentSession(_agentProvider: string): boolean { return true; }
+
 	/** Format the human-readable label for a session type entry (e.g. `Copilot CLI`). */
 	protected abstract _formatSessionTypeLabel(agentLabel: string): string;
 
@@ -1411,7 +1413,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			resourceScheme: this.resourceSchemeForProvider(sessionType.id),
 			authenticationPending: this.authenticationPending,
 			logService: this._logService,
-			initialConfigValues: this._initialNewSessionConfig(),
+			initialConfigValues: this._initialNewSessionConfig(sessionType),
 			instantiationService: this._instantiationService,
 			onSessionState: (id, state) => state === undefined
 				? this._handleNewSessionStateGone(id)
@@ -1500,7 +1502,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	 * clamped to `default` so the agent host never starts in an elevated
 	 * permission level the user is not allowed to pick.
 	 */
-	protected _initialNewSessionConfig(): Record<string, unknown> | undefined {
+	protected _initialNewSessionConfig(_sessionType?: ISessionType): Record<string, unknown> | undefined {
 		const config = Object.create(null) as Record<string, unknown>;
 		const policyRestricted = isAutoApprovePolicyRestricted(this._baseConfigurationService);
 
@@ -1842,6 +1844,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	}
 
 	setAgent(sessionId: string, agent: ISessionAgentRef | undefined): void {
+		if (this._isBackboardSession(sessionId)) {
+			return;
+		}
+
 		const newSession = this._getNewSession(sessionId);
 		if (newSession) {
 			newSession.setSelectedAgent(agent);
@@ -1864,8 +1870,23 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	}
 
 	getCustomAgents(sessionId: string): readonly AgentCustomization[] {
+		if (this._isBackboardSession(sessionId)) {
+			return [];
+		}
+
 		const sessionState = this._lastSessionStates.get(sessionId);
 		return getEffectiveAgents(sessionState?.customizations);
+	}
+
+	protected _isBackboardSession(sessionId: string): boolean {
+		const newSession = this._getNewSession(sessionId);
+		if (newSession) {
+			return newSession.agentProvider === 'backboard';
+		}
+
+		const rawId = this._rawIdFromChatId(sessionId);
+		const cached = rawId ? this._sessionCache.get(rawId) : undefined;
+		return cached?.agentProvider === 'backboard';
 	}
 
 	getCustomizations(sessionId: string): Customization[] {
@@ -2352,6 +2373,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			const changed: ISession[] = [];
 
 			for (const meta of sessions) {
+				const agentProvider = AgentSession.provider(meta.session);
+				if (!agentProvider || !this._shouldIncludeAgentSession(agentProvider)) {
+					continue;
+				}
 				const rawId = AgentSession.id(meta.session);
 				currentKeys.add(rawId);
 
@@ -2496,6 +2521,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 
 	private _handleSessionAdded(summary: SessionSummary): void {
 		const sessionUri = URI.parse(summary.resource);
+		const agentProvider = AgentSession.provider(sessionUri);
+		if (!agentProvider || !this._shouldIncludeAgentSession(agentProvider)) {
+			return;
+		}
 		const rawId = AgentSession.id(sessionUri);
 		if (this._sessionCache.has(rawId)) {
 			return;
@@ -2568,6 +2597,9 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		const rawId = AgentSession.id(session);
 		const cached = this._sessionCache.get(rawId);
 		if (!cached) {
+			return;
+		}
+		if (cached.agentProvider === 'backboard') {
 			return;
 		}
 		const nextMode = agent ? { id: agent.uri, kind: AGENT_MODE_KIND } : undefined;

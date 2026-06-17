@@ -114,6 +114,11 @@ Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEdit
 
 //#endregion
 
+function hidesAllCustomizationSections(harnessService: ICustomizationHarnessService): boolean {
+	const hiddenSections = new Set(harnessService.getActiveDescriptor().hiddenSections ?? []);
+	return Object.values(AICustomizationManagementSection).every(section => hiddenSections.has(section));
+}
+
 //#region Context Menu Actions
 
 /**
@@ -769,6 +774,9 @@ class AICustomizationManagementActionsContribution extends Disposable implements
 				if (sessionResource) {
 					harnessService.setActiveSession(sessionResource);
 				}
+				if (hidesAllCustomizationSections(harnessService)) {
+					return;
+				}
 
 				const input = AICustomizationManagementEditorInput.getOrCreate();
 				const pane = await editorService.openEditor(input, { pinned: true });
@@ -791,6 +799,10 @@ class AICustomizationManagementActionsContribution extends Disposable implements
 
 			async run(accessor: ServicesAccessor, section?: AICustomizationManagementSection): Promise<void> {
 				const editorService = accessor.get(IEditorService);
+				const harnessService = accessor.get(ICustomizationHarnessService);
+				if (hidesAllCustomizationSections(harnessService)) {
+					return;
+				}
 				const input = AICustomizationManagementEditorInput.getOrCreate();
 				const pane = await editorService.openEditor(input, { pinned: true });
 				if (pane instanceof AICustomizationManagementEditor) {
@@ -814,6 +826,10 @@ class AICustomizationManagementActionsContribution extends Disposable implements
 
 			async run(accessor: ServicesAccessor): Promise<void> {
 				const editorService = accessor.get(IEditorService);
+				const harnessService = accessor.get(ICustomizationHarnessService);
+				if (hidesAllCustomizationSections(harnessService)) {
+					return;
+				}
 				// Open the customizations editor if not already open
 				const input = AICustomizationManagementEditorInput.getOrCreate();
 				const pane = await editorService.openEditor(input, { pinned: true });

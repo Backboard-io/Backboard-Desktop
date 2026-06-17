@@ -16,3 +16,7 @@
 .sessions-chat-agent-host-config a.action-label {
 	touch-action: manipulation;
 }
+
+.action-widget .monaco-list-row.action.sessions-chat-config-choice-selected > .icon {
+	color: var(--vscode-focusBorder);
+}

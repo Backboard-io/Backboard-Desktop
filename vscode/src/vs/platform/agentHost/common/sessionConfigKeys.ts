@@ -24,7 +24,7 @@ export const enum SessionConfigKey {
 	Isolation = 'isolation',
 	/** `'branch'` — base branch to work from. */
 	Branch = 'branch',
-	/** `'mode'` — agent execution mode (interactive / plan). */
+	/** `'mode'` — agent execution mode (for example interactive / plan or agent / ask / manual / free). */
 	Mode = 'mode',
 }
 

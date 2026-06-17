@@ -959,6 +959,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		for (const { location, visible } of partsToRestore) {
 			if (visible) {
+				if (location === ViewContainerLocation.AuxiliaryBar) {
+					continue;
+				}
 				const defaultViewContainer = this.viewDescriptorService.getDefaultViewContainer(location);
 				if (defaultViewContainer) {
 					this.paneCompositeService.openPaneComposite(defaultViewContainer.id, location);
@@ -1627,15 +1630,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// If auxiliary bar becomes hidden, also hide the current active pane composite
 		if (hidden && this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)) {
 			this.paneCompositeService.hideActivePaneComposite(ViewContainerLocation.AuxiliaryBar);
-		}
-
-		// If auxiliary bar becomes visible, show last active pane composite or default
-		if (!hidden && !this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)) {
-			const paneCompositeToOpen = this.paneCompositeService.getLastActivePaneCompositeId(ViewContainerLocation.AuxiliaryBar) ??
-				this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.AuxiliaryBar)?.id;
-			if (paneCompositeToOpen) {
-				this.paneCompositeService.openPaneComposite(paneCompositeToOpen, ViewContainerLocation.AuxiliaryBar);
-			}
 		}
 
 		this._savePartVisibility();

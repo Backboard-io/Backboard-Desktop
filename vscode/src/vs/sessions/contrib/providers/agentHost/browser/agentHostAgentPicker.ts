@@ -5,7 +5,7 @@
 
 import { BaseActionViewItem, IActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../../base/common/lifecycle.js';
-import { autorun } from '../../../../../base/common/observable.js';
+import { autorun, IObservable } from '../../../../../base/common/observable.js';
 import * as nls from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
@@ -21,11 +21,11 @@ import { logChangesToStateModel } from '../../../../../workbench/contrib/chat/co
 import { ChatModeKind } from '../../../../../workbench/contrib/chat/common/constants.js';
 import { Menus } from '../../../../browser/menus.js';
 import { IAgentHostSessionsProvider, isAgentHostProvider, LOCAL_AGENT_HOST_PROVIDER_ID, REMOTE_AGENT_HOST_PROVIDER_RE } from '../../../../common/agentHostSessionsProvider.js';
-import { ActiveSessionProviderIdContext, IsPhoneLayoutContext } from '../../../../common/contextkeys.js';
+import { ActiveSessionProviderIdContext, ActiveSessionTypeContext, IsPhoneLayoutContext } from '../../../../common/contextkeys.js';
 import { IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
 import { ISessionsProvidersService } from '../../../../services/sessions/browser/sessionsProvidersService.js';
 import { ISession, ISessionAgentRef, SessionStatus } from '../../../../services/sessions/common/session.js';
-import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
+import { IActiveSession, ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 import { ModePicker, ModePickerModel } from '../../copilotChatSessions/browser/modePicker.js';
 import { ISessionInputContext } from '../../../chat/browser/sessionInputContext.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -36,6 +36,7 @@ const IsActiveSessionAgentHost = ContextKeyExpr.or(
 	ContextKeyExpr.equals(ActiveSessionProviderIdContext.key, LOCAL_AGENT_HOST_PROVIDER_ID),
 	ContextKeyExpr.regex(ActiveSessionProviderIdContext.key, REMOTE_AGENT_HOST_PROVIDER_RE),
 );
+const IsNotBackboardSession = ContextKeyExpr.notEquals(ActiveSessionTypeContext.key, 'backboard');
 
 // -- Agent Host Agent Picker Action --
 
@@ -49,7 +50,7 @@ registerAction2(class extends Action2 {
 				id: Menus.NewSessionConfig,
 				group: 'navigation',
 				order: -1,
-				when: ContextKeyExpr.and(IsActiveSessionAgentHost, IsPhoneLayoutContext.negate()),
+				when: ContextKeyExpr.and(IsActiveSessionAgentHost, IsNotBackboardSession, IsSessionsWindowContext.negate(), IsPhoneLayoutContext.negate()),
 			}, {
 				// Running-session input bar — only inside the dedicated
 				// Agents Window. The regular VS Code chat editor uses the
@@ -57,7 +58,7 @@ registerAction2(class extends Action2 {
 				id: MenuId.ChatInput,
 				group: 'navigation',
 				order: 1,
-				when: ContextKeyExpr.and(ChatContextKeyExprs.isAgentHostSession, IsSessionsWindowContext, IsPhoneLayoutContext.negate()),
+				when: ContextKeyExpr.and(ChatContextKeyExprs.isAgentHostSession, IsSessionsWindowContext.negate(), IsNotBackboardSession, IsPhoneLayoutContext.negate()),
 			}],
 		});
 	}
@@ -65,7 +66,7 @@ registerAction2(class extends Action2 {
 });
 
 class AgentHostModePickerActionViewItem extends BaseActionViewItem {
-	constructor(private readonly picker: ModePicker, disposable: IDisposable) {
+	constructor(private readonly picker: ModePicker, private readonly session: IObservable<IActiveSession | undefined>, disposable: IDisposable) {
 		super(undefined, { id: '', label: '', enabled: true, class: undefined, tooltip: '', run: () => { } });
 		this._register(disposable);
 	}
@@ -73,6 +74,9 @@ class AgentHostModePickerActionViewItem extends BaseActionViewItem {
 	override render(container: HTMLElement): void {
 		container.classList.add('chat-input-picker-item', 'chat-agent-picker-item');
 		this.picker.render(container);
+		this._register(autorun(reader => {
+			container.style.display = this.session.read(reader)?.sessionType === 'backboard' ? 'none' : '';
+		}));
 	}
 
 	override dispose(): void {
@@ -146,7 +150,7 @@ class AgentHostAgentPickerContribution extends Disposable implements IWorkbenchC
 			disposableStore.add(picker.onDidSelect(mode => {
 				this._selectMode(mode, session.get(), sessionsProvidersService);
 			}));
-			return scopedInstantiationService.createInstance(AgentHostModePickerActionViewItem, picker, disposableStore);
+			return scopedInstantiationService.createInstance(AgentHostModePickerActionViewItem, picker, session, disposableStore);
 		};
 
 		this._register(actionViewItemService.register(Menus.NewSessionConfig, 'sessions.agentHost.agentPicker', factory));
@@ -163,6 +167,9 @@ class AgentHostAgentPickerContribution extends Disposable implements IWorkbenchC
 
 	private _syncChatInputMode(session: ISession | undefined, selectedAgentUri: string | undefined, sessionsProvidersService: ISessionsProvidersService): void {
 		if (!session || !this._getProvider(session, sessionsProvidersService)) {
+			return;
+		}
+		if (session.sessionType === 'backboard') {
 			return;
 		}
 
@@ -220,6 +227,9 @@ class AgentHostAgentPickerContribution extends Disposable implements IWorkbenchC
 		if (!session || !provider) {
 			return;
 		}
+		if (session.sessionType === 'backboard') {
+			return;
+		}
 
 		const agents = provider.getCustomAgents(session.sessionId);
 		const storedUri = isUntitled
@@ -246,6 +256,9 @@ class AgentHostAgentPickerContribution extends Disposable implements IWorkbenchC
 
 	private _selectMode(mode: IChatMode, session: ISession | undefined, sessionsProvidersService: ISessionsProvidersService): void {
 		if (!session) {
+			return;
+		}
+		if (session.sessionType === 'backboard') {
 			return;
 		}
 		const provider = sessionsProvidersService.getProvider(session.providerId);

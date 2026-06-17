@@ -32,6 +32,10 @@ export interface IAgentHostSessionEnumPickerItem {
 
 function getModeIcon(value: string | undefined): ThemeIcon | undefined {
 	switch (value) {
+		case 'agent': return Codicon.comment;
+		case 'ask': return Codicon.search;
+		case 'manual': return Codicon.edit;
+		case 'free': return Codicon.rocket;
 		case 'plan': return Codicon.checklist;
 		case 'autopilot': return Codicon.rocket;
 		case 'interactive': return Codicon.comment;
@@ -281,7 +285,8 @@ export abstract class AgentHostSessionEnumPicker extends Disposable {
 
 /**
  * Picker widget for the agent-host `mode` session-config property
- * (`interactive` / `plan` / `autopilot`).
+ * (`interactive` / `plan` for platform agents, or provider-specific values
+ * such as Backboard's `agent` / `ask` / `manual` / `free`).
  */
 export class AgentHostModePicker extends AgentHostSessionEnumPicker {
 

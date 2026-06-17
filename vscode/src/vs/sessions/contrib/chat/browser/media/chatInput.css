@@ -87,6 +87,59 @@
 	flex: 1;
 }
 
+.sessions-chat-toolbar .sessions-chat-inline-repo-config {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	overflow: visible;
+	flex: 0 1 auto;
+}
+
+.sessions-chat-toolbar .sessions-chat-inline-repo-config > .monaco-toolbar,
+.sessions-chat-toolbar .sessions-chat-inline-repo-config > .new-chat-status-toolbar {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	overflow: visible;
+}
+
+.sessions-chat-toolbar .sessions-chat-inline-repo-config .monaco-action-bar,
+.sessions-chat-toolbar .sessions-chat-inline-repo-config .monaco-action-bar .actions-container {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	overflow: visible;
+	flex-wrap: nowrap;
+}
+
+.sessions-chat-toolbar .sessions-chat-inline-repo-config .monaco-action-bar .action-item,
+.sessions-chat-toolbar .sessions-chat-inline-repo-config .monaco-action-bar .action-item .action-label {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 0;
+	height: 24px;
+	overflow: visible;
+}
+
+.sessions-chat-toolbar .sessions-chat-inline-repo-config .action-label {
+	border-radius: var(--vscode-cornerRadius-small);
+	color: var(--vscode-icon-foreground);
+}
+
+.sessions-chat-toolbar .sessions-chat-inline-repo-config .action-label:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.sessions-chat-toolbar .sessions-chat-inline-repo-config .action-label > .codicon {
+	font-size: var(--vscode-codiconFontSize, 16px);
+	width: auto;
+	height: auto;
+}
+
 /* Model picker - uses workbench ModelPickerActionItem */
 /* Session config toolbar (mode, model pickers via MenuWorkbenchToolBar) */
 .sessions-chat-config-toolbar {
@@ -298,6 +351,7 @@
 }
 
 /* Attach context button */
+.sessions-chat-folder-button,
 .sessions-chat-attach-button {
 	display: flex;
 	align-items: center;
@@ -313,15 +367,18 @@
 	outline: none;
 }
 
+.sessions-chat-folder-button:hover,
 .sessions-chat-attach-button:hover {
 	background-color: var(--vscode-toolbar-hoverBackground);
 }
 
+.sessions-chat-folder-button:focus-visible,
 .sessions-chat-attach-button:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);
 	outline-offset: -1px;
 }
 
+.monaco-workbench .sessions-chat-folder-button .codicon[class*='codicon-'],
 .monaco-workbench .sessions-chat-attach-button .codicon[class*='codicon-'] {
 	font-size: 14px;
 }
@@ -490,121 +547,318 @@
 	border-top: none;
 }
 
-/* Chat-first Simple Mode composer. */
+/* Backboard-style Sandbox composer. */
 .agent-sessions-workbench .new-chat-input-container {
-	width: min(100%, 1216px);
+	width: min(100%, 1320px);
 	max-width: none;
 	margin: 0 auto;
 	font-family: var(--vscode-font-family);
+	display: block;
 }
 
 .agent-sessions-workbench .new-chat-input-area {
 	width: 100%;
 	max-width: none;
 	min-height: 158px;
-	border-radius: 24px;
-	border-color: var(--vscode-focusBorder);
-	background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-focusBorder) 8%);
-	box-shadow: none;
+	border-radius: 12px;
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 70%, var(--vscode-widget-border, transparent));
+	background: color-mix(in srgb, var(--vscode-input-background, var(--vscode-editor-background)) 94%, var(--vscode-editor-background));
+	box-shadow: 0 1px 3px color-mix(in srgb, var(--vscode-widget-shadow, #000) 12%, transparent);
 }
 
 .agent-sessions-workbench .new-chat-input-area:focus-within {
 	border-color: var(--vscode-focusBorder);
-	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder) 32%, transparent);
-}
-
-.agent-sessions-workbench .sessions-chat-attach-row {
-	padding: 10px 22px 0 22px;
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder) 24%, transparent);
 }
 
 .agent-sessions-workbench .sessions-chat-editor {
-	padding: 14px 22px 0 22px;
-	flex: 1 1 auto;
-}
-
-.agent-sessions-workbench .sessions-chat-editor .monaco-editor {
-	font-family: var(--vscode-font-family);
+	padding: 14px 18px 0 18px;
 }
 
 .agent-sessions-workbench .sessions-chat-editor .monaco-editor .placeholder-text {
-	color: var(--vscode-input-placeholderForeground);
-	font-family: var(--vscode-font-family);
-	font-size: 15px;
+	font-size: 14px;
+	font-weight: 500;
 }
 
 .agent-sessions-workbench .sessions-chat-toolbar {
-	margin: auto 22px 0 22px;
-	padding: 13px 0 14px 0;
-	gap: 10px;
-	border-top: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
+	display: grid;
+	grid-template-columns: 24px 24px minmax(140px, 520px) max-content minmax(12px, 1fr) 24px 24px;
+	min-height: 36px;
+	margin: auto 18px 0 18px;
+	padding: 10px 0 11px 0;
+	gap: 8px;
+	border-top-color: color-mix(in srgb, var(--vscode-editor-foreground) 10%, transparent);
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	isolation: isolate;
+	grid-template-rows: 36px;
 }
 
-.agent-sessions-workbench .new-chat-bottom-container .new-chat-controls-container {
+.agent-sessions-workbench .sessions-chat-config-toolbar,
+.agent-sessions-workbench .sessions-chat-inline-repo-config {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar {
+	width: 100%;
+	max-width: 520px;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar > .monaco-toolbar,
+.agent-sessions-workbench .sessions-chat-config-toolbar .monaco-action-bar {
+	display: flex;
+	align-items: center;
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .sessions-chat-inline-repo-config {
+	gap: 8px;
+	width: max-content;
+	max-width: 260px;
+	min-width: 0;
+	overflow: visible;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .monaco-action-bar .actions-container,
+.agent-sessions-workbench .sessions-chat-inline-repo-config .monaco-action-bar .actions-container {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	overflow: visible;
+	flex-wrap: nowrap;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .monaco-action-bar .actions-container {
+	flex: 1 1 auto;
+	width: 100%;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .action-label,
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-picker-slot .action-label,
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label {
+	height: 24px;
+	min-width: 0;
+	padding: 0 2px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .action-label[aria-expanded="true"] {
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .action-label:hover,
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-picker-slot .action-label:hover,
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label:hover {
+	background: transparent;
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .action-label > .codicon,
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-picker-slot .action-label > .codicon,
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label > .codicon {
+	font-size: 16px;
+	color: currentColor;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label .chat-input-picker-label,
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-dropdown-label {
+	font-size: 12px;
+	font-weight: 600;
+	color: currentColor;
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-config-icon-only .action-label {
+	position: relative;
+	width: 24px;
+	min-width: 24px;
+	height: 24px;
+	justify-content: center;
+	padding: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-config-icon-only .action-label:hover,
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-config-icon-only .action-label[aria-expanded="true"] {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-config-icon-only .sessions-chat-dropdown-label {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	margin: -1px;
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-config-icon-only .action-label > .codicon {
+	font-size: 17px;
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-config-icon-only .action-label {
+	width: 24px;
+	min-width: 24px;
+	max-width: 24px;
+	padding: 0;
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-permission-picker .action-label {
+	position: relative;
+	width: 24px;
+	min-width: 24px;
+	max-width: 24px;
+	height: 24px;
+	justify-content: center;
+	padding: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar .sessions-chat-permission-picker .sessions-chat-dropdown-label {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	margin: -1px;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label .codicon-claude,
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label .codicon-openai,
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label .codicon-sparkle,
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label .codicon-robot,
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label .codicon-server {
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .sessions-chat-folder-button + .sessions-chat-attach-button,
+.agent-sessions-workbench .sessions-chat-attach-button + .sessions-chat-config-toolbar,
+.agent-sessions-workbench .sessions-chat-config-toolbar + .sessions-chat-inline-repo-config,
+.agent-sessions-workbench .sessions-chat-inline-repo-config + .sessions-chat-toolbar-spacer {
+	box-shadow: -9px 0 0 -8px color-mix(in srgb, var(--vscode-editor-foreground) 14%, transparent);
+	padding-left: 8px;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .monaco-action-bar .action-item:has(.chat-input-picker-label) {
+	flex: 1 1 0;
+	min-width: 96px;
+	max-width: none;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .monaco-action-bar .action-item:has(.sessions-chat-dropdown-label) {
+	flex: 0 0 auto;
+	min-width: 0;
+	max-width: 140px;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .chat-input-picker-item {
+	max-width: none;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .model-picker-split {
+	min-width: 0;
+	max-width: 100%;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .model-picker-name {
+	min-width: 0;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .sessions-chat-config-toolbar .action-label .chat-input-picker-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
+.agent-sessions-workbench .new-chat-status-toolbar:empty {
 	display: none;
 }
 
+.agent-sessions-workbench .new-chat-status-toolbar {
+	display: none !important;
+}
+
+.agent-sessions-workbench .new-chat-status-toolbar .actions-container > .action-item:has(> .action-label:not(:has(.codicon))),
+.agent-sessions-workbench .new-chat-status-toolbar .actions-container > .action-item:has(> .action-label.separator) {
+	display: none;
+}
+
+.agent-sessions-workbench .sessions-chat-folder-button,
 .agent-sessions-workbench .sessions-chat-attach-button,
-.agent-sessions-workbench .sessions-chat-voice-button,
 .agent-sessions-workbench .sessions-chat-send-button,
 .agent-sessions-workbench .sessions-chat-send-button .monaco-button {
-	width: 28px;
-	height: 28px;
-	min-width: 28px;
+	width: 24px;
+	height: 24px;
+	min-width: 24px;
 	border-radius: var(--vscode-cornerRadius-small);
 }
 
-.agent-sessions-workbench .sessions-chat-attach-button,
-.agent-sessions-workbench .sessions-chat-voice-button {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	color: var(--vscode-icon-foreground);
-	cursor: pointer;
+.agent-sessions-workbench .sessions-chat-folder-button .codicon,
+.agent-sessions-workbench .sessions-chat-attach-button .codicon,
+.agent-sessions-workbench .sessions-chat-send-button .monaco-button.codicon {
+	font-size: 18px;
 }
 
-.agent-sessions-workbench .sessions-chat-attach-button:hover,
-.agent-sessions-workbench .sessions-chat-voice-button:hover {
-	background: var(--vscode-toolbar-hoverBackground);
-}
-
-.agent-sessions-workbench .sessions-chat-voice-button:focus-visible {
-	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: -1px;
-}
-
-.agent-sessions-workbench .sessions-chat-send-button .monaco-button {
-	color: var(--vscode-icon-foreground) !important;
+.agent-sessions-workbench .sessions-chat-send-button .monaco-button:not(.disabled) {
+	color: var(--vscode-descriptionForeground) !important;
 	background: transparent;
 }
 
-.agent-sessions-workbench .sessions-chat-send-button .monaco-button:not(.disabled):hover,
-.agent-sessions-workbench .sessions-chat-send-button .monaco-button:not(.disabled):focus-visible {
-	background: var(--vscode-toolbar-hoverBackground);
-	color: var(--vscode-foreground) !important;
+.agent-sessions-workbench .sessions-chat-send-button .monaco-button.disabled {
+	opacity: 0.45;
+}
+
+.agent-sessions-workbench .sessions-chat-inline-repo-config .sessions-chat-agent-host-config,
+.agent-sessions-workbench .sessions-chat-inline-repo-config .monaco-action-bar,
+.agent-sessions-workbench .sessions-chat-inline-repo-config .monaco-action-bar .actions-container {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	overflow: visible;
+}
+
+.agent-sessions-workbench .sessions-chat-inline-repo-config .sessions-chat-picker-slot,
+.agent-sessions-workbench .sessions-chat-inline-repo-config .monaco-action-bar .action-item,
+.agent-sessions-workbench .sessions-chat-inline-repo-config .monaco-action-bar .action-item .action-label {
+	flex: 0 0 auto;
+	width: auto;
+	min-width: 24px;
+	height: 24px;
+	padding: 0 2px;
+}
+
+.agent-sessions-workbench .sessions-chat-toolbar-spacer {
+	width: 100%;
+	min-width: 12px;
+}
+
+.agent-sessions-workbench .sessions-chat-loading-spinner {
+	width: 24px;
+	min-width: 24px;
+}
+
+@media (max-width: 900px) {
+	.agent-sessions-workbench .sessions-chat-toolbar {
+		grid-template-columns: 24px 24px minmax(96px, 1fr) max-content minmax(8px, 0.35fr) 24px 24px;
+	}
 }
 
 .agent-sessions-workbench .new-chat-bottom-container {
-	width: min(100%, 1216px);
-	max-width: none;
-	margin: 12px auto 0 auto;
-	padding: 0 10px;
-	display: flex;
-	align-items: center;
-	justify-content: flex-start;
-	min-height: 24px;
-	box-sizing: border-box;
-}
-
-.agent-sessions-workbench .new-chat-bottom-container .new-chat-repo-config-container {
-	margin-left: 0;
-	gap: 8px;
-}
-
-.agent-sessions-workbench .new-chat-bottom-container .action-label {
-	height: 24px;
-	padding: 2px 6px;
-	color: var(--vscode-descriptionForeground);
-	border-radius: var(--vscode-cornerRadius-small);
-	font-family: var(--vscode-font-family);
-	font-size: 12px;
+	display: none !important;
 }

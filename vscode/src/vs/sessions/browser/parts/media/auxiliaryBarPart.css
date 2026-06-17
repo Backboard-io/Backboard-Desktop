@@ -31,6 +31,274 @@
 	background-color: var(--vscode-agentsPanel-background);
 }
 
+.agent-sessions-workbench .part.auxiliarybar > .title.sandbox-output-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding-left: 8px;
+	min-height: 36px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.sandbox-output-title > .title-label {
+	display: none;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.sandbox-output-title > .title-actions {
+	display: none;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.sandbox-output-title > .sandbox-output-tabs {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	flex: 1;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.sandbox-output-title > .sandbox-output-tabs > .sandbox-output-tab {
+	border: 0;
+	background: transparent;
+	color: var(--vscode-panelTitle-inactiveForeground);
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 26px;
+	padding: 0 9px;
+	border-radius: var(--vscode-cornerRadius-small);
+	font: inherit;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+	min-width: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.sandbox-output-title > .sandbox-output-tabs > .sandbox-output-tab:hover {
+	color: var(--vscode-panelTitle-activeForeground);
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 7%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.sandbox-output-title > .sandbox-output-tabs > .sandbox-output-tab.checked {
+	color: var(--vscode-panelTitle-activeForeground);
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 10%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.sandbox-output-title > .sandbox-output-tabs > .sandbox-output-tab .codicon {
+	font-size: 15px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar.empty .empty-pane-message-area {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .content.sandbox-output-host {
+	position: relative;
+	background-color: var(--vscode-agentsPanel-background);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .content.sandbox-output-host > :not(.sandbox-output-content) {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .empty-pane-message-area {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-content {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	overflow: auto;
+	background-color: var(--vscode-agentsPanel-background);
+	color: var(--vscode-agentsPanel-foreground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-content.preview {
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-list {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	padding: 8px 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-row {
+	border: 0;
+	background: transparent;
+	color: var(--vscode-agentsPanel-foreground);
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	width: 100%;
+	height: 28px;
+	padding: 0 10px;
+	text-align: left;
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-row:hover,
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-row:focus-visible {
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 8%, transparent);
+	outline: none;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-twistie {
+	width: 14px;
+	flex: 0 0 14px;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-row-icon {
+	width: 16px;
+	flex: 0 0 16px;
+	font-size: 15px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-row-label {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-change-meta {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-empty,
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-status {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	min-height: 120px;
+	padding: 20px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	text-align: center;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-card {
+	display: grid;
+	grid-template-columns: 24px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+	margin: 10px;
+	padding: 10px;
+	border: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 10%, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 4%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-card-icon {
+	font-size: 18px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-card-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	gap: 2px;
+	font-size: 12px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-card-text strong,
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-card-text span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-card-text span {
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-open {
+	border: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 16%, transparent);
+	background: transparent;
+	color: var(--vscode-panelTitle-activeForeground);
+	border-radius: var(--vscode-cornerRadius-small);
+	height: 26px;
+	padding: 0 9px;
+	font: inherit;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-open:hover {
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 8%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-empty {
+	flex-direction: column;
+	height: 100%;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-empty-icon {
+	font-size: 22px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 34px;
+	padding: 0 8px;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 10%, transparent);
+	flex: 0 0 auto;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-title {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--vscode-panelTitle-activeForeground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-refresh {
+	border: 0;
+	background: transparent;
+	color: var(--vscode-panelTitle-inactiveForeground);
+	width: 26px;
+	height: 26px;
+	border-radius: var(--vscode-cornerRadius-small);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-refresh:hover {
+	color: var(--vscode-panelTitle-activeForeground);
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 8%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-frame {
+	border: 0;
+	width: 100%;
+	flex: 1;
+	min-height: 0;
+	background: #fff;
+}
+
 /* Hide the underline indicator for non-focused items, but keep it for keyboard focus */
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(:focus-visible) .active-item-indicator:before {
 	display: none !important;

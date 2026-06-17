@@ -64,7 +64,7 @@ import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderSe
 import { AgentHostSnapshotController } from './agentHostSnapshotController.js';
 import { toolDataToDefinition } from './agentHostToolUtils.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
-import { activeTurnToProgress, completedToolCallToEditParts, completedToolCallToSerialized, finalizeToolInvocation, getTerminalContentUri, isSubagentTool, makeAhpTerminalToolSessionId, messageToVariableData, parseAhpTerminalToolSessionId, rawMarkdownToString, stringOrMarkdownToString, toolCallStateToInvocation, turnsToHistory, updateRunningToolSpecificData, usageInfoToChatUsage, type IToolCallFileEdit, type TurnModelLookup } from './stateToProgressAdapter.js';
+import { activeTurnToProgress, completedToolCallToEditParts, completedToolCallToSerialized, finalizeToolInvocation, getTerminalContentUri, isInternalToolOutputSubmissionError, isSubagentTool, makeAhpTerminalToolSessionId, messageToVariableData, parseAhpTerminalToolSessionId, rawMarkdownToString, sanitizeInternalToolTraceContent, shouldHideInternalTraceTool, stringOrMarkdownToString, toolCallStateToInvocation, turnsToHistory, updateRunningToolSpecificData, usageInfoToChatUsage, type IToolCallFileEdit, type TurnModelLookup } from './stateToProgressAdapter.js';
 export { toolDataToDefinition };
 
 // =============================================================================
@@ -1174,13 +1174,15 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		// The sessions provider sets `modeInfo.modeInstructions.uri` from the
 		// new-session picker so a graduating session's `summary.agent` reflects
 		// the user's choice; on subsequent turns this also handles a swap.
-		const requestedAgentUri = request.modeInstructions?.uri?.toString();
-		const currentAgentUri = this._getSessionState(session.toString())?.summary.agent?.uri.toString();
-		if (requestedAgentUri !== currentAgentUri) {
-			this._config.connection.dispatch(session.toString(), {
-				type: ActionType.SessionAgentChanged,
-				...(requestedAgentUri ? { agent: { uri: requestedAgentUri } } : {}),
-			});
+		if (AgentSession.provider(session) !== 'backboard') {
+			const requestedAgentUri = request.modeInstructions?.uri?.toString();
+			const currentAgentUri = this._getSessionState(session.toString())?.summary.agent?.uri.toString();
+			if (requestedAgentUri !== currentAgentUri) {
+				this._config.connection.dispatch(session.toString(), {
+					type: ActionType.SessionAgentChanged,
+					...(requestedAgentUri ? { agent: { uri: requestedAgentUri } } : {}),
+				});
+			}
 		}
 
 		// If the chat model has fewer previous requests than the protocol has
@@ -1480,7 +1482,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			if (!seenActive) {
 				return;
 			}
-			if (lastTurn?.state === TurnState.Error && lastTurn.error) {
+			if (lastTurn?.state === TurnState.Error && lastTurn.error && !isInternalToolOutputSubmissionError(lastTurn.error.errorType, lastTurn.error.message)) {
 				opts.sink([{ kind: 'markdownContent', content: new MarkdownString(`\n\nError: (${lastTurn.error.errorType}) ${lastTurn.error.message}`) }]);
 			}
 			finish(lastTurn);
@@ -1499,14 +1501,16 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		// Seed from the snapshot length so the always-on graph does not
 		// re-emit content already covered by `activeTurnToProgress` on
 		// reconnect.
-		let lastEmitted = opts.seedEmittedLengths?.get(part$.get().id) ?? 0;
+		const seededRawLength = opts.seedEmittedLengths?.get(part$.get().id) ?? 0;
+		let lastEmitted = sanitizeInternalToolTraceContent(part$.get().content.substring(0, seededRawLength)).length;
 		store.add(autorun(reader => {
 			const content = part$.read(reader).content;
-			if (content.length <= lastEmitted) {
+			const visibleContent = sanitizeInternalToolTraceContent(content);
+			if (visibleContent.length <= lastEmitted) {
 				return;
 			}
-			const delta = content.substring(lastEmitted);
-			lastEmitted = content.length;
+			const delta = visibleContent.substring(lastEmitted);
+			lastEmitted = visibleContent.length;
 			opts.sink([{ kind: 'markdownContent', content: rawMarkdownToString(delta, this._config.connectionAuthority) }]);
 		}));
 	}
@@ -1621,7 +1625,9 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				this._awaitToolConfirmation(confirmInvocation, toolCallId, opts.backendSession, opts.turnId, opts.cancellationToken, tc.options);
 				invocation = confirmInvocation;
 			} else if (status === ToolCallStatus.Running || status === ToolCallStatus.PendingResultConfirmation) {
-				invocation.invocationMessage = stringOrMarkdownToString(tc.invocationMessage, this._config.connectionAuthority);
+				if (!shouldHideInternalTraceTool(tc)) {
+					invocation.invocationMessage = stringOrMarkdownToString(tc.invocationMessage, this._config.connectionAuthority);
+				}
 				this._reviveTerminalIfNeeded(invocation, tc, opts.backendSession);
 				updateRunningToolSpecificData(invocation, tc, opts.backendSession, this._config.connectionAuthority);
 			}

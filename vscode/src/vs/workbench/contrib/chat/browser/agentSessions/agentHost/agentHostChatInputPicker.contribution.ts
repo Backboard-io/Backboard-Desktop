@@ -69,7 +69,7 @@ export class OpenAgentHostModePickerAction extends Action2 {
 				id: MenuId.ChatInputSecondary,
 				group: 'navigation',
 				order: 0.7,
-				when: ChatContextKeyExprs.isAgentHostSession,
+				when: ContextKeyExpr.and(ChatContextKeyExprs.isAgentHostSession, IsSessionsWindowContext.negate()),
 			}],
 		});
 	}
@@ -88,7 +88,7 @@ export class OpenAgentHostAutoApprovePickerAction extends Action2 {
 				id: MenuId.ChatInputSecondary,
 				group: 'navigation',
 				order: 0.8,
-				when: ChatContextKeyExprs.isAgentHostSession,
+				when: ContextKeyExpr.and(ChatContextKeyExprs.isAgentHostSession, IsSessionsWindowContext.negate()),
 			}],
 		});
 	}
@@ -107,7 +107,7 @@ export class OpenAgentHostPermissionModePickerAction extends Action2 {
 				id: MenuId.ChatInputSecondary,
 				group: 'navigation',
 				order: 0.9,
-				when: ChatContextKeyExprs.isAgentHostSession,
+				when: ContextKeyExpr.and(ChatContextKeyExprs.isAgentHostSession, IsSessionsWindowContext.negate()),
 			}],
 		});
 	}
