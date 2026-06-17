@@ -16,8 +16,6 @@ import { IViewsService } from '../../../../workbench/services/views/common/views
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { MultiDiffEditorInput } from '../../../../workbench/contrib/multiDiffEditor/browser/multiDiffEditorInput.js';
-import { CHANGES_VIEW_ID } from '../../changes/common/changes.js';
-import { ChangesViewPane } from '../../changes/browser/changesView.js';
 import { prepareMoveCopyEditors } from '../../../../workbench/browser/parts/editor/editor.js';
 import { Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { MOVE_MODAL_EDITOR_TO_MAIN_COMMAND_ID } from '../../../../workbench/browser/parts/editor/editorCommands.js';
@@ -216,7 +214,6 @@ class OpenEditorInModalEditorAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		const viewsService = accessor.get(IViewsService);
 		const layoutService = accessor.get(IAgentWorkbenchLayoutService);
 		const configurationService = accessor.get(IConfigurationService);
 		const editorGroupsService = accessor.get(IEditorGroupsService);
@@ -234,10 +231,6 @@ class OpenEditorInModalEditorAction extends Action2 {
 			.find(editor => editor instanceof MultiDiffEditorInput);
 
 		if (multiFileDiffEditor) {
-			// Reopen multi-file diff editor as the first editor in the modal editor
-			const view = viewsService.getViewWithId<ChangesViewPane>(CHANGES_VIEW_ID);
-			await view?.openChanges();
-
 			// Close the multi-file diff editor
 			await activeGroup.closeEditor(multiFileDiffEditor);
 		}
@@ -280,7 +273,6 @@ class OpenModalEditorInEditorAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		const viewsService = accessor.get(IViewsService);
 		const commandService = accessor.get(ICommandService);
 		const configurationService = accessor.get(IConfigurationService);
 		const editorGroupsService = accessor.get(IEditorGroupsService);
@@ -299,23 +291,6 @@ class OpenModalEditorInEditorAction extends Action2 {
 
 		// Show the main editor part
 		layoutService.setPartHidden(false, Parts.EDITOR_PART);
-
-		// Check for navigation in the modal editor
-		const navigation = activeGroup.activeEditorPane?.options?.modal?.navigation;
-		if (navigation) {
-			const view = viewsService.getViewWithId<ChangesViewPane>(CHANGES_VIEW_ID);
-			const changes = view?.viewModel.activeSessionChangesObs.get();
-
-			if (changes && navigation.current < changes.length) {
-				// Reopen multi-file diff editor for the current file
-				await view?.openChanges(changes[navigation.current].modifiedUri ?? changes[navigation.current].originalUri);
-
-				// Close the editor in the modal editor (assume that the
-				// multi-file diff editor is the first editor in the modal
-				// editor)
-				await activeGroup.closeEditor(activeGroup.editors[0]);
-			}
-		}
 
 		// Move all remaining editors to the main editor part
 		await commandService.executeCommand(MOVE_MODAL_EDITOR_TO_MAIN_COMMAND_ID);

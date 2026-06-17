@@ -14,7 +14,7 @@ import { generateUuid } from '../../../base/common/uuid.js';
 import { BrowserViewUri } from '../../../platform/browserView/common/browserViewUri.js';
 import { IContextKeyService } from '../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../../platform/contextview/browser/contextView.js';
-import { IFileService, IFileStat, IFileStatWithMetadata } from '../../../platform/files/common/files.js';
+import { IFileService, IFileStat } from '../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../platform/keybinding/common/keybinding.js';
 import { INotificationService } from '../../../platform/notification/common/notification.js';
@@ -48,31 +48,25 @@ import { Extensions } from '../../../workbench/browser/panecomposite.js';
 import { mainWindow } from '../../../base/browser/window.js';
 import { ThemeIcon } from '../../../base/common/themables.js';
 import { URI } from '../../../base/common/uri.js';
+import { linesDiffComputers } from '../../../editor/common/diff/linesDiffComputers.js';
 import { ICompositeTitleLabel } from '../../../workbench/browser/parts/compositePart.js';
 import { CHANGES_VIEW_CONTAINER_ID } from '../../contrib/changes/common/changes.js';
 import { SESSIONS_FILES_CONTAINER_ID } from '../../contrib/files/browser/filesView.js';
 import { ISandboxPreviewService, SESSIONS_PREVIEW_CONTAINER_ID } from '../../contrib/preview/common/preview.js';
+import { ISandboxWorkspaceChange, ISandboxWorkspaceChangesService, SandboxWorkspaceChangeType } from '../../contrib/sandboxChanges/common/sandboxChanges.js';
 import { ISessionsManagementService } from '../../services/sessions/common/sessionsManagement.js';
 import { ISession } from '../../services/sessions/common/session.js';
 
-interface ISandboxOutputChangeItem {
-	readonly uri: URI;
-	readonly label: string;
-	readonly meta: string;
-	open(): void;
+interface ISandboxDiffLine {
+	readonly type: 'context' | 'added' | 'removed';
+	readonly oldLineNumber: number | undefined;
+	readonly newLineNumber: number | undefined;
+	readonly text: string;
 }
 
-interface ISandboxWorkspaceFileSnapshot {
-	readonly resource: URI;
-	readonly content: string | undefined;
-	readonly mtime: number;
-	readonly size: number;
-}
-
-interface ISandboxWorkspaceBaseline {
-	readonly workspaceKey: string;
-	readonly createdAt: number;
-	readonly files: Map<string, ISandboxWorkspaceFileSnapshot>;
+interface ISandboxDiffHunk {
+	readonly header: string;
+	readonly lines: readonly ISandboxDiffLine[];
 }
 
 /**
@@ -102,8 +96,9 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	private readonly _runScriptMenuListener = this._register(new MutableDisposable<IDisposable>());
 	private readonly _sandboxOutputButtons = new Map<string, HTMLButtonElement>();
 	private readonly _sandboxExpandedResources = new Set<string>();
+	private readonly _sandboxExpandedChanges = new Set<string>();
+	private readonly _sandboxTouchedChanges = new Set<string>();
 	private readonly _sandboxOutputRefreshScheduler = this._register(new RunOnceScheduler(() => void this._renderActiveSandboxOutput(), 100));
-	private readonly _sandboxWorkspaceBaselines = new Map<string, Promise<ISandboxWorkspaceBaseline>>();
 	private _sandboxOutputContent: HTMLElement | undefined;
 	private _activeSandboxOutputId = SESSIONS_FILES_CONTAINER_ID;
 	private _sandboxOutputGeneration = 0;
@@ -156,6 +151,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService,
 		@IFileService private readonly _fileService: IFileService,
 		@IOpenerService private readonly _openerService: IOpenerService,
+		@ISandboxWorkspaceChangesService private readonly _sandboxWorkspaceChangesService: ISandboxWorkspaceChangesService,
 	) {
 		super(
 			Parts.AUXILIARYBAR_PART,
@@ -189,10 +185,10 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		);
 
 		this._register(this._workspaceContextService.onDidChangeWorkspaceFolders(() => {
-			this._sandboxWorkspaceBaselines.clear();
 			this._sandboxOutputRefreshScheduler.schedule();
 		}));
 		this._register(this._fileService.onDidFilesChange(() => this._sandboxOutputRefreshScheduler.schedule()));
+		this._register(this._sandboxWorkspaceChangesService.onDidChange(() => this._sandboxOutputRefreshScheduler.schedule()));
 		this._register(this.layoutService.onDidChangePartVisibility(e => {
 			if (e.partId === Parts.AUXILIARYBAR_PART || e.partId === Parts.EDITOR_PART) {
 				this._onDidChange.fire(undefined);
@@ -239,7 +235,10 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		const contentArea = super.createContentArea(parent);
 		contentArea.classList.add('sandbox-output-host');
 		this._sandboxOutputContent = append(contentArea, $('.sandbox-output-content'));
-		queueMicrotask(() => void this._renderActiveSandboxOutput());
+		queueMicrotask(() => {
+			void this._sandboxWorkspaceChangesService.ensureBaseline(this._getActiveSession());
+			void this._renderActiveSandboxOutput();
+		});
 		return contentArea;
 	}
 
@@ -494,7 +493,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		const body = append(container, $('.sandbox-output-list'));
 		const activeSession = this._getActiveSession();
 		const folders = this._getSandboxWorkspaceRoots(activeSession);
-		void this._ensureWorkspaceBaseline(activeSession, folders);
+		void this._sandboxWorkspaceChangesService.ensureBaseline(activeSession);
 		if (!folders.length) {
 			this._renderEmpty(body, Codicon.files, localize('sandboxOutput.noFiles', "Folders and files will appear here."));
 			return;
@@ -573,7 +572,8 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	}
 
 	private async _renderChanges(container: HTMLElement, generation: number): Promise<void> {
-		const changes = await this._collectChanges();
+		const activeSession = this._getActiveSession();
+		const changes = await this._sandboxWorkspaceChangesService.getChanges(activeSession);
 		if (generation !== this._sandboxOutputGeneration) {
 			return;
 		}
@@ -584,21 +584,219 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 
 		const body = append(container, $('.sandbox-output-list'));
 		for (const change of changes) {
+			const key = change.uri.toString();
+			if (!this._sandboxTouchedChanges.has(key)) {
+				this._sandboxExpandedChanges.add(key);
+			}
+			const expanded = this._sandboxExpandedChanges.has(key);
 			const row = append(body, $('button.sandbox-output-row.sandbox-output-change-row')) as HTMLButtonElement;
 			row.type = 'button';
 			row.title = change.uri.fsPath || change.uri.toString();
+			row.classList.toggle('expanded', expanded);
+
+			const twistie = append(row, $('span.codicon.sandbox-output-twistie'));
+			twistie.classList.add(...ThemeIcon.asClassNameArray(expanded ? Codicon.chevronDown : Codicon.chevronRight));
 
 			const icon = append(row, $('span.codicon.sandbox-output-row-icon'));
 			icon.classList.add(...ThemeIcon.asClassNameArray(Codicon.file));
 
 			const label = append(row, $('span.sandbox-output-row-label'));
-			label.textContent = change.label;
+			label.textContent = this._label(change.uri);
 
 			const meta = append(row, $('span.sandbox-output-change-meta'));
-			meta.textContent = change.meta;
+			meta.textContent = this._changeMetaLabel(change.type);
 
-			row.onclick = () => void change.open();
+			row.onclick = () => {
+				this._sandboxTouchedChanges.add(key);
+				if (this._sandboxExpandedChanges.has(key)) {
+					this._sandboxExpandedChanges.delete(key);
+				} else {
+					this._sandboxExpandedChanges.add(key);
+				}
+				this._sandboxOutputRefreshScheduler.schedule(0);
+			};
+
+			if (expanded) {
+				await this._renderChangeDiff(body, activeSession, change, generation);
+				if (generation !== this._sandboxOutputGeneration) {
+					return;
+				}
+			}
 		}
+	}
+
+	private async _renderChangeDiff(container: HTMLElement, activeSession: ISession | undefined, change: ISandboxWorkspaceChange, generation: number): Promise<void> {
+		const details = await this._sandboxWorkspaceChangesService.getChangeDetails(activeSession, change.uri);
+		if (generation !== this._sandboxOutputGeneration) {
+			return;
+		}
+
+		const diff = append(container, $('.sandbox-output-diff'));
+		const header = append(diff, $('.sandbox-output-diff-file'));
+		const icon = append(header, $('span.codicon.sandbox-output-diff-file-icon'));
+		icon.classList.add(...ThemeIcon.asClassNameArray(Codicon.diff));
+		const label = append(header, $('span.sandbox-output-diff-file-label'));
+		label.textContent = this._label(change.uri);
+		const openButton = append(header, $('button.sandbox-output-diff-open.codicon')) as HTMLButtonElement;
+		openButton.type = 'button';
+		openButton.title = localize('sandboxOutput.openChangedFile', "Open file");
+		openButton.setAttribute('aria-label', openButton.title);
+		openButton.classList.add(...ThemeIcon.asClassNameArray(Codicon.goToFile));
+		openButton.onclick = event => {
+			event.stopPropagation();
+			void this._openerService.open(change.uri);
+		};
+
+		if (!details?.hasBeforeContent || !details.hasAfterContent) {
+			this._appendDiffMessage(diff, localize('sandboxOutput.diffUnavailable', "No text baseline is available for this file yet."));
+			return;
+		}
+
+		const before = details.beforeContent ?? '';
+		const after = details.afterContent ?? '';
+		const beforeLineCount = this._lineCount(before);
+		const afterLineCount = this._lineCount(after);
+		if (beforeLineCount + afterLineCount > 2400) {
+			this._appendDiffMessage(diff, localize('sandboxOutput.diffTooLarge', "Diff is too large to show inline."));
+			return;
+		}
+
+		const hunks = this._computeSandboxDiff(before, after);
+		if (!hunks.length) {
+			this._appendDiffMessage(diff, localize('sandboxOutput.noTextDiff', "No text changes to show."));
+			return;
+		}
+
+		const body = append(diff, $('.sandbox-output-diff-body'));
+		for (const hunk of hunks) {
+			const hunkHeader = append(body, $('div.sandbox-output-diff-hunk'));
+			hunkHeader.textContent = hunk.header;
+			for (const line of hunk.lines) {
+				this._appendDiffLine(body, line);
+			}
+		}
+	}
+
+	private _appendDiffMessage(container: HTMLElement, message: string): void {
+		const messageElement = append(container, $('.sandbox-output-diff-message'));
+		messageElement.textContent = message;
+	}
+
+	private _appendDiffLine(container: HTMLElement, line: ISandboxDiffLine): void {
+		const row = append(container, $('div.sandbox-output-diff-row'));
+		row.classList.add(line.type);
+
+		const oldLine = append(row, $('span.sandbox-output-diff-line-number'));
+		oldLine.textContent = line.oldLineNumber === undefined ? '' : String(line.oldLineNumber);
+
+		const newLine = append(row, $('span.sandbox-output-diff-line-number'));
+		newLine.textContent = line.newLineNumber === undefined ? '' : String(line.newLineNumber);
+
+		const marker = append(row, $('span.sandbox-output-diff-marker'));
+		marker.textContent = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
+
+		const code = append(row, $('code.sandbox-output-diff-code'));
+		code.textContent = line.text || ' ';
+	}
+
+	private _computeSandboxDiff(original: string, modified: string): ISandboxDiffHunk[] {
+		const originalLines = original.split(/\r?\n/);
+		const modifiedLines = modified.split(/\r?\n/);
+		const diff = linesDiffComputers.getDefault().computeDiff(originalLines, modifiedLines, {
+			ignoreTrimWhitespace: false,
+			maxComputationTimeMs: 1000,
+			computeMoves: false,
+		});
+		if (!diff.changes.length) {
+			return [];
+		}
+
+		type ChangeRange = {
+			readonly originalStart: number;
+			readonly originalEnd: number;
+			readonly modifiedStart: number;
+			readonly modifiedEnd: number;
+		};
+		const contextLines = 3;
+		const groups: ChangeRange[][] = [];
+		for (const change of diff.changes) {
+			const range: ChangeRange = {
+				originalStart: change.original.startLineNumber,
+				originalEnd: change.original.endLineNumberExclusive,
+				modifiedStart: change.modified.startLineNumber,
+				modifiedEnd: change.modified.endLineNumberExclusive,
+			};
+			const lastGroup = groups[groups.length - 1];
+			const lastRange = lastGroup?.[lastGroup.length - 1];
+			if (lastGroup && lastRange && range.originalStart - lastRange.originalEnd <= contextLines * 2) {
+				lastGroup.push(range);
+			} else {
+				groups.push([range]);
+			}
+		}
+
+		const hunks: ISandboxDiffHunk[] = [];
+		for (const group of groups) {
+			const first = group[0];
+			const last = group[group.length - 1];
+			const originalLeading = Math.max(1, first.originalStart - contextLines);
+			const modifiedLeading = Math.max(1, first.modifiedStart - contextLines);
+			const originalTrailing = Math.min(originalLines.length + 1, last.originalEnd + contextLines);
+			const modifiedTrailing = Math.min(modifiedLines.length + 1, last.modifiedEnd + contextLines);
+			const lines: ISandboxDiffLine[] = [];
+			let originalCursor = originalLeading;
+			let modifiedCursor = modifiedLeading;
+
+			const appendContextUntil = (originalEnd: number, modifiedEnd: number) => {
+				while (originalCursor < originalEnd && modifiedCursor < modifiedEnd) {
+					lines.push({
+						type: 'context',
+						oldLineNumber: originalCursor,
+						newLineNumber: modifiedCursor,
+						text: originalLines[originalCursor - 1] ?? '',
+					});
+					originalCursor++;
+					modifiedCursor++;
+				}
+			};
+
+			for (const range of group) {
+				appendContextUntil(range.originalStart, range.modifiedStart);
+
+				while (originalCursor < range.originalEnd) {
+					lines.push({
+						type: 'removed',
+						oldLineNumber: originalCursor,
+						newLineNumber: undefined,
+						text: originalLines[originalCursor - 1] ?? '',
+					});
+					originalCursor++;
+				}
+
+				while (modifiedCursor < range.modifiedEnd) {
+					lines.push({
+						type: 'added',
+						oldLineNumber: undefined,
+						newLineNumber: modifiedCursor,
+						text: modifiedLines[modifiedCursor - 1] ?? '',
+					});
+					modifiedCursor++;
+				}
+			}
+
+			appendContextUntil(originalTrailing, modifiedTrailing);
+
+			hunks.push({
+				header: `@@ -${originalLeading},${originalTrailing - originalLeading} +${modifiedLeading},${modifiedTrailing - modifiedLeading} @@`,
+				lines,
+			});
+		}
+
+		return hunks;
+	}
+
+	private _lineCount(value: string): number {
+		return value.length ? value.split(/\r?\n/).length : 0;
 	}
 
 	private async _renderPreview(container: HTMLElement, generation: number): Promise<void> {
@@ -740,140 +938,19 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		return this.instantiationService.invokeFunction(accessor => accessor.get(ISessionsManagementService).activeSession.get());
 	}
 
-	private async _collectChanges(): Promise<ISandboxOutputChangeItem[]> {
-		const activeSession = this._getActiveSession();
-		return this._collectWorkspaceBaselineChanges(activeSession);
-	}
-
-	private async _collectWorkspaceBaselineChanges(activeSession: ISession | undefined): Promise<ISandboxOutputChangeItem[]> {
-		const roots = this._getSandboxWorkspaceRoots(activeSession);
-		if (!roots.length) {
-			return [];
+	private _changeMetaLabel(type: SandboxWorkspaceChangeType): string {
+		switch (type) {
+			case 'added':
+				return localize('sandboxOutput.workspaceChangeAdded', "added");
+			case 'deleted':
+				return localize('sandboxOutput.workspaceChangeDeleted', "deleted");
+			case 'modified':
+				return localize('sandboxOutput.workspaceChangeModified', "modified");
 		}
-
-		const currentFiles = await this._collectWorkspaceFileSnapshots(roots);
-		const baseline = await this._getWorkspaceBaseline(activeSession, roots);
-		const referenceStart = activeSession?.createdAt.getTime() ?? baseline.createdAt;
-		const items: ISandboxOutputChangeItem[] = [];
-		const seen = new Set<string>();
-
-		for (const [key, current] of currentFiles) {
-			seen.add(key);
-			const before = baseline.files.get(key);
-			if (!before) {
-				items.push(this._workspaceChangeItem(current.resource, localize('sandboxOutput.workspaceChangeAdded', "added")));
-				continue;
-			}
-
-			const contentChanged = before.content !== undefined && current.content !== undefined
-				? before.content !== current.content
-				: before.mtime !== current.mtime || before.size !== current.size;
-			const changedSinceSessionStart = current.mtime >= referenceStart - 1000;
-			if (contentChanged || changedSinceSessionStart) {
-				items.push(this._workspaceChangeItem(current.resource, localize('sandboxOutput.workspaceChangeModified', "modified")));
-			}
-		}
-
-		for (const [key, before] of baseline.files) {
-			if (!seen.has(key)) {
-				items.push(this._workspaceChangeItem(before.resource, localize('sandboxOutput.workspaceChangeDeleted', "deleted")));
-			}
-		}
-
-		return items.sort((a, b) => a.label.localeCompare(b.label));
-	}
-
-	private _workspaceChangeItem(resource: URI, type: string): ISandboxOutputChangeItem {
-		return {
-			uri: resource,
-			label: this._label(resource),
-			meta: type,
-			open: () => { void this._openerService.open(resource); },
-		};
-	}
-
-	private _ensureWorkspaceBaseline(activeSession: ISession | undefined, roots = this._getSandboxWorkspaceRoots(activeSession)): void {
-		if (!roots.length) {
-			return;
-		}
-		const workspaceKey = this._workspaceBaselineKey(roots);
-		if (!this._sandboxWorkspaceBaselines.has(workspaceKey)) {
-			this._sandboxWorkspaceBaselines.set(workspaceKey, this._createWorkspaceBaseline(activeSession, roots, workspaceKey));
-		}
-	}
-
-	private async _getWorkspaceBaseline(activeSession: ISession | undefined, roots: readonly URI[]): Promise<ISandboxWorkspaceBaseline> {
-		const workspaceKey = this._workspaceBaselineKey(roots);
-		let baseline = this._sandboxWorkspaceBaselines.get(workspaceKey);
-		if (!baseline) {
-			baseline = this._createWorkspaceBaseline(activeSession, roots, workspaceKey);
-			this._sandboxWorkspaceBaselines.set(workspaceKey, baseline);
-		}
-		return baseline;
-	}
-
-	private async _createWorkspaceBaseline(activeSession: ISession | undefined, roots: readonly URI[], workspaceKey: string): Promise<ISandboxWorkspaceBaseline> {
-		return {
-			workspaceKey,
-			createdAt: activeSession?.createdAt.getTime() ?? Date.now(),
-			files: await this._collectWorkspaceFileSnapshots(roots),
-		};
-	}
-
-	private async _collectWorkspaceFileSnapshots(roots: readonly URI[]): Promise<Map<string, ISandboxWorkspaceFileSnapshot>> {
-		const files = new Map<string, ISandboxWorkspaceFileSnapshot>();
-		for (const root of roots) {
-			await this._collectWorkspaceFileSnapshotsFrom(root, files);
-		}
-		return files;
-	}
-
-	private async _collectWorkspaceFileSnapshotsFrom(resource: URI, files: Map<string, ISandboxWorkspaceFileSnapshot>): Promise<void> {
-		if (files.size > 1000 || this._shouldHideResource(resource)) {
-			return;
-		}
-
-		let stat: IFileStatWithMetadata;
-		try {
-			stat = await this._fileService.resolve(resource, { resolveMetadata: true });
-		} catch {
-			return;
-		}
-
-		if (stat.isDirectory) {
-			for (const child of stat.children ?? []) {
-				await this._collectWorkspaceFileSnapshotsFrom(child.resource, files);
-				if (files.size > 1000) {
-					return;
-				}
-			}
-			return;
-		}
-
-		const size = stat.size;
-		let content: string | undefined;
-		if (size <= 1024 * 1024) {
-			try {
-				content = (await this._fileService.readFile(stat.resource)).value.toString();
-			} catch {
-				content = undefined;
-			}
-		}
-
-		files.set(stat.resource.toString(), {
-			resource: stat.resource,
-			content,
-			mtime: stat.mtime,
-			size,
-		});
 	}
 
 	private _label(resource: URI): string {
 		return basename(resource) || resource.authority || resource.toString();
-	}
-
-	private _workspaceBaselineKey(roots: readonly URI[]): string {
-		return roots.map(root => root.toString()).sort().join('\n');
 	}
 
 	private _rootLabel(resource: URI): string {

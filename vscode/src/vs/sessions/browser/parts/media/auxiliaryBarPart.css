@@ -177,6 +177,121 @@
 	font-size: 11px;
 }
 
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-change-row.expanded {
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 6%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff {
+	margin: 0 8px 8px;
+	border: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 12%, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	overflow: hidden;
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 3%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-file {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
+	height: 32px;
+	padding: 0 8px;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 10%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-file-icon {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-file-label {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--vscode-panelTitle-activeForeground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-open {
+	border: 0;
+	background: transparent;
+	color: var(--vscode-panelTitle-inactiveForeground);
+	width: 24px;
+	height: 24px;
+	border-radius: var(--vscode-cornerRadius-small);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-open:hover {
+	color: var(--vscode-panelTitle-activeForeground);
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 8%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-body {
+	overflow: auto;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-hunk {
+	padding: 5px 8px;
+	background-color: color-mix(in srgb, var(--vscode-editorInfo-foreground, #3794ff) 16%, transparent);
+	color: var(--vscode-editorInfo-foreground);
+	font-family: var(--monaco-monospace-font);
+	font-size: 11px;
+	white-space: pre;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-row {
+	display: grid;
+	grid-template-columns: 38px 38px 18px minmax(0, 1fr);
+	min-width: max-content;
+	font-family: var(--monaco-monospace-font);
+	font-size: 11px;
+	line-height: 18px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-row.added {
+	background-color: color-mix(in srgb, #2ea043 16%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-row.removed {
+	background-color: color-mix(in srgb, #f85149 16%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-line-number {
+	padding: 0 6px;
+	text-align: right;
+	color: var(--vscode-descriptionForeground);
+	user-select: none;
+	border-right: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 8%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-marker {
+	padding-left: 6px;
+	user-select: none;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-code {
+	display: block;
+	min-width: 0;
+	padding-right: 8px;
+	white-space: pre;
+	color: var(--vscode-agentsPanel-foreground);
+	background: transparent;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sandbox-output-diff-message {
+	padding: 12px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+
 .agent-sessions-workbench .part.auxiliarybar .sandbox-output-empty,
 .agent-sessions-workbench .part.auxiliarybar .sandbox-output-preview-status {
 	display: flex;

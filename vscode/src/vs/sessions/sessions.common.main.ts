@@ -466,6 +466,8 @@ import './services/agentHostFilter/browser/agentHostFilterService.js';
 import './contrib/sessions/browser/customizationsToolbar.contribution.js';
 import './contrib/layout/browser/sessionLayout.contribution.js';
 import './contrib/codeReview/browser/codeReview.contributions.js';
+import './contrib/sandboxChanges/browser/sandboxChanges.contribution.js';
+import './contrib/sandboxChanges/browser/sandboxChangesService.js';
 import './contrib/preview/browser/previewBootstrap.contribution.js';
 import './contrib/github/browser/github.contribution.js';
 import './contrib/applyCommitsToParentRepo/browser/applyChangesToParentRepo.js';
