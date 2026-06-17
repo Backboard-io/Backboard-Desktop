@@ -1,0 +1,309 @@
+{
+  "name": "backboard",
+  "displayName": "Backboard",
+  "description": "Backboard agent bridge for Backboard Studio",
+  "version": "0.1.0",
+  "publisher": "backboard",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "main": "./out/extension",
+  "categories": [
+    "AI"
+  ],
+  "activationEvents": [
+    "onView:backboard.panel",
+    "onCommand:backboard.newChat",
+    "onCommand:backboard.showHistory",
+    "onCommand:backboard.signIn",
+    "onCommand:backboard.copyOAuthRedirectUri",
+    "onCommand:backboard.completeOAuthCallback",
+    "onCommand:backboard.refreshModels",
+    "onCommand:backboard.checkForUpdates",
+    "onCommand:backboard.openPanel",
+    "onCommand:backboard.openRightPanel"
+  ],
+  "extensionKind": [
+    "workspace",
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited"
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "backboard.openPanel",
+        "title": "Open Backboard",
+        "category": "Backboard",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "backboard.openRightPanel",
+        "title": "Open Backboard in Right Sidebar",
+        "category": "Backboard",
+        "icon": "$(layout-sidebar-right)"
+      },
+      {
+        "command": "backboard.newChat",
+        "title": "New Chat",
+        "category": "Backboard",
+        "icon": "$(add)"
+      },
+      {
+        "command": "backboard.showHistory",
+        "title": "Show History",
+        "category": "Backboard",
+        "icon": "$(history)"
+      },
+      {
+        "command": "backboard.signIn",
+        "title": "Sign in with SSO",
+        "category": "Backboard",
+        "icon": "$(account)"
+      },
+      {
+        "command": "backboard.copyOAuthRedirectUri",
+        "title": "Copy OAuth Redirect URI",
+        "category": "Backboard",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "backboard.completeOAuthCallback",
+        "title": "Complete OAuth Callback",
+        "category": "Backboard",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "backboard.refreshModels",
+        "title": "Refresh Models",
+        "category": "Backboard",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "backboard.checkForUpdates",
+        "title": "Check for Updates",
+        "category": "Backboard",
+        "icon": "$(cloud-download)"
+      }
+    ],
+    "menus": {
+      "viewContainer/title": [
+        {
+          "command": "backboard.newChat",
+          "when": "viewContainer == backboard",
+          "group": "navigation@1"
+        },
+        {
+          "command": "backboard.showHistory",
+          "when": "viewContainer == backboard",
+          "group": "navigation@2"
+        },
+        {
+          "command": "backboard.refreshModels",
+          "when": "viewContainer == backboard",
+          "group": "navigation@3"
+        },
+        {
+          "command": "backboard.signIn",
+          "when": "viewContainer == backboard && !backboard.authenticated",
+          "group": "navigation@4"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "backboard.signIn",
+          "when": "view == backboard.panel && !backboard.authenticated",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "backboard",
+          "title": "\u200B",
+          "icon": "media/blank.svg"
+        }
+      ]
+    },
+    "views": {
+      "backboard": [
+        {
+          "id": "backboard.panel",
+          "type": "webview",
+          "name": "\u200B"
+        }
+      ]
+    },
+    "configuration": [
+      {
+        "title": "Backboard",
+        "properties": {
+          "backboard.apiKey": {
+            "type": "string",
+            "default": "",
+            "editPresentation": "secretText",
+            "markdownDescription": "Legacy Backboard API key fallback. Prefer **Backboard: Sign in with SSO**.",
+            "scope": "machine-overridable"
+          },
+          "backboard.env": {
+            "type": "string",
+            "enum": [
+              "prod",
+              "dev",
+              "local"
+            ],
+            "default": "prod",
+            "description": "Backboard API environment."
+          },
+          "backboard.apiUrl": {
+            "type": "string",
+            "default": "",
+            "description": "Custom Backboard API base URL. Overrides the environment when set."
+          },
+          "backboard.oauthRedirectUri": {
+            "type": "string",
+            "default": "",
+            "description": "OAuth redirect URI for Backboard sign in. Leave empty to use http://127.0.0.1:49321/auth/callback, which the IDE listens on during sign in. Register this exact URI in the Backboard OAuth app."
+          },
+          "backboard.defaultProvider": {
+            "type": "string",
+            "default": "aws-bedrock",
+            "description": "Default Backboard model provider."
+          },
+          "backboard.defaultModel": {
+            "type": "string",
+            "default": "anthropic.claude-sonnet-4-6",
+            "description": "Default Backboard model name."
+          },
+          "backboard.mode": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "ask",
+              "manual",
+              "free"
+            ],
+            "default": "free",
+            "description": "Backboard tool mode."
+          },
+          "backboard.intensity": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "balanced",
+              "deep"
+            ],
+            "default": "fast",
+            "description": "Reasoning intensity sent to Backboard."
+          },
+          "backboard.memoryMode": {
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Readonly",
+              "off",
+              "ProAuto",
+              "ProReadonly"
+            ],
+            "default": "Auto",
+            "description": "Memory mode sent to Backboard turns. Pro modes use memory_pro and omit memory."
+          },
+          "backboard.webSearch": {
+            "type": "string",
+            "enum": [
+              "off",
+              "Auto"
+            ],
+            "default": "off",
+            "description": "Web search setting for Backboard turns."
+          },
+          "backboard.imageGeneration": {
+            "type": "string",
+            "enum": [
+              "off",
+              "auto"
+            ],
+            "default": "off",
+            "description": "Image generation setting for Backboard turns."
+          },
+          "backboard.mcpFigma": {
+            "type": "boolean",
+            "default": true,
+            "description": "Request Backboard-hosted Figma MCP tool intent for Backboard turns."
+          },
+          "backboard.mcpNotion": {
+            "type": "boolean",
+            "default": false,
+            "description": "Request Backboard-hosted Notion MCP tool intent for Backboard turns."
+          },
+          "backboard.mcpGoogle": {
+            "type": "boolean",
+            "default": false,
+            "description": "Request Backboard-hosted Google MCP tool intent for Backboard turns."
+          },
+          "backboard.voiceMode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "tts",
+              "stt",
+              "conversation"
+            ],
+            "default": "off",
+            "description": "Backboard voice mode for REST turns. TTS synthesizes assistant audio; STT and conversation require audio attachment support."
+          },
+          "backboard.bridgePath": {
+            "type": "string",
+            "default": "",
+            "description": "Path to the local backboard-bridge binary. Leave empty for the built-in development/package lookup."
+          },
+          "backboard.workspaceRoot": {
+            "type": "string",
+            "default": "",
+            "description": "Path to use as the Backboard panel workspace root. Supports ${workspaceFolder} and ${userHome}. Leave empty to use the open workspace folder. Can also be set with BACKBOARD_WORKSPACE_ROOT."
+          },
+          "backboard.updates.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Check the Backboard Studio S3 manifest for IDE updates after Backboard activates."
+          },
+          "backboard.updates.manifestBaseUrl": {
+            "type": "string",
+            "default": "https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases",
+            "description": "Base URL for Backboard Studio update manifests."
+          },
+          "backboard.updates.manifestUrl": {
+            "type": "string",
+            "default": "",
+            "description": "Full Backboard Studio update manifest URL override. Leave empty to derive the URL from the base URL, channel, platform, and architecture."
+          },
+          "backboard.updates.checkIntervalMinutes": {
+            "type": "number",
+            "default": 360,
+            "minimum": 15,
+            "description": "How often Backboard Studio checks the S3 update manifest while the IDE is open."
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build-bridge": "cargo build --manifest-path ./rust/Cargo.toml -p backboard_bridge",
+    "package-bridge": "node ./scripts/package-bridge.js",
+    "compile": "gulp compile-extension:backboard",
+    "watch": "gulp watch-extension:backboard",
+    "typecheck": "tsgo --project ./tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "24.x"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/microsoft/vscode.git"
+  }
+}
