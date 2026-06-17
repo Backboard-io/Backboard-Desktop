@@ -111,6 +111,18 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 			this._resumeNewSessionAfterAuthenticationSettles();
 		}));
 
+		let backboardRefreshInFlight = false;
+		const backboardRefreshInterval = setInterval(() => {
+			if (this._agentHostService.authenticationPending.get() || backboardRefreshInFlight) {
+				return;
+			}
+			backboardRefreshInFlight = true;
+			void this._refreshSessions().finally(() => {
+				backboardRefreshInFlight = false;
+			});
+		}, 2000);
+		this._register({ dispose: () => clearInterval(backboardRefreshInterval) });
+
 		// When the "default sessions provider" preference changes, the
 		// provider's `order` flips. Re-fire `onDidChangeSessionTypes` so the
 		// management service re-collects and re-sorts the session types.

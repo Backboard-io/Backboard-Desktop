@@ -1748,11 +1748,11 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	overflow: visible;
 }
 
-.interactive-session .chat-secondary-input-toolbar .monaco-action-bar .actions-container > .action-item + .action-item {
+.interactive-session .chat-secondary-input-toolbar .monaco-action-bar .actions-container > .action-item:not(.agent-host-chat-input-picker-host-hidden):not([style*="display: none"]) + .action-item:not(.agent-host-chat-input-picker-host-hidden):not([style*="display: none"]) {
 	position: relative;
 }
 
-.interactive-session .chat-secondary-input-toolbar .monaco-action-bar .actions-container > .action-item + .action-item::before {
+.interactive-session .chat-secondary-input-toolbar .monaco-action-bar .actions-container > .action-item:not(.agent-host-chat-input-picker-host-hidden):not([style*="display: none"]) + .action-item:not(.agent-host-chat-input-picker-host-hidden):not([style*="display: none"])::before {
 	content: '';
 	position: absolute;
 	left: -5px;
@@ -2098,6 +2098,8 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .interactive-session .chat-secondary-input-toolbar .monaco-action-bar .actions-container {
 	gap: 10px;
+	flex-wrap: nowrap;
+	overflow: hidden;
 }
 
 .interactive-session .chat-input-toolbars .chat-sessionPicker-container,

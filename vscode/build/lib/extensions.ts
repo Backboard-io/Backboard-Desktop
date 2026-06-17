@@ -473,11 +473,15 @@ export function packageCopilotExtensionStream(disableMangle: boolean): Stream {
 	);
 
 	const productionDependencies = getProductionDependencies('extensions/copilot');
-	const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat();
+	const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [
+		`${d}/**`,
+		`!${d}/**/{test,tests}/**`,
+		`!${d}/node_modules/@github/copilot/shims.txt`,
+	]).flat();
 
 	return es.merge(
 		localExtensionsStream,
-		gulp.src(dependenciesSrc, { base: '.' })
+		gulp.src(dependenciesSrc, { base: '.', allowEmpty: true })
 			.pipe(util2.cleanNodeModules(path.join(root, 'build', '.moduleignore')))
 			.pipe(util2.cleanNodeModules(path.join(root, 'build', `.moduleignore.${process.platform}`)))
 	).pipe(util2.setExecutableBit(['**/*.sh']));

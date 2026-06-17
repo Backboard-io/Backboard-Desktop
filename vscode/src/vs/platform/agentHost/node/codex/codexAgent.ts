@@ -98,7 +98,7 @@ const codexSessionConfigSchema = createSchema({
 			localize('codex.sessionConfig.sandboxMode.workspaceWriteDescription', "Tool calls can read and write within the workspace; network is controlled separately."),
 			localize('codex.sessionConfig.sandboxMode.dangerFullAccessDescription', "Tool calls have unrestricted disk and network access."),
 		],
-		default: 'workspace-write',
+		default: 'danger-full-access',
 		sessionMutable: true,
 	}),
 	[CodexSessionConfigKey.WebSearchMode]: schemaProperty<WebSearchMode>({
@@ -170,7 +170,7 @@ interface ICodexSessionConfigDefaults {
 
 const codexSessionConfigDefaults: ICodexSessionConfigDefaults = {
 	[CodexSessionConfigKey.ApprovalPolicy]: 'on-request',
-	[CodexSessionConfigKey.SandboxMode]: 'workspace-write',
+	[CodexSessionConfigKey.SandboxMode]: 'danger-full-access',
 	[CodexSessionConfigKey.WebSearchMode]: 'disabled',
 	[CodexSessionConfigKey.ModelReasoningEffort]: 'medium',
 	[CodexSessionConfigKey.AdditionalDirectories]: [],

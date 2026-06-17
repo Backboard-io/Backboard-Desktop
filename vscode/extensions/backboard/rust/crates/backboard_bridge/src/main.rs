@@ -39,6 +39,9 @@ const WEB_FETCH_MAX_BYTES: usize = 1_000_000;
 const WEB_FETCH_PREVIEW_CHARS: usize = 12_000;
 const BACKBOARD_IMAGE_TOOL_NAMES: &[&str] = &["generate_image", "image_generate"];
 const BACKBOARD_SYSTEM_PROMPT: &str = include_str!("backboard_runtime_system_prompt.md");
+const RAW_TOOL_CALL_BEGIN: &str = "<|tool_call_begin|>";
+const RAW_TOOL_CALL_SEPARATOR: &str = "<|tool_sep|>";
+const RAW_TOOL_CALL_END: &str = "<|tool_call_end|>";
 
 #[derive(Clone)]
 struct BridgeState {
@@ -1004,6 +1007,8 @@ async fn consume_stream(
     ignored_tool_call_names: &[&str],
 ) -> Result<()> {
     let mut streaming_tool_calls = StreamingToolCallAccumulator::default();
+    let mut raw_tool_calls = RawTextToolCallAccumulator::default();
+    let mut last_chunk: Option<Value> = None;
     while let Some(chunk) = stream.next().await {
         if session_cancel_flag(&state, session_id).load(Ordering::SeqCst) {
             state.writer.emit(base_event(
@@ -1015,6 +1020,7 @@ async fn consume_stream(
             return Ok(());
         }
         let chunk = chunk?;
+        last_chunk = Some(chunk.clone());
         record_binding(&state, session_id, &chunk);
         let chunk_type = chunk
             .get("type")
@@ -1071,12 +1077,28 @@ async fn consume_stream(
             }
             "content_streaming" | "stt_text_delta" => {
                 if let Some(text) = chunk_text(&chunk) {
-                    state.writer.emit(base_event(
-                        "assistantTextDelta",
-                        request_id,
-                        Some(session_id),
-                        json!({ "text": text }),
-                    ));
+                    let parsed = raw_tool_calls.push_text(&text);
+                    if !parsed.visible_text.is_empty() {
+                        state.writer.emit(base_event(
+                            "assistantTextDelta",
+                            request_id,
+                            Some(session_id),
+                            json!({ "text": parsed.visible_text }),
+                        ));
+                    }
+                    if !parsed.tool_calls.is_empty()
+                        && let Some(tool_calls) =
+                            filter_ignored_tool_calls(parsed.tool_calls, ignored_tool_call_names)
+                    {
+                        emit_tool_requested_events(
+                            &state, request_id, session_id, &chunk, tool_calls,
+                        );
+                        return Ok(());
+                    }
+                    if raw_tool_calls.is_inside_tool_call() {
+                        continue;
+                    }
+                    continue;
                 }
             }
             "media_generated" => {
@@ -1095,7 +1117,22 @@ async fn consume_stream(
                     json!({ "chunk": chunk }),
                 ));
             }
+            "usage" | "usage_summary" => {
+                state.writer.emit(base_event(
+                    "usage",
+                    request_id,
+                    Some(session_id),
+                    json!({ "usage": chunk }),
+                ));
+            }
             "run_ended" => {
+                if let Some(tool_calls) = raw_tool_calls.take_tool_calls()
+                    && let Some(tool_calls) =
+                        filter_ignored_tool_calls(tool_calls, ignored_tool_call_names)
+                {
+                    emit_tool_requested_events(&state, request_id, session_id, &chunk, tool_calls);
+                    return Ok(());
+                }
                 state.writer.emit(base_event(
                     "usage",
                     request_id,
@@ -1107,6 +1144,22 @@ async fn consume_stream(
                     request_id,
                     Some(session_id),
                     json!({ "stopReason": "end_turn" }),
+                ));
+                return Ok(());
+            }
+            "completed" | "done" => {
+                if let Some(tool_calls) = raw_tool_calls.take_tool_calls()
+                    && let Some(tool_calls) =
+                        filter_ignored_tool_calls(tool_calls, ignored_tool_call_names)
+                {
+                    emit_tool_requested_events(&state, request_id, session_id, &chunk, tool_calls);
+                    return Ok(());
+                }
+                state.writer.emit(base_event(
+                    "done",
+                    request_id,
+                    Some(session_id),
+                    json!({ "stopReason": chunk_stop_reason(&chunk).unwrap_or("end_turn") }),
                 ));
                 return Ok(());
             }
@@ -1140,6 +1193,14 @@ async fn consume_stream(
             }
             _ => {}
         }
+    }
+
+    if let Some(tool_calls) = raw_tool_calls.take_tool_calls()
+        && let Some(tool_calls) = filter_ignored_tool_calls(tool_calls, ignored_tool_call_names)
+    {
+        let fallback_chunk = last_chunk.unwrap_or_else(|| json!({}));
+        emit_tool_requested_events(&state, request_id, session_id, &fallback_chunk, tool_calls);
+        return Ok(());
     }
 
     state.writer.emit(base_event(
@@ -1828,6 +1889,171 @@ fn tool_call_name(tool_call: &Value) -> Option<&str> {
 }
 
 #[derive(Default)]
+struct RawTextToolCallAccumulator {
+    buffer: String,
+    state: RawTextToolCallState,
+    name: Option<String>,
+    arguments: String,
+    next_id: u64,
+}
+
+#[derive(Default, PartialEq, Eq)]
+enum RawTextToolCallState {
+    #[default]
+    Text,
+    Header,
+    Arguments,
+}
+
+struct RawTextToolCallResult {
+    visible_text: String,
+    tool_calls: Vec<Value>,
+}
+
+impl RawTextToolCallAccumulator {
+    fn push_text(&mut self, text: &str) -> RawTextToolCallResult {
+        self.buffer.push_str(text);
+        let mut visible_text = String::new();
+        let mut tool_calls = Vec::new();
+
+        loop {
+            match self.state {
+                RawTextToolCallState::Text => {
+                    let Some(begin_index) = self.buffer.find(RAW_TOOL_CALL_BEGIN) else {
+                        let hold_len = partial_marker_suffix_len(&self.buffer, RAW_TOOL_CALL_BEGIN);
+                        let visible_len = self.buffer.len().saturating_sub(hold_len);
+                        if visible_len > 0 {
+                            visible_text.push_str(&self.buffer[..visible_len]);
+                            self.buffer.replace_range(..visible_len, "");
+                        }
+                        break;
+                    };
+                    visible_text.push_str(&self.buffer[..begin_index]);
+                    let remove_to = begin_index + RAW_TOOL_CALL_BEGIN.len();
+                    self.buffer.replace_range(..remove_to, "");
+                    self.state = RawTextToolCallState::Header;
+                }
+                RawTextToolCallState::Header => {
+                    let Some(separator_index) = self.buffer.find(RAW_TOOL_CALL_SEPARATOR) else {
+                        break;
+                    };
+                    let remove_to = separator_index + RAW_TOOL_CALL_SEPARATOR.len();
+                    self.buffer.replace_range(..remove_to, "");
+                    self.state = RawTextToolCallState::Arguments;
+                }
+                RawTextToolCallState::Arguments => {
+                    if self.name.is_none() && !self.extract_tool_name() {
+                        break;
+                    }
+                    if let Some(end_index) = self.buffer.find(RAW_TOOL_CALL_END) {
+                        self.arguments.push_str(&self.buffer[..end_index]);
+                        let remove_to = end_index + RAW_TOOL_CALL_END.len();
+                        self.buffer.replace_range(..remove_to, "");
+                        if let Some(tool_call) = self.finish_current_call() {
+                            tool_calls.push(tool_call);
+                        }
+                        self.state = RawTextToolCallState::Text;
+                        continue;
+                    }
+                    if !self.buffer.is_empty() {
+                        self.arguments.push_str(&self.buffer);
+                        self.buffer.clear();
+                    }
+                    break;
+                }
+            }
+        }
+
+        RawTextToolCallResult {
+            visible_text,
+            tool_calls,
+        }
+    }
+
+    fn take_tool_calls(&mut self) -> Option<Vec<Value>> {
+        if self.state == RawTextToolCallState::Arguments {
+            if self.name.is_none() {
+                self.extract_tool_name();
+            }
+            if !self.buffer.is_empty() {
+                self.arguments.push_str(&self.buffer);
+                self.buffer.clear();
+            }
+            self.finish_current_call().map(|tool_call| vec![tool_call])
+        } else {
+            None
+        }
+    }
+
+    fn is_inside_tool_call(&self) -> bool {
+        self.state != RawTextToolCallState::Text
+    }
+
+    fn extract_tool_name(&mut self) -> bool {
+        if let Some(newline_index) = self.buffer.find('\n') {
+            let name = self.buffer[..newline_index].trim().to_string();
+            self.buffer.replace_range(..=newline_index, "");
+            if !name.is_empty() {
+                self.name = Some(name);
+            }
+            return self.name.is_some();
+        }
+
+        if let Some(json_index) = self.buffer.find('{') {
+            let name = self.buffer[..json_index].trim().to_string();
+            self.buffer.replace_range(..json_index, "");
+            if !name.is_empty() {
+                self.name = Some(name);
+            }
+            return self.name.is_some();
+        }
+
+        false
+    }
+
+    fn finish_current_call(&mut self) -> Option<Value> {
+        let name = self.name.take()?;
+        let arguments = normalize_raw_tool_arguments(&std::mem::take(&mut self.arguments));
+        if name.is_empty() || arguments.is_empty() {
+            return None;
+        }
+        self.next_id += 1;
+        Some(json!({
+            "id": format!("raw_tool_call_{}", self.next_id),
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": arguments,
+            }
+        }))
+    }
+}
+
+fn normalize_raw_tool_arguments(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Some(without_opening_fence) = trimmed.strip_prefix("```") else {
+        return trimmed.to_string();
+    };
+    let after_first_line = without_opening_fence
+        .split_once('\n')
+        .map(|(_, rest)| rest)
+        .unwrap_or(without_opening_fence);
+    after_first_line
+        .trim()
+        .strip_suffix("```")
+        .unwrap_or(after_first_line.trim())
+        .trim()
+        .to_string()
+}
+
+fn partial_marker_suffix_len(text: &str, marker: &str) -> usize {
+    (1..marker.len())
+        .rev()
+        .find(|len| text.ends_with(&marker[..*len]))
+        .unwrap_or(0)
+}
+
+#[derive(Default)]
 struct StreamingToolCallAccumulator {
     calls: BTreeMap<usize, StreamingToolCall>,
 }
@@ -1973,6 +2199,16 @@ fn chunk_text(chunk: &Value) -> Option<String> {
         }
     }
     None
+}
+
+fn chunk_stop_reason(chunk: &Value) -> Option<&str> {
+    chunk
+        .get("stop_reason")
+        .or_else(|| chunk.get("stopReason"))
+        .or_else(|| chunk.get("finish_reason"))
+        .or_else(|| chunk.get("finishReason"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
 }
 
 fn usage_payload(chunk: &Value) -> Value {
@@ -2132,12 +2368,12 @@ mod tests {
 
     use super::{
         BACKBOARD_IMAGE_TOOL_NAMES, BACKBOARD_SYSTEM_PROMPT, BridgeState, EventWriter,
-        StreamingToolCallAccumulator, add_visible_models, augment_prompt,
-        filter_ignored_tool_calls, is_duplicate_tool_outputs_error, is_featherless_provider,
-        model_is_visible, normalize_tool_output, thinking_payload, tool_call_stream_finished,
-        tool_calls_required_by_chunk, tool_definitions, tool_definitions_for_request,
-        tool_outputs_submission_key, try_begin_tool_outputs_submission, validate_web_fetch_url,
-        voice_payload,
+        RawTextToolCallAccumulator, StreamingToolCallAccumulator, add_visible_models,
+        augment_prompt, filter_ignored_tool_calls, is_duplicate_tool_outputs_error,
+        is_featherless_provider, model_is_visible, normalize_tool_output, thinking_payload,
+        tool_call_stream_finished, tool_calls_required_by_chunk, tool_definitions,
+        tool_definitions_for_request, tool_outputs_submission_key,
+        try_begin_tool_outputs_submission, validate_web_fetch_url, voice_payload,
     };
 
     #[test]
@@ -2507,6 +2743,65 @@ mod tests {
         let filtered = filter_ignored_tool_calls(calls, BACKBOARD_IMAGE_TOOL_NAMES).unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0]["id"], "call_read");
+    }
+
+    #[test]
+    fn raw_text_tool_call_is_extracted_from_content_stream() {
+        let mut accumulator = RawTextToolCallAccumulator::default();
+        let first =
+            accumulator.push_text("Let's search.<|tool_call_begin|>function<|tool_sep|>glob\n");
+
+        assert_eq!(first.visible_text, "Let's search.");
+        assert!(first.tool_calls.is_empty());
+        assert!(accumulator.is_inside_tool_call());
+
+        let second = accumulator.push_text("{\"pattern\":\"**/*.ts\"}<|tool_call_end|>");
+
+        assert!(second.visible_text.is_empty());
+        assert_eq!(second.tool_calls.len(), 1);
+        assert_eq!(second.tool_calls[0]["id"], "raw_tool_call_1");
+        assert_eq!(second.tool_calls[0]["function"]["name"], "glob");
+        assert_eq!(
+            second.tool_calls[0]["function"]["arguments"],
+            "{\"pattern\":\"**/*.ts\"}"
+        );
+        assert!(!accumulator.is_inside_tool_call());
+    }
+
+    #[test]
+    fn raw_text_tool_call_flushes_when_stream_ends_without_end_marker() {
+        let mut accumulator = RawTextToolCallAccumulator::default();
+        let result = accumulator.push_text(
+            "<|tool_call_begin|>function<|tool_sep|>glob\n```json\n{\"pattern\":\"src/**/*.ts\"}\n```",
+        );
+
+        assert!(result.visible_text.is_empty());
+        assert!(result.tool_calls.is_empty());
+
+        let calls = accumulator.take_tool_calls().unwrap();
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["function"]["name"], "glob");
+        assert_eq!(
+            calls[0]["function"]["arguments"],
+            "{\"pattern\":\"src/**/*.ts\"}"
+        );
+    }
+
+    #[test]
+    fn raw_text_tool_call_keeps_partial_begin_marker_hidden_until_complete() {
+        let mut accumulator = RawTextToolCallAccumulator::default();
+        let first = accumulator.push_text("before <|tool_call");
+
+        assert_eq!(first.visible_text, "before ");
+        assert!(first.tool_calls.is_empty());
+
+        let second = accumulator
+            .push_text("_begin|>function<|tool_sep|>grep\n{\"query\":\"abc\"}<|tool_call_end|>");
+
+        assert!(second.visible_text.is_empty());
+        assert_eq!(second.tool_calls.len(), 1);
+        assert_eq!(second.tool_calls[0]["function"]["name"], "grep");
     }
 
     #[test]

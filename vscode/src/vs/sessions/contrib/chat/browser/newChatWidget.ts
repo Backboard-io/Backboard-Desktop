@@ -27,6 +27,8 @@ import { IAgentHostFilterService } from '../../../services/agentHostFilter/commo
 import { IChatViewOptions } from '../../../browser/parts/chatView.js';
 import { LOCAL_AGENT_HOST_PROVIDER_ID } from '../../../common/agentHostSessionsProvider.js';
 
+const BACKBOARD_SESSION_TYPE_ID = 'backboard';
+
 // #region --- New Chat Widget ---
 
 export class NewChatWidget extends Disposable {
@@ -214,7 +216,7 @@ export class NewChatWidget extends Disposable {
 		}
 
 		return activeSession.providerId === LOCAL_AGENT_HOST_PROVIDER_ID
-			&& activeSession.sessionType === 'backboard';
+			&& activeSession.sessionType === BACKBOARD_SESSION_TYPE_ID;
 	}
 
 	private _isPreferredServable(folderUri: URI, pick: IPreferredSessionType): boolean {
@@ -257,8 +259,8 @@ export class NewChatWidget extends Disposable {
 
 	private _backboardPickForFolder(folderUri: URI): IPreferredSessionType | undefined {
 		return this.sessionsManagementService.getSessionTypesForFolder(folderUri).some(t =>
-			t.providerId === LOCAL_AGENT_HOST_PROVIDER_ID && t.sessionType.id === 'backboard')
-			? { providerId: LOCAL_AGENT_HOST_PROVIDER_ID, sessionTypeId: 'backboard' }
+			t.providerId === LOCAL_AGENT_HOST_PROVIDER_ID && t.sessionType.id === BACKBOARD_SESSION_TYPE_ID)
+			? { providerId: LOCAL_AGENT_HOST_PROVIDER_ID, sessionTypeId: BACKBOARD_SESSION_TYPE_ID }
 			: undefined;
 	}
 

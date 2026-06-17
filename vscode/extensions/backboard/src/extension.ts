@@ -131,12 +131,19 @@ interface PanelStateStore {
 	readonly byWorkspace?: Record<string, PanelPersistedState>;
 }
 
+interface PanelThreadFile {
+	readonly version?: number;
+	readonly source?: string;
+	readonly workspace?: string;
+	readonly savedAt?: number;
+	readonly entry?: unknown;
+}
+
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
 const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases';
 const dismissedUpdateVersionKey = 'backboard.update.dismissedVersion';
 const panelStateStorageKeyPrefix = 'backboard.panel.state.';
-const latestPanelStateStorageKey = 'backboard.panel.state.latest';
 const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
 const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
 const backboardOAuthClientId = 'Backboard_oauth_BGmuDtqCPmPgmIqWZ2ORvdqpl8fdKFQY';
@@ -185,6 +192,19 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(configWatcher.onDidCreate(refreshBackboardState));
 	context.subscriptions.push(configWatcher.onDidChange(refreshBackboardState));
 	context.subscriptions.push(configWatcher.onDidDelete(refreshBackboardState));
+	const panelStateWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardPanelStatePath()), path.basename(backboardPanelStatePath())));
+	const panelThreadsWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(backboardThreadsDir(), '*.json'));
+	const refreshPanelHistory = () => {
+		void panelProvider.postPanelStateSnapshot();
+	};
+	context.subscriptions.push(panelStateWatcher);
+	context.subscriptions.push(panelStateWatcher.onDidCreate(refreshPanelHistory));
+	context.subscriptions.push(panelStateWatcher.onDidChange(refreshPanelHistory));
+	context.subscriptions.push(panelStateWatcher.onDidDelete(refreshPanelHistory));
+	context.subscriptions.push(panelThreadsWatcher);
+	context.subscriptions.push(panelThreadsWatcher.onDidCreate(refreshPanelHistory));
+	context.subscriptions.push(panelThreadsWatcher.onDidChange(refreshPanelHistory));
+	context.subscriptions.push(panelThreadsWatcher.onDidDelete(refreshPanelHistory));
 	context.subscriptions.push(vscode.window.registerWebviewViewProvider('backboard.panel', panelProvider, { webviewOptions: { retainContextWhenHidden: true } }));
 	startBackboardUpdateChecks(context);
 }
@@ -1083,6 +1103,10 @@ function backboardPanelStatePath(): string {
 	return path.join(os.homedir(), '.backboard_ide', 'panel-state.json');
 }
 
+function backboardThreadsDir(): string {
+	return path.join(os.homedir(), '.backboard_ide', 'threads');
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -1117,8 +1141,7 @@ function panelStateStorageKey(workspace = workspacePath() ?? 'default'): string 
 
 function hasPanelStateContent(state: PanelPersistedState | undefined): boolean {
 	return !!state
-		&& (typeof state.currentWorkspace === 'string'
-			|| typeof state.activeHistoryId === 'string'
+		&& (typeof state.activeHistoryId === 'string'
 			|| !!state.promptQueue?.length
 			|| !!state.historyEntries?.length);
 }
@@ -1131,7 +1154,7 @@ function panelStateTimestamp(state: PanelPersistedState | undefined): number {
 		return state.savedAt;
 	}
 	const entries = Array.isArray(state.historyEntries) ? state.historyEntries : [];
-	return entries.reduce((max, entry) => {
+	return entries.reduce<number>((max, entry) => {
 		if (!isObjectRecord(entry)) {
 			return max;
 		}
@@ -1167,23 +1190,242 @@ function readSharedPanelStateStore(): PanelStateStore {
 function readSharedPanelState(workspace?: string): PanelPersistedState | undefined {
 	const store = readSharedPanelStateStore();
 	const scoped = workspace ? store.byWorkspace?.[panelStateStorageKey(workspace)] : undefined;
-	return newerPanelState(scoped, store.latest);
+	const threaded = readSharedPanelThreadsState(workspace);
+	const threadedAnyWorkspace = workspace ? readSharedPanelThreadsState(undefined) : undefined;
+	return newerPanelState(scoped, store.latest, threaded, threadedAnyWorkspace);
 }
 
 async function writeSharedPanelState(state: PanelPersistedState): Promise<void> {
+	const persistedState = enrichPanelPersistedState(state);
 	const existing = readSharedPanelStateStore();
-	const key = panelStateStorageKey(state.currentWorkspace);
-	const byWorkspace = { ...(existing.byWorkspace ?? {}), [key]: state };
+	const key = panelStateStorageKey(persistedState.currentWorkspace);
+	const byWorkspace = { ...(existing.byWorkspace ?? {}), [key]: persistedState };
 	const next: PanelStateStore = {
 		byWorkspace,
-		latest: hasPanelStateContent(state) ? state : existing.latest,
+		latest: hasPanelStateContent(persistedState) ? persistedState : existing.latest,
 	};
 	const statePath = backboardPanelStatePath();
 	await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
-	await fs.promises.writeFile(statePath, JSON.stringify(next), 'utf8');
+	await writeJsonFileAtomic(statePath, next);
 	if (process.platform !== 'win32') {
 		await fs.promises.chmod(statePath, 0o600);
 	}
+	await writeSharedPanelThreads(persistedState);
+}
+
+function enrichPanelPersistedState(state: PanelPersistedState): PanelPersistedState {
+	if (!Array.isArray(state.historyEntries)) {
+		return state;
+	}
+	return {
+		...state,
+		historyEntries: state.historyEntries.map(entry => isObjectRecord(entry) ? enrichPanelThreadEntry(entry) : entry),
+	};
+}
+
+function enrichPanelThreadEntry(entry: Record<string, unknown>): Record<string, unknown> {
+	const html = typeof entry.html === 'string' ? entry.html : '';
+	const prompt = typeof entry.prompt === 'string' ? entry.prompt : typeof entry.title === 'string' ? entry.title : '';
+	const outputText = typeof entry.outputText === 'string' ? entry.outputText : extractPanelAssistantText(html);
+	const toolOutputs = Array.isArray(entry.toolOutputs) ? entry.toolOutputs : extractPanelToolOutputs(html);
+	return {
+		...entry,
+		outputText,
+		messages: [
+			{ role: 'user', content: prompt },
+			...(outputText ? [{ role: 'assistant', content: outputText }] : []),
+		],
+		toolOutputs,
+	};
+}
+
+function extractPanelAssistantText(html: string): string {
+	const parts: string[] = [];
+	const pattern = /<div class="messageCard assistant"[\s\S]*?<div class="messageText">([\s\S]*?)<\/div>/g;
+	let match: RegExpExecArray | null;
+	while ((match = pattern.exec(html))) {
+		const text = stripPanelHtml(match[1]);
+		if (text) {
+			parts.push(text);
+		}
+	}
+	return parts.join('\n\n');
+}
+
+function extractPanelToolOutputs(html: string): Record<string, string>[] {
+	const outputs: Record<string, string>[] = [];
+	const cardPattern = /<div class="toolCard ([^"]*)"[^>]*data-tool-key="([^"]*)"[\s\S]*?<span class="toolLabel">([\s\S]*?)<\/span>[\s\S]*?<pre class="toolDetails">([\s\S]*?)<\/pre>/g;
+	let match: RegExpExecArray | null;
+	while ((match = cardPattern.exec(html))) {
+		outputs.push({
+			id: decodePanelHtmlEntities(match[2]),
+			status: stripPanelHtml(match[1]),
+			label: stripPanelHtml(match[3]),
+			text: stripPanelHtml(match[4]),
+		});
+	}
+	return outputs;
+}
+
+function stripPanelHtml(html: string): string {
+	return decodePanelHtmlEntities(html)
+		.replace(/<script[\s\S]*?<\/script>/gi, '')
+		.replace(/<style[\s\S]*?<\/style>/gi, '')
+		.replace(/<br\s*\/?>/gi, '\n')
+		.replace(/<\/(?:div|p|li|h[1-6])>/gi, '\n')
+		.replace(/<[^>]+>/g, '')
+		.replace(/[ \t]+\n/g, '\n')
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+}
+
+function decodePanelHtmlEntities(text: string): string {
+	return text
+		.replace(/&nbsp;/g, ' ')
+		.replace(/&amp;/g, '&')
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'");
+}
+
+function readSharedPanelThreadsState(workspace: string | undefined): PanelPersistedState | undefined {
+	const entries = readSharedPanelThreadEntries(workspace);
+	if (!entries.length) {
+		return undefined;
+	}
+	let savedAt = 0;
+	for (const entry of entries) {
+		if (!isObjectRecord(entry)) {
+			continue;
+		}
+		savedAt = Math.max(
+			savedAt,
+			typeof entry.updatedAt === 'number' ? entry.updatedAt : 0,
+			typeof entry.startedAt === 'number' ? entry.startedAt : 0,
+			typeof entry.savedAt === 'number' ? entry.savedAt : 0,
+		);
+	}
+	const active = entries[0];
+	const activeId = isObjectRecord(active) && typeof active.id === 'string' ? active.id : undefined;
+	return {
+		activeView: 'chat',
+		activeHistoryId: activeId,
+		currentWorkspace: workspace,
+		historyEntries: entries,
+		promptQueue: [],
+		savedAt,
+	};
+}
+
+function readSharedPanelThreadEntries(workspace: string | undefined): unknown[] {
+	let fileNames: string[];
+	try {
+		fileNames = fs.readdirSync(backboardThreadsDir());
+	} catch {
+		return [];
+	}
+	const entries: unknown[] = [];
+	for (const fileName of fileNames) {
+		if (!fileName.endsWith('.json')) {
+			continue;
+		}
+		try {
+			const parsed: unknown = JSON.parse(fs.readFileSync(path.join(backboardThreadsDir(), fileName), 'utf8'));
+			if (!isObjectRecord(parsed)) {
+				continue;
+			}
+			const thread = parsed as PanelThreadFile;
+			if (workspace && thread.workspace && thread.workspace !== workspace) {
+				continue;
+			}
+			const rawEntry = thread.entry;
+			if (isObjectRecord(rawEntry) && typeof rawEntry.id === 'string') {
+				entries.push({ ...rawEntry, currentWorkspace: thread.workspace });
+			}
+		} catch {
+			// Ignore malformed thread snapshots; valid shared thread files remain the source of truth.
+		}
+	}
+	return entries.sort((left, right) => panelThreadEntryTimestamp(right) - panelThreadEntryTimestamp(left));
+}
+
+function panelThreadEntryTimestamp(value: unknown): number {
+	if (!isObjectRecord(value)) {
+		return 0;
+	}
+	return Math.max(
+		typeof value.updatedAt === 'number' ? value.updatedAt : 0,
+		typeof value.startedAt === 'number' ? value.startedAt : 0,
+		typeof value.savedAt === 'number' ? value.savedAt : 0,
+	);
+}
+
+async function writeSharedPanelThreads(state: PanelPersistedState): Promise<void> {
+	const entries = Array.isArray(state.historyEntries) ? state.historyEntries : [];
+	const threadsDir = backboardThreadsDir();
+	await fs.promises.mkdir(threadsDir, { recursive: true });
+	const currentIds = new Set<string>();
+	for (const entry of entries) {
+		if (!isObjectRecord(entry) || typeof entry.id !== 'string' || !entry.id) {
+			continue;
+		}
+		currentIds.add(entry.id);
+		const threadPath = path.join(threadsDir, `${safePanelThreadFileName(entry.id)}.json`);
+		await writeJsonFileAtomic(threadPath, {
+			version: 1,
+			source: 'panel',
+			workspace: typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined,
+			savedAt: typeof state.savedAt === 'number' ? state.savedAt : Date.now(),
+			entry,
+		});
+		if (process.platform !== 'win32') {
+			await fs.promises.chmod(threadPath, 0o600);
+		}
+	}
+	await pruneSharedPanelThreads(state, currentIds);
+}
+
+async function pruneSharedPanelThreads(state: PanelPersistedState, currentIds: Set<string>): Promise<void> {
+	const workspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined;
+	if (!workspace) {
+		return;
+	}
+	let fileNames: string[];
+	try {
+		fileNames = await fs.promises.readdir(backboardThreadsDir());
+	} catch {
+		return;
+	}
+	await Promise.all(fileNames.map(async fileName => {
+		if (!fileName.endsWith('.json')) {
+			return;
+		}
+		const threadPath = path.join(backboardThreadsDir(), fileName);
+		try {
+			const parsed: unknown = JSON.parse(await fs.promises.readFile(threadPath, 'utf8'));
+			if (!isObjectRecord(parsed)) {
+				return;
+			}
+			const entry = isObjectRecord(parsed.entry) ? parsed.entry : undefined;
+			const entryId = typeof entry?.id === 'string' ? entry.id : undefined;
+			if (parsed.source === 'panel' && parsed.workspace === workspace && entryId && !currentIds.has(entryId)) {
+				await fs.promises.unlink(threadPath);
+			}
+		} catch {
+			// Leave unreadable files alone; they may be from a newer format.
+		}
+	}));
+}
+
+function safePanelThreadFileName(id: string): string {
+	return id.replace(/[^a-zA-Z0-9_.-]/g, '-');
+}
+
+async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<void> {
+	const tempPath = `${filePath}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+	await fs.promises.writeFile(tempPath, `${JSON.stringify(value, undefined, '\t')}\n`, 'utf8');
+	await fs.promises.rename(tempPath, filePath);
 }
 
 function scriptJson(value: unknown): string {
@@ -1565,37 +1807,21 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			}
 		});
 		void postPanelState(this.bridge, webviewView.webview);
+		void this.postPanelStateSnapshot();
 	}
 
 	private readPanelState(): PanelPersistedState {
 		const currentWorkspace = workspacePath();
-		const scopedKey = panelStateStorageKey(currentWorkspace);
-		const scopedState = this.context.workspaceState.get<PanelPersistedState>(scopedKey)
-			?? this.context.globalState.get<PanelPersistedState>(scopedKey);
-		const latestState = this.context.globalState.get<PanelPersistedState>(latestPanelStateStorageKey);
-		const sharedState = readSharedPanelState(currentWorkspace);
-		if (currentWorkspace) {
-			return newerPanelState(scopedState, latestState, sharedState) ?? {};
-		}
-		return newerPanelState(sharedState, latestState, scopedState) ?? {};
+		return readSharedPanelState(currentWorkspace) ?? {};
 	}
 
 	private async savePanelState(state: PanelPersistedState): Promise<void> {
-		const key = panelStateStorageKey(state.currentWorkspace);
-		const updates = [
-			this.context.workspaceState.update(key, state),
-			this.context.globalState.update(key, state),
-		];
-		if (hasPanelStateContent(state)) {
-			updates.push(this.context.globalState.update(latestPanelStateStorageKey, state));
-		}
-		updates.push(writeSharedPanelState(state).catch(error => {
+		await writeSharedPanelState(state).catch(error => {
 			backboardToolOutput?.appendLine(`[panel-state] failed to save shared state: ${error instanceof Error ? error.message : String(error)}`);
-		}));
-		await Promise.all(updates);
+		});
 	}
 
-	private async postPanelStateSnapshot(): Promise<void> {
+	async postPanelStateSnapshot(): Promise<void> {
 		await this.view?.webview.postMessage({ type: 'panelStateSnapshot', state: this.readPanelState() });
 	}
 
@@ -2281,8 +2507,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			mcpGoogle: document.getElementById('mcpGoogle')
 		};
 		const hostInitialState = ${initialStateJson};
-		const webviewState = vscode.getState();
-		const persistedState = webviewState && Object.keys(webviewState).length ? webviewState : hostInitialState;
+		const hostHasPanelState = !!hostInitialState && typeof hostInitialState === 'object' && (!!hostInitialState.activeHistoryId || !!hostInitialState.promptQueue?.length || !!hostInitialState.historyEntries?.length);
+		const persistedState = hostHasPanelState ? hostInitialState : {};
 		let models = [];
 		let tools = [];
 			let settings = {};
@@ -2291,6 +2517,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		let historyEntries = Array.isArray(persistedState.historyEntries) ? persistedState.historyEntries : [];
 		let activeHistoryId = typeof persistedState.activeHistoryId === 'string' ? persistedState.activeHistoryId : undefined;
 		let promptQueue = Array.isArray(persistedState.promptQueue) ? persistedState.promptQueue : [];
+		let panelStateSavedAt = typeof persistedState.savedAt === 'number' ? persistedState.savedAt : 0;
 		let runInProgress = false;
 		let stopRequested = false;
 		let activePopover = undefined;
@@ -2533,15 +2760,29 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			return new Date(value || Date.now()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 		}
 		function persistPanelState() {
+			panelStateSavedAt = Date.now();
 			const state = {
 				activeView,
 				activeHistoryId,
 				promptQueue,
 				currentWorkspace,
-				historyEntries: historyEntries.slice(0, 40)
-			};
-			vscode.setState(state);
-			vscode.postMessage({ type: 'panelState', state });
+					historyEntries: historyEntries.slice(0, 40),
+					savedAt: panelStateSavedAt
+				};
+				vscode.postMessage({ type: 'panelState', state });
+			}
+		function panelSnapshotTimestamp(state) {
+			if (!state || typeof state !== 'object') {
+				return 0;
+			}
+			if (typeof state.savedAt === 'number') {
+				return state.savedAt;
+			}
+			const entries = Array.isArray(state.historyEntries) ? state.historyEntries : [];
+			return entries.reduce((max, entry) => Math.max(max, typeof entry?.updatedAt === 'number' ? entry.updatedAt : 0, typeof entry?.startedAt === 'number' ? entry.startedAt : 0), 0);
+		}
+		function hasPanelSnapshotContent(state) {
+			return !!state && typeof state === 'object' && (!!state.activeHistoryId || !!state.promptQueue?.length || !!state.historyEntries?.length);
 		}
 		function activeHistoryEntry() {
 			return historyEntries.find(item => item.id === activeHistoryId);
@@ -2829,6 +3070,48 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				persistPanelState();
 			}
 		}
+		function applyPanelStateSnapshot(state, force) {
+			if (!hasPanelSnapshotContent(state) || runInProgress) {
+				return;
+			}
+			const snapshotSavedAt = panelSnapshotTimestamp(state);
+			if (!force && snapshotSavedAt && panelStateSavedAt && snapshotSavedAt <= panelStateSavedAt) {
+				return;
+			}
+			const nextHistoryEntries = Array.isArray(state.historyEntries) ? state.historyEntries : [];
+			const nextActiveHistoryId = typeof state.activeHistoryId === 'string' ? state.activeHistoryId : undefined;
+			const nextPromptQueue = Array.isArray(state.promptQueue) ? state.promptQueue : [];
+			const nextActiveView = state.activeView === 'history' ? 'history' : 'chat';
+			historyEntries = nextHistoryEntries;
+			activeHistoryId = nextActiveHistoryId;
+			promptQueue = nextPromptQueue;
+			currentWorkspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : currentWorkspace;
+			panelStateSavedAt = snapshotSavedAt || Date.now();
+			const entry = activeHistoryEntry();
+			restoringHistory = true;
+			if (entry) {
+				log.innerHTML = entry.html || '';
+				removeLegacyChangeArtifacts();
+				spreadLegacyToolGroups();
+				fileChanges = Array.isArray(entry.fileChanges) ? entry.fileChanges.slice(0) : [];
+				promptQueue = Array.isArray(entry.promptQueue) ? entry.promptQueue.slice(0) : promptQueue;
+			} else {
+				log.innerHTML = '';
+				fileChanges = [];
+			}
+			currentAssistantCard = undefined;
+			activeToolRows = [];
+			activeToolGroup = undefined;
+			restoringHistory = false;
+			syncEmptyState();
+			renderChangeStack();
+			renderQueue();
+			renderHistory();
+			renderRecentTabs();
+			renderCheckpoints();
+			setActiveView(nextActiveView);
+			scrollConversation(true);
+			}
 		function startNewChat() {
 			if (runInProgress) {
 				updateStatus('Cancel or finish the current run before starting a new chat.');
@@ -4617,6 +4900,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				applySettings(message.settings);
 				refreshWorkspaceStatus();
 				persistPanelState();
+			} else if (message.type === 'panelStateSnapshot') {
+				applyPanelStateSnapshot(message.state, false);
 			} else if (message.type === 'command') {
 				if (message.command === 'newChat') {
 					startNewChat();
@@ -4685,14 +4970,19 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		renderHistory();
 		renderChangeStack();
 		renderQueue();
-		setActiveView(activeView);
-		syncEmptyState();
-		syncRootHeight();
+			setActiveView(activeView);
+			applyPanelStateSnapshot(persistedState, true);
+			if (hasPanelSnapshotContent(persistedState)) {
+				persistPanelState();
+			}
+			syncEmptyState();
+			syncRootHeight();
 		requestAnimationFrame(() => {
 			syncRootHeight();
 			requestAnimationFrame(syncRootHeight);
 		});
 		vscode.postMessage({ type: 'ready' });
+		window.setInterval(() => vscode.postMessage({ type: 'syncPanelState' }), 2000);
 	</script>
 </body>
 </html>`;

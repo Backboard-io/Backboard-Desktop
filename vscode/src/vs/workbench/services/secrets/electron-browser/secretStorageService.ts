@@ -43,13 +43,25 @@ export class NativeSecretStorageService extends BaseSecretStorageService {
 			await this.resolvedStorageService;
 
 			if (this.type !== 'persisted' && !this._environmentService.useInMemorySecretStorage) {
-				this._logService.trace('[NativeSecretStorageService] Notifying user that secrets are not being stored on disk.');
-				await this.notifyOfNoEncryptionOnce();
+				if (this.shouldNotifyOfNoEncryption()) {
+					this._logService.trace('[NativeSecretStorageService] Notifying user that secrets are not being stored on disk.');
+					await this.notifyOfNoEncryptionOnce();
+				} else {
+					this._logService.warn('[NativeSecretStorageService] OS keyring unavailable; using in-memory secret storage without showing a notification.');
+				}
 			}
 
 		});
 
 		return super.set(key, value);
+	}
+
+	private shouldNotifyOfNoEncryption(): boolean {
+		// Source/dev macOS launches can report no keyring even though Backboard
+		// stores its own credentials in ~/.backboard_ide/config.json. Avoid a
+		// noisy startup notification for that case while keeping Linux guidance
+		// where users can choose a weaker password-store fallback.
+		return isLinux;
 	}
 
 	private notifyOfNoEncryptionOnce = createSingleCallFunction(() => this.notifyOfNoEncryption());

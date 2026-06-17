@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -23,7 +24,7 @@ import { AgentSession, AgentSignal, IAgent, IAgentCreateSessionConfig, IAgentCre
 import { ActionType, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
-import { ResponsePartKind, ToolCallConfirmationReason, ToolResultContentType, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
+import { MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolResultContentType, TurnState, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 
@@ -118,6 +119,58 @@ interface BackboardSession {
 	disposed: boolean;
 }
 
+interface BackboardPanelPersistedState {
+	readonly activeView?: string;
+	readonly activeHistoryId?: string;
+	readonly promptQueue?: unknown[];
+	readonly currentWorkspace?: string;
+	readonly historyEntries?: unknown[];
+	readonly savedAt?: number;
+}
+
+interface BackboardPanelStateStore {
+	readonly latest?: BackboardPanelPersistedState;
+	readonly byWorkspace?: Record<string, BackboardPanelPersistedState>;
+}
+
+interface BackboardPanelThreadFile {
+	readonly version?: number;
+	readonly source?: string;
+	readonly workspace?: string;
+	readonly savedAt?: number;
+	readonly entry?: unknown;
+}
+
+interface BackboardPanelHistoryEntry {
+	readonly id: string;
+	readonly title?: string;
+	readonly prompt?: string;
+	readonly startedAt?: number;
+	readonly updatedAt?: number;
+	readonly status?: string;
+	readonly html?: string;
+	readonly outputText?: string;
+	readonly toolOutputs?: unknown[];
+	readonly messages?: unknown[];
+	readonly currentWorkspace?: string;
+}
+
+interface BackboardResponseState {
+	didCreatePart: boolean;
+	pendingText: string;
+	assistantText: string;
+	toolOutputs: StoredToolOutput[];
+	flushHandle?: ReturnType<typeof setTimeout>;
+}
+
+interface StoredToolOutput {
+	readonly id: string;
+	readonly name: string;
+	readonly input: string;
+	readonly success: boolean;
+	readonly output: string;
+}
+
 interface ToolResultRequest {
 	readonly threadId: string;
 	readonly runId: string;
@@ -189,6 +242,30 @@ export class BackboardAgent extends Disposable implements IAgent {
 			return { session: sessionUri, workingDirectory: existing.workingDirectory, provisional: !existing.materialized };
 		}
 
+		const restoredEntry = config.session ? await this._panelHistoryEntry(sessionId) : undefined;
+		if (restoredEntry) {
+			const workingDirectory = config.workingDirectory ?? panelEntryWorkspace(restoredEntry);
+			const session: BackboardSession = {
+				sessionUri,
+				sessionId,
+				createdAt: restoredEntry.startedAt ?? Date.now(),
+				modifiedAt: restoredEntry.updatedAt ?? restoredEntry.startedAt ?? Date.now(),
+				workingDirectory,
+				model: normalizeBackboardModelSelection(config.model),
+				config: normalizeBackboardConfig(config.config),
+				title: restoredEntry.title,
+				materialized: true,
+				disposed: false,
+			};
+			this._sessions.set(sessionId, session);
+			return {
+				session: sessionUri,
+				workingDirectory,
+				project: workingDirectory ? { uri: workingDirectory, displayName: path.basename(workingDirectory.fsPath) } : undefined,
+				provisional: false,
+			};
+		}
+
 		const session: BackboardSession = {
 			sessionUri,
 			sessionId,
@@ -218,14 +295,18 @@ export class BackboardAgent extends Disposable implements IAgent {
 		await this._materialize(session);
 
 		const partId = generateUuid();
-		const responseState = { didCreatePart: false };
+		const responseState: BackboardResponseState = { didCreatePart: false, pendingText: '', assistantText: '', toolOutputs: [] };
 		const bridgeSessionId = `sandbox:${session.sessionId}`;
 		session.modifiedAt = Date.now();
+		session.title ??= panelHistoryTitle(prompt);
+		let failedMessage: string | undefined;
 
 		try {
+			await writeSharedBackboardThread(session, prompt, '', undefined, responseState, this._logService, 'running');
 			const settings = this._turnSettings(session);
 			const firstToolRequests: ToolResultRequest[] = [];
 			const seenToolRequests = new Set<string>();
+			const submitToolsPromise = this._bridge.listTools(settings.mode).catch(() => undefined);
 			const handle = this._bridge.send('sendPrompt', bridgeSessionId, {
 				content: prompt,
 				workspace: session.workingDirectory?.fsPath,
@@ -241,19 +322,22 @@ export class BackboardAgent extends Disposable implements IAgent {
 			}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, firstToolRequests, seenToolRequests, event));
 			session.currentRequestId = handle.requestId;
 			await handle.promise;
+			this._flushAssistantText(session, effectiveTurnId, partId, responseState);
 
 			let nextToolRequest = firstToolRequests.shift();
 			while (nextToolRequest) {
-				const toolOutputs = await this._executeToolCalls(session, effectiveTurnId, nextToolRequest.toolCalls, settings.mode);
+				const toolOutputs = await this._executeToolCalls(session, effectiveTurnId, nextToolRequest.toolCalls, settings.mode, responseState);
 				const continuationToolRequests: ToolResultRequest[] = [];
 				const continuation = this._bridge.send('submitToolResult', bridgeSessionId, {
 					threadId: nextToolRequest.threadId,
 					runId: nextToolRequest.runId,
 					toolOutputs,
+					tools: await submitToolsPromise,
 					config: settings.config,
 				}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, continuationToolRequests, seenToolRequests, event));
 				session.currentRequestId = continuation.requestId;
 				await continuation.promise;
+				this._flushAssistantText(session, effectiveTurnId, partId, responseState);
 				nextToolRequest = continuationToolRequests.shift();
 			}
 		} catch (error) {
@@ -261,20 +345,24 @@ export class BackboardAgent extends Disposable implements IAgent {
 			if (isDuplicateToolOutputError(message)) {
 				this._logService.info(`[Backboard] Suppressed duplicate tool-output submission error: ${message}`);
 			} else {
+				failedMessage = message;
 				this._fire(session.sessionUri, {
 					type: ActionType.SessionError,
 					turnId: effectiveTurnId,
 					error: { errorType: 'BackboardSendFailed', message },
 				});
 			}
-		} finally {
-			session.currentRequestId = undefined;
-			this._fire(session.sessionUri, { type: ActionType.SessionTurnComplete, turnId: effectiveTurnId });
-		}
+			} finally {
+				this._flushAssistantText(session, effectiveTurnId, partId, responseState);
+				session.currentRequestId = undefined;
+				await writeSharedBackboardThread(session, prompt, responseState.assistantText, failedMessage, responseState, this._logService, failedMessage ? 'error' : 'complete');
+				this._fire(session.sessionUri, { type: ActionType.SessionTurnComplete, turnId: effectiveTurnId });
+			}
 	}
 
 	async getSessionMessages(_session: URI): Promise<readonly Turn[]> {
-		return [];
+		const entry = await this._panelHistoryEntry(AgentSession.id(_session));
+		return entry ? [panelHistoryEntryToTurn(entry)] : [];
 	}
 
 	async disposeSession(sessionUri: URI): Promise<void> {
@@ -311,17 +399,34 @@ export class BackboardAgent extends Disposable implements IAgent {
 	}
 
 	async listSessions(): Promise<IAgentSessionMetadata[]> {
-		return [...this._sessions.values()]
+		const inMemory = [...this._sessions.values()]
 			.filter(session => session.materialized && !session.disposed)
 			.map(session => ({
 				session: session.sessionUri,
 				startTime: session.createdAt,
 				modifiedTime: session.modifiedAt,
 				summary: session.title,
+				status: session.currentRequestId ? SessionStatus.InProgress : SessionStatus.Idle,
 				model: session.model,
 				workingDirectory: session.workingDirectory,
 				project: session.workingDirectory ? { uri: session.workingDirectory, displayName: path.basename(session.workingDirectory.fsPath) } : undefined,
 			}));
+		const seen = new Set(inMemory.map(session => AgentSession.id(session.session)));
+		const restored = (await this._panelHistoryEntries())
+			.filter(entry => !seen.has(entry.id))
+			.map(entry => {
+				const workingDirectory = panelEntryWorkspace(entry);
+				return {
+					session: AgentSession.uri(this.id, entry.id),
+					startTime: entry.startedAt ?? entry.updatedAt ?? Date.now(),
+					modifiedTime: entry.updatedAt ?? entry.startedAt ?? Date.now(),
+					summary: entry.title || entry.prompt,
+					status: panelEntryStatus(entry),
+					workingDirectory,
+					project: workingDirectory ? { uri: workingDirectory, displayName: path.basename(workingDirectory.fsPath) } : undefined,
+				};
+			});
+		return [...inMemory, ...restored].sort((left, right) => right.modifiedTime - left.modifiedTime);
 	}
 
 	async authenticate(_resource: string, _token: string): Promise<boolean> {
@@ -386,7 +491,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 		session: BackboardSession,
 		turnId: string,
 		partId: string,
-		responseState: { didCreatePart: boolean },
+		responseState: BackboardResponseState,
 		toolRequests: ToolResultRequest[],
 		seenToolRequests: Set<string>,
 		event: BridgeEvent,
@@ -400,17 +505,11 @@ export class BackboardAgent extends Disposable implements IAgent {
 				if (!visibleText) {
 					return;
 				}
-				if (!responseState.didCreatePart) {
-					responseState.didCreatePart = true;
-					this._fire(session.sessionUri, {
-						type: ActionType.SessionResponsePart,
-						turnId,
-						part: { kind: ResponsePartKind.Markdown, id: partId, content: '' },
-					});
-				}
-				this._fire(session.sessionUri, { type: ActionType.SessionDelta, turnId, partId, content: visibleText });
+				responseState.pendingText += visibleText;
+				responseState.flushHandle ??= setTimeout(() => this._flushAssistantText(session, turnId, partId, responseState), 16);
 				return;
 			case 'toolRequested':
+				this._flushAssistantText(session, turnId, partId, responseState);
 				if (event.threadId && event.runId && event.toolCalls?.length) {
 					const request = { threadId: event.threadId, runId: event.runId, toolCalls: event.toolCalls };
 					const key = toolResultRequestKey(request);
@@ -423,6 +522,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				}
 				return;
 			case 'error':
+				this._flushAssistantText(session, turnId, partId, responseState);
 				if (isDuplicateToolOutputError(event.message)) {
 					this._logService.info(`[Backboard] Suppressed duplicate tool-output submission error: ${event.message}`);
 					return;
@@ -436,7 +536,29 @@ export class BackboardAgent extends Disposable implements IAgent {
 		}
 	}
 
-	private async _executeToolCalls(session: BackboardSession, turnId: string, toolCalls: readonly unknown[], mode: string): Promise<unknown[]> {
+	private _flushAssistantText(session: BackboardSession, turnId: string, partId: string, responseState: BackboardResponseState): void {
+		if (responseState.flushHandle) {
+			clearTimeout(responseState.flushHandle);
+			responseState.flushHandle = undefined;
+		}
+		const content = responseState.pendingText;
+		if (!content) {
+			return;
+		}
+		responseState.pendingText = '';
+		responseState.assistantText += content;
+		if (!responseState.didCreatePart) {
+			responseState.didCreatePart = true;
+			this._fire(session.sessionUri, {
+				type: ActionType.SessionResponsePart,
+				turnId,
+				part: { kind: ResponsePartKind.Markdown, id: partId, content: '' },
+			});
+		}
+		this._fire(session.sessionUri, { type: ActionType.SessionDelta, turnId, partId, content });
+	}
+
+	private async _executeToolCalls(session: BackboardSession, turnId: string, toolCalls: readonly unknown[], mode: string, responseState: BackboardResponseState): Promise<unknown[]> {
 		const outputs: unknown[] = [];
 		for (const rawCall of toolCalls) {
 			const call = parseToolCall(rawCall);
@@ -467,9 +589,9 @@ export class BackboardAgent extends Disposable implements IAgent {
 				_meta: { toolKind: toolKind(call.name) },
 			});
 
-				if (!allowed) {
-					const message = 'Tool call requires approval. Switch this Sandbox session to Full Access to allow write tools automatically.';
-					this._fire(session.sessionUri, {
+			if (!allowed) {
+				const message = 'Tool call requires approval. Switch this Sandbox session to Full Access to allow write tools automatically.';
+				this._fire(session.sessionUri, {
 					type: ActionType.SessionToolCallComplete,
 					turnId,
 					toolCallId: call.id,
@@ -480,12 +602,20 @@ export class BackboardAgent extends Disposable implements IAgent {
 						error: { message },
 					},
 				});
+				responseState.toolOutputs.push({ id: call.id, name: call.name, input: toolInput, success: false, output: message });
 				outputs.push(toolOutput(call.id, { success: false, content: message }));
 				continue;
 			}
 
+			const reportContent = createToolContentReporter((content: string) => this._fire(session.sessionUri, {
+				type: ActionType.SessionToolCallContentChanged,
+				turnId,
+				toolCallId: call.id,
+				content: [{ type: ToolResultContentType.Text, text: content }],
+			}));
 			try {
-				const result = await executeBackboardTool(this._bridge, session.workingDirectory?.fsPath, call);
+				const result = await executeBackboardTool(this._bridge, session.workingDirectory?.fsPath, call, reportContent.report);
+				reportContent.flush();
 				this._fire(session.sessionUri, {
 					type: ActionType.SessionToolCallComplete,
 					turnId,
@@ -496,8 +626,10 @@ export class BackboardAgent extends Disposable implements IAgent {
 						content: result ? [{ type: ToolResultContentType.Text, text: result }] : undefined,
 					},
 				});
+				responseState.toolOutputs.push({ id: call.id, name: call.name, input: toolInput, success: true, output: result ?? '' });
 				outputs.push(toolOutput(call.id, { success: true, content: result }));
 			} catch (error) {
+				reportContent.flush();
 				const message = error instanceof Error ? error.message : String(error);
 				this._fire(session.sessionUri, {
 					type: ActionType.SessionToolCallComplete,
@@ -510,6 +642,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 						error: { message },
 					},
 				});
+				responseState.toolOutputs.push({ id: call.id, name: call.name, input: toolInput, success: false, output: message });
 				outputs.push(toolOutput(call.id, { success: false, content: message }));
 			}
 		}
@@ -517,25 +650,30 @@ export class BackboardAgent extends Disposable implements IAgent {
 	}
 
 	private _refreshModels(): void {
+		const cachedModels = this._readCachedModels();
+		if (cachedModels.length) {
+			this._models.set(backboardModelInfos(cachedModels), undefined);
+		}
 		this._bridge.send('listModels', undefined, { config: bridgeConfig() }, undefined).promise.then(events => {
 			const bridgeModels = events.find(event => event.type === 'models')?.models ?? [];
-			const mergedModels = mergeBridgeModels(bridgeModels, this._readCachedModels());
-			const models = mergedModels
-				.filter(isVisibleBridgeModel)
-				.concat(supplementalBridgeModels(mergedModels))
-				.sort(compareBridgeModels)
-				.map(toAgentModelInfo);
+			this._writeCachedModels(bridgeModels);
+			const models = backboardModelInfos(bridgeModels, cachedModels);
 			this._models.set(models.length ? models : [fallbackModel()], undefined);
 		}).catch(error => {
 			this._logService.warn(`[Backboard] Failed to load models: ${error instanceof Error ? error.message : String(error)}`);
-			this._models.set([fallbackModel()], undefined);
+			if (!cachedModels.length) {
+				this._models.set([fallbackModel()], undefined);
+			}
 		});
 	}
 
+	private _modelCachePath(): string {
+		return path.join(this._environmentService.appSettingsHome.fsPath, 'globalStorage', 'backboard.backboard', 'models.json');
+	}
+
 	private _readCachedModels(): BridgeModel[] {
-		const cachePath = path.join(this._environmentService.appSettingsHome.fsPath, 'globalStorage', 'backboard.backboard', 'models.json');
 		try {
-			const parsed: unknown = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+			const parsed: unknown = JSON.parse(fs.readFileSync(this._modelCachePath(), 'utf8'));
 			const env = isObjectRecord(parsed) && typeof parsed.env === 'string' ? parsed.env : undefined;
 			if (!isObjectRecord(parsed)
 				|| parsed.version !== BACKBOARD_MODEL_CACHE_VERSION
@@ -552,6 +690,407 @@ export class BackboardAgent extends Disposable implements IAgent {
 			return [];
 		}
 	}
+
+	private _writeCachedModels(models: readonly BridgeModel[]): void {
+		const cachePath = this._modelCachePath();
+		const dir = path.dirname(cachePath);
+		try {
+			fs.mkdirSync(dir, { recursive: true });
+			const tempPath = path.join(dir, `models.${process.pid}.${Date.now()}.tmp`);
+			const entry = {
+				env: currentBackboardEnv(),
+				version: BACKBOARD_MODEL_CACHE_VERSION,
+				fetchedAt: Date.now(),
+				models: models.filter(isBridgeModel).filter(isVisibleBridgeModel),
+			};
+			fs.writeFileSync(tempPath, `${JSON.stringify(entry, undefined, '\t')}\n`, 'utf8');
+			fs.renameSync(tempPath, cachePath);
+		} catch (error) {
+			this._logService.warn(`[Backboard] Failed to write cached models: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	private async _panelHistoryEntry(id: string): Promise<BackboardPanelHistoryEntry | undefined> {
+		return (await this._panelHistoryEntries()).find(entry => entry.id === id);
+	}
+
+	private async _panelHistoryEntries(): Promise<BackboardPanelHistoryEntry[]> {
+		const states = readBackboardPanelStates(this._logService);
+		const entries = new Map<string, BackboardPanelHistoryEntry>();
+		for (const state of states.sort((left, right) => panelStateTimestamp(left) - panelStateTimestamp(right))) {
+			const workspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined;
+			for (const rawEntry of Array.isArray(state.historyEntries) ? state.historyEntries : []) {
+				const entry = normalizePanelHistoryEntry(rawEntry, workspace);
+				if (entry) {
+					entries.set(entry.id, entry);
+				}
+			}
+		}
+		return [...entries.values()].sort((left, right) => (right.updatedAt ?? right.startedAt ?? 0) - (left.updatedAt ?? left.startedAt ?? 0));
+	}
+}
+
+function readBackboardPanelStates(logService: ILogService): BackboardPanelPersistedState[] {
+	const states: BackboardPanelPersistedState[] = [];
+	const sharedState = readSharedBackboardPanelState(logService);
+	if (sharedState) {
+		states.push(...sharedState);
+	}
+	const bySignature = new Map<string, BackboardPanelPersistedState>();
+	for (const state of states) {
+		if (!hasPanelStateContent(state)) {
+			continue;
+		}
+		bySignature.set(panelStateSignature(state), state);
+	}
+	return [...bySignature.values()];
+}
+
+function readSharedBackboardPanelState(logService: ILogService): BackboardPanelPersistedState[] | undefined {
+	const statePath = path.join(os.homedir(), '.backboard_ide', 'panel-state.json');
+	const states: BackboardPanelPersistedState[] = [];
+	try {
+		const parsed: unknown = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+		if (isObjectRecord(parsed)) {
+			const store = parsed as BackboardPanelStateStore;
+			states.push(
+				...(store.latest && isPanelPersistedState(store.latest) ? [store.latest] : []),
+				...Object.values(store.byWorkspace ?? {}).filter(isPanelPersistedState),
+			);
+		}
+	} catch (error) {
+		if (!isFileNotFoundError(error) && !(error instanceof SyntaxError)) {
+			logService.warn(`[Backboard] Failed to read shared panel state: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+	states.push(...readSharedBackboardThreadStates(logService));
+	return states.length ? states : undefined;
+}
+
+function readSharedBackboardThreadStates(logService: ILogService): BackboardPanelPersistedState[] {
+	const entries = readSharedBackboardThreadEntries(logService);
+	if (!entries.length) {
+		return [];
+	}
+	const byWorkspace = new Map<string | undefined, BackboardPanelHistoryEntry[]>();
+	for (const entry of entries) {
+		const workspace = entry.currentWorkspace;
+		const bucket = byWorkspace.get(workspace) ?? [];
+		bucket.push(entry);
+		byWorkspace.set(workspace, bucket);
+	}
+	const states: BackboardPanelPersistedState[] = [];
+	for (const [workspace, workspaceEntries] of byWorkspace) {
+		const sorted = workspaceEntries.sort((left, right) => panelHistoryEntryTimestamp(right) - panelHistoryEntryTimestamp(left));
+		states.push({
+			activeView: 'chat',
+			activeHistoryId: sorted[0]?.id,
+			currentWorkspace: workspace,
+			promptQueue: [],
+			historyEntries: sorted,
+			savedAt: panelHistoryEntryTimestamp(sorted[0]),
+		});
+	}
+	return states;
+}
+
+function readSharedBackboardThreadEntries(logService: ILogService): BackboardPanelHistoryEntry[] {
+	const threadsDir = sharedBackboardThreadsDir();
+	let fileNames: string[];
+	try {
+		fileNames = fs.readdirSync(threadsDir);
+	} catch (error) {
+		if (!isFileNotFoundError(error)) {
+			logService.warn(`[Backboard] Failed to list shared threads: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		return [];
+	}
+	const entries: BackboardPanelHistoryEntry[] = [];
+	for (const fileName of fileNames) {
+		if (!fileName.endsWith('.json')) {
+			continue;
+		}
+		try {
+			const parsed: unknown = JSON.parse(fs.readFileSync(path.join(threadsDir, fileName), 'utf8'));
+			if (!isObjectRecord(parsed)) {
+				continue;
+			}
+			const thread = parsed as BackboardPanelThreadFile;
+			const entry = normalizePanelHistoryEntry(thread.entry, thread.workspace);
+			if (entry) {
+				entries.push(entry);
+			}
+		} catch (error) {
+			if (!(error instanceof SyntaxError)) {
+				logService.warn(`[Backboard] Failed to read shared thread ${fileName}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+	}
+	return entries;
+}
+
+function isPanelPersistedState(value: unknown): value is BackboardPanelPersistedState {
+	return isObjectRecord(value)
+		&& (value.activeView === undefined || typeof value.activeView === 'string')
+		&& (value.activeHistoryId === undefined || typeof value.activeHistoryId === 'string')
+		&& (value.currentWorkspace === undefined || typeof value.currentWorkspace === 'string')
+		&& (value.promptQueue === undefined || Array.isArray(value.promptQueue))
+		&& (value.historyEntries === undefined || Array.isArray(value.historyEntries))
+		&& (value.savedAt === undefined || typeof value.savedAt === 'number');
+}
+
+function hasPanelStateContent(state: BackboardPanelPersistedState): boolean {
+	return !!state.activeHistoryId || !!state.promptQueue?.length || !!state.historyEntries?.length;
+}
+
+function panelStateTimestamp(state: BackboardPanelPersistedState): number {
+	if (typeof state.savedAt === 'number') {
+		return state.savedAt;
+	}
+	return (state.historyEntries ?? []).reduce<number>((max, entry) => {
+		if (!isObjectRecord(entry)) {
+			return max;
+		}
+		return Math.max(max, typeof entry.updatedAt === 'number' ? entry.updatedAt : 0, typeof entry.startedAt === 'number' ? entry.startedAt : 0);
+	}, 0);
+}
+
+function panelStateSignature(state: BackboardPanelPersistedState): string {
+	return `${state.currentWorkspace ?? ''}:${state.activeHistoryId ?? ''}:${panelStateTimestamp(state)}:${state.historyEntries?.length ?? 0}`;
+}
+
+function normalizePanelHistoryEntry(value: unknown, currentWorkspace: string | undefined): BackboardPanelHistoryEntry | undefined {
+	if (!isObjectRecord(value) || typeof value.id !== 'string' || !value.id) {
+		return undefined;
+	}
+	const workspace = typeof value.currentWorkspace === 'string' ? value.currentWorkspace : currentWorkspace;
+	return {
+		id: value.id,
+		title: typeof value.title === 'string' ? value.title : undefined,
+		prompt: typeof value.prompt === 'string' ? value.prompt : undefined,
+		startedAt: typeof value.startedAt === 'number' ? value.startedAt : undefined,
+		updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : undefined,
+		status: typeof value.status === 'string' ? value.status : undefined,
+		html: typeof value.html === 'string' ? value.html : undefined,
+		outputText: typeof value.outputText === 'string' ? value.outputText : undefined,
+		toolOutputs: Array.isArray(value.toolOutputs) ? value.toolOutputs : undefined,
+		messages: Array.isArray(value.messages) ? value.messages : undefined,
+		currentWorkspace: workspace,
+	};
+}
+
+function panelHistoryEntryTimestamp(entry: BackboardPanelHistoryEntry | undefined): number {
+	if (!entry) {
+		return 0;
+	}
+	return Math.max(entry.updatedAt ?? 0, entry.startedAt ?? 0);
+}
+
+function panelEntryWorkspace(entry: BackboardPanelHistoryEntry): URI | undefined {
+	return entry.currentWorkspace ? URI.file(entry.currentWorkspace) : undefined;
+}
+
+function panelHistoryEntryToTurn(entry: BackboardPanelHistoryEntry): Turn {
+	const responseText = entry.outputText || assistantTextFromPanelHtml(entry.html) || stripHtml(entry.html ?? '');
+	return {
+		id: entry.id,
+		message: {
+			text: entry.prompt || entry.title || 'Backboard chat',
+			origin: { kind: MessageKind.User },
+		},
+		responseParts: responseText ? [{
+			kind: ResponsePartKind.Markdown,
+			id: `${entry.id}-response`,
+			content: responseText,
+		}] : [],
+		usage: undefined,
+		state: /fail/i.test(entry.status ?? '') ? TurnState.Error : TurnState.Complete,
+	};
+}
+
+function panelEntryStatus(entry: BackboardPanelHistoryEntry): SessionStatus {
+	const status = (entry.status ?? '').toLowerCase();
+	if (status.includes('running') || status.includes('progress')) {
+		return SessionStatus.InProgress;
+	}
+	if (status.includes('error') || status.includes('fail')) {
+		return SessionStatus.Error;
+	}
+	return SessionStatus.Idle;
+}
+
+function assistantTextFromPanelHtml(html: string | undefined): string {
+	if (!html) {
+		return '';
+	}
+	const parts: string[] = [];
+	const pattern = /<div class="messageCard assistant"[\s\S]*?<div class="messageText">([\s\S]*?)<\/div>/g;
+	let match: RegExpExecArray | null;
+	while ((match = pattern.exec(html))) {
+		const text = stripHtml(match[1]);
+		if (text) {
+			parts.push(text);
+		}
+	}
+	return parts.join('\n\n');
+}
+
+function stripHtml(html: string): string {
+	return decodeHtmlEntities(html)
+		.replace(/<script[\s\S]*?<\/script>/gi, '')
+		.replace(/<style[\s\S]*?<\/style>/gi, '')
+		.replace(/<br\s*\/?>/gi, '\n')
+		.replace(/<\/(?:div|p|li|h[1-6])>/gi, '\n')
+		.replace(/<[^>]+>/g, '')
+		.replace(/[ \t]+\n/g, '\n')
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+}
+
+function decodeHtmlEntities(text: string): string {
+	return text
+		.replace(/&nbsp;/g, ' ')
+		.replace(/&amp;/g, '&')
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'");
+}
+
+async function writeSharedBackboardThread(session: BackboardSession, prompt: string, assistantText: string, errorMessage: string | undefined, responseState: BackboardResponseState, logService: ILogService, status: 'running' | 'complete' | 'error'): Promise<void> {
+	try {
+		const now = Date.now();
+		const workspace = session.workingDirectory?.fsPath;
+		const title = session.title || panelHistoryTitle(prompt);
+		const response = errorMessage ? `${assistantText}\n\n${errorMessage}`.trim() : assistantText.trim();
+		const entry = {
+			id: session.sessionId,
+			title,
+			prompt,
+			startedAt: session.createdAt,
+			updatedAt: now,
+			status,
+			currentWorkspace: workspace,
+			outputText: response,
+			messages: [
+				{ role: 'user', content: prompt },
+				...(response ? [{ role: errorMessage ? 'error' : 'assistant', content: response }] : []),
+			],
+			toolOutputs: responseState.toolOutputs,
+			html: panelThreadHtml(prompt, response, errorMessage),
+			promptQueue: [],
+			fileChanges: [],
+		};
+		await fs.promises.mkdir(sharedBackboardThreadsDir(), { recursive: true });
+		const threadPath = path.join(sharedBackboardThreadsDir(), `${safePanelThreadFileName(session.sessionId)}.json`);
+		await writeJsonFileAtomic(threadPath, {
+			version: 1,
+			source: 'sandbox',
+			workspace,
+			savedAt: now,
+			entry,
+		});
+		if (process.platform !== 'win32') {
+			await fs.promises.chmod(threadPath, 0o600);
+		}
+		await updateSharedBackboardPanelState(entry, workspace, now);
+	} catch (error) {
+		logService.warn(`[Backboard] Failed to write shared sandbox thread: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
+async function updateSharedBackboardPanelState(entry: Record<string, unknown>, workspace: string | undefined, savedAt: number): Promise<void> {
+	const store = readSharedBackboardPanelStateStore();
+	const key = sharedPanelStateStorageKey(workspace);
+	const previous = workspace ? store.byWorkspace?.[key] : store.latest;
+	const previousEntries = Array.isArray(previous?.historyEntries) ? previous.historyEntries : [];
+	const historyEntries = [entry, ...previousEntries.filter(item => !(isObjectRecord(item) && item.id === entry.id))].slice(0, 40);
+	const state: BackboardPanelPersistedState = {
+		activeView: 'chat',
+		activeHistoryId: typeof entry.id === 'string' ? entry.id : undefined,
+		currentWorkspace: workspace,
+		promptQueue: [],
+		historyEntries,
+		savedAt,
+	};
+	const next: BackboardPanelStateStore = {
+		byWorkspace: { ...(store.byWorkspace ?? {}), [key]: state },
+		latest: state,
+	};
+	const statePath = sharedBackboardPanelStatePath();
+	await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
+	await writeJsonFileAtomic(statePath, next);
+	if (process.platform !== 'win32') {
+		await fs.promises.chmod(statePath, 0o600);
+	}
+}
+
+function readSharedBackboardPanelStateStore(): BackboardPanelStateStore {
+	try {
+		const parsed: unknown = JSON.parse(fs.readFileSync(sharedBackboardPanelStatePath(), 'utf8'));
+		if (!isObjectRecord(parsed)) {
+			return {};
+		}
+		const byWorkspace: Record<string, BackboardPanelPersistedState> = {};
+		if (isObjectRecord(parsed.byWorkspace)) {
+			for (const [key, value] of Object.entries(parsed.byWorkspace)) {
+				if (isPanelPersistedState(value)) {
+					byWorkspace[key] = value;
+				}
+			}
+		}
+		return {
+			latest: isPanelPersistedState(parsed.latest) ? parsed.latest : undefined,
+			byWorkspace: Object.keys(byWorkspace).length ? byWorkspace : undefined,
+		};
+	} catch {
+		return {};
+	}
+}
+
+function panelThreadHtml(prompt: string, assistantText: string, errorMessage: string | undefined): string {
+	const user = `<div class="messageCard user"><div class="messageText">${escapePanelHtml(prompt)}</div></div>`;
+	const assistantClass = errorMessage ? 'messageCard error' : 'messageCard assistant';
+	const assistant = assistantText ? `<div class="${assistantClass}"><div class="messageText">${escapePanelHtml(assistantText).replace(/\n/g, '<br>')}</div></div>` : '';
+	return `${user}${assistant}`;
+}
+
+function panelHistoryTitle(prompt: string): string {
+	const words = prompt.trim().split(/\s+/).filter(Boolean);
+	return words.slice(0, 8).join(' ') || 'Untitled chat';
+}
+
+function escapePanelHtml(text: string): string {
+	return text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
+function sharedBackboardPanelStatePath(): string {
+	return path.join(os.homedir(), '.backboard_ide', 'panel-state.json');
+}
+
+function sharedBackboardThreadsDir(): string {
+	return path.join(os.homedir(), '.backboard_ide', 'threads');
+}
+
+function sharedPanelStateStorageKey(workspace = 'default'): string {
+	const normalizedWorkspace = workspace || 'default';
+	const digest = createHash('sha256').update(normalizedWorkspace).digest('hex').slice(0, 24);
+	return `backboard.panel.state.${digest}`;
+}
+
+function safePanelThreadFileName(id: string): string {
+	return id.replace(/[^a-zA-Z0-9_.-]/g, '-');
+}
+
+async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<void> {
+	const tempPath = `${filePath}.${process.pid}.${Date.now()}.${generateUuid()}.tmp`;
+	await fs.promises.writeFile(tempPath, `${JSON.stringify(value, undefined, '\t')}\n`, 'utf8');
+	await fs.promises.rename(tempPath, filePath);
 }
 
 class BackboardBridgeProcess extends Disposable {
@@ -592,6 +1131,11 @@ class BackboardBridgeProcess extends Disposable {
 		const events = await this.send('runTool', undefined, { name, args }, undefined).promise;
 		const result = [...events].reverse().find(event => event.type === 'toolFinished' && event.status === 'finished');
 		return result?.output ?? { success: false, error: `Rust tool ${name} did not return output.` };
+	}
+
+	async listTools(mode: string): Promise<unknown[] | undefined> {
+		const events = await this.send('listTools', undefined, { mode }, undefined).promise;
+		return events.find(event => event.type === 'tools')?.tools;
 	}
 
 	private _ensureProcess(sessionId: string | undefined): ChildProcessWithoutNullStreams {
@@ -759,6 +1303,15 @@ function mergeBridgeModels(...modelSets: readonly (readonly BridgeModel[])[]): B
 		}
 	}
 	return [...byId.values()];
+}
+
+function backboardModelInfos(...modelSets: readonly (readonly BridgeModel[])[]): IAgentModelInfo[] {
+	const mergedModels = mergeBridgeModels(...modelSets);
+	return mergedModels
+		.filter(isVisibleBridgeModel)
+		.concat(supplementalBridgeModels(mergedModels))
+		.sort(compareBridgeModels)
+		.map(toAgentModelInfo);
 }
 
 function compareBridgeModels(a: BridgeModel, b: BridgeModel): number {
@@ -1062,7 +1615,36 @@ function bridgeConfig(): Record<string, unknown> {
 	};
 }
 
-async function executeBackboardTool(bridge: BackboardBridgeProcess, rootPath: string | undefined, call: ParsedToolCall): Promise<string> {
+function createToolContentReporter(emit: (content: string) => void): { report: (content: string) => void; flush: () => void } {
+	let latestContent = '';
+	let flushHandle: ReturnType<typeof setTimeout> | undefined;
+	const flush = (): void => {
+		if (flushHandle) {
+			clearTimeout(flushHandle);
+			flushHandle = undefined;
+		}
+		if (latestContent) {
+			emit(latestContent);
+		}
+	};
+	return {
+		report: (content: string) => {
+			latestContent = toolContentPreview(content);
+			flushHandle ??= setTimeout(flush, 50);
+		},
+		flush,
+	};
+}
+
+function toolContentPreview(content: string): string {
+	const maxLength = 128 * 1024;
+	if (content.length <= maxLength) {
+		return content;
+	}
+	return `${content.slice(0, maxLength)}\n[Output truncated]\n`;
+}
+
+async function executeBackboardTool(bridge: BackboardBridgeProcess, rootPath: string | undefined, call: ParsedToolCall, reportContent?: (content: string) => void): Promise<string> {
 	switch (call.name) {
 		case 'read_file':
 			return readFileTool(rootPath, call.args);
@@ -1093,10 +1675,10 @@ async function executeBackboardTool(bridge: BackboardBridgeProcess, rootPath: st
 			return createDirectoryTool(rootPath, call.args);
 		case 'bash':
 		case 'run_terminal_cmd':
-			return runShellTool(rootPath, call.args);
+			return runShellTool(rootPath, call.args, reportContent);
 		case 'run_code':
 		case 'repl':
-			return runCodeTool(rootPath, call.args);
+			return runCodeTool(rootPath, call.args, reportContent);
 		case 'todo_write':
 			return `Todo list updated: ${compactJson(call.args.todos ?? [])}`;
 		case 'sleep':
@@ -1141,6 +1723,16 @@ async function globTool(rootPath: string | undefined, args: Record<string, unkno
 	const root = workspaceRoot(rootPath);
 	const base = stringArg(args, 'target_directory');
 	const pattern = path.posix.join(base?.replace(/\\/g, '/') || '', stringArg(args, 'pattern') || '**/*');
+	const rg = await runRipgrep(root, [
+		'--files',
+		'--hidden',
+		...ripgrepIgnoredDirectoryGlobs(),
+		'--glob',
+		pattern,
+	], { timeout: 10_000, maxBuffer: 256 * 1024 });
+	if (rg.ok || rg.code === 1) {
+		return limitLines(rg.stdout, 300);
+	}
 	const regex = globToRegExp(pattern);
 	const files = await walkFiles(root, 800);
 	return files
@@ -1159,10 +1751,35 @@ async function grepTool(rootPath: string | undefined, args: Record<string, unkno
 	const include = stringArg(args, 'glob', 'include') || '**/*';
 	const subPath = stringArg(args, 'path');
 	const fullPattern = path.posix.join(subPath?.replace(/\\/g, '/') || '', include);
+	const outputMode = stringArg(args, 'output_mode') || 'content';
+	const rgArgs = [
+		'--hidden',
+		'--line-number',
+		'--no-heading',
+		'--color',
+		'never',
+		...ripgrepIgnoredDirectoryGlobs(),
+		'--glob',
+		fullPattern,
+		...(boolArg(args, 'case_insensitive') ? ['--ignore-case'] : []),
+		...(outputMode === 'files_with_matches' ? ['--files-with-matches'] : []),
+		...(outputMode === 'count' ? ['--count-matches'] : []),
+		'--',
+		pattern,
+	];
+	const rg = await runRipgrep(root, rgArgs, { timeout: 10_000, maxBuffer: 512 * 1024 });
+	if (rg.ok || rg.code === 1) {
+		if (outputMode === 'content') {
+			return limitLines(rg.stdout, 100);
+		}
+		if (outputMode === 'count') {
+			return String(sumRipgrepCounts(rg.stdout));
+		}
+		return limitLines(rg.stdout, 100);
+	}
 	const includeRegex = globToRegExp(fullPattern);
 	const flags = boolArg(args, 'case_insensitive') ? 'i' : '';
 	const regex = new RegExp(pattern, flags);
-	const outputMode = stringArg(args, 'output_mode') || 'content';
 	const files = await walkFiles(root, 800);
 	const matches: string[] = [];
 	let count = 0;
@@ -1201,7 +1818,26 @@ async function codebaseSearchTool(rootPath: string | undefined, args: Record<str
 	}
 	const root = workspaceRoot(rootPath);
 	const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+	if (!terms.length) {
+		throw new Error('codebase_search requires query');
+	}
 	const limit = numberArg(args, 'num_results') ?? 15;
+	const rg = await runRipgrep(root, [
+		'--hidden',
+		'--line-number',
+		'--no-heading',
+		'--color',
+		'never',
+		'--ignore-case',
+		...ripgrepIgnoredDirectoryGlobs(),
+		'--glob',
+		'**/*',
+		'--',
+		terms.map(escapeRegExp).join('|'),
+	], { timeout: 10_000, maxBuffer: 768 * 1024 });
+	if (rg.ok || rg.code === 1) {
+		return scoreRipgrepSearchOutput(rg.stdout, terms, limit);
+	}
 	const files = await walkFiles(root, 800);
 	const scored: { path: string; score: number; preview: string }[] = [];
 	for (const file of files) {
@@ -1258,7 +1894,7 @@ async function createDirectoryTool(rootPath: string | undefined, args: Record<st
 	return `Created ${relativePath(workspaceRoot(rootPath), dir)}`;
 }
 
-async function runShellTool(rootPath: string | undefined, args: Record<string, unknown>): Promise<string> {
+async function runShellTool(rootPath: string | undefined, args: Record<string, unknown>, reportContent?: (content: string) => void): Promise<string> {
 	const command = stringArg(args, 'command', 'cmd');
 	if (!command) {
 		throw new Error('shell tool requires command');
@@ -1278,6 +1914,7 @@ async function runShellTool(rootPath: string | undefined, args: Record<string, u
 		const append = (chunk: Buffer | string) => {
 			if (output.length < 1024 * 1024) {
 				output += chunk.toString();
+				reportContent?.(output);
 			}
 		};
 		const finish = (suffix = '') => {
@@ -1286,7 +1923,9 @@ async function runShellTool(rootPath: string | undefined, args: Record<string, u
 			}
 			settled = true;
 			clearTimeout(timer);
-			resolve(`${output}${suffix}`);
+			const result = `${output}${suffix}`;
+			reportContent?.(result);
+			resolve(result);
 		};
 		const timer = setTimeout(() => {
 			child.kill();
@@ -1305,25 +1944,126 @@ async function runShellTool(rootPath: string | undefined, args: Record<string, u
 	});
 }
 
-async function runCodeTool(rootPath: string | undefined, args: Record<string, unknown>): Promise<string> {
+async function runCodeTool(rootPath: string | undefined, args: Record<string, unknown>, reportContent?: (content: string) => void): Promise<string> {
 	const code = stringArg(args, 'code');
 	if (!code) {
 		throw new Error('run_code/repl requires code');
 	}
 	const language = (stringArg(args, 'language') || 'python').toLowerCase();
 	if (language === 'shell') {
-		return runShellTool(rootPath, { ...args, command: code });
+		return runShellTool(rootPath, { ...args, command: code }, reportContent);
 	}
 	const command = language === 'node' || language === 'typescript'
 		? `node -e ${shellQuote(code)}`
 		: `python3 -c ${shellQuote(code)}`;
-	return runShellTool(rootPath, { ...args, command });
+	return runShellTool(rootPath, { ...args, command }, reportContent);
 }
 
 async function sleepTool(args: Record<string, unknown>): Promise<string> {
 	const seconds = Math.max(0, numberArg(args, 'seconds') ?? 1);
 	await new Promise(resolve => setTimeout(resolve, seconds * 1000));
 	return `Waited ${seconds} second(s).`;
+}
+
+interface ProcessOutput {
+	readonly ok: boolean;
+	readonly code: number | undefined;
+	readonly stdout: string;
+	readonly stderr: string;
+}
+
+async function runRipgrep(cwd: string, args: readonly string[], options: { timeout: number; maxBuffer: number }): Promise<ProcessOutput> {
+	return runProcess('rg', args, cwd, options);
+}
+
+function runProcess(command: string, args: readonly string[], cwd: string, options: { timeout: number; maxBuffer: number }): Promise<ProcessOutput> {
+	return new Promise<ProcessOutput>(resolve => {
+		let stdout = '';
+		let stderr = '';
+		let settled = false;
+		const child = spawn(command, args, { cwd, env: process.env });
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const append = (target: 'stdout' | 'stderr', chunk: Buffer | string): void => {
+			const text = chunk.toString();
+			if (target === 'stdout') {
+				stdout = appendLimited(stdout, text, options.maxBuffer);
+			} else {
+				stderr = appendLimited(stderr, text, options.maxBuffer);
+			}
+		};
+		const finish = (code: number | undefined): void => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			if (timer) {
+				clearTimeout(timer);
+				timer = undefined;
+			}
+			resolve({ ok: code === 0, code, stdout, stderr });
+		};
+		timer = setTimeout(() => {
+			child.kill();
+			finish(undefined);
+		}, options.timeout);
+		child.stdout.on('data', chunk => append('stdout', chunk));
+		child.stderr.on('data', chunk => append('stderr', chunk));
+		child.on('error', () => finish(undefined));
+		child.on('close', code => finish(code ?? undefined));
+	});
+}
+
+function appendLimited(current: string, next: string, maxLength: number): string {
+	if (current.length >= maxLength) {
+		return current;
+	}
+	if (current.length + next.length <= maxLength) {
+		return current + next;
+	}
+	return current + next.slice(0, maxLength - current.length);
+}
+
+function ripgrepIgnoredDirectoryGlobs(): string[] {
+	return [...IGNORED_DIRECTORIES].flatMap(directory => ['--glob', `!${directory}/**`, '--glob', `!**/${directory}/**`]);
+}
+
+function limitLines(text: string, limit: number): string {
+	return text.trimEnd().split(/\r?\n/).slice(0, limit).join('\n');
+}
+
+function sumRipgrepCounts(text: string): number {
+	return text.trim().split(/\r?\n/).reduce((sum, line) => {
+		const separator = line.lastIndexOf(':');
+		const value = Number(separator >= 0 ? line.slice(separator + 1) : line);
+		return Number.isFinite(value) ? sum + value : sum;
+	}, 0);
+}
+
+function scoreRipgrepSearchOutput(text: string, terms: readonly string[], limit: number): string {
+	const scored = new Map<string, { score: number; preview: string }>();
+	for (const line of text.split(/\r?\n/)) {
+		const match = /^(.*?):\d+:(.*)$/.exec(line);
+		if (!match) {
+			continue;
+		}
+		const [, file, preview] = match;
+		const lower = preview.toLowerCase();
+		const score = terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0);
+		if (score <= 0) {
+			continue;
+		}
+		const existing = scored.get(file);
+		if (!existing) {
+			scored.set(file, { score, preview: preview.trim().slice(0, 240) });
+		} else {
+			existing.score += score;
+		}
+	}
+	return [...scored.entries()]
+		.sort(([, left], [, right]) => right.score - left.score)
+		.slice(0, limit)
+		.map(([file, item]) => `${file}: ${item.preview}`)
+		.join('\n');
 }
 
 async function walkFiles(root: string, limit: number): Promise<string[]> {

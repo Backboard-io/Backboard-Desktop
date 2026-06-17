@@ -2867,14 +2867,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		// Secondary toolbar (permissions) — below the input box.
 		// Per-action minimum widths (in pixels) for pickers that collapse to an
 		// icon-only label via a CSS container query in `AgentHostChatInputPicker`.
-		// Most pickers reserve ~22px for the icon; the tunnel-sharing toggle has
-		// no chevron, so it can collapse further to 16px.
+		// Most pickers reserve ~22px for the icon.
 		const agentHostShortPickerMinWidths = new Map<string, number>([
 			[OpenAgentHostModePickerAction.ID, 22],
 			[OpenAgentHostAutoApprovePickerAction.ID, 22],
 			[OpenAgentHostPermissionModePickerAction.ID, 22],
 			[OpenAgentHostFolderPickerAction.ID, 22],
-			['sessions.tunnelHost.toggleSharing', 16],
 		]);
 		// Direct-rendered chip lane for agent-host config properties that
 		// are advertised by the agent's schema but not handled by a

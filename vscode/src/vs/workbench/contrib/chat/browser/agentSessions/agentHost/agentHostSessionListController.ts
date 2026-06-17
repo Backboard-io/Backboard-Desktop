@@ -89,7 +89,7 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 				const rawId = AgentSession.id(n.summary.resource);
 				this._pendingNewSessions.delete(rawId);
 				const workingDir = typeof n.summary.workingDirectory === 'string' ? URI.parse(n.summary.workingDirectory) : n.summary.workingDirectory;
-				if (!this._isWorkingDirectoryInWorkspace(workingDir)) {
+				if (!this._shouldShowWorkingDirectory(workingDir)) {
 					return;
 				}
 				this._mutationGeneration++;
@@ -141,6 +141,20 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 			this._cacheValid = false;
 			void this.refresh(CancellationToken.None);
 		}));
+
+		if (this._provider === 'backboard') {
+			let refreshInFlight = false;
+			const handle = setInterval(() => {
+				if (refreshInFlight) {
+					return;
+				}
+				refreshInFlight = true;
+				void this.refresh(CancellationToken.None).finally(() => {
+					refreshInFlight = false;
+				});
+			}, 2000);
+			this._register({ dispose: () => clearInterval(handle) });
+		}
 	}
 
 	/** Reset the list-sessions cache so the next {@link refresh} re-fetches from the agent host. */
@@ -197,7 +211,7 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 	}
 
 	async refresh(token: CancellationToken): Promise<void> {
-		if (this._cacheValid) {
+		if (this._provider !== 'backboard' && this._cacheValid) {
 			// Cache is kept in sync by notify/sessionAdded,
 			// notify/sessionRemoved, and notify/sessionSummaryChanged. No
 			// need to round-trip through the agent host on every refresh.
@@ -236,7 +250,7 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 		}
 		const filtered = sessions.filter(s =>
 			AgentSession.provider(s.session) === this._provider
-			&& this._isWorkingDirectoryInWorkspace(s.workingDirectory)
+			&& this._shouldShowWorkingDirectory(s.workingDirectory)
 		);
 		this._cachedSummaries.clear();
 		this._items = filtered.map(s => {
@@ -300,6 +314,13 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 			return false;
 		}
 		return folders.some(folder => extUriBiasedIgnorePathCase.isEqualOrParent(workingDirectory, folder.uri));
+	}
+
+	private _shouldShowWorkingDirectory(workingDirectory: URI | undefined): boolean {
+		if (this._provider === 'backboard') {
+			return true;
+		}
+		return this._isWorkingDirectoryInWorkspace(workingDirectory);
 	}
 
 	private _makeItemFromSummary(rawId: string, summary: SessionSummary): IChatSessionItem {

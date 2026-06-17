@@ -25,6 +25,10 @@
 	display: none;
 }
 
+.agent-host-chat-input-picker-host-hidden {
+	display: none !important;
+}
+
 .agent-host-chat-input-picker-slot {
 	display: inline-flex;
 	align-items: center;
