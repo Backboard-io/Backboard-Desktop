@@ -245,7 +245,7 @@ export namespace SessionType {
 	export const ClaudeCode = 'claude-code';
 	export const Codex = 'openai-codex';
 	export const Growth = 'copilot-growth';
-	export const AgentHostCopilot = 'agent-host-copilotcli';
+	export const AgentHostCopilot = 'agent-host-backboard';
 }
 
 /**
