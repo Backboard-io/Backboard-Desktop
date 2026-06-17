@@ -1,4 +1,0 @@
-* text=auto eol=lf
-
-# Keep SQLite fixtures as regular Git blobs in this vendored source tree.
-*.sqlite -filter -diff -merge -text
