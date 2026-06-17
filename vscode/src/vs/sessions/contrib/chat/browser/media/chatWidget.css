@@ -508,15 +508,17 @@
 
 /* Simple-mode landing surface. */
 .agent-sessions-workbench .sessions-chat-widget {
-	background: var(--vscode-agentsPanel-background);
+	background: var(--vscode-editor-background);
 	color: var(--vscode-editor-foreground);
 }
 
 .agent-sessions-workbench .new-chat-widget-container {
 	align-items: stretch;
-	justify-content: stretch;
+	justify-content: center;
 	padding: 0;
-	background: var(--vscode-agentsPanel-background);
+	background: var(--vscode-editor-background);
+	container-type: normal;
+	contain: none;
 }
 
 .agent-sessions-workbench .simple-mode-chat-header {
@@ -528,7 +530,7 @@
 	padding: 0 10px 0 12px;
 	box-sizing: border-box;
 	border-bottom: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border));
-	background: var(--vscode-agentsPanel-background);
+	background: var(--vscode-editor-background);
 }
 
 .agent-sessions-workbench .simple-mode-chat-project-icon {
@@ -568,19 +570,25 @@
 }
 
 .agent-sessions-workbench .new-chat-widget-content {
-	flex: 1;
+	flex: 0 1 auto;
+	width: 100%;
 	max-width: none;
 	align-self: stretch;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding: 16px 16px 18px 16px;
+	padding: 0 clamp(32px, 7vw, 112px);
 	box-sizing: border-box;
 	min-height: 0;
-	background: var(--vscode-agentsPanel-background);
+	background: var(--vscode-editor-background);
+	font-family: var(--vscode-font-family);
 }
 
 .agent-sessions-workbench .new-session-workspace-picker-container {
+	display: none !important;
+}
+
+.agent-sessions-workbench .new-chat-widget-container .new-chat-bottom-container {
 	display: none !important;
 }
 
@@ -590,16 +598,16 @@
 	align-items: center;
 	justify-content: center;
 	gap: 12px;
-	width: 100%;
-	max-width: 360px;
-	margin: auto 0 18px 0;
+	width: min(100%, 1216px);
+	max-width: none;
+	margin: 0 0 32px 0;
 	text-align: center;
 }
 
 .agent-sessions-workbench .simple-mode-chat-heading {
 	margin: 0;
-	font-size: 18px;
-	line-height: 24px;
+	font-size: 28px;
+	line-height: 34px;
 	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
 	color: var(--vscode-editor-foreground);
 	letter-spacing: 0;
@@ -608,10 +616,11 @@
 .agent-sessions-workbench .simple-mode-chat-copy {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
-	margin: 0 0 6px 0;
-	font-size: 13px;
-	line-height: 18px;
+	gap: 4px;
+	margin: 0 0 22px 0;
+	font-size: 15px;
+	line-height: 22px;
+	font-weight: 500;
 	color: var(--vscode-descriptionForeground);
 }
 
@@ -648,38 +657,9 @@
 	outline-offset: 2px;
 }
 
-/* Chat-first Simple Mode landing surface. */
 .agent-sessions-workbench .simple-mode-chat-header,
 .agent-sessions-workbench .simple-mode-chat-suggestions {
 	display: none;
-}
-
-.agent-sessions-workbench .new-chat-widget-container {
-	align-items: stretch;
-	justify-content: center;
-	background: var(--vscode-agentsPanel-background);
-	container-type: normal;
-	contain: none;
-}
-
-.agent-sessions-workbench .new-chat-widget-content {
-	flex: 0 1 auto;
-	width: 100%;
-	max-width: none;
-	align-self: stretch;
-	align-items: center;
-	justify-content: center;
-	padding: 0 clamp(32px, 7vw, 112px);
-	box-sizing: border-box;
-	font-family: var(--vscode-font-family);
-}
-
-.agent-sessions-workbench .simple-mode-chat-welcome {
-	width: min(100%, 1216px);
-	max-width: none;
-	margin: 0 0 32px 0;
-	gap: 12px;
-	text-align: center;
 }
 
 .agent-sessions-workbench .simple-mode-chat-logo {
@@ -689,24 +669,4 @@
 	background-color: var(--vscode-foreground);
 	mask: url('../../../../../workbench/contrib/welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
 	-webkit-mask: url('../../../../../workbench/contrib/welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
-}
-
-.agent-sessions-workbench .simple-mode-chat-heading {
-	font-size: 28px;
-	line-height: 34px;
-	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
-	color: var(--vscode-editor-foreground);
-}
-
-.agent-sessions-workbench .simple-mode-chat-copy {
-	gap: 4px;
-	margin: 0 0 22px 0;
-	font-size: 15px;
-	line-height: 22px;
-	font-weight: 500;
-	color: var(--vscode-descriptionForeground);
-}
-
-.agent-sessions-workbench .new-chat-widget-container .new-chat-bottom-container {
-	display: none !important;
 }

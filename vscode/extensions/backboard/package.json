@@ -16,7 +16,6 @@
     "onView:backboard.panel",
     "onCommand:backboard.newChat",
     "onCommand:backboard.showHistory",
-    "onCommand:backboard.setApiKey",
     "onCommand:backboard.signIn",
     "onCommand:backboard.copyOAuthRedirectUri",
     "onCommand:backboard.completeOAuthCallback",
@@ -61,14 +60,8 @@
         "icon": "$(history)"
       },
       {
-        "command": "backboard.setApiKey",
-        "title": "Set API Key",
-        "category": "Backboard",
-        "icon": "$(key)"
-      },
-      {
         "command": "backboard.signIn",
-        "title": "Sign In",
+        "title": "Sign in with SSO",
         "category": "Backboard",
         "icon": "$(account)"
       },
@@ -115,9 +108,16 @@
           "group": "navigation@3"
         },
         {
-          "command": "backboard.setApiKey",
-          "when": "viewContainer == backboard",
+          "command": "backboard.signIn",
+          "when": "viewContainer == backboard && !backboard.authenticated",
           "group": "navigation@4"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "backboard.signIn",
+          "when": "view == backboard.panel && !backboard.authenticated",
+          "group": "navigation@1"
         }
       ]
     },
@@ -147,7 +147,7 @@
             "type": "string",
             "default": "",
             "editPresentation": "secretText",
-            "markdownDescription": "Legacy Backboard API key fallback. Prefer the **Set API Key** command, which stores the key in `~/.backboard_ide/config.json`.",
+            "markdownDescription": "Legacy Backboard API key fallback. Prefer **Backboard: Sign in with SSO**.",
             "scope": "machine-overridable"
           },
           "backboard.env": {

@@ -1617,6 +1617,7 @@ configurationRegistry.registerConfiguration({
 		'chat.agent.thinking.collapsedTools': {
 			type: 'string',
 			default: 'always',
+			agentsWindow: { default: 'off' },
 			enum: ['off', 'withThinking', 'always'],
 			enumDescriptions: [
 				nls.localize('chat.agent.thinking.collapsedTools.off', "Tool calls are shown separately, not collapsed into thinking."),
@@ -1629,6 +1630,7 @@ configurationRegistry.registerConfiguration({
 		[ChatConfiguration.TerminalToolsInThinking]: {
 			type: 'boolean',
 			default: true,
+			agentsWindow: { default: false },
 			markdownDescription: nls.localize('chat.agent.thinking.terminalTools', "When enabled, terminal tool calls are displayed inside the thinking dropdown with a simplified view."),
 			tags: ['experimental'],
 		},

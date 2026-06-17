@@ -1211,27 +1211,12 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			}
 		}
 
-		// Dispatch session/turnStarted — the server will call sendMessage on
-		// the provider as a side effect.
-		const turnAction: SessionTurnStartedAction = {
-			type: ActionType.SessionTurnStarted,
-			turnId,
-			message: userOriginMessage(request.message, messageAttachments),
-		};
-		this._config.connection.dispatch(session.toString(), turnAction);
-
-		// Ensure the snapshot controller records a sentinel checkpoint for this
-		// request so it appears in requestDisablement even if the turn
-		// produces no file edits.
-		this._ensureSnapshotController(request.sessionResource)
-			?.ensureRequestCheckpoint(request.requestId);
-
 		// Wait for the turn to reach a terminal state. The observable graph
 		// installed below drives all progress emission via the `progress`
 		// sink and resolves the promise from `onTurnEnded`. Cancellation is
 		// surfaced through the same path: the observer disposes itself when
 		// `cancellationToken` fires, then calls `onTurnEnded(undefined)`.
-		return new Promise<Turn | undefined>(resolve => {
+		const turnCompletion = new Promise<Turn | undefined>(resolve => {
 			const store = new DisposableStore();
 			const cancelSub = store.add(cancellationToken.onCancellationRequested(() => {
 				cancelSub.dispose();
@@ -1262,6 +1247,25 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				},
 			}));
 		});
+
+		// Dispatch session/turnStarted only after the observer is installed.
+		// Fast agent hosts can emit the first reasoning/tool state immediately
+		// as a side effect of this action; listening first keeps that progress
+		// visible in the chat instead of relying on a later hydration pass.
+		const turnAction: SessionTurnStartedAction = {
+			type: ActionType.SessionTurnStarted,
+			turnId,
+			message: userOriginMessage(request.message, messageAttachments),
+		};
+		this._config.connection.dispatch(session.toString(), turnAction);
+
+		// Ensure the snapshot controller records a sentinel checkpoint for this
+		// request so it appears in requestDisablement even if the turn
+		// produces no file edits.
+		this._ensureSnapshotController(request.sessionResource)
+			?.ensureRequestCheckpoint(request.requestId);
+
+		return turnCompletion;
 	}
 
 	// ---- Tool confirmation --------------------------------------------------

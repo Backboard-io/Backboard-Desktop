@@ -117,10 +117,26 @@ interface PanelOptions {
 	readonly authenticated?: boolean;
 }
 
+interface PanelPersistedState {
+	readonly activeView?: string;
+	readonly activeHistoryId?: string;
+	readonly promptQueue?: unknown[];
+	readonly currentWorkspace?: string;
+	readonly historyEntries?: unknown[];
+	readonly savedAt?: number;
+}
+
+interface PanelStateStore {
+	readonly latest?: PanelPersistedState;
+	readonly byWorkspace?: Record<string, PanelPersistedState>;
+}
+
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
 const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases';
 const dismissedUpdateVersionKey = 'backboard.update.dismissedVersion';
+const panelStateStorageKeyPrefix = 'backboard.panel.state.';
+const latestPanelStateStorageKey = 'backboard.panel.state.latest';
 const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
 const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
 const backboardOAuthClientId = 'Backboard_oauth_BGmuDtqCPmPgmIqWZ2ORvdqpl8fdKFQY';
@@ -141,7 +157,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			bridge.restart();
 		}
 	}));
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.signIn', () => signInBackboard(bridge)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.signIn', () => promptBackboardSso(bridge)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.copyOAuthRedirectUri', () => copyBackboardOAuthRedirectUri()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.completeOAuthCallback', () => completeBackboardOAuthCallbackFromInput()));
 	context.subscriptions.push(vscode.window.registerUriHandler({
@@ -159,11 +175,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		await openBackboardView();
 		await panelProvider.postUiCommand('showHistory');
 	}));
+	void updateBackboardAuthContext();
 	const configWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardConfigPath()), path.basename(backboardConfigPath())));
+	const refreshBackboardState = () => {
+		void updateBackboardAuthContext();
+		panelProvider.refreshState();
+	};
 	context.subscriptions.push(configWatcher);
-	context.subscriptions.push(configWatcher.onDidCreate(() => panelProvider.refreshState()));
-	context.subscriptions.push(configWatcher.onDidChange(() => panelProvider.refreshState()));
-	context.subscriptions.push(configWatcher.onDidDelete(() => panelProvider.refreshState()));
+	context.subscriptions.push(configWatcher.onDidCreate(refreshBackboardState));
+	context.subscriptions.push(configWatcher.onDidChange(refreshBackboardState));
+	context.subscriptions.push(configWatcher.onDidDelete(refreshBackboardState));
 	context.subscriptions.push(vscode.window.registerWebviewViewProvider('backboard.panel', panelProvider, { webviewOptions: { retainContextWhenHidden: true } }));
 	startBackboardUpdateChecks(context);
 }
@@ -199,6 +220,18 @@ async function setApiKey(): Promise<boolean> {
 	return false;
 }
 
+async function promptBackboardSso(bridge: BackboardBridge): Promise<boolean> {
+	const choice = await vscode.window.showInformationMessage(
+		'Sign in to Backboard Studio.',
+		{ modal: true },
+		'Continue with SSO'
+	);
+	if (choice !== 'Continue with SSO') {
+		return false;
+	}
+	return signInBackboard(bridge);
+}
+
 async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
 	const state = crypto.randomBytes(24).toString('base64url');
 	const nonce = crypto.randomBytes(24).toString('base64url');
@@ -231,23 +264,13 @@ async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
 		callbackServer = undefined;
 		backboardToolOutput?.appendLine('[oauth] Received Backboard authorization code; exchanging for tokens.');
 		const tokens = await exchangeBackboardOAuthCode(code, redirectUri, codeVerifier);
-			const saveResult = await saveBackboardOAuthTokens(tokens);
-			bridge.restart();
-			if (saveResult.apiKeySaved) {
-				backboardToolOutput?.appendLine(`[oauth] API KEY HAS BEEN TAKEN and saved to ${backboardConfigPath()}.`);
-				void vscode.window.showInformationMessage('Backboard sign in complete. API KEY HAS BEEN TAKEN and saved to ~/.backboard_ide/config.json.');
-			} else if (!backboardConfigApiKey(await readBackboardConfigJson())) {
-				const choice = await vscode.window.showWarningMessage(
-					'Signed in to Backboard, but NO API KEY was returned. Set an organization API key to send IDE requests.',
-				'Set API Key'
-			);
-			if (choice === 'Set API Key') {
-				await setApiKey();
-				}
-			} else {
-				void vscode.window.showInformationMessage('Backboard sign in complete. Existing API key remains saved in ~/.backboard_ide/config.json.');
-			}
-			return true;
+		const saveResult = await saveBackboardOAuthTokens(tokens);
+		bridge.restart();
+		if (saveResult.apiKeySaved) {
+			backboardToolOutput?.appendLine(`[oauth] Backboard SSO complete. API key saved to ${backboardConfigPath()}.`);
+		}
+		void vscode.window.showInformationMessage('Backboard SSO complete.');
+		return true;
 	} catch (error) {
 		backboardToolOutput?.appendLine(`[oauth] sign in failed: ${error instanceof Error ? error.message : String(error)}`);
 		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -998,11 +1021,8 @@ function parseVersion(version: string): number[] | undefined {
 async function handleBackboardError(webview: vscode.Webview, error: unknown, bridge?: BackboardBridge): Promise<void> {
 	if (isBackboardAuthError(error)) {
 		await webview.postMessage({ type: 'status', text: 'Backboard authentication required.' });
-		const choice = await vscode.window.showInformationMessage('Backboard needs an API key or OAuth sign in. The Set API Key command stores it in ~/.backboard_ide/config.json.', 'Set API Key');
-		if (choice === 'Set API Key') {
-			if (await setApiKey()) {
-				bridge?.restart();
-			}
+		if (bridge) {
+			await promptBackboardSso(bridge);
 		}
 		return;
 	}
@@ -1059,8 +1079,120 @@ function backboardConfigPath(): string {
 	return path.join(os.homedir(), '.backboard_ide', 'config.json');
 }
 
+function backboardPanelStatePath(): string {
+	return path.join(os.homedir(), '.backboard_ide', 'panel-state.json');
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isPanelPersistedState(value: unknown): value is PanelPersistedState {
+	if (!isObjectRecord(value)) {
+		return false;
+	}
+	return (value.activeView === undefined || typeof value.activeView === 'string')
+		&& (value.activeHistoryId === undefined || typeof value.activeHistoryId === 'string')
+		&& (value.currentWorkspace === undefined || typeof value.currentWorkspace === 'string')
+		&& (value.promptQueue === undefined || Array.isArray(value.promptQueue))
+		&& (value.historyEntries === undefined || Array.isArray(value.historyEntries))
+		&& (value.savedAt === undefined || typeof value.savedAt === 'number');
+}
+
+function isPanelStateStore(value: unknown): value is PanelStateStore {
+	if (!isObjectRecord(value)) {
+		return false;
+	}
+	const latest = value.latest;
+	const byWorkspace = value.byWorkspace;
+	return (latest === undefined || isPanelPersistedState(latest))
+		&& (byWorkspace === undefined || (isObjectRecord(byWorkspace) && Object.values(byWorkspace).every(isPanelPersistedState)));
+}
+
+function panelStateStorageKey(workspace = workspacePath() ?? 'default'): string {
+	const normalizedWorkspace = workspace || 'default';
+	const digest = crypto.createHash('sha256').update(normalizedWorkspace).digest('hex').slice(0, 24);
+	return `${panelStateStorageKeyPrefix}${digest}`;
+}
+
+function hasPanelStateContent(state: PanelPersistedState | undefined): boolean {
+	return !!state
+		&& (typeof state.currentWorkspace === 'string'
+			|| typeof state.activeHistoryId === 'string'
+			|| !!state.promptQueue?.length
+			|| !!state.historyEntries?.length);
+}
+
+function panelStateTimestamp(state: PanelPersistedState | undefined): number {
+	if (!state) {
+		return 0;
+	}
+	if (typeof state.savedAt === 'number') {
+		return state.savedAt;
+	}
+	const entries = Array.isArray(state.historyEntries) ? state.historyEntries : [];
+	return entries.reduce((max, entry) => {
+		if (!isObjectRecord(entry)) {
+			return max;
+		}
+		const updatedAt = typeof entry.updatedAt === 'number' ? entry.updatedAt : 0;
+		const startedAt = typeof entry.startedAt === 'number' ? entry.startedAt : 0;
+		return Math.max(max, updatedAt, startedAt);
+	}, 0);
+}
+
+function newerPanelState(...states: (PanelPersistedState | undefined)[]): PanelPersistedState | undefined {
+	let best: PanelPersistedState | undefined;
+	for (const state of states) {
+		if (!hasPanelStateContent(state)) {
+			continue;
+		}
+		if (!best || panelStateTimestamp(state) >= panelStateTimestamp(best)) {
+			best = state;
+		}
+	}
+	return best;
+}
+
+function readSharedPanelStateStore(): PanelStateStore {
+	try {
+		const raw = fs.readFileSync(backboardPanelStatePath(), 'utf8');
+		const parsed: unknown = JSON.parse(raw);
+		return isPanelStateStore(parsed) ? parsed : {};
+	} catch {
+		return {};
+	}
+}
+
+function readSharedPanelState(workspace?: string): PanelPersistedState | undefined {
+	const store = readSharedPanelStateStore();
+	const scoped = workspace ? store.byWorkspace?.[panelStateStorageKey(workspace)] : undefined;
+	return newerPanelState(scoped, store.latest);
+}
+
+async function writeSharedPanelState(state: PanelPersistedState): Promise<void> {
+	const existing = readSharedPanelStateStore();
+	const key = panelStateStorageKey(state.currentWorkspace);
+	const byWorkspace = { ...(existing.byWorkspace ?? {}), [key]: state };
+	const next: PanelStateStore = {
+		byWorkspace,
+		latest: hasPanelStateContent(state) ? state : existing.latest,
+	};
+	const statePath = backboardPanelStatePath();
+	await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
+	await fs.promises.writeFile(statePath, JSON.stringify(next), 'utf8');
+	if (process.platform !== 'win32') {
+		await fs.promises.chmod(statePath, 0o600);
+	}
+}
+
+function scriptJson(value: unknown): string {
+	return JSON.stringify(value ?? null)
+		.replace(/</g, '\\u003c')
+		.replace(/>/g, '\\u003e')
+		.replace(/&/g, '\\u0026')
+		.replace(/\u2028/g, '\\u2028')
+		.replace(/\u2029/g, '\\u2029');
 }
 
 function redactSensitiveValues(value: unknown): unknown {
@@ -1196,6 +1328,10 @@ function hasBackboardCredentials(): boolean {
 	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
 }
 
+async function updateBackboardAuthContext(): Promise<void> {
+	await vscode.commands.executeCommand('setContext', 'backboard.authenticated', hasBackboardCredentials());
+}
+
 async function writeBackboardConfigJson(config: BackboardConfigJson): Promise<void> {
 	const configPath = backboardConfigPath();
 	const configDir = path.dirname(configPath);
@@ -1207,6 +1343,7 @@ async function writeBackboardConfigJson(config: BackboardConfigJson): Promise<vo
 	if (process.platform !== 'win32') {
 		await fs.promises.chmod(configPath, 0o600);
 	}
+	await updateBackboardAuthContext();
 }
 
 async function saveBackboardConfigApiKey(apiKey: string): Promise<void> {
@@ -1386,25 +1523,24 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		this.view = webviewView;
 		webviewView.title = '\u200B';
 		webviewView.webview.options = { enableScripts: true, localResourceRoots: webviewLocalResourceRoots(this.context) };
-		webviewView.webview.html = panelHtml(webviewView.webview, codiconsStylesheetUri(this.context, webviewView.webview), iconBaseUri(this.context, webviewView.webview), { showHeader: false });
+		webviewView.webview.html = panelHtml(webviewView.webview, codiconsStylesheetUri(this.context, webviewView.webview), iconBaseUri(this.context, webviewView.webview), { showHeader: false, initialState: this.readPanelState() });
 		webviewView.webview.onDidReceiveMessage(message => {
 			if (message?.type === 'send' && typeof message.prompt === 'string') {
-				this.runPrompt(message.prompt, asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined);
+				this.runPrompt(message.prompt, asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, undefined, typeof message.workspace === 'string' ? message.workspace : undefined);
 			} else if (message?.type === 'sendVoice' && isVoiceAttachment(message.audio)) {
-				this.runPrompt(typeof message.prompt === 'string' ? message.prompt : '', asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, message.audio);
+				this.runPrompt(typeof message.prompt === 'string' ? message.prompt : '', asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, message.audio, typeof message.workspace === 'string' ? message.workspace : undefined);
 			} else if (message?.type === 'cancel') {
 				this.runToken?.cancel();
 			} else if (message?.type === 'reviewChanges') {
 				void vscode.commands.executeCommand('workbench.view.scm');
 				} else if (message?.type === 'setApiKey') {
-					void setApiKey().then(changed => {
+					void promptBackboardSso(this.bridge).then(changed => {
 						if (changed) {
-							this.bridge.restart();
 							void postPanelState(this.bridge, webviewView.webview, true);
 						}
 					});
 				} else if (message?.type === 'signIn') {
-					void signInBackboard(this.bridge).then(changed => {
+					void promptBackboardSso(this.bridge).then(changed => {
 						if (changed) {
 							void postPanelState(this.bridge, webviewView.webview, true);
 						}
@@ -1417,16 +1553,53 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				void postBranchDiff(webviewView.webview);
 			} else if (message?.type === 'ready' || message?.type === 'refreshModels') {
 				void postPanelState(this.bridge, webviewView.webview, message?.type === 'refreshModels');
+				void this.postPanelStateSnapshot();
 			} else if (message?.type === 'refreshUsage') {
 				void postUsageSnapshot(this.bridge, webviewView.webview);
 			} else if (message?.type === 'saveSettings') {
 				void savePanelOptions(asPanelOptions(message.options));
+			} else if (message?.type === 'panelState' && isPanelPersistedState(message.state)) {
+				void this.savePanelState(message.state);
+			} else if (message?.type === 'syncPanelState') {
+				void this.postPanelStateSnapshot();
 			}
 		});
 		void postPanelState(this.bridge, webviewView.webview);
 	}
 
-	private runPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment): void {
+	private readPanelState(): PanelPersistedState {
+		const currentWorkspace = workspacePath();
+		const scopedKey = panelStateStorageKey(currentWorkspace);
+		const scopedState = this.context.workspaceState.get<PanelPersistedState>(scopedKey)
+			?? this.context.globalState.get<PanelPersistedState>(scopedKey);
+		const latestState = this.context.globalState.get<PanelPersistedState>(latestPanelStateStorageKey);
+		const sharedState = readSharedPanelState(currentWorkspace);
+		if (currentWorkspace) {
+			return newerPanelState(scopedState, latestState, sharedState) ?? {};
+		}
+		return newerPanelState(sharedState, latestState, scopedState) ?? {};
+	}
+
+	private async savePanelState(state: PanelPersistedState): Promise<void> {
+		const key = panelStateStorageKey(state.currentWorkspace);
+		const updates = [
+			this.context.workspaceState.update(key, state),
+			this.context.globalState.update(key, state),
+		];
+		if (hasPanelStateContent(state)) {
+			updates.push(this.context.globalState.update(latestPanelStateStorageKey, state));
+		}
+		updates.push(writeSharedPanelState(state).catch(error => {
+			backboardToolOutput?.appendLine(`[panel-state] failed to save shared state: ${error instanceof Error ? error.message : String(error)}`);
+		}));
+		await Promise.all(updates);
+	}
+
+	private async postPanelStateSnapshot(): Promise<void> {
+		await this.view?.webview.postMessage({ type: 'panelStateSnapshot', state: this.readPanelState() });
+	}
+
+	private runPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment, workspaceOverride?: string): void {
 		const serial = ++this.promptRunSerial;
 		const previousRun = this.activePromptRun;
 		if (previousRun) {
@@ -1444,7 +1617,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			if (serial !== this.promptRunSerial) {
 				return;
 			}
-			await this.sendPrompt(prompt, options, chatId, audio);
+			await this.sendPrompt(prompt, options, chatId, audio, workspaceOverride);
 		})();
 		this.activePromptRun = run;
 		void run.finally(() => {
@@ -1454,7 +1627,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
-	private async sendPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment): Promise<void> {
+	private async sendPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment, workspaceOverride?: string): Promise<void> {
 		const view = this.view;
 		if (!view || (!prompt.trim() && !audio)) {
 			return;
@@ -1469,7 +1642,8 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		this.runToken?.cancel();
 		this.runToken = new vscode.CancellationTokenSource();
 		const token = this.runToken.token;
-		const sessionId = `panel:${workspacePath() ?? 'default'}:${chatId || 'default'}`;
+		const effectiveWorkspace = workspaceOverride?.trim() || workspacePath();
+		const sessionId = `panel:${effectiveWorkspace ?? 'default'}:${chatId || 'default'}`;
 		const sink = this.panelSink(view);
 		const content = prompt.trim() || 'Please transcribe this audio and respond.';
 		const imageGeneration = imageGenerationForPrompt(content, settings.imageGeneration);
@@ -1481,7 +1655,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			let currentToolRequest: ToolResultRequest | undefined;
 			await this.bridge.send('sendPrompt', sessionId, {
 				content,
-				workspace: workspacePath(),
+				workspace: effectiveWorkspace,
 				provider: settings.defaultProvider,
 				model: settings.defaultModel,
 				mode: settings.mode,
@@ -1567,12 +1741,13 @@ function iconBaseUri(context: vscode.ExtensionContext, webview: vscode.Webview):
 	return webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'icons'));
 }
 
-function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, iconBase: vscode.Uri, options: { readonly showHeader: boolean }): string {
+function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, iconBase: vscode.Uri, options: { readonly showHeader: boolean; readonly initialState?: PanelPersistedState }): string {
 	const nonce = newId();
 	const csp = `default-src 'none'; img-src ${webview.cspSource} https: data: blob:; media-src ${webview.cspSource} https: data: blob:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';`;
 	const backboardLogo = `${iconBase.toString()}/backboard_logo.svg`;
 	const rootRows = `${options.showHeader ? '42px ' : ''}35px 24px minmax(0, 1fr) auto`;
 	const logLabel = options.showHeader ? 'aria-labelledby="chatTab"' : 'aria-label="Chat"';
+	const initialStateJson = scriptJson(options.initialState ?? {});
 	const header = options.showHeader ? `
 			<div class="panelHeader">
 				<div class="brandMark"><span class="codicon codicon-sparkle"></span></div>
@@ -1729,40 +1904,40 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		@keyframes bbPulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 		.statusIcon { width: 12px; height: 12px; flex: 0 0 auto; display: grid; place-items: center; }
 		.statusIcon .codicon { font-size: 12px; }
-		.toolGroup { width: 100%; overflow: hidden; border: 1px solid color-mix(in srgb, var(--bb-border) 58%, transparent); border-radius: 5px; color: var(--bb-text); background: transparent; }
+		.toolGroup { width: 100%; overflow: hidden; border: 1px solid color-mix(in srgb, var(--bb-border) 48%, transparent); border-radius: 5px; color: var(--bb-text); background: transparent; }
 		.toolGroup.failed { border-color: color-mix(in srgb, var(--bb-danger) 28%, var(--bb-border)); background: color-mix(in srgb, var(--bb-danger) 4%, transparent); }
-		.toolGroupHead { width: 100%; min-height: 28px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 4px 7px; color: var(--bb-text); background: transparent; text-align: left; }
+		.toolGroupHead { width: 100%; min-height: 24px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 3px 6px; color: var(--bb-text); background: transparent; text-align: left; }
 		.toolGroupStatus { width: 14px; height: 14px; display: grid; place-items: center; color: var(--bb-muted); }
 		.toolGroupStatus .codicon { font-size: 12px; }
 		.toolGroup.running .toolGroupStatus .codicon { animation: bbSpin 1.2s linear infinite; }
 		.toolGroup.failed .toolGroupStatus { color: var(--bb-danger); }
-		.toolGroupMain { min-width: 0; display: grid; gap: 1px; }
-		.toolGroupTitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 600; line-height: 15px; }
+		.toolGroupMain { min-width: 0; display: flex; align-items: baseline; gap: 7px; }
+		.toolGroupTitle { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 600; line-height: 15px; }
 		.toolGroupMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-muted); font-size: 10.5px; line-height: 14px; }
 		.toolGroupToggle { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border-radius: 3px; color: var(--bb-muted); background: transparent; }
 		.toolGroupToggle .codicon { font-size: 12px; }
 		.toolGroupToggle:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
-		.toolGroupBody { display: none; gap: 2px; padding: 0 6px 6px 6px; border-top: 1px solid color-mix(in srgb, var(--bb-border) 46%, transparent); }
+		.toolGroupBody { display: none; gap: 0; padding: 2px 5px 5px 20px; border-top: 1px solid color-mix(in srgb, var(--bb-border) 38%, transparent); }
 		.toolGroup.open .toolGroupBody { display: grid; }
-		.toolCard { width: 100%; align-self: stretch; overflow: hidden; border: 0; border-radius: 4px; color: var(--bb-text); background: transparent; font-size: 11px; line-height: 15px; }
+		.toolCard { width: 100%; align-self: stretch; overflow: hidden; border: 0; border-radius: 4px; color: var(--bb-text); background: transparent; font-size: 10.5px; line-height: 14px; }
 		.toolCard:hover { background: color-mix(in srgb, var(--bb-border) 22%, transparent); }
 		.toolCard.started, .toolCard.finished { background: transparent; }
 		.toolCard.failed, .toolCard.denied { background: color-mix(in srgb, var(--bb-danger) 5%, transparent); }
-		.toolHead { min-height: 26px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 6px; padding: 3px 4px; }
+		.toolHead { min-height: 21px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 5px; padding: 1px 3px; }
 		.toolStatusIcon { width: 14px; height: 14px; display: grid; place-items: center; color: var(--bb-muted); }
 		.toolCard.started .toolStatusIcon { color: var(--bb-muted); }
 		.toolCard.started .toolStatusIcon .codicon { animation: bbSpin 1.2s linear infinite; }
 		@keyframes bbSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 		.toolCard.failed .toolStatusIcon, .toolCard.denied .toolStatusIcon { color: var(--bb-danger); }
 		.toolStatusIcon .codicon { font-size: 12px; }
-		.toolMain { min-width: 0; display: grid; gap: 1px; }
-		.toolLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; line-height: 14px; }
+		.toolMain { min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+		.toolLabel { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; font-weight: 600; line-height: 14px; }
 		.toolMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-muted); font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; line-height: 14px; }
-		.toolDuration { min-width: 38px; flex: 0 0 auto; padding: 0 5px; border: 0; border-radius: 999px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-border) 22%, transparent); font-size: 10px; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; }
+		.toolDuration { min-width: 34px; flex: 0 0 auto; padding: 0 4px; border: 0; border-radius: 999px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-border) 18%, transparent); font-size: 10px; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; }
 		.toolToggle { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border-radius: 3px; color: var(--bb-muted); background: transparent; }
 		.toolToggle .codicon { font-size: 12px; }
 		.toolToggle:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
-		.toolDetails { display: none; max-height: 220px; overflow: auto; border-top: 1px solid color-mix(in srgb, var(--bb-border) 42%, transparent); padding: 6px 8px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-bg) 78%, transparent); font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; line-height: 14px; white-space: pre-wrap; word-break: break-word; }
+		.toolDetails { display: none; max-height: 160px; overflow: auto; border-top: 1px solid color-mix(in srgb, var(--bb-border) 36%, transparent); padding: 5px 7px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-bg) 78%, transparent); font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; line-height: 14px; white-space: pre-wrap; word-break: break-word; }
 		.toolCard.open .toolDetails { display: block; }
 		.usageRow { width: 100%; box-sizing: border-box; display: flex; align-items: flex-start; gap: 8px; padding: 3px 2px; color: var(--bb-muted); font-size: 12px; line-height: 16px; }
 		.usageToggle { --usage-percent: 0; position: relative; width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; padding: 0; border-radius: 50%; color: var(--bb-text); background: conic-gradient(var(--bb-primary) calc(var(--usage-percent) * 1%), color-mix(in srgb, var(--bb-border) 60%, transparent) 0); }
@@ -2044,8 +2219,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					<div class="authCard">
 						<div class="authLogo" aria-hidden="true"></div>
 						<div class="authTitle">Sign in required</div>
-						<div class="authText">Sign in with Backboard to use the auxiliary bar.</div>
-						<button id="authSignInBtn" class="authButton" type="button"><span class="codicon codicon-account"></span><span>Sign in with Backboard</span></button>
+						<div class="authText">Sign in with Backboard SSO to use the auxiliary bar.</div>
+						<button id="authSignInBtn" class="authButton" type="button"><span class="codicon codicon-account"></span><span>Sign in with SSO</span></button>
 					</div>
 				</div>
 		</div>
@@ -2105,7 +2280,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			mcpNotion: document.getElementById('mcpNotion'),
 			mcpGoogle: document.getElementById('mcpGoogle')
 		};
-		const persistedState = vscode.getState() || {};
+		const hostInitialState = ${initialStateJson};
+		const webviewState = vscode.getState();
+		const persistedState = webviewState && Object.keys(webviewState).length ? webviewState : hostInitialState;
 		let models = [];
 		let tools = [];
 			let settings = {};
@@ -2123,6 +2300,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		let modelProviderFiltersOpen = false;
 		let currentAssistantCard = undefined;
 		let activeToolRows = [];
+		let activeToolGroup = undefined;
 		let fileChanges = [];
 		let latestUsage = undefined;
 		let accountUsage = undefined;
@@ -2334,10 +2512,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		}
 		function spreadLegacyToolGroups() {
 			for (const group of Array.from(log.querySelectorAll('.toolGroup'))) {
-				for (const card of Array.from(group.querySelectorAll('.toolCard'))) {
-					group.parentElement?.insertBefore(card, group);
-				}
-				group.remove();
+				updateToolGroupSummary(group);
 			}
 		}
 		function hasConversationContent() {
@@ -2358,13 +2533,15 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			return new Date(value || Date.now()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 		}
 		function persistPanelState() {
-			vscode.setState({
+			const state = {
 				activeView,
 				activeHistoryId,
 				promptQueue,
 				currentWorkspace,
 				historyEntries: historyEntries.slice(0, 40)
-			});
+			};
+			vscode.setState(state);
+			vscode.postMessage({ type: 'panelState', state });
 		}
 		function activeHistoryEntry() {
 			return historyEntries.find(item => item.id === activeHistoryId);
@@ -2568,6 +2745,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			spreadLegacyToolGroups();
 			currentAssistantCard = undefined;
 			activeToolRows = [];
+			activeToolGroup = undefined;
 			fileChanges = Array.isArray(checkpoint.fileChanges) ? checkpoint.fileChanges.slice(0) : [];
 			promptQueue = Array.isArray(checkpoint.promptQueue) ? checkpoint.promptQueue.slice(0) : [];
 			entry.html = log.innerHTML;
@@ -2603,6 +2781,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			spreadLegacyToolGroups();
 			currentAssistantCard = undefined;
 			activeToolRows = [];
+			activeToolGroup = undefined;
 			fileChanges = Array.isArray(entry.fileChanges) ? entry.fileChanges.slice(0) : [];
 			promptQueue = Array.isArray(entry.promptQueue) ? entry.promptQueue.slice(0) : [];
 			activeHistoryId = entry.id;
@@ -2718,12 +2897,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const extension = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('mpeg') ? 'mp3' : mimeType.includes('wav') ? 'wav' : 'webm';
 			const nextOptions = { ...options(), voiceMode: controls.voiceMode.value === 'stt' ? 'stt' : 'conversation' };
 			updateStatus('Sending voice to Backboard.');
-			vscode.postMessage({
-				type: 'sendVoice',
-				prompt: prompt.value.trim(),
-				options: nextOptions,
-				chatId: activeHistoryId,
-				audio: {
+				vscode.postMessage({
+					type: 'sendVoice',
+					prompt: prompt.value.trim(),
+					options: nextOptions,
+					chatId: activeHistoryId,
+					workspace: currentWorkspace,
+					audio: {
 					data: bytes,
 					fileName: 'backboard-voice.' + extension,
 					mimeType
@@ -2968,7 +3148,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				const providerRows = allProviders.map(provider => providerSwitch(provider, !disabledModelProviders.has(provider))).join('');
 				return filterWrap + '<div class="providerFilterPane"><div class="filterHeader"><span class="filterTitle">Filter by provider</span><span class="filterMeta">Choose one or more providers, then press Done.</span></div><div class="providerSwitchList">' + allProvidersRow + providerRows + '</div><button class="providerFilterDone" type="button" data-action="doneModelProviderFilters">Done</button></div>';
 			}
-			const noModelsMeta = query ? 'Try a different text filter.' : disabledModelProviders.size ? 'Enable a provider filter.' : 'Refresh models or set an API key.';
+			const noModelsMeta = query ? 'Try a different text filter.' : disabledModelProviders.size ? 'Enable a provider filter.' : 'Refresh models or sign in with SSO.';
 			const sections = providers.length ? providers.map(provider => {
 				const rows = filtered
 					.filter(model => model.provider === provider)
@@ -2976,7 +3156,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					.join('');
 				return section(providerDisplayName(provider), rows);
 			}).join('') : section('Models', choice('disabled', '', 'No matching models', noModelsMeta, false, true));
-			return filterWrap + sections + '<div class="popoverActions">' + actionButton('refreshModels', 'Refresh Models', 'refresh') + actionButton('setApiKey', 'API Key', 'key') + '</div>';
+			return filterWrap + sections + '<div class="popoverActions">' + actionButton('refreshModels', 'Refresh Models', 'refresh') + actionButton('signIn', 'SSO', 'account') + '</div>';
 		}
 		function renderReasoningPopover() {
 			const modes = [
@@ -3264,6 +3444,29 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 		});
 		log.addEventListener('click', event => {
+			const groupToggle = event.target instanceof Element ? event.target.closest('[data-tool-group-toggle]') : undefined;
+			if (groupToggle) {
+				const group = groupToggle.closest('.toolGroup');
+				if (group instanceof HTMLElement) {
+					const open = group.classList.toggle('open');
+					groupToggle.title = open ? 'Hide command list' : 'Show command list';
+					groupToggle.setAttribute('aria-label', groupToggle.title);
+					updateToolGroupSummary(group);
+				}
+				return;
+			}
+			const toolToggle = event.target instanceof Element ? event.target.closest('[data-tool-toggle]') : undefined;
+			if (toolToggle) {
+				const row = toolToggle.closest('.toolCard');
+				if (row instanceof HTMLElement) {
+					const open = row.classList.toggle('open');
+					toolToggle.title = open ? 'Hide tool details' : 'Show tool details';
+					toolToggle.setAttribute('aria-label', toolToggle.title);
+					toolToggle.textContent = '';
+					toolToggle.appendChild(icon(open ? 'chevron-up' : 'chevron-down'));
+				}
+				return;
+			}
 			const target = event.target instanceof Element ? event.target.closest('[data-log-action]') : undefined;
 			const action = target?.getAttribute('data-log-action');
 			if (action === 'reviewChanges') {
@@ -3404,8 +3607,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				closePopover();
 			} else if (action === 'refreshUsage') {
 				requestUsageSnapshot();
-			} else if (action === 'setApiKey') {
-				vscode.postMessage({ type: 'setApiKey' });
+			} else if (action === 'setApiKey' || action === 'signIn') {
+				vscode.postMessage({ type: 'signIn' });
 				closePopover();
 			} else if (action === 'openModel') {
 				openPopover('model', buttons.model);
@@ -3505,6 +3708,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			log.appendChild(ensureEmptyState());
 			currentAssistantCard = undefined;
 			activeToolRows = [];
+			activeToolGroup = undefined;
 			fileChanges = [];
 			promptQueue = [];
 			latestUsage = undefined;
@@ -3608,7 +3812,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			runInProgress = true;
 			startRunTimer(Date.now());
 			renderQueue();
-			vscode.postMessage({ type: 'send', chatId, prompt: text, options: queuedOptions || options() });
+			vscode.postMessage({ type: 'send', chatId, prompt: text, workspace: currentWorkspace, options: queuedOptions || options() });
 		}
 		function drainPromptQueue() {
 			if (runInProgress || !promptQueue.length) {
@@ -3735,6 +3939,98 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const max = 12000;
 			return text.length > max ? text.slice(0, max) + '\\n\\n[truncated]' : text;
 		}
+		function toolGroupParts(group) {
+			return {
+				status: group?.querySelector('.toolGroupStatus'),
+				title: group?.querySelector('.toolGroupTitle'),
+				meta: group?.querySelector('.toolGroupMeta'),
+				toggle: group?.querySelector('.toolGroupToggle')
+			};
+		}
+		function setIcon(element, name) {
+			if (!element) {
+				return;
+			}
+			element.textContent = '';
+			element.appendChild(icon(name));
+		}
+		function updateToolGroupSummary(group) {
+			if (!(group instanceof HTMLElement)) {
+				return;
+			}
+			const cards = Array.from(group.querySelectorAll('.toolCard'));
+			const running = cards.filter(card => card.classList.contains('started')).length;
+			const failed = cards.filter(card => card.classList.contains('failed') || card.classList.contains('denied')).length;
+			const total = cards.length;
+			const parts = toolGroupParts(group);
+			group.classList.toggle('running', running > 0);
+			group.classList.toggle('failed', failed > 0);
+			if (parts.title) {
+				parts.title.textContent = running > 0 ? 'Running commands' : failed > 0 ? 'Finished with errors' : 'Finished commands';
+			}
+			if (parts.meta) {
+				const chunks = [total + ' command' + (total === 1 ? '' : 's')];
+				if (running > 0) {
+					chunks.push(running + ' running');
+				}
+				if (failed > 0) {
+					chunks.push(failed + ' failed');
+				}
+				parts.meta.textContent = chunks.join(', ');
+			}
+			setIcon(parts.status, failed > 0 ? 'error' : running > 0 ? 'sync' : 'check');
+			setIcon(parts.toggle, group.classList.contains('open') ? 'chevron-up' : 'chevron-down');
+		}
+		function ensureToolGroup() {
+			if (activeToolGroup?.row?.isConnected) {
+				return activeToolGroup;
+			}
+			const row = document.createElement('div');
+			row.className = 'toolGroup running';
+			const head = document.createElement('button');
+			head.className = 'toolGroupHead';
+			head.type = 'button';
+			head.dataset.toolGroupToggle = 'true';
+			head.title = 'Show command list';
+			head.setAttribute('aria-label', 'Show command list');
+			const status = document.createElement('span');
+			status.className = 'toolGroupStatus';
+			const main = document.createElement('span');
+			main.className = 'toolGroupMain';
+			const title = document.createElement('span');
+			title.className = 'toolGroupTitle';
+			const meta = document.createElement('span');
+			meta.className = 'toolGroupMeta';
+			const toggle = document.createElement('span');
+			toggle.className = 'toolGroupToggle';
+			main.append(title, meta);
+			head.append(status, main, toggle);
+			const body = document.createElement('div');
+			body.className = 'toolGroupBody';
+			row.append(head, body);
+			log.appendChild(row);
+			activeToolGroup = { row, body };
+			updateToolGroupSummary(row);
+			return activeToolGroup;
+		}
+		function closeActiveToolGroup(finalStatus) {
+			for (const item of activeToolRows) {
+				if (item?.row instanceof HTMLElement && item.row.classList.contains('started')) {
+					item.row.classList.remove('started');
+					item.row.classList.add(finalStatus === 'failed' ? 'failed' : 'finished');
+					const statusIcon = item.row.querySelector('.toolStatusIcon');
+					setIcon(statusIcon, finalStatus === 'failed' ? 'error' : 'check');
+					if (item.label) {
+						item.label.textContent = (finalStatus === 'failed' ? 'Failed ' : 'Finished ') + item.name;
+					}
+				}
+			}
+			if (activeToolGroup?.row) {
+				updateToolGroupSummary(activeToolGroup.row);
+			}
+			activeToolRows = [];
+			activeToolGroup = undefined;
+		}
 		function appendToolOutput(payload) {
 			const key = payload?.key;
 			const text = typeof payload?.text === 'string' ? payload.text : '';
@@ -3753,6 +4049,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			if (meta && text.trim()) {
 				meta.textContent = text.trim().split(/\\r?\\n/).pop()?.slice(0, 220) || meta.textContent;
 			}
+			updateToolGroupSummary(row.closest('.toolGroup'));
 			scrollConversation();
 		}
 		function appendTool(item) {
@@ -3813,6 +4110,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const toggle = document.createElement('button');
 			toggle.className = 'toolToggle';
 			toggle.type = 'button';
+			toggle.dataset.toolToggle = 'true';
 			toggle.title = 'Show tool details';
 			toggle.setAttribute('aria-label', 'Show tool details');
 			toggle.appendChild(icon('chevron-down'));
@@ -3821,22 +4119,16 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			body.className = 'toolDetails';
 			const previousDetails = existing?.row?.querySelector('.toolDetails')?.textContent;
 			body.textContent = clippedToolText(details || previousDetails || 'No details reported.');
-			toggle.addEventListener('click', () => {
-				const open = row.classList.toggle('open');
-				toggle.title = open ? 'Hide tool details' : 'Show tool details';
-				toggle.setAttribute('aria-label', toggle.title);
-				toggle.textContent = '';
-				toggle.appendChild(icon(open ? 'chevron-up' : 'chevron-down'));
-			});
 			row.append(head, body);
 			if (existingIndex >= 0) {
 				activeToolRows.splice(existingIndex, 1);
 			} else {
-				log.appendChild(row);
+				ensureToolGroup().body.appendChild(row);
 			}
 			if (status === 'started') {
 				activeToolRows.push({ key, name, row, label, duration, startedAt });
 			}
+			updateToolGroupSummary(row.closest('.toolGroup'));
 			scrollConversation();
 		}
 		function numberValue(value) {
@@ -4284,6 +4576,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				}
 				runInProgress = true;
 				stopRequested = false;
+				activeToolRows = [];
+				activeToolGroup = undefined;
 				startRunTimer(Date.now());
 				setActiveView('chat');
 				appendMessage('user', message.prompt || '');
@@ -4294,6 +4588,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				stopRequested = false;
 				stopRunTimer();
 				currentAssistantCard = undefined;
+				closeActiveToolGroup('finished');
 				syncComposerButtons();
 				saveActiveHistory('Done');
 				renderHistory();
@@ -4304,6 +4599,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					runInProgress = false;
 					stopRequested = false;
 					stopRunTimer();
+					closeActiveToolGroup('finished');
 					syncComposerButtons();
 					saveActiveHistory('Cancelled');
 					renderHistory();
@@ -4311,6 +4607,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					runInProgress = false;
 					stopRequested = false;
 					stopRunTimer();
+					closeActiveToolGroup('failed');
 					syncComposerButtons();
 					saveActiveHistory('Failed');
 					renderHistory();
@@ -4319,6 +4616,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				currentWorkspace = typeof message.workspace === 'string' ? message.workspace : currentWorkspace;
 				applySettings(message.settings);
 				refreshWorkspaceStatus();
+				persistPanelState();
 			} else if (message.type === 'command') {
 				if (message.command === 'newChat') {
 					startNewChat();
@@ -5477,7 +5775,7 @@ async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, 
 		} else {
 				await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
 				if (isBackboardAuthError(error)) {
-					await webview.postMessage({ type: 'status', text: 'Sign in or set a Backboard API key in ~/.backboard_ide/config.json to load models.' });
+					await webview.postMessage({ type: 'status', text: 'Sign in with Backboard SSO to load models.' });
 				} else {
 					await webview.postMessage({ type: 'status', text: 'Could not load models.' });
 				}

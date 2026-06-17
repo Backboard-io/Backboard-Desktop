@@ -20,11 +20,7 @@ suite('Backboard onboarding types', () => {
 	test('steps are ordered to match the Backboard onboarding flow', () => {
 		assert.deepStrictEqual([...ONBOARDING_STEPS], [
 			OnboardingStepId.Welcome,
-			OnboardingStepId.Experience,
 			OnboardingStepId.Theme,
-			OnboardingStepId.ImportSettings,
-			OnboardingStepId.SignIn,
-			OnboardingStepId.ApiKey,
 		]);
 	});
 

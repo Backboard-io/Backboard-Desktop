@@ -18,9 +18,10 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { SessionsView, SessionsViewId as SessionsListViewId } from '../../sessions/browser/views/sessionsView.js';
 import { ISessionsSetUpService } from '../../../browser/sessionsSetUpService.js';
 import { ISessionsPartService } from '../../../browser/parts/sessionsPartService.js';
-import { SessionStatus } from '../../../services/sessions/common/session.js';
+import { ISession, SessionStatus } from '../../../services/sessions/common/session.js';
 import { writeStoredSessionTypePref } from '../browser/sessionTypePicker.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
+import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 
 class SelectAgentsFolderContribution extends Disposable implements IWorkbenchContribution {
 
@@ -36,6 +37,7 @@ class SelectAgentsFolderContribution extends Disposable implements IWorkbenchCon
 		@ILogService private readonly logService: ILogService,
 		@ISessionsPartService private readonly sessionsPartService: ISessionsPartService,
 		@IStorageService private readonly storageService: IStorageService,
+		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
 	) {
 		super();
 		const handleSelectAgentsFolder = (_: unknown, ...args: unknown[]) => {
@@ -79,12 +81,15 @@ class SelectAgentsFolderContribution extends Disposable implements IWorkbenchCon
 	}
 
 	private async handleOpenIntent(folderUri: URI | undefined, initialQuery: string | undefined, sessionResource: URI | undefined): Promise<void> {
-		if (folderUri) {
-			await this.selectFolder(folderUri);
-		}
 		if (sessionResource) {
+			if (folderUri) {
+				await this.prepareFolder(folderUri);
+			}
 			await this.openExistingSession(sessionResource);
 			return;
+		}
+		if (folderUri) {
+			await this.selectFolder(folderUri, !!initialQuery);
 		}
 		if (initialQuery) {
 			await this.submitInitialQuery(initialQuery);
@@ -243,17 +248,18 @@ class SelectAgentsFolderContribution extends Disposable implements IWorkbenchCon
 		});
 	}
 
-	private async selectFolder(folderUri: URI): Promise<void> {
-		// Wait for the welcome/setup flow to complete before selecting the folder
-		await this.sessionsSetUpService.whenWelcomeDone();
+	private async selectFolder(folderUri: URI, forceNewSession: boolean): Promise<void> {
+		await this.prepareFolder(folderUri);
+
+		if (!forceNewSession) {
+			await this.lifecycleService.when(LifecyclePhase.Eventually);
+		}
+
+		if (!forceNewSession && await this.tryOpenExistingSessionForFolder(folderUri)) {
+			return;
+		}
 
 		this.sessionsViewService.openNewSession();
-
-		// Tell the sessions list this folder is the open-window source folder
-		// so it ranks the matching folder section first. Get the view if it
-		// already exists — do not open it just for this side-effect.
-		const sessionsView = this.viewsService.getViewWithId<SessionsView>(SessionsListViewId);
-		sessionsView?.sessionsControl?.setOpenWindowSourceFolder(folderUri);
 
 		if (this.tryResolveAndSelect(folderUri)) {
 			return;
@@ -272,6 +278,40 @@ class SelectAgentsFolderContribution extends Disposable implements IWorkbenchCon
 			}));
 			this.lifecycleService.when(LifecyclePhase.Eventually).then(done);
 		});
+	}
+
+	private async prepareFolder(folderUri: URI): Promise<void> {
+		// Wait for the welcome/setup flow to complete before selecting the folder
+		await this.sessionsSetUpService.whenWelcomeDone();
+
+		// Tell the sessions list this folder is the open-window source folder
+		// so it ranks the matching folder section first. Get the view if it
+		// already exists — do not open it just for this side-effect.
+		const sessionsView = this.viewsService.getViewWithId<SessionsView>(SessionsListViewId);
+		sessionsView?.sessionsControl?.setOpenWindowSourceFolder(folderUri);
+	}
+
+	private async tryOpenExistingSessionForFolder(folderUri: URI): Promise<boolean> {
+		const activeSession = this.sessionsManagementService.activeSession.get();
+		if (activeSession && this.isCommittedSessionInFolder(activeSession, folderUri)) {
+			return true;
+		}
+
+		const { recent, other } = this.sessionsViewService.getRecentlyOpenedSessions();
+		const session = [...recent, ...other].find(candidate => this.isCommittedSessionInFolder(candidate, folderUri));
+		if (!session) {
+			return false;
+		}
+
+		await this.sessionsViewService.openSession(session.resource);
+		return true;
+	}
+
+	private isCommittedSessionInFolder(session: ISession, folderUri: URI): boolean {
+		if (session.status.get() === SessionStatus.Untitled) {
+			return false;
+		}
+		return !!session.workspace.get()?.folders.some(folder => this.uriIdentityService.extUri.isEqual(folder.root, folderUri));
 	}
 
 	private tryResolveAndSelect(folderUri: URI): boolean {

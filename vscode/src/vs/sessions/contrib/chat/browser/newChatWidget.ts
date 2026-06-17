@@ -15,6 +15,7 @@ import { localize } from '../../../../nls.js';
 import { IActiveSession, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISession } from '../../../services/sessions/common/session.js';
 import { ISessionsViewService } from '../../../browser/sessionsViewService.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkspaceTrustRequestService } from '../../../../platform/workspace/common/workspaceTrust.js';
 import { WorkspacePicker } from './sessionWorkspacePicker.js';
 import { WebWorkspacePicker } from './webWorkspacePicker.js';
@@ -60,6 +61,7 @@ export class NewChatWidget extends Disposable {
 		@ILogService private readonly logService: ILogService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@ISessionsViewService private readonly sessionsViewService: ISessionsViewService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@IWorkspaceTrustRequestService private readonly workspaceTrustRequestService: IWorkspaceTrustRequestService,
 		@IAgentHostFilterService private readonly agentHostFilterService: IAgentHostFilterService,
 	) {
@@ -145,8 +147,11 @@ export class NewChatWidget extends Disposable {
 		// picker fires onDidSelectWorkspace and our listener handles it.
 		// Skip if an active session already exists (restored by openNewSession
 		// from a new-session draft when navigating back from another session).
-		const restoredFolderUri = this._workspacePicker.selectedFolderUri;
+		const restoredFolderUri = this._workspacePicker.selectedFolderUri ?? this._defaultFolderUri();
 		if (!this._syncWorkspacePickerFromActiveSession() && restoredFolderUri) {
+			if (!this._workspacePicker.selectedFolderUri) {
+				this._workspacePicker.setSelectedWorkspace(restoredFolderUri, { fireEvent: false, providerId: LOCAL_AGENT_HOST_PROVIDER_ID });
+			}
 			this._createNewSession(restoredFolderUri, this._newChatInput.sessionTypePicker.selectedPick);
 		}
 
@@ -218,7 +223,7 @@ export class NewChatWidget extends Disposable {
 			&& t.sessionType.id === pick.sessionTypeId);
 	}
 
-	private _createNewSession(folderUri: URI, pick: IPreferredSessionType | undefined): void {
+	private _createNewSession(folderUri: URI, pick: IPreferredSessionType | undefined): ISession | undefined {
 		this._pendingPreferredUpgrade.clear();
 		const created = this._createSessionNow(folderUri, pick);
 		// Watch for late-registering providers when the draft could not be
@@ -228,6 +233,7 @@ export class NewChatWidget extends Disposable {
 		if (!created || (pick && !this._isPreferredServable(folderUri, pick))) {
 			this._scheduleRecreateOnProviderChange(folderUri, pick, created);
 		}
+		return created;
 	}
 
 	private _createSessionNow(folderUri: URI, pick: IPreferredSessionType | undefined): ISession | undefined {
@@ -277,7 +283,11 @@ export class NewChatWidget extends Disposable {
 	 * Returns the workspace URI for the context picker based on the current workspace selection.
 	 */
 	private _getContextFolderUri(): URI | undefined {
-		return this._workspacePicker.selectedFolderUri;
+		return this._workspacePicker.selectedFolderUri ?? this._defaultFolderUri();
+	}
+
+	private _defaultFolderUri(): URI | undefined {
+		return this.workspaceContextService.getWorkspace().folders[0]?.uri;
 	}
 
 	private _renderWorkspacePicker(container: HTMLElement): IDisposable {
@@ -390,10 +400,21 @@ export class NewChatWidget extends Disposable {
 	// --- Send ---
 
 	private async _send(query: string, attachedContext?: IChatRequestVariableEntry[], background?: boolean): Promise<void> {
-		const session = this._session.get();
+		let session: ISession | undefined = this._session.get();
 		if (!session) {
-			this._workspacePicker.showPicker();
-			return;
+			const folderUri = this._getContextFolderUri();
+			if (!folderUri) {
+				this._workspacePicker.showPicker();
+				return;
+			}
+			if (!this._workspacePicker.selectedFolderUri) {
+				this._workspacePicker.setSelectedWorkspace(folderUri, { fireEvent: false, providerId: LOCAL_AGENT_HOST_PROVIDER_ID });
+			}
+			session = this._createNewSession(folderUri, this._newChatInput.sessionTypePicker.selectedPick);
+			if (!session) {
+				this._workspacePicker.showPicker();
+				return;
+			}
 		}
 
 		// Capture the composer's workspace/session-type selection before the
