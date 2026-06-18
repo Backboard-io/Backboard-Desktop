@@ -22,6 +22,7 @@ import { CommandsRegistry, ICommandService } from '../../../../../../platform/co
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { IContextKey, IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../../../../../platform/contextview/browser/contextView.js';
+import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../../../platform/instantiation/common/serviceCollection.js';
@@ -40,6 +41,7 @@ import { Memento } from '../../../../../common/memento.js';
 import { SIDE_BAR_FOREGROUND } from '../../../../../common/theme.js';
 import { IViewDescriptorService, ViewContainerLocation } from '../../../../../common/views.js';
 import { ILifecycleService, StartupKind } from '../../../../../services/lifecycle/common/lifecycle.js';
+import { IPathService } from '../../../../../services/path/common/pathService.js';
 import { IChatViewTitleActionContext } from '../../../common/actions/chatActions.js';
 import { IChatAgentService } from '../../../common/participants/chatAgents.js';
 import { ChatContextKeys } from '../../../common/actions/chatContextKeys.js';
@@ -79,6 +81,7 @@ import { IAgentTitleBarStatusService } from '../../agentSessions/experiments/age
 import { IVoicePlaybackService } from '../../../common/voicePlaybackService.js';
 import { VoiceOnboardingCompletedClassification, VoiceOnboardingCompletedEvent } from '../../voiceClient/voiceTelemetry.js';
 import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
+import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, isBackboardProduct } from '../../../common/backboardAuth.js';
 
 interface IChatViewPaneState extends Partial<IChatModelInputState> {
 	/**
@@ -101,6 +104,8 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 	private readonly viewState: IChatViewPaneState;
 
 	private viewPaneContainer: HTMLElement | undefined;
+	private chatControlsContainer: HTMLElement | undefined;
+	private chatAuthGateOverlay: HTMLElement | undefined;
 	private readonly chatViewLocationContext: IContextKey<ViewContainerLocation>;
 
 	private lastDimensions: { height: number; width: number } | undefined;
@@ -147,6 +152,8 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		@IAgentTitleBarStatusService private readonly agentTitleBarStatusService: IAgentTitleBarStatusService,
 		@IVoicePlaybackService private readonly voicePlaybackService: IVoicePlaybackService,
 		@IWorkbenchEnvironmentService private readonly workbenchEnvironmentService: IWorkbenchEnvironmentService,
+		@IFileService private readonly fileService: IFileService,
+		@IPathService private readonly pathService: IPathService,
 	) {
 		super(options, keybindingService2, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -276,6 +283,12 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		this._register(Event.filter(this.configurationService.onDidChangeConfiguration, e => {
 			return e.affectsConfiguration(LayoutSettings.ACTIVITY_BAR_LOCATION);
 		})(() => this.updateViewPaneClasses(true)));
+
+		this._register(this.contextKeyService.onDidChangeContext(e => {
+			if (e.affectsSome(BackboardAuthGateContextKeys)) {
+				this.updateBackboardChatAuthGate();
+			}
+		}));
 	}
 
 	private onDidChangeAgents(): void {
@@ -723,6 +736,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 
 	private createChatControl(parent: HTMLElement): ChatWidget {
 		const chatControlsContainer = append(parent, $('.chat-controls-container'));
+		this.chatControlsContainer = chatControlsContainer;
 
 		const locationBasedColors = this.getLocationBasedColors();
 
@@ -764,12 +778,77 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 				resultEditorBackground: editorBackground,
 			}));
 		this._widget.render(chatControlsContainer);
+		this.createBackboardChatAuthGate(chatControlsContainer);
+		this.updateBackboardChatAuthGate();
+		this.refreshBackboardChatAuthGateFromConfig().catch(error => {
+			this.logService.error(`[Backboard] Failed to refresh chat auth gate: ${error instanceof Error ? error.message : String(error)}`);
+		});
 
 		const updateWidgetVisibility = (reader?: IReader) => this._widget.setVisible(this.isBodyVisible() && !this.welcomeController?.isShowingWelcome.read(reader));
 		this._register(this.onDidChangeBodyVisibility(() => updateWidgetVisibility()));
 		this._register(autorun(reader => updateWidgetVisibility(reader)));
 
 		return this._widget;
+	}
+
+	private isBackboardAuthRequired(): boolean {
+		return this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.enabled.key) === true
+			&& this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true;
+	}
+
+	private createBackboardChatAuthGate(parent: HTMLElement): void {
+		if (this.chatAuthGateOverlay) {
+			return;
+		}
+
+		const overlay = append(parent, $('.backboard-auth-gate-overlay.backboard-auth-gate-chat'));
+		overlay.setAttribute('role', 'dialog');
+		overlay.setAttribute('aria-label', localize('backboard.auth.chat.aria', "Sign in to Backboard"));
+
+		const topButton = append(overlay, $<HTMLButtonElement>('button.backboard-auth-gate-top-button'));
+		topButton.type = 'button';
+		topButton.textContent = localize('backboard.auth.signIn', "Sign in");
+		this._register(addDisposableListener(topButton, EventType.CLICK, () => {
+			void this.commandService.executeCommand('backboard.signIn');
+		}));
+
+		const card = append(overlay, $('.backboard-auth-gate-card'));
+		const title = append(card, $('h3.backboard-auth-gate-title'));
+		title.textContent = localize('backboard.auth.chat.title', "Sign in to Backboard");
+
+		const description = append(card, $('p.backboard-auth-gate-description'));
+		description.textContent = localize('backboard.auth.chat.description', "To use Backboard Chat, sign in with single sign-on.");
+
+		const button = append(card, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
+		button.type = 'button';
+		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
+		this._register(addDisposableListener(button, EventType.CLICK, () => {
+			void this.commandService.executeCommand('backboard.signIn');
+		}));
+
+		this.chatAuthGateOverlay = overlay;
+	}
+
+	private updateBackboardChatAuthGate(): void {
+		const gated = this.isBackboardAuthRequired();
+		this.chatControlsContainer?.classList.toggle('backboard-auth-gate-active', gated);
+		if (this.chatAuthGateOverlay) {
+			setVisibility(gated, this.chatAuthGateOverlay);
+		}
+	}
+
+	private async refreshBackboardChatAuthGateFromConfig(): Promise<void> {
+		if (!isBackboardProduct()) {
+			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(false);
+			BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(true);
+			this.updateBackboardChatAuthGate();
+			return;
+		}
+
+		BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
+		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
+		BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(signedIn);
+		this.updateBackboardChatAuthGate();
 	}
 
 	private createChatTitleControl(parent: HTMLElement): void {

@@ -43,6 +43,10 @@ import { IMouseEvent } from '../../../../../base/browser/mouseEvent.js';
 import { IChatWidget } from '../chat.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
+import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, isBackboardProduct } from '../../common/backboardAuth.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
+import { IPathService } from '../../../../services/path/common/pathService.js';
+import { ILogService } from '../../../../../platform/log/common/log.js';
 
 export interface IAgentSessionsControlOptions {
 	readonly overrideStyles: IStyleOverride<IListStyles>;
@@ -81,6 +85,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 	private sessionsContainer: HTMLElement | undefined;
 	get element(): HTMLElement | undefined { return this.sessionsContainer; }
+	private backboardAuthGateOverlay: HTMLElement | undefined;
 
 	private emptyFilterMessage: HTMLElement | undefined;
 
@@ -119,6 +124,9 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		@IEditorService private readonly editorService: IEditorService,
 		@IStorageService private readonly storageService: IStorageService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
+		@IFileService private readonly fileService: IFileService,
+		@IPathService private readonly pathService: IPathService,
+		@ILogService private readonly logService: ILogService,
 	) {
 		super();
 
@@ -135,6 +143,11 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 	private registerListeners(): void {
 		this._register(this.editorService.onDidActiveEditorChange(() => this.revealAndFocusActiveEditorSession()));
+		this._register(this.contextKeyService.onDidChangeContext(e => {
+			if (e.affectsSome(BackboardAuthGateContextKeys)) {
+				this.updateBackboardAuthGate();
+			}
+		}));
 	}
 
 	private revealAndFocusActiveEditorSession(): void {
@@ -167,6 +180,64 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 		this.createEmptyFilterMessage(this.sessionsContainer);
 		this.createList(this.sessionsContainer);
+		this.createBackboardAuthGate(this.sessionsContainer);
+		this.updateBackboardAuthGate();
+		this.refreshBackboardAuthGateFromConfig().catch(error => {
+			this.logService.error(`[Backboard] Failed to refresh agents auth gate: ${error instanceof Error ? error.message : String(error)}`);
+		});
+	}
+
+	private isBackboardAuthRequired(): boolean {
+		return this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.enabled.key) === true
+			&& this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true;
+	}
+
+	private createBackboardAuthGate(parent: HTMLElement): void {
+		if (this.backboardAuthGateOverlay) {
+			return;
+		}
+
+		const overlay = append(parent, $('.backboard-auth-gate-overlay.backboard-auth-gate-agents'));
+		overlay.setAttribute('role', 'dialog');
+		overlay.setAttribute('aria-label', localize('backboard.auth.agents.aria', "Sign in to Backboard"));
+
+		const card = append(overlay, $('.backboard-auth-gate-card'));
+		const title = append(card, $('h3.backboard-auth-gate-title'));
+		title.textContent = localize('backboard.auth.agents.title', "Sign in to Backboard");
+
+		const description = append(card, $('p.backboard-auth-gate-description'));
+		description.textContent = localize('backboard.auth.agents.description', "To use the Agents page, sign in to Backboard.");
+
+		const button = append(card, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
+		button.type = 'button';
+		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
+		this._register(addDisposableListener(button, EventType.CLICK, () => {
+			void this.commandService.executeCommand('backboard.signIn');
+		}));
+
+		this.backboardAuthGateOverlay = overlay;
+	}
+
+	private updateBackboardAuthGate(): void {
+		const gated = this.isBackboardAuthRequired();
+		this.sessionsContainer?.classList.toggle('backboard-auth-gate-active', gated);
+		if (this.backboardAuthGateOverlay) {
+			setVisibility(gated, this.backboardAuthGateOverlay);
+		}
+	}
+
+	private async refreshBackboardAuthGateFromConfig(): Promise<void> {
+		if (!isBackboardProduct()) {
+			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(false);
+			BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(true);
+			this.updateBackboardAuthGate();
+			return;
+		}
+
+		BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
+		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
+		BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(signedIn);
+		this.updateBackboardAuthGate();
 	}
 
 	private createEmptyFilterMessage(container: HTMLElement): void {
@@ -619,6 +690,11 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 	}
 
 	private async openAgentSession(e: IOpenEvent<AgentSessionListItem | undefined>): Promise<void> {
+		if (this.isBackboardAuthRequired()) {
+			await this.commandService.executeCommand('backboard.signIn');
+			return;
+		}
+
 		const element = e.element;
 		if (!element || isAgentSessionSection(element)) {
 			return; // Section headers are not openable

@@ -4,14 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { VSBuffer } from '../../../../../base/common/buffer.js';
+import { Codicon } from '../../../../../base/common/codicons.js';
 import { dirname } from '../../../../../base/common/resources.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../../nls.js';
-import { Action2, registerAction2 } from '../../../../../platform/actions/common/actions.js';
+import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
-import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
@@ -21,6 +22,7 @@ import product from '../../../../../platform/product/common/product.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { ChatEntitlementContextKeys, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
+import { BackboardAuthContextKeys } from '../../common/backboardAuth.js';
 
 const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
 const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
@@ -110,6 +112,20 @@ export function registerBackboardSsoActions(): void {
 			await accessor.get(IInstantiationService).createInstance(BackboardSsoFlow).completeCallbackFromClipboard();
 		}
 	});
+
+	MenuRegistry.appendMenuItem(MenuId.ChatTitleBarMenu, {
+		command: {
+			id: 'backboard.signIn',
+			title: localize2('backboard.signIn.short', "Sign in"),
+			icon: Codicon.account,
+		},
+		group: 'a_first',
+		order: 0,
+		when: ContextKeyExpr.and(
+			BackboardAuthContextKeys.enabled,
+			BackboardAuthContextKeys.signedIn.negate()
+		),
+	});
 }
 
 export class BackboardCredentialsContribution implements IWorkbenchContribution {
@@ -124,7 +140,12 @@ export class BackboardCredentialsContribution implements IWorkbenchContribution 
 		@ILogService private readonly logService: ILogService,
 	) {
 		if (isBackboardProduct()) {
+			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
+			BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(false);
 			this.checkBackboardCredentials().catch(error => this.logService.error(`[Backboard] Failed to check credentials: ${error instanceof Error ? error.message : String(error)}`));
+		} else {
+			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(false);
+			BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(true);
 		}
 	}
 
@@ -452,6 +473,8 @@ function backboardConfigAccessToken(config: BackboardConfigJson): string | undef
 
 function markBackboardChatReady(chatEntitlementService: IChatEntitlementService, contextKeyService: IContextKeyService): void {
 	chatEntitlementService.markSetupCompleted();
+	BackboardAuthContextKeys.enabled.bindTo(contextKeyService).set(true);
+	BackboardAuthContextKeys.signedIn.bindTo(contextKeyService).set(true);
 	ChatEntitlementContextKeys.Setup.completed.bindTo(contextKeyService).set(true);
 	ChatEntitlementContextKeys.Setup.installed.bindTo(contextKeyService).set(true);
 	ChatEntitlementContextKeys.Setup.hidden.bindTo(contextKeyService).set(false);

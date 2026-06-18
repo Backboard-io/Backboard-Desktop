@@ -62,6 +62,10 @@ const treeSitterGrammars: ITreeSitterGrammar[] = [
 const REPO_ROOT = path.join(__dirname, '..');
 
 async function removeCopilotCLIShim() {
+	if (process.env.BACKBOARD_KEEP_COPILOT_SHIM_MARKER === '1') {
+		return;
+	}
+
 	const shimsPath = path.join(REPO_ROOT, 'node_modules', '@github', 'copilot', 'shims.txt');
 	await fs.promises.rm(shimsPath, { force: true }).catch(() => { /* ignore */ });
 }

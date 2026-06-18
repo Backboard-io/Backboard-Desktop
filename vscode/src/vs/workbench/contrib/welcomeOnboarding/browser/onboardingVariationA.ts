@@ -158,6 +158,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 	private previouslyFocusedElement: HTMLElement | undefined;
 	private _isShowing = false;
+	private postOnboardingSignInPromptShown = false;
 	private selectedThemeId = 'dark-2026';
 	private selectedExperience = OnboardingExperience.Developer;
 	private hasConfirmedBackboardSignIn = false;
@@ -323,6 +324,13 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			handled = true;
 			this._removeFromDOM();
 			this._onDidDismiss.fire();
+			this._promptBackboardSsoAfterOnboarding().catch(error => {
+				this.notificationService.notify({
+					severity: Severity.Error,
+					message: localize('onboarding.backboard.ssoPromptFailed', "Could not check Backboard sign-in state."),
+					source: error instanceof Error ? error.message : undefined,
+				});
+			});
 		};
 
 		this.overlay.addEventListener('transitionend', onTransitionEnd, { once: true });
@@ -340,6 +348,60 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		};
 
 		this.storageService.store(ONBOARDING_STORAGE_KEY, JSON.stringify(state), StorageScope.APPLICATION, StorageTarget.USER);
+	}
+
+	private async _promptBackboardSsoAfterOnboarding(): Promise<void> {
+		if (this.postOnboardingSignInPromptShown || !this._isBackboardProduct()) {
+			return;
+		}
+
+		if (await this._hasBackboardCredentials()) {
+			return;
+		}
+
+		this.postOnboardingSignInPromptShown = true;
+		const handle = this.notificationService.prompt(
+			Severity.Info,
+			localize('onboarding.backboard.ssoPrompt', "Sign in to Backboard with single sign-on to use chat and agents."),
+			[
+				{
+					label: localize('onboarding.backboard.ssoPrompt.signIn', "Sign in to Backboard"),
+					run: () => {
+						handle.close();
+						void this.commandService.executeCommand('backboard.signIn');
+					}
+				},
+				{
+					label: localize('onboarding.backboard.ssoPrompt.later', "Later"),
+					run: () => handle.close()
+				}
+			],
+			{ sticky: true }
+		);
+	}
+
+	private async _hasBackboardCredentials(): Promise<boolean> {
+		const home = this.pathService.userHome({ preferLocal: true });
+		const configResource = URI.joinPath(home, '.backboard_ide', 'config.json');
+		const config = await this._readBackboardConfigJson(configResource);
+		const apiKey = typeof config.api_key === 'string' ? config.api_key.trim() : '';
+		if (apiKey) {
+			return true;
+		}
+
+		const configuredEnv = this.configurationService.getValue<string>('backboard.env');
+		const env = normalizeBackboardEnv(typeof config.env === 'string' ? config.env : configuredEnv);
+		const envKey = getBackboardEnvKeys(config)[env]?.trim();
+		if (envKey) {
+			return true;
+		}
+
+		const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
+		return typeof oauth?.access_token === 'string' && Boolean(oauth.access_token.trim());
+	}
+
+	private _isBackboardProduct(): boolean {
+		return product.defaultChatAgent?.provider?.default?.id === 'backboard';
 	}
 
 	private _nextStep(): void {

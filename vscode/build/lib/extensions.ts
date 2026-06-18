@@ -467,12 +467,17 @@ export function packageCopilotExtensionStream(disableMangle: boolean): Stream {
 		return es.readArray([]);
 	}
 
+	const shimMarkerPath = path.join(extensionPath, 'node_modules', '@github', 'copilot', 'shims.txt');
+	fs.mkdirSync(path.dirname(shimMarkerPath), { recursive: true });
+	fs.writeFileSync(shimMarkerPath, 'Shims created successfully');
+
 	const localExtensionsStream = minifyExtensionResources(
 		fromLocal(extensionPath, false, disableMangle)
 			.pipe(rename(p => p.dirname = `extensions/copilot/${p.dirname}`))
 	);
 
-	const productionDependencies = getProductionDependencies('extensions/copilot');
+	const productionDependencies = getProductionDependencies('extensions/copilot')
+		.filter(d => path.basename(d) !== 'shims.txt');
 	const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat();
 
 	return es.merge(
