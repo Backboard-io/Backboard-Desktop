@@ -92,7 +92,7 @@ blockquote {
 }
 
 code {
-	font-family: "BB Mono", monospace;
+	font-family: var(--vscode-editor-font-family);
 }
 
 pre {

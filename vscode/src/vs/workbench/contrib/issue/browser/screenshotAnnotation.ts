@@ -37,10 +37,10 @@ const COLORS = [
 ];
 
 const LIGHT_SWATCH_COLORS = new Set(['#34c759', '#ffcc00', '#ffffff', 'transparent']);
-const BB_MONO_FONT_FAMILY = '"BB Mono", monospace';
 
 const FONT_FAMILIES = [
-	{ label: 'BB Mono', value: BB_MONO_FONT_FAMILY },
+	{ label: 'Arial', value: 'Arial, sans-serif' },
+	{ label: 'Monospace', value: 'monospace' },
 ];
 
 const DEFAULT_TEXT_BOX_WIDTH = 240;
@@ -1829,7 +1829,7 @@ export class ScreenshotAnnotationEditor {
 			case AnnotationTool.Text:
 				if (action.text && action.textPos) {
 					const fontSize = (action.fontSize || 16) * this.scale;
-					const fontFamily = action.fontFamily || BB_MONO_FONT_FAMILY;
+					const fontFamily = action.fontFamily || FONT_FAMILIES[0].value;
 					const width = (action.textWidth ?? DEFAULT_TEXT_BOX_WIDTH) * this.scale;
 					this.ctx.font = `${fontSize}px ${fontFamily}`;
 					this.ctx.textBaseline = 'alphabetic';
@@ -2254,7 +2254,7 @@ export class ScreenshotAnnotationEditor {
 			case AnnotationTool.Text:
 				if (action.text && action.textPos) {
 					const fontSize = action.fontSize || 16;
-					const fontFamily = action.fontFamily || BB_MONO_FONT_FAMILY;
+					const fontFamily = action.fontFamily || FONT_FAMILIES[0].value;
 					const textWidth = action.textWidth ?? DEFAULT_TEXT_BOX_WIDTH;
 					const layout = this.measureWrappedText(action.text, textWidth, fontSize, fontFamily);
 					return {

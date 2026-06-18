@@ -1365,16 +1365,6 @@ class EditorStringOption<K extends EditorOption> extends SimpleEditorOption<K, s
 	}
 }
 
-class EditorFontFamilyOption extends EditorStringOption<EditorOption.fontFamily> {
-	public override validate(_input: unknown): string {
-		return EDITOR_FONT_DEFAULTS.fontFamily;
-	}
-
-	public override compute(_env: IEnvironmentalOptions, _options: IComputedEditorOptions, _value: string): string {
-		return EDITOR_FONT_DEFAULTS.fontFamily;
-	}
-}
-
 /**
  * @internal
  */
@@ -2015,7 +2005,7 @@ class EditorFontInfo extends ComputedEditorOption<EditorOption.fontInfo, FontInf
 	constructor() {
 		super(EditorOption.fontInfo, new FontInfo({
 			pixelRatio: 0,
-			fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
+			fontFamily: '',
 			fontWeight: '',
 			fontSize: 0,
 			fontFeatureSettings: '',
@@ -3249,7 +3239,7 @@ export type EditorInlayHintsOptions = Readonly<Required<IEditorInlayHintsOptions
 class EditorInlayHints extends BaseEditorOption<EditorOption.inlayHints, IEditorInlayHintsOptions, EditorInlayHintsOptions> {
 
 	constructor() {
-		const defaults: EditorInlayHintsOptions = { enabled: 'on', fontSize: 0, fontFamily: EDITOR_FONT_DEFAULTS.fontFamily, padding: false, maximumLength: 43 };
+		const defaults: EditorInlayHintsOptions = { enabled: 'on', fontSize: 0, fontFamily: '', padding: false, maximumLength: 43 };
 		super(
 			EditorOption.inlayHints, 'inlayHints', defaults,
 			{
@@ -3300,7 +3290,7 @@ class EditorInlayHints extends BaseEditorOption<EditorOption.inlayHints, IEditor
 		return {
 			enabled: stringSet<'on' | 'off' | 'offUnlessPressed' | 'onUnlessPressed'>(input.enabled, this.defaultValue.enabled, ['on', 'off', 'offUnlessPressed', 'onUnlessPressed']),
 			fontSize: EditorIntOption.clampedInt(input.fontSize, this.defaultValue.fontSize, 0, 100),
-			fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
+			fontFamily: EditorStringOption.string(input.fontFamily, this.defaultValue.fontFamily),
 			padding: boolean(input.padding, this.defaultValue.padding),
 			maximumLength: EditorIntOption.clampedInt(input.maximumLength, this.defaultValue.maximumLength, 0, Number.MAX_SAFE_INTEGER),
 		};
@@ -4551,7 +4541,7 @@ class InlineEditorSuggest extends BaseEditorOption<EditorOption.inlineSuggest, I
 			showToolbar: 'onHover',
 			suppressSuggestions: false,
 			keepOnBlur: false,
-			fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
+			fontFamily: 'default',
 			syntaxHighlightingEnabled: true,
 			minShowDelay: 0,
 			suppressInSnippetMode: true,
@@ -4698,7 +4688,7 @@ class InlineEditorSuggest extends BaseEditorOption<EditorOption.inlineSuggest, I
 			showToolbar: stringSet(input.showToolbar, this.defaultValue.showToolbar, ['always', 'onHover', 'never']),
 			suppressSuggestions: boolean(input.suppressSuggestions, this.defaultValue.suppressSuggestions),
 			keepOnBlur: boolean(input.keepOnBlur, this.defaultValue.keepOnBlur),
-			fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
+			fontFamily: EditorStringOption.string(input.fontFamily, this.defaultValue.fontFamily),
 			syntaxHighlightingEnabled: boolean(input.syntaxHighlightingEnabled, this.defaultValue.syntaxHighlightingEnabled),
 			minShowDelay: EditorIntOption.clampedInt(input.minShowDelay, 0, 0, 10000),
 			suppressInSnippetMode: boolean(input.suppressInSnippetMode, this.defaultValue.suppressInSnippetMode),
@@ -6343,7 +6333,7 @@ export const EditorOptions = {
 		EditorOption.unfoldOnClickAfterEndOfLine, 'unfoldOnClickAfterEndOfLine', false,
 		{ description: nls.localize('unfoldOnClickAfterEndOfLine', "Controls whether clicking on the empty content after a folded line will unfold the line.") }
 	)),
-	fontFamily: register(new EditorFontFamilyOption(
+	fontFamily: register(new EditorStringOption(
 		EditorOption.fontFamily, 'fontFamily', EDITOR_FONT_DEFAULTS.fontFamily,
 		{ description: nls.localize('fontFamily', "Controls the font family.") }
 	)),

@@ -314,24 +314,30 @@ const SHADOW_ROOT_CSS = /* css */ `
 	}
 
 	:host {
-		font-family: "BB Mono", monospace;
+		font-family: system-ui, "Ubuntu", "Droid Sans", sans-serif;
 	}
 
 	:host-context(.mac),
 	:host-context(.mac:lang(zh-Hans)),
 	:host-context(.mac:lang(zh-Hant)),
 	:host-context(.mac:lang(ja)),
-	:host-context(.mac:lang(ko)),
+	:host-context(.mac:lang(ko)) {
+		font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+	}
+
 	:host-context(.windows),
 	:host-context(.windows:lang(zh-Hans)),
 	:host-context(.windows:lang(zh-Hant)),
 	:host-context(.windows:lang(ja)),
-	:host-context(.windows:lang(ko)),
+	:host-context(.windows:lang(ko)) {
+		font-family: "Segoe WPC", "Segoe UI", sans-serif;
+	}
+
 	:host-context(.linux),
 	:host-context(.linux:lang(zh-Hans)),
 	:host-context(.linux:lang(zh-Hant)),
 	:host-context(.linux:lang(ja)),
 	:host-context(.linux:lang(ko)) {
-		font-family: "BB Mono", monospace;
+		font-family: system-ui, "Ubuntu", "Droid Sans", sans-serif;
 	}
 `;

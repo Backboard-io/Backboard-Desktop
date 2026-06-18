@@ -7,11 +7,11 @@ import '../media/openInVSCode.css';
 import { $, addDisposableListener, append, EventHelper, EventType } from '../../../base/browser/dom.js';
 import { getDefaultHoverDelegate } from '../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
-import { IAction } from '../../../base/common/actions.js';
+import { IAction, toAction } from '../../../base/common/actions.js';
 import { localize } from '../../../nls.js';
 import { IHoverService } from '../../../platform/hover/browser/hover.js';
 import { IKeybindingService } from '../../../platform/keybinding/common/keybinding.js';
-import { IProductService } from '../../../platform/product/common/productService.js';
+import { IContextMenuService } from '../../../platform/contextview/browser/contextView.js';
 
 /**
  * Renders a stable Editor / Agents titlebar switcher in the sessions workbench.
@@ -22,9 +22,9 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		action: IAction,
 		options: IBaseActionViewItemOptions | undefined,
 		private readonly keybindingCommandId: string,
-		@IProductService private readonly productService: IProductService,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
+		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 	) {
 		super(undefined, action, options);
 	}
@@ -33,40 +33,48 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		super.render(container);
 
 		container.classList.add('open-in-vscode-titlebar-widget');
-		container.setAttribute('role', 'group');
 
-		// Set quality attribute for distro icon selection. Only set when quality is
-		// known so that the CSS fallback icon is used in dev builds.
-		const quality = this.productService.quality;
 		const hoverText = this.keybindingService.appendKeybinding(localize('openInVSCodeHover', "Switch to Editor"), this.keybindingCommandId);
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 
-		const editorButton = append(container, $('button.open-in-vscode-titlebar-widget-option.editor'));
-		if (quality) {
-			editorButton.setAttribute('data-product-quality', quality);
-		}
-		const icon = append(editorButton, $('span.open-in-vscode-titlebar-widget-icon'));
-		icon.setAttribute('aria-hidden', 'true');
-		append(editorButton, $('span.open-in-vscode-titlebar-widget-label')).textContent = localize('openInVSCodeSwitcher.editor', "Editor");
+		const triggerButton = append(container, $('button.open-in-vscode-titlebar-widget-trigger'));
+		triggerButton.setAttribute('aria-haspopup', 'menu');
+		triggerButton.setAttribute('aria-expanded', 'false');
+		append(triggerButton, $('span.open-in-vscode-titlebar-widget-label')).textContent = localize('openInVSCodeSwitcher.agents', "Agents");
+		const chevron = append(triggerButton, $('span.open-in-vscode-titlebar-widget-chevron.codicon.codicon-chevron-down'));
+		chevron.setAttribute('aria-hidden', 'true');
 
-		const agentsButton = append(container, $('button.open-in-vscode-titlebar-widget-option.agents.checked'));
-		agentsButton.textContent = localize('openInVSCodeSwitcher.agents', "Agents");
-		agentsButton.setAttribute('aria-pressed', 'true');
-		editorButton.setAttribute('aria-pressed', 'false');
+		const showMenu = () => {
+			triggerButton.setAttribute('aria-expanded', 'true');
+			this.contextMenuService.showContextMenu({
+				getAnchor: () => triggerButton,
+				getActions: () => [
+					toAction({
+						id: 'agents.action.mode.editor',
+						label: localize('openInVSCodeSwitcher.editor', "Editor"),
+						run: () => this.action.run(),
+					}),
+					toAction({
+						id: 'agents.action.mode.agents',
+						label: localize('openInVSCodeSwitcher.agents', "Agents"),
+						checked: true,
+						run: () => undefined,
+					}),
+				],
+				onHide: () => triggerButton.setAttribute('aria-expanded', 'false'),
+			});
+		};
 
-		this._register(addDisposableListener(editorButton, EventType.CLICK, event => {
+		this._register(addDisposableListener(triggerButton, EventType.CLICK, event => {
 			EventHelper.stop(event, true);
-			this.action.run();
+			showMenu();
 		}));
-		this._register(addDisposableListener(editorButton, EventType.KEY_DOWN, event => {
-			if (event.key === 'Enter' || event.key === ' ') {
+		this._register(addDisposableListener(triggerButton, EventType.KEY_DOWN, event => {
+			if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
 				EventHelper.stop(event, true);
-				this.action.run();
+				showMenu();
 			}
-		}));
-		this._register(addDisposableListener(agentsButton, EventType.CLICK, event => {
-			EventHelper.stop(event, true);
 		}));
 	}
 }

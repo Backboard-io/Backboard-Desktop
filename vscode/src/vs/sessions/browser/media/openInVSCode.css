@@ -7,7 +7,7 @@
 	display: inline-flex;
 	align-items: center;
 	height: 24px;
-	padding: 2px;
+	padding: 0;
 	margin: 0 4px 0 2px;
 	border: 1px solid var(--vscode-commandCenter-border, transparent);
 	border-radius: 6px;
@@ -19,55 +19,31 @@
 	touch-action: manipulation;
 }
 
-.monaco-workbench .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-option {
+.monaco-workbench .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-trigger {
 	all: unset;
 	box-sizing: border-box;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	height: 18px;
-	padding: 0 7px;
-	border-radius: 4px;
+	height: 100%;
+	padding: 0 9px 0 11px;
+	border-radius: 5px;
 	color: var(--vscode-commandCenter-foreground, var(--vscode-titleBar-activeForeground));
 	cursor: pointer;
 	font: inherit;
-	line-height: 18px;
+	line-height: 22px;
 }
 
-.monaco-workbench .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-option:hover {
+.monaco-workbench .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-trigger:hover {
 	background-color: var(--vscode-toolbar-hoverBackground);
 }
 
-.monaco-workbench .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-option:focus-visible {
+.monaco-workbench .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-trigger:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);
 	outline-offset: -1px;
 }
 
-.monaco-workbench .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-option.checked {
-	background-color: var(--vscode-commandCenter-activeBackground, var(--vscode-toolbar-activeBackground));
-	color: var(--vscode-commandCenter-activeForeground, var(--vscode-titleBar-activeForeground));
-}
-
-.monaco-workbench .open-in-vscode-titlebar-widget-icon {
-	width: 14px;
-	height: 14px;
-	flex: 0 0 auto;
-	margin-right: 4px;
-	background-image: url('./vscode-icon.svg');
-	background-repeat: no-repeat;
-	background-position: center center;
-	background-size: contain;
-	filter: grayscale(1);
-}
-
-.monaco-workbench .open-in-vscode-titlebar-widget-option[data-product-quality="stable"] > .open-in-vscode-titlebar-widget-icon,
-.monaco-workbench .open-in-vscode-titlebar-widget-option[data-product-quality="insider"] > .open-in-vscode-titlebar-widget-icon,
-.monaco-workbench .open-in-vscode-titlebar-widget-option[data-product-quality="exploration"] > .open-in-vscode-titlebar-widget-icon {
-	background-image: url('../../../workbench/browser/media/code-icon.svg');
-}
-
-.monaco-workbench .open-in-vscode-titlebar-widget-option.checked .open-in-vscode-titlebar-widget-icon,
-.monaco-workbench .open-in-vscode-titlebar-widget-option:hover .open-in-vscode-titlebar-widget-icon,
-.monaco-workbench .open-in-vscode-titlebar-widget-option:focus-visible .open-in-vscode-titlebar-widget-icon {
-	filter: none;
+.monaco-workbench .open-in-vscode-titlebar-widget-chevron {
+	margin-left: 6px;
+	font-size: 13px;
 }

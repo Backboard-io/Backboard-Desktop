@@ -2993,6 +2993,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						return new HiddenActionViewItem(action);
 					}
 				} else if (action.id === OpenModePickerAction.ID && action instanceof MenuItemAction) {
+					if (this.options.isSessionsWindow) {
+						return new HiddenActionViewItem(action);
+					}
 					const sessionType = this.getCurrentSessionType();
 					if (sessionType && isAgentHostTarget(sessionType)) {
 						return new HiddenActionViewItem(action);

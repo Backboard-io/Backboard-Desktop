@@ -720,7 +720,7 @@ class ElementPicker {
 		style.textContent = `
 			:host {
 				all: initial;
-					font-family: var(--pick-font, "BB Mono", monospace);
+				font-family: var(--pick-font, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
 				pointer-events: none !important;
 			}
 			.highlight {
@@ -770,7 +770,7 @@ class ElementPicker {
 		host.style.setProperty('--vscode-focusBorder', theme?.focusBorder ?? null);
 		host.style.setProperty('--vscode-button-background', theme?.buttonBackground ?? null);
 		host.style.setProperty('--vscode-button-foreground', theme?.buttonForeground ?? null);
-		host.style.setProperty('--pick-font', '"BB Mono", monospace');
+		host.style.setProperty('--pick-font', theme?.font ?? null);
 	}
 }
 

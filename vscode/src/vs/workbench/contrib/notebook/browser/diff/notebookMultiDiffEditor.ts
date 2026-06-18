@@ -164,7 +164,7 @@ export class NotebookMultiTextDiffEditor extends EditorPane {
 		this.modelSpecificResources.clear();
 	}
 	_generateFontFamily(): string {
-		return `"BB Mono", monospace`;
+		return this._notebookOptions.computeDiffWebviewOptions().markupFontFamily;
 	}
 	override setOptions(options: IMultiDiffEditorOptions | undefined): void {
 		super.setOptions(options);

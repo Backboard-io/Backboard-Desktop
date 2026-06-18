@@ -10,7 +10,7 @@ import { ActionsOrientation } from '../../../../base/browser/ui/actionbar/action
 import { Part } from '../../part.js';
 import { ActivityBarPosition, IWorkbenchLayoutService, LayoutSettings, Parts, Position } from '../../../services/layout/browser/layoutService.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
-import { DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { ToggleSidebarPositionAction, ToggleSidebarVisibilityAction } from '../../actions/layoutActions.js';
 import { IThemeService, IColorTheme, registerThemingParticipant } from '../../../../platform/theme/common/themeService.js';
 import { ACTIVITY_BAR_BACKGROUND, ACTIVITY_BAR_BORDER, ACTIVITY_BAR_FOREGROUND, ACTIVITY_BAR_ACTIVE_BORDER, ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND, ACTIVITY_BAR_INACTIVE_FOREGROUND, ACTIVITY_BAR_ACTIVE_BACKGROUND, ACTIVITY_BAR_DRAG_AND_DROP_BORDER, ACTIVITY_BAR_ACTIVE_FOCUS_BORDER } from '../../../common/theme.js';
@@ -39,6 +39,9 @@ import { IExtensionService } from '../../../services/extensions/common/extension
 import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { SwitchCompositeViewAction } from '../compositeBarActions.js';
+import { IStatusbarEntry, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 
 export class ActivitybarPart extends Part {
 
@@ -130,7 +133,7 @@ export class ActivitybarPart extends Part {
 			activityHoverOptions: {
 				position: () => this.layoutService.getSideBarPosition() === Position.LEFT ? HoverPosition.RIGHT : HoverPosition.LEFT,
 			},
-			excludedViewContainerIds: ['workbench.view.debug', 'copilot-chat'],
+			excludedViewContainerIds: ['workbench.view.explorer', 'workbench.view.search', 'workbench.view.scm', 'workbench.view.extensions', 'workbench.view.debug', 'copilot-chat'],
 			preventLoopNavigation: true,
 			recomputeSizes: false,
 			fillExtraContextMenuActions: (actions, e?: MouseEvent | GestureEvent) => { },
@@ -448,6 +451,38 @@ export class ActivityBarCompositeBar extends PaneCompositeBar {
 	}
 
 }
+
+class StatusbarActivityNavigationContribution extends Disposable implements IWorkbenchContribution {
+
+	static readonly ID = 'workbench.contrib.statusbarActivityNavigation';
+
+	constructor(
+		@IStatusbarService statusbarService: IStatusbarService,
+	) {
+		super();
+
+		const entries: readonly { id: string; name: string; icon: string; command: string; priority: number }[] = [
+			{ id: 'status.activity.explorer', name: localize('statusActivityExplorer', "Explorer"), icon: Codicon.folderOpened.id, command: 'workbench.view.explorer', priority: 54 },
+			{ id: 'status.activity.search', name: localize('statusActivitySearch', "Search"), icon: Codicon.searchSparkle.id, command: 'workbench.view.search', priority: 53 },
+			{ id: 'status.activity.scm', name: localize('statusActivitySourceControl', "Source Control"), icon: Codicon.gitPullRequest.id, command: 'workbench.view.scm', priority: 52 },
+			{ id: 'status.activity.extensions', name: localize('statusActivityExtensions', "Extensions"), icon: Codicon.package.id, command: 'workbench.view.extensions', priority: 51 },
+		];
+
+		for (const entry of entries) {
+			const statusbarEntry: IStatusbarEntry = {
+				name: entry.name,
+				text: `$(${entry.icon})`,
+				ariaLabel: entry.name,
+				tooltip: entry.name,
+				command: entry.command
+			};
+
+			this._register(statusbarService.addEntry(statusbarEntry, entry.id, StatusbarAlignment.LEFT, entry.priority));
+		}
+	}
+}
+
+registerWorkbenchContribution2(StatusbarActivityNavigationContribution.ID, StatusbarActivityNavigationContribution, WorkbenchPhase.BlockStartup);
 
 registerAction2(class extends Action2 {
 	constructor() {

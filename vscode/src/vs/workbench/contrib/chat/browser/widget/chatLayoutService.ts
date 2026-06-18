@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { derived, IObservable } from '../../../../../base/common/observable.js';
+import { IObservable } from '../../../../../base/common/observable.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { observableConfigValue } from '../../../../../platform/observable/common/platformObservableUtils.js';
 import { IChatLayoutService } from '../../common/widget/chatLayoutService.js';
@@ -20,7 +20,7 @@ export class ChatLayoutService extends Disposable implements IChatLayoutService 
 	constructor(@IConfigurationService configurationService: IConfigurationService) {
 		super();
 
-		this.fontFamily = derived(() => '"BB Mono", monospace');
+		this.fontFamily = observableConfigValue<string | null>('chat.fontFamily', null, configurationService);
 
 		this.fontSize = observableConfigValue<number>('chat.fontSize', FONT_SIZE, configurationService);
 	}

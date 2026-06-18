@@ -36,8 +36,8 @@ import { Menus } from '../menus.js';
  * Simplified agent sessions titlebar part.
  *
  * Three sections driven entirely by menus:
- * - **Left**: `Menus.TitleBarLeft` toolbar
- * - **Center**: `Menus.TitleBarCenterRight` toolbar (renders the Editor / Agents switcher)
+ * - **Left**: `Menus.TitleBarLeft` toolbar (renders the Editor / Agents switcher)
+ * - **Center**: `Menus.TitleBarCenterRight` toolbar
  * - **Right**: `Menus.TitleBarRight` toolbar (includes account submenu)
  *
  * No menubar, no editor actions, no layout controls, no WindowTitle dependency.
@@ -200,7 +200,7 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 			toolbarOptions: { primaryGroup: () => true },
 		}));
 
-		// Center toolbar (Editor / Agents switcher).
+		// Center toolbar.
 		const centerActionsContainer = append(this.centerContent, $('div.titlebar-actions-container.titlebar-center-actions-container'));
 		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, centerActionsContainer, Menus.TitleBarCenterRight, {
 			contextMenu: Menus.TitleBarContext,

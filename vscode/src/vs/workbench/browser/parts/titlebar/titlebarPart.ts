@@ -490,7 +490,21 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 		this.title = append(this.centerContent, $('div.window-title'));
 		this.createTitle();
 
-		// Center-Adjacent Toolbar (e.g., update indicator, Editor / Agents switcher)
+		// Left Toolbar (e.g., Editor / Agents switcher)
+		if (hasCustomTitlebar(this.configurationService, this.titleBarStyle)) {
+			const leftToolBarElement = append(this.leftContent, $('div.titlebar-left-toolbar-container'));
+			this.centerAdjacentToolBarDisposable.add(this.instantiationService.createInstance(MenuWorkbenchToolBar, leftToolBarElement, MenuId.TitleBarLeft, {
+				contextMenu: MenuId.TitleBarContext,
+				hiddenItemStrategy: HiddenItemStrategy.NoHide,
+				toolbarOptions: {
+					primaryGroup: () => true,
+				},
+				actionViewItemProvider: (action, options) => this.actionViewItemProvider(action, options) ?? createActionViewItem(this.instantiationService, action, options),
+				hoverDelegate: this.hoverDelegate
+			}));
+		}
+
+		// Center-Adjacent Toolbar (e.g., update indicator)
 		if (hasCustomTitlebar(this.configurationService, this.titleBarStyle)) {
 			const centerAdjacentToolBarElement = append(this.centerContent, $('div.center-adjacent-toolbar-container'));
 			this.centerAdjacentToolBarDisposable.add(this.instantiationService.createInstance(MenuWorkbenchToolBar, centerAdjacentToolBarElement, MenuId.TitleBarAdjacentCenter, {
@@ -607,7 +621,7 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 	private actionViewItemProvider(action: IAction, options: IBaseActionViewItemOptions): IActionViewItem | undefined {
 
 		// --- Custom view items registered via IActionViewItemService
-		for (const menuId of [MenuId.TitleBar, MenuId.TitleBarAdjacentCenter, MenuId.LayoutControlMenu]) {
+		for (const menuId of [MenuId.TitleBar, MenuId.TitleBarLeft, MenuId.TitleBarAdjacentCenter, MenuId.LayoutControlMenu]) {
 			const customViewItem = this.actionViewItemService.lookUp(menuId, action.id);
 			if (customViewItem) {
 				const result = customViewItem(action, options, this.instantiationService, getWindowId(this.element ? getWindow(this.element) : mainWindow));
@@ -902,7 +916,7 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 			this.customMenubar.value.layout(menubarDimension);
 		}
 
-		const hasCenter = this.isCommandCenterVisible || this.title.textContent !== '' || !!this.rootContainer.querySelector('.center-adjacent-toolbar-container');
+		const hasCenter = this.isCommandCenterVisible || this.title.textContent !== '';
 		this.rootContainer.classList.toggle('has-center', hasCenter);
 	}
 

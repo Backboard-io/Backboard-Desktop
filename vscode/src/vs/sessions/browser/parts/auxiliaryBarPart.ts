@@ -292,10 +292,8 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 			return;
 		}
 
-		const borderTotal = 2; // 1px border on each side
-
 		// Keep the auxiliary bar flush with adjacent parts. The CSS mirrors these
-		// zero margins; only borders are removed from the internal layout.
+		// zero margins.
 		const editorVisible = this.layoutService.isVisible(Parts.EDITOR_PART, mainWindow);
 		const marginLeft = editorVisible ? 0 : AuxiliaryBarPart.MARGIN_LEFT;
 		const paddingLeft = editorVisible ? AuxiliaryBarPart.MARGIN_LEFT : 0;
@@ -304,8 +302,8 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 			: 0;
 
 		super.layout(
-			width - marginLeft - borderTotal - paddingLeft,
-			height - AuxiliaryBarPart.MARGIN_TOP - marginBottom - borderTotal,
+			width - marginLeft - paddingLeft,
+			height - AuxiliaryBarPart.MARGIN_TOP - marginBottom,
 			top, left
 		);
 

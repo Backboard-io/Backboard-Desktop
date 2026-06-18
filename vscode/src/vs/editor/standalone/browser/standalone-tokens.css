@@ -6,8 +6,8 @@
 
 /* Default standalone editor fonts */
 .monaco-editor {
-	font-family: "BB Mono", monospace;
-	--monaco-monospace-font: "BB Mono", monospace;
+	font-family: monospace;
+	--monaco-monospace-font: monospace;
 }
 
 .monaco-menu .monaco-action-bar.vertical .action-item .action-menu-item:focus .action-label {

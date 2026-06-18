@@ -100,7 +100,7 @@ suite('Workbench - TerminalConfigurationService', () => {
 					editor: { fontFamily: 'foo' },
 					terminal: { integrated: { fontFamily: 'bar' } }
 				});
-				ok(terminalConfigurationService.getFont(getActiveWindow()).fontFamily.startsWith(EDITOR_FONT_DEFAULTS.fontFamily), 'BB Mono should be selected over terminal.integrated.fontFamily and editor.fontFamily');
+				ok(terminalConfigurationService.getFont(getActiveWindow()).fontFamily.startsWith('bar'), 'terminal.integrated.fontFamily should be selected over editor.fontFamily');
 			});
 
 		test('fontFamily (Linux Fedora)', () => {
@@ -108,7 +108,7 @@ suite('Workbench - TerminalConfigurationService', () => {
 				editor: { fontFamily: 'foo' },
 				terminal: { integrated: { fontFamily: null } }
 			}, LinuxDistro.Fedora);
-				ok(terminalConfigurationService.getFont(getActiveWindow()).fontFamily.startsWith(EDITOR_FONT_DEFAULTS.fontFamily), 'Fedora should use BB Mono when terminal.integrated.fontFamily is not set');
+				ok(terminalConfigurationService.getFont(getActiveWindow()).fontFamily.startsWith(EDITOR_FONT_DEFAULTS.fontFamily), 'Fedora should use the editor font default when terminal.integrated.fontFamily is not set');
 			});
 
 		test('fontFamily (Linux Ubuntu)', () => {
@@ -116,7 +116,7 @@ suite('Workbench - TerminalConfigurationService', () => {
 				editor: { fontFamily: 'foo' },
 				terminal: { integrated: { fontFamily: null } }
 			}, LinuxDistro.Ubuntu);
-				ok(terminalConfigurationService.getFont(getActiveWindow()).fontFamily.startsWith(EDITOR_FONT_DEFAULTS.fontFamily), 'Ubuntu should use BB Mono when terminal.integrated.fontFamily is not set');
+				ok(terminalConfigurationService.getFont(getActiveWindow()).fontFamily.startsWith(EDITOR_FONT_DEFAULTS.fontFamily), 'Ubuntu should use the editor font default when terminal.integrated.fontFamily is not set');
 			});
 
 		test('fontFamily (Linux Unknown)', () => {
@@ -124,7 +124,7 @@ suite('Workbench - TerminalConfigurationService', () => {
 				editor: { fontFamily: 'foo' },
 				terminal: { integrated: { fontFamily: null } }
 			});
-				ok(terminalConfigurationService.getFont(getActiveWindow()).fontFamily.startsWith(EDITOR_FONT_DEFAULTS.fontFamily), 'BB Mono should be used when terminal.integrated.fontFamily is not set');
+				ok(terminalConfigurationService.getFont(getActiveWindow()).fontFamily.startsWith(EDITOR_FONT_DEFAULTS.fontFamily), 'The editor font default should be used when terminal.integrated.fontFamily is not set');
 			});
 
 		test('fontSize 10', () => {
@@ -260,7 +260,7 @@ suite('Workbench - TerminalConfigurationService', () => {
 			strictEqual(terminalConfigurationService.configFontIsMonospace(), true, 'monospace is monospaced');
 		});
 
-			test('isMonospace ignores sans-serif override', () => {
+			test('isMonospace sans-serif', () => {
 				const terminalConfigurationService = createTerminalConfigationService({
 					terminal: {
 						integrated: {
@@ -268,10 +268,10 @@ suite('Workbench - TerminalConfigurationService', () => {
 						}
 					}
 				});
-				strictEqual(terminalConfigurationService.configFontIsMonospace(), true, 'BB Mono is forced instead of sans-serif');
+				strictEqual(terminalConfigurationService.configFontIsMonospace(), false, 'sans-serif is not monospaced');
 			});
 
-			test('isMonospace ignores serif override', () => {
+			test('isMonospace serif', () => {
 				const terminalConfigurationService = createTerminalConfigationService({
 					terminal: {
 						integrated: {
@@ -279,7 +279,7 @@ suite('Workbench - TerminalConfigurationService', () => {
 						}
 					}
 				});
-				strictEqual(terminalConfigurationService.configFontIsMonospace(), true, 'BB Mono is forced instead of serif');
+				strictEqual(terminalConfigurationService.configFontIsMonospace(), false, 'serif is not monospaced');
 			});
 
 		test('isMonospace monospace falls back to editor.fontFamily', () => {
@@ -296,7 +296,7 @@ suite('Workbench - TerminalConfigurationService', () => {
 			strictEqual(terminalConfigurationService.configFontIsMonospace(), true, 'monospace is monospaced');
 		});
 
-			test('isMonospace ignores sans-serif editor.fontFamily', () => {
+			test('isMonospace falls back when terminal fontFamily is not set', () => {
 				const terminalConfigurationService = createTerminalConfigationService({
 					editor: {
 						fontFamily: 'sans-serif'
@@ -307,10 +307,10 @@ suite('Workbench - TerminalConfigurationService', () => {
 					}
 					}
 				});
-				strictEqual(terminalConfigurationService.configFontIsMonospace(), true, 'BB Mono is forced instead of editor.fontFamily');
+				strictEqual(terminalConfigurationService.configFontIsMonospace(), true, 'editor font default is monospaced');
 			});
 
-			test('isMonospace ignores serif editor.fontFamily', () => {
+			test('isMonospace falls back when terminal fontFamily is unset', () => {
 				const terminalConfigurationService = createTerminalConfigationService({
 					editor: {
 						fontFamily: 'serif'
@@ -321,7 +321,7 @@ suite('Workbench - TerminalConfigurationService', () => {
 					}
 					}
 				});
-				strictEqual(terminalConfigurationService.configFontIsMonospace(), true, 'BB Mono is forced instead of editor.fontFamily');
+				strictEqual(terminalConfigurationService.configFontIsMonospace(), true, 'editor font default is monospaced');
 			});
 	});
 });

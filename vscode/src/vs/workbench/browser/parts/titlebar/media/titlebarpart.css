@@ -397,7 +397,25 @@
 	color: white;
 }
 
-/* Center-Adjacent Toolbar (e.g., update indicator, Editor / Agents switcher) */
+/* Left Toolbar (e.g., Editor / Agents switcher) */
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .titlebar-left-toolbar-container {
+	z-index: 2500;
+	-webkit-app-region: no-drag;
+	flex: 0 0 auto;
+	margin-left: 4px;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.monaco-workbench.mac:not(.web) .part.titlebar > .titlebar-container > .titlebar-left > .titlebar-left-toolbar-container {
+	margin-left: 72px;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .titlebar-left-toolbar-container.has-no-actions {
+	display: none;
+}
+
+/* Center-Adjacent Toolbar (e.g., update indicator) */
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .center-adjacent-toolbar-container {
 	z-index: 2500;
 	-webkit-app-region: no-drag;

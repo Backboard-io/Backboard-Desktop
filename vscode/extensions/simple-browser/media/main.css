@@ -11,28 +11,12 @@
 	--input-margin-horizontal: 0;
 }
 
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-Regular.ttf") format("truetype");
-	font-weight: 400;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-SemiBold.ttf") format("truetype");
-	font-weight: 600;
-	font-style: normal;
-	font-display: swap;
-}
-
 html, body {
 	height: 100%;
 	min-height: 100%;
 	padding: 0;
 	margin: 0;
-	font-family: "BB Mono", monospace;
+	font-family: var(--vscode-font-family);
 }
 
 body {
@@ -46,7 +30,7 @@ textarea {
 	width: 100%;
 	border: none;
 	margin-right: 0.3em;
-	font-family: "BB Mono", monospace;
+	font-family: var(--vscode-font-family);
 	padding: var(--input-padding-vertical) var(--input-padding-horizontal);
 	color: var(--vscode-input-foreground);
 	outline-color: var(--vscode-input-border);
@@ -125,7 +109,7 @@ iframe {
 	border-radius: 4px;
 
 	font-size: 8px;
-	font-family: "BB Mono", monospace;
+	font-family: var(--vscode-font-family);
 	user-select: none;
 	pointer-events: none;
 }

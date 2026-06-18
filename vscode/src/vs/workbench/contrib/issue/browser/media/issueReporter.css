@@ -133,18 +133,24 @@ body.issue-reporter-body  {
 .issue-reporter-body .mac.web:lang(zh-Hans),
 .issue-reporter-body .mac.web:lang(zh-Hant),
 .issue-reporter-body .mac.web:lang(ja),
-.issue-reporter-body .mac.web:lang(ko),
+.issue-reporter-body .mac.web:lang(ko) {
+	font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
 .issue-reporter-body .windows.web,
 .issue-reporter-body .windows.web:lang(zh-Hans),
 .issue-reporter-body .windows.web:lang(zh-Hant),
 .issue-reporter-body .windows.web:lang(ja),
-.issue-reporter-body .windows.web:lang(ko),
+.issue-reporter-body .windows.web:lang(ko) {
+	font-family: "Segoe WPC", "Segoe UI", sans-serif;
+}
+
 .issue-reporter-body .linux.web,
 .issue-reporter-body .linux.web:lang(zh-Hans),
 .issue-reporter-body .linux.web:lang(zh-Hant),
 .issue-reporter-body .linux.web:lang(ja),
 .issue-reporter-body .linux.web:lang(ko) {
-	font-family: "BB Mono", monospace;
+	font-family: system-ui, "Ubuntu", "Droid Sans", sans-serif;
 }
 
 .issue-reporter-body .monaco-workbench {

@@ -111,7 +111,7 @@ export class TerminalFontMetrics extends Disposable {
 
 	configFontIsMonospace(): boolean {
 		const fontSize = 15;
-		const fontFamily = EDITOR_FONT_DEFAULTS.fontFamily;
+		const fontFamily = this._terminalConfigurationService.config.fontFamily || EDITOR_FONT_DEFAULTS.fontFamily;
 		const iRect = this._getBoundingRectFor('i', fontFamily, fontSize);
 		const wRect = this._getBoundingRectFor('w', fontFamily, fontSize);
 
@@ -128,7 +128,7 @@ export class TerminalFontMetrics extends Disposable {
 	 * terminal.integrated.fontSize, terminal.integrated.lineHeight configuration properties
 	 */
 	getFont(w: Window, xtermCore?: IXtermCore, excludeDimensions?: boolean): ITerminalFont {
-		let fontFamily = EDITOR_FONT_DEFAULTS.fontFamily;
+		let fontFamily = this._terminalConfigurationService.config.fontFamily || EDITOR_FONT_DEFAULTS.fontFamily;
 		let fontSize = clampInt(this._terminalConfigurationService.config.fontSize, FontConstants.MinimumFontSize, FontConstants.MaximumFontSize, EDITOR_FONT_DEFAULTS.fontSize);
 
 		// Always fallback to monospace, otherwise a proportional font may become the default

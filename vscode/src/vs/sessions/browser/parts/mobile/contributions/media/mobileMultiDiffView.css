@@ -155,7 +155,7 @@
 	top: 44px;
 	left: 0;
 	right: 0;
-	font-family: "BB Mono", monospace;
+	font-family: var(--vscode-editor-font-family);
 	font-size: 12px;
 	line-height: 18px;
 	overflow-x: auto;

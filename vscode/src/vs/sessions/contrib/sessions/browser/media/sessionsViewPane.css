@@ -76,36 +76,79 @@
 	/* Header row: label + action buttons */
 	.agent-sessions-header-row {
 		display: flex;
-		align-items: center;
-		padding: 8px 10px;
-		min-height: 40px;
+		flex-direction: column;
+		align-items: stretch;
+		padding: 8px 12px 6px;
+		min-height: auto;
 		box-sizing: border-box;
 		-webkit-user-select: none;
 		user-select: none;
 	}
 
 	.agent-sessions-header-label {
-		flex: 1;
-		min-width: 0;
-		font-size: var(--vscode-agents-fontSize-label1, 12px);
-		font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+		display: none;
+	}
+
+	.agent-sessions-header-actions {
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 2px;
+		margin-left: 0;
+		flex-shrink: 0;
+	}
+
+	.agent-sessions-sidebar-action {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		height: 26px;
+		padding: 0 4px;
+		border: none;
+		border-radius: var(--vscode-cornerRadius-small);
+		background: transparent;
 		color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+		font-family: inherit;
+		font-size: var(--vscode-agents-fontSize-body1, 13px);
+		line-height: 18px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.agent-sessions-sidebar-action:hover,
+	.agent-sessions-sidebar-action:focus-visible {
+		background: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 6%, transparent);
+	}
+
+	.agent-sessions-sidebar-action:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: 2px;
+	}
+
+	.agent-sessions-sidebar-action-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		flex: 0 0 16px;
+		color: var(--vscode-icon-foreground);
+	}
+
+	.agent-sessions-sidebar-action-icon .codicon {
+		font-size: var(--vscode-codiconFontSize-compact, 12px);
+	}
+
+	.agent-sessions-sidebar-action-label {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
-	.agent-sessions-header-actions {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-		margin-left: auto;
-		flex-shrink: 0;
-	}
-
 	/* Inline search input — replaces label + actions when active */
 	.agent-sessions-find-widget-container {
-		flex: 1;
+		width: 100%;
 		min-width: 0;
 	}
 
@@ -147,80 +190,6 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-	}
-
-	/* Compact "New" button in header */
-	.agent-sessions-compact-new-button.monaco-button {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 6px;
-		padding: 2px 8px;
-		font-size: var(--vscode-agents-fontSize-label1, 12px);
-		line-height: 18px;
-		border-radius: var(--vscode-cornerRadius-small);
-		border: 1px solid var(--vscode-agentsNewSessionButton-border, var(--vscode-button-border, color-mix(in srgb, var(--vscode-foreground) 20%, transparent)));
-		background-color: var(--vscode-agentsNewSessionButton-background, transparent);
-		color: var(--vscode-agentsNewSessionButton-foreground, var(--vscode-foreground));
-		width: auto;
-		min-width: 0;
-		height: auto;
-		white-space: nowrap;
-	}
-
-	.agent-sessions-compact-new-button.monaco-button:not(.disabled) {
-		cursor: pointer;
-	}
-
-	.agent-sessions-compact-new-button.monaco-button.default-colors:hover {
-		background-color: var(--vscode-agentsNewSessionButton-hoverBackground, var(--vscode-toolbar-hoverBackground));
-	}
-
-	.agent-sessions-compact-new-button.monaco-button:focus {
-		outline-offset: -1px !important;
-	}
-
-	.agent-sessions-compact-new-button .new-session-button-label {
-		display: inline-flex;
-		align-items: center;
-		gap: 2px;
-		min-width: 0;
-		white-space: nowrap;
-	}
-
-	.agent-sessions-compact-new-button .new-session-keybinding-hint {
-		display: inline-block;
-		flex-shrink: 0;
-		font-family: var(--monaco-monospace-font);
-		font-size: var(--vscode-agents-fontSize-label3, 10px);
-		line-height: 1;
-		padding: 2px 4px;
-		border: var(--vscode-strokeThickness) solid transparent;
-		border-radius: var(--vscode-cornerRadius-xSmall);
-		background-color: var(--vscode-keybindingLabel-background);
-		color: var(--vscode-keybindingLabel-foreground);
-		box-shadow: none;
-	}
-
-	.agent-sessions-compact-new-button .new-session-keybinding-hint .monaco-keybinding {
-		line-height: 1;
-	}
-
-	.agent-sessions-compact-new-button .new-session-keybinding-hint .monaco-keybinding > .monaco-keybinding-key {
-		margin: 0 1px;
-		padding: 0;
-		min-width: auto;
-		border: 0;
-		background-color: transparent;
-		box-shadow: none;
-	}
-
-	.agent-sessions-compact-new-button .new-session-keybinding-hint .monaco-keybinding > .monaco-keybinding-key:first-child {
-		margin-left: 0;
-	}
-
-	.agent-sessions-compact-new-button .new-session-keybinding-hint .monaco-keybinding > .monaco-keybinding-key:last-child {
-		margin-right: 0;
 	}
 
 	.agent-sessions-control-container {

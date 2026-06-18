@@ -85,7 +85,7 @@
 }
 
 .tests-renderer {
-	font-family: "BB Mono", monospace;
+	font-family: "Helvetica Neue Light", "HelveticaNeue-Light", "Helvetica Neue", "Segoe UI", Calibri, Helvetica, Arial, sans-serif;
 	font-size: 12px;
 }
 
@@ -140,7 +140,7 @@
 	border-right: #000 2px;
 	font-weight: bold;
 	white-space: pre;
-	font-family: "BB Mono", monospace;
+	font-family: monospace;
 }
 
 .test-renderer .suite-title {
@@ -173,7 +173,7 @@
 }
 
 .request-container .title {
-	font-family: "BB Mono", monospace;
+	font-family: Arial, "Segoe UI";
 	font-size: 1em;
 	font-weight: bold;
 }
@@ -206,14 +206,14 @@
 }
 
 .step-title {
-	font-family: "BB Mono", monospace;
+	font-family: Arial, "Segoe UI";
 	font-size: 1.1em;
 	font-weight: bold;
 	margin-top: 5px;
 }
 
 .error-comparison {
-	font-family: "BB Mono", monospace;
+	font-family: Arial, 'Segoe UI';
 	margin-left: 30px;
 	margin-top: 10px;
 	margin-bottom: 10px;
@@ -237,7 +237,7 @@
 }
 
 .step-query {
-	font-family: "BB Mono", monospace;
+	font-family: Monaco, 'Cascadia Code', monospace;
 	white-space: pre;
 	word-break: break-word;
 	text-wrap: wrap;
@@ -267,12 +267,12 @@
 
 /*
 .step-markdown {
-	font-family: "BB Mono", monospace;
+	font-family: Arial;
 	width: 400px;
 	margin-left: 30px
 }
 .step-markdown code {
-	font-family: "BB Mono", monospace;
+	font-family: Monaco;
 	color: red;
 } */
 

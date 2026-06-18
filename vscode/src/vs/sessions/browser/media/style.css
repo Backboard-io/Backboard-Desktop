@@ -165,22 +165,17 @@
 	 */
 	margin: 0;
 	background: var(--vscode-agentsPanel-background);
-	border: 1px solid var(--vscode-agentsPanel-border, transparent);
-	border-right-width: 0;
-	border-top-right-radius: 0;
-	border-bottom-right-radius: 0;
-	border-top-left-radius: 0;
-	border-bottom-left-radius: 0;
+	border: none;
+	border-radius: 0;
 	box-sizing: border-box;
 	overflow: hidden;
 }
 
 /*
- * When the secondary side bar (auxiliary bar) is hidden, the editor becomes the
- * rightmost visible part, so restore the right border without adding spacing.
+ * When the secondary side bar (auxiliary bar) is hidden, keep the editor as a
+ * square-edged full-width part.
  */
 .agent-sessions-workbench.noauxiliarybar .monaco-grid-view .part.editor:not(.modal-editor-part) {
-	border-right-width: var(--vscode-strokeThickness);
 	border-top-right-radius: 0;
 	border-bottom-right-radius: 0;
 }
@@ -367,11 +362,8 @@
 	margin: 0;
 	padding-left: 0;
 	background: var(--part-background);
-	border: 1px solid var(--part-border-color, transparent);
-	border-top-left-radius: 0;
-	border-bottom-left-radius: 0;
-	border-top-right-radius: 0;
-	border-bottom-right-radius: 0;
+	border: none;
+	border-radius: 0;
 	box-sizing: border-box;
 }
 

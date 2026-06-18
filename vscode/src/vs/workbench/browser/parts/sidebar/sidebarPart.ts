@@ -205,7 +205,7 @@ export class SidebarPart extends AbstractPaneCompositePart {
 			activityHoverOptions: {
 				position: () => this.getCompositeBarPosition() === CompositeBarPosition.BOTTOM ? HoverPosition.ABOVE : HoverPosition.BELOW,
 			},
-			excludedViewContainerIds: ['workbench.view.debug', 'copilot-chat'],
+			excludedViewContainerIds: ['workbench.view.explorer', 'workbench.view.search', 'workbench.view.scm', 'workbench.view.extensions', 'workbench.view.debug', 'copilot-chat'],
 			fillExtraContextMenuActions: actions => {
 				if (this.getCompositeBarPosition() === CompositeBarPosition.TITLE) {
 					const viewsSubmenuAction = this.getViewsSubmenuAction();

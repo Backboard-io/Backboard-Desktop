@@ -4,10 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { EditorOption, EditorOptions } from './editorOptions.js';
-import { IValidatedEditorOptions, BareFontInfo, EDITOR_FONT_DEFAULTS } from './fontInfo.js';
+import { IValidatedEditorOptions, BareFontInfo } from './fontInfo.js';
 
 export function createBareFontInfoFromValidatedSettings(options: IValidatedEditorOptions, pixelRatio: number, ignoreEditorZoom: boolean): BareFontInfo {
-	const fontFamily = EDITOR_FONT_DEFAULTS.fontFamily;
+	const fontFamily = options.get(EditorOption.fontFamily);
 	const fontWeight = options.get(EditorOption.fontWeight);
 	const fontSize = options.get(EditorOption.fontSize);
 	const fontFeatureSettings = options.get(EditorOption.fontLigatures);
@@ -26,7 +26,7 @@ export function createBareFontInfoFromRawSettings(opts: {
 	lineHeight?: unknown;
 	letterSpacing?: unknown;
 }, pixelRatio: number, ignoreEditorZoom: boolean = false): BareFontInfo {
-	const fontFamily = EDITOR_FONT_DEFAULTS.fontFamily;
+	const fontFamily = EditorOptions.fontFamily.validate(opts.fontFamily);
 	const fontWeight = EditorOptions.fontWeight.validate(opts.fontWeight);
 	const fontSize = EditorOptions.fontSize.validate(opts.fontSize);
 	const fontFeatureSettings = EditorOptions.fontLigatures2.validate(opts.fontLigatures);

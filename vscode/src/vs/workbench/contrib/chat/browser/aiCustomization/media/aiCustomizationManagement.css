@@ -556,7 +556,7 @@
 }
 
 .ai-customization-list-item .item-description.is-filename {
-	font-family: "BB Mono", monospace;
+	font-family: var(--vscode-editor-font-family);
 	font-size: var(--vscode-agents-fontSize-label3);
 	opacity: 0.7;
 }

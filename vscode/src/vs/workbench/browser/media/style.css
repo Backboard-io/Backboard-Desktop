@@ -77,138 +77,9 @@
 	cursor: default;
 }
 
-/* Font Families */
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-Thin.ttf") format("truetype");
-	font-weight: 100;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-ThinItalic.ttf") format("truetype");
-	font-weight: 100;
-	font-style: italic;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-ExtraLight.ttf") format("truetype");
-	font-weight: 200;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-ExtraLightItalic.ttf") format("truetype");
-	font-weight: 200;
-	font-style: italic;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-Light.ttf") format("truetype");
-	font-weight: 300;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-LightItalic.ttf") format("truetype");
-	font-weight: 300;
-	font-style: italic;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-Regular.ttf") format("truetype");
-	font-weight: 400;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-Italic.ttf") format("truetype");
-	font-weight: 400;
-	font-style: italic;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-Medium.ttf") format("truetype");
-	font-weight: 500;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-MediumItalic.ttf") format("truetype");
-	font-weight: 500;
-	font-style: italic;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-SemiBold.ttf") format("truetype");
-	font-weight: 600;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-SemiBoldItalic.ttf") format("truetype");
-	font-weight: 600;
-	font-style: italic;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-Bold.ttf") format("truetype");
-	font-weight: 700;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: "BB Mono";
-	src: url("./fonts/bb-mono/IBMPlexMono-BoldItalic.ttf") format("truetype");
-	font-weight: 700;
-	font-style: italic;
-	font-display: swap;
-}
-
-.monaco-workbench.mac,
-.monaco-workbench.windows,
-.monaco-workbench.linux,
-.monaco-workbench.mac:lang(zh-Hans),
-.monaco-workbench.mac:lang(zh-Hant),
-.monaco-workbench.mac:lang(ja),
-.monaco-workbench.mac:lang(ko),
-.monaco-workbench.windows:lang(zh-Hans),
-.monaco-workbench.windows:lang(zh-Hant),
-.monaco-workbench.windows:lang(ja),
-.monaco-workbench.windows:lang(ko),
-.monaco-workbench.linux:lang(zh-Hans),
-.monaco-workbench.linux:lang(zh-Hant),
-.monaco-workbench.linux:lang(ja),
-.monaco-workbench.linux:lang(ko) {
-	font-family: "BB Mono", monospace;
-	--monaco-monospace-font: "BB Mono", "IBM Plex Mono", monospace;
-}
+.monaco-workbench.mac { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+.monaco-workbench.windows { font-family: "Segoe WPC", "Segoe UI", sans-serif; }
+.monaco-workbench.linux { font-family: system-ui, "Ubuntu", "Droid Sans", sans-serif; }
 
 /* Global Styles */
 
@@ -218,20 +89,9 @@ body {
 	margin: 0;
 	padding: 0;
 	overflow: hidden;
-	font-family: "BB Mono", "IBM Plex Mono", monospace;
-	--monaco-monospace-font: "BB Mono", "IBM Plex Mono", monospace;
-	--vscode-editor-font-family: "BB Mono", "IBM Plex Mono", monospace;
 	font-size: 11px;
 	user-select: none;
 	-webkit-user-select: none;
-}
-
-.monaco-editor .view-lines,
-.monaco-editor .view-line,
-.monaco-editor .view-line span,
-.monaco-editor .margin-view-overlays,
-.monaco-editor .line-numbers {
-	font-family: "BB Mono", "IBM Plex Mono", monospace !important;
 }
 
 .monaco-workbench {
@@ -242,10 +102,6 @@ body {
 	z-index: 1;
 	overflow: hidden;
 	color: var(--vscode-foreground);
-	font-family: "BB Mono", "IBM Plex Mono", monospace;
-	--vscode-font-family: "BB Mono", "IBM Plex Mono", monospace !important;
-	--vscode-editor-font-family: "BB Mono", "IBM Plex Mono", monospace !important;
-	--vscode-chat-font-family: "BB Mono", "IBM Plex Mono", monospace !important;
 
 	/* Elevation shadows */
 	--vscode-shadow-sm: 0 0 4px rgba(0, 0, 0, 0.08);

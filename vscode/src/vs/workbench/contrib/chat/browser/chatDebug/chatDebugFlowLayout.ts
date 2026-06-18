@@ -702,7 +702,7 @@ function renderSubgraphs(svg: SVGElement, subgraphs: readonly SubgraphRect[], fo
 			y: sg.y + SUBGRAPH_HEADER_HEIGHT / 2 + 4,
 			'font-size': SUBLABEL_FONT_SIZE,
 			fill: color,
-			'font-family': '"BB Mono", monospace',
+			'font-family': 'var(--vscode-font-family)',
 			'font-weight': '600',
 		});
 		headerText.textContent = `${chevron} ${sg.label}`;
@@ -717,7 +717,7 @@ function renderSubgraphs(svg: SVGElement, subgraphs: readonly SubgraphRect[], fo
 				y: sg.y + SUBGRAPH_HEADER_HEIGHT + SUBGRAPH_PADDING + 4,
 				'font-size': SUBLABEL_FONT_SIZE,
 				fill: 'var(--vscode-descriptionForeground)',
-				'font-family': '"BB Mono", monospace',
+				'font-family': 'var(--vscode-font-family)',
 				'font-style': 'italic',
 				'text-anchor': 'middle',
 			});
@@ -788,7 +788,7 @@ function renderEdges(svg: SVGElement, edges: readonly LayoutEdge[]): void {
 }
 
 function renderNodes(svg: SVGElement, nodes: readonly LayoutNode[], focusableElements: Map<string, SVGElement>): void {
-	const fontFamily = '"BB Mono", monospace';
+	const fontFamily = 'var(--vscode-font-family)';
 	const nodeFill = 'var(--vscode-editor-background, var(--vscode-editorWidget-background))';
 
 	for (const node of nodes) {

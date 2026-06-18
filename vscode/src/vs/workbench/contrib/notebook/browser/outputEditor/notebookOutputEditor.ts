@@ -126,7 +126,7 @@ export class NotebookOutputEditor extends EditorPane implements INotebookDelegat
 	}
 
 	private _generateFontFamily(): string {
-		return `"BB Mono", monospace`;
+		return this._notebookOptions.computeDiffWebviewOptions().markupFontFamily;
 	}
 
 	override getTitle(): string {

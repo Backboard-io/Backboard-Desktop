@@ -6,7 +6,7 @@ import './media/openInAgents.css';
 import { $, addDisposableListener, append, EventHelper, EventType } from '../../../../../base/browser/dom.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
-import { IAction } from '../../../../../base/common/actions.js';
+import { IAction, toAction } from '../../../../../base/common/actions.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../../nls.js';
@@ -38,6 +38,7 @@ import { CommandsRegistry, ICommandService } from '../../../../../platform/comma
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
+import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
 const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
@@ -56,7 +57,7 @@ export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 					order: 1,
 					when: OPEN_AGENTS_WINDOW_PRECONDITION,
 				}, {
-					id: MenuId.TitleBarAdjacentCenter,
+					id: MenuId.TitleBarLeft,
 					group: 'navigation',
 					order: 0,
 					when: ContextKeyExpr.and(
@@ -177,8 +178,8 @@ export class OpenChatSessionInAgentsWindowAction extends Action2 {
  */
 class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 
-	private editorButton: HTMLButtonElement | undefined;
-	private agentsButton: HTMLButtonElement | undefined;
+	private triggerButton: HTMLButtonElement | undefined;
+	private currentLabel: HTMLElement | undefined;
 
 	constructor(
 		action: IAction,
@@ -187,6 +188,7 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IEditorService private readonly editorService: IEditorService,
+		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 	) {
 		super(undefined, action, options);
 	}
@@ -195,40 +197,60 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 		super.render(container);
 
 		container.classList.add('open-in-agents-titlebar-widget');
-		container.setAttribute('role', 'group');
 
 		const hoverText = this.keybindingService.appendKeybinding(localize('openInAgentsHover', "Switch to Agents"), OPEN_AGENTS_WINDOW_COMMAND_ID);
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 
-		this.editorButton = append(container, $('button.open-in-agents-titlebar-widget-option.editor'));
-		this.editorButton.textContent = localize('openInAgentsSwitcher.editor', "Editor");
+		this.triggerButton = append(container, $('button.open-in-agents-titlebar-widget-trigger'));
+		this.triggerButton.setAttribute('aria-haspopup', 'menu');
+		this.triggerButton.setAttribute('aria-expanded', 'false');
+		this.currentLabel = append(this.triggerButton, $('span.open-in-agents-titlebar-widget-label'));
+		const chevron = append(this.triggerButton, $('span.open-in-agents-titlebar-widget-chevron.codicon.codicon-chevron-down'));
+		chevron.setAttribute('aria-hidden', 'true');
 
-		this.agentsButton = append(container, $('button.open-in-agents-titlebar-widget-option.agents'));
-		const icon = append(this.agentsButton, $('span.open-in-agents-titlebar-widget-icon'));
-		icon.setAttribute('aria-hidden', 'true');
-		append(this.agentsButton, $('span.open-in-agents-titlebar-widget-label')).textContent = localize('openInAgentsSwitcher.agents', "Agents");
-
-		this._register(addDisposableListener(this.editorButton, EventType.CLICK, e => {
+		this._register(addDisposableListener(this.triggerButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
-			this.openEditor();
+			this.showMenu();
 		}));
-		this._register(addDisposableListener(this.agentsButton, EventType.CLICK, e => {
-			EventHelper.stop(e, true);
-			this.openAgents();
-		}));
-		this._register(addDisposableListener(this.editorButton, EventType.KEY_DOWN, e => this.handleKeyDown(e, () => this.openEditor())));
-		this._register(addDisposableListener(this.agentsButton, EventType.KEY_DOWN, e => this.handleKeyDown(e, () => this.openAgents())));
+		this._register(addDisposableListener(this.triggerButton, EventType.KEY_DOWN, e => this.handleKeyDown(e)));
 		this._register(this.editorService.onDidActiveEditorChange(() => this.updateState()));
 
 		this.updateState();
 	}
 
-	private handleKeyDown(event: KeyboardEvent, run: () => void): void {
-		if (event.key === 'Enter' || event.key === ' ') {
+	private handleKeyDown(event: KeyboardEvent): void {
+		if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
 			EventHelper.stop(event, true);
-			run();
+			this.showMenu();
 		}
+	}
+
+	private showMenu(): void {
+		if (!this.triggerButton) {
+			return;
+		}
+
+		const agentsActive = this.isAgentsActive();
+		this.triggerButton.setAttribute('aria-expanded', 'true');
+		this.contextMenuService.showContextMenu({
+			getAnchor: () => this.triggerButton!,
+			getActions: () => [
+				toAction({
+					id: 'workbench.action.mode.editor',
+					label: localize('openInAgentsSwitcher.editor', "Editor"),
+					checked: !agentsActive,
+					run: () => this.openEditor(),
+				}),
+				toAction({
+					id: 'workbench.action.mode.agents',
+					label: localize('openInAgentsSwitcher.agents', "Agents"),
+					checked: agentsActive,
+					run: () => this.openAgents(),
+				}),
+			],
+			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
+		});
 	}
 
 	private openAgents(): void {
@@ -241,12 +263,15 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 		}
 	}
 
+	private isAgentsActive(): boolean {
+		return this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID;
+	}
+
 	private updateState(): void {
-		const agentsActive = this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID;
-		this.editorButton?.classList.toggle('checked', !agentsActive);
-		this.editorButton?.setAttribute('aria-pressed', String(!agentsActive));
-		this.agentsButton?.classList.toggle('checked', agentsActive);
-		this.agentsButton?.setAttribute('aria-pressed', String(agentsActive));
+		const agentsActive = this.isAgentsActive();
+		this.currentLabel?.replaceChildren(agentsActive
+			? localize('openInAgentsSwitcher.agents', "Agents")
+			: localize('openInAgentsSwitcher.editor', "Editor"));
 	}
 }
 
@@ -259,7 +284,7 @@ export class OpenWorkspaceInAgentsContribution extends Disposable implements IWo
 		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
-		this._register(actionViewItemService.register(MenuId.TitleBarAdjacentCenter, OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, (action, options) => {
+		this._register(actionViewItemService.register(MenuId.TitleBarLeft, OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, (action, options) => {
 			return instantiationService.createInstance(OpenWorkspaceInAgentsTitleBarWidget, action, options);
 		}, undefined));
 	}

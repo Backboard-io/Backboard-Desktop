@@ -357,7 +357,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 			readOnly: false,
 			ariaLabel: this._getAriaLabel(),
 			placeholder: this.options.placeholder ?? getRandomChatInputPlaceholder(),
-				fontFamily: '"BB Mono", monospace',
+				fontFamily: 'var(--vscode-editor-font-family)',
 			fontSize: 13,
 			lineHeight: 20,
 			cursorWidth: 1,

@@ -38,9 +38,9 @@ export class OpenInVSCodeAction extends Action2 {
 			icon: Codicon.window,
 			precondition: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
 			menu: [{
-				id: Menus.TitleBarCenterRight,
+				id: Menus.TitleBarLeftLayout,
 				group: 'navigation',
-				order: 7,
+				order: -10,
 				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
 			}]
 		});
@@ -116,7 +116,7 @@ export class OpenInVSCodeWidgetContribution extends Disposable implements IWorkb
 		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
-		this._register(actionViewItemService.register(Menus.TitleBarCenterRight, OpenInVSCodeAction.ID, (action, options) => {
+		this._register(actionViewItemService.register(Menus.TitleBarLeftLayout, OpenInVSCodeAction.ID, (action, options) => {
 			return instantiationService.createInstance(OpenInVSCodeTitleBarWidget, action, options, OpenInVSCodeAction.ID);
 		}, undefined));
 	}

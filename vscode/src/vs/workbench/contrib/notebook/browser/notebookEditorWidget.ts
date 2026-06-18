@@ -633,7 +633,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 	}
 
 	private _generateFontFamily() {
-		return `"BB Mono", monospace`;
+		return this._notebookOptions.computeWebviewOptions().markupFontFamily;
 	}
 
 	private _createLayoutStyles(): void {

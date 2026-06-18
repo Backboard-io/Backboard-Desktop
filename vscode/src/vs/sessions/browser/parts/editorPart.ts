@@ -25,8 +25,7 @@ export class MainEditorPart extends MainEditorPartBase {
 			return;
 		}
 
-		// Keep the editor flush with adjacent agent-session parts. Only borders are
-		// removed from the internal layout.
+		// Keep the editor flush with adjacent agent-session parts.
 		const marginLeft = this.layoutService.isVisible(Parts.SIDEBAR_PART) ||
 			this.layoutService.isVisible(Parts.SESSIONS_PART)
 			? 0
@@ -35,8 +34,8 @@ export class MainEditorPart extends MainEditorPartBase {
 			? MainEditorPart.MARGIN_BOTTOM
 			: 0;
 
-		const adjustedWidth = width - MainEditorPart.MARGIN_RIGHT - marginLeft - 2 /* border width */;
-		const adjustedHeight = height - MainEditorPart.MARGIN_TOP - marginBottom - 2 /* border width */;
+		const adjustedWidth = width - MainEditorPart.MARGIN_RIGHT - marginLeft;
+		const adjustedHeight = height - MainEditorPart.MARGIN_TOP - marginBottom;
 
 		super.layout(adjustedWidth, adjustedHeight, top, left);
 	}

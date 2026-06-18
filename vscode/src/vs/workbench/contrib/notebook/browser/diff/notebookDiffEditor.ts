@@ -617,7 +617,7 @@ export class NotebookTextDiffEditor extends EditorPane implements INotebookTextD
 		this._modifiedWebview.element.style.left = `calc(50%)`;
 	}
 	_generateFontFamily(): string {
-		return `"BB Mono", monospace`;
+		return this._notebookOptions.computeDiffWebviewOptions().markupFontFamily;
 	}
 
 	private async _createOriginalWebview(id: string, viewType: string, resource: URI): Promise<void> {

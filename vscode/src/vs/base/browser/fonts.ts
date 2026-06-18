@@ -5,13 +5,9 @@
 
 import { mainWindow } from './window.js';
 import type { IJSONSchemaSnippet } from '../common/jsonSchema.js';
-import { isElectron } from '../common/platform.js';
+import { isElectron, isMacintosh, isWindows } from '../common/platform.js';
 
-/**
- * Backboard's default UI font. The font-face is registered as "BB Mono" in
- * the workbench stylesheet and backed by IBM Plex Mono assets.
- */
-export const DEFAULT_FONT_FAMILY = '"BB Mono", "IBM Plex Mono", monospace';
+export const DEFAULT_FONT_FAMILY = isMacintosh ? '-apple-system, BlinkMacSystemFont, sans-serif' : isWindows ? '"Segoe WPC", "Segoe UI", sans-serif' : 'system-ui, "Ubuntu", "Droid Sans", sans-serif';
 
 interface FontData {
 	readonly family: string;

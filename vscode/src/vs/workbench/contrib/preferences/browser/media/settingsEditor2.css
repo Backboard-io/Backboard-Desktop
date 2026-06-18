@@ -784,7 +784,7 @@
 	--bb-settings-accent: var(--vscode-foreground);
 	--bb-settings-control-background: var(--vscode-input-background);
 	--bb-settings-control-border: var(--vscode-input-border, var(--vscode-settings-headerBorder, transparent));
-	font-family: "BB Mono", "IBM Plex Mono", monospace;
+	font-family: var(--vscode-font-family);
 	max-width: 1520px;
 	background: var(--bb-settings-panel-background);
 }
