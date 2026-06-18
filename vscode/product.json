@@ -1,9 +1,9 @@
 {
-	"nameShort": "Code - OSS",
-	"nameLong": "Code - OSS",
-	"applicationName": "code-oss",
-	"dataFolderName": ".vscode-oss",
-	"sharedDataFolderName": ".vscode-oss-shared",
+	"nameShort": "Backboard IDE",
+	"nameLong": "Backboard IDE",
+	"applicationName": "backboard-ide",
+	"dataFolderName": ".backboard-ide",
+	"sharedDataFolderName": ".backboard-ide-shared",
 	"win32MutexName": "vscodeoss",
 	"licenseName": "MIT",
 	"licenseUrl": "https://github.com/microsoft/vscode/blob/main/LICENSE.txt",
@@ -14,15 +14,15 @@
 	"serverApplicationName": "code-server-oss",
 	"serverDataFolderName": ".vscode-server-oss",
 	"tunnelApplicationName": "code-tunnel-oss",
-	"win32DirName": "Microsoft Code OSS",
-	"win32NameVersion": "Microsoft Code OSS",
-	"win32RegValueName": "CodeOSS",
+	"win32DirName": "Backboard IDE",
+	"win32NameVersion": "Backboard IDE",
+	"win32RegValueName": "BackboardIDE",
 	"win32x64AppId": "{{D77B7E06-80BA-4137-BCF4-654B95CCEBC5}",
 	"win32arm64AppId": "{{D1ACE434-89C5-48D1-88D3-E2991DF85475}",
 	"win32x64UserAppId": "{{CC6B787D-37A0-49E8-AE24-8559A032BE0C}",
 	"win32arm64UserAppId": "{{3AEBF0C8-F733-4AD4-BADE-FDB816D53D7B}",
 	"win32AppUserModelId": "Microsoft.CodeOSS",
-	"win32ShellNameShort": "C&ode - OSS",
+	"win32ShellNameShort": "Backboard IDE",
 	"win32TunnelServiceMutex": "vscodeoss-tunnelservice",
 	"win32TunnelMutex": "vscodeoss-tunnel",
 	"darwinBundleIdentifier": "com.visualstudio.code.oss",
@@ -139,7 +139,7 @@
 	"onboardingKeymaps": [
 		{
 			"id": "vscode",
-			"label": "VS Code",
+			"label": "Default",
 			"description": "Default keyboard mapping"
 		},
 		{

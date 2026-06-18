@@ -81,7 +81,7 @@ export class SessionsBrowserMain extends BrowserMain {
 		serviceCollection.set(IStorageService, storageService);
 
 		// Workspace Trust Service
-		const workspaceTrustEnablementService = new WorkspaceTrustEnablementService(configurationService, environmentService);
+		const workspaceTrustEnablementService = new WorkspaceTrustEnablementService();
 		serviceCollection.set(IWorkspaceTrustEnablementService, workspaceTrustEnablementService);
 
 		const workspaceTrustManagementService = new WorkspaceTrustManagementService(configurationService, remoteAuthorityResolverService, storageService, uriIdentityService, environmentService, workspaceContextService, workspaceTrustEnablementService, fileService);

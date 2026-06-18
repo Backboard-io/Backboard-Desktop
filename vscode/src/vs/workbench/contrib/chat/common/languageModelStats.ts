@@ -10,7 +10,7 @@ import { ExtensionIdentifier } from '../../../../platform/extensions/common/exte
 import { Extensions, IExtensionFeaturesManagementService, IExtensionFeaturesRegistry } from '../../../services/extensionManagement/common/extensionFeatures.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { localize } from '../../../../nls.js';
-import { Codicon } from '../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 
 export const ILanguageModelStatsService = createDecorator<ILanguageModelStatsService>('ILanguageModelStatsService');
 
@@ -46,9 +46,9 @@ export class LanguageModelStatsService extends Disposable implements ILanguageMo
 export const CopilotUsageExtensionFeatureId = 'copilot';
 Registry.as<IExtensionFeaturesRegistry>(Extensions.ExtensionFeaturesRegistry).registerExtensionFeature({
 	id: CopilotUsageExtensionFeatureId,
-	label: localize('Language Models', "Copilot"),
+	label: localize('Language Models', "Backboard"),
 	description: localize('languageModels', "Language models usage statistics of this extension."),
-	icon: Codicon.copilot,
+	icon: ThemeIcon.fromId('backboard-logo'),
 	access: {
 		canToggle: false
 	},

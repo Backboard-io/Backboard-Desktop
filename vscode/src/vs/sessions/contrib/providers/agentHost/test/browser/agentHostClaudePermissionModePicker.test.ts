@@ -139,7 +139,7 @@ suite('AgentHostClaudePermissionModePicker', () => {
 			Codicon.shield.id,
 			Codicon.edit.id,
 			Codicon.lightbulb.id,
-			Codicon.sparkle.id,
+			'backboard-logo',
 			Codicon.warning.id,
 		]);
 		assert.strictEqual(new Set(iconIds).size, modeItems.length);

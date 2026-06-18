@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { ICodeEditor, isCodeEditor, isDiffEditor } from '../../../../editor/browser/editorBrowser.js';
 import { EditorAction2 } from '../../../../editor/browser/editorExtensions.js';
@@ -32,7 +33,7 @@ import { NOTEBOOK_IS_ACTIVE_EDITOR } from '../../notebook/common/notebookContext
 
 CommandsRegistry.registerCommandAlias('interactiveEditor.start', 'inlineChat.start');
 
-const START_INLINE_CHAT = registerIcon('start-inline-chat', Codicon.sparkle, localize('startInlineChat', 'Icon which spawns the inline chat from the editor toolbar.'));
+const START_INLINE_CHAT = registerIcon('start-inline-chat', ThemeIcon.fromId('backboard-logo'), localize('startInlineChat', 'Icon which spawns the inline chat from the editor toolbar.'));
 
 const inlineChatNotebooksOldEnabled = ContextKeyExpr.or(
 	ContextKeyExpr.and(NOTEBOOK_IS_ACTIVE_EDITOR, CTX_INLINE_CHAT_HAS_NOTEBOOK_INLINE)
@@ -127,7 +128,7 @@ MenuRegistry.appendMenuItem(MenuId.InlineChatEditorAffordance, {
 		id: ACTION_START,
 		title: localize('editCode', "Ask for Edits"),
 		shortTitle: localize('editCodeShort', "Ask for Edits"),
-		icon: Codicon.sparkle,
+		icon: ThemeIcon.fromId('backboard-logo'),
 	}
 });
 
@@ -361,7 +362,7 @@ export class ContinueInlineChatInChatViewAction extends AbstractInlineChatAction
 		super({
 			id: 'inlineChat2.continueInChat',
 			title: localize2('continueInChat', "Ask in Chat"),
-			icon: Codicon.chatSparkle,
+			icon: ThemeIcon.fromId('backboard-logo'),
 			precondition: ContextKeyExpr.and(CTX_INLINE_CHAT_VISIBLE, CTX_INLINE_CHAT_TERMINATED),
 			menu: [{
 				id: MenuId.ChatEditorInlineExecute,
@@ -413,7 +414,7 @@ export class AskInChatAction extends EditorAction2 {
 				weight: KeybindingWeight.WorkbenchContrib,
 				primary: KeyMod.CtrlCmd | KeyCode.KeyI
 			},
-			icon: Codicon.chatSparkle,
+			icon: ThemeIcon.fromId('backboard-logo'),
 			menu: [{
 				id: MenuId.EditorContext,
 				group: '1_chat',

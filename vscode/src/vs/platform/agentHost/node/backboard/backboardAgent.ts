@@ -638,7 +638,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 					_meta: { toolKind: 'client' },
 				});
 				if (!session.toolsClientId) {
-					const message = `No active VS Code client is connected to run ${displayName}.`;
+					const message = `No active Backboard client is connected to run ${displayName}.`;
 					this._fire(session.sessionUri, {
 						type: ActionType.ChatToolCallComplete,
 						turnId,
@@ -1836,7 +1836,7 @@ function toBackboardFunctionTool(tool: ToolDefinition): unknown {
 			description: tool.description ?? tool.title ?? `Run ${tool.name}`,
 			parameters: tool.inputSchema ?? { type: 'object', properties: {} },
 		},
-		_meta: { ...(tool._meta ?? {}), source: 'vscode-client' },
+		_meta: { ...(tool._meta ?? {}), source: 'backboard-client' },
 	};
 }
 

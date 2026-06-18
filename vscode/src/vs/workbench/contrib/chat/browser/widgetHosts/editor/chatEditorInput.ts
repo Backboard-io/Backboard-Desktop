@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
-import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Disposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { revive } from '../../../../../../base/common/marshalling.js';
 import { Schemas } from '../../../../../../base/common/network.js';
@@ -28,7 +27,7 @@ import { LocalChatSessionUri, getChatSessionType } from '../../../common/model/c
 import { IClearEditingSessionConfirmationOptions } from '../../actions/chatActions.js';
 import type { IChatEditorOptions } from './chatEditor.js';
 
-const ChatEditorIcon = registerIcon('chat-editor-label-icon', Codicon.chatSparkle, nls.localize('chatEditorLabelIcon', 'Icon of the chat editor label.'));
+const ChatEditorIcon = registerIcon('chat-editor-label-icon', ThemeIcon.fromId('backboard-logo'), nls.localize('chatEditorLabelIcon', 'Icon of the chat editor label.'));
 
 export class ChatEditorInput extends EditorInput implements IEditorCloseHandler {
 	static readonly TypeID: string = 'workbench.input.chatSession';

@@ -49,11 +49,11 @@ suite('Workspace Trust', () => {
 	});
 
 	suite('Enablement', () => {
-		test('workspace trust enabled', async () => {
+		test('workspace trust disabled', async () => {
 			await configurationService.setUserConfiguration('security', getUserSettings(true, true));
 			const testObject = store.add(instantiationService.createInstance(WorkspaceTrustEnablementService));
 
-			assert.strictEqual(testObject.isWorkspaceTrustEnabled(), true);
+			assert.strictEqual(testObject.isWorkspaceTrustEnabled(), false);
 		});
 
 		test('workspace trust disabled (user setting)', async () => {

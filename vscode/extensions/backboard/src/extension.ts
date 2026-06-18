@@ -142,7 +142,7 @@ interface PanelThreadFile {
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
 const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases';
-const dismissedUpdateVersionKey = 'backboard.update.dismissedVersion';
+const promptedUpdateVersions = new Set<string>();
 const panelStateStorageKeyPrefix = 'backboard.panel.state.';
 const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
 const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
@@ -151,6 +151,8 @@ const defaultBackboardOAuthRedirectUri = 'http://127.0.0.1:49321/auth/callback';
 const backboardOAuthScope = 'openid email profile';
 let backboardToolOutput: vscode.OutputChannel | undefined;
 let backboardUpdateInstallInProgress = false;
+let availableBackboardUpdate: UpdateManifest | undefined;
+let backboardUpdateStatusItem: vscode.StatusBarItem | undefined;
 let pendingBackboardOAuth: BackboardOAuthPending | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -159,6 +161,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	const panelProvider = new BackboardPanelProvider(bridge, context);
 	context.subscriptions.push(backboardToolOutput);
 	context.subscriptions.push(bridge);
+	backboardUpdateStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+	backboardUpdateStatusItem.command = 'backboard.installAvailableUpdate';
+	context.subscriptions.push(backboardUpdateStatusItem);
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', async () => {
 		if (await setApiKey()) {
 			bridge.restart();
@@ -171,7 +176,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		handleUri: uri => handleBackboardOAuthCallback(uri)
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => bridge.refreshModels()));
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.checkForUpdates', () => checkBackboardUpdates(context, true)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.checkForUpdates', () => checkBackboardUpdates(true)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.installAvailableUpdate', () => installAvailableBackboardUpdate()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openRightPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.newChat', async () => {
@@ -588,17 +594,20 @@ function startBackboardUpdateChecks(context: vscode.ExtensionContext): void {
 		return;
 	}
 
-	void checkBackboardUpdates(context, false);
+	const initialTimer = setTimeout(() => {
+		void checkBackboardUpdates(false);
+	}, 10_000);
+	context.subscriptions.push({ dispose: () => clearTimeout(initialTimer) });
 
 	const configuredMinutes = vscode.workspace.getConfiguration('backboard').get<number>('updates.checkIntervalMinutes', 360);
 	const intervalMinutes = Number.isFinite(configuredMinutes) ? Math.max(15, configuredMinutes) : 360;
 	const timer = setInterval(() => {
-		void checkBackboardUpdates(context, false);
+		void checkBackboardUpdates(false);
 	}, intervalMinutes * 60 * 1000);
 	context.subscriptions.push({ dispose: () => clearInterval(timer) });
 }
 
-async function checkBackboardUpdates(context: vscode.ExtensionContext, manual: boolean): Promise<void> {
+async function checkBackboardUpdates(manual: boolean): Promise<void> {
 	try {
 		const manifestUrl = getBackboardUpdateManifestUrl();
 		if (!manifestUrl) {
@@ -608,21 +617,28 @@ async function checkBackboardUpdates(context: vscode.ExtensionContext, manual: b
 			return;
 		}
 
+		backboardToolOutput?.appendLine(`[updates] checking ${manifestUrl}`);
 		const manifest = await fetchBackboardUpdateManifest(manifestUrl);
 		const currentVersion = readCurrentAppVersion();
+		backboardToolOutput?.appendLine(`[updates] current=${currentVersion} remote=${manifest.version}`);
 		if (!isNewerVersion(manifest.version, currentVersion)) {
+			await setAvailableBackboardUpdate(undefined);
 			if (manual) {
 				await vscode.window.showInformationMessage(`Backboard Studio is up to date. Current version: ${currentVersion}.`);
 			}
 			return;
 		}
 
-		if (!manual && context.globalState.get<string>(dismissedUpdateVersionKey) === manifest.version) {
+		await setAvailableBackboardUpdate(manifest);
+		if (!manual && promptedUpdateVersions.has(manifest.version)) {
 			return;
+		}
+		if (!manual) {
+			promptedUpdateVersions.add(manifest.version);
 		}
 
 		const canInstall = canInstallBackboardUpdate();
-		const message = `Backboard Studio ${manifest.version} is available. Current version: ${currentVersion}.`;
+		const message = `Backboard Studio ${manifest.version} is available from S3. Current version: ${currentVersion}.`;
 		const actions = canInstall ? ['Install and Restart', 'Download DMG', 'Copy Link', 'Later'] : ['Download DMG', 'Copy Link', 'Later'];
 		const choice = await vscode.window.showInformationMessage(message, ...actions);
 		if (choice === 'Install and Restart') {
@@ -632,8 +648,6 @@ async function checkBackboardUpdates(context: vscode.ExtensionContext, manual: b
 		} else if (choice === 'Copy Link') {
 			await vscode.env.clipboard.writeText(manifest.url);
 			await vscode.window.showInformationMessage('Backboard Studio update link copied.');
-		} else if (choice === 'Later') {
-			await context.globalState.update(dismissedUpdateVersionKey, manifest.version);
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -642,6 +656,33 @@ async function checkBackboardUpdates(context: vscode.ExtensionContext, manual: b
 			await vscode.window.showWarningMessage(`Could not check for Backboard Studio updates: ${message}`);
 		}
 	}
+}
+
+async function setAvailableBackboardUpdate(manifest: UpdateManifest | undefined): Promise<void> {
+	availableBackboardUpdate = manifest;
+	await vscode.commands.executeCommand('setContext', 'backboard.updateAvailable', Boolean(manifest));
+	if (!backboardUpdateStatusItem) {
+		return;
+	}
+	if (!manifest) {
+		backboardUpdateStatusItem.hide();
+		return;
+	}
+	backboardUpdateStatusItem.text = `$(cloud-download) Update ${manifest.version}`;
+	backboardUpdateStatusItem.tooltip = `Install Backboard Studio ${manifest.version}`;
+	backboardUpdateStatusItem.show();
+}
+
+async function installAvailableBackboardUpdate(): Promise<void> {
+	if (!availableBackboardUpdate) {
+		await checkBackboardUpdates(true);
+		return;
+	}
+	if (canInstallBackboardUpdate()) {
+		await installBackboardUpdate(availableBackboardUpdate);
+		return;
+	}
+	await vscode.env.openExternal(vscode.Uri.parse(availableBackboardUpdate.url));
 }
 
 function canInstallBackboardUpdate(): boolean {
@@ -827,11 +868,13 @@ for _ in {1..120}; do
   fi
   /bin/sleep 1
 done
+/usr/bin/pkill -f "$APP_PATH/Contents/" >/dev/null 2>&1 || true
 
 replace_app() {
   /bin/rm -rf "$APP_PATH"
   /usr/bin/ditto "$SOURCE_APP" "$APP_PATH"
   /bin/chmod -R u+rwX "$APP_PATH" >/dev/null 2>&1 || true
+  /usr/bin/xattr -dr com.apple.quarantine "$APP_PATH" >/dev/null 2>&1 || true
 }
 
 if [[ -w "$(dirname "$APP_PATH")" || -w "$APP_PATH" ]]; then
@@ -849,6 +892,7 @@ else
     echo '/bin/rm -rf "$APP_PATH"'
     echo '/usr/bin/ditto "$SOURCE_APP" "$APP_PATH"'
     echo '/bin/chmod -R a+rX "$APP_PATH" >/dev/null 2>&1 || true'
+    echo '/usr/bin/xattr -dr com.apple.quarantine "$APP_PATH" >/dev/null 2>&1 || true'
   } > "$HELPER"
   /bin/chmod 700 "$HELPER"
   /usr/bin/osascript -e "do shell script \\"/bin/zsh $HELPER\\" with administrator privileges"
@@ -958,6 +1002,35 @@ function readCurrentAppVersion(): string {
 		return envVersion.trim();
 	}
 
+	const appRoot = vscode.env.appRoot;
+	const extensionPath = vscode.extensions.getExtension('backboard.backboard')?.extensionPath;
+	const releaseMetadataPaths = [
+		appRoot ? path.join(appRoot, 'backboard-build-info.json') : undefined,
+		appRoot ? path.join(appRoot, 'product.json') : undefined,
+		extensionPath ? path.resolve(extensionPath, '..', '..', 'backboard-build-info.json') : undefined,
+		extensionPath ? path.resolve(extensionPath, '..', '..', 'product.json') : undefined,
+		path.join(process.cwd(), 'backboard-build-info.json'),
+		path.join(process.cwd(), 'product.json')
+	].filter((value): value is string => Boolean(value));
+	for (const releaseMetadataPath of releaseMetadataPaths) {
+		try {
+			const parsed: unknown = JSON.parse(fs.readFileSync(releaseMetadataPath, 'utf8'));
+			if (isObjectRecord(parsed)) {
+				const backboardBuildInfo = isObjectRecord(parsed.backboardBuildInfo) ? parsed.backboardBuildInfo : undefined;
+				const isBuildInfoFile = path.basename(releaseMetadataPath) === 'backboard-build-info.json';
+				const value =
+					stringValueFromRecord(parsed.backboardStudioVersion) ||
+					(backboardBuildInfo ? stringValueFromRecord(backboardBuildInfo.version) : undefined) ||
+					(isBuildInfoFile ? stringValueFromRecord(parsed.version) : undefined);
+				if (value) {
+					return value;
+				}
+			}
+		} catch {
+			// Development hosts may not have packaged Backboard release metadata.
+		}
+	}
+
 	const appPath = currentMacAppPath();
 	const infoPlistPaths = [
 		appPath ? path.join(appPath, 'Contents', 'Info.plist') : undefined,
@@ -967,7 +1040,7 @@ function readCurrentAppVersion(): string {
 		try {
 			const plist = fs.readFileSync(infoPlist, 'utf8');
 			const value = readPlistString(plist, 'CFBundleShortVersionString') || readPlistString(plist, 'CFBundleVersion');
-			if (value) {
+			if (value && value !== vscode.version) {
 				return value;
 			}
 		} catch {
@@ -975,25 +1048,7 @@ function readCurrentAppVersion(): string {
 		}
 	}
 
-	const productJsonPaths = [
-		vscode.env.appRoot ? path.join(vscode.env.appRoot, 'product.json') : undefined,
-		path.join(process.cwd(), 'product.json')
-	].filter((value): value is string => Boolean(value));
-	for (const productJsonPath of productJsonPaths) {
-		try {
-			const parsed: unknown = JSON.parse(fs.readFileSync(productJsonPath, 'utf8'));
-			if (isObjectRecord(parsed)) {
-				const value = stringValueFromRecord(parsed.backboardStudioVersion);
-				if (value) {
-					return value;
-				}
-			}
-		} catch {
-			// Product metadata is best-effort; fall through to VS Code's API version.
-		}
-	}
-
-	return vscode.version;
+	return 'development build';
 }
 
 function readPlistString(plist: string, key: string): string | undefined {

@@ -58,7 +58,7 @@ const autoPermissionMode: IClaudePermissionModeItem = {
 	id: 'auto',
 	label: localize('claude.permissionMode.auto', "Auto"),
 	description: localize('claude.permissionMode.auto.description', "A model classifier approves or denies tool operations automatically"),
-	icon: Codicon.sparkle,
+	icon: ThemeIcon.fromId('backboard-logo'),
 };
 
 const bypassPermissionMode: IClaudePermissionModeItem = {

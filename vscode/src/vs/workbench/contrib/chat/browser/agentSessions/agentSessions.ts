@@ -63,7 +63,7 @@ export function getAgentSessionProviderName(provider: AgentSessionTarget): strin
 		case AgentSessionProviders.Local:
 			return localize('chat.session.providerLabel.local', "Local");
 		case AgentSessionProviders.Background:
-			return localize('chat.session.providerLabel.background', "Copilot CLI");
+			return localize('chat.session.providerLabel.background', "Background Agent");
 		case AgentSessionProviders.Cloud:
 			return localize('chat.session.providerLabel.cloud', "Cloud");
 		case AgentSessionProviders.Claude:
@@ -88,7 +88,7 @@ export function getAgentSessionProviderIcon(provider: AgentSessionTarget): Theme
 		case AgentSessionProviders.Local:
 			return Codicon.vm;
 		case AgentSessionProviders.Background:
-			return Codicon.copilot;
+			return BackboardLogoIcon;
 		case AgentSessionProviders.Cloud:
 			return Codicon.cloud;
 		case AgentSessionProviders.Codex:
@@ -102,7 +102,7 @@ export function getAgentSessionProviderIcon(provider: AgentSessionTarget): Theme
 		case AgentSessionProviders.AgentHostCopilot:
 			return BackboardLogoIcon;
 		default:
-			return Codicon.sparkle;
+			return BackboardLogoIcon;
 	}
 }
 
@@ -181,18 +181,18 @@ export function getAgentCanContinueIn(provider: AgentSessionTarget): boolean {
 export function getAgentSessionProviderDescription(provider: AgentSessionTarget): string {
 	switch (provider) {
 		case AgentSessionProviders.Local:
-			return localize('chat.session.providerDescription.local', "Run tasks within VS Code chat. The agent iterates via chat and works interactively to implement changes on your main workspace.");
+			return localize('chat.session.providerDescription.local', "Run tasks within Backboard chat. The agent iterates via chat and works interactively to implement changes on your main workspace.");
 		case AgentSessionProviders.Background:
-			return localize('chat.session.providerDescription.background', "Delegate tasks to a background agent running locally on your machine. The agent iterates via chat and works asynchronously in a Git worktree to implement changes isolated from your main workspace using the GitHub Copilot CLI.");
+			return localize('chat.session.providerDescription.background', "Delegate tasks to a background agent running locally on your machine. The agent iterates via chat and works asynchronously in a Git worktree to implement changes isolated from your main workspace.");
 		case AgentSessionProviders.Cloud:
-			return localize('chat.session.providerDescription.cloud', "Delegate tasks to the GitHub Copilot coding agent. The agent iterates via chat and works asynchronously in the cloud to implement changes and pull requests as needed.");
+			return localize('chat.session.providerDescription.cloud', "Delegate tasks to a cloud coding agent. The agent iterates via chat and works asynchronously in the cloud to implement changes and pull requests as needed.");
 		case AgentSessionProviders.Claude:
 		case AgentSessionProviders.AgentHostClaude:
-			return localize('chat.session.providerDescription.claude', "Delegate tasks to the Claude Agent SDK using the Claude models included in your GitHub Copilot subscription. The agent iterates via chat and works interactively to implement changes on your main workspace.");
+			return localize('chat.session.providerDescription.claude', "Delegate tasks to the Claude Agent SDK. The agent iterates via chat and works interactively to implement changes on your main workspace.");
 		case AgentSessionProviders.Codex:
 			return localize('chat.session.providerDescription.codex', "Opens a new Codex session in the editor. Codex sessions can be managed from the chat sessions view.");
 		case AgentSessionProviders.Growth:
-			return localize('chat.session.providerDescription.growth', "Learn about Copilot features.");
+			return localize('chat.session.providerDescription.growth', "Learn about Backboard features.");
 		case AgentSessionProviders.AgentHostCopilot:
 			return localize('chat.session.providerDescription.agentHostCopilot', "Run Backboard against the current workspace with local tools, model selection, and saved Backboard credentials.");
 		default:

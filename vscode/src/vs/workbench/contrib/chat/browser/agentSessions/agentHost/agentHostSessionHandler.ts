@@ -5,7 +5,6 @@
 
 import { encodeBase64, VSBuffer } from '../../../../../../base/common/buffer.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
-import { Codicon } from '../../../../../../base/common/codicons.js';
 import { isCancellationError } from '../../../../../../base/common/errors.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
@@ -69,7 +68,7 @@ import { BackboardLogoIcon } from '../agentSessions.js';
 export { toolDataToDefinition };
 
 function agentHostSessionIcon(provider: string) {
-	return provider === 'backboard' ? BackboardLogoIcon : Codicon.copilot;
+	return BackboardLogoIcon;
 }
 
 // =============================================================================

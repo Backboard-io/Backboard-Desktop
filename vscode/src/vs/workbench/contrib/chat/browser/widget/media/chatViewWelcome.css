@@ -68,21 +68,29 @@ div.chat-welcome-view {
 	}
 
 	& > .chat-welcome-view-icon.large-icon {
-		min-width: 72px;
-		min-height: 72px;
+		min-width: 160px;
+		min-height: 160px;
+		opacity: 0.9;
 	}
 
 	& > .chat-welcome-view-icon.large-icon .codicon {
-		font-size: 72px;
-		width: 72px;
-		height: 72px;
+		font-size: 160px;
+		width: 160px;
+		height: 160px;
 	}
 
 	& > .chat-welcome-view-icon.large-icon.custom-icon {
-		mask-size: 72px !important;
-		-webkit-mask-size: 72px !important;
-		width: 72px;
-		height: 72px;
+		mask-size: 160px !important;
+		-webkit-mask-size: 160px !important;
+		width: 160px;
+		height: 160px;
+	}
+
+	& > .chat-welcome-view-icon.large-icon .chat-welcome-view-image-icon {
+		display: block;
+		width: 150px;
+		height: 150px;
+		object-fit: contain;
 	}
 
 	& > .chat-welcome-view-title {
@@ -100,9 +108,10 @@ div.chat-welcome-view {
 		text-align: center;
 		max-width: 280px;
 		padding: 0 20px;
-		margin: 8px auto 0;
+		margin: 14px auto 0;
 		color: var(--vscode-descriptionForeground);
 		font-size: 12px;
+		line-height: 1.7;
 
 		a {
 			color: var(--vscode-textLink-foreground);
@@ -176,6 +185,10 @@ div.chat-welcome-view {
 		a:focus {
 			text-decoration: underline;
 			outline: 1px solid var(--vscode-focusBorder);
+		}
+
+		p {
+			margin: 0 0 3px;
 		}
 	}
 }

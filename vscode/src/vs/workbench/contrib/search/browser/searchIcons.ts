@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize } from '../../../../nls.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 
@@ -30,5 +31,5 @@ export const searchViewIcon = registerIcon('search-view-icon', Codicon.searchLar
 export const searchNewEditorIcon = registerIcon('search-new-editor', Codicon.newFile, localize('searchNewEditorIcon', 'Icon for the action to open a new search editor.'));
 export const searchOpenInFileIcon = registerIcon('search-open-in-file', Codicon.goToFile, localize('searchOpenInFile', 'Icon for the action to go to the file of the current search result.'));
 
-export const searchSparkleFilled = registerIcon('search-sparkle-filled', Codicon.sparkleFilled, localize('searchSparkleFilled', 'Icon to show AI results in search.'));
-export const searchSparkleEmpty = registerIcon('search-sparkle-empty', Codicon.sparkle, localize('searchSparkleEmpty', 'Icon to hide AI results in search.'));
+export const searchSparkleFilled = registerIcon('search-sparkle-filled', ThemeIcon.fromId('backboard-logo'), localize('searchSparkleFilled', 'Icon to show AI results in search.'));
+export const searchSparkleEmpty = registerIcon('search-sparkle-empty', ThemeIcon.fromId('backboard-logo'), localize('searchSparkleEmpty', 'Icon to hide AI results in search.'));

@@ -122,7 +122,7 @@ export function getSessionTypeUnavailableHover(availability: SessionTypeAvailabi
 	switch (availability) {
 		case SessionTypeAvailability.UpgradeRequired: {
 			const hover = new MarkdownString('', { isTrusted: { enabledCommands: ['workbench.action.chat.upgradePlan'] }, supportThemeIcons: true });
-			hover.appendMarkdown(localize('chat.sessionType.upgradeHover', "[Upgrade to GitHub Copilot Pro](command:workbench.action.chat.upgradePlan) to use this agent."));
+			hover.appendMarkdown(localize('chat.sessionType.upgradeHover', "[Upgrade Backboard](command:workbench.action.chat.upgradePlan) to use this agent."));
 			return hover;
 		}
 		case SessionTypeAvailability.NoModels:
@@ -139,7 +139,7 @@ export function getSessionTypeUnavailableHover(availability: SessionTypeAvailabi
 export function getSessionTypeUnavailableLabel(availability: SessionTypeAvailability): string | undefined {
 	switch (availability) {
 		case SessionTypeAvailability.UpgradeRequired:
-			return localize('chat.sessionType.upgradeMobile', "Requires GitHub Copilot Pro");
+			return localize('chat.sessionType.upgradeMobile', "Requires Backboard upgrade");
 		case SessionTypeAvailability.NoModels:
 			return localize('chat.sessionType.noModels', "No models available");
 		default:

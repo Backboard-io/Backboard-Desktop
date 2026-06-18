@@ -842,7 +842,7 @@ registerAction2(class extends Action2 {
 		super({
 			id: SCMInputWidgetCommandId.SetupAction,
 			title: localize('scmInputGenerateCommitMessage', "Generate Commit Message"),
-			icon: Codicon.sparkle,
+			icon: ThemeIcon.fromId('backboard-logo'),
 			f1: false,
 			menu: {
 				id: MenuId.SCMInputBox,

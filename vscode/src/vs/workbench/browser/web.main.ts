@@ -476,7 +476,7 @@ export class BrowserMain extends Disposable {
 		]);
 
 		// Workspace Trust Service
-		const workspaceTrustEnablementService = new WorkspaceTrustEnablementService(configurationService, environmentService);
+		const workspaceTrustEnablementService = new WorkspaceTrustEnablementService();
 		serviceCollection.set(IWorkspaceTrustEnablementService, workspaceTrustEnablementService);
 
 		const workspaceTrustManagementService = new WorkspaceTrustManagementService(configurationService, remoteAuthorityResolverService, storageService, uriIdentityService, environmentService, configurationService, workspaceTrustEnablementService, fileService);

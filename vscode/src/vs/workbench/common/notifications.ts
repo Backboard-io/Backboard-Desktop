@@ -8,7 +8,7 @@ import { toErrorMessage, isErrorWithActions } from '../../base/common/errorMessa
 import { Event, Emitter } from '../../base/common/event.js';
 import { Disposable } from '../../base/common/lifecycle.js';
 import { isCancellationError } from '../../base/common/errors.js';
-import { Action } from '../../base/common/actions.js';
+import { Action, IAction } from '../../base/common/actions.js';
 import { equals } from '../../base/common/arrays.js';
 import { parseLinkedText, LinkedText } from '../../base/common/linkedText.js';
 import { mapsStrictEqualIgnoreOrder } from '../../base/common/map.js';
@@ -445,6 +445,48 @@ export interface INotificationMessage {
 	linkedText: LinkedText;
 }
 
+interface INotificationActionWithMenu extends IAction {
+	readonly menu?: readonly IAction[];
+}
+
+const BLOCKED_NOTIFICATION_TEXT = /(?:\bcopilot\b|\bmicrosoft\b|\bvisual\s+studio\s+code\b|\bvs\s*code\b)/i;
+
+function shouldBlockNotificationText(text: string | undefined): boolean {
+	return typeof text === 'string' && BLOCKED_NOTIFICATION_TEXT.test(text);
+}
+
+function shouldBlockNotificationMessage(message: INotificationMessage): boolean {
+	if (shouldBlockNotificationText(message.raw) || shouldBlockNotificationText(message.linkedText.toString())) {
+		return true;
+	}
+
+	return message.linkedText.nodes.some(node => {
+		if (typeof node === 'string') {
+			return shouldBlockNotificationText(node);
+		}
+
+		return shouldBlockNotificationText(node.label) || shouldBlockNotificationText(node.href) || shouldBlockNotificationText(node.title);
+	});
+}
+
+function shouldBlockNotificationSource(source: string | INotificationSource | undefined): boolean {
+	if (typeof source === 'string') {
+		return shouldBlockNotificationText(source);
+	}
+
+	return shouldBlockNotificationText(source?.id) || shouldBlockNotificationText(source?.label);
+}
+
+function shouldBlockNotificationActions(actions: INotificationActions | undefined): boolean {
+	const notificationActions = [...(actions?.primary ?? []), ...(actions?.secondary ?? [])];
+	return notificationActions.some(action => {
+		const actionWithMenu = action as INotificationActionWithMenu;
+		return shouldBlockNotificationText(action.label) ||
+			shouldBlockNotificationText(action.tooltip) ||
+			actionWithMenu.menu?.some(action => shouldBlockNotificationActions({ primary: [action] })) === true;
+	});
+}
+
 export class NotificationViewItem extends Disposable implements INotificationViewItem {
 
 	private static readonly MAX_MESSAGE_LENGTH = 1000;
@@ -489,6 +531,10 @@ export class NotificationViewItem extends Disposable implements INotificationVie
 			actions = notification.actions;
 		} else if (isErrorWithActions(notification.message)) {
 			actions = { primary: notification.message.actions };
+		}
+
+		if (shouldBlockNotificationMessage(message) || shouldBlockNotificationSource(notification.source) || shouldBlockNotificationActions(actions)) {
+			return undefined;
 		}
 
 		let priority = notification.priority ?? NotificationPriority.DEFAULT;
@@ -664,11 +710,21 @@ export class NotificationViewItem extends Disposable implements INotificationVie
 			return;
 		}
 
+		if (shouldBlockNotificationMessage(message)) {
+			this.close();
+			return;
+		}
+
 		this._message = message;
 		this._onDidChangeContent.fire({ kind: NotificationViewItemContentChangeKind.MESSAGE });
 	}
 
 	updateActions(actions?: INotificationActions): void {
+		if (shouldBlockNotificationActions(actions)) {
+			this.close();
+			return;
+		}
+
 		this.setActions(actions);
 		this._onDidChangeContent.fire({ kind: NotificationViewItemContentChangeKind.ACTIONS });
 	}
@@ -790,6 +846,10 @@ class StatusMessageViewItem {
 
 		if (!message) {
 			return undefined; // we need a message to show
+		}
+
+		if (shouldBlockNotificationText(message)) {
+			return undefined;
 		}
 
 		return { message, options };

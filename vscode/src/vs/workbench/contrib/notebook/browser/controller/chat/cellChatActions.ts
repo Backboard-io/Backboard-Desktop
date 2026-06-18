@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { KeyChord, KeyCode, KeyMod } from '../../../../../../base/common/keyCodes.js';
 import { localize, localize2 } from '../../../../../../nls.js';
 import { MenuId, MenuRegistry, registerAction2 } from '../../../../../../platform/actions/common/actions.js';
@@ -202,7 +203,7 @@ registerAction2(class extends NotebookAction {
 MenuRegistry.appendMenuItem(MenuId.NotebookToolbar, {
 	command: {
 		id: 'notebook.cell.chat.start',
-		icon: Codicon.sparkle,
+		icon: ThemeIcon.fromId('backboard-logo'),
 		title: localize('notebookActions.menu.insertCode.ontoolbar', "Generate"),
 		tooltip: localize('notebookActions.menu.insertCode.tooltip', "Start Chat to Generate Code")
 	},

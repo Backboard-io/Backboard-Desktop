@@ -54,11 +54,11 @@ export class SessionsPart extends Part {
 	override readonly maximumHeight: number = Number.POSITIVE_INFINITY;
 	get snap(): boolean { return false; }
 
-	/** Visual margin values for the card-like appearance */
+	/** Agent sessions parts are flush; layout only subtracts borders. */
 	static readonly MARGIN_TOP = 0;
-	static readonly MARGIN_LEFT = 10;
-	static readonly MARGIN_RIGHT = 5;
-	static readonly MARGIN_BOTTOM = 5;
+	static readonly MARGIN_LEFT = 0;
+	static readonly MARGIN_RIGHT = 0;
+	static readonly MARGIN_BOTTOM = 0;
 
 	/** Border width on the card (1px each side) */
 	static readonly BORDER_WIDTH = 1;
@@ -419,10 +419,7 @@ export class SessionsPart extends Part {
 
 		this._lastLayout = { width, height, top, left };
 
-		// Compute content dimensions accounting for visual margins and border.
-		// MARGIN_BOTTOM applies only when the panel is visible (paired with the panel's
-		// 5px top margin to center the sash). When the panel is hidden the card fills its
-		// cell; the workbench grid's 10px bottom gutter provides the visible gap.
+		// Compute content dimensions accounting for the border only.
 		const borderTotal = SessionsPart.BORDER_WIDTH * 2;
 		const marginLeft = this.layoutService.isVisible(Parts.SIDEBAR_PART) ? 0 : SessionsPart.MARGIN_LEFT;
 		const marginBottom = this.layoutService.isVisible(Parts.PANEL_PART) ? SessionsPart.MARGIN_BOTTOM : 0;

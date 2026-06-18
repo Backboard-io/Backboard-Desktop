@@ -24,6 +24,8 @@ import product from '../../../../../platform/product/common/product.js';
 import { isCompletionsEnabled } from '../../../../../editor/common/services/completionsEnablement.js';
 import { CHAT_SETUP_ACTION_ID } from '../actions/chatActions.js';
 
+const BackboardStatusIcon = '$(backboard-logo)';
+
 export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.chatStatusBarEntry';
@@ -127,8 +129,8 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 	}
 
 	private getEntryProps(): IStatusbarEntry {
-		let text = '$(copilot)';
-		let ariaLabel = localize('chatStatusAria', "Copilot status");
+		let text = BackboardStatusIcon;
+		let ariaLabel = localize('chatStatusAria', "Backboard status");
 		let kind: StatusbarEntryKind | undefined;
 
 		if (isNewUser(this.chatEntitlementService)) {
@@ -151,13 +153,13 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 
 			// Disabled
 			if (this.chatEntitlementService.sentiment.disabled || this.chatEntitlementService.sentiment.untrusted) {
-				text = '$(copilot-unavailable)';
-				ariaLabel = localize('copilotDisabledStatus', "Copilot disabled");
+				text = '$(warning)';
+				ariaLabel = localize('copilotDisabledStatus', "Backboard disabled");
 			}
 
 			// Sessions in progress
 			else if (this.runningSessionsCount > 0) {
-				text = '$(copilot-in-progress)';
+				text = '$(loading~spin)';
 				if (this.runningSessionsCount > 1) {
 					ariaLabel = localize('chatSessionsInProgressStatus', "{0} agent sessions in progress", this.runningSessionsCount);
 				} else {
@@ -182,7 +184,7 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 					quotaWarning = localize('chatAndCompletionsQuotaExceededStatus', "Quota reached");
 				}
 
-				text = `$(copilot-warning) ${quotaWarning}`;
+				text = `$(warning) ${quotaWarning}`;
 				ariaLabel = quotaWarning;
 				kind = 'prominent';
 			}
@@ -197,19 +199,19 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 
 			// Completions Disabled
 			else if (this.editorService.activeTextEditorLanguageId && !isCompletionsEnabled(this.configurationService, this.editorService.activeTextEditorLanguageId)) {
-				text = '$(copilot-unavailable)';
+				text = '$(warning)';
 				ariaLabel = localize('completionsDisabledStatus', "Inline suggestions disabled");
 			}
 
 			// Completions Snoozed
 			else if (this.completionsService.isSnoozing()) {
-				text = '$(copilot-snooze)';
+				text = '$(bell-slash)';
 				ariaLabel = localize('completionsSnoozedStatus', "Inline suggestions snoozed");
 			}
 		}
 
 		const baseResult = {
-			name: localize('chatStatus', "Copilot Status"),
+			name: localize('chatStatus', "Backboard Status"),
 			text,
 			ariaLabel,
 			command: ShowTooltipCommand,
@@ -226,9 +228,9 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 		const showSignInLabel = !this.isSignInTitleBarAffordanceVisible();
 		const signInLabel = localize('signIn', "Sign In");
 		return {
-			name: localize('chatStatus', "Copilot Status"),
-			text: showSignInLabel ? `$(copilot) ${signInLabel}` : '$(copilot)',
-			ariaLabel: showSignInLabel ? signInLabel : localize('chatStatusAria', "Copilot status"),
+			name: localize('chatStatus', "Backboard Status"),
+			text: showSignInLabel ? `${BackboardStatusIcon} ${signInLabel}` : BackboardStatusIcon,
+			ariaLabel: showSignInLabel ? signInLabel : localize('chatStatusAria', "Backboard status"),
 			command: CHAT_SETUP_ACTION_ID,
 			showInAllWindows: true,
 			kind: undefined,

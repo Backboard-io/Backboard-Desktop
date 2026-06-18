@@ -488,7 +488,7 @@ export class AgentsHandoffInputTipContribution extends Disposable implements IWo
 		const description = useEmptyWorkspaceCopy
 			? localize('chat.agentsHandoff.tip.emptyWorkspace.description', "Open Agents to start a Backboard session.")
 			: mode === AgentsHandoffTipMode.Custom
-				? localize('chat.agentsHandoff.tip.description.copilot', "Free with your Copilot plan — get a dedicated, multi-pane view alongside your workspace.")
+				? localize('chat.agentsHandoff.tip.description.copilot', "Get a dedicated, multi-pane view alongside your workspace.")
 				: localize('chat.agentsHandoff.tip.description', "Get a dedicated, multi-pane view alongside your workspace.");
 		const actionLabel = useEmptyWorkspaceCopy
 			? localize('chat.agentsHandoff.tip.action', "Open Agents")

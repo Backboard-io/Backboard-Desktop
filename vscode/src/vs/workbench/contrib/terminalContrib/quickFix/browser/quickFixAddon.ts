@@ -304,7 +304,7 @@ export class TerminalQuickFixAddon extends Disposable implements ITerminalAddon,
 			if (isExplainOnly) {
 				e.classList.add('explainOnly');
 			}
-			e.classList.add(...ThemeIcon.asClassNameArray(isExplainOnly ? Codicon.sparkle : Codicon.lightBulb));
+			e.classList.add(...ThemeIcon.asClassNameArray(isExplainOnly ? ThemeIcon.fromId('backboard-logo') : Codicon.lightBulb));
 
 			updateLayout(this._configurationService, e);
 			this._accessibilitySignalService.playSignal(AccessibilitySignal.terminalQuickFix);
@@ -532,7 +532,7 @@ function toActionWidgetItems(inputQuickFixes: readonly TerminalQuickFixItem[], s
 
 function getQuickFixIcon(quickFix: TerminalQuickFixItem): ThemeIcon {
 	if (quickFix.kind === 'explain') {
-		return Codicon.sparkle;
+		return ThemeIcon.fromId('backboard-logo');
 	}
 	switch (quickFix.type) {
 		case TerminalQuickFixType.Opener:

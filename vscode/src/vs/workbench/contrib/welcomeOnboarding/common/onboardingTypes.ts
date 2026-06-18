@@ -102,7 +102,7 @@ export const ONBOARDING_AI_PREFERENCE_OPTIONS: readonly IAiPreferenceOption[] = 
 		id: AiCollaborationMode.AgentForward,
 		label: localize('onboarding.aiPref.agentForward', "AI Takes the Lead"),
 		description: localize('onboarding.aiPref.agentForward.desc', "Let the agent drive — describe what you want and review the result. Great for scaffolding and exploration."),
-		icon: 'copilot',
+		icon: 'sparkle',
 	},
 ];
 

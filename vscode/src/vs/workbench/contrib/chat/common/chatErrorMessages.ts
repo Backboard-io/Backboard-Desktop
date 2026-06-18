@@ -153,7 +153,7 @@ function getRateLimitMessage(fetchError: IChatFetchErrorPayload, copilotPlan: st
 		return localize({ key: 'chatError.rateLimit.model', comment: [`{Locked=']({'}`] }, "You've hit the rate limit for this model. Please try switching to Auto or try again in {0}. [Learn More]({1})", retryAfterString, RATE_LIMIT_LEARN_MORE_URL);
 	}
 	if (code?.startsWith('integration_rate_limited')) {
-		return localize({ key: 'chatError.rateLimit.integration', comment: [`{Locked=']({'}`] }, "Sorry, GitHub Copilot Chat is currently experiencing high demand. Please try again in {0}. [Learn More]({1})", retryAfterString, RATE_LIMIT_LEARN_MORE_URL);
+		return localize({ key: 'chatError.rateLimit.integration', comment: [`{Locked=']({'}`] }, "Sorry, Backboard Chat is currently experiencing high demand. Please try again in {0}. [Learn More]({1})", retryAfterString, RATE_LIMIT_LEARN_MORE_URL);
 	}
 
 	if (fetchError.capiError?.code && fetchError.capiError?.message) {
@@ -178,12 +178,12 @@ export function getQuotaMessageForPlan(copilotPlan: string | undefined, isUsageB
 		switch (copilotPlan) {
 			case 'free':
 				return resetDateString
-					? localize('chatError.quota.ubb.freeDate', "You've reached your monthly credit limit. Upgrade to Copilot Pro or wait until your credits reset on {0}.", resetDateString)
-					: localize('chatError.quota.ubb.free', "You've reached your monthly credit limit. Upgrade to Copilot Pro or wait for your credits to reset.");
+					? localize('chatError.quota.ubb.freeDate', "You've reached your monthly credit limit. Upgrade Backboard or wait until your credits reset on {0}.", resetDateString)
+					: localize('chatError.quota.ubb.free', "You've reached your monthly credit limit. Upgrade Backboard or wait for your credits to reset.");
 			case 'individual':
 				return resetDateString
-					? localize('chatError.quota.ubb.individualDate', "You've reached your monthly credit limit. Please enable additional paid credits, upgrade to Copilot Pro+, or wait until your credits reset on {0}.", resetDateString)
-					: localize('chatError.quota.ubb.individual', "You've reached your monthly credit limit. Please enable additional paid credits, upgrade to Copilot Pro+, or wait for your credits to reset.");
+					? localize('chatError.quota.ubb.individualDate', "You've reached your monthly credit limit. Please enable additional paid credits, upgrade Backboard, or wait until your credits reset on {0}.", resetDateString)
+					: localize('chatError.quota.ubb.individual', "You've reached your monthly credit limit. Please enable additional paid credits, upgrade Backboard, or wait for your credits to reset.");
 			case 'individual_pro':
 			case 'individual_max':
 				return resetDateString
@@ -192,28 +192,28 @@ export function getQuotaMessageForPlan(copilotPlan: string | undefined, isUsageB
 			case 'business':
 			case 'enterprise':
 				return resetDateString
-					? localize('chatError.quota.ubb.businessDate', "You've reached your credit limit. To continue working, please contact your organization's Copilot admin or wait until your credits reset on {0}.", resetDateString)
-					: localize('chatError.quota.ubb.business', "You've reached your credit limit. To continue working, please contact your organization's Copilot admin or wait for your credits to reset.");
+					? localize('chatError.quota.ubb.businessDate', "You've reached your credit limit. To continue working, please contact your organization's Backboard admin or wait until your credits reset on {0}.", resetDateString)
+					: localize('chatError.quota.ubb.business', "You've reached your credit limit. To continue working, please contact your organization's Backboard admin or wait for your credits to reset.");
 			default:
 				return resetDateString
-					? localize('chatError.quota.ubb.defaultDate', "You've reached your credit limit. For additional paid credits, please reach out to your organization's Copilot admin or wait until your credits reset on {0}.", resetDateString)
-					: localize('chatError.quota.ubb.default', "You've reached your credit limit. For additional paid credits, please reach out to your organization's Copilot admin or wait for your credits to reset.");
+					? localize('chatError.quota.ubb.defaultDate', "You've reached your credit limit. For additional paid credits, please reach out to your organization's Backboard admin or wait until your credits reset on {0}.", resetDateString)
+					: localize('chatError.quota.ubb.default', "You've reached your credit limit. For additional paid credits, please reach out to your organization's Backboard admin or wait for your credits to reset.");
 		}
 	}
 
 	switch (copilotPlan) {
 		case 'free':
-			return localize('chatError.quota.free', "You've reached your monthly chat messages quota. Upgrade to Copilot Pro or wait for your allowance to renew.");
+			return localize('chatError.quota.free', "You've reached your monthly chat messages quota. Upgrade Backboard or wait for your allowance to renew.");
 		case 'individual':
-			return localize('chatError.quota.individual', "You've exhausted your premium model quota. Please enable additional paid premium requests, upgrade to Copilot Pro+, or wait for your allowance to renew.");
+			return localize('chatError.quota.individual', "You've exhausted your premium model quota. Please enable additional paid premium requests, upgrade Backboard, or wait for your allowance to renew.");
 		case 'individual_pro':
 		case 'individual_max':
 			return localize('chatError.quota.pro', "You've exhausted your premium model quota. Please enable additional paid premium requests or wait for your allowance to renew.");
 		case 'business':
 		case 'enterprise':
-			return localize('chatError.quota.business', "You've exhausted your credits. To continue working, please contact your organization's Copilot admin or wait for your allowance to renew.");
+			return localize('chatError.quota.business', "You've exhausted your credits. To continue working, please contact your organization's Backboard admin or wait for your allowance to renew.");
 		default:
-			return localize('chatError.quota.default', "You've exhausted your premium model quota. For additional paid premium requests, please reach out to your organization's Copilot admin or wait for your allowance to renew.");
+			return localize('chatError.quota.default', "You've exhausted your premium model quota. For additional paid premium requests, please reach out to your organization's Backboard admin or wait for your allowance to renew.");
 	}
 }
 
@@ -225,7 +225,7 @@ function getQuotaHitMessage(fetchError: IChatFetchErrorPayload, copilotPlan: str
 	if (code === 'quota_exceeded') {
 		return getQuotaMessageForPlan(copilotPlan, isUsageBasedBilling, quotaResetDate);
 	} else if (code === 'overage_limit_reached') {
-		return localize({ key: 'chatError.quota.overage', comment: [`{Locked=']({'}`] }, "You cannot accrue additional premium requests at this time. Please contact [GitHub Support]({0}) to continue using Copilot.", GITHUB_SUPPORT_URL);
+		return localize({ key: 'chatError.quota.overage', comment: [`{Locked=']({'}`] }, "You cannot accrue additional premium requests at this time. Please contact [GitHub Support]({0}) to continue using Backboard.", GITHUB_SUPPORT_URL);
 	} else if (code === 'additional_spend_limit_reached') {
 		return localize('chatError.quota.additionalSpend', "You've reached your additional usage limit for your plan. Upgrade your plan to keep going.");
 	} else if (code === 'billing_not_configured' && fetchError.capiError?.message) {

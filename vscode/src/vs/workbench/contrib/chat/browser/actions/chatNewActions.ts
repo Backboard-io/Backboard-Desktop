@@ -25,6 +25,7 @@ import { clearChatEditor } from './chatClear.js';
 import { AgentSessionProviders, AgentSessionsViewerOrientation } from '../agentSessions/agentSessions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IChatSessionsService } from '../../common/chatSessionsService.js';
+import { BackboardLogoIcon } from '../agentSessions/agentSessions.js';
 
 export interface INewEditSessionActionContext {
 
@@ -140,7 +141,7 @@ export function registerNewChatActions() {
 	);
 
 	const iconVariants = [
-		{ idSuffix: '.copilotIcon', iconValue: 'copilot', icon: Codicon.copilot },
+		{ idSuffix: '.copilotIcon', iconValue: 'copilot', icon: BackboardLogoIcon },
 		{ idSuffix: '.newSessionIcon', iconValue: 'new-session', icon: Codicon.newSession },
 		{ idSuffix: '.commentIcon', iconValue: 'comment', icon: Codicon.comment },
 	] as const;

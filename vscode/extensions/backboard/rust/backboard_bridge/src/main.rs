@@ -41,7 +41,7 @@ const BACKBOARD_IMAGE_TOOL_NAMES: &[&str] = &["generate_image", "image_generate"
 const BACKBOARD_SYSTEM_PROMPT: &str = include_str!("backboard_runtime_system_prompt.md");
 const FAST_BACKBOARD_SYSTEM_PROMPT: &str = r#"# Backboard Runtime System Prompt
 
-You are Backboard, an AI coding assistant running inside the Backboard VS Code IDE.
+You are Backboard, an AI coding assistant running inside Backboard IDE.
 
 Use the native function/tool-call channel for file reads, edits, shell commands, workspace search, web fetch/search, and other tool-backed actions. Do not print tool-call JSON, XML, pseudo tool calls, patches, or shell commands as a substitute for calling a real tool.
 
@@ -1583,14 +1583,14 @@ fn all_tool_definitions() -> Vec<Value> {
         json!({"type":"function","function":{"name":"read_file","description":"Read a text file from the workspace. Supports offset and limit line ranges.","parameters":{"type":"object","properties":{"path":{"type":"string"},"target_file":{"type":"string"},"file_path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}}}),
         json!({"type":"function","function":{"name":"write","description":"Write a complete file in the workspace. Prefer edit for existing files.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"write_file","description":"Write a complete file in the workspace. Alias for write.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
-        json!({"type":"function","function":{"name":"create_file","description":"Create a file in the workspace, creating parent directories when the VS Code host supports it. Alias for write_file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"create_file","description":"Create a file in the workspace, creating parent directories when the host supports it. Alias for write_file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"overwrite_file","description":"Overwrite a complete file in the workspace. Alias for write_file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"edit","description":"Perform exact string replacement in a file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"edit_file","description":"Perform exact string replacement in a file. Alias for edit.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"old_string":{"type":"string"},"oldString":{"type":"string"},"new_string":{"type":"string"},"newString":{"type":"string"},"replace_all":{"type":"boolean"},"replaceAll":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"search_replace","description":"Search and replace text in a file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"glob","description":"Find workspace files by glob pattern.","parameters":{"type":"object","properties":{"pattern":{"type":"string"},"target_directory":{"type":"string"}},"required":["pattern"]}}}),
         json!({"type":"function","function":{"name":"grep","description":"Search workspace text files using regular expressions.","parameters":{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"glob":{"type":"string"},"include":{"type":"string"},"output_mode":{"type":"string","enum":["content","files_with_matches","count"]},"case_insensitive":{"type":"boolean"},"context_lines":{"type":"integer"}},"required":["pattern"]}}}),
-        json!({"type":"function","function":{"name":"codebase_search","description":"Search the workspace codebase semantically when available, with lexical fallback in VS Code.","parameters":{"type":"object","properties":{"query":{"type":"string"},"num_results":{"type":"integer"}},"required":["query"]}}}),
+        json!({"type":"function","function":{"name":"codebase_search","description":"Search the workspace codebase semantically when available, with lexical fallback in the host.","parameters":{"type":"object","properties":{"query":{"type":"string"},"num_results":{"type":"integer"}},"required":["query"]}}}),
         json!({"type":"function","function":{"name":"list_dir","description":"List files in a workspace directory with file types.","parameters":{"type":"object","properties":{"path":{"type":"string"},"target_directory":{"type":"string"},"relative_workspace_path":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"delete_file","description":"Delete a workspace file or directory.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"create_directory","description":"Create a workspace directory.","parameters":{"type":"object","properties":{"path":{"type":"string"},"target_directory":{"type":"string"}}}}}),
@@ -1598,15 +1598,15 @@ fn all_tool_definitions() -> Vec<Value> {
         json!({"type":"function","function":{"name":"web_fetch","description":"Fetch URL content as readable text.","parameters":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}}}),
         json!({"type":"function","function":{"name":"generate_image","description":"Request image generation through Backboard media generation. Use when the user explicitly asks to create, generate, draw, render, or make an image.","parameters":{"type":"object","properties":{"prompt":{"type":"string"},"description":{"type":"string"},"size":{"type":"string"},"style":{"type":"string"}},"required":["prompt"]}}}),
         json!({"type":"function","function":{"name":"todo_write","description":"Update the agent todo list.","parameters":{"type":"object","properties":{"merge":{"type":"boolean"},"todos":{"type":"array","items":{"type":"object"}}}}}}),
-        json!({"type":"function","function":{"name":"read_lints","description":"Read VS Code diagnostics for the workspace or run explicit check commands.","parameters":{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"command":{"type":"string"},"cmd":{"type":"string"},"commands":{"type":"array","items":{"type":"string"}},"working_directory":{"type":"string"},"cwd":{"type":"string"},"timeout":{"type":"integer"}}}}}),
+        json!({"type":"function","function":{"name":"read_lints","description":"Read diagnostics for the workspace or run explicit check commands.","parameters":{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"command":{"type":"string"},"cmd":{"type":"string"},"commands":{"type":"array","items":{"type":"string"}},"working_directory":{"type":"string"},"cwd":{"type":"string"},"timeout":{"type":"integer"}}}}}),
         json!({"type":"function","function":{"name":"task","description":"Run a focused read/search sub-task with local workspace tools.","parameters":{"type":"object","properties":{"prompt":{"type":"string"},"description":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"enter_plan_mode","description":"Enter read-only plan mode. Only use when the user explicitly requests planning.","parameters":{"type":"object","properties":{"reason":{"type":"string"}},"required":["reason"]}}}),
         json!({"type":"function","function":{"name":"exit_plan_mode","description":"Exit plan mode and present an implementation plan for user approval.","parameters":{"type":"object","properties":{"plan":{"type":"string"}},"required":["plan"]}}}),
         json!({"type":"function","function":{"name":"persistence_decide","description":"Persistence-gate decision tool.","parameters":{"type":"object","properties":{"action":{"type":"string","enum":["continue","done"]},"reason":{"type":"string"},"focus":{"type":"string"}},"required":["action","reason"]}}}),
         json!({"type":"function","function":{"name":"sleep","description":"Wait for a number of seconds.","parameters":{"type":"object","properties":{"seconds":{"type":"integer"}},"required":["seconds"]}}}),
-        json!({"type":"function","function":{"name":"repl","description":"Persistent REPL compatibility tool. VS Code host executes this as a snippet.","parameters":{"type":"object","properties":{"code":{"type":"string"},"language":{"type":"string"},"reset":{"type":"boolean"}},"required":["code"]}}}),
+        json!({"type":"function","function":{"name":"repl","description":"Persistent REPL compatibility tool. The host executes this as a snippet.","parameters":{"type":"object","properties":{"code":{"type":"string"},"language":{"type":"string"},"reset":{"type":"boolean"}},"required":["code"]}}}),
         json!({"type":"function","function":{"name":"run_code","description":"Execute a one-off code snippet.","parameters":{"type":"object","properties":{"code":{"type":"string"},"language":{"type":"string","enum":["python","node","typescript","shell","ruby","go"]},"timeout":{"type":"integer"},"description":{"type":"string"}},"required":["code"]}}}),
-        json!({"type":"function","function":{"name":"computer","description":"Desktop automation. This VS Code bridge reports it unsupported until desktop automation is ported.","parameters":{"type":"object","properties":{"action":{"type":"string"},"x":{"type":"integer"},"y":{"type":"integer"},"text":{"type":"string"},"key":{"type":"string"}},"required":["action"]}}}),
+        json!({"type":"function","function":{"name":"computer","description":"Desktop automation. This bridge reports it unsupported until desktop automation is ported.","parameters":{"type":"object","properties":{"action":{"type":"string"},"x":{"type":"integer"},"y":{"type":"integer"},"text":{"type":"string"},"key":{"type":"string"}},"required":["action"]}}}),
     ]
 }
 
@@ -1659,12 +1659,12 @@ async fn execute_rust_tool(name: &str, args: &Value) -> Result<Value> {
         "computer" => Ok(json!({
             "success": false,
             "unsupported": true,
-            "error": "The VS Code Backboard bridge does not support desktop automation yet."
+            "error": "The Backboard bridge does not support desktop automation yet."
         })),
         other => Ok(json!({
             "success": false,
             "unsupported": true,
-            "error": format!("Tool `{other}` is executed by the VS Code host adapter, not the Rust network bridge.")
+            "error": format!("Tool `{other}` is executed by the host adapter, not the Rust network bridge.")
         })),
     }
 }
@@ -2484,7 +2484,7 @@ mod tests {
         assert!(!prompt.contains("## Backboard API Reference"));
         assert!(prompt.contains("## User Request"));
         assert!(prompt.contains("make the UI better"));
-        assert!(!prompt.contains("Backboard is running inside VS Code."));
+        assert!(!prompt.contains("Backboard is running inside an extension host."));
         assert!(!prompt.contains("ask_user_question"));
     }
 

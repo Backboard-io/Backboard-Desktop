@@ -109,11 +109,11 @@ import { HookType } from '../../common/promptSyntax/hookTypes.js';
 import { IWorkbenchEnvironmentService } from '../../../../services/environment/common/environmentService.js';
 import { AccessibilityWorkbenchSettingId } from '../../../accessibility/browser/accessibilityConfiguration.js';
 import { isMcpToolInvocation } from './chatContentParts/toolInvocationParts/chatToolPartUtilities.js';
-import { isAgentHostTarget } from '../agentSessions/agentSessions.js';
+import { BackboardLogoIcon, isAgentHostTarget } from '../agentSessions/agentSessions.js';
 
 const $ = dom.$;
 
-const COPILOT_USERNAME = 'GitHub Copilot';
+const COPILOT_USERNAME = 'Backboard';
 const WORKING_CAUGHT_UP_DEBOUNCE_MS = 750;
 
 export interface IChatListItemTemplate {
@@ -1042,7 +1042,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		} else if (agent?.icon) {
 			return agent.icon;
 		} else {
-			return Codicon.chatSparkle;
+			return BackboardLogoIcon;
 		}
 	}
 

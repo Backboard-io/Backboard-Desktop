@@ -39,7 +39,7 @@ export function createOnboarding(): OnboardingComponent {
 	welcomeRow.style.cssText = 'display:flex;gap:10px;align-items:center;';
 	const welcomeIconWrap = dom.$('span');
 	welcomeIconWrap.style.cssText = 'display:flex;justify-content:center;align-items:center;width:24px;flex-shrink:0;';
-	const welcomeIcon = dom.$('span.codicon.codicon-sparkle');
+	const welcomeIcon = dom.$('span.codicon.codicon-backboard-logo');
 	welcomeIcon.style.fontSize = '20px';
 	welcomeIconWrap.append(welcomeIcon);
 	const welcomeText = dom.$('span');

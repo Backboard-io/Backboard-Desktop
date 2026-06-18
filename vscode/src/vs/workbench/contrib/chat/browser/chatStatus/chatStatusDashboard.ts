@@ -153,11 +153,7 @@ export class ChatStatusDashboard extends DomWidget {
 			isAnonymousWithSentiment ||
 			isPooledQuotaDepleted;
 		const contributedEntries = [...this.chatStatusItemService.getEntries()].filter(entry => !ChatStatusDashboard.HIDDEN_ENTRY_IDS.has(entry.id));
-		const hasQuickSettingsContent =
-			!this.options?.disableInlineSuggestionsSettings ||
-			!this.options?.disableModelSelection ||
-			!this.options?.disableProviderOptions ||
-			!this.options?.disableCompletionsSnooze;
+		const hasQuickSettingsContent = false;
 
 		// Title header with plan name, CTA buttons, and manage action
 		let headerAdditionalSpendButton: Button | undefined;
@@ -167,8 +163,8 @@ export class ChatStatusDashboard extends DomWidget {
 			const headerHost = this.options?.titleHeaderContainer ?? this.element;
 			const header = this.renderHeader(headerHost, this._store, planName, toAction({
 				id: 'workbench.action.manageCopilot',
-				label: localize('quotaLabel', "Manage Copilot Settings"),
-				tooltip: localize('quotaTooltip', "Manage Copilot Settings"),
+				label: localize('quotaLabel', "Manage Backboard Settings"),
+				tooltip: localize('quotaTooltip', "Manage Backboard Settings"),
 				class: ThemeIcon.asClassName(Codicon.settings),
 				run: () => this.runCommandAndClose(() => this.openerService.open(URI.parse(this.defaultAccountService.resolveGitHubUrl(GitHubPaths.copilotSettings)))),
 			}));
@@ -579,14 +575,14 @@ export class ChatStatusDashboard extends DomWidget {
 		let descriptionText: string | MarkdownString;
 		let descriptionClass = '.description';
 		if (newUser && anonymousUser) {
-			descriptionText = new MarkdownString(localize({ key: 'activeDescriptionAnonymous', comment: ['{Locked="]({2})"}', '{Locked="]({3})"}'] }, "By continuing with {0} Copilot, you agree to {1}'s [Terms]({2}) and [Privacy Statement]({3})", defaultChat.provider.default.name, defaultChat.provider.default.name, defaultChat.termsStatementUrl, defaultChat.privacyStatementUrl), { isTrusted: true });
+			descriptionText = new MarkdownString(localize({ key: 'activeDescriptionAnonymous', comment: ['{Locked="]({2})"}', '{Locked="]({3})"}'] }, "By continuing with {0}, you agree to {1}'s [Terms]({2}) and [Privacy Statement]({3})", defaultChat.provider.default.name, defaultChat.provider.default.name, defaultChat.termsStatementUrl, defaultChat.privacyStatementUrl), { isTrusted: true });
 			descriptionClass = `${descriptionClass}.terms`;
 		} else if (newUser) {
-			descriptionText = localize('activateDescription', "Set up Copilot to use AI features.");
+			descriptionText = localize('activateDescription', "Set up Backboard to use AI features.");
 		} else if (anonymousUser) {
-			descriptionText = localize('enableMoreDescription', "Sign in to enable more Copilot AI features.");
+			descriptionText = localize('enableMoreDescription', "Sign in to enable more Backboard AI features.");
 		} else if (disabled) {
-			descriptionText = localize('enableDescription', "Enable Copilot to use AI features.");
+			descriptionText = localize('enableDescription', "Enable Backboard to use AI features.");
 		} else {
 			descriptionText = localize('signInDescription', "Sign in to use Backboard AI features.");
 		}
@@ -871,13 +867,13 @@ export class ChatStatusDashboard extends DomWidget {
 				quotaCallout.style.display = '';
 				quotaCallout.className = 'quota-callout info';
 				calloutIcon.className = `callout-icon ${ThemeIcon.asClassName(Codicon.info)}`;
-				calloutText.textContent = localize('quotaBudgetExceededEnterprise', "Your organization or enterprise has exceeded its Copilot budget. Contact your admin to resume usage.");
+				calloutText.textContent = localize('quotaBudgetExceededEnterprise', "Your organization or enterprise has exceeded its Backboard budget. Contact your admin to resume usage.");
 			} else if (maxUsedPercentage >= 100 && additionalUsageEnabled) {
 				quotaCallout.style.display = '';
 				quotaCallout.className = 'quota-callout info';
 				calloutIcon.className = `callout-icon ${ThemeIcon.asClassName(Codicon.info)}`;
 				calloutText.textContent = isEnterpriseUser
-					? localize('quotaAdditionalUsageActiveEnterprise', "Copilot has paused because your limits are reached. Please contact your admin to increase your limits.")
+					? localize('quotaAdditionalUsageActiveEnterprise', "Backboard has paused because your limits are reached. Please contact your admin to increase your limits.")
 					: isUsageBasedBilling
 						? localize('quotaAdditionalUsageActive', "Additional budget is configured. Usage will continue until limits reset.")
 						: localize('quotaBudgetActive', "Premium request budget is configured. Usage will continue until limits reset.");
@@ -886,7 +882,7 @@ export class ChatStatusDashboard extends DomWidget {
 				quotaCallout.className = 'quota-callout info';
 				calloutIcon.className = `callout-icon ${ThemeIcon.asClassName(Codicon.info)}`;
 				calloutText.textContent = isEnterpriseUser
-					? localize('quotaAdditionalUsageApproachingEnterprise', "Copilot will pause when your limits are reached. Please contact your admin to increase your limits.")
+					? localize('quotaAdditionalUsageApproachingEnterprise', "Backboard will pause when your limits are reached. Please contact your admin to increase your limits.")
 					: isUsageBasedBilling
 						? localize('quotaAdditionalUsageApproaching', "Once the limit is reached, additional budget will be used.")
 						: localize('quotaBudgetApproaching', "Once the limit is reached, premium request budget will be used.");
@@ -895,15 +891,15 @@ export class ChatStatusDashboard extends DomWidget {
 				quotaCallout.className = 'quota-callout info';
 				calloutIcon.className = `callout-icon ${ThemeIcon.asClassName(Codicon.info)}`;
 				calloutText.textContent = isEnterpriseUser
-					? localize('quotaPausedEnterprise', "Copilot is paused until the limit resets. Contact your administrator for more information.")
-					: localize('quotaPaused', "Copilot is paused until the limit resets.");
+					? localize('quotaPausedEnterprise', "Backboard is paused until the limit resets. Contact your administrator for more information.")
+					: localize('quotaPaused', "Backboard is paused until the limit resets.");
 			} else if (maxUsedPercentage >= 75 && !additionalUsageEnabled) {
 				quotaCallout.style.display = '';
 				quotaCallout.className = 'quota-callout info';
 				calloutIcon.className = `callout-icon ${ThemeIcon.asClassName(Codicon.info)}`;
 				calloutText.textContent = isEnterpriseUser
-					? localize('quotaWarningEnterprise', "Copilot will pause when the limit is reached. Contact your administrator for more information.")
-					: localize('quotaWarning', "Copilot will pause when the limit is reached.");
+					? localize('quotaWarningEnterprise', "Backboard will pause when the limit is reached. Contact your administrator for more information.")
+					: localize('quotaWarning', "Backboard will pause when the limit is reached.");
 			} else {
 				quotaCallout.style.display = 'none';
 			}

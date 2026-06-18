@@ -57,7 +57,6 @@ import { ISCMHistoryItemChangeRangeVariableEntry, ISCMHistoryItemChangeVariableE
 import { IChatRequestViewModel, IChatResponseViewModel, isRequestVM } from '../../common/model/chatViewModel.js';
 import { IChatWidgetHistoryService } from '../../common/widget/chatWidgetHistoryService.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, getDefaultNewChatSessionResource, getDefaultNewChatSessionType } from '../../common/constants.js';
-import { AICustomizationManagementCommands } from '../aiCustomization/aiCustomizationManagement.js';
 import { ILanguageModelChatSelector, ILanguageModelsService } from '../../common/languageModels.js';
 import { CopilotUsageExtensionFeatureId } from '../../common/languageModelStats.js';
 import { ILanguageModelToolsConfirmationService } from '../../common/tools/languageModelToolsConfirmationService.js';
@@ -70,6 +69,7 @@ import { getChatSessionType } from '../../common/model/chatUri.js';
 import { IChatSessionsService, localChatSessionType } from '../../common/chatSessionsService.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { ChatViewPane } from '../widgetHosts/viewPane/chatViewPane.js';
+import { BackboardLogoIcon } from '../agentSessions/agentSessions.js';
 
 export const CHAT_CATEGORY = localize2('chat.category', 'Chat');
 
@@ -202,7 +202,7 @@ abstract class OpenChatGlobalAction extends Action2 {
 	constructor(overrides: Pick<ICommandPaletteOptions, 'keybinding' | 'title' | 'id' | 'menu'>, private readonly mode?: IChatMode) {
 		super({
 			...overrides,
-			icon: Codicon.chatSparkle,
+			icon: BackboardLogoIcon,
 			f1: true,
 			category: CHAT_CATEGORY,
 			precondition: ContextKeyExpr.and(
@@ -689,7 +689,7 @@ export function registerChatActions() {
 			super({
 				id: ACTION_ID_OPEN_CHAT + '.copilotIcon',
 				title: localize2('interactiveSession.open', "New Chat Editor"),
-				icon: Codicon.copilot,
+				icon: BackboardLogoIcon,
 				f1: false,
 				category: CHAT_CATEGORY,
 				precondition: ChatContextKeys.enabled,
@@ -1148,7 +1148,7 @@ export function registerChatActions() {
 		constructor() {
 			super({
 				id: 'workbench.action.chat.manageSettings',
-				title: localize2('manageChat', "Manage Copilot Settings"),
+				title: localize2('manageChat', "Manage Backboard Settings"),
 				category: CHAT_CATEGORY,
 				f1: true,
 				precondition: ContextKeyExpr.and(
@@ -1182,7 +1182,7 @@ export function registerChatActions() {
 		constructor() {
 			super({
 				id: 'workbench.action.chat.showExtensionsUsingCopilot',
-				title: localize2('showCopilotUsageExtensions', "Show Extensions using Copilot"),
+				title: localize2('showCopilotUsageExtensions', "Show Extensions using Backboard"),
 				f1: true,
 				category: EXTENSIONS_CATEGORY,
 				precondition: ChatContextKeys.enabled
@@ -1225,7 +1225,7 @@ export function registerChatActions() {
 		constructor() {
 			super({
 				id: OPEN_CHAT_QUOTA_EXCEEDED_DIALOG,
-				title: localize('upgradeChat', "Upgrade GitHub Copilot Plan")
+				title: localize('upgradeChat', "Upgrade Backboard Plan")
 			});
 		}
 
@@ -1253,18 +1253,18 @@ export function registerChatActions() {
 			}
 
 			const free = chatEntitlementService.entitlement === ChatEntitlement.Free;
-			const upgradeToPro = free ? localize('upgradeToPro', "Upgrade to GitHub Copilot Pro for:\n- Unlimited inline suggestions\n- Unlimited chat messages\n- Access to premium models") : undefined;
+			const upgradeToPro = free ? localize('upgradeToPro', "Upgrade Backboard for:\n- Unlimited inline suggestions\n- Unlimited chat messages\n- Access to premium models") : undefined;
 
 			await dialogService.prompt({
 				type: 'none',
-				message: localize('copilotQuotaReached', "GitHub Copilot Quota Reached"),
+				message: localize('copilotQuotaReached', "Backboard Quota Reached"),
 				cancelButton: {
 					label: localize('dismiss', "Dismiss"),
 					run: () => { /* noop */ }
 				},
 				buttons: [
 					{
-						label: free ? localize('upgradePro', "Upgrade to GitHub Copilot Pro") : localize('upgradePlan', "Upgrade GitHub Copilot Plan"),
+						label: free ? localize('upgradePro', "Upgrade Backboard") : localize('upgradePlan', "Upgrade Backboard Plan"),
 						run: () => {
 							const commandId = 'workbench.action.chat.upgradePlan';
 							telemetryService.publicLog2<WorkbenchActionExecutedEvent, WorkbenchActionExecutedClassification>('workbenchActionExecuted', { id: commandId, from: 'chat-dialog' });
@@ -1273,7 +1273,7 @@ export function registerChatActions() {
 					},
 				],
 				custom: {
-					icon: Codicon.copilotWarningLarge,
+					icon: Codicon.warning,
 					markdownDetails: coalesce([
 						{ markdown: new MarkdownString(message, true) },
 						upgradeToPro ? { markdown: new MarkdownString(upgradeToPro, true) } : undefined
@@ -1305,7 +1305,7 @@ export function registerChatActions() {
 				id: GENERATE_AGENT_INSTRUCTIONS_COMMAND_ID,
 				title: localize2('generateInstructions', "Generate Agent Instructions"),
 				category: CHAT_CATEGORY,
-				icon: Codicon.sparkle,
+				icon: BackboardLogoIcon,
 				f1: true,
 				precondition: ChatContextKeys.enabled
 			});
@@ -1327,7 +1327,7 @@ export function registerChatActions() {
 				id: GENERATE_ON_DEMAND_INSTRUCTIONS_COMMAND_ID,
 				title: localize2('generateOnDemandInstructions', "Generate On-Demand Instructions"),
 				category: CHAT_CATEGORY,
-				icon: Codicon.sparkle,
+				icon: BackboardLogoIcon,
 				f1: true,
 				precondition: ChatContextKeys.enabled
 			});
@@ -1350,7 +1350,7 @@ export function registerChatActions() {
 				title: localize2('generatePrompt', "Generate Prompt File"),
 				shortTitle: localize2('generatePrompt.short', "Generate Prompt"),
 				category: CHAT_CATEGORY,
-				icon: Codicon.sparkle,
+				icon: BackboardLogoIcon,
 				f1: true,
 				precondition: ChatContextKeys.enabled
 			});
@@ -1373,7 +1373,7 @@ export function registerChatActions() {
 				title: localize2('generateSkill', "Generate Skill"),
 				shortTitle: localize2('generateSkill.short', "Generate Skill"),
 				category: CHAT_CATEGORY,
-				icon: Codicon.sparkle,
+				icon: BackboardLogoIcon,
 				f1: true,
 				precondition: ChatContextKeys.enabled
 			});
@@ -1396,7 +1396,7 @@ export function registerChatActions() {
 				title: localize2('generateAgent', "Generate Custom Agent"),
 				shortTitle: localize2('generateAgent.short', "Generate Agent"),
 				category: CHAT_CATEGORY,
-				icon: Codicon.sparkle,
+				icon: BackboardLogoIcon,
 				f1: true,
 				precondition: ChatContextKeys.enabled
 			});
@@ -1419,7 +1419,7 @@ export function registerChatActions() {
 				title: localize2('generateHook', "Generate Hook"),
 				shortTitle: localize2('generateHook.short', "Generate Hook"),
 				category: CHAT_CATEGORY,
-				icon: Codicon.sparkle,
+				icon: BackboardLogoIcon,
 				f1: true,
 				precondition: ChatContextKeys.enabled
 			});
@@ -1513,21 +1513,6 @@ export function registerChatActions() {
 		}
 	});
 
-	// Show a direct gear action to open the Customizations editor
-	MenuRegistry.appendMenuItem(MenuId.ViewTitle, {
-		command: {
-			id: AICustomizationManagementCommands.OpenEditor,
-			title: localize2('openChatCustomizations', "Open Customizations"),
-			category: CHAT_CATEGORY,
-			icon: Codicon.gear
-		},
-		group: 'navigation',
-		when: ContextKeyExpr.and(
-			ChatContextKeys.enabled,
-			ContextKeyExpr.equals('view', ChatViewId),
-		),
-		order: 6
-	});
 }
 
 export function stringifyItem(item: IChatRequestViewModel | IChatResponseViewModel, includeName = true): string {

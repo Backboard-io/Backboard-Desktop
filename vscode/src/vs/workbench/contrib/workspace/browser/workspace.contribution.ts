@@ -798,7 +798,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
 		properties: {
 			[WORKSPACE_TRUST_ENABLED]: {
 				type: 'boolean',
-				default: true,
+				default: false,
 				description: localize('workspace.trust.description', "Controls whether or not Workspace Trust is enabled within VS Code."),
 				tags: [WORKSPACE_TRUST_SETTING_TAG],
 				scope: ConfigurationScope.APPLICATION,

@@ -18,11 +18,11 @@ import { IAgentHostFileSystemService, SYNCED_CUSTOMIZATION_SCHEME } from '../../
 // Re-export so existing consumers don't need to change their import source.
 export { SYNCED_CUSTOMIZATION_SCHEME };
 
-const DISPLAY_NAME = 'VS Code Synced Data';
+const DISPLAY_NAME = 'Backboard Synced Data';
 
 const MANIFEST_CONTENT = JSON.stringify({
 	name: DISPLAY_NAME,
-	description: 'Customization data synced from VS Code',
+	description: 'Customization data synced from Backboard IDE',
 }, null, '\t');
 
 /**

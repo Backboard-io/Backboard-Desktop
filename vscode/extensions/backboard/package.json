@@ -13,6 +13,7 @@
     "AI"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:backboard.signIn",
     "onCommand:backboard.setApiKey",
     "onCommand:backboard.copyOAuthRedirectUri",
@@ -70,8 +71,32 @@
       {
         "command": "backboard.showHistory",
         "title": "Backboard: Show History"
+      },
+      {
+        "command": "backboard.checkForUpdates",
+        "title": "Backboard: Check for Updates"
+      },
+      {
+        "command": "backboard.installAvailableUpdate",
+        "title": "Backboard: Install Update",
+        "icon": "$(cloud-download)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "backboard.installAvailableUpdate",
+          "when": "view == backboard.panel && backboard.updateAvailable",
+          "group": "navigation@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "backboard.installAvailableUpdate",
+          "when": "backboard.updateAvailable"
+        }
+      ]
+    },
     "configuration": [
       {
         "title": "Backboard",
@@ -228,8 +253,8 @@
   "scripts": {
     "build-bridge": "cargo build --manifest-path ./rust/Cargo.toml -p backboard_bridge",
     "package-bridge": "node ./scripts/package-bridge.js",
-    "compile": "gulp compile-extension:backboard",
-    "watch": "gulp watch-extension:backboard",
+    "compile": "tsgo --project ./tsconfig.json",
+    "watch": "tsgo --project ./tsconfig.json --watch",
     "typecheck": "tsgo --project ./tsconfig.json --noEmit"
   },
   "devDependencies": {

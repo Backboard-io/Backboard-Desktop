@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../../base/common/codicons.js';
+import { getErrorMessage } from '../../../../../base/common/errors.js';
 import { KeyCode, KeyMod } from '../../../../../base/common/keyCodes.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { basename } from '../../../../../base/common/resources.js';
@@ -16,12 +17,15 @@ import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
-import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
+import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
+import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { KeybindingWeight } from '../../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
+import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
+import { IPathService } from '../../../../services/path/common/pathService.js';
 import { IViewsService } from '../../../../services/views/common/viewsService.js';
 import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
@@ -457,6 +461,255 @@ export class OpenModelPickerAction extends Action2 {
 	}
 }
 
+interface IBackboardConfigJson {
+	readonly env?: unknown;
+	readonly api_url?: unknown;
+	readonly api_key?: unknown;
+	readonly env_keys?: unknown;
+}
+
+interface IBackboardComposerMicState {
+	readonly recorder: MediaRecorder;
+	readonly chunks: Blob[];
+	readonly widget: IChatWidget;
+}
+
+let backboardComposerMicState: IBackboardComposerMicState | undefined;
+
+export class ToggleBackboardComposerMicrophoneAction extends Action2 {
+	static readonly ID = 'workbench.action.chat.toggleBackboardComposerMicrophone';
+
+	constructor() {
+		super({
+			id: ToggleBackboardComposerMicrophoneAction.ID,
+			title: localize2('interactive.backboardMicrophone.label', "Backboard Microphone"),
+			tooltip: localize('interactive.backboardMicrophone.tooltip', "Listen and insert transcript"),
+			category: CHAT_CATEGORY,
+			icon: Codicon.mic,
+			f1: false,
+			precondition: ChatContextKeys.enabled,
+			toggled: ChatContextKeys.backboardMicrophoneRecording,
+			menu: {
+				id: MenuId.ChatInput,
+				order: 5,
+				group: 'navigation',
+				when: ContextKeyExpr.and(
+					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+					ChatContextKeys.inQuickChat.negate(),
+				)
+			}
+		});
+	}
+
+	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+		const context = args[0] as IChatExecuteActionContext | undefined;
+		const widgetService = accessor.get(IChatWidgetService);
+		const notificationService = accessor.get(INotificationService);
+		const fileService = accessor.get(IFileService);
+		const pathService = accessor.get(IPathService);
+		const configurationService = accessor.get(IConfigurationService);
+		const contextKeyService = accessor.get(IContextKeyService);
+		const recordingKey = ChatContextKeys.backboardMicrophoneRecording.bindTo(contextKeyService);
+		const widget = context?.widget ?? widgetService.lastFocusedWidget;
+		if (!widget) {
+			return;
+		}
+
+		if (backboardComposerMicState) {
+			backboardComposerMicState.recorder.stop();
+			return;
+		}
+
+		const win = widget.inputEditor.getDomNode()?.ownerDocument.defaultView;
+		if (!win?.navigator.mediaDevices?.getUserMedia || typeof win.MediaRecorder === 'undefined') {
+			notificationService.error(localize('interactive.backboardMicrophone.unsupported', "Microphone recording is not available in this window."));
+			return;
+		}
+
+		try {
+			const stream = await win.navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+			const mimeType = win.MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+			const chunks: Blob[] = [];
+			const recorder = new win.MediaRecorder(stream, { mimeType });
+			backboardComposerMicState = { recorder, chunks, widget };
+			recordingKey.set(true);
+			recorder.ondataavailable = event => {
+				if (event.data.size > 0) {
+					chunks.push(event.data);
+				}
+			};
+			recorder.onstop = () => {
+				const stoppedState = backboardComposerMicState;
+				backboardComposerMicState = undefined;
+				recordingKey.set(false);
+				for (const track of stream.getTracks()) {
+					track.stop();
+				}
+				if (!stoppedState || stoppedState.chunks.length === 0) {
+					return;
+				}
+				transcribeBackboardComposerAudio(stoppedState, mimeType, fileService, pathService, configurationService, notificationService).catch(error => {
+					notificationService.error(localize('interactive.backboardMicrophone.failed', "Backboard transcription failed: {0}", getErrorMessage(error)));
+				});
+			};
+			recorder.start();
+			notificationService.info(localize('interactive.backboardMicrophone.listening', "Listening. Click the microphone again to stop."));
+		} catch (error) {
+			backboardComposerMicState = undefined;
+			recordingKey.set(false);
+			notificationService.error(localize('interactive.backboardMicrophone.startFailed', "Could not start microphone: {0}", getErrorMessage(error)));
+		}
+	}
+}
+
+export class OpenBackboardComposerOptionsAction extends Action2 {
+	static readonly ID = 'workbench.action.chat.openBackboardComposerOptions';
+
+	constructor() {
+		super({
+			id: OpenBackboardComposerOptionsAction.ID,
+			title: localize2('interactive.backboardComposerOptions.label', "Backboard Options"),
+			tooltip: localize('interactive.backboardComposerOptions.tooltip', "Open composer options"),
+			category: CHAT_CATEGORY,
+			icon: Codicon.ellipsis,
+			f1: false,
+			precondition: ChatContextKeys.enabled,
+			menu: {
+				id: MenuId.ChatInput,
+				order: 6,
+				group: 'navigation',
+				when: ContextKeyExpr.and(
+					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+					ChatContextKeys.inQuickChat.negate(),
+				)
+			}
+		});
+	}
+
+	override async run(): Promise<void> {
+		// The custom action view item owns the dropdown so it can call the
+		// current widget's existing picker methods directly.
+	}
+}
+
+async function transcribeBackboardComposerAudio(
+	state: IBackboardComposerMicState,
+	mimeType: string,
+	fileService: IFileService,
+	pathService: IPathService,
+	configurationService: IConfigurationService,
+	notificationService: INotificationService,
+): Promise<void> {
+	notificationService.info(localize('interactive.backboardMicrophone.transcribing', "Transcribing with Backboard..."));
+	const config = await readBackboardComposerConfig(fileService, pathService);
+	const apiKey = backboardComposerApiKey(config);
+	if (!apiKey) {
+		throw new Error(localize('interactive.backboardMicrophone.noApiKey', "No Backboard API key found in ~/.backboard_ide/config.json."));
+	}
+
+	const blob = new Blob(state.chunks, { type: mimeType });
+	const form = new FormData();
+	form.append('stream', 'false');
+	form.append('content', '');
+	form.append('send_to_llm', 'false');
+	form.append('voice', JSON.stringify({
+		stt: {
+			provider: 'openai',
+			model: 'gpt-4o-mini-transcribe',
+			language: 'en',
+		}
+	}));
+	form.append('audio_file', blob, 'backboard-composer-voice.webm');
+
+	const response = await fetch(`${backboardComposerApiUrl(config, configurationService)}/threads/messages`, {
+		method: 'POST',
+		headers: { 'X-API-Key': apiKey },
+		body: form,
+	});
+	if (!response.ok) {
+		throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
+	}
+
+	const payload: unknown = await response.json();
+	const transcript = extractBackboardTranscript(payload);
+	if (!transcript) {
+		throw new Error(localize('interactive.backboardMicrophone.noTranscript', "Backboard response did not include a transcript."));
+	}
+
+	const current = state.widget.inputEditor.getValue();
+	const next = current.trim().length > 0 ? `${current}${current.endsWith(' ') ? '' : ' '}${transcript}` : transcript;
+	state.widget.setInput(next);
+	state.widget.inputEditor.focus();
+}
+
+async function readBackboardComposerConfig(fileService: IFileService, pathService: IPathService): Promise<IBackboardConfigJson> {
+	const resource = URI.joinPath(await pathService.userHome({ preferLocal: true }), '.backboard_ide', 'config.json');
+	try {
+		const parsed: unknown = JSON.parse((await fileService.readFile(resource)).value.toString());
+		return isBackboardRecord(parsed) ? parsed : {};
+	} catch (error) {
+		if (toFileOperationResult(error) === FileOperationResult.FILE_NOT_FOUND || error instanceof SyntaxError) {
+			return {};
+		}
+		throw error;
+	}
+}
+
+function backboardComposerApiUrl(config: IBackboardConfigJson, configurationService: IConfigurationService): string {
+	const configured = stringFromBackboardRecord(config.api_url) ?? configurationService.getValue<string>('backboard.apiUrl');
+	return (configured || 'https://app.backboard.io/api').replace(/\/+$/, '');
+}
+
+function backboardComposerApiKey(config: IBackboardConfigJson): string | undefined {
+	const apiKey = stringFromBackboardRecord(config.api_key);
+	if (apiKey) {
+		return apiKey;
+	}
+	const env = normalizeBackboardComposerEnv(config.env);
+	const envKeys = isBackboardRecord(config.env_keys) ? config.env_keys : {};
+	return stringFromBackboardRecord(envKeys[env]);
+}
+
+function normalizeBackboardComposerEnv(value: unknown): string {
+	const env = stringFromBackboardRecord(value);
+	return (env || 'prod').trim().toLowerCase();
+}
+
+function extractBackboardTranscript(value: unknown): string | undefined {
+	if (!isBackboardRecord(value)) {
+		return undefined;
+	}
+	const direct = stringFromBackboardRecord(value.transcript) ?? stringFromBackboardRecord(value.text);
+	if (direct) {
+		return direct;
+	}
+	const messages = Array.isArray(value.messages) ? value.messages : [value];
+	for (const message of messages) {
+		if (!isBackboardRecord(message)) {
+			continue;
+		}
+		const voiceRecords = isBackboardRecord(message.voice_records) ? message.voice_records : isBackboardRecord(message.voiceRecords) ? message.voiceRecords : undefined;
+		const stt = isBackboardRecord(voiceRecords?.stt) ? voiceRecords.stt : undefined;
+		const transcript = stringFromBackboardRecord(stt?.transcript) ?? stringFromBackboardRecord(stt?.text) ?? stringFromBackboardRecord(stt?.message);
+		if (transcript) {
+			return transcript;
+		}
+		const content = stringFromBackboardRecord(message.content) ?? stringFromBackboardRecord(message.message);
+		if (content) {
+			return content;
+		}
+	}
+	return undefined;
+}
+
+function isBackboardRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringFromBackboardRecord(value: unknown): string | undefined {
+	return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
 export class OpenPermissionPickerAction extends Action2 {
 	static readonly ID = 'workbench.action.chat.openPermissionPicker';
 
@@ -519,20 +772,9 @@ export class OpenModePickerAction extends Action2 {
 				{
 					id: MenuId.ChatInput,
 					order: 1,
-					when: ContextKeyExpr.and(
-						ChatContextKeys.enabled,
-						ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
-						ChatContextKeys.inQuickChat.negate(),
-						// Hide the agent picker while a delegation (continue in) target is pending
-						ChatContextKeys.hasPendingDelegationTarget.negate(),
-						ContextKeyExpr.or(
-							ChatContextKeys.lockedToCodingAgent.negate(),
-							ChatContextKeys.chatSessionHasCustomAgentTarget),
-						// Show in welcome view for local sessions or sessions with custom agent target
-						ContextKeyExpr.or(
-							ChatContextKeys.inAgentSessionsWelcome.negate(),
-							ChatContextKeys.chatSessionHasCustomAgentTarget,
-							ChatContextKeys.agentSessionType.isEqualTo(AgentSessionProviders.Local))),
+					// Backboard keeps the composer focused on model/tools controls.
+					// The current chat mode still exists, but the visible "Agent" chip is hidden.
+					when: ContextKeyExpr.false(),
 					group: 'navigation',
 				},
 			]
@@ -602,21 +844,9 @@ export class OpenDelegationPickerAction extends Action2 {
 				{
 					id: MenuId.ChatInputSecondary,
 					order: 0.5,
-					when: ContextKeyExpr.and(
-						ChatContextKeys.enabled,
-						ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
-						ChatContextKeys.inQuickChat.negate(),
-						ChatContextKeys.chatSessionSupportsDelegation,
-						ChatContextKeys.chatSessionIsEmpty.negate(),
-						// In the agents window, hide the delegation chip while a
-						// request (or the input) is being edited. The editor window
-						// keeps showing it during edits.
-						ContextKeyExpr.or(
-							IsSessionsWindowContext.negate(),
-							ContextKeyExpr.and(
-								ChatContextKeys.currentlyEditing.negate(),
-								ChatContextKeys.currentlyEditingInput.negate()))
-					),
+					// Backboard keeps session execution local, so do not surface
+					// the "Delegate Session" composer chip.
+					when: ContextKeyExpr.false(),
 					group: 'navigation',
 				},
 			]
@@ -677,18 +907,8 @@ export class ChatSessionPrimaryPickerAction extends Action2 {
 					id: MenuId.ChatInput,
 					order: 4,
 					group: 'navigation',
-					when:
-						ContextKeyExpr.and(
-							ChatContextKeys.chatSessionHasModels,
-							ChatContextKeys.chatSessionType.isEqualTo(AgentSessionProviders.Cloud),
-							ContextKeyExpr.or(
-								ChatContextKeys.lockedToCodingAgent,
-								ContextKeyExpr.and(
-									ChatContextKeys.inAgentSessionsWelcome,
-									ChatContextKeys.chatSessionType.notEqualsTo('local')
-								)
-							)
-						)
+					// Backboard does not surface remote/cloud session controls in the composer.
+					when: ContextKeyExpr.false(),
 				},
 				{
 					// All other coding agents (Claude, etc.): show in the secondary toolbar.
@@ -698,22 +918,8 @@ export class ChatSessionPrimaryPickerAction extends Action2 {
 					id: MenuId.ChatInputSecondary,
 					order: 4,
 					group: 'navigation',
-					when:
-						ContextKeyExpr.and(
-							ChatContextKeys.chatSessionHasModels,
-							ChatContextKeys.chatSessionType.notEqualsTo(AgentSessionProviders.Cloud),
-							ContextKeyExpr.or(
-								IsSessionsWindowContext.negate(),
-								ChatContextKeys.chatSessionType.notEqualsTo(AgentSessionProviders.Background)
-							),
-							ContextKeyExpr.or(
-								ChatContextKeys.lockedToCodingAgent,
-								ContextKeyExpr.and(
-									ChatContextKeys.inAgentSessionsWelcome,
-									ChatContextKeys.chatSessionType.notEqualsTo('local')
-								)
-							)
-						)
+					// Backboard does not surface remote/cloud session controls in the composer.
+					when: ContextKeyExpr.false(),
 				},
 			]
 		});
@@ -1216,6 +1422,8 @@ export function registerChatExecuteActions(): DisposableStore {
 	store.add(registerAction2(SwitchToNextModelAction));
 	store.add(registerAction2(SwitchToNextPinnedModelAction));
 	store.add(registerAction2(OpenModelPickerAction));
+	store.add(registerAction2(ToggleBackboardComposerMicrophoneAction));
+	store.add(registerAction2(OpenBackboardComposerOptionsAction));
 	store.add(registerAction2(OpenPermissionPickerAction));
 	store.add(registerAction2(OpenModePickerAction));
 	store.add(registerAction2(OpenSessionTargetPickerAction));

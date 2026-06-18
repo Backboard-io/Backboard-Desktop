@@ -53,8 +53,11 @@ import { SuggestController } from '../../../../../../editor/contrib/suggest/brow
 import { localize } from '../../../../../../nls.js';
 import { IAccessibilityService } from '../../../../../../platform/accessibility/common/accessibility.js';
 import { MenuWorkbenchButtonBar } from '../../../../../../platform/actions/browser/buttonbar.js';
+import { ActionWidgetDropdownActionViewItem } from '../../../../../../platform/actions/browser/actionWidgetDropdownActionViewItem.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../../../platform/actions/browser/toolbar.js';
 import { MenuId, MenuItemAction } from '../../../../../../platform/actions/common/actions.js';
+import { IActionWidgetService } from '../../../../../../platform/actionWidget/browser/actionWidget.js';
+import { IActionWidgetDropdownAction, IActionWidgetDropdownActionProvider, IActionWidgetDropdownOptions } from '../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
@@ -68,6 +71,7 @@ import { ObservableMemento, observableMemento } from '../../../../../../platform
 import { bindContextKey } from '../../../../../../platform/observable/common/platformObservableUtils.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
 import { IThemeService } from '../../../../../../platform/theme/common/themeService.js';
+import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
 import { ISharedWebContentExtractorService } from '../../../../../../platform/webContentExtractor/common/webContentExtractor.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../../platform/workspace/common/workspace.js';
 import { ISCMService } from '../../../../scm/common/scm.js';
@@ -96,7 +100,7 @@ import { IChatResponseViewModel, isResponseVM } from '../../../common/model/chat
 import { IChatAgentService } from '../../../common/participants/chatAgents.js';
 import { ILanguageModelToolsService } from '../../../common/tools/languageModelToolsService.js';
 import { ChatHistoryNavigator } from '../../../common/widget/chatWidgetHistoryService.js';
-import { ChatSessionPrimaryPickerAction, ChatSubmitAction, IChatExecuteActionContext, OpenDelegationPickerAction, OpenModelPickerAction, OpenModePickerAction, OpenPermissionPickerAction, OpenSessionTargetPickerAction, OpenWorkspacePickerAction } from '../../actions/chatExecuteActions.js';
+import { ChatSessionPrimaryPickerAction, ChatSubmitAction, IChatExecuteActionContext, OpenBackboardComposerOptionsAction, OpenDelegationPickerAction, OpenModelPickerAction, OpenModePickerAction, OpenPermissionPickerAction, OpenSessionTargetPickerAction, OpenWorkspacePickerAction } from '../../actions/chatExecuteActions.js';
 import { AgentSessionProviders, AgentSessionTarget, getAgentSessionProvider } from '../../agentSessions/agentSessions.js';
 import { IAgentSessionsService } from '../../agentSessions/agentSessionsService.js';
 import { ChatAttachmentModel } from '../../attachments/chatAttachmentModel.js';
@@ -425,6 +429,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private readonly permissionWidgetDisposeListener = this._register(new MutableDisposable<IDisposable>());
 	private sessionTargetWidget: SessionTypePickerActionItem | undefined;
 	private delegationWidget: DelegationSessionPickerActionItem | undefined;
+	private agentHostModeWidget: AgentHostChatInputPickerActionViewItem | undefined;
+	private agentHostAutoApproveWidget: AgentHostChatInputPickerActionViewItem | undefined;
+	private agentHostPermissionModeWidget: AgentHostChatInputPickerActionViewItem | undefined;
+	private agentHostFolderWidget: AgentHostFolderPickerActionItem | undefined;
 	private readonly chatSessionPickerWidgets = this._register(new DisposableMap<string, ChatSessionPickerActionItem>());
 	private chatSessionPickerContainer: HTMLElement | undefined;
 	private _lastSessionPickerAction: MenuItemAction | undefined;
@@ -1115,6 +1123,22 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		// Open the first available picker widget
 		const firstWidget = this.chatSessionPickerWidgets?.values()?.next().value;
 		firstWidget?.show();
+	}
+
+	public openAgentHostModePicker(): void {
+		this.agentHostModeWidget?.show();
+	}
+
+	public openAgentHostAutoApprovePicker(): void {
+		this.agentHostAutoApproveWidget?.show();
+	}
+
+	public openAgentHostPermissionModePicker(): void {
+		this.agentHostPermissionModeWidget?.show();
+	}
+
+	public openAgentHostFolderPicker(): void {
+		this.agentHostFolderWidget?.show();
 	}
 
 	/**
@@ -2873,13 +2897,16 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 					const itemDelegate: IModelPickerDelegate = this._createModelPickerDelegate();
 					return this.modelWidget = this.instantiationService.createInstance(ModelPickerActionItem, action, itemDelegate, pickerOptions);
+				} else if (action.id === OpenBackboardComposerOptionsAction.ID && action instanceof MenuItemAction) {
+					return this.instantiationService.createInstance(BackboardComposerOptionsActionViewItem, action, this, pickerOptions);
 				} else if (action.id === OpenModePickerAction.ID && action instanceof MenuItemAction) {
 					const sessionType = this.getCurrentSessionType();
 					if (sessionType && isAgentHostTarget(sessionType)) {
 						return new HiddenActionViewItem(action);
 					}
 					const delegate: IModePickerDelegate = this._createModePickerDelegate();
-					return this.modeWidget = this.instantiationService.createInstance(ModePickerActionItem, action, delegate, pickerOptions);
+					this.modeWidget = this.instantiationService.createInstance(ModePickerActionItem, action, delegate, pickerOptions);
+					return new HiddenRenderedActionViewItem(action, this.modeWidget);
 				} else if ((action.id === OpenSessionTargetPickerAction.ID || action.id === OpenDelegationPickerAction.ID) && action instanceof MenuItemAction) {
 					// Use provided delegate if available, otherwise create default delegate
 					const delegate: ISessionTypePickerDelegate = this.options.sessionTypePickerDelegate ?? {
@@ -2896,14 +2923,20 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					};
 					const isWelcomeViewMode = !!this.options.sessionTypePickerDelegate?.setActiveSessionProvider;
 					const Picker = (action.id === OpenSessionTargetPickerAction.ID || isWelcomeViewMode) ? SessionTypePickerActionItem : DelegationSessionPickerActionItem;
-					return this.sessionTargetWidget = this.instantiationService.createInstance(Picker, action, location === ChatWidgetLocation.Editor ? 'editor' : 'sidebar', delegate, pickerOptions);
+					const picker = this.instantiationService.createInstance(Picker, action, location === ChatWidgetLocation.Editor ? 'editor' : 'sidebar', delegate, pickerOptions);
+					if (Picker === SessionTypePickerActionItem) {
+						this.sessionTargetWidget = picker as SessionTypePickerActionItem;
+					} else {
+						this.delegationWidget = picker as DelegationSessionPickerActionItem;
+					}
+					return new HiddenRenderedActionViewItem(action, picker);
 				} else if (action.id === ChatSessionPrimaryPickerAction.ID && action instanceof MenuItemAction) {
 					// Cloud sessions render their option-group pickers (e.g. branch) on the primary toolbar
 					const widgets = this.createChatSessionPickerWidgets(action, primarySessionPickerOptions);
 					if (widgets.length === 0) {
 						return new HiddenActionViewItem(action);
 					}
-					return this.instantiationService.createInstance(ChatSessionPickersContainerActionItem, action, widgets);
+					return new HiddenRenderedActionViewItem(action, this.instantiationService.createInstance(ChatSessionPickersContainerActionItem, action, widgets));
 				} else if (
 					(action.id === OpenAgentHostModePickerAction.ID
 						|| action.id === OpenAgentHostAutoApprovePickerAction.ID
@@ -2919,12 +2952,21 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 							? ClaudeSessionConfigKey.PermissionMode
 							: SessionConfigKey.Mode;
 					const picker = this.instantiationService.createInstance(AgentHostChatInputPicker, widget, property);
-					return new AgentHostChatInputPickerActionViewItem(action, picker);
+					const item = new AgentHostChatInputPickerActionViewItem(action, picker);
+					if (action.id === OpenAgentHostAutoApprovePickerAction.ID) {
+						this.agentHostAutoApproveWidget = item;
+					} else if (action.id === OpenAgentHostPermissionModePickerAction.ID) {
+						this.agentHostPermissionModeWidget = item;
+					} else {
+						this.agentHostModeWidget = item;
+					}
+					return new HiddenRenderedActionViewItem(action, item);
 				} else if (action.id === OpenAgentHostFolderPickerAction.ID && action instanceof MenuItemAction) {
 					if (this.options.isSessionsWindow) {
 						return new HiddenActionViewItem(action);
 					}
-					return this.instantiationService.createInstance(AgentHostFolderPickerActionItem, action, widget, pickerOptions);
+					this.agentHostFolderWidget = this.instantiationService.createInstance(AgentHostFolderPickerActionItem, action, widget, pickerOptions);
+					return new HiddenRenderedActionViewItem(action, this.agentHostFolderWidget);
 				}
 				return undefined;
 			}
@@ -3045,10 +3087,16 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					};
 					const isWelcomeViewMode = !!this.options.sessionTypePickerDelegate?.setActiveSessionProvider;
 					const Picker = (action.id === OpenSessionTargetPickerAction.ID || isWelcomeViewMode) ? SessionTypePickerActionItem : DelegationSessionPickerActionItem;
-					return this.sessionTargetWidget = this.instantiationService.createInstance(Picker, action, location === ChatWidgetLocation.Editor ? 'editor' : 'sidebar', delegate, secondaryPickerOptions);
+					const picker = this.instantiationService.createInstance(Picker, action, location === ChatWidgetLocation.Editor ? 'editor' : 'sidebar', delegate, secondaryPickerOptions);
+					if (Picker === SessionTypePickerActionItem) {
+						this.sessionTargetWidget = picker as SessionTypePickerActionItem;
+					} else {
+						this.delegationWidget = picker as DelegationSessionPickerActionItem;
+					}
+					return new HiddenRenderedActionViewItem(action, picker);
 				} else if (action.id === OpenWorkspacePickerAction.ID && action instanceof MenuItemAction) {
 					if (this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY && this.options.workspacePickerDelegate) {
-						return this.instantiationService.createInstance(WorkspacePickerActionItem, action, this.options.workspacePickerDelegate, secondaryPickerOptions);
+						return new HiddenRenderedActionViewItem(action, this.instantiationService.createInstance(WorkspacePickerActionItem, action, this.options.workspacePickerDelegate, secondaryPickerOptions));
 					} else {
 						return new HiddenActionViewItem(action);
 					}
@@ -3095,7 +3143,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						}
 						this.permissionWidgetDisposeListener.clear();
 					});
-					return widget;
+					return new HiddenRenderedActionViewItem(action, widget);
 				} else if (
 					(action.id === OpenAgentHostModePickerAction.ID
 						|| action.id === OpenAgentHostAutoApprovePickerAction.ID
@@ -3111,12 +3159,21 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 							? ClaudeSessionConfigKey.PermissionMode
 							: SessionConfigKey.Mode;
 					const picker = this.instantiationService.createInstance(AgentHostChatInputPicker, widget, property);
-					return new AgentHostChatInputPickerActionViewItem(action, picker);
+					const item = new AgentHostChatInputPickerActionViewItem(action, picker);
+					if (action.id === OpenAgentHostAutoApprovePickerAction.ID) {
+						this.agentHostAutoApproveWidget = item;
+					} else if (action.id === OpenAgentHostPermissionModePickerAction.ID) {
+						this.agentHostPermissionModeWidget = item;
+					} else {
+						this.agentHostModeWidget = item;
+					}
+					return new HiddenRenderedActionViewItem(action, item);
 				} else if (action.id === OpenAgentHostFolderPickerAction.ID && action instanceof MenuItemAction) {
 					if (this.options.isSessionsWindow) {
 						return new HiddenActionViewItem(action);
 					}
-					return this.instantiationService.createInstance(AgentHostFolderPickerActionItem, action, widget, secondaryPickerOptions);
+					this.agentHostFolderWidget = this.instantiationService.createInstance(AgentHostFolderPickerActionItem, action, widget, secondaryPickerOptions);
+					return new HiddenRenderedActionViewItem(action, this.agentHostFolderWidget);
 				} else if (action.id === ChatSessionPrimaryPickerAction.ID && action instanceof MenuItemAction) {
 					// Create all pickers and return a container action view item
 					const widgets = this.createChatSessionPickerWidgets(action, secondaryPickerOptions);
@@ -3124,7 +3181,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						return new HiddenActionViewItem(action);
 					}
 					// Create a container to hold all picker widgets
-					return this.instantiationService.createInstance(ChatSessionPickersContainerActionItem, action, widgets);
+					return new HiddenRenderedActionViewItem(action, this.instantiationService.createInstance(ChatSessionPickersContainerActionItem, action, widgets));
 				}
 				return undefined;
 			}
@@ -4375,5 +4432,103 @@ class HiddenActionViewItem extends BaseActionViewItem {
 	override render(container: HTMLElement): void {
 		super.render(container);
 		container.style.display = 'none';
+	}
+}
+
+class HiddenRenderedActionViewItem extends BaseActionViewItem {
+	constructor(action: IAction, private readonly child: ActionViewItem | BaseActionViewItem) {
+		super(undefined, action);
+		this._register(child);
+	}
+
+	override render(container: HTMLElement): void {
+		this.child.render(container);
+		container.style.display = 'none';
+	}
+}
+
+class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionViewItem {
+	constructor(
+		action: MenuItemAction,
+		private readonly inputPart: ChatInputPart,
+		pickerOptions: IChatInputPickerOptions,
+		@IActionWidgetService actionWidgetService: IActionWidgetService,
+		@IKeybindingService keybindingService: IKeybindingService,
+		@IContextKeyService contextKeyService: IContextKeyService,
+		@ITelemetryService telemetryService: ITelemetryService,
+	) {
+		const actionProvider: IActionWidgetDropdownActionProvider = {
+			getActions: () => this.getActions(),
+		};
+		const options: Omit<IActionWidgetDropdownOptions, 'label' | 'labelRenderer'> = {
+			actionProvider,
+			showItemKeybindings: false,
+			getAnchor: () => this.getAnchorElement(pickerOptions),
+			reporter: { id: 'BackboardComposerOptions', name: 'BackboardComposerOptions', includeOptions: false },
+		};
+		super(action, options, actionWidgetService, keybindingService, contextKeyService, telemetryService);
+	}
+
+	private getActions(): IActionWidgetDropdownAction[] {
+		const actions: IActionWidgetDropdownAction[] = [
+			{
+				id: 'backboardComposerOptions.permissions',
+				label: localize('backboardComposerOptions.permissions', "Permissions"),
+				class: undefined,
+				tooltip: localize('backboardComposerOptions.permissionsTooltip', "Change permission settings"),
+				icon: Codicon.shield,
+				enabled: true,
+				run: () => this.inputPart.openPermissionPicker(),
+			},
+			{
+				id: 'backboardComposerOptions.session',
+				label: localize('backboardComposerOptions.session', "Session Options"),
+				class: undefined,
+				tooltip: localize('backboardComposerOptions.sessionTooltip', "Change session options"),
+				icon: Codicon.database,
+				enabled: true,
+				run: () => this.inputPart.openChatSessionPicker(),
+			},
+			{
+				id: 'backboardComposerOptions.autoApprove',
+				label: localize('backboardComposerOptions.autoApprove', "Auto-Approve"),
+				class: undefined,
+				tooltip: localize('backboardComposerOptions.autoApproveTooltip', "Change auto-approve behavior"),
+				icon: Codicon.warning,
+				enabled: true,
+				run: () => this.inputPart.openAgentHostAutoApprovePicker(),
+			},
+			{
+				id: 'backboardComposerOptions.approvals',
+				label: localize('backboardComposerOptions.approvals', "Approvals"),
+				class: undefined,
+				tooltip: localize('backboardComposerOptions.approvalsTooltip', "Change approval behavior"),
+				icon: Codicon.shield,
+				enabled: true,
+				run: () => this.inputPart.openAgentHostPermissionModePicker(),
+			},
+			{
+				id: 'backboardComposerOptions.folder',
+				label: localize('backboardComposerOptions.folder', "Folder"),
+				class: undefined,
+				tooltip: localize('backboardComposerOptions.folderTooltip', "Change working folder"),
+				icon: Codicon.folder,
+				enabled: true,
+				run: () => this.inputPart.openAgentHostFolderPicker(),
+			},
+		];
+		return actions;
+	}
+
+	private getAnchorElement(pickerOptions: IChatInputPickerOptions): HTMLElement {
+		if (this.element && this.element.ownerDocument.contains(this.element)) {
+			return this.element;
+		}
+		return pickerOptions.getOverflowAnchor?.() ?? this.element!;
+	}
+
+	protected override renderLabel(element: HTMLElement): IDisposable | null {
+		element.classList.add('codicon', 'codicon-ellipsis');
+		return super.renderLabel(element);
 	}
 }

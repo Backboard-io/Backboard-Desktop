@@ -5,7 +5,6 @@
 
 import { DeferredPromise, disposableTimeout, raceTimeout } from '../../../../../base/common/async.js';
 import type { CancellationToken } from '../../../../../base/common/cancellation.js';
-import { Codicon } from '../../../../../base/common/codicons.js';
 import { CancellationError } from '../../../../../base/common/errors.js';
 import { Event } from '../../../../../base/common/event.js';
 import { DisposableStore, MutableDisposable } from '../../../../../base/common/lifecycle.js';
@@ -191,7 +190,7 @@ export class ToolTerminalCreator {
 		}
 
 		const config: IShellLaunchConfig = {
-			icon: ThemeIcon.fromId(Codicon.chatSparkle.id),
+			icon: ThemeIcon.fromId('backboard-logo'),
 			hideFromUser: true,
 			forcePersist: true,
 			env,

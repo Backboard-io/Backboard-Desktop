@@ -20,6 +20,7 @@ import { SCMViewPaneContainer } from './scmViewPaneContainer.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { ModesRegistry } from '../../../../editor/common/languages/modesRegistry.js';
 import { Codicon } from '../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 import { ContextKeys, SCMViewPane } from './scmViewPane.js';
 import { RepositoryPicker } from './scmViewService.js';
@@ -673,7 +674,7 @@ registerAction2(class extends Action2 {
 		super({
 			id: 'scm.editor.triggerSetup',
 			title: localize('scmEditorResolveMergeConflict', "Resolve Conflicts with AI"),
-			icon: Codicon.chatSparkle,
+			icon: ThemeIcon.fromId('backboard-logo'),
 			f1: false,
 			menu: {
 				id: MenuId.EditorContent,

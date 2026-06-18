@@ -879,7 +879,7 @@ export class McpListWidget extends Disposable {
 				icon: extensionIcon,
 				count: extensionServers.length,
 				isFirst,
-				description: localize('extensionGroupDescription', "MCP servers contributed by installed VS Code extensions."),
+				description: localize('extensionGroupDescription', "MCP servers contributed by installed Backboard IDE extensions."),
 				collapsed,
 			});
 			if (!collapsed) {
@@ -906,7 +906,7 @@ export class McpListWidget extends Disposable {
 				icon: builtinIcon,
 				count: otherBuiltinServers.length,
 				isFirst,
-				description: localize('builtInGroupDescription', "MCP servers built into VS Code. These are available automatically."),
+				description: localize('builtInGroupDescription', "MCP servers built into Backboard IDE. These are available automatically."),
 				collapsed,
 			});
 			if (!collapsed) {

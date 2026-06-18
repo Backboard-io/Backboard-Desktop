@@ -960,7 +960,7 @@ export class AICustomizationListWidget extends Disposable {
 				break;
 			case AICustomizationManagementSection.Skills:
 				title = localize('skills', "Skills");
-				description = localize('skillsDescription', "Folders of instructions, scripts, and resources that Copilot loads when relevant to perform specialized tasks.");
+				description = localize('skillsDescription', "Folders of instructions, scripts, and resources that Backboard loads when relevant to perform specialized tasks.");
 				docsUrl = 'https://code.visualstudio.com/docs/agent-customization/agent-skills?referrer=in-product';
 				learnMoreLabel = localize('learnMoreSkills', "Learn more about agent skills");
 				break;
@@ -1090,7 +1090,7 @@ export class AICustomizationListWidget extends Disposable {
 			if (!this.workspaceService.isSessionsWindow && !descriptor.hideGenerateButton) {
 				// Core Local: Generate is primary, configure hooks in dropdown
 				actions.push({
-					label: `$(${Codicon.sparkle.id}) Generate ${typeLabel}`,
+					label: `$(backboard-logo) Generate ${typeLabel}`,
 					enabled: true,
 					run: () => { this._onDidRequestCreate.fire(promptType); },
 				});
@@ -1120,7 +1120,7 @@ export class AICustomizationListWidget extends Disposable {
 			if (!this.workspaceService.isSessionsWindow && !descriptor.hideGenerateButton) {
 				// Core Local: Generate is primary
 				actions.push({
-					label: `$(${Codicon.sparkle.id}) Generate ${typeLabel}`,
+					label: `$(backboard-logo) Generate ${typeLabel}`,
 					enabled: true,
 					run: () => { this._onDidRequestCreate.fire(promptType); },
 				});
@@ -1361,7 +1361,7 @@ export class AICustomizationListWidget extends Disposable {
 		const groups: { groupKey: string; label: string; icon: ThemeIcon; description: string; items: IAICustomizationListItem[] }[] =
 			this.currentSection === AICustomizationManagementSection.Instructions
 				? [
-					{ groupKey: 'agent-instructions', label: localize('agentInstructionsGroup', "Agent Instructions"), icon: instructionsIcon, description: localize('agentInstructionsGroupDescription', "Instruction files automatically loaded for all agent interactions (e.g. AGENTS.md, CLAUDE.md, copilot-instructions.md)."), items: [] },
+					{ groupKey: 'agent-instructions', label: localize('agentInstructionsGroup', "Agent Instructions"), icon: instructionsIcon, description: localize('agentInstructionsGroupDescription', "Instruction files automatically loaded for all agent interactions (e.g. AGENTS.md, CLAUDE.md, instructions.md)."), items: [] },
 					{ groupKey: 'context-instructions', label: localize('contextInstructionsGroup', "Included Based on Context"), icon: instructionsIcon, description: localize('contextInstructionsGroupDescription', "Instructions automatically loaded when matching files are part of the context."), items: [] },
 					{ groupKey: 'on-demand-instructions', label: localize('onDemandInstructionsGroup', "Loaded on Demand"), icon: instructionsIcon, description: localize('onDemandInstructionsGroupDescription', "Instructions loaded only when explicitly referenced."), items: [] },
 					{ groupKey: PromptsStorage.local, label: localize('workspaceGroup', "Workspace"), icon: workspaceIcon, description: localize('workspaceGroupDescription', "Customizations stored as files in your project folder and shared with your team via version control."), items: [] },
@@ -1469,7 +1469,7 @@ export class AICustomizationListWidget extends Disposable {
 			case AICustomizationManagementSection.Instructions:
 				return {
 					title: localize('noInstructions', "No instructions yet"),
-					description: localize('createFirstInstructions', "Add instructions to teach Copilot about your codebase"),
+					description: localize('createFirstInstructions', "Add instructions to teach Backboard about your codebase"),
 				};
 			case AICustomizationManagementSection.Hooks:
 				return {

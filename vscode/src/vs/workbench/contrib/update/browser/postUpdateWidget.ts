@@ -188,7 +188,7 @@ export class PostUpdateWidgetContribution extends Disposable implements IWorkben
 				const row = dom.append(list, dom.$('.feature'));
 				row.setAttribute('role', 'listitem');
 				const iconEl = dom.append(row, dom.$('.feature-icon'));
-				const iconId = feature.icon ?? Codicon.sparkle.id;
+				const iconId = feature.icon ?? 'backboard-logo';
 				const themeIcon = ThemeIcon.fromId(iconId);
 				iconEl.classList.add(...ThemeIcon.asClassNameArray(themeIcon));
 				iconEl.setAttribute('aria-hidden', 'true');

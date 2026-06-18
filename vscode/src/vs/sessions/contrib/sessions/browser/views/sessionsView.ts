@@ -25,7 +25,6 @@ import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { localize } from '../../../../../nls.js';
 import { SessionsList, SessionsGrouping, SessionsSorting } from './sessionsList.js';
 import { ISession, SessionStatus } from '../../../../services/sessions/common/session.js';
-import { AICustomizationShortcutsWidget } from '../aiCustomizationShortcutsWidget.js';
 import { AgentHostShortcutsWidget } from '../agentHostShortcutsWidget.js';
 import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { Button } from '../../../../../base/browser/ui/button/button.js';
@@ -85,7 +84,6 @@ export class SessionsView extends ViewPane {
 	private headerActions: HTMLElement | undefined;
 	private isFindWidgetOpen = false;
 	sessionsControl: SessionsList | undefined;
-	private _customizationsWidget: AICustomizationShortcutsWidget | undefined;
 	private currentGrouping: SessionsGrouping = SessionsGrouping.Workspace;
 	private currentSorting: SessionsSorting = SessionsSorting.Created;
 	private groupingContextKey: IContextKey | undefined;
@@ -295,16 +293,6 @@ export class SessionsView extends ViewPane {
 			}));
 		}
 
-		// AI Customization toolbar (bottom, fixed height)
-		this._customizationsWidget = this._register(this.instantiationService.createInstance(AICustomizationShortcutsWidget, sessionsContainer, {
-			onDidChangeLayout: () => {
-				if (this.viewPaneContainer) {
-					const { offsetHeight, offsetWidth } = this.viewPaneContainer;
-					this.layoutBody(offsetHeight, offsetWidth);
-				}
-			},
-		}));
-
 		// Agent Host toolbar (bottom, below customizations). Only rendered
 		// in the sessions window on web desktop layouts: electron has no
 		// host picker today (gated out at the menu level), phone layout
@@ -403,7 +391,6 @@ export class SessionsView extends ViewPane {
 	}
 
 	focusCustomizations(): void {
-		this._customizationsWidget?.focus();
 	}
 
 	private restoreLastSelectedSession(): void {

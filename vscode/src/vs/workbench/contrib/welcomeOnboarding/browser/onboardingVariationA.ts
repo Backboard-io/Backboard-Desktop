@@ -167,7 +167,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.overlay = append(container, $('.onboarding-a-overlay'));
 		this.overlay.setAttribute('role', 'dialog');
 		this.overlay.setAttribute('aria-modal', 'true');
-		this.overlay.setAttribute('aria-label', localize('onboarding.a.aria', "Welcome to Visual Studio Code"));
+		this.overlay.setAttribute('aria-label', localize('onboarding.a.aria', "Welcome to Backboard IDE"));
 
 		// Card
 		this.card = append(this.overlay, $('.onboarding-a-card'));
@@ -508,7 +508,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			const mark = append(btn, $('span.onboarding-a-provider-mark'));
 			mark.classList.add(providerClass);
 			mark.setAttribute('aria-hidden', 'true');
-			mark.appendChild(renderIcon(Codicon.sparkle));
+			mark.appendChild(renderIcon(ThemeIcon.fromId('backboard-logo')));
 		}
 
 		if (!options?.iconOnly) {
@@ -642,7 +642,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this._createKbd(localize('onboarding.personalize.tip.shift', "Shift")),
 			'+',
 			this._createKbd(localize('onboarding.personalize.tip.p', "P")),
-			localize('onboarding.personalize.tip.suffix', " to access all VS Code commands."),
+			localize('onboarding.personalize.tip.suffix', " to access all commands."),
 		);
 	}
 
@@ -710,7 +710,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private async _applyKeymap(keymapId: string): Promise<void> {
 		const keymap = (product.onboardingKeymaps ?? []).find(k => k.id === keymapId);
 		if (!keymap?.extensionId) {
-			return; // VS Code default, nothing to install
+			return; // Default keymap, nothing to install
 		}
 
 		try {
@@ -815,7 +815,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 			const iconEl = append(card, $('span.onboarding-a-ai-pref-card-icon'));
 			iconEl.setAttribute('aria-hidden', 'true');
-			const icon = Codicon[option.icon as keyof typeof Codicon] ?? Codicon.sparkle;
+			const icon = Codicon[option.icon as keyof typeof Codicon] ?? ThemeIcon.fromId('backboard-logo');
 			iconEl.appendChild(renderIcon(icon));
 
 			const titleEl = append(card, $('div.onboarding-a-ai-pref-card-title'));
@@ -902,15 +902,15 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		this._createFeatureCard(moreGrid, Codicon.rocket,
 			localize('onboarding.sessions.runAnywhere', "Run Agents Anywhere"),
-			localize('onboarding.sessions.runAnywhere.desc', "Run agents locally for interactive work, in the background with Copilot CLI, or in the cloud with cloud agents that open a pull request your team can review."));
+			localize('onboarding.sessions.runAnywhere.desc', "Run agents locally for interactive work, in the background, or in the cloud with agent runs that open a pull request your team can review."));
 
 		this._createFeatureCard(moreGrid, Codicon.settingsGear,
 			localize('onboarding.sessions.customize', "Customize Your Agents"),
-			localize('onboarding.sessions.customize.desc', "Tailor Copilot to your project with custom instructions and agents, skills, reusable prompts, and MCP servers that connect to the tools and context you rely on."));
+			localize('onboarding.sessions.customize.desc', "Tailor Backboard to your project with custom instructions and agents, skills, reusable prompts, and MCP servers that connect to the tools and context you rely on."));
 
 		// Tutorial link at bottom of content, above footer
 		const docsRow = append(wrapper, $('.onboarding-a-sessions-docs'));
-		this._createDocLink(docsRow, localize('onboarding.sessions.agentsTutorial', "Agents tutorial"), 'https://code.visualstudio.com/docs/copilot/agents/agents-tutorial', 'agentsTutorial');
+		this._createDocLink(docsRow, localize('onboarding.sessions.agentsTutorial', "Agents tutorial"), 'https://docs.backboard.io/', 'agentsTutorial');
 	}
 
 	private _createFeatureCard(parent: HTMLElement, icon: ThemeIcon, title: string, description?: string): HTMLElement {

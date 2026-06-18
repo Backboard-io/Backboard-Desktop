@@ -126,6 +126,7 @@ export interface IChatViewWelcomeContent {
 	tips?: IMarkdownString;
 	readonly inputPart?: HTMLElement;
 	readonly useLargeIcon?: boolean;
+	readonly useImageIcon?: boolean;
 }
 
 export interface IChatViewWelcomeRenderOptions {
@@ -160,27 +161,37 @@ export class ChatViewWelcomePart extends Disposable {
 					const iconElement = renderIcon(content.icon);
 					icon.appendChild(iconElement);
 				} else if (URI.isUri(content.icon)) {
-					const cssUrl = asCSSUrl(content.icon);
-					const hash = new StringSHA1();
-					hash.update(cssUrl);
-					const iconId = `chat-welcome-icon-${hash.digest()}`;
-					const iconClass = `.chat-welcome-view-icon.${iconId}`;
+					if (content.useImageIcon) {
+						const image = dom.append(icon, $('img.chat-welcome-view-image-icon')) as HTMLImageElement;
+						image.src = content.icon.toString(true);
+						image.alt = '';
+					} else {
+						const cssUrl = asCSSUrl(content.icon);
+						const hash = new StringSHA1();
+						hash.update(cssUrl);
+						const iconId = `chat-welcome-icon-${hash.digest()}`;
+						const iconClass = `.chat-welcome-view-icon.${iconId}`;
 
-					createCSSRule(iconClass, `
-					mask: ${cssUrl} no-repeat 50% 50%;
-					-webkit-mask: ${cssUrl} no-repeat 50% 50%;
-					background-color: var(--vscode-icon-foreground);
-				`);
-					icon.classList.add(iconId, 'custom-icon');
+						createCSSRule(iconClass, `
+						mask: ${cssUrl} no-repeat 50% 50%;
+						-webkit-mask: ${cssUrl} no-repeat 50% 50%;
+						background-color: var(--vscode-icon-foreground);
+					`);
+						icon.classList.add(iconId, 'custom-icon');
+					}
 				}
 			}
-			const title = dom.append(this.element, $('.chat-welcome-view-title'));
-			title.textContent = content.title;
+			if (content.title) {
+				const title = dom.append(this.element, $('.chat-welcome-view-title'));
+				title.textContent = content.title;
+			}
 
-			const message = dom.append(this.element, $('.chat-welcome-view-message'));
+			if (content.message.value) {
+				const message = dom.append(this.element, $('.chat-welcome-view-message'));
 
-			const messageResult = this.renderMarkdownMessageContent(content.message, options);
-			dom.append(message, messageResult.element);
+				const messageResult = this.renderMarkdownMessageContent(content.message, options);
+				dom.append(message, messageResult.element);
+			}
 
 			// Additional message
 			if (content.additionalMessage) {

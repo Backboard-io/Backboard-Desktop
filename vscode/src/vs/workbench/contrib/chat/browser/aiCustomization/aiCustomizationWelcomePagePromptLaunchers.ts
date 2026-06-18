@@ -125,7 +125,7 @@ export class PromptLaunchersAICustomizationWelcomePage extends Disposable implem
 		if (this.welcomePageFeatures?.showGettingStartedBanner !== false) {
 			const gettingStarted = DOM.append(welcomeInner, $('.welcome-prompts-primary'));
 			const header = DOM.append(gettingStarted, $('.welcome-prompts-section-label'));
-			const icon = DOM.append(header, $('span.welcome-prompts-section-label-icon.codicon.codicon-sparkle'));
+			const icon = DOM.append(header, $('span.welcome-prompts-section-label-icon.codicon.codicon-backboard-logo'));
 			icon.setAttribute('aria-hidden', 'true');
 			const title = DOM.append(header, $('span'));
 			title.textContent = localize('gettingStartedTitle', "Customize Your Agent");

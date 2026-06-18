@@ -182,6 +182,42 @@ suite('Notifications', () => {
 		}
 	});
 
+	test('Items - filters blocked notification text', () => {
+		assert.ok(!NotificationViewItem.create({ severity: Severity.Info, message: 'Copilot is ready' }, noFilter));
+		assert.ok(!NotificationViewItem.create({ severity: Severity.Info, message: 'Open [details](https://microsoft.com/help)' }, noFilter));
+		assert.ok(!NotificationViewItem.create({ severity: Severity.Info, message: 'Open [details](https://vscode.dev)' }, noFilter));
+		assert.ok(!NotificationViewItem.create({ severity: Severity.Info, message: 'Update available', source: { id: 'github.copilot', label: 'GitHub Copilot' } }, noFilter));
+		assert.ok(!NotificationViewItem.create({ severity: Severity.Info, message: 'Update available', actions: { primary: [disposables.add(new Action('id', 'Open Microsoft Settings'))] } }, noFilter));
+
+		const allowedItem = NotificationViewItem.create({ severity: Severity.Info, message: 'Build completed' }, noFilter);
+		assert.ok(allowedItem);
+		allowedItem.close();
+	});
+
+	test('Items - closes when updated message is blocked', () => {
+		const item = NotificationViewItem.create({ severity: Severity.Info, message: 'Build started' }, noFilter)!;
+
+		let closed = false;
+		disposables.add(item.onDidClose(() => {
+			closed = true;
+		}));
+
+		item.updateMessage('VS Code update available');
+		assert.strictEqual(closed, true);
+	});
+
+	test('Items - closes when updated actions are blocked', () => {
+		const item = NotificationViewItem.create({ severity: Severity.Info, message: 'Build started' }, noFilter)!;
+
+		let closed = false;
+		disposables.add(item.onDidClose(() => {
+			closed = true;
+		}));
+
+		item.updateActions({ primary: [disposables.add(new Action('id', 'Open Copilot'))] });
+		assert.strictEqual(closed, true);
+	});
+
 	test('Model', () => {
 		const model = disposables.add(new NotificationsModel());
 
@@ -286,6 +322,9 @@ suite('Notifications', () => {
 		assert.strictEqual(model.statusMessage!.message, 'Hello World 3');
 
 		disposable3.close();
+		assert.ok(!model.statusMessage);
+
+		model.showStatusMessage('Microsoft account required');
 		assert.ok(!model.statusMessage);
 
 		item2DuplicateHandle.close();

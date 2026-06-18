@@ -196,7 +196,7 @@ export function getHookSourceFormatLabel(format: HookSourceFormat): string {
 		case HookSourceFormat.Claude:
 			return 'Claude';
 		case HookSourceFormat.Copilot:
-			return 'GitHub Copilot';
+			return 'Backboard';
 	}
 }
 

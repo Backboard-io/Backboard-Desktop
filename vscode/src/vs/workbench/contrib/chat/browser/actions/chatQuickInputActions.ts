@@ -13,6 +13,7 @@ import { KeybindingWeight } from '../../../../../platform/keybinding/common/keyb
 import { CHAT_CATEGORY } from './chatActions.js';
 import { IQuickChatOpenOptions, IQuickChatService } from '../chat.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
+import { BackboardLogoIcon } from '../agentSessions/agentSessions.js';
 
 export const ASK_QUICK_QUESTION_ACTION_ID = 'workbench.action.quickchat.toggle';
 export function registerQuickChatActions() {
@@ -26,7 +27,7 @@ export function registerQuickChatActions() {
 				title: localize2('chat.openInChatView.label', "Open in Chat View"),
 				f1: false,
 				category: CHAT_CATEGORY,
-				icon: Codicon.chatSparkle,
+				icon: BackboardLogoIcon,
 				menu: {
 					id: MenuId.ChatInputSide,
 					group: 'navigation',
@@ -71,7 +72,7 @@ class QuickChatGlobalAction extends Action2 {
 			id: ASK_QUICK_QUESTION_ACTION_ID,
 			title: localize2('quickChat', 'Open Quick Chat'),
 			precondition: ChatContextKeys.enabled,
-			icon: Codicon.chatSparkle,
+			icon: BackboardLogoIcon,
 			f1: false,
 			category: CHAT_CATEGORY,
 			keybinding: {

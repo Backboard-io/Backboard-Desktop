@@ -380,7 +380,7 @@ export class ChatQuotaNotificationContribution extends Disposable implements IWo
 			id: QUOTA_NOTIFICATION_ID,
 			severity: ChatInputNotificationSeverity.Info,
 			message: localize('quota.blocked.managed.title', "Usage Blocked"),
-			description: localize('quota.blocked.managed', "Your organization or enterprise has exceeded its Copilot budget. Contact your admin to resume usage."),
+			description: localize('quota.blocked.managed', "Your organization or enterprise has exceeded its Backboard budget. Contact your admin to resume usage."),
 			actions: [],
 			dismissible: true,
 			autoDismissOnMessage: true,

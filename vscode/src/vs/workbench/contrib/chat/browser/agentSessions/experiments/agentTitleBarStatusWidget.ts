@@ -12,6 +12,7 @@ import { Event as EventUtils } from '../../../../../../base/common/event.js';
 import { localize } from '../../../../../../nls.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { getDefaultHoverDelegate } from '../../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { AgentStatusMode, IAgentTitleBarStatusService } from './agentTitleBarStatusService.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IKeybindingService } from '../../../../../../platform/keybinding/common/keybinding.js';
@@ -864,7 +865,7 @@ export class AgentTitleBarStatusWidget extends BaseActionViewItem {
 
 		const primaryActionId = TOGGLE_CHAT_ACTION_ID;
 		const primaryActionTitle = localize('toggleChat', "Toggle Chat");
-		const primaryActionIcon = Codicon.chatSparkle;
+		const primaryActionIcon = ThemeIcon.fromId('backboard-logo');
 
 		// Create primary action
 		const primaryAction = this.instantiationService.createInstance(MenuItemAction, {

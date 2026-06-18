@@ -237,7 +237,7 @@ const copilotCliHookProperties: Record<string, IJSONSchema> = buildHookPropertie
 export const hookFileSchema: IJSONSchema = {
 	$schema: 'http://json-schema.org/draft-07/schema#',
 	type: 'object',
-	description: nls.localize('hookFile.description', 'GitHub Copilot hook configuration file. Hooks enable executing custom shell commands at strategic points in an agent\'s workflow.'),
+	description: nls.localize('hookFile.description', 'Backboard hook configuration file. Hooks enable executing custom shell commands at strategic points in an agent\'s workflow.'),
 	additionalProperties: true,
 	required: ['hooks'],
 	properties: {

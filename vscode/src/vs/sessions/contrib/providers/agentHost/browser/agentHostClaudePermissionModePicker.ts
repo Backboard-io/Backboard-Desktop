@@ -28,7 +28,7 @@ function getClaudePermissionModeIcon(value: string | undefined): ThemeIcon | und
 		case 'default': return Codicon.shield;
 		case 'acceptEdits': return Codicon.edit;
 		case 'plan': return Codicon.lightbulb;
-		case 'auto': return Codicon.sparkle;
+		case 'auto': return ThemeIcon.fromId('backboard-logo');
 		case 'bypassPermissions': return Codicon.warning;
 		default: return undefined;
 	}

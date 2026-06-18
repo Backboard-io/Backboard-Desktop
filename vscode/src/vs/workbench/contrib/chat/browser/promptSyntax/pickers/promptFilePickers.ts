@@ -175,7 +175,7 @@ const NEW_INSTRUCTIONS_FILE_OPTION: IPromptPickerQuickPickItem = {
  */
 const GENERATE_AGENT_INSTRUCTIONS_OPTION: IPromptPickerQuickPickItem = {
 	type: 'item',
-	label: `$(sparkle) ${localize(
+	label: `$(backboard-logo) ${localize(
 		'commands.generate-agent-instructions.select-dialog.label',
 		'Generate agent instructions...',
 	)}`,
@@ -190,7 +190,7 @@ const GENERATE_AGENT_INSTRUCTIONS_OPTION: IPromptPickerQuickPickItem = {
  */
 const GENERATE_ON_DEMAND_INSTRUCTIONS_OPTION: IPromptPickerQuickPickItem = {
 	type: 'item',
-	label: `$(sparkle) ${localize(
+	label: `$(backboard-logo) ${localize(
 		'commands.generate-on-demand-instructions.select-dialog.label',
 		'Generate on-demand instructions...',
 	)}`,
@@ -235,7 +235,7 @@ const NEW_SKILL_FILE_OPTION: IPromptPickerQuickPickItem = {
  */
 const GENERATE_PROMPT_OPTION: IPromptPickerQuickPickItem = {
 	type: 'item',
-	label: `$(sparkle) ${localize(
+	label: `$(backboard-logo) ${localize(
 		'commands.generate-prompt.select-dialog.label',
 		'Generate prompt...',
 	)}`,
@@ -250,7 +250,7 @@ const GENERATE_PROMPT_OPTION: IPromptPickerQuickPickItem = {
  */
 const GENERATE_SKILL_OPTION: IPromptPickerQuickPickItem = {
 	type: 'item',
-	label: `$(sparkle) ${localize(
+	label: `$(backboard-logo) ${localize(
 		'commands.generate-skill.select-dialog.label',
 		'Generate skill...',
 	)}`,
@@ -265,7 +265,7 @@ const GENERATE_SKILL_OPTION: IPromptPickerQuickPickItem = {
  */
 const GENERATE_AGENT_OPTION: IPromptPickerQuickPickItem = {
 	type: 'item',
-	label: `$(sparkle) ${localize(
+	label: `$(backboard-logo) ${localize(
 		'commands.generate-agent.select-dialog.label',
 		'Generate agent...',
 	)}`,

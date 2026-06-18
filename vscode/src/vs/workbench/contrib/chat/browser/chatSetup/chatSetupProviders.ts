@@ -107,7 +107,7 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 					break;
 			}
 
-			return SetupAgent.doRegisterAgent(instantiationService, chatAgentService, id, `${defaultChat.provider.default.name} Copilot` /* Do NOT change, this hides the username altogether in Chat */, true, description, location, mode, context, controller);
+			return SetupAgent.doRegisterAgent(instantiationService, chatAgentService, id, defaultChat.provider.default.name, true, description, location, mode, context, controller);
 		});
 	}
 
@@ -117,8 +117,8 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 
 			const disposables = new DisposableStore();
 
-			// Register VSCode agent
-			const { disposable: vscodeDisposable } = SetupAgent.doRegisterAgent(instantiationService, chatAgentService, 'setup.vscode', 'vscode', false, localize2('vscodeAgentDescription', "Ask questions about VS Code").value, ChatAgentLocation.Chat, ChatModeKind.Agent, context, controller);
+			// Register Backboard agent
+			const { disposable: vscodeDisposable } = SetupAgent.doRegisterAgent(instantiationService, chatAgentService, 'setup.backboard', 'backboard', false, localize2('vscodeAgentDescription', "Ask questions about Backboard IDE").value, ChatAgentLocation.Chat, ChatModeKind.Agent, context, controller);
 			disposables.add(vscodeDisposable);
 
 			// Register workspace agent
@@ -135,8 +135,8 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 				source: ToolDataSource.Internal,
 				icon: Codicon.newFolder,
 				displayName: localize('setupToolDisplayName', "New Workspace"),
-				modelDescription: 'Scaffold a new workspace in VS Code',
-				userDescription: localize('setupToolsDescription', "Scaffold a new workspace in VS Code"),
+				modelDescription: 'Scaffold a new workspace in Backboard IDE',
+				userDescription: localize('setupToolsDescription', "Scaffold a new workspace in Backboard IDE"),
 				canBeReferencedInPrompt: true,
 				toolReferenceName: 'new',
 				when: ContextKeyExpr.true(),
@@ -175,7 +175,7 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 		return { agent, disposable: disposables };
 	}
 
-	private static readonly SETUP_NEEDED_MESSAGE = new MarkdownString(localize('settingUpCopilotNeeded', "You need to set up GitHub Copilot and be signed in to use Chat."));
+	private static readonly SETUP_NEEDED_MESSAGE = new MarkdownString(localize('settingUpCopilotNeeded', "You need to set up Backboard and be signed in to use Chat."));
 	private static readonly TRUST_NEEDED_MESSAGE = new MarkdownString(localize('trustNeeded', "You need to trust this workspace to use Chat."));
 
 	private static readonly CHAT_RETRY_COMMAND_ID = 'workbench.action.chat.retrySetup';

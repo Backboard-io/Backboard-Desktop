@@ -644,11 +644,21 @@ export class AgentHostChatInputPicker extends Disposable {
 }
 
 export class AgentHostChatInputPickerActionViewItem extends BaseActionViewItem {
+	private _container: HTMLElement | undefined;
+
 	constructor(action: IAction, private readonly _picker: AgentHostChatInputPicker) {
 		super(undefined, action);
 		this._register(this._picker);
 	}
 	override render(container: HTMLElement): void {
+		this._container = container;
 		this._picker.render(container);
+	}
+
+	show(): void {
+		const trigger = this._container?.querySelector('.action-label');
+		if (dom.isHTMLElement(trigger)) {
+			trigger.click();
+		}
 	}
 }

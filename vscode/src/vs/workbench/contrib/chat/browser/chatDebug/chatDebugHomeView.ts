@@ -179,7 +179,7 @@ export class ChatDebugHomeView extends Disposable {
 				} else if (getChatSessionType(sessionResource) === 'copilotcli') {
 					const pathId = sessionResource.path.replace(/^\//, '').split('-')[0];
 					const shortId = pathId || sessionResource.authority || sessionResource.toString();
-					sessionTitle = localize('chatDebug.copilotCliSessionWithId', "Copilot CLI: {0}", shortId);
+					sessionTitle = localize('chatDebug.copilotCliSessionWithId', "Background Agent: {0}", shortId);
 				} else if (getChatSessionType(sessionResource) === 'claude-code') {
 					const pathId = sessionResource.path.replace(/^\//, '').split('-')[0];
 					const shortId = pathId || sessionResource.authority || sessionResource.toString();

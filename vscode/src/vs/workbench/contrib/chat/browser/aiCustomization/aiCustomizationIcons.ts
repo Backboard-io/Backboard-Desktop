@@ -12,7 +12,7 @@ import { type AICustomizationSource, AICustomizationSources } from '../../common
 /**
  * Icon for the AI Customization view container (sidebar).
  */
-export const aiCustomizationViewIcon = registerIcon('ai-customization-view-icon', Codicon.sparkle, localize('aiCustomizationViewIcon', "Icon for the Agent Customization view."));
+export const aiCustomizationViewIcon = registerIcon('ai-customization-view-icon', ThemeIcon.fromId('backboard-logo'), localize('aiCustomizationViewIcon', "Icon for the Agent Customization view."));
 
 /**
  * Icon for custom agents.

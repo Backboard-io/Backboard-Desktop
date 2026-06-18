@@ -33,6 +33,20 @@
 	content: '';
 }
 
+.monaco-workbench .codicon.codicon-backboard-logo {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	font-size: 0;
+	background-color: currentColor;
+	-webkit-mask: url('../../contrib/chat/browser/media/backboard_icon.svg') center / contain no-repeat;
+	mask: url('../../contrib/chat/browser/media/backboard_icon.svg') center / contain no-repeat;
+}
+
+.monaco-workbench .codicon.codicon-backboard-logo::before {
+	content: '';
+}
+
 /* Font Families */
 
 @font-face {

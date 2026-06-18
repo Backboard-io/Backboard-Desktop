@@ -10,9 +10,9 @@ import { Parts } from '../../../workbench/services/layout/browser/layoutService.
 
 export class MainEditorPart extends MainEditorPartBase {
 	static readonly MARGIN_TOP = 0;
-	static readonly MARGIN_BOTTOM = 5;
-	static readonly MARGIN_LEFT = 5;
-	static readonly MARGIN_RIGHT = 5;
+	static readonly MARGIN_BOTTOM = 0;
+	static readonly MARGIN_LEFT = 0;
+	static readonly MARGIN_RIGHT = 0;
 
 	override get minimumWidth() {
 		return Math.max(300, super.minimumWidth);
@@ -25,9 +25,8 @@ export class MainEditorPart extends MainEditorPartBase {
 			return;
 		}
 
-		// MARGIN_BOTTOM applies only when the panel is visible (paired with the panel's
-		// 5px top margin to center the sash). When the panel is hidden the card fills its
-		// cell; the workbench grid's 10px bottom gutter provides the visible gap.
+		// Keep the editor flush with adjacent agent-session parts. Only borders are
+		// removed from the internal layout.
 		const marginLeft = this.layoutService.isVisible(Parts.SIDEBAR_PART) ||
 			this.layoutService.isVisible(Parts.SESSIONS_PART)
 			? 0

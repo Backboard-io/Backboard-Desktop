@@ -10,6 +10,7 @@ import { DomScrollableElement } from '../../../../base/browser/ui/scrollbar/scro
 import { Toggle } from '../../../../base/browser/ui/toggle/toggle.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { DisposableStore, IReference, toDisposable } from '../../../../base/common/lifecycle.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { ScrollbarVisibility } from '../../../../base/common/scrollable.js';
@@ -727,7 +728,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 
 		// Icon
 		const iconContainer = append(tosCard, $('.agentSessionsWelcome-walkthroughCard-icon'));
-		iconContainer.appendChild(renderIcon(Codicon.chatSparkle));
+		iconContainer.appendChild(renderIcon(ThemeIcon.fromId('backboard-logo')));
 
 		// Content
 		const content = append(tosCard, $('.agentSessionsWelcome-walkthroughCard-content'));

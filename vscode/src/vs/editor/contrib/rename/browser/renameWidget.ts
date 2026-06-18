@@ -14,6 +14,7 @@ import * as arrays from '../../../../base/common/arrays.js';
 import { DeferredPromise, raceCancellation } from '../../../../base/common/async.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
 import { DisposableStore, IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
@@ -983,7 +984,7 @@ class InputWithButton implements IDisposable {
 
 	setSparkleButton() {
 		this._buttonState = 'sparkle';
-		this._sparkleIcon ??= renderIcon(Codicon.sparkle);
+		this._sparkleIcon ??= renderIcon(ThemeIcon.fromId('backboard-logo'));
 		dom.clearNode(this.button);
 		this.button.appendChild(this._sparkleIcon);
 		this.button.setAttribute('aria-label', 'Generating new name suggestions');
@@ -1031,7 +1032,7 @@ class RenameCandidateView {
 		iconContainer.style.width = iconContainer.style.height = `${fontInfo.lineHeight * 0.8}px`;
 		this._domNode.appendChild(iconContainer);
 
-		this._icon = renderIcon(Codicon.sparkle);
+		this._icon = renderIcon(ThemeIcon.fromId('backboard-logo'));
 		this._icon.style.display = `none`;
 		iconContainer.appendChild(this._icon);
 

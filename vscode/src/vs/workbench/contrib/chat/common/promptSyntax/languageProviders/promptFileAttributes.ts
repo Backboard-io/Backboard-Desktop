@@ -131,7 +131,7 @@ export const customAgentAttributes: Record<string, IAttributeDefinition> = {
 	},
 	[PromptHeaderAttributes.target]: {
 		type: 'scalar',
-		description: localize('promptHeader.agent.target', 'The target to which the header attributes like tools apply to. Possible values are `github-copilot` and `vscode`.'),
+		description: localize('promptHeader.agent.target', 'The target to which the header attributes like tools apply.'),
 		enums: targetAttributeEnumValues,
 	},
 	[PromptHeaderAttributes.infer]: {
@@ -298,9 +298,9 @@ export const knownClaudeTools = [
 ];
 
 export const knownClaudeModels = [
-	{ name: 'sonnet', description: localize('claude.sonnet', 'Latest Claude Sonnet'), modelEquivalent: 'Claude Sonnet 4.5 (copilot)' },
-	{ name: 'opus', description: localize('claude.opus', 'Latest Claude Opus'), modelEquivalent: 'Claude Opus 4.6 (copilot)' },
-	{ name: 'haiku', description: localize('claude.haiku', 'Latest Claude Haiku, fast for simple tasks'), modelEquivalent: 'Claude Haiku 4.5 (copilot)' },
+	{ name: 'sonnet', description: localize('claude.sonnet', 'Latest Claude Sonnet'), modelEquivalent: 'Claude Sonnet 4.5 (backboard)' },
+	{ name: 'opus', description: localize('claude.opus', 'Latest Claude Opus'), modelEquivalent: 'Claude Opus 4.6 (backboard)' },
+	{ name: 'haiku', description: localize('claude.haiku', 'Latest Claude Haiku, fast for simple tasks'), modelEquivalent: 'Claude Haiku 4.5 (backboard)' },
 	{ name: 'inherit', description: localize('claude.inherit', 'Inherit model from parent agent or prompt'), modelEquivalent: undefined },
 ];
 

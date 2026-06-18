@@ -312,7 +312,7 @@ export class ChatDebugOverviewView extends Disposable {
 
 		if (totalCopilotUsageNanoAiu > 0) {
 			const aic = totalCopilotUsageNanoAiu / NANO_AIU_PER_AIC;
-			metrics.push({ label: localize('chatDebug.metric.copilotUsage', "Copilot Usage (AIC)"), value: aicFormatter.value.format(aic) });
+			metrics.push({ label: localize('chatDebug.metric.copilotUsage', "Backboard Usage (AIC)"), value: aicFormatter.value.format(aic) });
 		}
 
 		for (const metric of metrics) {

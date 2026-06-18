@@ -51,10 +51,10 @@ export async function openCopilotCliStateFile(
 			await editorService.openEditor({ resource: result.resource });
 			return;
 		case 'no-session':
-			notificationService.info(localize('openSessionEventsFile.noSession', "No Copilot CLI session is active."));
+			notificationService.info(localize('openSessionEventsFile.noSession', "No background agent session is active."));
 			return;
 		case 'unsupported-scheme':
-			notificationService.info(localize('openSessionEventsFile.unsupported', "The active chat session is not a Copilot CLI session."));
+			notificationService.info(localize('openSessionEventsFile.unsupported', "The active chat session is not a background agent session."));
 			return;
 		case 'remote-not-connected':
 			notificationService.warn(localize('openSessionEventsFile.notConnected', "No active connection found for remote agent host '{0}'.", result.authority));
@@ -67,7 +67,7 @@ export async function openCopilotCliStateFile(
 
 /**
  * Workbench-side action. Uses the last-focused chat widget's view model to
- * find the active Copilot CLI chat session. Suitable for vscode where the
+ * find the active background agent chat session. Suitable for the workbench where the
  * agents-window-specific `ISessionsManagementService` is not present.
  */
 export class OpenCopilotCliStateFileAction extends Action2 {
@@ -77,7 +77,7 @@ export class OpenCopilotCliStateFileAction extends Action2 {
 	constructor() {
 		super({
 			id: OpenCopilotCliStateFileAction.ID,
-			title: localize2('openSessionEventsFile', "Open Copilot CLI State File"),
+			title: localize2('openSessionEventsFile', "Open Background Agent State File"),
 			f1: true,
 			category: Categories.Developer,
 			precondition: ContextKeyExpr.and(

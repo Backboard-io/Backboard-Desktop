@@ -766,7 +766,7 @@ class RunScriptActionViewItem extends BaseActionViewItem {
 			hover: {
 				content: localize('generateRunActionTooltip', "Generate a new workspace task"),
 			},
-			icon: Codicon.sparkleCompact,
+			icon: ThemeIcon.fromId('backboard-logo'),
 			enabled: true,
 			class: undefined,
 			category: tasksCategory,

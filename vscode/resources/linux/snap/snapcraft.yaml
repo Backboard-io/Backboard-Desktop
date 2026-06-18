@@ -1,10 +1,9 @@
 name: @@NAME@@
 version: '@@VERSION@@'
-summary: Code editing. Redefined.
+summary: Backboard IDE.
 description: |
-  Visual Studio Code is a new choice of tool that combines the
-  simplicity of a code editor with what developers need for the core
-  edit-build-debug cycle.
+  Backboard IDE combines the simplicity of a code editor with
+  Backboard-powered development workflows.
 
 architectures:
   - build-on: amd64

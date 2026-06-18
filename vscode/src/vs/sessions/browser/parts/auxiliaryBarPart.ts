@@ -48,10 +48,10 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	static readonly placeholderViewContainersKey = 'workbench.agentsession.auxiliarybar.placeholderPanels';
 	static readonly viewContainersWorkspaceStateKey = 'workbench.agentsession.auxiliarybar.viewContainersWorkspaceState';
 
-	/** Visual margin values for the card-like appearance */
+	/** Agent sessions parts are flush; layout only subtracts borders. */
 	static readonly MARGIN_TOP = 0;
-	static readonly MARGIN_BOTTOM = 5;
-	static readonly MARGIN_LEFT = 5;
+	static readonly MARGIN_BOTTOM = 0;
+	static readonly MARGIN_LEFT = 0;
 
 	// Action ID for run script - defined here to avoid layering issues
 	private static readonly RUN_SCRIPT_ACTION_ID = 'workbench.action.agentSessions.runScript';
@@ -294,12 +294,8 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 
 		const borderTotal = 2; // 1px border on each side
 
-		// The right gutter is provided by the workbench grid (see Workbench.layout).
-		// The bottom margin is 5px when the panel is visible (paired with the panel's
-		// 5px top margin to center the sash) and 0 when the panel is hidden (so the card
-		// fills its cell; the workbench grid's 10px bottom gutter provides the visible gap).
-		// When the editor is visible, padding-left: 5px keeps the inner content position
-		// invariant (matching the editor-hidden state where margin-left: 5px applies instead).
+		// Keep the auxiliary bar flush with adjacent parts. The CSS mirrors these
+		// zero margins; only borders are removed from the internal layout.
 		const editorVisible = this.layoutService.isVisible(Parts.EDITOR_PART, mainWindow);
 		const marginLeft = editorVisible ? 0 : AuxiliaryBarPart.MARGIN_LEFT;
 		const paddingLeft = editorVisible ? AuxiliaryBarPart.MARGIN_LEFT : 0;

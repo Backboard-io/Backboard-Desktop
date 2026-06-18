@@ -3,7 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP="$ROOT/.build/electron/Code - OSS.app/Contents/MacOS/Code - OSS"
-CODE_SH="$ROOT/scripts/code.sh"
+APP_BUNDLE="$ROOT/.build/electron/Code - OSS.app"
+DEV_ICON_SOURCE="$ROOT/resources/darwin/code.icns"
+DEV_ICON_DEST="$APP_BUNDLE/Contents/Resources/Code - OSS.icns"
 RUN_DIR="${RUN_DIR:-/tmp/backboard-ide-$(date +%s)}"
 NODE24="$HOME/.nvm/versions/node/v24.15.0/bin"
 
@@ -11,6 +13,11 @@ if [[ ! -x "$APP" ]]; then
 	echo "Missing Code OSS app binary at: $APP" >&2
 	echo "Run: PATH=\"\$HOME/.nvm/versions/node/v24.15.0/bin:\$PATH\" npm run transpile && node build/lib/preLaunch.ts" >&2
 	exit 1
+fi
+
+if [[ -f "$DEV_ICON_SOURCE" ]]; then
+	cp "$DEV_ICON_SOURCE" "$DEV_ICON_DEST"
+	touch "$APP_BUNDLE"
 fi
 
 if [[ -d "$NODE24" ]]; then
@@ -57,7 +64,13 @@ if [[ "${DISABLE_GPU:-}" == "1" ]]; then
 	ARGS+=(--disable-gpu)
 fi
 
-VSCODE_SKIP_PRELAUNCH="${VSCODE_SKIP_PRELAUNCH:-1}" "$CODE_SH" "${ARGS[@]}" > "$RUN_DIR/code.log" 2>&1 &
+export NODE_ENV=development
+export VSCODE_DEV=1
+export VSCODE_CLI=1
+export ELECTRON_ENABLE_STACK_DUMPING=1
+export ELECTRON_ENABLE_LOGGING=1
+
+"$APP" . "${ARGS[@]}" > "$RUN_DIR/code.log" 2>&1 &
 PID=$!
 
 sleep 2

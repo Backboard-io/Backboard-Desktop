@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
-import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import { extUriBiasedIgnorePathCase } from '../../../../../../base/common/resources.js';
@@ -33,7 +32,7 @@ function mapSessionStatus(status: SessionStatus | undefined): ChatSessionStatus 
 }
 
 function agentHostSessionIcon(provider: string) {
-	return provider === 'backboard' ? BackboardLogoIcon : Codicon.copilot;
+	return BackboardLogoIcon;
 }
 
 /**

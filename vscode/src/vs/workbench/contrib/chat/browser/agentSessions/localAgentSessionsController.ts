@@ -5,7 +5,6 @@
 
 import { coalesce } from '../../../../../base/common/arrays.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
-import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter } from '../../../../../base/common/event.js';
 import { Disposable, DisposableResourceMap } from '../../../../../base/common/lifecycle.js';
 import { ResourceMap, ResourceSet } from '../../../../../base/common/map.js';
@@ -22,6 +21,7 @@ import { getChatSessionType } from '../../common/model/chatUri.js';
 import { getInProgressSessionDescription } from '../chatSessions/chatSessionDescription.js';
 import { chatResponseStateToSessionStatus, getSessionStatusForModel } from '../chatSessions/chatSessions.contribution.js';
 import { Schemas } from '../../../../../base/common/network.js';
+import { BackboardLogoIcon } from './agentSessions.js';
 
 export class LocalAgentsSessionsController extends Disposable implements IChatSessionItemController, IWorkbenchContribution {
 
@@ -196,7 +196,7 @@ export class LocalAgentsSessionsController extends Disposable implements IChatSe
 
 class LocalChatSessionItem implements IChatSessionItem {
 	readonly resource: URI;
-	readonly iconPath = Codicon.chatSparkle;
+	readonly iconPath = BackboardLogoIcon;
 
 	readonly label: string;
 	readonly description: string | undefined;

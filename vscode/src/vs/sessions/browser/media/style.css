@@ -119,17 +119,8 @@
 }
 
 /**
- * The auxiliary bar and panel use a card-like appearance with margins and border-radius
- * applied directly on the .part element. The grid allocates full space; CSS margin shrinks
- * the part within its split-view-view wrapper. Layout dimensions are reduced in code
- * (AgenticAuxiliaryBarPart) to keep internal layout correct.
- *
- * No z-index or stacking-context changes - sashes render naturally on top.
- *
- * Margin values (must match the constants in the Part classes):
- *   Sidebar:       no card (flush, spans full height)
- *   Auxiliary bar:  top=16, bottom=18, right=16
- *   Panel:          bottom=18, left=16, right=16
+ * Agent sessions parts are flush against each other. The grid allocates the full
+ * space and the Part classes subtract only their borders from internal layout.
  */
 
 .agent-sessions-workbench.shell-gradient-background .part.titlebar,
@@ -148,10 +139,10 @@
 }
 
 .agent-sessions-workbench .part.sessionspart {
-	margin: 0 4px 4px 10px;
+	margin: 0;
 	background: var(--part-background);
 	border: 1px solid var(--part-border-color, transparent);
-	border-radius: var(--vscode-cornerRadius-large);
+	border-radius: 0;
 	box-sizing: border-box;
 }
 
@@ -165,42 +156,33 @@
 
 .agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part) {
 	/*
-	 * No right margin so the editor flushes against the auxiliary bar (whose
-	 * `margin-left` is 0 in this state). The grid sash sits at the visual
-	 * seam between the two cards. The 5px bottom margin pairs with the
-	 * panel's `margin-top: 5px` to center the sash; it drops to 0 when the
-	 * panel is hidden (see `.nopanel` override).
+	 * Keep the main editor flush with adjacent agent-session parts. Scoped to
+	 * `.monaco-grid-view` so this styling does not leak into floating editor
+	 * windows.
 	 *
-	 * Scoped to `.monaco-grid-view` so the card-like styling only applies to
-	 * the main workbench editor part — auxiliary window editor parts are
-	 * created as a direct child of the aux container (no grid view wrapper)
-	 * and the `agent-sessions-workbench` class is mirrored onto the aux
-	 * container via `trackAttributes`, so without this scoping the styling
-	 * would leak into floating editor windows.
+	 * Auxiliary window editor parts are created as a direct child of the aux
+	 * container and also receive `agent-sessions-workbench` via `trackAttributes`.
 	 */
-	margin: 0 0 4px 4px;
+	margin: 0;
 	background: var(--vscode-agentsPanel-background);
 	border: 1px solid var(--vscode-agentsPanel-border, transparent);
 	border-right-width: 0;
 	border-top-right-radius: 0;
 	border-bottom-right-radius: 0;
-	border-top-left-radius: 8px;
-	border-bottom-left-radius: 8px;
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
 	box-sizing: border-box;
 	overflow: hidden;
 }
 
 /*
  * When the secondary side bar (auxiliary bar) is hidden, the editor becomes the
- * rightmost card and takes over the space the auxiliary bar used to occupy. The
- * 10px workbench gutter on the right edge (see Workbench.layout) already provides
- * the outer margin, so we only need to restore the right border and the right
- * corner radii so the editor still looks like a card.
+ * rightmost visible part, so restore the right border without adding spacing.
  */
 .agent-sessions-workbench.noauxiliarybar .monaco-grid-view .part.editor:not(.modal-editor-part) {
 	border-right-width: var(--vscode-strokeThickness);
-	border-top-right-radius: 8px;
-	border-bottom-right-radius: 8px;
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
 }
 
 .agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part)::after {
@@ -379,36 +361,25 @@
 
 .agent-sessions-workbench .part.auxiliarybar {
 	/*
-	 * The right gutter is provided by the workbench grid (see Workbench.layout).
-	 * The bottom margin is 5px when the panel is visible (paired with the panel's
-	 * 5px top margin to center the sash) and 0 when the panel is hidden
-	 * (see `.nopanel` override below) so the card fills its cell.
-	 *
-	 * Default (editor visible): card flushes against the editor with the
-	 * grid sash at the seam. `padding-left: 5px` keeps the inner content
-	 * aligned with the editor-hidden state.
-	 *
-	 * Editor hidden (override below): 5px left gutter against the sash.
-	 *
-	 * The TS `layout()` mirrors this and re-runs on editor visibility
-	 * changes so the inner area is sized correctly.
+	 * The TS `layout()` mirrors these zero margins so the inner area is sized
+	 * correctly while the auxiliary bar stays flush against adjacent parts.
 	 */
-	margin: 0 0 5px 0;
-	padding-left: 5px;
+	margin: 0;
+	padding-left: 0;
 	background: var(--part-background);
 	border: 1px solid var(--part-border-color, transparent);
 	border-top-left-radius: 0;
 	border-bottom-left-radius: 0;
-	border-top-right-radius: 8px;
-	border-bottom-right-radius: 8px;
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
 	box-sizing: border-box;
 }
 
 .agent-sessions-workbench.nomaineditorarea .part.auxiliarybar {
-	margin-left: 5px;
+	margin-left: 0;
 	padding-left: 0;
-	border-top-left-radius: 8px;
-	border-bottom-left-radius: 8px;
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
 }
 
 .agent-sessions-workbench.nopanel .part.auxiliarybar,
@@ -421,10 +392,10 @@
 }
 
 .agent-sessions-workbench .part.panel {
-	margin: 5px 0 0 10px;
+	margin: 0;
 	background: var(--part-background);
 	border: 1px solid var(--part-border-color, transparent);
-	border-radius: var(--vscode-cornerRadius-large);
+	border-radius: 0;
 	box-sizing: border-box;
 }
 
@@ -753,19 +724,19 @@
 		transform: translateX(-6px);
 	}
 
-	/* Panel (bottom): slides down from 6px above → margin: 0 10px 10px 10px */
+	/* Panel (bottom): fade in without introducing temporary gutters */
 	.agent-sessions-workbench .part.panel {
-		margin: 6px 16px 16px 16px;
+		margin: 0;
 	}
 
-	/* Auxiliary bar (right): slides in from 6px right → margin: 0 10px 0px 0 */
+	/* Auxiliary bar (right): fade in without introducing temporary gutters */
 	.agent-sessions-workbench .part.auxiliarybar {
-		margin: 0 16px 0px 6px;
+		margin: 0;
 	}
 
-	/* Chat bar (center-bottom): slides up from 6px below → margin: 0 10px 0px 10px */
+	/* Chat bar (center-bottom): fade in without introducing temporary gutters */
 	.agent-sessions-workbench .part.sessionspart {
-		margin: 6px 16px 0px 16px;
+		margin: 0;
 	}
 }
 

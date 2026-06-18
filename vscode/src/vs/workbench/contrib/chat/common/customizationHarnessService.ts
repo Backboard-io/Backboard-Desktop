@@ -377,13 +377,15 @@ const EMPTY_FILTER: IStorageSourceFilter = {
 	sources: [],
 };
 
+const BackboardLogoIcon = ThemeIcon.fromId('backboard-logo');
+
 /**
  * Empty descriptor returned when no harness is registered yet.
  */
 const EMPTY_DESCRIPTOR: IHarnessDescriptor = {
 	id: '',
 	label: '',
-	icon: Codicon.sparkle,
+	icon: BackboardLogoIcon,
 	getStorageSourceFilter: () => ({ sources: [] }),
 };
 
@@ -493,13 +495,13 @@ function createRestrictedHarnessDescriptor(
 }
 
 /**
- * Creates a "Copilot CLI" harness descriptor.
+ * Creates a background agent harness descriptor.
  */
 export function createCliHarnessDescriptor(cliUserRoots: readonly URI[], extras: readonly AICustomizationSource[]): IHarnessDescriptor {
 	return createRestrictedHarnessDescriptor(
 		SessionType.CopilotCLI,
-		localize('harness.cli', "Copilot CLI"),
-		ThemeIcon.fromId(Codicon.copilot.id),
+		localize('harness.cli', "Background Agent"),
+		BackboardLogoIcon,
 		cliUserRoots,
 		extras,
 		{
