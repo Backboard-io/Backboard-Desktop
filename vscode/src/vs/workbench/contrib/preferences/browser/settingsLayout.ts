@@ -130,7 +130,7 @@ export const tocData: ITOCEntry<string> = {
 				{
 					id: 'workbench/appearance',
 					label: localize('appearance', "Appearance"),
-					settings: ['workbench.activityBar.*', 'workbench.colorTheme', 'workbench.preferred*ColorTheme', 'workbench.productIconTheme', 'workbench.iconTheme', 'workbench.*color*', 'workbench.fontAliasing', 'workbench.sidebar.location', 'workbench.*.visible', 'workbench.tips.enabled', 'workbench.tree.*', 'workbench.view.*']
+					settings: ['workbench.activityBar.*', 'workbench.*color*', 'workbench.fontAliasing', 'workbench.iconTheme', 'workbench.sidebar.location', 'workbench.*.visible', 'workbench.tips.enabled', 'workbench.tree.*', 'workbench.view.*']
 				},
 				{
 					id: 'workbench/breadcrumbs',

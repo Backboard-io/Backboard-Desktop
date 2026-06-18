@@ -10,9 +10,9 @@ import { DomScrollableElement } from '../../../../base/browser/ui/scrollbar/scro
 import { Toggle } from '../../../../base/browser/ui/toggle/toggle.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../base/common/codicons.js';
-import { ThemeIcon } from '../../../../base/common/themables.js';
 import { DisposableStore, IReference, toDisposable } from '../../../../base/common/lifecycle.js';
 import { Emitter } from '../../../../base/common/event.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { ScrollbarVisibility } from '../../../../base/common/scrollable.js';
 import { basename } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -32,7 +32,6 @@ import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
 import { IEditorOpenContext, IEditorSerializer } from '../../../common/editor.js';
 import { SIDE_BAR_FOREGROUND } from '../../../common/theme.js';
 import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
-import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from '../../chat/common/constants.js';
 import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
@@ -50,8 +49,6 @@ import { AgentSessionsControl, IAgentSessionsControlOptions } from '../../chat/b
 import { AgentSessionsFilter } from '../../chat/browser/agentSessions/agentSessionsFilter.js';
 import { AgentSessionsListDelegate } from '../../chat/browser/agentSessions/agentSessionsViewer.js';
 import { HoverPosition } from '../../../../base/browser/ui/hover/hoverWidget.js';
-import { IResolvedWalkthrough, IWalkthroughsService } from '../../welcomeGettingStarted/browser/gettingStartedService.js';
-import { GettingStartedEditorOptions, GettingStartedInput } from '../../welcomeGettingStarted/browser/gettingStartedInput.js';
 import { IMarkdownRendererService } from '../../../../platform/markdown/browser/markdownRenderer.js';
 import { MarkdownString } from '../../../../base/common/htmlContent.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
@@ -66,10 +63,10 @@ import { canShowAgentsBanner, createAgentsBanner } from '../../chat/browser/agen
 const configurationKey = 'workbench.startupEditor';
 const MAX_SESSIONS = 6;
 const MAX_REPO_PICKS = 10;
-const MAX_WALKTHROUGHS = 10;
 const WELCOME_CHAT_INPUT_LAYOUT_HEIGHT = 150;
 const WELCOME_CHAT_INPUT_RESERVED_LIST_HEIGHT = 50;
 const WELCOME_CHAT_INPUT_RESERVED_CHROME_HEIGHT = 72;
+const SANDBOX_INPUT_PLACEHOLDER = 'Describe what you want to build';
 // Mirror ChatWidget's compact-surface sizing so the hidden list reservation and input chrome do not collapse the editor.
 const WELCOME_CHAT_INPUT_MAX_HEIGHT_OVERRIDE = WELCOME_CHAT_INPUT_LAYOUT_HEIGHT + WELCOME_CHAT_INPUT_RESERVED_LIST_HEIGHT + WELCOME_CHAT_INPUT_RESERVED_CHROME_HEIGHT;
 
@@ -109,20 +106,6 @@ type AgentSessionsWelcomeChatSubmittedEvent = {
 	selectedRecentWorkspace: boolean;
 };
 
-type AgentSessionsWelcomeActionClassification = {
-	action: { classification: 'PublicNonPersonalData'; purpose: 'FeatureInsight'; comment: 'The action being executed on the agent sessions welcome page.' };
-	actionId: { classification: 'PublicNonPersonalData'; purpose: 'FeatureInsight'; comment: 'Identifier of the action being executed, such as command ID or walkthrough ID.' };
-	welcomeKind: { classification: 'PublicNonPersonalData'; purpose: 'FeatureInsight'; comment: 'The kind of welcome page' };
-	owner: 'osortega';
-	comment: 'Help understand what actions are most commonly taken on the agent sessions welcome page';
-};
-
-type AgentSessionsWelcomeActionEvent = {
-	action: string;
-	welcomeKind: 'agentSessionsWelcomePage';
-	actionId: string | undefined;
-};
-
 export class AgentSessionsWelcomePage extends EditorPane {
 
 	static readonly ID = 'agentSessionsWelcomePage';
@@ -132,13 +115,13 @@ export class AgentSessionsWelcomePage extends EditorPane {
 	private contentContainer!: HTMLElement;
 	private scrollableElement: DomScrollableElement | undefined;
 	private chatWidget: ChatWidget | undefined;
+	private chatWidgetContainer: HTMLElement | undefined;
 	private chatModelRef: IReference<IChatModel> | undefined;
 	private sessionsControl: AgentSessionsControl | undefined;
 	private sessionsControlContainer: HTMLElement | undefined;
 	private readonly sessionsControlDisposables = this._register(new DisposableStore());
 	private readonly contentDisposables = this._register(new DisposableStore());
 	private contextService: IContextKeyService;
-	private walkthroughs: IResolvedWalkthrough[] = [];
 	private _selectedSessionProvider: AgentSessionTarget = AgentSessionProviders.Local;
 	private _selectedWorkspace: IWorkspacePickerItem | undefined;
 	private _recentTrustedWorkspaces: Array<IRecentWorkspace | IRecentFolder> = [];
@@ -159,11 +142,9 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@ICommandService private readonly commandService: ICommandService,
-		@IEditorService private readonly editorService: IEditorService,
 		@IAgentSessionsService private readonly agentSessionsService: IAgentSessionsService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IProductService private readonly productService: IProductService,
-		@IWalkthroughsService private readonly walkthroughsService: IWalkthroughsService,
 		@IChatService private readonly chatService: IChatService,
 		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
 		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
@@ -180,7 +161,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		this.container = $('.agentSessionsWelcome', {
 			role: 'document',
 			tabindex: 0,
-			'aria-label': localize('agentSessionsWelcomeAriaLabel', "Overview of agent sessions and how to get started.")
+			'aria-label': localize('agentSessionsWelcomeAriaLabel', "Sandbox chat workspace.")
 		});
 
 		this.contextService = this._register(contextKeyService.createScoped(this.container));
@@ -245,26 +226,43 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			this._recentTrustedWorkspaces = recentlyOpened.slice(0, MAX_REPO_PICKS);
 		}
 
-		// Get walkthroughs
-		this.walkthroughs = this.walkthroughsService.getWalkthroughs();
+		const shell = append(this.contentContainer, $('.agentSessionsWelcome-shell'));
+		const leftRail = append(shell, $('.agentSessionsWelcome-leftRail'));
+		const mainRegion = append(shell, $('.agentSessionsWelcome-mainRegion'));
+		const rightPanel = append(shell, $('.agentSessionsWelcome-rightPanel'));
 
-		// Header
-		const header = append(this.contentContainer, $('.agentSessionsWelcome-header'));
-		append(header, $('h1.product-name', {}, this.productService.nameLong));
+		this.buildLeftRail(leftRail);
 
-		const startEntries = append(header, $('.agentSessionsWelcome-startEntries'));
-		await this.buildStartEntries(startEntries);
+		const topBar = append(mainRegion, $('.agentSessionsWelcome-topBar'));
+		const titleWrap = append(topBar, $('.agentSessionsWelcome-threadTitle'));
+		append(titleWrap, $('span.agentSessionsWelcome-projectGlyph'));
+		append(titleWrap, $('span', {}, localize('sandboxTitle', "Sandbox")));
+		titleWrap.appendChild(renderIcon(Codicon.chevronDown));
+		const topActions = append(topBar, $('.agentSessionsWelcome-topActions'));
+		this.buildIconButton(topActions, Codicon.more, localize('moreActionsButton', "More Actions"));
 
-		// Chat input section
-		const chatSection = append(this.contentContainer, $('.agentSessionsWelcome-chatSection'));
+		const conversation = append(mainRegion, $('.agentSessionsWelcome-conversation'));
+		const header = append(conversation, $('.agentSessionsWelcome-header'));
+		append(header, $('h1.product-name', {}, localize('simpleModePromptTitle', "What do you want to build?")));
+		append(header, $('p.agentSessionsWelcome-subtitle', {}, localize('agentSessionsWelcome.subtitle', "Describe a page, feature, or change. Backboard will generate the output.")));
+		const suggestions = append(header, $('.agentSessionsWelcome-suggestedPrompts'));
+		this.buildSuggestedPrompt(suggestions, localize('landingPagePrompt', "Make a landing page"));
+		this.buildSuggestedPrompt(suggestions, localize('pricingSectionPrompt', "Create a pricing section"));
+		this.buildSuggestedPrompt(suggestions, localize('settingsScreenPrompt', "Build a settings screen"));
+
+		const chatSection = append(mainRegion, $('.agentSessionsWelcome-chatSection'));
 		this.buildChatWidget(chatSection);
 
-		// Sessions or walkthroughs
-		const sessionsSection = append(this.contentContainer, $('.agentSessionsWelcome-sessionsSection'));
+		const recentsHeader = append(leftRail, $('.agentSessionsWelcome-sessionsHeader'));
+		append(recentsHeader, $('span', {}, localize('recents', "Recents")));
+		append(recentsHeader, $('span.agentSessionsWelcome-recentsIndicator'));
+
+		const sessionsSection = append(leftRail, $('.agentSessionsWelcome-sessionsSection'));
 		this.buildSessionsOrPrompts(sessionsSection);
 
-		// Footer
-		const footer = append(this.contentContainer, $('.agentSessionsWelcome-footer'));
+		this.buildEnvironmentPanel(rightPanel);
+
+		const footer = append(leftRail, $('.agentSessionsWelcome-footer'));
 		this.buildFooter(footer);
 
 		// Listen for session changes - store reference to avoid querySelector
@@ -283,33 +281,92 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		this.scrollableElement?.scanDomNode();
 	}
 
-	private async buildStartEntries(container: HTMLElement): Promise<void> {
-		const workspaces = await this.getRecentlyOpenedWorkspaces(false);
-		const openEntry = workspaces.length > 0
-			? { icon: Codicon.folderOpened, label: localize('openRecent', "Open Recent..."), command: 'workbench.action.openRecent' }
-			: { icon: Codicon.folderOpened, label: localize('openFolder', "Open Folder..."), command: 'workbench.action.files.openFolder' };
-		const entries = [
-			openEntry,
-			{ icon: Codicon.newFile, label: localize('newFile', "New file..."), command: 'welcome.showNewFileEntries' },
-			{ icon: Codicon.repoClone, label: localize('cloneRepo', "Clone Git Repository..."), command: 'git.clone' },
-		];
+	private buildLeftRail(container: HTMLElement): void {
+		const header = append(container, $('.agentSessionsWelcome-railHeader'));
+		append(header, $('span.agentSessionsWelcome-railTitle', {}, localize('sandbox', "Sandbox")));
+		this.buildIconButton(header, Codicon.layoutSidebarLeft, localize('toggleSidebar', "Toggle Sidebar"));
 
-		for (const entry of entries) {
-			const button = append(container, $('button.agentSessionsWelcome-startEntry'));
-			button.appendChild(renderIcon(entry.icon));
-			button.appendChild(document.createTextNode(entry.label));
-			button.onclick = () => {
-				this.telemetryService.publicLog2<AgentSessionsWelcomeActionEvent, AgentSessionsWelcomeActionClassification>(
-					'agentSessionsWelcome.ActionExecuted',
-					{ welcomeKind: 'agentSessionsWelcomePage', action: 'executeCommand', actionId: entry.command }
-				);
-				this.commandService.executeCommand(entry.command);
-			};
+		const nav = append(container, $('.agentSessionsWelcome-railNav'));
+		this.buildRailButton(nav, Codicon.edit, localize('newChat', "New chat"), () => this.chatWidget?.focusInput());
+		this.buildRailButton(nav, Codicon.search, localize('searchChats', "Search chats"), () => this.commandService.executeCommand('workbench.action.quickOpen'));
+	}
+
+	private buildRailButton(container: HTMLElement, icon: ThemeIcon, label: string, run?: () => void): void {
+		const button = append(container, $('button.agentSessionsWelcome-railButton')) as HTMLButtonElement;
+		button.type = 'button';
+		button.appendChild(renderIcon(icon));
+		button.appendChild($('span', {}, label));
+		if (run) {
+			button.onclick = () => run();
 		}
+	}
+
+	private buildIconButton(container: HTMLElement, icon: ThemeIcon, title: string): void {
+		const button = append(container, $('button.agentSessionsWelcome-iconButton')) as HTMLButtonElement;
+		button.type = 'button';
+		button.title = title;
+		button.setAttribute('aria-label', title);
+		button.appendChild(renderIcon(icon));
+	}
+
+	private buildSuggestedPrompt(container: HTMLElement, prompt: string): void {
+		const button = append(container, $('button.agentSessionsWelcome-suggestedPrompt', {}, prompt)) as HTMLButtonElement;
+		button.type = 'button';
+		button.onclick = () => {
+			this.chatWidget?.setInput(prompt);
+			this.chatWidget?.focusInput();
+		};
+	}
+
+	private buildEnvironmentPanel(container: HTMLElement): void {
+		const header = append(container, $('.agentSessionsWelcome-artifactHeader'));
+		append(header, $('span.agentSessionsWelcome-artifactTitle', {}, localize('artifactTitle', "Landing Page")));
+		const actions = append(header, $('.agentSessionsWelcome-artifactActions'));
+		const toggle = append(actions, $('.agentSessionsWelcome-artifactToggle'));
+		this.buildArtifactToggleButton(toggle, Codicon.tools, localize('designView', "Design"), true);
+		this.buildArtifactToggleButton(toggle, Codicon.code, localize('codeView', "Code"), false);
+		this.buildIconButton(actions, Codicon.deviceDesktop, localize('viewportButton', "Viewport"));
+		this.buildIconButton(actions, Codicon.refresh, localize('refreshArtifact', "Refresh"));
+		this.buildIconButton(actions, Codicon.more, localize('artifactMoreActions', "More Actions"));
+
+		const canvas = append(container, $('.agentSessionsWelcome-artifactCanvas'));
+		const empty = append(canvas, $('.agentSessionsWelcome-artifactEmptyState'));
+		const illustration = append(empty, $('.agentSessionsWelcome-artifactIllustration'));
+		append(illustration, $('.agentSessionsWelcome-artifactIllustrationShadow'));
+		const sheet = append(illustration, $('.agentSessionsWelcome-artifactIllustrationSheet'));
+		append(sheet, $('.agentSessionsWelcome-artifactIllustrationLine.lineOne'));
+		append(sheet, $('.agentSessionsWelcome-artifactIllustrationLine.lineTwo'));
+		append(sheet, $('.agentSessionsWelcome-artifactIllustrationLine.lineThree'));
+		append(empty, $('h2', {}, localize('noArtifactYet', "No artifact yet")));
+		append(empty, $('p', {}, localize('noArtifactDescription', "Ask Backboard to build something and the output will appear here.")));
+		const emptyActions = append(empty, $('.agentSessionsWelcome-artifactEmptyActions'));
+		const generateButton = append(emptyActions, $('button.agentSessionsWelcome-artifactPrimaryButton', {}, localize('generateArtifact', "Generate artifact"))) as HTMLButtonElement;
+		generateButton.type = 'button';
+		generateButton.onclick = () => {
+			const prompt = localize('generateArtifactPrompt', "Generate a landing page");
+			this.chatWidget?.setInput(prompt);
+			this.chatWidget?.focusInput();
+		};
+		const tryPromptButton = append(emptyActions, $('button.agentSessionsWelcome-artifactSecondaryButton', {}, localize('tryPrompt', "Try a prompt"))) as HTMLButtonElement;
+		tryPromptButton.type = 'button';
+		tryPromptButton.onclick = () => {
+			const prompt = localize('tryPromptValue', "Make a landing page");
+			this.chatWidget?.setInput(prompt);
+			this.chatWidget?.focusInput();
+		};
+	}
+
+	private buildArtifactToggleButton(container: HTMLElement, icon: ThemeIcon, label: string, active: boolean): void {
+		const button = append(container, $('button.agentSessionsWelcome-artifactToggleButton')) as HTMLButtonElement;
+		button.type = 'button';
+		button.classList.toggle('active', active);
+		button.appendChild(renderIcon(icon));
+		append(button, $('span', {}, label));
 	}
 
 	private buildChatWidget(container: HTMLElement): void {
 		const chatWidgetContainer = append(container, $('.agentSessionsWelcome-chatWidget'));
+		this.chatWidgetContainer = chatWidgetContainer;
 
 		// Create editor overflow widgets container
 		const editorOverflowWidgetsDomNode = this.layoutService.getContainer(getWindow(chatWidgetContainer)).appendChild($('.chat-editor-overflow.monaco-editor'));
@@ -415,6 +472,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		this.contentDisposables.add(this.chatModelRef);
 		if (this.chatModelRef.object) {
 			this.chatWidget.setModel(this.chatModelRef.object);
+			this.chatWidget.setInputPlaceholder(SANDBOX_INPUT_PLACEHOLDER);
 		}
 
 		// Focus the input when clicking anywhere in the chat widget area
@@ -547,7 +605,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		if (sessions.length > 0) {
 			this.buildSessionsGrid(container, sessions);
 		} else {
-			this.buildWalkthroughs(container);
+			append(container, $('div.agentSessionsWelcome-noChats', {}, localize('noChats', "No chats")));
 		}
 	}
 
@@ -566,6 +624,10 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			getHoverPosition: () => HoverPosition.BELOW,
 			trackActiveEditorSession: () => false,
 			source: 'welcomeView',
+			hideSectionCount: true,
+			hideSessionBadge: true,
+			useStatusOnlyIcons: true,
+			compactShowMore: true,
 			notifySessionOpened: () => {
 				const isProjectionEnabled = this.configurationService.getValue<boolean>(ChatConfiguration.AgentSessionProjectionEnabled);
 				if (!isProjectionEnabled) {
@@ -595,13 +657,13 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			this.layoutSessionsControl();
 		}));
 
-		// "Try out the new Agents app" banner
+		// "Try out the new Sandbox app" banner
 		if (canShowAgentsBanner(this.chatEntitlementService)) {
 			const agentsBanner = createAgentsBanner(
 				{
 					cssClass: 'agentSessionsWelcome-agentsBanner',
 					source: 'agentSessionsWelcome',
-					label: localize('viewAllSessions', "View All Sessions"),
+					label: localize('viewAllSessions', "View Sandbox"),
 					onButtonClick: () => { this._closedBy = 'viewAllSessions'; },
 				},
 				this.commandService,
@@ -610,92 +672,6 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			this.sessionsControlDisposables.add(agentsBanner.disposables);
 			append(container, agentsBanner.element);
 		}
-	}
-
-	private buildWalkthroughs(container: HTMLElement): void {
-		const activeWalkthroughs = this.walkthroughs.filter(w =>
-			!w.when || this.contextService.contextMatchesRules(w.when)
-		).slice(0, MAX_WALKTHROUGHS);
-
-		if (activeWalkthroughs.length === 0) {
-			return;
-		}
-
-		let currentIndex = 0;
-
-		const card = append(container, $('.agentSessionsWelcome-walkthroughCard'));
-
-		// Icon
-		const iconContainer = append(card, $('.agentSessionsWelcome-walkthroughCard-icon'));
-
-		// Content
-		const content = append(card, $('.agentSessionsWelcome-walkthroughCard-content'));
-		const title = append(content, $('.agentSessionsWelcome-walkthroughCard-title'));
-		const desc = append(content, $('.agentSessionsWelcome-walkthroughCard-description'));
-
-		// Navigation arrows container
-		const navContainer = append(card, $('.agentSessionsWelcome-walkthroughCard-nav'));
-		const prevButton = append(navContainer, $('button.nav-button')) as HTMLButtonElement;
-		prevButton.appendChild(renderIcon(Codicon.chevronLeft));
-		prevButton.title = localize('previousWalkthrough', "Previous");
-
-		const nextButton = append(navContainer, $('button.nav-button')) as HTMLButtonElement;
-		nextButton.appendChild(renderIcon(Codicon.chevronRight));
-		nextButton.title = localize('nextWalkthrough', "Next");
-
-		const updateContent = () => {
-			const walkthrough = activeWalkthroughs[currentIndex];
-
-			// Update icon
-			clearNode(iconContainer);
-			if (walkthrough.icon.type === 'icon') {
-				iconContainer.appendChild(renderIcon(walkthrough.icon.icon));
-			}
-
-			// Update content
-			title.textContent = walkthrough.title;
-			desc.textContent = walkthrough.description || '';
-
-			// Update navigation button states
-			prevButton.disabled = currentIndex === 0;
-			nextButton.disabled = currentIndex === activeWalkthroughs.length - 1;
-		};
-
-		// Initialize content
-		updateContent();
-
-		card.onclick = () => {
-			const walkthrough = activeWalkthroughs[currentIndex];
-			this.telemetryService.publicLog2<AgentSessionsWelcomeActionEvent, AgentSessionsWelcomeActionClassification>(
-				'agentSessionsWelcome.ActionExecuted',
-				{ welcomeKind: 'agentSessionsWelcomePage', action: 'openWalkthrough', actionId: walkthrough.id }
-			);
-			// Open walkthrough with returnToCommand so back button returns to agent sessions welcome
-			const options: GettingStartedEditorOptions = {
-				selectedCategory: walkthrough.id,
-				returnToCommand: AgentSessionsWelcomePage.COMMAND_ID,
-			};
-			this.editorService.openEditor({
-				resource: GettingStartedInput.RESOURCE,
-				options
-			});
-		};
-
-		prevButton.onclick = (e) => {
-			e.stopPropagation();
-			if (currentIndex > 0) {
-				currentIndex--;
-				updateContent();
-			}
-		};
-
-		nextButton.onclick = (e) => {
-			e.stopPropagation();
-			if (currentIndex < activeWalkthroughs.length - 1) {
-				currentIndex++;
-				updateContent();
-			}
-		};
 	}
 
 	private static readonly PRIVACY_NOTICE_DISMISSED_KEY = 'agentSessionsWelcome.privacyNoticeDismissed';
@@ -728,7 +704,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 
 		// Icon
 		const iconContainer = append(tosCard, $('.agentSessionsWelcome-walkthroughCard-icon'));
-		iconContainer.appendChild(renderIcon(ThemeIcon.fromId('backboard-logo')));
+		iconContainer.appendChild(renderIcon(Codicon.chatSparkle));
 
 		// Content
 		const content = append(tosCard, $('.agentSessionsWelcome-walkthroughCard-content'));
@@ -818,7 +794,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			return;
 		}
 
-		const chatWidth = Math.min(800, this.lastDimension.width - 80);
+		const chatWidth = Math.max(260, this.chatWidgetContainer?.clientWidth ?? Math.min(540, this.lastDimension.width));
 		this.chatWidget.setInputPartMaxHeightOverride(WELCOME_CHAT_INPUT_MAX_HEIGHT_OVERRIDE);
 		this.chatWidget.layout(WELCOME_CHAT_INPUT_LAYOUT_HEIGHT, chatWidth);
 	}
@@ -828,23 +804,14 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			return;
 		}
 
-		// TODO: @osortega this is a weird way of doing this, maybe we handle the 2-colum layout in the control itself?
-		const sessionsWidth = Math.min(800, this.lastDimension.width - 80);
-		// Calculate height based on actual visible sessions (capped at MAX_SESSIONS)
-		// Use ITEM_HEIGHT per item from AgentSessionsListDelegate
-		// Give the list FULL height so virtualization renders all items
-		// CSS transforms handle the 2-column visual layout
+		const sessionsWidth = Math.max(180, this.sessionsControlContainer.clientWidth);
 		const visibleSessions = Math.min(
 			this.agentSessionsService.model.sessions.filter(s => !s.isArchived()).length,
 			MAX_SESSIONS
 		);
 		const sessionsHeight = visibleSessions * AgentSessionsListDelegate.ITEM_HEIGHT;
 		this.sessionsControl.layout(sessionsHeight, sessionsWidth);
-
-		// Set margin offset for 2-column layout: actual height - visual height
-		// Visual height = ceil(n/2) * ITEM_HEIGHT, so offset = floor(n/2) * ITEM_HEIGHT
-		const marginOffset = Math.floor(visibleSessions / 2) * AgentSessionsListDelegate.ITEM_HEIGHT;
-		this.sessionsControl.element!.style.marginBottom = `-${marginOffset}px`;
+		this.sessionsControl.element!.style.marginBottom = '0';
 	}
 
 	override focus(): void {

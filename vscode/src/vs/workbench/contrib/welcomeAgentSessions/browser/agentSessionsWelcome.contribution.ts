@@ -24,6 +24,7 @@ import { Action2, registerAction2 } from '../../../../platform/actions/common/ac
 import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
 import { IChatEntitlementService } from '../../../services/chat/common/chatEntitlementService.js';
+import './workspacePage.js';
 
 // Registration priority
 const agentSessionsWelcomeInputTypeId = 'workbench.editors.agentSessionsWelcomeInput';
@@ -37,7 +38,7 @@ Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane
 	EditorPaneDescriptor.create(
 		AgentSessionsWelcomePage,
 		AgentSessionsWelcomePage.ID,
-		localize('agentSessionsWelcome', "Agent Sessions Welcome")
+		localize('agentSessionsWelcome', "Sandbox")
 	),
 	[
 		new SyncDescriptor(AgentSessionsWelcomeInput)
@@ -74,7 +75,7 @@ class AgentSessionsWelcomeEditorResolverContribution extends Disposable implemen
 			`${AgentSessionsWelcomeInput.RESOURCE.scheme}:${AgentSessionsWelcomeInput.RESOURCE.authority}/**`,
 			{
 				id: AgentSessionsWelcomePage.ID,
-				label: localize('agentSessionsWelcome.displayName', "Agent Sessions Welcome"),
+				label: localize('agentSessionsWelcome.displayName', "Sandbox"),
 				priority: RegisteredEditorPriority.builtin,
 			},
 			{
@@ -94,12 +95,12 @@ class AgentSessionsWelcomeEditorResolverContribution extends Disposable implemen
 	}
 }
 
-// Register command to open agent sessions welcome page
+// Register command to open Sandbox
 registerAction2(class OpenAgentSessionsWelcomeAction extends Action2 {
 	constructor() {
 		super({
 			id: AgentSessionsWelcomePage.COMMAND_ID,
-			title: localize('openAgentSessionsWelcome', "Open Agent Sessions Welcome"),
+			title: localize('openAgentSessionsWelcome', "Open Sandbox"),
 			precondition: ChatContextKeys.enabled
 		});
 	}

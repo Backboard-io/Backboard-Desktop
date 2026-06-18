@@ -32,6 +32,7 @@ import { autorun, constObservable, derived, derivedOpts, IObservable, ISettableO
 import { isMacintosh } from '../../../../../../base/common/platform.js';
 import { isEqual } from '../../../../../../base/common/resources.js';
 import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { IEditorConstructionOptions } from '../../../../../../editor/browser/config/editorConfiguration.js';
 import { EditorExtensionsRegistry } from '../../../../../../editor/browser/editorExtensions.js';
@@ -114,7 +115,7 @@ import { resizeImage } from '../../chatImageUtils.js';
 import { ChatSessionPickerActionItem, IChatSessionPickerDelegate } from '../../chatSessions/chatSessionPickerActionItem.js';
 import { AgentHostChatInputPicker, AgentHostChatInputPickerActionViewItem } from '../../agentSessions/agentHost/agentHostChatInputPicker.js';
 import { OpenAgentHostAutoApprovePickerAction, OpenAgentHostModePickerAction, OpenAgentHostPermissionModePickerAction, OpenAgentHostFolderPickerAction } from '../../agentSessions/agentHost/agentHostChatInputPicker.contribution.js';
-import { AgentHostGenericConfigChips } from '../../agentSessions/agentHost/agentHostGenericConfigChips.js';
+import { AgentHostGenericConfigChips, IAgentHostGenericConfigOption } from '../../agentSessions/agentHost/agentHostGenericConfigChips.js';
 import { AgentHostFolderPickerActionItem } from '../../agentSessions/agentHost/agentHostFolderPickerActionItem.js';
 import { SessionConfigKey } from '../../../../../../platform/agentHost/common/sessionConfigKeys.js';
 import { ClaudeSessionConfigKey } from '../../../../../../platform/agentHost/common/claudeSessionConfigKeys.js';
@@ -433,6 +434,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private agentHostAutoApproveWidget: AgentHostChatInputPickerActionViewItem | undefined;
 	private agentHostPermissionModeWidget: AgentHostChatInputPickerActionViewItem | undefined;
 	private agentHostFolderWidget: AgentHostFolderPickerActionItem | undefined;
+	private agentHostGenericConfigChips: AgentHostGenericConfigChips | undefined;
+	private backboardOptionsAnchor: HTMLElement | undefined;
 	private readonly chatSessionPickerWidgets = this._register(new DisposableMap<string, ChatSessionPickerActionItem>());
 	private chatSessionPickerContainer: HTMLElement | undefined;
 	private _lastSessionPickerAction: MenuItemAction | undefined;
@@ -1126,19 +1129,31 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	}
 
 	public openAgentHostModePicker(): void {
-		this.agentHostModeWidget?.show();
+		this.agentHostModeWidget?.show(this.backboardOptionsAnchor);
 	}
 
 	public openAgentHostAutoApprovePicker(): void {
-		this.agentHostAutoApproveWidget?.show();
+		this.agentHostAutoApproveWidget?.show(this.backboardOptionsAnchor);
 	}
 
 	public openAgentHostPermissionModePicker(): void {
-		this.agentHostPermissionModeWidget?.show();
+		this.agentHostPermissionModeWidget?.show(this.backboardOptionsAnchor);
 	}
 
 	public openAgentHostFolderPicker(): void {
 		this.agentHostFolderWidget?.show();
+	}
+
+	public setBackboardOptionsAnchor(anchor: HTMLElement | undefined): void {
+		this.backboardOptionsAnchor = anchor;
+	}
+
+	public getBackboardGenericConfigOptions(): readonly IAgentHostGenericConfigOption[] {
+		return this.agentHostGenericConfigChips?.getOptions() ?? [];
+	}
+
+	public getBackboardOptionsAnchor(): HTMLElement | undefined {
+		return this.backboardOptionsAnchor;
 	}
 
 	/**
@@ -2835,13 +2850,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			actionContext: { widget },
 			compact: derived(reader => this._stableInputPartWidth.read(reader) < CHAT_INPUT_PICKER_COLLAPSE_WIDTH),
 		};
-		const primarySessionPickerOptions: IChatInputPickerOptions = {
+		const backboardOptionsPickerOptions: IChatInputPickerOptions = {
 			...pickerOptions,
-			compact: constObservable(true),
-		};
-		const secondaryPickerOptions: IChatInputPickerOptions = {
-			...pickerOptions,
-			getOverflowAnchor: () => this.secondaryToolbar.getElement(),
+			getOverflowAnchor: () => this.backboardOptionsAnchor ?? pickerOptions.getOverflowAnchor?.(),
 			compact: constObservable(true),
 		};
 
@@ -2905,7 +2916,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						return new HiddenActionViewItem(action);
 					}
 					const delegate: IModePickerDelegate = this._createModePickerDelegate();
-					this.modeWidget = this.instantiationService.createInstance(ModePickerActionItem, action, delegate, pickerOptions);
+					this.modeWidget = this.instantiationService.createInstance(ModePickerActionItem, action, delegate, backboardOptionsPickerOptions);
 					return new HiddenRenderedActionViewItem(action, this.modeWidget);
 				} else if ((action.id === OpenSessionTargetPickerAction.ID || action.id === OpenDelegationPickerAction.ID) && action instanceof MenuItemAction) {
 					// Use provided delegate if available, otherwise create default delegate
@@ -2923,7 +2934,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					};
 					const isWelcomeViewMode = !!this.options.sessionTypePickerDelegate?.setActiveSessionProvider;
 					const Picker = (action.id === OpenSessionTargetPickerAction.ID || isWelcomeViewMode) ? SessionTypePickerActionItem : DelegationSessionPickerActionItem;
-					const picker = this.instantiationService.createInstance(Picker, action, location === ChatWidgetLocation.Editor ? 'editor' : 'sidebar', delegate, pickerOptions);
+					const picker = this.instantiationService.createInstance(Picker, action, location === ChatWidgetLocation.Editor ? 'editor' : 'sidebar', delegate, backboardOptionsPickerOptions);
 					if (Picker === SessionTypePickerActionItem) {
 						this.sessionTargetWidget = picker as SessionTypePickerActionItem;
 					} else {
@@ -2932,7 +2943,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					return new HiddenRenderedActionViewItem(action, picker);
 				} else if (action.id === ChatSessionPrimaryPickerAction.ID && action instanceof MenuItemAction) {
 					// Cloud sessions render their option-group pickers (e.g. branch) on the primary toolbar
-					const widgets = this.createChatSessionPickerWidgets(action, primarySessionPickerOptions);
+					const widgets = this.createChatSessionPickerWidgets(action, backboardOptionsPickerOptions);
 					if (widgets.length === 0) {
 						return new HiddenActionViewItem(action);
 					}
@@ -2965,7 +2976,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					if (this.options.isSessionsWindow) {
 						return new HiddenActionViewItem(action);
 					}
-					this.agentHostFolderWidget = this.instantiationService.createInstance(AgentHostFolderPickerActionItem, action, widget, pickerOptions);
+					this.agentHostFolderWidget = this.instantiationService.createInstance(AgentHostFolderPickerActionItem, action, widget, backboardOptionsPickerOptions);
 					return new HiddenRenderedActionViewItem(action, this.agentHostFolderWidget);
 				}
 				return undefined;
@@ -3041,7 +3052,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			AgentHostGenericConfigChips,
 			widget,
 		));
+		this.agentHostGenericConfigChips = genericChipsLane;
 		genericChipsLane.render(genericChipsContainer);
+		genericChipsContainer.style.display = 'none';
 		dom.append(toolbarsContainer, genericChipsContainer);
 
 		// Secondary toolbar (permissions) — below the input box.
@@ -3087,7 +3100,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					};
 					const isWelcomeViewMode = !!this.options.sessionTypePickerDelegate?.setActiveSessionProvider;
 					const Picker = (action.id === OpenSessionTargetPickerAction.ID || isWelcomeViewMode) ? SessionTypePickerActionItem : DelegationSessionPickerActionItem;
-					const picker = this.instantiationService.createInstance(Picker, action, location === ChatWidgetLocation.Editor ? 'editor' : 'sidebar', delegate, secondaryPickerOptions);
+					const picker = this.instantiationService.createInstance(Picker, action, location === ChatWidgetLocation.Editor ? 'editor' : 'sidebar', delegate, backboardOptionsPickerOptions);
 					if (Picker === SessionTypePickerActionItem) {
 						this.sessionTargetWidget = picker as SessionTypePickerActionItem;
 					} else {
@@ -3096,7 +3109,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					return new HiddenRenderedActionViewItem(action, picker);
 				} else if (action.id === OpenWorkspacePickerAction.ID && action instanceof MenuItemAction) {
 					if (this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY && this.options.workspacePickerDelegate) {
-						return new HiddenRenderedActionViewItem(action, this.instantiationService.createInstance(WorkspacePickerActionItem, action, this.options.workspacePickerDelegate, secondaryPickerOptions));
+						return new HiddenRenderedActionViewItem(action, this.instantiationService.createInstance(WorkspacePickerActionItem, action, this.options.workspacePickerDelegate, backboardOptionsPickerOptions));
 					} else {
 						return new HiddenActionViewItem(action);
 					}
@@ -3135,7 +3148,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 							this.permissionWidget?.refresh();
 						},
 					};
-					const widget = this.instantiationService.createInstance(PermissionPickerActionItem, action, delegate, secondaryPickerOptions);
+					const widget = this.instantiationService.createInstance(PermissionPickerActionItem, action, delegate, backboardOptionsPickerOptions);
 					this.permissionWidget = widget;
 					this.permissionWidgetDisposeListener.value = widget.onDidDispose(() => {
 						if (this.permissionWidget === widget) {
@@ -3172,11 +3185,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					if (this.options.isSessionsWindow) {
 						return new HiddenActionViewItem(action);
 					}
-					this.agentHostFolderWidget = this.instantiationService.createInstance(AgentHostFolderPickerActionItem, action, widget, secondaryPickerOptions);
+					this.agentHostFolderWidget = this.instantiationService.createInstance(AgentHostFolderPickerActionItem, action, widget, backboardOptionsPickerOptions);
 					return new HiddenRenderedActionViewItem(action, this.agentHostFolderWidget);
 				} else if (action.id === ChatSessionPrimaryPickerAction.ID && action instanceof MenuItemAction) {
 					// Create all pickers and return a container action view item
-					const widgets = this.createChatSessionPickerWidgets(action, secondaryPickerOptions);
+					const widgets = this.createChatSessionPickerWidgets(action, backboardOptionsPickerOptions);
 					if (widgets.length === 0) {
 						return new HiddenActionViewItem(action);
 					}
@@ -4478,7 +4491,7 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 				tooltip: localize('backboardComposerOptions.permissionsTooltip', "Change permission settings"),
 				icon: Codicon.shield,
 				enabled: true,
-				run: () => this.inputPart.openPermissionPicker(),
+				run: () => this.openNestedPicker(() => this.inputPart.openPermissionPicker()),
 			},
 			{
 				id: 'backboardComposerOptions.session',
@@ -4487,7 +4500,7 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 				tooltip: localize('backboardComposerOptions.sessionTooltip', "Change session options"),
 				icon: Codicon.database,
 				enabled: true,
-				run: () => this.inputPart.openChatSessionPicker(),
+				run: () => this.openNestedPicker(() => this.inputPart.openChatSessionPicker()),
 			},
 			{
 				id: 'backboardComposerOptions.autoApprove',
@@ -4496,7 +4509,7 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 				tooltip: localize('backboardComposerOptions.autoApproveTooltip', "Change auto-approve behavior"),
 				icon: Codicon.warning,
 				enabled: true,
-				run: () => this.inputPart.openAgentHostAutoApprovePicker(),
+				run: () => this.openNestedPicker(() => this.inputPart.openAgentHostAutoApprovePicker()),
 			},
 			{
 				id: 'backboardComposerOptions.approvals',
@@ -4505,7 +4518,7 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 				tooltip: localize('backboardComposerOptions.approvalsTooltip', "Change approval behavior"),
 				icon: Codicon.shield,
 				enabled: true,
-				run: () => this.inputPart.openAgentHostPermissionModePicker(),
+				run: () => this.openNestedPicker(() => this.inputPart.openAgentHostPermissionModePicker()),
 			},
 			{
 				id: 'backboardComposerOptions.folder',
@@ -4514,10 +4527,46 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 				tooltip: localize('backboardComposerOptions.folderTooltip', "Change working folder"),
 				icon: Codicon.folder,
 				enabled: true,
-				run: () => this.inputPart.openAgentHostFolderPicker(),
+				run: () => this.openNestedPicker(() => this.inputPart.openAgentHostFolderPicker()),
 			},
 		];
+		for (const option of this.inputPart.getBackboardGenericConfigOptions()) {
+			actions.push({
+				id: `backboardComposerOptions.generic.${option.id}`,
+				label: option.label,
+				class: undefined,
+				tooltip: option.description ?? option.label,
+				icon: this.getGenericOptionIcon(option.id),
+				enabled: true,
+				run: () => this.openNestedPicker(() => option.show(this.inputPart.getBackboardOptionsAnchor())),
+			});
+		}
 		return actions;
+	}
+
+	private openNestedPicker(open: () => void): void {
+		this.inputPart.setBackboardOptionsAnchor(this.element ?? this.inputPart.getBackboardOptionsAnchor());
+		setTimeout(open, 0);
+	}
+
+	private getGenericOptionIcon(property: string): ThemeIcon {
+		switch (property) {
+			case 'intensity':
+			case 'reasoning':
+			case 'reasoningIntensity':
+				return Codicon.flame;
+			case 'webSearch':
+			case 'web':
+				return Codicon.globe;
+			case 'memory':
+			case 'memoryMode':
+				return Codicon.database;
+			case 'imageGeneration':
+			case 'images':
+				return Codicon.symbolColor;
+			default:
+				return Codicon.layersActive;
+		}
 	}
 
 	private getAnchorElement(pickerOptions: IChatInputPickerOptions): HTMLElement {
@@ -4528,7 +4577,13 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 	}
 
 	protected override renderLabel(element: HTMLElement): IDisposable | null {
-		element.classList.add('codicon', 'codicon-ellipsis');
+		this.inputPart.setBackboardOptionsAnchor(element);
+		element.classList.add('codicon', 'codicon-list-filter');
 		return super.renderLabel(element);
+	}
+
+	override dispose(): void {
+		this.inputPart.setBackboardOptionsAnchor(undefined);
+		super.dispose();
 	}
 }

@@ -15,7 +15,7 @@ import { IContextKeyService } from '../../../../../platform/contextkey/common/co
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
-import { INotificationService } from '../../../../../platform/notification/common/notification.js';
+import { INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import product from '../../../../../platform/product/common/product.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
@@ -157,8 +157,11 @@ class BackboardSsoFlow {
 			const configResource = await backboardConfigResource(this.pathService);
 			if (await hasBackboardCredentials(this.fileService, configResource)) {
 				markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
-				this.logService.info(`[Backboard OAuth] Existing credentials found in ${configResource.fsPath}; skipping browser sign in.`);
-				return true;
+				this.logService.info(`[Backboard OAuth] Existing credentials found in ${configResource.fsPath}; asking whether to sign in again.`);
+				const shouldSignInAgain = await this.confirmSignInAgain(configResource.fsPath);
+				if (!shouldSignInAgain) {
+					return true;
+				}
 			}
 
 			const state = randomBase64Url(24);
@@ -228,6 +231,35 @@ class BackboardSsoFlow {
 
 	private async openAuthorizeUrl(authorizeUrl: string): Promise<void> {
 		await this.openerService.open(URI.parse(authorizeUrl), { openExternal: true });
+	}
+
+	private async confirmSignInAgain(configPath: string): Promise<boolean> {
+		return new Promise<boolean>(resolve => {
+			const handle = this.notificationService.prompt(
+				Severity.Info,
+				localize('backboard.ssoExistingCredentials', "Backboard is already signed in. Credentials are stored at {0}.", configPath),
+				[
+					{
+						label: localize('backboard.ssoSignInAgain', "Sign In Again"),
+						run: () => {
+							handle.close();
+							resolve(true);
+						}
+					},
+					{
+						label: localize('backboard.ssoUseExisting', "Use Existing"),
+						run: () => {
+							handle.close();
+							resolve(false);
+						}
+					}
+				],
+				{
+					sticky: true,
+					onCancel: () => resolve(false),
+				}
+			);
+		});
 	}
 }
 

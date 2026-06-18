@@ -65,7 +65,7 @@ import { AGENT_SESSIONS_SCOPED_INPUT_HISTORY_SETTING } from './sessionsChatHisto
 
 
 const STORAGE_KEY_DRAFT_STATE = 'sessions.draftState';
-const MIN_EDITOR_HEIGHT = 50;
+const MIN_EDITOR_HEIGHT = 36;
 const MAX_EDITOR_HEIGHT = 200;
 
 interface IDraftState {
@@ -361,7 +361,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 			fontSize: 13,
 			lineHeight: 20,
 			cursorWidth: 1,
-			padding: { top: 8, bottom: 2 },
+			padding: { top: 6, bottom: 0 },
 			wrappingStrategy: 'advanced',
 			stickyScroll: { enabled: false },
 			renderWhitespace: 'none',

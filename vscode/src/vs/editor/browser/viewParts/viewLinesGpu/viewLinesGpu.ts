@@ -200,8 +200,9 @@ export class ViewLinesGpu extends ViewPart implements IViewLines {
 
 		// #region Storage buffers
 
-		const fontFamily = this._context.configuration.options.get(EditorOption.fontFamily);
-		const fontSize = this._context.configuration.options.get(EditorOption.fontSize);
+		const fontInfo = this._context.configuration.options.get(EditorOption.fontInfo);
+		const fontFamily = fontInfo.fontFamily;
+		const fontSize = fontInfo.fontSize;
 		this._glyphRasterizer.value = this._register(new GlyphRasterizer(fontSize, fontFamily, this._viewGpuContext.devicePixelRatio.get(), ViewGpuContext.decorationStyleCache));
 		this._register(runOnChange(this._viewGpuContext.devicePixelRatio, () => {
 			this._refreshGlyphRasterizer();
@@ -459,8 +460,9 @@ export class ViewLinesGpu extends ViewPart implements IViewLines {
 		if (!glyphRasterizer) {
 			return;
 		}
-		const fontFamily = this._context.configuration.options.get(EditorOption.fontFamily);
-		const fontSize = this._context.configuration.options.get(EditorOption.fontSize);
+		const fontInfo = this._context.configuration.options.get(EditorOption.fontInfo);
+		const fontFamily = fontInfo.fontFamily;
+		const fontSize = fontInfo.fontSize;
 		const devicePixelRatio = this._viewGpuContext.devicePixelRatio.get();
 		if (
 			glyphRasterizer.fontFamily !== fontFamily ||

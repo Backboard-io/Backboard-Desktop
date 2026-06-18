@@ -189,9 +189,19 @@ body {
 	padding: 0;
 	overflow: hidden;
 	font-family: "BB Mono", monospace;
+	--monaco-monospace-font: "BB Mono", monospace;
+	--vscode-editor-font-family: "BB Mono", monospace;
 	font-size: 11px;
 	user-select: none;
 	-webkit-user-select: none;
+}
+
+.monaco-editor .view-lines,
+.monaco-editor .view-line,
+.monaco-editor .view-line span,
+.monaco-editor .margin-view-overlays,
+.monaco-editor .line-numbers {
+	font-family: "BB Mono", monospace !important;
 }
 
 .monaco-workbench {

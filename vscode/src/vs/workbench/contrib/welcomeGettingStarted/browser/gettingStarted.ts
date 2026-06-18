@@ -923,6 +923,89 @@ export class GettingStartedPage extends EditorPane {
 			onShowOnStartupChanged();
 		}));
 
+		this.container.classList.remove('backboard-welcome');
+
+		const backboardEditorInput = this.editorInput;
+		if (backboardEditorInput?.selectedCategory) {
+			this.currentWalkthrough = this.gettingStartedCategories.find(category => category.id === backboardEditorInput.selectedCategory);
+
+			if (!this.currentWalkthrough) {
+				this.gettingStartedCategories = this.gettingStartedService.getWalkthroughs();
+				this.currentWalkthrough = this.gettingStartedCategories.find(category => category.id === backboardEditorInput.selectedCategory);
+			}
+
+			if (this.currentWalkthrough) {
+				this.buildCategorySlide(backboardEditorInput.selectedCategory, backboardEditorInput.selectedStep, preserveFocus);
+				this.setSlide('details');
+				return;
+			}
+		}
+
+		if (!backboardEditorInput?.selectedCategory) {
+			this.container.classList.add('backboard-welcome');
+
+			const createLogo = () => $('.backboard-welcome-logo', { 'aria-hidden': 'true' });
+
+			const runCommand = (command: string, ...args: unknown[]) => {
+				Promise.resolve(this.commandService.executeCommand(command, ...args)).catch(onUnexpectedError);
+			};
+
+			const createActionRow = (icon: ThemeIcon, label: string, command: string, ...args: unknown[]) => {
+				const keybinding = this.keybindingService.lookupKeybinding(command)?.getLabel();
+				const row = $('button.backboard-welcome-action', { type: 'button' },
+					$('span.backboard-welcome-action-icon.codicon' + ThemeIcon.asCSSSelector(icon), { 'aria-hidden': 'true' }),
+					$('span.backboard-welcome-action-label', {}, label),
+					keybinding ? $('span.backboard-welcome-action-keybinding', {}, keybinding) : $('span.backboard-welcome-action-keybinding', {}),
+				) as HTMLButtonElement;
+				this.categoriesSlideDisposables.add(addDisposableListener(row, 'click', () => runCommand(command, ...args)));
+				return row;
+			};
+
+			const createSection = (label: string, ...actions: HTMLElement[]) => $('.backboard-welcome-section', {},
+				$('.backboard-welcome-section-heading', {},
+					$('span', {}, label),
+					$('.backboard-welcome-section-rule'),
+				),
+				$('.backboard-welcome-action-list', {}, ...actions),
+			);
+
+			const returnToOnboarding = $('button.backboard-welcome-footer-link', { type: 'button' }, localize('backboardWelcome.returnToOnboarding', "Return to Onboarding")) as HTMLButtonElement;
+			this.categoriesSlideDisposables.add(addDisposableListener(returnToOnboarding, 'click', () => runCommand('workbench.action.welcomeOnboarding2026')));
+
+			const welcome = $('.backboard-welcome-page', {},
+				$('.backboard-welcome-shell', {},
+					$('.backboard-welcome-header', {},
+						createLogo(),
+						$('.backboard-welcome-header-copy', {},
+							$('h1.backboard-welcome-title', {}, localize('backboardWelcome.title', "Welcome to Backboard Studio")),
+							$('p.backboard-welcome-subtitle', {}, localize('backboardWelcome.subtitle', "The editor for what's next")),
+						),
+					),
+
+					createSection(
+						localize('backboardWelcome.getStarted', "GET STARTED"),
+						createActionRow(Codicon.add, localize('backboardWelcome.newFile', "New File"), 'workbench.action.files.newUntitledFile'),
+						createActionRow(Codicon.folderOpened, localize('backboardWelcome.openProject', "Open Project"), 'workbench.action.files.openFolder'),
+						createActionRow(Codicon.cloudDownload, localize('backboardWelcome.cloneRepository', "Clone Repository"), 'git.clone'),
+					),
+
+					createSection(
+						localize('backboardWelcome.configure', "CONFIGURE"),
+						createActionRow(Codicon.settingsGear, localize('backboardWelcome.openSettings', "Open Settings"), 'workbench.action.openSettings'),
+						createActionRow(Codicon.keyboard, localize('backboardWelcome.customizeKeymaps', "Customize Keymaps"), 'workbench.action.openGlobalKeybindings'),
+						createActionRow(Codicon.extensions, localize('backboardWelcome.exploreExtensions', "Explore Extensions"), 'workbench.view.extensions'),
+					),
+
+					returnToOnboarding,
+				),
+			);
+
+			reset(this.categoriesSlide, welcome);
+			this.categoriesPageScrollbar?.scanDomNode();
+			this.setSlide('categories');
+			return;
+		}
+
 		const header = $('.header', {},
 			$('h1.product-name.caption', {}, this.productService.nameLong),
 			$('p.subtitle.description', {}, localize({ key: 'gettingStarted.editingEvolved', comment: ['Shown as subtitle on the Welcome page.'] }, "Editing evolved"))

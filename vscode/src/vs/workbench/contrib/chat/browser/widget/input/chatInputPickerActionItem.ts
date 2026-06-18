@@ -63,7 +63,7 @@ export abstract class ChatInputPickerActionViewItem extends ActionWidgetDropdown
 	 * Falls back to the overflow anchor if this element is not in the DOM.
 	 */
 	protected getAnchorElement(): HTMLElement {
-		if (this.element && getActiveWindow().document.contains(this.element)) {
+		if (this.element && getActiveWindow().document.contains(this.element) && this.element.getClientRects().length > 0) {
 			return this.element;
 		}
 		return this.pickerOptions.getOverflowAnchor?.() ?? this.element!;

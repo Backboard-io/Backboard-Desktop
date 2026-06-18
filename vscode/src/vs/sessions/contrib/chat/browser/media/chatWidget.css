@@ -11,18 +11,20 @@
 	position: relative;
 }
 
+.sessions-chat-widget > .agents-aquarium-toggle {
+	display: none;
+}
+
 .new-chat-widget-container {
 	display: flex;
 	flex-direction: column;
-	/* Cross-axis: keep children flush left so the input's left edge — and therefore
-	 * the attach (+) button — stays anchored as the viewport narrows past max-width. */
-	align-items: flex-start;
-	justify-content: center;
+	align-items: stretch;
+	justify-content: flex-end;
 	width: 100%;
 	height: 100%;
 	box-sizing: border-box;
 	overflow: hidden;
-	padding: 16px 16px 20px 16px;
+	padding: 12px;
 	/* Establishes a size container so the @container (max-width: 330px) query below
 	 * can collapse picker labels to icon-only when the new-chat area is narrow. */
 	container-type: size;
@@ -30,7 +32,7 @@
 }
 
 .new-chat-widget-container.revealed {
-	justify-content: center;
+	justify-content: flex-end;
 }
 
 .new-chat-widget-container.revealed .new-chat-input-container {
@@ -42,8 +44,8 @@
 .new-session-workspace-picker-container {
 	display: none;
 	width: 100%;
-	max-width: 800px;
 	padding: 0;
+	margin-bottom: 4px;
 	box-sizing: border-box;
 }
 
@@ -71,24 +73,24 @@
 
 .new-chat-widget-content {
 	width: 100%;
-	max-width: 800px;
+	max-width: var(--session-view-centered-content-max-width, 950px);
 	display: flex;
 	flex-direction: column;
 	align-items: stretch;
 	align-self: center;
+	gap: 4px;
 }
 
 .new-chat-widget-container .new-chat-bottom-container {
 	width: 100%;
-	max-width: 800px;
-	margin-top: 4px;
-	padding: 0 4px;
+	margin-top: 2px;
+	padding: 0;
 	box-sizing: border-box;
 	display: none;
 	flex-direction: row;
 	align-items: center;
 	gap: 4px;
-	min-height: 28px;
+	min-height: 24px;
 	justify-content: space-between;
 }
 
@@ -235,7 +237,7 @@
 	flex-wrap: nowrap;
 	align-items: center;
 	justify-content: flex-start;
-	gap: 6px;
+	gap: 4px;
 	width: 100%;
 	box-sizing: border-box;
 	padding: 0;
@@ -246,10 +248,7 @@
 }
 
 .session-workspace-picker-label {
-	font-size: var(--vscode-agents-fontSize-heading2, 18px);
-	line-height: 1.25;
-	color: var(--vscode-descriptionForeground);
-	white-space: nowrap;
+	display: none;
 }
 
 .session-workspace-picker-with-label:has(+ .sessions-chat-session-type-picker .action-label.hidden) {
@@ -260,12 +259,12 @@
 .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label,
 .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label {
 	height: auto;
-	padding: 4px;
-	font-size: var(--vscode-agents-fontSize-heading2, 18px);
-	line-height: 1.25;
+	padding: 3px 6px;
+	font-size: var(--vscode-agents-fontSize-label2, 11px);
+	line-height: 16px;
 	border: none;
 	background-color: transparent;
-	color: var(--vscode-foreground);
+	color: var(--vscode-icon-foreground);
 	border-radius: var(--vscode-cornerRadius-small);
 	touch-action: manipulation;
 }
@@ -278,12 +277,12 @@
 
 .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label .sessions-chat-dropdown-label,
 .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label .sessions-chat-dropdown-label {
-	font-size: var(--vscode-agents-fontSize-heading2, 18px);
+	font-size: var(--vscode-agents-fontSize-label2, 11px);
 }
 
 .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label > .codicon:not(.sessions-chat-dropdown-chevron),
 .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label > .codicon:not(.sessions-chat-dropdown-chevron) {
-	font-size: var(--vscode-codiconFontSize, 16px);
+	font-size: var(--vscode-codiconFontSize-compact, 12px);
 	margin: 0;
 }
 

@@ -22,6 +22,18 @@ import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitled
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { toAgentHostBackendSessionUri } from './agentHostSessionUri.js';
 
+export interface IAgentHostGenericConfigOption {
+	readonly id: string;
+	readonly label: string;
+	readonly description?: string;
+	show(anchor?: HTMLElement): void;
+}
+
+interface IAgentHostGenericConfigChipEntry extends IDisposable {
+	readonly chip: AgentHostChatInputPicker;
+	readonly slot: HTMLElement;
+}
+
 /**
  * Direct-render chip lane for agent-host session-config properties that are
  * advertised by the agent's schema but are NOT handled by a dedicated
@@ -36,7 +48,7 @@ export class AgentHostGenericConfigChips extends Disposable {
 
 	private _container: HTMLElement | undefined;
 
-	private readonly _chips = this._register(new DisposableMap<string>());
+	private readonly _chips = this._register(new DisposableMap<string, IAgentHostGenericConfigChipEntry>());
 
 	/**
 	 * Subscription to the active session's backend state. Maintained for the
@@ -74,6 +86,32 @@ export class AgentHostGenericConfigChips extends Disposable {
 	render(container: HTMLElement): void {
 		this._container = container;
 		this._sync();
+	}
+
+	getOptions(): readonly IAgentHostGenericConfigOption[] {
+		this._sync();
+		const entries = this._readSchemaProperties();
+		if (!entries) {
+			return [];
+		}
+
+		const options: IAgentHostGenericConfigOption[] = [];
+		for (const [property, schema] of entries) {
+			if (isClaimedByDedicatedPicker(property, schema)) {
+				continue;
+			}
+			const chip = this._chips.get(property)?.chip;
+			if (!chip) {
+				continue;
+			}
+			options.push({
+				id: property,
+				label: schema.title || property,
+				description: schema.description,
+				show: (anchor?: HTMLElement) => chip.show(anchor),
+			});
+		}
+		return options;
 	}
 
 	private _reattach(): void {
@@ -201,6 +239,8 @@ export class AgentHostGenericConfigChips extends Disposable {
 			const slot = dom.append(this._container, dom.$('.agent-host-generic-chip-slot.chat-input-picker-item'));
 			chip.render(slot);
 			this._chips.set(property, {
+				chip,
+				slot,
 				dispose: () => {
 					chip.dispose();
 					slot.remove();

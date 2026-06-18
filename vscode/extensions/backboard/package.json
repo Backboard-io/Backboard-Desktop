@@ -252,7 +252,7 @@
   },
   "scripts": {
     "build-bridge": "cargo build --manifest-path ./rust/Cargo.toml -p backboard_bridge",
-    "package-bridge": "node ./scripts/package-bridge.js",
+    "package-bridge": "npm run build-bridge && mkdir -p ./bin && cp ./rust/target/debug/backboard-bridge ./bin/backboard-bridge && chmod 755 ./bin/backboard-bridge",
     "compile": "tsgo --project ./tsconfig.json",
     "watch": "tsgo --project ./tsconfig.json --watch",
     "typecheck": "tsgo --project ./tsconfig.json --noEmit"

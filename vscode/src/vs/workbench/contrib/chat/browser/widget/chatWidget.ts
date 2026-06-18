@@ -1223,18 +1223,14 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	private getWelcomeViewContent(additionalMessage: string | IMarkdownString | undefined): IChatViewWelcomeContent {
 		if (this.isLockedToCodingAgent) {
-			// Check for provider-specific customizations from chat sessions service
-			const contribution = this._lockedAgent ? this.chatSessionsService.getChatSessionContribution(this._lockedAgent.id) : undefined;
-			const providerIcon = contribution?.icon;
-
 			return {
 				title: '',
 				message: new MarkdownString([
 					localize('backboardWelcomeExampleLandingPage', "Make me a landing page"),
 					localize('backboardWelcomeExampleBlueWebsite', "Make this website blue"),
 				].join('\n\n')),
-				icon: providerIcon ?? FileAccess.asBrowserUri('vs/workbench/contrib/chat/browser/media/backboard_logo_blue.svg'),
-				useImageIcon: !providerIcon,
+				icon: FileAccess.asBrowserUri('vs/workbench/contrib/chat/browser/media/backboard_logo_blue.svg'),
+				useImageIcon: true,
 				useLargeIcon: true,
 			};
 		}

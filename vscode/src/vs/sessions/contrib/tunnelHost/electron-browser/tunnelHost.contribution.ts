@@ -16,8 +16,6 @@ import { INotificationService, Severity } from '../../../../platform/notificatio
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { IOutputService } from '../../../../workbench/services/output/common/output.js';
-import { ChatContextKeys } from '../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
-import { ChatAgentLocation } from '../../../../workbench/contrib/chat/common/constants.js';
 import { ITunnelHostService } from '../common/tunnelHost.js';
 import { TUNNEL_HOST_LOG_ID } from '../../../../platform/agentHost/common/tunnelAgentHost.js';
 import { CONFIGURATION_KEY_MICROSOFT_AUTH, SHOW_TUNNEL_HOST_OUTPUT_ID, TunnelHostService } from './tunnelHostService.js';
@@ -79,12 +77,8 @@ registerAction2(class ToggleRemoteConnectionsAction extends Action2 {
 				id: MenuId.ChatInputSecondary,
 				order: 10,
 				group: 'navigation',
-				when: ContextKeyExpr.and(
-					ChatContextKeys.enabled,
-					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
-					ChatContextKeys.inQuickChat.negate(),
-					ContextKeyExpr.regex(ChatContextKeys.lockedCodingAgentId.key, /^agent-host-/),
-				)
+				// Backboard does not expose remote session access from the composer.
+				when: ContextKeyExpr.false(),
 			}
 		});
 	}

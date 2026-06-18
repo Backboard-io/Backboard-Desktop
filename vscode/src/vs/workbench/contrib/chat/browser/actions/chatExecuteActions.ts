@@ -27,7 +27,6 @@ import { INotificationService } from '../../../../../platform/notification/commo
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
 import { IViewsService } from '../../../../services/views/common/viewsService.js';
-import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { getModeNameForTelemetry, buildCustomAgentHandoffsInfo, getHandoffId, IChatMode, IChatModeService, IChatModes } from '../../common/chatModes.js';
 import { chatVariableLeader } from '../../common/requestParser/chatParserTypes.js';
@@ -571,7 +570,7 @@ export class OpenBackboardComposerOptionsAction extends Action2 {
 			title: localize2('interactive.backboardComposerOptions.label', "Backboard Options"),
 			tooltip: localize('interactive.backboardComposerOptions.tooltip', "Open composer options"),
 			category: CHAT_CATEGORY,
-			icon: Codicon.ellipsis,
+			icon: Codicon.listFilter,
 			f1: false,
 			precondition: ChatContextKeys.enabled,
 			menu: {

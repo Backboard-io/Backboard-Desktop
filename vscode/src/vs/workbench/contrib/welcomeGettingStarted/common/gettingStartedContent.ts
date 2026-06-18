@@ -214,7 +214,7 @@ export const startEntries: GettingStartedStartEntryContent = [
 		id: 'topLevelNewWorkspaceChat',
 		title: localize('gettingStarted.newWorkspaceChat.title', "Generate New Workspace..."),
 		description: localize('gettingStarted.newWorkspaceChat.description', "Chat to create a new workspace"),
-		icon: ThemeIcon.fromId('backboard-logo'),
+		icon: Codicon.chatSparkle,
 		when: '!isWeb && !chatSetupHidden && !chatSetupDisabledInWorkspace',
 		content: {
 			type: 'startEntry',

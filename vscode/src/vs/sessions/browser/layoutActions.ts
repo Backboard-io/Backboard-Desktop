@@ -147,3 +147,14 @@ MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {
 	group: 'navigation',
 	order: 0
 });
+
+MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {
+	command: {
+		id: 'backboard.installAvailableUpdate',
+		title: localize('installBackboardUpdate', "Install Backboard Studio Update"),
+		icon: Codicon.cloudDownload,
+	},
+	when: ContextKeyExpr.has('backboard.updateAvailable'),
+	group: 'navigation',
+	order: -10
+});

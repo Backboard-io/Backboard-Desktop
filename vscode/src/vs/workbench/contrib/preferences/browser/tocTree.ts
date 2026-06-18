@@ -151,7 +151,7 @@ class TOCTreeDelegate implements IListVirtualDelegate<SettingsTreeElement> {
 	}
 
 	getHeight(element: SettingsTreeElement): number {
-		return 22;
+		return 32;
 	}
 }
 

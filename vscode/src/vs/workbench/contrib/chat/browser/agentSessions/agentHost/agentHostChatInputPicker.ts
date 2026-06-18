@@ -223,6 +223,7 @@ export class AgentHostChatInputPicker extends Disposable {
 	private readonly _filterDelayer = this._register(new Delayer<readonly IActionListItem<IConfigPickerItem>[]>(200));
 	private readonly _subRef = this._register(new MutableDisposable<IDisposable & { readonly sub: IAgentSubscription<SessionState>; readonly backendSession: URI }>());
 	private _container: HTMLElement | undefined;
+	private _trigger: HTMLElement | undefined;
 
 	private _initialResolved: { readonly sessionResource: URI; readonly result: ResolveSessionConfigResult } | undefined;
 	private readonly _initialResolveCts = this._register(new MutableDisposable<CancellationTokenSource>());
@@ -380,6 +381,7 @@ export class AgentHostChatInputPicker extends Disposable {
 
 		const isReadOnly = !!ctx.schema.readOnly || (isStartedSession && ctx.schema.sessionMutable === false);
 		const trigger = renderPickerTrigger(slot, isReadOnly, this._renderDisposables, () => this._showPicker(trigger));
+		this._trigger = trigger;
 		const tooltip = ctx.schema.description ?? ctx.schema.title;
 		if (tooltip) {
 			this._renderDisposables.add(this._hoverService.setupDelayedHover(trigger, { content: tooltip }));
@@ -539,6 +541,12 @@ export class AgentHostChatInputPicker extends Disposable {
 		);
 	}
 
+	show(anchor?: HTMLElement): void {
+		if (this._trigger) {
+			void this._showPicker(anchor ?? this._trigger);
+		}
+	}
+
 	private async _getItems(schema: SessionConfigPropertySchema, query?: string): Promise<readonly IConfigPickerItem[]> {
 		if (schema.type === 'boolean') {
 			return [
@@ -644,21 +652,15 @@ export class AgentHostChatInputPicker extends Disposable {
 }
 
 export class AgentHostChatInputPickerActionViewItem extends BaseActionViewItem {
-	private _container: HTMLElement | undefined;
-
 	constructor(action: IAction, private readonly _picker: AgentHostChatInputPicker) {
 		super(undefined, action);
 		this._register(this._picker);
 	}
 	override render(container: HTMLElement): void {
-		this._container = container;
 		this._picker.render(container);
 	}
 
-	show(): void {
-		const trigger = this._container?.querySelector('.action-label');
-		if (dom.isHTMLElement(trigger)) {
-			trigger.click();
-		}
+	show(anchor?: HTMLElement): void {
+		this._picker.show(anchor);
 	}
 }

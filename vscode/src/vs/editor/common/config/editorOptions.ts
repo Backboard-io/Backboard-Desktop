@@ -1365,6 +1365,16 @@ class EditorStringOption<K extends EditorOption> extends SimpleEditorOption<K, s
 	}
 }
 
+class EditorFontFamilyOption extends EditorStringOption<EditorOption.fontFamily> {
+	public override validate(_input: unknown): string {
+		return EDITOR_FONT_DEFAULTS.fontFamily;
+	}
+
+	public override compute(_env: IEnvironmentalOptions, _options: IComputedEditorOptions, _value: string): string {
+		return EDITOR_FONT_DEFAULTS.fontFamily;
+	}
+}
+
 /**
  * @internal
  */
@@ -6333,7 +6343,7 @@ export const EditorOptions = {
 		EditorOption.unfoldOnClickAfterEndOfLine, 'unfoldOnClickAfterEndOfLine', false,
 		{ description: nls.localize('unfoldOnClickAfterEndOfLine', "Controls whether clicking on the empty content after a folded line will unfold the line.") }
 	)),
-	fontFamily: register(new EditorStringOption(
+	fontFamily: register(new EditorFontFamilyOption(
 		EditorOption.fontFamily, 'fontFamily', EDITOR_FONT_DEFAULTS.fontFamily,
 		{ description: nls.localize('fontFamily', "Controls the font family.") }
 	)),

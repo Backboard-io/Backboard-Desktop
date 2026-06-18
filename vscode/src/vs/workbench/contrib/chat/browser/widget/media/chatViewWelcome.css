@@ -70,7 +70,7 @@ div.chat-welcome-view {
 	& > .chat-welcome-view-icon.large-icon {
 		min-width: 160px;
 		min-height: 160px;
-		opacity: 0.9;
+		opacity: 0.32;
 	}
 
 	& > .chat-welcome-view-icon.large-icon .codicon {
