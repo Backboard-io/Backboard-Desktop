@@ -23,7 +23,7 @@ import { IChatService } from '../../../../../workbench/contrib/chat/common/chatS
 import { IChatEditorOptions } from '../../../../../workbench/contrib/chat/browser/widgetHosts/editor/chatEditor.js';
 import { IChatWidgetHistoryService } from '../../../../../workbench/contrib/chat/common/widget/chatWidgetHistoryService.js';
 import { PreferredGroup } from '../../../../../workbench/services/editor/common/editorService.js';
-import { IChat, ISession, ISessionType, ISessionWorkspace } from '../../common/session.js';
+import { IChat, ISession, ISessionType, ISessionWorkspace, SessionStatus } from '../../common/session.js';
 import { ILanguageModelChatMetadataAndIdentifier } from '../../../../../workbench/contrib/chat/common/languageModels.js';
 import { ISessionChangeEvent, ISendRequestOptions, ISessionModelPickerOptions, ISessionsProvider } from '../../common/sessionsProvider.js';
 import { SessionsManagementService } from '../../browser/sessionsManagementService.js';
@@ -756,6 +756,25 @@ suite('SessionsManagementService', () => {
 		assert.strictEqual(sendRequestStarted, true);
 
 		completeSendRequest?.();
+	});
+
+	test('sendRequest reports isNewChat only for untitled chats', async () => {
+		const existingChat: IChat = { ...stubChat, resource: URI.parse('test:///existing-chat'), status: constObservable(SessionStatus.Completed) };
+		const untitledChat: IChat = { ...stubChat, resource: URI.parse('test:///untitled-chat'), status: constObservable(SessionStatus.Untitled) };
+		const session = stubSession({
+			sessionId: 's1',
+			providerId: 'test',
+			chats: constObservable([existingChat, untitledChat]),
+			mainChat: constObservable(existingChat),
+		});
+		const { service } = createSessionsManagementService(session, disposables);
+		const events: boolean[] = [];
+		disposables.add(service.onDidSendRequest(event => events.push(event.isNewChat)));
+
+		await service.sendRequest(session, existingChat, { query: 'existing' });
+		await service.sendRequest(session, untitledChat, { query: 'new chat' });
+
+		assert.deepStrictEqual(events, [false, true]);
 	});
 
 	test('createAndSendNewChatRequest sends without changing the active view', async () => {

@@ -270,15 +270,15 @@ export class NewChatWidget extends Disposable {
 		const effectivePick = userPick && this._isPreferredServable(folderUri, userPick)
 			? userPick
 			: this._sessionTypePicker.getPreferredSessionType(folderUri);
-		const fallbackProviderId = this._workspacePicker.selectedResolved?.providerId;
+		if (!effectivePick) {
+			this.logService.info(`[Sessions] Backboard session type is not available yet for ${folderUri.toString()}; waiting for provider registration.`);
+			return undefined;
+		}
 		try {
 			return this.sessionsService.openNewSession({
 				folderUri,
-				...(effectivePick
-					? { providerId: effectivePick.providerId, sessionTypeId: effectivePick.sessionTypeId }
-					: fallbackProviderId
-						? { providerId: fallbackProviderId }
-						: undefined),
+				providerId: effectivePick.providerId,
+				sessionTypeId: effectivePick.sessionTypeId,
 			});
 		} catch (e) {
 			this.logService.error('Failed to create new session:', e);
@@ -416,11 +416,11 @@ export class NewChatWidget extends Disposable {
 
 	// --- Send ---
 
-	private async _send(options: ISendRequestOptions): Promise<void> {
+	private async _send(options: ISendRequestOptions): Promise<boolean> {
 		const session = this._session.get();
 		if (!session) {
 			this._workspacePicker.showPicker();
-			return;
+			return false;
 		}
 
 		// Capture the composer's workspace selection before the send: a
@@ -433,6 +433,7 @@ export class NewChatWidget extends Disposable {
 			await this.sessionsManagementService.sendNewChatRequest(session, options);
 		} catch (e) {
 			this.logService.error('Failed to send request:', e);
+			return false;
 		}
 
 		// A background send graduated the composer's in-flight session and
@@ -444,6 +445,7 @@ export class NewChatWidget extends Disposable {
 		if (options.background && reseedFolderUri) {
 			this._createNewSession(reseedFolderUri);
 		}
+		return true;
 	}
 
 	private async _sendFromSharedComposer(query: string): Promise<boolean> {
@@ -458,7 +460,7 @@ export class NewChatWidget extends Disposable {
 			provider?.setModel(session.sessionId, input.currentLanguageModel);
 		}
 		const modeKind = input.currentModeKind;
-		await this._send({
+		const sent = await this._send({
 			query,
 			attachedContext: input.getAttachedAndImplicitContext().asArray(),
 			userSelectedModelId: input.currentLanguageModel,
@@ -470,7 +472,9 @@ export class NewChatWidget extends Disposable {
 				enabledSubAgents: modeKind === ChatModeKind.Agent ? input.currentModeObs.get().agents?.get() : undefined,
 			},
 		});
-		input.acceptInput(true);
+		if (sent) {
+			input.acceptInput(true);
+		}
 		return true;
 	}
 

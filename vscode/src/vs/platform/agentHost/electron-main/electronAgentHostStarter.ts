@@ -88,6 +88,7 @@ export class ElectronAgentHostStarter extends Disposable implements IAgentHostSt
 			outfile: this._configurationService.getValue<string>(AgentHostOTelOutfileSettingId),
 			dbSpanExporterEnabled: this._configurationService.getValue<boolean>(AgentHostOTelDbSpanExporterEnabledSettingId),
 		}, process.env);
+		const backboardEnv = this._buildBackboardEnv(process.env);
 
 		const args = [
 			'--logsPath', this._environmentMainService.logsHome.with({ scheme: Schemas.file }).fsPath,
@@ -111,6 +112,7 @@ export class ElectronAgentHostStarter extends Disposable implements IAgentHostSt
 				VSCODE_VERBOSE_LOGGING: 'true',
 				...sdkEnv,
 				...otelEnv,
+				...backboardEnv,
 			}
 		});
 
@@ -148,6 +150,24 @@ export class ElectronAgentHostStarter extends Disposable implements IAgentHostSt
 			this._logService.error('AgentHostStarter was unable to resolve shell environment', error);
 			return {};
 		}
+	}
+
+	private _buildBackboardEnv(parentEnv: NodeJS.ProcessEnv): Record<string, string> {
+		const env: Record<string, string> = {};
+		const configuredEnv = this._configurationService.getValue<string>('backboard.env')?.trim();
+		const parentBackboardEnv = parentEnv.BACKBOARD_ENV || parentEnv.VSCODE_BACKBOARD_ENV;
+		const resolvedEnv = parentBackboardEnv || configuredEnv;
+		if (resolvedEnv) {
+			env.VSCODE_BACKBOARD_ENV = resolvedEnv;
+		}
+
+		const configuredApiUrl = this._configurationService.getValue<string>('backboard.apiUrl')?.trim();
+		const parentApiUrl = parentEnv.BACKBOARD_API_URL || parentEnv.VSCODE_BACKBOARD_API_URL;
+		const resolvedApiUrl = parentApiUrl || configuredApiUrl;
+		if (resolvedApiUrl) {
+			env.VSCODE_BACKBOARD_API_URL = resolvedApiUrl;
+		}
+		return env;
 	}
 
 	private async _onWindowConnection(e: IpcMainEvent, nonce: string): Promise<void> {

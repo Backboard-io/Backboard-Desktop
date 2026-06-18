@@ -451,6 +451,7 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 		// Sending into an existing session abandons any in-progress new session,
 		// so dispose it to release its eager backend session.
 		this.discardNewSession();
+		const isNewChat = chat.status.get() === SessionStatus.Untitled;
 
 		// Notify listeners that a send is starting. Listeners (e.g., telemetry)
 		// can use this to prewarm caches whose result is consumed when
@@ -475,7 +476,7 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 			this.logService.info(`[SessionsManagement] sendRequest: active session replaced: ${session.sessionId} -> ${updatedSession.sessionId}`);
 		}
 
-		this._onDidSendRequest.fire({ session: updatedSession, chat, isNewSession: false, isNewChat: true, options });
+		this._onDidSendRequest.fire({ session: updatedSession, chat, isNewSession: false, isNewChat, options });
 	}
 
 	// -- Session Actions --

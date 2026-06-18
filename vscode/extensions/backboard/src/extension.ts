@@ -172,7 +172,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			bridge.restart();
 		}
 	}));
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.signIn', () => promptBackboardSso(bridge)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => promptBackboardSso(bridge)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.copyOAuthRedirectUri', () => copyBackboardOAuthRedirectUri()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.completeOAuthCallback', () => completeBackboardOAuthCallbackFromInput()));
 	context.subscriptions.push(vscode.window.registerUriHandler({
@@ -3490,7 +3490,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			if (!file) {
 				return '<span class="' + attr(className) + '"><span class="codicon codicon-symbol-misc"></span></span>';
 			}
-			return '<span class="' + attr(className) + '"><img src="' + attr(iconBase + '/' + file) + '" alt="" loading="lazy"></span>';
+			return '<span class="' + attr(className) + '"><img data-provider-icon="true" src="' + attr(iconBase + '/' + file) + '" alt="" loading="lazy"></span>';
 		}
 		function unwrapModelIconHtml(value) {
 			const prefix = '<span class="modelIcon">';
@@ -3577,7 +3577,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			return '<button class="drawerButton" type="button" data-action="' + attr(action) + '">' + (icon ? '<span class="codicon codicon-' + attr(icon) + '"></span> ' : '') + escapeHtml(label) + '</button>';
 		}
 		function providerSwitch(provider, active) {
-			const icon = providerIconFile(provider) ? '<img src="' + attr(iconBase + '/' + providerIconFile(provider)) + '" alt="" loading="lazy">' : '<span class="codicon codicon-symbol-misc"></span>';
+			const icon = providerIconFile(provider) ? '<img data-provider-icon="true" src="' + attr(iconBase + '/' + providerIconFile(provider)) + '" alt="" loading="lazy">' : '<span class="codicon codicon-symbol-misc"></span>';
 			return '<button class="providerSwitch' + (active ? ' active' : '') + '" type="button" data-action="toggleProviderFilter" data-provider="' + attr(provider) + '" aria-pressed="' + (active ? 'true' : 'false') + '"><span class="providerSwitchIcon">' + icon + '</span><span class="providerSwitchName">' + escapeHtml(providerDisplayName(provider)) + '</span><span class="providerSwitchToggle" aria-hidden="true">' + (active ? '<span class="codicon codicon-check"></span>' : '') + '</span></button>';
 		}
 		function modelSource() {
@@ -4107,6 +4107,15 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				return;
 			}
 			closePopover();
+		}, true);
+		document.addEventListener('error', event => {
+			const target = event.target;
+			if (!(target instanceof HTMLImageElement) || target.dataset.providerIcon !== 'true') {
+				return;
+			}
+			const fallback = document.createElement('span');
+			fallback.className = 'codicon codicon-symbol-misc';
+			target.replaceWith(fallback);
 		}, true);
 		document.addEventListener('keydown', event => {
 			if (event.key === 'Escape' && activePopover) {

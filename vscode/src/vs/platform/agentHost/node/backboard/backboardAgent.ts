@@ -170,6 +170,16 @@ interface BackboardPanelThreadFile {
 	readonly entry?: unknown;
 }
 
+interface BackboardConfigJson {
+	readonly env?: unknown;
+	readonly api_url?: unknown;
+	readonly apiUrl?: unknown;
+	readonly api_key?: unknown;
+	readonly apiKey?: unknown;
+	readonly env_keys?: unknown;
+	readonly oauth?: unknown;
+}
+
 interface BackboardPanelHistoryEntry {
 	readonly id: string;
 	readonly title?: string;
@@ -336,7 +346,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 			const settings = this._turnSettings(session);
 			const firstToolRequests: ToolResultRequest[] = [];
 			const seenToolRequests = new Set<string>();
-			const submitToolsPromise = this._bridge.listTools(settings.mode)
+			const submitToolsPromise = this._bridge.listTools(settings.mode, settings.config)
 				.then(tools => mergeBackboardTools(tools, session.clientTools))
 				.catch(() => mergeBackboardTools(undefined, session.clientTools));
 			const submitTools = await submitToolsPromise;
@@ -1242,28 +1252,30 @@ class BackboardBridgeProcess extends Disposable {
 		return result?.output ?? { success: false, error: `Rust tool ${name} did not return output.` };
 	}
 
-	async listTools(mode: string): Promise<unknown[] | undefined> {
-		const cached = this.toolCache.get(mode);
+	async listTools(mode: string, config?: Record<string, unknown>): Promise<unknown[] | undefined> {
+		const effectiveConfig = config ?? bridgeConfig();
+		const cacheKey = backboardToolCacheKey(mode, effectiveConfig);
+		const cached = this.toolCache.get(cacheKey);
 		if (cached?.pending) {
 			return cached.pending;
 		}
 		if (cached && cached.expiresAt > Date.now()) {
 			return cached.tools;
 		}
-		const pending = this._fetchTools(mode);
-		this.toolCache.set(mode, { expiresAt: 0, pending });
+		const pending = this._fetchTools(mode, effectiveConfig);
+		this.toolCache.set(cacheKey, { expiresAt: 0, pending });
 		try {
 			const tools = await pending;
-			this.toolCache.set(mode, { expiresAt: Date.now() + BACKBOARD_TOOL_CACHE_TTL_MS, tools });
+			this.toolCache.set(cacheKey, { expiresAt: Date.now() + BACKBOARD_TOOL_CACHE_TTL_MS, tools });
 			return tools;
 		} catch (error) {
-			this.toolCache.delete(mode);
+			this.toolCache.delete(cacheKey);
 			throw error;
 		}
 	}
 
-	private async _fetchTools(mode: string): Promise<unknown[] | undefined> {
-		const events = await this.send('listTools', undefined, { mode }, undefined).promise;
+	private async _fetchTools(mode: string, config?: Record<string, unknown>): Promise<unknown[] | undefined> {
+		const events = await this.send('listTools', undefined, { mode, config: config ?? bridgeConfig() }, undefined).promise;
 		return events.find(event => event.type === 'tools')?.tools;
 	}
 
@@ -1765,14 +1777,82 @@ function bridgeModeFromConfig(config: Record<string, unknown>): string {
 	return stringConfigValue(config, SessionConfigKey.Mode, 'free');
 }
 
+function backboardToolCacheKey(mode: string, config: Record<string, unknown>): string {
+	const env = normalizeBackboardEnv(config.env);
+	const apiUrl = stringValueFromRecord(config.apiUrl) || stringValueFromRecord(config.api_url) || '';
+	const credential = stringValueFromRecord(config.accessToken)
+		|| stringValueFromRecord(config.apiKey)
+		|| stringValueFromRecord(config.api_key)
+		|| '';
+	const credentialHash = credential ? createHash('sha256').update(credential).digest('hex').slice(0, 12) : '';
+	return `${mode}:${env}:${apiUrl}:${credentialHash}`;
+}
+
 function bridgeConfig(): Record<string, unknown> {
-	const apiUrl = process.env.BACKBOARD_API_URL || process.env.VSCODE_BACKBOARD_API_URL;
-	const apiKey = process.env.BACKBOARD_API_KEY || process.env.VSCODE_BACKBOARD_API_KEY;
+	const persisted = readBackboardConfigJsonSync();
+	const env = normalizeBackboardEnv(
+		process.env.BACKBOARD_ENV
+		|| process.env.VSCODE_BACKBOARD_ENV
+		|| stringValueFromRecord(persisted.env)
+		|| 'prod'
+	);
+	const apiUrl = process.env.BACKBOARD_API_URL
+		|| process.env.VSCODE_BACKBOARD_API_URL
+		|| stringValueFromRecord(persisted.api_url)
+		|| stringValueFromRecord(persisted.apiUrl);
+	const apiKey = process.env.BACKBOARD_API_KEY
+		|| process.env.VSCODE_BACKBOARD_API_KEY
+		|| backboardConfigApiKey(persisted, env);
+	const accessToken = process.env.BACKBOARD_ACCESS_TOKEN
+		|| process.env.VSCODE_BACKBOARD_ACCESS_TOKEN
+		|| backboardConfigAccessToken(persisted);
 	return {
-		env: process.env.BACKBOARD_ENV || process.env.VSCODE_BACKBOARD_ENV || 'prod',
+		env,
 		...(apiUrl ? { apiUrl } : {}),
 		...(apiKey ? { apiKey } : {}),
+		...(accessToken ? { accessToken } : {}),
 	};
+}
+
+function backboardConfigPath(): string {
+	return path.join(os.homedir(), '.backboard_ide', 'config.json');
+}
+
+function readBackboardConfigJsonSync(): BackboardConfigJson {
+	try {
+		const parsed: unknown = JSON.parse(fs.readFileSync(backboardConfigPath(), 'utf8'));
+		return isObjectRecord(parsed) ? parsed : {};
+	} catch (error) {
+		if (isFileNotFoundError(error) || error instanceof SyntaxError) {
+			return {};
+		}
+		throw error;
+	}
+}
+
+function backboardConfigEnvKeys(config: BackboardConfigJson): Record<string, string> {
+	const envKeys = config.env_keys;
+	if (!isObjectRecord(envKeys)) {
+		return {};
+	}
+	const result: Record<string, string> = {};
+	for (const [env, apiKey] of Object.entries(envKeys)) {
+		if (typeof apiKey === 'string') {
+			result[normalizeBackboardEnv(env)] = apiKey;
+		}
+	}
+	return result;
+}
+
+function backboardConfigApiKey(config: BackboardConfigJson, env = normalizeBackboardEnv(config.env)): string | undefined {
+	return stringValueFromRecord(config.api_key)
+		|| stringValueFromRecord(config.apiKey)
+		|| stringValueFromRecord(backboardConfigEnvKeys(config)[env]);
+}
+
+function backboardConfigAccessToken(config: BackboardConfigJson): string | undefined {
+	const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
+	return stringValueFromRecord(oauth?.access_token);
 }
 
 function createToolContentReporter(emit: (content: string) => void): { report: (content: string) => void; flush: () => void } {
@@ -2467,6 +2547,10 @@ function boolArg(args: Record<string, unknown>, ...names: string[]): boolean {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function stringValueFromRecord(value: unknown): string | undefined {
+	return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function isReadOnlyTool(name: string): boolean {

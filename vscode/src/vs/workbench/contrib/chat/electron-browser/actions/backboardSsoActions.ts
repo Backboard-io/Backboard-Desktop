@@ -16,6 +16,7 @@ import { localize, localize2 } from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../platform/files/common/files.js';
@@ -84,7 +85,7 @@ export function registerBackboardSsoActions(): void {
 		}
 
 		override async run(accessor: ServicesAccessor): Promise<boolean> {
-			return accessor.get(IInstantiationService).createInstance(BackboardSsoFlow).signIn();
+			return Boolean(await accessor.get(ICommandService).executeCommand<boolean>('backboard.extension.signIn'));
 		}
 	});
 

@@ -98,6 +98,7 @@ export class NodeAgentHostStarter extends Disposable implements IAgentHostStarte
 			dbSpanExporterEnabled: this._configurationService.getValue<boolean>(AgentHostOTelDbSpanExporterEnabledSettingId),
 		}, process.env);
 		Object.assign(env, otelEnv);
+		Object.assign(env, this._buildBackboardEnv(process.env));
 
 		// Forward WebSocket server configuration to the child process via env vars
 		if (this._wsConfig) {
@@ -158,5 +159,23 @@ export class NodeAgentHostStarter extends Disposable implements IAgentHostStarte
 			this._logService.error('AgentHostStarter was unable to resolve shell environment', error);
 			return {};
 		}
+	}
+
+	private _buildBackboardEnv(parentEnv: NodeJS.ProcessEnv): Record<string, string> {
+		const env: Record<string, string> = {};
+		const configuredEnv = this._configurationService.getValue<string>('backboard.env')?.trim();
+		const parentBackboardEnv = parentEnv.BACKBOARD_ENV || parentEnv.VSCODE_BACKBOARD_ENV;
+		const resolvedEnv = parentBackboardEnv || configuredEnv;
+		if (resolvedEnv) {
+			env.VSCODE_BACKBOARD_ENV = resolvedEnv;
+		}
+
+		const configuredApiUrl = this._configurationService.getValue<string>('backboard.apiUrl')?.trim();
+		const parentApiUrl = parentEnv.BACKBOARD_API_URL || parentEnv.VSCODE_BACKBOARD_API_URL;
+		const resolvedApiUrl = parentApiUrl || configuredApiUrl;
+		if (resolvedApiUrl) {
+			env.VSCODE_BACKBOARD_API_URL = resolvedApiUrl;
+		}
+		return env;
 	}
 }

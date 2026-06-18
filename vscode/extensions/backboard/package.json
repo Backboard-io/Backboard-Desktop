@@ -12,9 +12,15 @@
   "categories": [
     "AI"
   ],
+  "files": [
+    "out/**",
+    "media/**",
+    "bin/**",
+    "package.json"
+  ],
   "activationEvents": [
     "onStartupFinished",
-    "onCommand:backboard.signIn",
+    "onCommand:backboard.extension.signIn",
     "onCommand:backboard.setApiKey",
     "onCommand:backboard.copyOAuthRedirectUri",
     "onCommand:backboard.completeOAuthCallback",
@@ -36,10 +42,6 @@
   },
   "contributes": {
     "commands": [
-      {
-        "command": "backboard.signIn",
-        "title": "Backboard: Sign In with SSO"
-      },
       {
         "command": "backboard.setApiKey",
         "title": "Backboard: Set API Key"

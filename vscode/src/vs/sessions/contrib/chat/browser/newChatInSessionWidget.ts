@@ -163,17 +163,19 @@ export class NewChatInSessionWidget extends Disposable {
 
 	// --- Send ---
 
-	private async _send(options: ISendRequestOptions): Promise<void> {
+	private async _send(options: ISendRequestOptions): Promise<boolean> {
 		const activeSession = this._session.get();
 		if (!activeSession) {
-			return;
+			return false;
 		}
 		const activeChat = activeSession.activeChat.get();
 		try {
 			await this.sessionsManagementService.sendRequest(activeSession, activeChat, options);
 		} catch (e) {
 			this.logService.error('Failed to send secondary chat request:', e);
+			return false;
 		}
+		return true;
 	}
 
 	private async _sendFromSharedComposer(query: string): Promise<boolean> {
@@ -187,7 +189,7 @@ export class NewChatInSessionWidget extends Disposable {
 			provider?.setModel(activeSession.sessionId, input.currentLanguageModel);
 		}
 		const modeKind = input.currentModeKind;
-		await this._send({
+		const sent = await this._send({
 			query,
 			attachedContext: input.getAttachedAndImplicitContext().asArray(),
 			userSelectedModelId: input.currentLanguageModel,
@@ -199,7 +201,9 @@ export class NewChatInSessionWidget extends Disposable {
 				enabledSubAgents: modeKind === ChatModeKind.Agent ? input.currentModeObs.get().agents?.get() : undefined,
 			},
 		});
-		input.acceptInput(true);
+		if (sent) {
+			input.acceptInput(true);
+		}
 		return true;
 	}
 

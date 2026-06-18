@@ -754,7 +754,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _backboardMediaIcon(fileName: string): string {
-		return FileAccess.asBrowserUri(`vs/workbench/contrib/chat/browser/widget/media/model-provider-icons/${fileName}`).toString(true);
+		return FileAccess.asBrowserUri(`vs/workbench/contrib/welcomeOnboarding/browser/media/model-provider-icons/${fileName}`).toString(true);
 	}
 
 	private _renderExperienceStep(container: HTMLElement): void {
