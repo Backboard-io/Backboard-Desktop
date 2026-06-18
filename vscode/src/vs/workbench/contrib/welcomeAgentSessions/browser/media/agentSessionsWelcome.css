@@ -9,6 +9,73 @@
 	height: 100%;
 	background-color: var(--vscode-welcomePage-background);
 	overflow: hidden;
+	position: relative;
+}
+
+.agentSessionsWelcome.backboard-auth-gate-active > :not(.backboard-auth-gate-overlay) {
+	filter: blur(4px);
+	pointer-events: none;
+	user-select: none;
+}
+
+.agentSessionsWelcome .backboard-auth-gate-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background: color-mix(in srgb, var(--vscode-editor-background) 55%, transparent);
+	backdrop-filter: blur(2px);
+}
+
+.agentSessionsWelcome .backboard-auth-gate-card {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	width: min(300px, 100%);
+	padding: 18px;
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 4px;
+	color: var(--vscode-editor-foreground);
+	background: var(--vscode-editor-background);
+	box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.agentSessionsWelcome .backboard-auth-gate-logo.codicon.codicon-backboard-logo {
+	width: 36px;
+	height: 36px;
+	color: var(--vscode-editor-foreground);
+}
+
+.agentSessionsWelcome .backboard-auth-gate-title {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 20px;
+}
+
+.agentSessionsWelcome .backboard-auth-gate-description {
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	line-height: 18px;
+}
+
+.agentSessionsWelcome .backboard-auth-gate-button {
+	align-self: flex-start;
+	height: 28px;
+	padding: 0 12px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 2px;
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+	cursor: pointer;
+}
+
+.agentSessionsWelcome .backboard-auth-gate-button:hover {
+	background: var(--vscode-button-hoverBackground);
 }
 
 .agentSessionsWelcome-scrollable {

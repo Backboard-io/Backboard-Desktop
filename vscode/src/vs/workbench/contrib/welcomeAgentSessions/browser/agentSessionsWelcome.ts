@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/agentSessionsWelcome.css';
-import { $, addDisposableListener, append, clearNode, Dimension, getWindow, scheduleAtNextAnimationFrame } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode, Dimension, EventType, getWindow, scheduleAtNextAnimationFrame, setVisibility } from '../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { DomScrollableElement } from '../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { Toggle } from '../../../../base/browser/ui/toggle/toggle.js';
@@ -59,6 +59,9 @@ import { IViewDescriptorService, ViewContainerLocation } from '../../../common/v
 import { toErrorMessage } from '../../../../base/common/errorMessage.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { canShowAgentsBanner, createAgentsBanner } from '../../chat/browser/agentSessions/agentSessionsBanner.js';
+import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, isBackboardProduct } from '../../chat/common/backboardAuth.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { IPathService } from '../../../services/path/common/pathService.js';
 
 const configurationKey = 'workbench.startupEditor';
 const MAX_SESSIONS = 6;
@@ -127,6 +130,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 	private _recentTrustedWorkspaces: Array<IRecentWorkspace | IRecentFolder> = [];
 	private _isEmptyWorkspace: boolean = false;
 	private _workspaceKind: AgentSessionsWelcomeWorkspaceKind = 'empty';
+	private backboardAuthGateOverlay: HTMLElement | undefined;
 
 	// Telemetry tracking
 	private _openedAt: number = 0;
@@ -155,6 +159,8 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		@IViewDescriptorService private readonly viewDescriptorService: IViewDescriptorService,
 		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
 		@ILogService private readonly logService: ILogService,
+		@IFileService private readonly fileService: IFileService,
+		@IPathService private readonly pathService: IPathService,
 	) {
 		super(AgentSessionsWelcomePage.ID, group, telemetryService, themeService, storageService);
 
@@ -166,6 +172,11 @@ export class AgentSessionsWelcomePage extends EditorPane {
 
 		this.contextService = this._register(contextKeyService.createScoped(this.container));
 		ChatContextKeys.inAgentSessionsWelcome.bindTo(this.contextService).set(true);
+		this._register(this.contextService.onDidChangeContext(e => {
+			if (e.affectsSome(BackboardAuthGateContextKeys)) {
+				this.updateBackboardAuthGate();
+			}
+		}));
 
 		this._register(this.chatEntitlementService.onDidChangeSentiment(() => {
 			const input = this.input || this._storedInput;
@@ -186,6 +197,74 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			vertical: ScrollbarVisibility.Auto
 		}));
 		this.container.appendChild(this.scrollableElement.getDomNode());
+		this.createBackboardAuthGate();
+		this.updateBackboardAuthGate();
+		this.refreshBackboardAuthGateFromConfig().catch(error => {
+			this.logService.error(`[Backboard] Failed to refresh agents welcome auth gate: ${error instanceof Error ? error.message : String(error)}`);
+		});
+	}
+
+	private isBackboardAuthRequired(): boolean {
+		return this.contextService.getContextKeyValue<boolean>(BackboardAuthContextKeys.enabled.key) === true
+			&& this.contextService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true;
+	}
+
+	private createBackboardAuthGate(): void {
+		if (this.backboardAuthGateOverlay) {
+			return;
+		}
+
+		const overlay = append(this.container, $('.backboard-auth-gate-overlay.backboard-auth-gate-agents-welcome'));
+		overlay.setAttribute('role', 'dialog');
+		overlay.setAttribute('aria-label', localize('backboard.auth.agentsWelcome.aria', "Sign in to Backboard"));
+
+		const card = append(overlay, $('.backboard-auth-gate-card'));
+		const logo = append(card, $('span.backboard-auth-gate-logo.codicon.codicon-backboard-logo'));
+		logo.setAttribute('aria-hidden', 'true');
+
+		const title = append(card, $('h3.backboard-auth-gate-title'));
+		title.textContent = localize('backboard.auth.agentsWelcome.title', "Sign in to Backboard");
+
+		const description = append(card, $('p.backboard-auth-gate-description'));
+		description.textContent = localize('backboard.auth.agentsWelcome.description', "To use the Agents page, sign in to Backboard.");
+
+		const button = append(card, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
+		button.type = 'button';
+		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
+		this._register(addDisposableListener(button, EventType.CLICK, () => {
+			this.signInAndRefreshBackboardAuthGate().catch(error => {
+				this.logService.error(`[Backboard] Failed to refresh agents welcome auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
+			});
+		}));
+
+		this.backboardAuthGateOverlay = overlay;
+	}
+
+	private async signInAndRefreshBackboardAuthGate(): Promise<void> {
+		await this.commandService.executeCommand('backboard.signIn');
+		await this.refreshBackboardAuthGateFromConfig();
+	}
+
+	private updateBackboardAuthGate(): void {
+		const gated = this.isBackboardAuthRequired();
+		this.container.classList.toggle('backboard-auth-gate-active', gated);
+		if (this.backboardAuthGateOverlay) {
+			setVisibility(gated, this.backboardAuthGateOverlay);
+		}
+	}
+
+	private async refreshBackboardAuthGateFromConfig(): Promise<void> {
+		if (!isBackboardProduct()) {
+			BackboardAuthContextKeys.enabled.bindTo(this.contextService).set(false);
+			BackboardAuthContextKeys.signedIn.bindTo(this.contextService).set(true);
+			this.updateBackboardAuthGate();
+			return;
+		}
+
+		BackboardAuthContextKeys.enabled.bindTo(this.contextService).set(true);
+		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
+		BackboardAuthContextKeys.signedIn.bindTo(this.contextService).set(signedIn);
+		this.updateBackboardAuthGate();
 	}
 
 	override async setInput(input: AgentSessionsWelcomeInput, options: AgentSessionsWelcomeEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {

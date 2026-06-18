@@ -819,10 +819,17 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		button.type = 'button';
 		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
 		this._register(addDisposableListener(button, EventType.CLICK, () => {
-			void this.commandService.executeCommand('backboard.signIn');
+			this.signInAndRefreshBackboardChatAuthGate().catch(error => {
+				this.logService.error(`[Backboard] Failed to refresh chat auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
+			});
 		}));
 
 		this.chatAuthGateOverlay = overlay;
+	}
+
+	private async signInAndRefreshBackboardChatAuthGate(): Promise<void> {
+		await this.commandService.executeCommand('backboard.signIn');
+		await this.refreshBackboardChatAuthGateFromConfig();
 	}
 
 	private updateBackboardChatAuthGate(): void {

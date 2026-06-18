@@ -215,10 +215,17 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		button.type = 'button';
 		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
 		this._register(addDisposableListener(button, EventType.CLICK, () => {
-			void this.commandService.executeCommand('backboard.signIn');
+			this.signInAndRefreshBackboardAuthGate().catch(error => {
+				this.logService.error(`[Backboard] Failed to refresh agents auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
+			});
 		}));
 
 		this.backboardAuthGateOverlay = overlay;
+	}
+
+	private async signInAndRefreshBackboardAuthGate(): Promise<void> {
+		await this.commandService.executeCommand('backboard.signIn');
+		await this.refreshBackboardAuthGateFromConfig();
 	}
 
 	private updateBackboardAuthGate(): void {
@@ -694,7 +701,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 	private async openAgentSession(e: IOpenEvent<AgentSessionListItem | undefined>): Promise<void> {
 		if (this.isBackboardAuthRequired()) {
-			await this.commandService.executeCommand('backboard.signIn');
+			await this.signInAndRefreshBackboardAuthGate();
 			return;
 		}
 
