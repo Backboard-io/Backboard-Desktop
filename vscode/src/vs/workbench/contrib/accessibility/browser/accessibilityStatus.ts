@@ -67,7 +67,7 @@ export class AccessibilityStatus extends Disposable implements IWorkbenchContrib
 			{
 				label: localize('screenReaderDetectedExplanation.answerLearnMore', "Learn More"),
 				run: () => {
-					this.openerService.open('https://code.visualstudio.com/docs/editor/accessibility#_screen-readers');
+					this.openerService.open('');
 				}
 			}],
 			{

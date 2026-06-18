@@ -16,7 +16,7 @@ export function registerGetDiagnosticsTool(server: McpServer, logger: ILogger): 
 	server.registerTool(
 		'get_diagnostics',
 		{
-			description: 'Gets language diagnostics (errors, warnings, hints) from VS Code',
+			description: 'Gets language diagnostics (errors, warnings, hints) from Backboard IDE',
 			inputSchema: schema,
 		},
 		// @ts-ignore - TS2589: zod type instantiation too deep for server.tool() generics

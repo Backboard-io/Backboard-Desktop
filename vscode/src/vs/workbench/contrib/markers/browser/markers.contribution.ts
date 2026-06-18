@@ -127,34 +127,37 @@ Registry.as<IConfigurationRegistry>(Extensions.Configuration).registerConfigurat
 });
 
 const markersViewIcon = registerIcon('markers-view-icon', Codicon.warning, localize('markersViewIcon', 'View icon of the markers view.'));
+const backboardShowProblemsPanel = false;
 
 // markers view container
-const VIEW_CONTAINER: ViewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
-	id: Markers.MARKERS_CONTAINER_ID,
-	title: Messages.MARKERS_PANEL_TITLE_PROBLEMS,
-	icon: markersViewIcon,
-	hideIfEmpty: true,
-	order: 0,
-	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [Markers.MARKERS_CONTAINER_ID, { mergeViewWithContainerWhenSingleView: true }]),
-	storageId: Markers.MARKERS_VIEW_STORAGE_ID,
-	windowEnablement: WindowEnablement.Both
-}, ViewContainerLocation.Panel, { doNotRegisterOpenCommand: true });
-
-Registry.as<IViewsRegistry>(ViewContainerExtensions.ViewsRegistry).registerViews([{
-	id: Markers.MARKERS_VIEW_ID,
-	containerIcon: markersViewIcon,
-	name: Messages.MARKERS_PANEL_TITLE_PROBLEMS,
-	canToggleVisibility: true,
-	canMoveView: true,
-	ctorDescriptor: new SyncDescriptor(MarkersView),
-	openCommandActionDescriptor: {
-		id: 'workbench.actions.view.problems',
-		mnemonicTitle: localize({ key: 'miMarker', comment: ['&& denotes a mnemonic'] }, "&&Problems"),
-		keybindings: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyM },
+if (backboardShowProblemsPanel) {
+	const VIEW_CONTAINER: ViewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
+		id: Markers.MARKERS_CONTAINER_ID,
+		title: Messages.MARKERS_PANEL_TITLE_PROBLEMS,
+		icon: markersViewIcon,
+		hideIfEmpty: true,
 		order: 0,
-	},
-	windowEnablement: WindowEnablement.Both
-}], VIEW_CONTAINER);
+		ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [Markers.MARKERS_CONTAINER_ID, { mergeViewWithContainerWhenSingleView: true }]),
+		storageId: Markers.MARKERS_VIEW_STORAGE_ID,
+		windowEnablement: WindowEnablement.Both
+	}, ViewContainerLocation.Panel, { doNotRegisterOpenCommand: true });
+
+	Registry.as<IViewsRegistry>(ViewContainerExtensions.ViewsRegistry).registerViews([{
+		id: Markers.MARKERS_VIEW_ID,
+		containerIcon: markersViewIcon,
+		name: Messages.MARKERS_PANEL_TITLE_PROBLEMS,
+		canToggleVisibility: true,
+		canMoveView: true,
+		ctorDescriptor: new SyncDescriptor(MarkersView),
+		openCommandActionDescriptor: {
+			id: 'workbench.actions.view.problems',
+			mnemonicTitle: localize({ key: 'miMarker', comment: ['&& denotes a mnemonic'] }, "&&Problems"),
+			keybindings: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyM },
+			order: 0,
+		},
+		windowEnablement: WindowEnablement.Both
+	}], VIEW_CONTAINER);
+}
 
 // workbench
 const workbenchRegistry = Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench);

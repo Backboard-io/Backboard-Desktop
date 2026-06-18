@@ -1363,8 +1363,8 @@ class AgentSessionAdapter implements ICopilotChatSession {
 export class CopilotChatSessionsProvider extends Disposable implements ISessionsProvider {
 
 	readonly id = COPILOT_PROVIDER_ID;
-	readonly label = localize('copilotChatSessionsProvider', "Copilot Chat");
-	readonly icon = Codicon.copilot;
+	readonly label = localize('copilotChatSessionsProvider', "Backboard Chat");
+	readonly icon = Codicon.sparkle;
 	readonly order = 0;
 
 	get sessionTypes(): readonly ISessionType[] {

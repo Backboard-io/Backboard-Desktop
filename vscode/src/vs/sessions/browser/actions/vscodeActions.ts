@@ -35,7 +35,7 @@ export class OpenInVSCodeAction extends Action2 {
 		super({
 			id: OpenInVSCodeAction.ID,
 			title: localize2('openInVSCode', 'Open in Editor'),
-			icon: Codicon.vscodeInsiders,
+			icon: Codicon.window,
 			precondition: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
 			menu: [{
 				id: Menus.TitleBarCenterRight,

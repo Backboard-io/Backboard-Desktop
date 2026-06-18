@@ -42,7 +42,7 @@ import { BackboardLogoIcon } from '../agentSessions.js';
 const FILTER_THRESHOLD = 10;
 
 const LEARN_MORE_VALUE = '__agentHostChatInputPicker.learnMore__';
-const PERMISSION_MODE_LEARN_MORE_URL = 'https://aka.ms/vscode/docs/permissions';
+const PERMISSION_MODE_LEARN_MORE_URL = '';
 
 interface IConfigPickerItem {
 	readonly value: string;

@@ -270,7 +270,7 @@ export class ExplorerService implements IExplorerService {
 		const resources = items.map(s => s.resource);
 
 		// For remote resources, download to a temp location so they can be
-		// pasted both in other VS Code windows and into native file managers.
+		// pasted both in other Backboard IDE windows and into native file managers.
 		// We replace remote URIs with local file:// URIs pointing to temp copies.
 		const clipboardResources = await this.resolveClipboardResources(resources);
 
@@ -316,7 +316,7 @@ export class ExplorerService implements IExplorerService {
 				}
 			} catch (error) {
 				// If download fails, fall back to the original remote URIs.
-				// VS Code cross-window paste will still work via the proxy
+				// Backboard IDE cross-window paste will still work via the proxy
 				// provider, but native paste will not.
 				this.logService.warn('Failed to download remote files for clipboard', error);
 				result.push(...remoteResources);

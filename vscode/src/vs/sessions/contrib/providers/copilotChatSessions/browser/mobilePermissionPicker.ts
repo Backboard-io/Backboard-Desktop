@@ -58,7 +58,7 @@ export class MobilePermissionPicker extends PermissionPicker {
 			{
 				id: ChatPermissionLevel.Default,
 				label: localize('permissions.default', "Default Approvals"),
-				description: localize('permissions.default.subtext', "Copilot uses your configured settings"),
+				description: localize('permissions.default.subtext', "Backboard uses your configured settings"),
 				icon: Codicon.shield,
 				checked: this._currentLevel === ChatPermissionLevel.Default,
 			},

@@ -27,7 +27,7 @@ const taskDefinitionSchema: IJSONSchema = {
 		},
 		required: {
 			type: 'array',
-			markdownDescription: nls.localize('TaskDefinition.required', 'The names of the properties from the `properties` object that must be provided for a task of this type to be considered a match. Used by VS Code to associate a `tasks.json` entry with a registered task provider.'),
+			markdownDescription: nls.localize('TaskDefinition.required', 'The names of the properties from the `properties` object that must be provided for a task of this type to be considered a match. Used by Backboard IDE to associate a `tasks.json` entry with a registered task provider.'),
 			items: {
 				type: 'string'
 			}
@@ -41,7 +41,7 @@ const taskDefinitionSchema: IJSONSchema = {
 		},
 		when: {
 			type: 'string',
-			markdownDescription: nls.localize('TaskDefinition.when', 'Condition which must be true to enable this type of task. Consider using `shellExecutionSupported`, `processExecutionSupported`, and `customExecutionSupported` as appropriate for this task definition. See the [API documentation](https://code.visualstudio.com/api/extension-guides/task-provider#when-clause) for more information.'),
+			markdownDescription: nls.localize('TaskDefinition.when', 'Condition which must be true to enable this type of task. Consider using `shellExecutionSupported`, `processExecutionSupported`, and `customExecutionSupported` as appropriate for this task definition. See the API documentation for more information.'),
 			default: ''
 		}
 	}

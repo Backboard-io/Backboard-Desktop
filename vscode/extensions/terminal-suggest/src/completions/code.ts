@@ -355,7 +355,7 @@ export const troubleshootingOptions = (cliName: string): Fig.Option[] => [
 	},
 	{
 		name: '--telemetry',
-		description: 'Shows all telemetry events which VS code collects',
+		description: 'Shows all telemetry events collected by the editor',
 	},
 	{
 		name: '--transient',
@@ -943,7 +943,7 @@ export const codeTunnelSubcommands: Fig.Subcommand[] = [
 				description: 'Cancel the active turn of a session',
 				args: {
 					name: 'session',
-					description: 'Session URI to cancel the active turn of (e.g. copilot:/<uuid>)',
+					description: 'Session URI to cancel the active turn of',
 				},
 				options: [...agentConnectionOptions, ...globalTunnelOptions, ...tunnelHelpOptions],
 			},
@@ -957,7 +957,7 @@ export const codeTunnelSubcommands: Fig.Subcommand[] = [
 				description: 'Stream live session events',
 				args: {
 					name: 'session',
-					description: 'Session URI to stream events for (e.g. copilot:/<uuid>)',
+					description: 'Session URI to stream events for',
 				},
 				options: [...agentConnectionOptions, ...globalTunnelOptions, ...tunnelHelpOptions],
 			},
@@ -983,7 +983,7 @@ export const codeTunnelSubcommands: Fig.Subcommand[] = [
 	},
 	{
 		name: 'serve-web',
-		description: 'Runs a local web version of Code - OSS',
+		description: 'Runs a local web version of Backboard IDE',
 		options: [
 			{
 				name: '--host',
@@ -1152,7 +1152,7 @@ export const codeTunnelSubcommands: Fig.Subcommand[] = [
 			},
 			{
 				name: 'serve-web',
-				description: 'Runs a local web version of Code - OSS',
+				description: 'Runs a local web version of Backboard IDE',
 			},
 			{
 				name: 'agent',
@@ -1184,7 +1184,7 @@ export const codeTunnelSubcommands: Fig.Subcommand[] = [
 
 const codeCompletionSpec: Fig.Spec = {
 	name: 'code',
-	description: 'Visual Studio Code',
+	description: 'Backboard IDE',
 	args: {
 		template: ['filepaths', 'folders'],
 		isVariadic: true,
@@ -1198,4 +1198,3 @@ const codeCompletionSpec: Fig.Spec = {
 };
 
 export default codeCompletionSpec;
-

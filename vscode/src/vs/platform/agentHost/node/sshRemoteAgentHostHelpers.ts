@@ -166,7 +166,7 @@ export function resolveRemotePlatform(unameS: string, unameM: string): { os: str
  * When `commit` is undefined (dev/OSS builds), falls back to `latest`.
  */
 export function buildCLIDownloadUrl(os: string, arch: string, quality: string, commit?: string): string {
-	const base = 'https://update.code.visualstudio.com';
+	const base = '';
 	const artifact = `cli-${os}-${arch}`;
 	if (commit) {
 		// Defense-in-depth: same validation as getRemoteCLIBin so the URL

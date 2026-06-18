@@ -677,7 +677,7 @@ export class DynamicAuthProvider implements vscode.AuthenticationProvider {
 		}
 
 		// Use a redirect URI that matches what was registered during dynamic registration
-		const redirectUri = 'https://vscode.dev/redirect';
+		const redirectUri = '';
 		authorizationUrl.searchParams.append('redirect_uri', redirectUri);
 
 		const promise = this.waitForAuthorizationCode(callbackUri);

@@ -43,7 +43,7 @@ interface IStatusActionDescriptor {
 const OTEL_HOVER_TITLE_MARKDOWN = localize(
 	'chat.inputStatus.otel.title',
 	"Agent being monitored via [OpenTelemetry]({0})",
-	'https://code.visualstudio.com/docs/copilot/guides/monitoring-agents'
+	''
 );
 
 const STATUS_COMMAND_DESCRIPTORS: ReadonlyMap<string, IStatusActionDescriptor> = new Map<string, IStatusActionDescriptor>([

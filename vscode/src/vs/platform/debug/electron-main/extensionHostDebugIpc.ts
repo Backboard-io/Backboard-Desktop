@@ -77,10 +77,10 @@ export class ElectronExtensionHostDebugBroadcastChannel<TContext> extends Extens
 			if (req.url === '/json/list' || req.url === '/json') {
 				res.setHeader('Content-Type', 'application/json');
 				res.end(JSON.stringify([{
-					description: 'VS Code Renderer',
+					description: 'Backboard IDE Renderer',
 					devtoolsFrontendUrl: '',
 					id: ident,
-					title: 'VS Code Renderer',
+					title: 'Backboard IDE Renderer',
 					type: 'page',
 					url: 'vscode://renderer',
 					webSocketDebuggerUrl: wsUrl
@@ -169,7 +169,7 @@ export class ElectronExtensionHostDebugBroadcastChannel<TContext> extends Extens
 
 				if (debugRenderer) {
 					// Emulate Target.* methods that js-debug expects but Electron's debugger doesn't support
-					const targetInfo = { targetId: ident, type: 'page', title: 'VS Code Renderer', url: 'vscode://renderer' };
+					const targetInfo = { targetId: ident, type: 'page', title: 'Backboard IDE Renderer', url: 'vscode://renderer' };
 					if (data.method === 'Target.setDiscoverTargets') {
 						writeMessage({ id: data.id, sessionId: data.sessionId, result: {} });
 						writeMessage({ method: 'Target.targetCreated', sessionId: data.sessionId, params: { targetInfo: { ...targetInfo, attached: false, canAccessOpener: false } } });

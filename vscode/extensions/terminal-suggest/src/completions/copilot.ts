@@ -5,7 +5,7 @@
 
 const copilotSpec: Fig.Spec = {
 	name: 'copilot',
-	description: 'GitHub Copilot CLI - An AI-powered coding assistant',
+	description: 'Backboard agent CLI',
 	options: [
 		{
 			name: '--add-dir',
@@ -85,7 +85,7 @@ const copilotSpec: Fig.Spec = {
 		},
 		{
 			name: '--log-dir',
-			description: 'Set log file directory (default: ~/.copilot/logs/)',
+			description: 'Set log file directory',
 			args: {
 				name: 'directory',
 				template: 'folders'

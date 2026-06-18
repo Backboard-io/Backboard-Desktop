@@ -142,6 +142,9 @@ interface PanelThreadFile {
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
 const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases';
+const stableUpdateChannel = 'stable';
+const sandboxUpdateChannel = 'sandbox';
+const supportedUpdateChannels = new Set([stableUpdateChannel, sandboxUpdateChannel]);
 const promptedUpdateVersions = new Set<string>();
 const panelStateStorageKeyPrefix = 'backboard.panel.state.';
 const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
@@ -923,7 +926,60 @@ function getBackboardUpdateManifestUrl(): string | undefined {
 	const manifestBaseUrl = (process.env.BBIDE_UPDATE_MANIFEST_BASE_URL || process.env.BACKBOARD_UPDATE_MANIFEST_BASE_URL || configuredBaseUrl || defaultUpdateManifestBaseUrl)
 		.trim()
 		.replace(/\/+$/, '');
-	return `${manifestBaseUrl}/stable/latest/bbide/${platform}-${arch}.json`;
+	const channel = getBackboardUpdateChannel(config);
+	return `${manifestBaseUrl}/${channel}/latest/bbide/${platform}-${arch}.json`;
+}
+
+function getBackboardUpdateChannel(config: vscode.WorkspaceConfiguration): string {
+	const configuredChannel = process.env.BBIDE_UPDATE_CHANNEL
+		|| process.env.BACKBOARD_UPDATE_CHANNEL
+		|| config.get<string>('updates.channel', '').trim();
+	const configured = normalizeBackboardUpdateChannel(configuredChannel);
+	if (configured) {
+		return configured;
+	}
+
+	const packagedChannel = normalizeBackboardUpdateChannel(
+		readBackboardReleaseMetadataString('channel', 'backboardUpdateChannel', 'productJsonBackboardUpdateChannel')
+		|| readBackboardProductMetadataString('backboardUpdateChannel')
+	);
+	if (packagedChannel) {
+		return packagedChannel;
+	}
+
+	return isBackboardDevelopmentBuild() ? sandboxUpdateChannel : stableUpdateChannel;
+}
+
+function normalizeBackboardUpdateChannel(channel: string | undefined): string | undefined {
+	const normalized = channel?.trim().toLowerCase();
+	if (!normalized) {
+		return undefined;
+	}
+	if (supportedUpdateChannels.has(normalized)) {
+		return normalized;
+	}
+	backboardToolOutput?.appendLine(`[updates] unsupported channel "${channel}", falling back to automatic channel selection.`);
+	return undefined;
+}
+
+function isBackboardDevelopmentBuild(): boolean {
+	const metadataVersion = readBackboardReleaseMetadataString('version', 'backboardStudioVersion')
+		|| readBackboardProductMetadataString('backboardStudioVersion');
+	if (metadataVersion) {
+		return false;
+	}
+
+	const appName = vscode.env.appName.toLowerCase();
+	if (appName.includes('dev')) {
+		return true;
+	}
+
+	const productName = readBackboardProductMetadataString('nameShort', 'nameLong', 'applicationName');
+	if (productName?.toLowerCase().includes('dev')) {
+		return true;
+	}
+
+	return readCurrentAppVersion() === 'development build';
 }
 
 function getUpdatePlatform(): string | undefined {
@@ -1002,6 +1058,16 @@ function readCurrentAppVersion(): string {
 		return envVersion.trim();
 	}
 
+	const metadataVersion = readBackboardReleaseMetadataString('version', 'backboardStudioVersion');
+	if (metadataVersion) {
+		return metadataVersion;
+	}
+
+	const productVersion = readBackboardProductMetadataString('backboardStudioVersion');
+	if (productVersion) {
+		return productVersion;
+	}
+
 	const appRoot = vscode.env.appRoot;
 	const extensionPath = vscode.extensions.getExtension('backboard.backboard')?.extensionPath;
 	const releaseMetadataPaths = [
@@ -1049,6 +1115,69 @@ function readCurrentAppVersion(): string {
 	}
 
 	return 'development build';
+}
+
+function readBackboardReleaseMetadataString(...keys: string[]): string | undefined {
+	for (const metadataPath of backboardReleaseMetadataPaths()) {
+		const value = readBackboardMetadataString(metadataPath, keys, true);
+		if (value) {
+			return value;
+		}
+	}
+	return undefined;
+}
+
+function readBackboardProductMetadataString(...keys: string[]): string | undefined {
+	for (const metadataPath of backboardProductMetadataPaths()) {
+		const value = readBackboardMetadataString(metadataPath, keys, false);
+		if (value) {
+			return value;
+		}
+	}
+	return undefined;
+}
+
+function readBackboardMetadataString(metadataPath: string, keys: readonly string[], includeBuildInfo: boolean): string | undefined {
+	try {
+		const parsed: unknown = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+		if (!isObjectRecord(parsed)) {
+			return undefined;
+		}
+		const buildInfo = includeBuildInfo && isObjectRecord(parsed.backboardBuildInfo) ? parsed.backboardBuildInfo : undefined;
+		for (const key of keys) {
+			const rootValue = stringValueFromRecord(parsed[key]);
+			if (rootValue) {
+				return rootValue;
+			}
+			const buildInfoValue = buildInfo ? stringValueFromRecord(buildInfo[key]) : undefined;
+			if (buildInfoValue) {
+				return buildInfoValue;
+			}
+		}
+	} catch {
+		// Development hosts may not have packaged Backboard release metadata.
+	}
+	return undefined;
+}
+
+function backboardReleaseMetadataPaths(): string[] {
+	const appRoot = vscode.env.appRoot;
+	const extensionPath = vscode.extensions.getExtension('backboard.backboard')?.extensionPath;
+	return [
+		appRoot ? path.join(appRoot, 'backboard-build-info.json') : undefined,
+		extensionPath ? path.resolve(extensionPath, '..', '..', 'backboard-build-info.json') : undefined,
+		path.join(process.cwd(), 'backboard-build-info.json')
+	].filter((value): value is string => Boolean(value));
+}
+
+function backboardProductMetadataPaths(): string[] {
+	const appRoot = vscode.env.appRoot;
+	const extensionPath = vscode.extensions.getExtension('backboard.backboard')?.extensionPath;
+	return [
+		appRoot ? path.join(appRoot, 'product.json') : undefined,
+		extensionPath ? path.resolve(extensionPath, '..', '..', 'product.json') : undefined,
+		path.join(process.cwd(), 'product.json')
+	].filter((value): value is string => Boolean(value));
 }
 
 function readPlistString(plist: string, key: string): string | undefined {

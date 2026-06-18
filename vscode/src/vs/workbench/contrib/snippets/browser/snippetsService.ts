@@ -397,7 +397,7 @@ export class SnippetsService implements ISnippetsService {
 								if (file.data.some(snippet => snippet.isBogous)) {
 									extension.collector.warn(localize(
 										'badVariableUse',
-										"One or more snippets from the extension '{0}' very likely confuse snippet-variables and snippet-placeholders (see https://code.visualstudio.com/docs/editor/userdefinedsnippets#_snippet-syntax for more details)",
+										"One or more snippets from the extension '{0}' very likely confuse snippet-variables and snippet-placeholders (see  for more details)",
 										extension.description.name
 									));
 								}

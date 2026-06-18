@@ -4,11 +4,16 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { VSBuffer } from '../../../../../base/common/buffer.js';
-import { Codicon } from '../../../../../base/common/codicons.js';
+import * as dom from '../../../../../base/browser/dom.js';
+import { BaseActionViewItem, IActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
+import { IAction } from '../../../../../base/common/actions.js';
+import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { dirname } from '../../../../../base/common/resources.js';
+import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../../nls.js';
+import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -113,13 +118,13 @@ export function registerBackboardSsoActions(): void {
 		}
 	});
 
-	MenuRegistry.appendMenuItem(MenuId.ChatTitleBarMenu, {
+	MenuRegistry.appendMenuItem(MenuId.TitleBar, {
 		command: {
 			id: 'backboard.signIn',
 			title: localize2('backboard.signIn.short', "Sign in"),
-			icon: Codicon.account,
+			icon: ThemeIcon.fromId('backboard-logo'),
 		},
-		group: 'a_first',
+		group: 'navigation',
 		order: 0,
 		when: ContextKeyExpr.and(
 			BackboardAuthContextKeys.enabled,
@@ -128,17 +133,21 @@ export function registerBackboardSsoActions(): void {
 	});
 }
 
-export class BackboardCredentialsContribution implements IWorkbenchContribution {
+export class BackboardCredentialsContribution extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.backboardCredentials';
 
 	constructor(
+		@IActionViewItemService actionViewItemService: IActionViewItemService,
 		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
 		@ILogService private readonly logService: ILogService,
 	) {
+		super();
+		this._register(actionViewItemService.register(MenuId.TitleBar, 'backboard.signIn', (action, options) => new BackboardSignInTitleBarEntry(action, options)));
+
 		if (isBackboardProduct()) {
 			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
 			BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(false);
@@ -154,6 +163,48 @@ export class BackboardCredentialsContribution implements IWorkbenchContribution 
 		if (await hasBackboardCredentials(this.fileService, configResource)) {
 			markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
 			this.logService.info(`[Backboard] Existing credentials found in ${configResource.fsPath}; chat setup marked ready.`);
+		}
+	}
+}
+
+class BackboardSignInTitleBarEntry extends BaseActionViewItem {
+
+	private label: HTMLElement | undefined;
+
+	constructor(
+		action: IAction,
+		options: IActionViewItemOptions,
+	) {
+		super(undefined, action, options);
+	}
+
+	public override render(container: HTMLElement): void {
+		super.render(container);
+
+		container.classList.add('backboard-titlebar-sign-in');
+		container.setAttribute('role', 'button');
+		container.setAttribute('aria-label', this.action.label);
+
+		const content = dom.append(container, dom.$('.backboard-titlebar-sign-in-button'));
+		const logo = dom.append(content, dom.$('span.backboard-titlebar-sign-in-logo.codicon.codicon-backboard-logo'));
+		logo.setAttribute('aria-hidden', 'true');
+
+		this.label = dom.append(content, dom.$('span.backboard-titlebar-sign-in-label'));
+		this.label.textContent = this.action.label;
+	}
+
+	protected override updateLabel(): void {
+		if (this.label) {
+			this.label.textContent = this.action.label;
+		}
+		if (this.element) {
+			this.element.setAttribute('aria-label', this.action.label);
+		}
+	}
+
+	protected override updateEnabled(): void {
+		if (this.element) {
+			this.element.classList.toggle('disabled', !this.action.enabled);
 		}
 	}
 }

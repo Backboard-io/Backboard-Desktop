@@ -1,6 +1,6 @@
 ---
 name: project-setup-info-local
-description: 'Comprehensive setup steps to help the user create complete project structures in a VS Code workspace; this tool is designed for full project initialization and scaffolding, not for creating individual files. When to use this tool: user wants to create a new complete project from scratch; setting up entire project frameworks (TypeScript projects, React apps, Node.js servers, etc.); initializing Model Context Protocol (MCP) servers with full structure; creating VS Code extensions with proper scaffolding; setting up Next.js, Vite, or other framework-based projects; user asks for "new project", "create a workspace", "set up a [framework] project"; need to establish a complete development environment with dependencies, config files, and folder structure. When NOT to use this tool: creating single files or small code snippets; adding individual files to existing projects; making modifications to existing codebases; user asks to "create a file" or "add a component"; simple code examples or demonstrations; debugging or fixing existing code. This tool provides complete project setup including: folder structure creation; package.json and dependency management; configuration files (tsconfig, eslint, etc.); initial boilerplate code; development environment setup; build and run instructions. Use other file creation tools for individual files within existing projects.'
+description: 'Comprehensive setup steps to help the user create complete project structures in a Backboard IDE workspace; this tool is designed for full project initialization and scaffolding, not for creating individual files. When to use this tool: user wants to create a new complete project from scratch; setting up entire project frameworks (TypeScript projects, React apps, Node.js servers, etc.); initializing Model Context Protocol (MCP) servers with full structure; creating Backboard IDE extensions with proper scaffolding; setting up Next.js, Vite, or other framework-based projects; user asks for "new project", "create a workspace", "set up a [framework] project"; need to establish a complete development environment with dependencies, config files, and folder structure. When NOT to use this tool: creating single files or small code snippets; adding individual files to existing projects; making modifications to existing codebases; user asks to "create a file" or "add a component"; simple code examples or demonstrations; debugging or fixing existing code. This tool provides complete project setup including: folder structure creation; package.json and dependency management; configuration files (tsconfig, eslint, etc.); initial boilerplate code; development environment setup; build and run instructions. Use other file creation tools for individual files within existing projects.'
 ---
 
 # How to setup a project
@@ -9,7 +9,7 @@ Determine what kind of project the user wants to create, then based on that, cho
 
 ## vscode-extension
 
-A template for creating a VS Code extension using Yeoman and Generator-Code.
+A template for creating a Backboard IDE extension using Yeoman and Generator-Code.
 
 Run this command:
 
@@ -86,7 +86,7 @@ A Model Context Protocol (MCP) server project. This project supports multiple pr
    - mcp-server-name: The name of the MCP server. Create a unique name that reflects what this MCP server does.
    - command-to-run: The command to run to start the MCP server. This is the command you would use to run the project you just created.
    - list-of-args: The arguments to pass to the command. This is the list of arguments you would use to run the project you just created.
-5. Install any required VS Code extensions based on the chosen language (e.g., Python extension for Python projects).
+5. Install any required Backboard IDE extensions based on the chosen language (e.g., Python extension for Python projects).
 6. Inform the user that they can now debug this MCP server using VS Code.
 
 ## python-script

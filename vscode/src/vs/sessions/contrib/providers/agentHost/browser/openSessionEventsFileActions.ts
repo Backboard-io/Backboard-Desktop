@@ -31,7 +31,7 @@ export class OpenSessionEventsFileAction extends Action2 {
 	constructor() {
 		super({
 			id: OpenSessionEventsFileAction.ID,
-			title: localize2('openSessionEventsFile', "Open Copilot CLI State File"),
+			title: localize2('openSessionEventsFile', "Open Backboard Agent State File"),
 			f1: true,
 			category: Categories.Developer,
 			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, IsAgentHostSession),

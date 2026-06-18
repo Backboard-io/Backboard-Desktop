@@ -189,7 +189,7 @@ export class AccountPolicyGateContribution extends Disposable implements IWorkbe
 				},
 				{
 					label: localize('accountPolicy.notification.learnMore', "Learn More"),
-					run: () => this.openerService.open(URI.parse('https://code.visualstudio.com/docs/enterprise/overview')),
+					run: () => this.openerService.open(URI.parse('')),
 				},
 			],
 			{ sticky: true }

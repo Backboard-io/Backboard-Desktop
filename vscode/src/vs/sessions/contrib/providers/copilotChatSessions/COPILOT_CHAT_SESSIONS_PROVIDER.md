@@ -1,8 +1,8 @@
-# CopilotChatSessionsProvider — Default Copilot Provider
+# Backboard Chat Sessions Provider
 
 **File:** `src/vs/sessions/contrib/copilotChatSessions/browser/copilotChatSessionsProvider.ts`
 
-The default sessions provider, registered with ID `'default-copilot'`. Wraps the existing agent session infrastructure into the extensible provider model. Supports three session types: **Copilot CLI** (local), **Copilot Cloud** (remote), and **Claude** (local, gated by `sessions.chat.claudeAgent.enabled`).
+The default sessions provider, registered with ID `'default-copilot'`. Wraps the existing agent session infrastructure into the extensible provider model. Supports three session types: **Backboard Agent CLI** (local), **Backboard Cloud** (remote), and **Claude** (local, gated by `sessions.chat.claudeAgent.enabled`).
 
 ## Registration
 
@@ -26,8 +26,8 @@ class DefaultSessionsProviderContribution extends Disposable {
 | Property | Value |
 |----------|-------|
 | `id` | `'default-copilot'` |
-| `label` | `'Copilot Chat'` |
-| `icon` | `Codicon.copilot` |
+| `label` | `'Backboard Chat'` |
+| `icon` | `Codicon.sparkle` |
 | `sessionTypes` | `[CopilotCLISessionType, CopilotCloudSessionType]` (+ `ClaudeCodeSessionType` when enabled) |
 
 ## Browse Actions

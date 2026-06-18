@@ -360,24 +360,59 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 
 		this.postOnboardingSignInPromptShown = true;
-		const handle = this.notificationService.prompt(
-			Severity.Info,
-			localize('onboarding.backboard.ssoPrompt', "Sign in to Backboard with single sign-on to use chat and agents."),
-			[
-				{
-					label: localize('onboarding.backboard.ssoPrompt.signIn', "Sign in to Backboard"),
-					run: () => {
-						handle.close();
-						void this.commandService.executeCommand('backboard.signIn');
-					}
-				},
-				{
-					label: localize('onboarding.backboard.ssoPrompt.later', "Later"),
-					run: () => handle.close()
-				}
-			],
-			{ sticky: true }
-		);
+		this._showBackboardSsoPromptDialog();
+	}
+
+	private _showBackboardSsoPromptDialog(): void {
+		const promptDisposables = new DisposableStore();
+		const overlay = append(this.layoutService.activeContainer, $('.onboarding-backboard-sso-overlay'));
+		overlay.setAttribute('role', 'presentation');
+
+		const dialog = append(overlay, $('.onboarding-backboard-sso-dialog'));
+		dialog.setAttribute('role', 'dialog');
+		dialog.setAttribute('aria-modal', 'true');
+		dialog.setAttribute('aria-label', localize('onboarding.backboard.ssoPrompt.aria', "Sign in to Backboard"));
+
+		this._createBackboardMark(dialog, 'onboarding-backboard-sso-logo');
+
+		const title = append(dialog, $('h3.onboarding-backboard-sso-title'));
+		title.textContent = localize('onboarding.backboard.ssoPrompt.title', "Sign in to Backboard");
+
+		const description = append(dialog, $('p.onboarding-backboard-sso-description'));
+		description.textContent = localize('onboarding.backboard.ssoPrompt.description', "Use single sign-on to enable Backboard Chat and Agents.");
+
+		const actions = append(dialog, $('.onboarding-backboard-sso-actions'));
+		const signInButton = append(actions, $<HTMLButtonElement>('button.onboarding-backboard-sso-primary'));
+		signInButton.type = 'button';
+		signInButton.textContent = localize('onboarding.backboard.ssoPrompt.signIn', "Sign in with SSO");
+
+		const laterButton = append(actions, $<HTMLButtonElement>('button.onboarding-backboard-sso-secondary'));
+		laterButton.type = 'button';
+		laterButton.textContent = localize('onboarding.backboard.ssoPrompt.later', "Later");
+
+		const close = () => {
+			promptDisposables.dispose();
+			overlay.remove();
+		};
+
+		promptDisposables.add(addDisposableListener(signInButton, EventType.CLICK, () => {
+			close();
+			void this.commandService.executeCommand('backboard.signIn');
+		}));
+		promptDisposables.add(addDisposableListener(laterButton, EventType.CLICK, close));
+		promptDisposables.add(addDisposableListener(overlay, EventType.CLICK, event => {
+			if (event.target === overlay) {
+				close();
+			}
+		}));
+		promptDisposables.add(addDisposableListener(getActiveWindow(), EventType.KEY_DOWN, event => {
+			const keyboardEvent = new StandardKeyboardEvent(event);
+			if (keyboardEvent.keyCode === KeyCode.Escape) {
+				close();
+			}
+		}));
+
+		getActiveWindow().requestAnimationFrame(() => signInButton.focus());
 	}
 
 	private async _hasBackboardCredentials(): Promise<boolean> {
@@ -603,10 +638,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			welcomeContent.classList.add('visible');
 			continueButton.disabled = false;
 			this._focusCurrentStepElement();
-		}, 4300);
+		}, 6000);
 		const removeTimer = activeWindow.setTimeout(() => {
 			splash.remove();
-		}, 5200);
+		}, 7050);
 
 		this.stepDisposables.add(toDisposable(() => {
 			activeWindow.clearTimeout(splashTimer);
@@ -863,7 +898,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this._createImportCard(
 			grid,
 			'vscode',
-			localize('onboarding.backboard.import.vscode', "VS Code"),
+			localize('onboarding.backboard.import.vscode', "Editor"),
 			localize('onboarding.backboard.import.vscode.description', "Bring keybindings and settings."),
 			'onboarding-vscode.png'
 		);
@@ -900,7 +935,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this._logAction('importSettings', undefined, id);
 			this.notificationService.notify({
 				severity: Severity.Info,
-				message: localize('onboarding.backboard.import.pending', "{0} settings import is not wired up in the VS Code build yet.", label),
+				message: localize('onboarding.backboard.import.pending', "{0} settings import is not wired up in this build yet.", label),
 			});
 		}));
 	}

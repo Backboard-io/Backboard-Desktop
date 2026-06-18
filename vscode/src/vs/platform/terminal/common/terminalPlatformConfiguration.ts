@@ -103,8 +103,8 @@ function createTerminalProfileMarkdownDescription(platform: Platform.Linux | Pla
 		"A set of terminal profile customizations for {0} which allows adding, removing or changing how terminals are launched. Profiles are made up of a mandatory path, optional arguments and other presentation options.\n\nTo override an existing profile use its profile name as the key, for example:\n\n{1}\n\n{2}Read more about configuring profiles{3}.",
 		PlatformToString(platform),
 		'```json\n"terminal.integrated.profile.' + key + '": {\n  "bash": null\n}\n```',
-		'[',
-		'](https://code.visualstudio.com/docs/terminal/profiles)'
+		'',
+		''
 	);
 }
 
@@ -394,7 +394,7 @@ const terminalPlatformConfiguration: IConfigurationNode = {
 		},
 		[TerminalSettingId.InheritEnv]: {
 			scope: ConfigurationScope.APPLICATION,
-			description: localize('terminal.integrated.inheritEnv', "Whether new shells should inherit their environment from VS Code, which may source a login shell to ensure $PATH and other development variables are initialized. This has no effect on Windows."),
+			description: localize('terminal.integrated.inheritEnv', "Whether new shells should inherit their environment from Backboard IDE, which may source a login shell to ensure $PATH and other development variables are initialized. This has no effect on Windows."),
 			type: 'boolean',
 			default: true
 		},

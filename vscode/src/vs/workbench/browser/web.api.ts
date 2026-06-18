@@ -200,7 +200,7 @@ export interface IWorkbenchConstructionOptions {
 	/**
 	 * A provider for discovering and connecting to dev tunnel agent hosts.
 	 *
-	 * The embedder (e.g. vscode.dev) implements this to handle tunnel listing
+	 * The embedder implements this to handle tunnel listing
 	 * and relay WebSocket proxying. If not provided, the sessions workbench
 	 * will not be able to discover tunnel-based agent hosts.
 	 */

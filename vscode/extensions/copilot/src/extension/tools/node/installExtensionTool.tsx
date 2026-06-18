@@ -91,7 +91,7 @@ class InstallExtensionTool implements vscode.LanguageModelTool<IInstallExtension
 		}
 
 		const query = encodeURIComponent(JSON.stringify([[extensionId]]));
-		const markdownString = new MarkdownString(l10n.t(`Copilot will install the extension [{0}](command:workbench.extensions.action.showExtensionsWithIds?{1}) and its dependencies.`, options.input.name, query));
+		const markdownString = new MarkdownString(l10n.t(`Backboard will install the extension [{0}](command:workbench.extensions.action.showExtensionsWithIds?{1}) and its dependencies.`, options.input.name, query));
 		markdownString.isTrusted = { enabledCommands: ['workbench.extensions.action.showExtensionsWithIds'] };
 		return {
 			invocationMessage: l10n.t`Installing extension ${options.input.name}`,

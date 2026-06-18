@@ -7,6 +7,7 @@ import { $, addDisposableListener, append, clearNode, h } from '../../../../base
 import { Codicon } from '../../../../base/common/codicons.js';
 import { onUnexpectedError } from '../../../../base/common/errors.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { FileAccess } from '../../../../base/common/network.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize } from '../../../../nls.js';
 import { MenuId } from '../../../../platform/actions/common/actions.js';
@@ -125,7 +126,13 @@ export class EditorGroupWatermark extends Disposable {
 		append(this.shortcuts, $('.backboard-welcome-page', {},
 			$('.backboard-welcome-shell', {},
 				$('.backboard-welcome-header', {},
-					$('.backboard-welcome-logo', { 'aria-hidden': 'true' }),
+					$('.backboard-welcome-logo', { 'aria-hidden': 'true' },
+						$<HTMLImageElement>('img', {
+							src: FileAccess.asBrowserUri('vs/workbench/contrib/welcomeGettingStarted/browser/media/backboard_mark.svg').toString(true),
+							alt: '',
+							decoding: 'async',
+						}),
+					),
 					$('.backboard-welcome-header-copy', {},
 						$('h1.backboard-welcome-title', {}, localize('backboardWelcome.title', "Welcome to Backboard Studio")),
 						$('p.backboard-welcome-subtitle', {}, localize('backboardWelcome.subtitle', "The editor for what's next")),

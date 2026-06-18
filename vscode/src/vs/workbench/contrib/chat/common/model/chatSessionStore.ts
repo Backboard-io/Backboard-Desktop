@@ -373,7 +373,7 @@ export class ChatSessionStore extends Disposable {
 								title: localize('chatSessionStore.serializationError', 'Error saving chat session'),
 								message: localize('chatSessionStore.writeError', 'Error serializing chat session for storage. The session will be lost if the window is closed. Please report this issue to the Backboard team:\n\n{0}', e.stack || toErrorMessage(e)),
 								buttons: [
-									{ label: localize('reportIssue', 'Report Issue'), run: () => this.openerService.open('https://github.com/microsoft/vscode/issues/new?template=bug_report.md') }
+									{ label: localize('reportIssue', 'Report Issue'), run: () => this.openerService.open('') }
 								]
 							});
 						}

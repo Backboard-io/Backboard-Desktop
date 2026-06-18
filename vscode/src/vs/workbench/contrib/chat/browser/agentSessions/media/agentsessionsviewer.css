@@ -40,6 +40,12 @@
 		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
 	}
 
+	.backboard-auth-gate-logo.codicon.codicon-backboard-logo {
+		width: 36px !important;
+		height: 36px !important;
+		color: var(--vscode-editor-foreground);
+	}
+
 	.backboard-auth-gate-title {
 		margin: 0;
 		font-size: 14px;

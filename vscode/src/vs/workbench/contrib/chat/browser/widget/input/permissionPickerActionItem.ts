@@ -188,7 +188,7 @@ export class PermissionPickerActionItem extends ChatInputPickerActionViewItem {
 					const ext = delegate.getExtensionPermissions?.();
 					const url = ext?.sessionType === SessionType.ClaudeCode
 						? 'https://code.claude.com/docs/en/permission-modes#available-modes'
-						: 'https://aka.ms/vscode/docs/permissions';
+						: '';
 					await openerService.open(URI.parse(url));
 				}
 			}],

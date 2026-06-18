@@ -148,7 +148,7 @@ export class SessionTypePickerActionItem extends ChatInputPickerActionViewItem {
 	}
 
 	protected _getLearnMore(): IAction {
-		const learnMoreUrl = 'https://code.visualstudio.com/docs/copilot/agents/overview';
+		const learnMoreUrl = '';
 		return {
 			id: 'workbench.action.chat.agentOverview.learnMore',
 			label: localize('chat.learnMoreAgentTypes', "Learn about agent types..."),

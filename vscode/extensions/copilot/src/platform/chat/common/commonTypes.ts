@@ -288,7 +288,7 @@ function getRateLimitMessage(fetchResult: ChatFetchError, copilotPlan: string | 
 	}
 	if (fetchResult.capiError?.code?.startsWith('integration_rate_limited')) {
 		return l10n.t({
-			message: 'Sorry, GitHub Copilot Chat is currently experiencing high demand. Please try again in {0}. [Learn More]({1})',
+			message: 'Sorry, Backboard Chat is currently experiencing high demand. Please try again in {0}. [Learn More]({1})',
 			args: [retryAfterString, 'https://aka.ms/github-copilot-rate-limit-error'],
 			comment: [`{Locked=']({'}`]
 		});
@@ -332,12 +332,12 @@ export function getQuotaMessageForPlan(copilotPlan: string | undefined, isUsageB
 		switch (copilotPlan) {
 			case 'free':
 				return resetDateString
-					? l10n.t(`You've reached your monthly credit limit. Upgrade to Copilot Pro or wait until your credits reset on {0}.`, resetDateString)
-					: l10n.t(`You've reached your monthly credit limit. Upgrade to Copilot Pro or wait for your credits to reset.`);
+					? l10n.t(`You've reached your monthly credit limit. Upgrade Backboard or wait until your credits reset on {0}.`, resetDateString)
+					: l10n.t(`You've reached your monthly credit limit. Upgrade Backboard or wait for your credits to reset.`);
 			case 'individual':
 				return resetDateString
-					? l10n.t(`You've reached your monthly credit limit. Please enable additional paid credits, upgrade to Copilot Pro+, or wait until your credits reset on {0}.`, resetDateString)
-					: l10n.t(`You've reached your monthly credit limit. Please enable additional paid credits, upgrade to Copilot Pro+, or wait for your credits to reset.`);
+					? l10n.t(`You've reached your monthly credit limit. Please enable additional paid credits, upgrade Backboard, or wait until your credits reset on {0}.`, resetDateString)
+					: l10n.t(`You've reached your monthly credit limit. Please enable additional paid credits, upgrade Backboard, or wait for your credits to reset.`);
 			case 'individual_pro':
 			case 'individual_max':
 				return resetDateString
@@ -346,28 +346,28 @@ export function getQuotaMessageForPlan(copilotPlan: string | undefined, isUsageB
 			case 'business':
 			case 'enterprise':
 				return resetDateString
-					? l10n.t(`You've reached your credit limit. To continue working, please contact your organization's Copilot admin or wait until your credits reset on {0}.`, resetDateString)
-					: l10n.t(`You've reached your credit limit. To continue working, please contact your organization's Copilot admin or wait for your credits to reset.`);
+					? l10n.t(`You've reached your credit limit. To continue working, please contact your organization's Backboard admin or wait until your credits reset on {0}.`, resetDateString)
+					: l10n.t(`You've reached your credit limit. To continue working, please contact your organization's Backboard admin or wait for your credits to reset.`);
 			default:
 				return resetDateString
-					? l10n.t(`You've reached your credit limit. For additional paid credits, please reach out to your organization's Copilot admin or wait until your credits reset on {0}.`, resetDateString)
-					: l10n.t(`You've reached your credit limit. For additional paid credits, please reach out to your organization's Copilot admin or wait for your credits to reset.`);
+					? l10n.t(`You've reached your credit limit. For additional paid credits, please reach out to your organization's Backboard admin or wait until your credits reset on {0}.`, resetDateString)
+					: l10n.t(`You've reached your credit limit. For additional paid credits, please reach out to your organization's Backboard admin or wait for your credits to reset.`);
 		}
 	}
 
 	switch (copilotPlan) {
 		case 'free':
-			return l10n.t(`You've reached your monthly chat messages quota. Upgrade to Copilot Pro or wait for your allowance to renew.`);
+			return l10n.t(`You've reached your monthly chat messages quota. Upgrade Backboard or wait for your allowance to renew.`);
 		case 'individual':
-			return l10n.t(`You've exhausted your premium model quota. Please enable additional paid premium requests, upgrade to Copilot Pro+, or wait for your allowance to renew.`);
+			return l10n.t(`You've exhausted your premium model quota. Please enable additional paid premium requests, upgrade Backboard, or wait for your allowance to renew.`);
 		case 'individual_pro':
 		case 'individual_max':
 			return l10n.t(`You've exhausted your premium model quota. Please enable additional paid premium requests or wait for your allowance to renew.`);
 		case 'business':
 		case 'enterprise':
-			return l10n.t(`You've exhausted your credits. To continue working, please contact your organization's Copilot admin or wait for your allowance to renew.`);
+			return l10n.t(`You've exhausted your credits. To continue working, please contact your organization's Backboard admin or wait for your allowance to renew.`);
 		default:
-			return l10n.t(`You've exhausted your premium model quota. For additional paid premium requests, please reach out to your organization's Copilot admin or wait for your allowance to renew.`);
+			return l10n.t(`You've exhausted your premium model quota. For additional paid premium requests, please reach out to your organization's Backboard admin or wait for your allowance to renew.`);
 	}
 }
 
@@ -382,7 +382,7 @@ function getQuotaHitMessage(fetchResult: ChatFetchError, copilotPlan: string | u
 		return getQuotaMessageForPlan(copilotPlan, isUsageBasedBilling, quotaResetDate);
 	} else if (fetchResult.capiError?.code === 'overage_limit_reached') {
 		return l10n.t({
-			message: 'You cannot accrue additional premium requests at this time. Please contact [GitHub Support]({0}) to continue using Copilot.',
+			message: 'You cannot accrue additional premium requests at this time. Please contact [GitHub Support]({0}) to continue using Backboard.',
 			args: ['https://support.github.com/contact'],
 			comment: [`{Locked=']({'}`]
 		});
@@ -478,7 +478,7 @@ function getErrorDetailsFromChatFetchErrorInner(fetchResult: ChatFetchError, cop
 
 	if (gitHubOutageStatus !== GitHubOutageStatus.None) {
 		const outageMsg = l10n.t({
-			message: 'Note: GitHub is currently experiencing a service disruption. This may be affecting Copilot. Check [GitHub Status]({0}) for details.',
+			message: 'Note: GitHub is currently experiencing a service disruption. This may be affecting Backboard. Check [GitHub Status]({0}) for details.',
 			args: ['https://www.githubstatus.com'],
 			comment: [`{Locked=']({'}`]
 		});

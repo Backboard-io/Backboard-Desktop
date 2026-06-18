@@ -89,7 +89,7 @@ import { getSandboxPrecheckInputsForToolInvocation } from '../../../../chat/brow
 
 // #region Tool data
 
-const TERMINAL_SANDBOX_DOCUMENTATION_URL = 'https://aka.ms/vscode-sandboxing';
+const TERMINAL_SANDBOX_DOCUMENTATION_URL = '';
 const TOOL_REFERENCE_NAME = 'runInTerminal';
 const LEGACY_TOOL_REFERENCE_FULL_NAMES = ['runCommands/runInTerminal'];
 const INPUT_NEEDED_NOTIFICATION_THROTTLE_MS = 5000;
@@ -345,7 +345,7 @@ export async function createRunInTerminalToolData(
 			type: 'boolean',
 			const: allowToRunUnsandboxedCommands,
 			default: allowToRunUnsandboxedCommands,
-			description: 'Whether this tool invocation is allowed to run commands outside the terminal sandbox. This value is set by VS Code based on chat.agent.sandbox.allowUnsandboxedCommands.'
+			description: 'Whether this tool invocation is allowed to run commands outside the terminal sandbox. This value is set by Backboard IDE based on chat.agent.sandbox.allowUnsandboxedCommands.'
 		},
 		requestUnsandboxedExecution: {
 			type: 'boolean',
@@ -2363,7 +2363,7 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 		this._terminalToolCreator.refreshShellIntegrationQuality(toolTerminal);
 		this._logService.info(`RunInTerminalTool: shellIntegrationQuality=${toolTerminal.shellIntegrationQuality} at banner decision time`);
 		if (!toolResultMessage && toolTerminal.shellIntegrationQuality === ShellIntegrationQuality.None) {
-			toolResultMessage = '$(info) Enable [shell integration](https://code.visualstudio.com/docs/terminal/shell-integration) to improve command detection';
+			toolResultMessage = '$(info) Enable shell integration to improve command detection';
 		}
 
 		const resultText: string[] = [];

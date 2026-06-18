@@ -96,11 +96,11 @@ export class SessionsPolicyBlockedOverlay extends Disposable {
 		learnMore.href = 'https://aka.ms/VSCode/Agents/docs';
 		this._register(addDisposableListener(learnMore, EventType.CLICK, (e) => {
 			e.preventDefault();
-			this.openerService.open(URI.parse('https://aka.ms/VSCode/Agents/docs'));
+			this.openerService.open(URI.parse('https://backboard.dev/docs/agents'));
 		}));
 
 		const button = this._register(new Button(card, { ...defaultButtonStyles, secondary: true }));
-		button.label = localize('policyBlocked.openVSCode', "Open VS Code");
+		button.label = localize('policyBlocked.openVSCode', "Open Backboard IDE");
 		this._register(button.onDidClick(() => this._openVSCode()));
 	}
 

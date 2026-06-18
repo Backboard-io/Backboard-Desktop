@@ -241,7 +241,7 @@ export const schema: IJSONSchema = {
 			deprecationMessage: nls.localize('vscode.extension.enableProposedApi.deprecated', 'Use `enabledApiProposals` instead.'),
 		},
 		enabledApiProposals: {
-			markdownDescription: nls.localize('vscode.extension.enabledApiProposals', 'Enable API proposals to try them out. Only valid **during development**. Extensions **cannot be published** with this property. For more details visit: https://code.visualstudio.com/api/advanced-topics/using-proposed-api'),
+			markdownDescription: nls.localize('vscode.extension.enabledApiProposals', 'Enable API proposals to try them out. Only valid **during development**. Extensions **cannot be published** with this property. For more details visit: '),
 			type: 'array',
 			uniqueItems: true,
 			items: {
@@ -251,7 +251,7 @@ export const schema: IJSONSchema = {
 			}
 		},
 		api: {
-			markdownDescription: nls.localize('vscode.extension.api', 'Describe the API provided by this extension. For more details visit: https://code.visualstudio.com/api/advanced-topics/remote-extensions#handling-dependencies-with-remote-extensions'),
+			markdownDescription: nls.localize('vscode.extension.api', 'Describe the API provided by this extension. For more details visit: '),
 			type: 'string',
 			enum: ['none'],
 			enumDescriptions: [
@@ -632,7 +632,7 @@ export const schema: IJSONSchema = {
 		},
 		pricing: {
 			type: 'string',
-			markdownDescription: nls.localize('vscode.extension.pricing', 'The pricing information for the extension. Can be Free (default) or Trial. For more details visit: https://code.visualstudio.com/api/working-with-extensions/publishing-extension#extension-pricing-label'),
+			markdownDescription: nls.localize('vscode.extension.pricing', 'The pricing information for the extension. Can be Free (default) or Trial. For more details visit: '),
 			enum: ['Free', 'Trial'],
 			default: 'Free'
 		}

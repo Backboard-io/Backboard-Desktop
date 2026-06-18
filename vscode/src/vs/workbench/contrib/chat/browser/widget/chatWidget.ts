@@ -1224,7 +1224,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	private getWelcomeViewContent(additionalMessage: string | IMarkdownString | undefined): IChatViewWelcomeContent {
 		if (this.isLockedToCodingAgent) {
 			return {
-				title: '',
+				title: localize('backboardWelcomeTitle', "Backboard"),
 				message: new MarkdownString([
 					localize('backboardWelcomeExampleLandingPage', "Make me a landing page"),
 					localize('backboardWelcomeExampleBlueWebsite', "Make this website blue"),

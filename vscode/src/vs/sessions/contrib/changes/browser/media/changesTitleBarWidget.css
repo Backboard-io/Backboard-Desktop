@@ -5,8 +5,8 @@
 
 /* ---- Changes titlebar action spacing ---- */
 
-/* Remove leftover spacing between local-session actions (Run, VS Code) and fixed toggles (Terminal, Changes).
- * Targets the action following the VS Code icon (any Codicon.vscode variant). */
+/* Remove leftover spacing between local-session actions and fixed toggles (Terminal, Changes).
+ * Targets the action following the editor icon. */
 .agent-sessions-workbench .titlebar-session-actions-container .monaco-action-bar .actions-container > .action-item:has(.codicon[class*="codicon-vscode"]) + .action-item {
 	margin-left: 0;
 }

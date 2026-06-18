@@ -306,7 +306,7 @@ export async function showInteractivePermissionPrompt(
 	const toolParams: CoreConfirmationToolParams = {
 		tool: ToolName.CoreConfirmationTool,
 		input: {
-			title: 'Copilot CLI Permission Request',
+			title: 'Backboard Agent Permission Request',
 			message: codeBlock(permissionRequest),
 			confirmationType: 'basic'
 		}

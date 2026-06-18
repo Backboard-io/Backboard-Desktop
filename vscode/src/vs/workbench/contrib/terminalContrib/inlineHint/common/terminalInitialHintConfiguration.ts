@@ -23,7 +23,7 @@ export const terminalInitialHintConfiguration: IStringDictionary<IConfigurationP
 	},
 	[TerminalInitialHintSettingId.CopilotCli]: {
 		restricted: true,
-		markdownDescription: localize('terminal.integrated.initialHintCopilotCli', "When enabled, the terminal initial hint will suggest using Copilot CLI by typing {0} instead of opening Copilot Chat.", '`copilot`'),
+		markdownDescription: localize('terminal.integrated.initialHintCopilotCli', "When enabled, the terminal initial hint will suggest using Backboard CLI by typing {0} instead of opening Backboard Chat.", '`backboard`'),
 		type: 'boolean',
 		default: false,
 		tags: ['experimental'],

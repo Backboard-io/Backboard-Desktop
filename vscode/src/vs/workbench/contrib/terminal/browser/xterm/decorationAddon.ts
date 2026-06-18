@@ -516,7 +516,7 @@ export class DecorationAddon extends Disposable implements ITerminalAddon, IDeco
 		const labelAbout = localize("terminal.learnShellIntegration", 'Learn About Shell Integration');
 		actions.push({
 			class: undefined, tooltip: labelAbout, id: 'terminal.learnShellIntegration', label: labelAbout, enabled: true,
-			run: () => this._openerService.open('https://code.visualstudio.com/docs/terminal/shell-integration')
+			run: () => this._openerService.open('')
 		});
 		return actions;
 	}

@@ -1714,15 +1714,15 @@ const completionSpec: Fig.Spec = {
 		},
 		{
 			name: ['coding-agent'],
-			description: 'This extension configures GitHub Copilot Coding Agent access to Azure',
+			description: 'This extension configures coding agent access to Azure',
 			subcommands: [
 				{
 					name: ['config'],
-					description: 'Configure the GitHub Copilot coding agent to access Azure resources via the Azure MCP',
+					description: 'Configure the coding agent to access Azure resources via the Azure MCP',
 					options: [
 						{
 							name: ['--branch-name'],
-							description: 'The branch name to use when pushing changes to the copilot-setup-steps.yml',
+							description: 'The branch name to use when pushing setup-step changes',
 							args: [
 								{
 									name: 'branch-name',
@@ -1749,7 +1749,7 @@ const completionSpec: Fig.Spec = {
 						},
 						{
 							name: ['--remote-name'],
-							description: 'The name of the git remote where the Copilot Coding Agent will run (ex: <owner>/<repo>)',
+							description: 'The name of the git remote where the coding agent will run (ex: <owner>/<repo>)',
 							args: [
 								{
 									name: 'remote-name',
@@ -1874,7 +1874,7 @@ const completionSpec: Fig.Spec = {
 		},
 		{
 			name: ['copilot'],
-			description: 'Manage GitHub Copilot agent settings. (Preview)',
+			description: 'Manage coding agent settings. (Preview)',
 			subcommands: [
 				{
 					name: ['consent'],
@@ -3555,11 +3555,11 @@ const completionSpec: Fig.Spec = {
 				},
 				{
 					name: ['coding-agent'],
-					description: 'This extension configures GitHub Copilot Coding Agent access to Azure',
+					description: 'This extension configures coding agent access to Azure',
 					subcommands: [
 						{
 							name: ['config'],
-							description: 'Configure the GitHub Copilot coding agent to access Azure resources via the Azure MCP',
+							description: 'Configure the coding agent to access Azure resources via the Azure MCP',
 						},
 						{
 							name: ['version'],
@@ -3643,7 +3643,7 @@ const completionSpec: Fig.Spec = {
 				},
 				{
 					name: ['copilot'],
-					description: 'Manage GitHub Copilot agent settings. (Preview)',
+					description: 'Manage coding agent settings. (Preview)',
 					subcommands: [
 						{
 							name: ['consent'],

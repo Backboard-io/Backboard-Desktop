@@ -314,7 +314,7 @@ export const platformSessionSchema = createSchema({
 			localize('agentHost.sessionConfig.autoApprove.autopilot', "Autopilot (Preview)"),
 		],
 		enumDescriptions: [
-			localize('agentHost.sessionConfig.autoApprove.defaultDescription', "Copilot uses your configured settings"),
+			localize('agentHost.sessionConfig.autoApprove.defaultDescription', "Backboard uses your configured settings"),
 			localize('agentHost.sessionConfig.autoApprove.bypassDescription', "All tool calls are auto-approved"),
 			localize('agentHost.sessionConfig.autoApprove.autopilotDescription', "Autonomously iterates from start to finish"),
 		],
@@ -406,7 +406,7 @@ export const platformRootSchema = createSchema({
 	[AgentHostSessionSyncEnabledConfigKey]: schemaProperty<boolean>({
 		type: 'boolean',
 		title: localize('agentHost.config.sessionSyncEnabled.title', "Session Sync"),
-		description: localize('agentHost.config.sessionSyncEnabled.description', "Whether remote session sync is enabled for the copilot-sdk CLI."),
+	description: localize('agentHost.config.sessionSyncEnabled.description', "Whether remote session sync is enabled for the Backboard agent CLI."),
 		default: false,
 	}),
 });

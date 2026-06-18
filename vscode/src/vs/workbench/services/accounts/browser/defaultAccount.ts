@@ -351,8 +351,8 @@ class DefaultAccountProvider extends Disposable implements IDefaultAccountProvid
 	}
 
 	private async init(): Promise<void> {
-		// Skip initialization for classic web-no-remote (vscode.dev editor), but
-		// still initialize for the agents web workbench (vscode.dev/agents) where
+		// Skip initialization for classic web-no-remote, but
+		// still initialize for the agents web workbench where
 		// account state drives the title bar and the welcome walkthrough.
 		if (isWeb && !this.environmentService.remoteAuthority && !this.environmentService.isSessionsWindow) {
 			this.logService.debug('[DefaultAccount] Running in web without remote, skipping initialization');

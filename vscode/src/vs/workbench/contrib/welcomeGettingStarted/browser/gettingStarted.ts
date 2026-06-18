@@ -21,7 +21,7 @@ import { splitRecentLabel } from '../../../../base/common/labels.js';
 import { DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { ILink, LinkedText } from '../../../../base/common/linkedText.js';
 import { parse } from '../../../../base/common/marshalling.js';
-import { Schemas, matchesScheme } from '../../../../base/common/network.js';
+import { FileAccess, Schemas, matchesScheme } from '../../../../base/common/network.js';
 import { OS } from '../../../../base/common/platform.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { assertReturnsDefined } from '../../../../base/common/types.js';
@@ -944,7 +944,13 @@ export class GettingStartedPage extends EditorPane {
 		if (!backboardEditorInput?.selectedCategory) {
 			this.container.classList.add('backboard-welcome');
 
-			const createLogo = () => $('.backboard-welcome-logo', { 'aria-hidden': 'true' });
+			const createLogo = () => $('.backboard-welcome-logo', { 'aria-hidden': 'true' },
+				$<HTMLImageElement>('img', {
+					src: FileAccess.asBrowserUri('vs/workbench/contrib/welcomeGettingStarted/browser/media/backboard_mark.svg').toString(true),
+					alt: '',
+					decoding: 'async',
+				}),
+			);
 
 			const runCommand = (command: string, ...args: unknown[]) => {
 				Promise.resolve(this.commandService.executeCommand(command, ...args)).catch(onUnexpectedError);
@@ -1741,7 +1747,7 @@ export class GettingStartedPage extends EditorPane {
 		const optOutCopy = localize('optOut', "opt out");
 		const optOutButton = `[${optOutCopy}](command:settings.filterByTelemetry)`;
 
-		const text = localize({ key: 'footer', comment: ['fist substitution is "vs code", second is "privacy statement", third is "opt out".'] },
+		const text = localize({ key: 'footer', comment: ['first substitution is the product name, second is "privacy statement", third is "opt out".'] },
 			"{0} collects usage data. Read our {1} and learn how to {2}.", this.productService.nameShort, privacyStatementButton, optOutButton);
 
 		const renderedContents = this.detailsPageDisposables.add(this.markdownRendererService.render({ value: text, isTrusted: true }));

@@ -33,7 +33,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			default: true,
 			tags: ['experimental'],
 			experiment: { mode: 'startup' },
-			description: localize('sessions.chat.localAgent.enabled', "Enable Local VS Code chat sessions in the Agents Window. Reload the window for changes to take effect."),
+			description: localize('sessions.chat.localAgent.enabled', "Enable local Backboard IDE chat sessions in the Agents window. Reload the window for changes to take effect."),
 		},
 	},
 });
@@ -118,4 +118,3 @@ registerAction2(class DeleteLocalSessionAction extends Action2 {
 		return confirmAndDeleteSessions(accessor, context);
 	}
 });
-

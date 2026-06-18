@@ -235,6 +235,16 @@
             "default": "https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases",
             "description": "Base URL for Backboard Studio update manifests."
           },
+          "backboard.updates.channel": {
+            "type": "string",
+            "enum": [
+              "",
+              "stable",
+              "sandbox"
+            ],
+            "default": "",
+            "description": "Backboard Studio update channel. Leave empty to use sandbox for development builds and stable for packaged production builds."
+          },
           "backboard.updates.manifestUrl": {
             "type": "string",
             "default": "",

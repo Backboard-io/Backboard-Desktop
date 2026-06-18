@@ -70,37 +70,40 @@ ModesRegistry.registerLanguage({
 
 // register output container
 const outputViewIcon = registerIcon('output-view-icon', Codicon.output, nls.localize('outputViewIcon', 'View icon of the output view.'));
-const VIEW_CONTAINER: ViewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
-	id: OUTPUT_VIEW_ID,
-	title: nls.localize2('output', "Output"),
-	icon: outputViewIcon,
-	order: 1,
-	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [OUTPUT_VIEW_ID, { mergeViewWithContainerWhenSingleView: true }]),
-	storageId: OUTPUT_VIEW_ID,
-	hideIfEmpty: true,
-	windowEnablement: WindowEnablement.Both
-}, ViewContainerLocation.Panel, { doNotRegisterOpenCommand: true });
-
-Registry.as<IViewsRegistry>(ViewContainerExtensions.ViewsRegistry).registerViews([{
-	id: OUTPUT_VIEW_ID,
-	name: nls.localize2('output', "Output"),
-	containerIcon: outputViewIcon,
-	canMoveView: true,
-	canToggleVisibility: true,
-	ctorDescriptor: new SyncDescriptor(OutputViewPane),
-	openCommandActionDescriptor: {
-		id: 'workbench.action.output.toggleOutput',
-		mnemonicTitle: nls.localize({ key: 'miToggleOutput', comment: ['&& denotes a mnemonic'] }, "&&Output"),
-		keybindings: {
-			primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyU,
-			linux: {
-				primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyMod.CtrlCmd | KeyCode.KeyH)  // On Ubuntu Ctrl+Shift+U is taken by some global OS command
-			}
-		},
+const backboardShowOutputPanel = false;
+if (backboardShowOutputPanel) {
+	const VIEW_CONTAINER: ViewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
+		id: OUTPUT_VIEW_ID,
+		title: nls.localize2('output', "Output"),
+		icon: outputViewIcon,
 		order: 1,
-	},
-	windowEnablement: WindowEnablement.Both
-}], VIEW_CONTAINER);
+		ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [OUTPUT_VIEW_ID, { mergeViewWithContainerWhenSingleView: true }]),
+		storageId: OUTPUT_VIEW_ID,
+		hideIfEmpty: true,
+		windowEnablement: WindowEnablement.Both
+	}, ViewContainerLocation.Panel, { doNotRegisterOpenCommand: true });
+
+	Registry.as<IViewsRegistry>(ViewContainerExtensions.ViewsRegistry).registerViews([{
+		id: OUTPUT_VIEW_ID,
+		name: nls.localize2('output', "Output"),
+		containerIcon: outputViewIcon,
+		canMoveView: true,
+		canToggleVisibility: true,
+		ctorDescriptor: new SyncDescriptor(OutputViewPane),
+		openCommandActionDescriptor: {
+			id: 'workbench.action.output.toggleOutput',
+			mnemonicTitle: nls.localize({ key: 'miToggleOutput', comment: ['&& denotes a mnemonic'] }, "&&Output"),
+			keybindings: {
+				primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyU,
+				linux: {
+					primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyMod.CtrlCmd | KeyCode.KeyH)  // On Ubuntu Ctrl+Shift+U is taken by some global OS command
+				}
+			},
+			order: 1,
+		},
+		windowEnablement: WindowEnablement.Both
+	}], VIEW_CONTAINER);
+}
 
 class OutputContribution extends Disposable implements IWorkbenchContribution {
 	constructor(

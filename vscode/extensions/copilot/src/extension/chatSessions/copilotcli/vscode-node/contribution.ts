@@ -70,7 +70,7 @@ export class CopilotCLIContrib extends Disposable {
 		try {
 			const { serverUri, headers } = await httpServer.start({
 				id: 'vscode-copilot-cli',
-				serverLabel: 'VS Code Copilot CLI',
+				serverLabel: 'Backboard Agent CLI',
 				serverVersion: '0.0.1',
 				registerTools: (server, sessionId) => {
 					registerTools(server, logger, diffState, selectionState, contentProvider, this.sessionTracker, sessionId);

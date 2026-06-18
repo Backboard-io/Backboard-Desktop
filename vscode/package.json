@@ -275,10 +275,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/microsoft/vscode.git"
+    "url": ""
   },
   "bugs": {
-    "url": "https://github.com/microsoft/vscode/issues"
+    "url": ""
   },
   "optionalDependencies": {
     "windows-foreground-love": "0.6.1"

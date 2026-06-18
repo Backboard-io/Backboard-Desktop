@@ -83,11 +83,11 @@ function normalizeSessionConfigValue(property: string, value: unknown, policyRes
 // AgentHostSessionAdapter — shared adapter for local and remote sessions
 // ============================================================================
 
-/** Copilot CLI session type */
+/** Background agent session type */
 export const CopilotCLISessionType: ISessionType = {
 	id: 'copilotcli',
-	label: localize('copilotCLI', "Copilot CLI"),
-	icon: Codicon.copilot,
+	label: localize('copilotCLI', "Background Agent"),
+	icon: Codicon.sparkle,
 };
 
 /**

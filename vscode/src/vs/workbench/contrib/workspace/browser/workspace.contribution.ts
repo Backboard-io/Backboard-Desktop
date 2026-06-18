@@ -127,12 +127,12 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 			await this.workspaceTrustManagementService.workspaceResolved;
 
 			// Details
-			const markdownDetails = [
-				this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY ?
-					localize('openLooseFileWorkspaceDetails', "You are trying to open untrusted files in a workspace which is trusted.") :
-					localize('openLooseFileWindowDetails', "You are trying to open untrusted files in a window which is trusted."),
-				localize('openLooseFileLearnMore', "If you don't want to open untrusted files, we recommend to open them in Restricted Mode in a new window as the files may be malicious. See [our docs](https://aka.ms/vscode-workspace-trust) to learn more.")
-			];
+				const markdownDetails = [
+					this.workspaceContextService.getWorkbenchState() !== WorkbenchState.EMPTY ?
+						localize('openLooseFileWorkspaceDetails', "You are trying to open untrusted files in a workspace which is trusted.") :
+						localize('openLooseFileWindowDetails', "You are trying to open untrusted files in a window which is trusted."),
+					localize('openLooseFileLearnMore', "If you don't want to open untrusted files, we recommend to open them in Restricted Mode in a new window as the files may be malicious. See our docs to learn more.")
+				];
 
 			// Dialog
 			await this.dialogService.prompt<void>({
@@ -169,11 +169,11 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 			await this.workspaceTrustManagementService.workspaceResolved;
 
 			// Details
-			const markdownDetails = [
-				options?.message ?? localize('resourcesTrustDetails', "You are trying to open an untrusted folder. Do you trust the authors of this content?"),
-				localize('resourcesTrustLearnMore', "If you don't trust the authors of these files, we recommend not continuing as the files may be malicious. See [our docs](https://aka.ms/vscode-workspace-trust) to learn more."),
-				`\`${this.labelService.getUriLabel(options.uri)}\``
-			];
+				const markdownDetails = [
+					options?.message ?? localize('resourcesTrustDetails', "You are trying to open an untrusted folder. Do you trust the authors of this content?"),
+					localize('resourcesTrustLearnMore', "If you don't trust the authors of these files, we recommend not continuing as the files may be malicious. See our docs to learn more."),
+					`\`${this.labelService.getUriLabel(options.uri)}\``
+				];
 
 			const sessionsTrustNote = getSessionsWindowTrustNote(this.environmentService, this.productService, false);
 			if (sessionsTrustNote) {
@@ -225,10 +225,10 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 			}
 
 			// Dialog
-			const markdownDetails = [
-				{ markdown: new MarkdownString(details) },
-				{ markdown: new MarkdownString(localize('immediateTrustRequestLearnMore', "If you don't trust the authors of these files, we do not recommend continuing as the files may be malicious. See [our docs](https://aka.ms/vscode-workspace-trust) to learn more.")) }
-			];
+				const markdownDetails = [
+					{ markdown: new MarkdownString(details) },
+					{ markdown: new MarkdownString(localize('immediateTrustRequestLearnMore', "If you don't trust the authors of these files, we do not recommend continuing as the files may be malicious. See our docs to learn more.")) }
+				];
 			const sessionsTrustNote = getSessionsWindowTrustNote(this.environmentService, this.productService, this.useWorkspaceLanguage);
 			if (sessionsTrustNote) {
 				markdownDetails.push({ markdown: new MarkdownString(sessionsTrustNote) });
@@ -407,14 +407,14 @@ export class WorkspaceTrustUXHandler extends Disposable implements IWorkbenchCon
 			}
 
 			// Show Workspace Trust Start Dialog
-			const markdownStrings = [
-				!isSingleFolderWorkspace ?
-					localize('workspaceStartupTrustDetails', "{0} provides features that may automatically execute files in this workspace.", this.productService.nameShort) :
-					localize('folderStartupTrustDetails', "{0} provides features that may automatically execute files in this folder.", this.productService.nameShort),
-				learnMoreString ?? localize('startupTrustRequestLearnMore', "If you don't trust the authors of these files, we recommend to continue in restricted mode as the files may be malicious. See [our docs](https://aka.ms/vscode-workspace-trust) to learn more."),
-				!isEmptyWindow ?
-					`\`${this.labelService.getWorkspaceLabel(workspaceIdentifier, { verbose: Verbosity.LONG })}\`` : '',
-			];
+				const markdownStrings = [
+					!isSingleFolderWorkspace ?
+						localize('workspaceStartupTrustDetails', "{0} provides features that may automatically execute files in this workspace.", this.productService.nameShort) :
+						localize('folderStartupTrustDetails', "{0} provides features that may automatically execute files in this folder.", this.productService.nameShort),
+					learnMoreString ?? localize('startupTrustRequestLearnMore', "If you don't trust the authors of these files, we recommend to continue in restricted mode as the files may be malicious. See our docs to learn more."),
+					!isEmptyWindow ?
+						`\`${this.labelService.getWorkspaceLabel(workspaceIdentifier, { verbose: Verbosity.LONG })}\`` : '',
+				];
 			const sessionsTrustNote = getSessionsWindowTrustNote(this.environmentService, this.productService, !isSingleFolderWorkspace);
 			if (sessionsTrustNote) {
 				markdownStrings.push(sessionsTrustNote);
@@ -573,7 +573,7 @@ export class WorkspaceTrustUXHandler extends Disposable implements IWorkbenchCon
 				},
 				{
 					label: localize('restrictedModeBannerLearnMore', "Learn More"),
-					href: 'https://aka.ms/vscode-workspace-trust'
+					href: ''
 				}
 			];
 
@@ -799,7 +799,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
 			[WORKSPACE_TRUST_ENABLED]: {
 				type: 'boolean',
 				default: false,
-				description: localize('workspace.trust.description', "Controls whether or not Workspace Trust is enabled within VS Code."),
+				description: localize('workspace.trust.description', "Controls whether or not Workspace Trust is enabled within Backboard IDE."),
 				tags: [WORKSPACE_TRUST_SETTING_TAG],
 				scope: ConfigurationScope.APPLICATION,
 			},
@@ -845,7 +845,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
 			[WORKSPACE_TRUST_EMPTY_WINDOW]: {
 				type: 'boolean',
 				default: true,
-				markdownDescription: localize('workspace.trust.emptyWindow.description', "Controls whether or not the empty window is trusted by default within VS Code. When used with `#{0}#`, you can enable the full functionality of VS Code without prompting in an empty window.", WORKSPACE_TRUST_UNTRUSTED_FILES),
+				markdownDescription: localize('workspace.trust.emptyWindow.description', "Controls whether or not the empty window is trusted by default within Backboard IDE. When used with `#{0}#`, you can enable full functionality without prompting in an empty window.", WORKSPACE_TRUST_UNTRUSTED_FILES),
 				tags: [WORKSPACE_TRUST_SETTING_TAG],
 				scope: ConfigurationScope.APPLICATION
 			}

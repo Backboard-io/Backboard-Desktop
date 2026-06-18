@@ -62,7 +62,7 @@ fi
 
 echo "Starting Backboard Studio Dev"
 echo "Profile: $RUN_DIR/user-data"
-echo "Log: $RUN_DIR/code.log"
+echo "Output: terminal"
 
 ARGS=(
 	--user-data-dir "$RUN_DIR/user-data"
@@ -85,19 +85,5 @@ export VSCODE_CLI=1
 export ELECTRON_ENABLE_STACK_DUMPING=1
 export ELECTRON_ENABLE_LOGGING=1
 
-"$APP" . "${ARGS[@]}" > "$RUN_DIR/code.log" 2>&1 &
-PID=$!
-
-sleep 2
-
-osascript - "$PID" <<'APPLESCRIPT' >/dev/null 2>&1 || true
-on run argv
-	set appPid to item 1 of argv as integer
-	tell application "System Events"
-		set frontmost of the first process whose unix id is appPid to true
-	end tell
-end run
-APPLESCRIPT
-
-echo "PID: $PID"
-wait "$PID"
+echo "PID: $$"
+exec "$APP" . "${ARGS[@]}"

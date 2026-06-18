@@ -67,17 +67,17 @@ export function refreshTokens(commandService: ICommandService): void {
 
 /**
  * Builds a redirect URL that GitHub will use to return the user to VS Code
- * after completing a plan upgrade. The redirect goes through `vscode.dev/redirect`
+ * after completing a plan upgrade. The redirect goes through Backboard's redirect
  * which triggers the native protocol handler back into the desktop app.
  *
  * @param baseUpgradeUrl The direct GitHub upgrade URL (from `resolveGitHubUrl`).
- * @param urlProtocol The VS Code URL protocol scheme (e.g. `vscode`, `vscode-insiders`, `code-oss`).
+ * @param urlProtocol The Backboard URL protocol scheme.
  * @param quality The product quality (`stable`, `insider`, or `undefined` for OSS).
  * @returns The upgrade URL with a `return_to` query parameter appended.
  */
 export function buildUpgradeUrlWithRedirect(baseUpgradeUrl: string, urlProtocol: string, quality: string | undefined): string {
 	const vscodeUri = `${urlProtocol}://${defaultChat.chatExtensionId}/upgrade-success`;
-	const redirectHost = quality === 'stable' ? 'vscode.dev' : 'insiders.vscode.dev';
+	const redirectHost = quality === 'stable' ? 'backboard.dev' : '';
 	const returnTo = `https://${redirectHost}/redirect?url=${encodeURIComponent(vscodeUri)}`;
 
 	const separator = baseUpgradeUrl.includes('?') ? '&' : '?';

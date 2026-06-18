@@ -41,6 +41,7 @@ import { IStorageService, StorageScope } from '../../../../platform/storage/comm
 export const VIEWLET_ID = 'workbench.view.remote';
 
 export class ForwardedPortsView extends Disposable implements IWorkbenchContribution {
+	private static readonly backboardShowPortsPanel = false;
 	private readonly contextKeyListener = this._register(new MutableDisposable<IDisposable>());
 	private readonly activityBadge = this._register(new MutableDisposable<IDisposable>());
 	private entryAccessor: IStatusbarEntryAccessor | undefined;
@@ -69,6 +70,10 @@ export class ForwardedPortsView extends Disposable implements IWorkbenchContribu
 	}
 
 	private async getViewContainer(): Promise<ViewContainer | null> {
+		if (!ForwardedPortsView.backboardShowPortsPanel) {
+			return null;
+		}
+
 		return Registry.as<IViewContainersRegistry>(Extensions.ViewContainersRegistry).registerViewContainer({
 			id: TUNNEL_VIEW_CONTAINER_ID,
 			title: nls.localize2('ports', "Ports"),

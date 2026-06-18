@@ -1276,7 +1276,7 @@ fork end-to-end ships in Phase 6.5.
 
 Exit criteria: ready to enable for external preview.
 
-### Phase 15 — SDK distribution via `product.json` + main.vscode-cdn.net
+### Phase 15 — SDK distribution via `product.json` + Backboard CDN
 
 **Status as of 2026-06-12:** Runtime shape is per-SDK `urlTemplate` +
 runtime `{sdkTarget}` substitution (replaced the per-platform

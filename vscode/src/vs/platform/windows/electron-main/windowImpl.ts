@@ -1694,7 +1694,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			}
 
 			logMessage += `Total Samples: ${samples}\n`;
-			logMessage += 'For full overview of the unresponsive period, capture cpu profile via https://aka.ms/vscode-tracing-cpu-profile';
+			logMessage += 'For full overview of the unresponsive period, capture cpu profile via ';
 			this.logService.error(logMessage);
 		}
 

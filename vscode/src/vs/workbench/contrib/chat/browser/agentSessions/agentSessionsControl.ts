@@ -202,6 +202,9 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		overlay.setAttribute('aria-label', localize('backboard.auth.agents.aria', "Sign in to Backboard"));
 
 		const card = append(overlay, $('.backboard-auth-gate-card'));
+		const logo = append(card, $('span.backboard-auth-gate-logo.codicon.codicon-backboard-logo'));
+		logo.setAttribute('aria-hidden', 'true');
+
 		const title = append(card, $('h3.backboard-auth-gate-title'));
 		title.textContent = localize('backboard.auth.agents.title', "Sign in to Backboard");
 

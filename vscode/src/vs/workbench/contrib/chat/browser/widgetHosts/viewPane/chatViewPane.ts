@@ -805,14 +805,10 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		overlay.setAttribute('role', 'dialog');
 		overlay.setAttribute('aria-label', localize('backboard.auth.chat.aria', "Sign in to Backboard"));
 
-		const topButton = append(overlay, $<HTMLButtonElement>('button.backboard-auth-gate-top-button'));
-		topButton.type = 'button';
-		topButton.textContent = localize('backboard.auth.signIn', "Sign in");
-		this._register(addDisposableListener(topButton, EventType.CLICK, () => {
-			void this.commandService.executeCommand('backboard.signIn');
-		}));
-
 		const card = append(overlay, $('.backboard-auth-gate-card'));
+		const logo = append(card, $('span.backboard-auth-gate-logo.codicon.codicon-backboard-logo'));
+		logo.setAttribute('aria-hidden', 'true');
+
 		const title = append(card, $('h3.backboard-auth-gate-title'));
 		title.textContent = localize('backboard.auth.chat.title', "Sign in to Backboard");
 

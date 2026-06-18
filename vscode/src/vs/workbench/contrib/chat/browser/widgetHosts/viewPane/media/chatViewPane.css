@@ -76,21 +76,12 @@
 		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
 	}
 
-	.backboard-auth-gate-top-button {
-		position: absolute;
-		top: 10px;
-		right: 10px;
-		height: 26px;
-		padding: 0 10px;
-		border: 1px solid var(--vscode-button-border, transparent);
-		border-radius: 2px;
-		color: var(--vscode-button-foreground);
-		background: var(--vscode-button-background);
-		cursor: pointer;
-	}
-
-	.backboard-auth-gate-top-button:hover {
-		background: var(--vscode-button-hoverBackground);
+	.backboard-auth-gate-logo.codicon.codicon-backboard-logo {
+		display: inline-block;
+		width: 36px;
+		height: 36px;
+		font-size: 0;
+		color: var(--vscode-editor-foreground);
 	}
 
 	.backboard-auth-gate-title {

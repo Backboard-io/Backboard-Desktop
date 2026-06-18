@@ -139,7 +139,7 @@ export class DelegationSessionPickerActionItem extends SessionTypePickerActionIt
 	}
 
 	protected override _getLearnMore(): IAction {
-		const learnMoreUrl = 'https://aka.ms/vscode-continue-chat-in';
+		const learnMoreUrl = '';
 		return {
 			id: 'workbench.action.chat.agentOverview.learnMoreHandOff',
 			label: localize('chat.learnMoreAgentHandOff', "Learn about agent handoff..."),

@@ -555,6 +555,9 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 		for (let i = 0; i < menuActions.length; i++) {
 			const action = menuActions[i];
 			if (action instanceof MenuItemAction) {
+				if (isCopilotCliChatNewAction(action)) {
+					continue;
+				}
 				// TODO: This is an odd way to do this, but the best we can do currently
 				if (i === 0 && !contribution.canDelegate) {
 					disposables.add(registerNewSessionExternalAction(contribution.type, contribution.displayName, action.item.id));
@@ -1596,7 +1599,13 @@ function isAgentSessionProviderType(type: string): boolean {
 }
 
 function isCopilotCliSessionContribution(contribution: IChatSessionsExtensionPoint): boolean {
-	return contribution.type === AgentSessionProviders.Background || contribution.displayName === 'Copilot CLI';
+	return contribution.type === AgentSessionProviders.Background ||
+		contribution.type.includes('copilotcli') ||
+		contribution.displayName.includes('Copilot CLI');
+}
+
+function isCopilotCliChatNewAction(action: MenuItemAction): boolean {
+	return action.item.id.includes('copilotcli') || action.label.includes('Copilot CLI');
 }
 
 export function getSessionStatusForModel(model: IChatModel): ChatSessionStatus | undefined {
