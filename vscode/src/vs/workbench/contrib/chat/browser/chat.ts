@@ -83,6 +83,11 @@ export interface ISessionTypePickerDelegate {
 	 */
 	setActiveSessionProvider?(provider: AgentSessionTarget): void;
 	/**
+	 * Optional allowlist for picker surfaces that want to expose only a subset
+	 * of session providers while still reusing the shared session picker UI.
+	 */
+	getAllowedSessionProviders?(): readonly AgentSessionTarget[];
+	/**
 	 * Optional getter for the pending delegation target - the target that will be used when submit is pressed.
 	 */
 	getPendingDelegationTarget?(): AgentSessionTarget | undefined;

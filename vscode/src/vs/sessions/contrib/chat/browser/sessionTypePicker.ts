@@ -88,6 +88,7 @@ export class SessionTypePicker extends Disposable {
 
 	/** Session types the active session's folder can be served by, across all providers. */
 	protected _folderSessionTypes: IProviderSessionType[] = [];
+	private _allowedSessionTypeIds: readonly string[] | undefined;
 
 	private readonly _renderDisposables = this._register(new DisposableStore());
 	protected _triggerElement: HTMLElement | undefined;
@@ -111,7 +112,7 @@ export class SessionTypePicker extends Disposable {
 		const refresh = (session: ISession | undefined) => {
 			if (session) {
 				const folderUri = session.workspace.get()?.folders[0]?.root;
-				this._folderSessionTypes = folderUri ? this.sessionsManagementService.getSessionTypesForFolder(folderUri) : [];
+				this._folderSessionTypes = this._filterAllowedSessionTypes(folderUri ? this.sessionsManagementService.getSessionTypesForFolder(folderUri) : []);
 				// Reflect the active session's type in the trigger label, but do
 				// not persist it: the stored preference must only change when the
 				// user explicitly picks a type via the picker.
@@ -136,6 +137,19 @@ export class SessionTypePicker extends Disposable {
 		}));
 	}
 
+	setAllowedSessionTypeIds(ids: readonly string[] | undefined): void {
+		this._allowedSessionTypeIds = ids;
+		this._folderSessionTypes = this._filterAllowedSessionTypes(this._folderSessionTypes);
+		this._updateTriggerLabel();
+	}
+
+	private _filterAllowedSessionTypes(types: readonly IProviderSessionType[]): IProviderSessionType[] {
+		if (!this._allowedSessionTypeIds) {
+			return [...types];
+		}
+		return types.filter(type => this._allowedSessionTypeIds!.includes(type.sessionType.id) || (type.sessionType.chatSessionType && this._allowedSessionTypeIds!.includes(type.sessionType.chatSessionType)));
+	}
+
 	get selectedPick(): IPreferredSessionType | undefined {
 		return this._picked;
 	}
@@ -148,7 +162,11 @@ export class SessionTypePicker extends Disposable {
 	 * consumers should fall back to {@link getPreferredSessionType}.
 	 */
 	getUserPickedSessionType(): IPreferredSessionType | undefined {
-		return this._readStoredPick();
+		const pick = this._readStoredPick();
+		if (!pick || !this._allowedSessionTypeIds) {
+			return pick;
+		}
+		return this._allowedSessionTypeIds.includes(pick.sessionTypeId) ? pick : undefined;
 	}
 
 	/**
@@ -159,7 +177,7 @@ export class SessionTypePicker extends Disposable {
 	 * explicit pick.
 	 */
 	getPreferredSessionType(folderUri: URI): IPreferredSessionType | undefined {
-		const first = this.sessionsManagementService.getSessionTypesForFolder(folderUri)[0];
+		const first = this._filterAllowedSessionTypes(this.sessionsManagementService.getSessionTypesForFolder(folderUri))[0];
 		return first ? { providerId: first.providerId, sessionTypeId: first.sessionType.id } : undefined;
 	}
 
@@ -218,7 +236,7 @@ export class SessionTypePicker extends Disposable {
 		// land before the user clicks.
 		const folderUri = session.workspace.get()?.folders[0]?.root;
 		const folderTypes = folderUri
-			? this.sessionsManagementService.getSessionTypesForFolder(folderUri)
+			? this._filterAllowedSessionTypes(this.sessionsManagementService.getSessionTypesForFolder(folderUri))
 			: this._folderSessionTypes;
 		this._folderSessionTypes = folderTypes;
 

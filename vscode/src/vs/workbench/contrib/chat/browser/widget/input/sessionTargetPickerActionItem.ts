@@ -199,7 +199,10 @@ export class SessionTypePickerActionItem extends ChatInputPickerActionViewItem {
 		}
 
 		// Filter out hidden items based on settings
-		const agentSessionItems = allAgentSessionItems.filter(item => this._isVisible(item.type));
+		const allowed = this.delegate.getAllowedSessionProviders?.();
+		const agentSessionItems = allAgentSessionItems
+			.filter(item => !allowed || allowed.includes(item.type))
+			.filter(item => this._isVisible(item.type));
 
 		// When the experimental "local agent host as default" setting is
 		// enabled, hoist the agent-host item to the front of the picker so it

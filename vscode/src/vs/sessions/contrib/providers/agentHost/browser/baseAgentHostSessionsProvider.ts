@@ -2101,7 +2101,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		}
 
 		newSession.setStatus(SessionStatus.InProgress);
-		const selectedModelId = newSession.getSelectedModelId();
+		const selectedModelId = options.userSelectedModelId ?? newSession.getSelectedModelId();
+		if (options.userSelectedModelId) {
+			newSession.setSelectedModelId(options.userSelectedModelId);
+		}
 		const selectedAgent = newSession.getSelectedAgent();
 
 		const { query, attachedContext } = options;
@@ -2112,7 +2115,8 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		const sendOptions: IChatSendRequestOptions = {
 			location: ChatAgentLocation.Chat,
 			userSelectedModelId: selectedModelId,
-			modeInfo: selectedAgent ? {
+			userSelectedModelConfiguration: options.userSelectedModelConfiguration,
+			modeInfo: options.modeInfo ?? (selectedAgent ? {
 				kind: ChatModeKind.Agent,
 				isBuiltin: false,
 				modeInstructions: {
@@ -2131,9 +2135,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 				telemetryModeId: 'agent',
 				applyCodeBlockSuggestionId: undefined,
 				permissionLevel: undefined,
-			},
+			}),
 			agentIdSilent: contribution?.type,
 			attachedContext,
+			instructionContext: options.instructionContext,
 			agentHostSessionConfig: this.getCreateSessionConfig(chatId),
 		};
 

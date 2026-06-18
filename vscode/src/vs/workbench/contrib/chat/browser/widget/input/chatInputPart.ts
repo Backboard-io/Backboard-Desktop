@@ -2988,6 +2988,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					return this.modelWidget = this.instantiationService.createInstance(ModelPickerActionItem, action, itemDelegate, pickerOptions);
 				} else if (action.id === OpenBackboardComposerOptionsAction.ID && action instanceof MenuItemAction) {
 					return this.instantiationService.createInstance(BackboardComposerOptionsActionViewItem, action, this, pickerOptions);
+				} else if (action.id === ConfigureToolsAction.ID) {
+					if (this.options.isSessionsWindow) {
+						return new HiddenActionViewItem(action);
+					}
 				} else if (action.id === OpenModePickerAction.ID && action instanceof MenuItemAction) {
 					const sessionType = this.getCurrentSessionType();
 					if (sessionType && isAgentHostTarget(sessionType)) {

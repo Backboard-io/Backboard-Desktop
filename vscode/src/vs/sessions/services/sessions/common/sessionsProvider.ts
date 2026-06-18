@@ -7,6 +7,8 @@ import { Event } from '../../../../base/common/event.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IChatRequestVariableEntry } from '../../../../workbench/contrib/chat/common/attachments/chatVariableEntries.js';
+import { IChatSendRequestOptions } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
+import { IChatRequestModeInfo } from '../../../../workbench/contrib/chat/common/model/chatModel.js';
 import { ILanguageModelChatMetadataAndIdentifier } from '../../../../workbench/contrib/chat/common/languageModels.js';
 import { IChat, ISession, ISessionType, ISessionWorkspace, ISessionWorkspaceBrowseAction } from './session.js';
 
@@ -27,6 +29,14 @@ export interface ISendRequestOptions {
 	readonly query: string;
 	/** Optional attached context entries. */
 	readonly attachedContext?: IChatRequestVariableEntry[];
+	/** Model selected by a shared chat composer, when the request did not come through chatService directly. */
+	readonly userSelectedModelId?: string;
+	/** Provider-specific configuration for the selected model. */
+	readonly userSelectedModelConfiguration?: IChatSendRequestOptions['userSelectedModelConfiguration'];
+	/** Chat mode, permission, and custom instructions selected by the shared chat composer. */
+	readonly modeInfo?: IChatRequestModeInfo;
+	/** Tool and sub-agent enablement selected by the shared chat composer. */
+	readonly instructionContext?: IChatSendRequestOptions['instructionContext'];
 }
 
 /**

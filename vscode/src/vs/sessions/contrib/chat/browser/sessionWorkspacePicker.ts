@@ -162,6 +162,7 @@ export class WorkspacePicker extends Disposable {
 
 	/** Cached VS Code recent folder URIs, resolved lazily. */
 	private _vsCodeRecentFolderUris: URI[] = [];
+	private _localOnly = false;
 
 	get selectedFolderUri(): URI | undefined {
 		return this._selectedFolderUri;
@@ -176,6 +177,13 @@ export class WorkspacePicker extends Disposable {
 	 */
 	get selectedResolved(): IResolvedFolderWorkspace | undefined {
 		return this._selectedResolved;
+	}
+
+	setLocalOnly(value: boolean): void {
+		this._localOnly = value;
+		if (value) {
+			this._activeTab = SESSION_WORKSPACE_GROUP_LOCAL;
+		}
 	}
 
 	constructor(
@@ -345,10 +353,13 @@ export class WorkspacePicker extends Disposable {
 	 * a single host).
 	 */
 	protected _showTabs(): boolean {
-		return true;
+		return !this._localOnly;
 	}
 
 	protected _getAvailableTabs(): ITabDescriptor[] {
+		if (this._localOnly) {
+			return [{ id: SESSION_WORKSPACE_GROUP_LOCAL }];
+		}
 		const byLabel = new Map<string, ITabDescriptor>();
 		const remoteAgentHostsEnabled = this.configurationService.getValue<boolean>(RemoteAgentHostsEnabledSettingId);
 		if (remoteAgentHostsEnabled) {
@@ -662,6 +673,9 @@ export class WorkspacePicker extends Disposable {
 			};
 			all.unshift(localAction);
 		}
+		if (this._localOnly) {
+			return all.filter(a => a.group === SESSION_WORKSPACE_GROUP_LOCAL);
+		}
 		if (!this._isTabFiltered()) {
 			return all;
 		}
@@ -718,7 +732,9 @@ export class WorkspacePicker extends Disposable {
 		// Collect recent workspaces from picker storage across all providers
 		const allProviders = this.sessionsProvidersService.getProviders();
 		const providerIds = new Set(allProviders.map(p => p.id));
-		const tabFilter = this._isTabFiltered()
+		const tabFilter = this._localOnly
+			? (w: IResolvedFolderWorkspace) => w.workspace.group === SESSION_WORKSPACE_GROUP_LOCAL
+			: this._isTabFiltered()
 			? (w: IResolvedFolderWorkspace) => w.workspace.group === this._activeTab
 			: undefined;
 		const ownRecentWorkspaces = this._getRecentWorkspaces()
@@ -757,7 +773,7 @@ export class WorkspacePicker extends Disposable {
 		// Remote providers with connection status — shown as dynamic rows
 		// in the Manage submenu on the Remote tab.
 		const remoteProviders = allProviders.filter(isAgentHostProvider).filter(p => p.connectionStatus !== undefined);
-		const includeRemoteProviders = this._activeTab === SESSION_WORKSPACE_GROUP_REMOTE;
+		const includeRemoteProviders = !this._localOnly && this._activeTab === SESSION_WORKSPACE_GROUP_REMOTE;
 
 		if (items.length > 0 && (allBrowseActions.length > 0)) {
 			items.push({ kind: ActionListItemKind.Separator, label: '' });

@@ -1021,11 +1021,13 @@ export class LocalChatSessionsProvider extends Disposable implements ISessionsPr
 		} : undefined;
 
 		const permissionLevel = session.permissionLevel.get();
+		const selectedModelId = options.userSelectedModelId ?? session.selectedModelId;
 
 		const sendOptions: IChatSendRequestOptions = {
 			location: ChatAgentLocation.Chat,
-			userSelectedModelId: session.selectedModelId,
-			modeInfo: {
+			userSelectedModelId: selectedModelId,
+			userSelectedModelConfiguration: options.userSelectedModelConfiguration,
+			modeInfo: options.modeInfo ?? {
 				kind: modeKind,
 				isBuiltin: modeIsBuiltin,
 				modeInstructions,
@@ -1034,6 +1036,7 @@ export class LocalChatSessionsProvider extends Disposable implements ISessionsPr
 				permissionLevel,
 			},
 			attachedContext,
+			instructionContext: options.instructionContext,
 		};
 
 		// Set model/mode/permission state on the chat model before sending

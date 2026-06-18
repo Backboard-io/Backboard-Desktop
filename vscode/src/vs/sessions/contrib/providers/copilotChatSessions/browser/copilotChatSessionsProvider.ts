@@ -2063,11 +2063,16 @@ export class CopilotChatSessionsProvider extends Disposable implements ISessions
 		} : undefined;
 
 		const permissionLevel = session.permissionLevel.get();
+		const selectedModelId = options.userSelectedModelId ?? session.selectedModelId;
+		if (options.userSelectedModelId) {
+			session.setModelId(options.userSelectedModelId);
+		}
 
 		const sendOptions: IChatSendRequestOptions = {
 			location: ChatAgentLocation.Chat,
-			userSelectedModelId: session.selectedModelId,
-			modeInfo: {
+			userSelectedModelId: selectedModelId,
+			userSelectedModelConfiguration: options.userSelectedModelConfiguration,
+			modeInfo: options.modeInfo ?? {
 				kind: modeKind,
 				isBuiltin: modeIsBuiltin,
 				modeInstructions,
@@ -2077,6 +2082,7 @@ export class CopilotChatSessionsProvider extends Disposable implements ISessions
 			},
 			agentIdSilent: contribution?.type,
 			attachedContext,
+			instructionContext: options.instructionContext,
 			agentHostSessionConfig: session instanceof CopilotCLISession ? session.getAgentHostSessionConfig() : undefined,
 		};
 
@@ -2205,13 +2211,18 @@ export class CopilotChatSessionsProvider extends Disposable implements ISessions
 		this._onDidChangeSessions.fire({ added: [], removed: [], changed: [this._chatToSession(newChatSession)] });
 
 		const { query, attachedContext } = options;
+		const selectedModelId = options.userSelectedModelId ?? newChatSession.selectedModelId;
+		if (options.userSelectedModelId) {
+			newChatSession.setModelId(options.userSelectedModelId);
+		}
 
 		const contribution = this.chatSessionsService.getChatSessionContribution(newChatSession.target);
 
 		const sendOptions: IChatSendRequestOptions = {
 			location: ChatAgentLocation.Chat,
-			userSelectedModelId: newChatSession.selectedModelId,
-			modeInfo: {
+			userSelectedModelId: selectedModelId,
+			userSelectedModelConfiguration: options.userSelectedModelConfiguration,
+			modeInfo: options.modeInfo ?? {
 				kind: ChatModeKind.Agent,
 				isBuiltin: true,
 				modeInstructions: undefined,
@@ -2221,6 +2232,7 @@ export class CopilotChatSessionsProvider extends Disposable implements ISessions
 			},
 			agentIdSilent: contribution?.type,
 			attachedContext,
+			instructionContext: options.instructionContext,
 			agentHostSessionConfig: newChatSession.getAgentHostSessionConfig(),
 		};
 
