@@ -80,9 +80,9 @@ export class ChatSlashCommandsContribution extends Disposable {
 			executeImmediately: true,
 			silent: true,
 			locations: [ChatAgentLocation.Chat],
-			sessionTypes: [SessionType.Local, SessionType.AgentHostCopilot],
+			sessionTypes: [SessionType.Local, SessionType.AgentHostBackboard],
 		}, async (_prompt, _progress, _history, _location, sessionResource) => {
-			if (getChatSessionType(sessionResource) === SessionType.AgentHostCopilot) {
+			if (getChatSessionType(sessionResource) === SessionType.AgentHostBackboard) {
 				await commandService.executeCommand(AICustomizationManagementCommands.OpenEditor, AICustomizationManagementSection.Hooks);
 			} else {
 				await instantiationService.invokeFunction(showConfigureHooksQuickPick);
@@ -139,9 +139,9 @@ export class ChatSlashCommandsContribution extends Disposable {
 			executeImmediately: true,
 			silent: true,
 			locations: [ChatAgentLocation.Chat],
-			sessionTypes: [SessionType.Local, SessionType.AgentHostCopilot],
+			sessionTypes: [SessionType.Local, SessionType.AgentHostBackboard],
 		}, async (_prompt, _progress, _history, _location, sessionResource) => {
-			if (getChatSessionType(sessionResource) === SessionType.AgentHostCopilot) {
+			if (getChatSessionType(sessionResource) === SessionType.AgentHostBackboard) {
 				await commandService.executeCommand(AICustomizationManagementCommands.OpenEditor, AICustomizationManagementSection.Agents);
 			} else {
 				await commandService.executeCommand(OpenModePickerAction.ID);
@@ -154,9 +154,9 @@ export class ChatSlashCommandsContribution extends Disposable {
 			executeImmediately: true,
 			silent: true,
 			locations: [ChatAgentLocation.Chat],
-			sessionTypes: [SessionType.Local, SessionType.AgentHostCopilot],
+			sessionTypes: [SessionType.Local, SessionType.AgentHostBackboard],
 		}, async (_prompt, _progress, _history, _location, sessionResource) => {
-			if (getChatSessionType(sessionResource) === SessionType.AgentHostCopilot) {
+			if (getChatSessionType(sessionResource) === SessionType.AgentHostBackboard) {
 				await commandService.executeCommand(AICustomizationManagementCommands.OpenEditor, AICustomizationManagementSection.Skills);
 			} else {
 				await commandService.executeCommand(CONFIGURE_SKILLS_ACTION_ID);
@@ -169,9 +169,9 @@ export class ChatSlashCommandsContribution extends Disposable {
 			executeImmediately: true,
 			silent: true,
 			locations: [ChatAgentLocation.Chat],
-			sessionTypes: [SessionType.Local, SessionType.AgentHostCopilot],
+			sessionTypes: [SessionType.Local, SessionType.AgentHostBackboard],
 		}, async (_prompt, _progress, _history, _location, sessionResource) => {
-			if (getChatSessionType(sessionResource) === SessionType.AgentHostCopilot) {
+			if (getChatSessionType(sessionResource) === SessionType.AgentHostBackboard) {
 				await commandService.executeCommand(AICustomizationManagementCommands.OpenEditor, AICustomizationManagementSection.Instructions);
 			} else {
 				await commandService.executeCommand(CONFIGURE_INSTRUCTIONS_ACTION_ID);
@@ -184,9 +184,9 @@ export class ChatSlashCommandsContribution extends Disposable {
 			executeImmediately: true,
 			silent: true,
 			locations: [ChatAgentLocation.Chat],
-			sessionTypes: [SessionType.Local, SessionType.AgentHostCopilot],
+			sessionTypes: [SessionType.Local, SessionType.AgentHostBackboard],
 		}, async (_prompt, _progress, _history, _location, sessionResource) => {
-			if (getChatSessionType(sessionResource) === SessionType.AgentHostCopilot) {
+			if (getChatSessionType(sessionResource) === SessionType.AgentHostBackboard) {
 				await commandService.executeCommand(AICustomizationManagementCommands.OpenEditor, AICustomizationManagementSection.Prompts);
 			} else {
 				await commandService.executeCommand(CONFIGURE_PROMPTS_ACTION_ID);
@@ -264,7 +264,7 @@ export class ChatSlashCommandsContribution extends Disposable {
 				executeImmediately: true,
 				silent: true,
 				locations: [ChatAgentLocation.Chat],
-				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostCopilot],
+				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostBackboard],
 			}, async (_prompt, _progress, _history, _location, sessionResource) => {
 				await setPermissionLevelForSession(sessionResource, ChatPermissionLevel.AutoApprove);
 			}));
@@ -275,7 +275,7 @@ export class ChatSlashCommandsContribution extends Disposable {
 				executeImmediately: true,
 				silent: true,
 				locations: [ChatAgentLocation.Chat],
-				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostCopilot],
+				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostBackboard],
 			}, async (_prompt, _progress, _history, _location, sessionResource) => {
 				await setPermissionLevelForSession(sessionResource, ChatPermissionLevel.Default);
 			}));
@@ -286,7 +286,7 @@ export class ChatSlashCommandsContribution extends Disposable {
 				executeImmediately: true,
 				silent: true,
 				locations: [ChatAgentLocation.Chat],
-				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostCopilot],
+				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostBackboard],
 			}, async (_prompt, _progress, _history, _location, sessionResource) => {
 				await setPermissionLevelForSession(sessionResource, ChatPermissionLevel.AutoApprove);
 			}));
@@ -297,7 +297,7 @@ export class ChatSlashCommandsContribution extends Disposable {
 				executeImmediately: true,
 				silent: true,
 				locations: [ChatAgentLocation.Chat],
-				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostCopilot],
+				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostBackboard],
 			}, async (_prompt, _progress, _history, _location, sessionResource) => {
 				await setPermissionLevelForSession(sessionResource, ChatPermissionLevel.Default);
 			}));
@@ -308,7 +308,7 @@ export class ChatSlashCommandsContribution extends Disposable {
 				executeImmediately: true,
 				silent: true,
 				locations: [ChatAgentLocation.Chat],
-				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostCopilot],
+				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostBackboard],
 			}, async (_prompt, _progress, _history, _location, sessionResource) => {
 				await setPermissionLevelForSession(sessionResource, ChatPermissionLevel.Autopilot);
 			}));
@@ -319,7 +319,7 @@ export class ChatSlashCommandsContribution extends Disposable {
 				executeImmediately: true,
 				silent: true,
 				locations: [ChatAgentLocation.Chat],
-				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostCopilot],
+				sessionTypes: [SessionType.Local, SessionType.CopilotCLI, SessionType.AgentHostBackboard],
 			}, async (_prompt, _progress, _history, _location, sessionResource) => {
 				await setPermissionLevelForSession(sessionResource, ChatPermissionLevel.Default);
 			}));

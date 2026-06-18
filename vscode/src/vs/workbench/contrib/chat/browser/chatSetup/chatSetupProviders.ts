@@ -322,9 +322,9 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 
 	private async doForwardRequestToChatWhenReady(requestModel: IChatRequestModel, progress: (part: IChatProgress) => void, chatService: IChatService, languageModelsService: ILanguageModelsService, chatAgentService: IChatAgentService, chatWidgetService: IChatWidgetService, languageModelToolsService: ILanguageModelToolsService): Promise<void> {
 
-		// Ensure auth extension is enabled before waiting for chat readiness.
-		// This must run before the readiness event listeners are set up because
-		// updateRunningExtensions restarts all extension hosts.
+			// Ensure any external auth provider is enabled before waiting for chat readiness.
+			// Backboard itself is integrated, so this is a no-op unless product metadata
+			// points at a separate auth provider.
 		const authExtensionReEnabled = await maybeEnableAuthExtension(this.extensionsWorkbenchService, this.logService);
 		if (authExtensionReEnabled) {
 			refreshTokens(this.commandService);
@@ -396,13 +396,13 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 					return;
 				}
 
-				if (ready === 'timedout') {
-					let warningMessage: string;
-					if (this.chatEntitlementService.anonymous) {
-						warningMessage = localize('chatTookLongWarningAnonymous', "Chat took too long to get ready. Please ensure that the extension `{0}` is installed and enabled. Click restart to try again if this issue persists.", defaultChat.chatExtensionId);
-					} else {
-						warningMessage = localize('chatTookLongWarning', "Chat took too long to get ready. Please ensure you are signed in to {0} and that the extension `{1}` is installed and enabled. Click restart to try again if this issue persists.", defaultChat.provider.default.name, defaultChat.chatExtensionId);
-					}
+					if (ready === 'timedout') {
+						let warningMessage: string;
+						if (this.chatEntitlementService.anonymous) {
+							warningMessage = localize('chatTookLongWarningAnonymous', "Backboard took too long to get ready. Click restart to try again if this issue persists.");
+						} else {
+							warningMessage = localize('chatTookLongWarning', "Backboard took too long to get ready. Please ensure you are signed in to {0}, then click restart to try again if this issue persists.", defaultChat.provider.default.name);
+						}
 
 					const diagnosticInfo = this.computeDiagnosticInfo(agentActivated, agentReady, languageModelReady, toolsModelReady, requestModel, languageModelsService, chatAgentService, modeInfo);
 
@@ -465,9 +465,9 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 							}
 						});
 					} else {
-						this.logService.warn(defaultChat.outputChannelId
-							? `[chat setup] No output channel found for id '${defaultChat.outputChannelId}' to show details about chat setup timeout. Please ensure the ${defaultChat.chatExtensionId} extension is activated.`
-							: '[chat setup] No output channel provided via product.json to show details about chat setup timeout.');
+							this.logService.warn(defaultChat.outputChannelId
+								? `[chat setup] No output channel found for id '${defaultChat.outputChannelId}' to show details about chat setup timeout. Backboard is integrated into the workbench.`
+								: '[chat setup] No output channel provided via product.json to show details about chat setup timeout.');
 						progress({
 							kind: 'command',
 							command: {

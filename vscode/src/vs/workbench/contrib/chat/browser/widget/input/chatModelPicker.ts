@@ -210,6 +210,10 @@ function isMultiplierPricing(model: ILanguageModelChatMetadataAndIdentifier): bo
 	return model.metadata.multiplierNumeric !== undefined;
 }
 
+function isBackboardModel(model: ILanguageModelChatMetadataAndIdentifier): boolean {
+	return model.metadata.vendor === 'agent-host-backboard';
+}
+
 function createModelItem(
 	action: IActionWidgetDropdownAction & { section?: string },
 	model?: ILanguageModelChatMetadataAndIdentifier,
@@ -252,8 +256,8 @@ function createPinAction(
 	return toAction({
 		id: `pin.${modelIdentifier}`,
 		label: isPinned
-			? localize('chat.modelPicker.unpin', "Unpin Model")
-			: localize('chat.modelPicker.pin', "Pin Model"),
+			? localize('chat.modelPicker.removeFavorite', "Remove from Favorites")
+			: localize('chat.modelPicker.addFavorite', "Add to Favorites"),
 		class: ThemeIcon.asClassName(isPinned ? Codicon.pinned : Codicon.pin),
 		run: () => onTogglePin(modelIdentifier, !isPinned),
 	});
@@ -380,7 +384,7 @@ function createModelAction(
 ): { action: IActionWidgetDropdownAction & { section?: string }; ariaDescription?: string } {
 	// Only show pricing in the description line if it's a multiplier (e.g. "2x").
 	// Detailed AIC/token pricing is shown in the hover instead.
-	const pricingForDescription = isMultiplierPricing(model) ? model.metadata.pricing : undefined;
+	const pricingForDescription = isMultiplierPricing(model) || isBackboardModel(model) ? model.metadata.pricing : undefined;
 	const priceCategoryLabel = isUBB ? getPriceCategoryLabel(model.metadata.priceCategory) : undefined;
 	// In PRU mode, show the current configuration value (e.g. thinking effort "High") in the description
 	const configDescription = !isUBB ? getModelConfigurationDescription(model, configAccess) : undefined;
@@ -608,7 +612,7 @@ export function buildModelPickerItems(
 				}
 			}
 			if (pinnedModels.length > 0) {
-				items.push({ kind: ActionListItemKind.Separator, label: localize('chat.modelPicker.pinned', "Pinned") });
+				items.push({ kind: ActionListItemKind.Separator, label: localize('chat.modelPicker.favorites', "Favorites") });
 				for (const model of pinnedModels) {
 					const groupLabel = showGroupLabel
 						? getProviderGroupForModel(model, modelToGroup, languageModelsService!).groupName

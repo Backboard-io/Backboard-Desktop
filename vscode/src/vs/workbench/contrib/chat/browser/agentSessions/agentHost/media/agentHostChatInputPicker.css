@@ -36,10 +36,22 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
-	height: 16px;
-	padding: 3px 6px;
-	border-radius: 4px;
+	min-height: 20px;
+	height: 20px;
+	padding: 0 7px;
+	border: 1px solid var(--vscode-widget-border, transparent);
+	border-radius: 6px;
+	background-color: color-mix(in srgb, var(--vscode-editorWidget-background) 72%, transparent);
 	color: var(--vscode-icon-foreground);
+	font-weight: 500;
+	line-height: 18px;
+	transition: background-color 80ms ease, border-color 80ms ease;
+}
+
+.agent-host-chat-input-picker-slot a.action-label:hover,
+.agent-host-chat-input-picker-slot span.action-label:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	border-color: var(--vscode-focusBorder);
 }
 
 .agent-host-chat-input-picker-slot .action-label .codicon-chevron-down {
@@ -67,7 +79,7 @@
 .chat-secondary-generic-chips {
 	display: inline-flex;
 	align-items: center;
-	gap: 12px;
+	gap: 6px;
 
 	&:empty {
 		display: none;
@@ -78,9 +90,17 @@
 
 		.action-label {
 			font-size: 11px;
+			min-height: 20px;
+			height: 20px;
+			padding: 0 7px;
+			border: 1px solid var(--vscode-widget-border, transparent);
+			border-radius: 6px;
+			background-color: color-mix(in srgb, var(--vscode-editorWidget-background) 72%, transparent);
+			font-weight: 500;
 
 			&:hover {
 				background-color: var(--vscode-toolbar-hoverBackground);
+				border-color: var(--vscode-focusBorder);
 			}
 		}
 
@@ -90,7 +110,7 @@
 	}
 
 	> .agent-host-generic-chip-slot + .agent-host-generic-chip-slot {
-		box-shadow: -5px 0 0 -4px var(--vscode-editorWidget-border);
+		box-shadow: none;
 	}
 }
 

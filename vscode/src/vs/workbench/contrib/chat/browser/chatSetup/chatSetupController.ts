@@ -260,6 +260,10 @@ export class ChatSetupController extends Disposable {
 	}
 
 	private async doInstall(): Promise<void> {
+		if (!defaultChat.chatExtensionId) {
+			this.logService.info('[chat setup] Backboard is integrated into the workbench.');
+			return;
+		}
 		await this.extensionsWorkbenchService.install(defaultChat.chatExtensionId, {
 			enable: true,
 			isApplicationScoped: true, 	// install into all profiles

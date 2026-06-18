@@ -79,6 +79,7 @@ export interface IPaneCompositeBarOptions {
 	readonly orientation: ActionsOrientation;
 	readonly compositeSize: number;
 	readonly overflowActionSize: number;
+	readonly excludedViewContainerIds?: readonly string[];
 	readonly preventLoopNavigation?: boolean;
 	readonly activityHoverOptions: IActivityHoverOptions;
 	readonly fillExtraContextMenuActions: (actions: IAction[], e?: MouseEvent | GestureEvent) => void;
@@ -515,12 +516,21 @@ export class PaneCompositeBar extends Disposable {
 	}
 
 	private getViewContainer(id: string): ViewContainer | undefined {
+		if (this.options.excludedViewContainerIds?.includes(id)) {
+			return undefined;
+		}
+
 		const viewContainer = this.viewDescriptorService.getViewContainerById(id);
 		return viewContainer && this.viewDescriptorService.getViewContainerLocation(viewContainer) === this.location ? viewContainer : undefined;
 	}
 
 	private getViewContainers(): readonly ViewContainer[] {
-		return this.viewDescriptorService.getViewContainersByLocation(this.location);
+		const viewContainers = this.viewDescriptorService.getViewContainersByLocation(this.location);
+		if (!this.options.excludedViewContainerIds?.length) {
+			return viewContainers;
+		}
+
+		return viewContainers.filter(({ id }) => !this.options.excludedViewContainerIds?.includes(id));
 	}
 
 	private updateCompositeBarItemsFromStorage(retainExisting: boolean): void {

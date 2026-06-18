@@ -55,7 +55,30 @@ function getConfigIcon(property: string, value: unknown | undefined): ThemeIcon 
 			case 'plan': return Codicon.checklist;
 			case 'autopilot': return Codicon.rocket;
 			case 'interactive': return Codicon.comment;
+			case 'agent': return Codicon.sparkle;
+			case 'ask': return Codicon.comment;
+			case 'manual': return Codicon.shield;
+			case 'free': return Codicon.rocket;
 		}
+	}
+	if (property === 'intensity' && typeof value === 'string') {
+		switch (value) {
+			case 'fast': return Codicon.flame;
+			case 'balanced': return Codicon.dashboard;
+			case 'deep': return Codicon.beaker;
+		}
+	}
+	if (property === 'webSearch') {
+		return value === 'off' ? Codicon.circleSlash : Codicon.globe;
+	}
+	if (property === 'imageGeneration') {
+		return value === 'off' ? Codicon.circleSlash : Codicon.symbolColor;
+	}
+	if (property === 'mcpCalls') {
+		return value === 'off' ? Codicon.circleSlash : Codicon.server;
+	}
+	if (property === 'memoryMode') {
+		return value === 'off' ? Codicon.circleSlash : Codicon.database;
 	}
 	if (property === SessionConfigKey.AutoApprove) {
 		if (value === 'autopilot') {

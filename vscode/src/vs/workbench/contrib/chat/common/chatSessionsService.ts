@@ -303,7 +303,9 @@ export namespace SessionType {
 	export const ClaudeCode = 'claude-code';
 	export const Codex = 'openai-codex';
 	export const Growth = 'copilot-growth';
-	export const AgentHostCopilot = 'agent-host-backboard';
+	export const AgentHostBackboard = 'agent-host-backboard';
+	/** @deprecated Use AgentHostBackboard. Kept only for old persisted settings and URI compatibility. */
+	export const AgentHostCopilot = AgentHostBackboard;
 	export const AgentHostClaude = 'agent-host-claude';
 	export const AgentHostCodex = 'agent-host-codex';
 }
@@ -312,7 +314,7 @@ export namespace SessionType {
  * Returns whether the given session type is a local agent host target.
  */
 export function isLocalAgentHostTarget(target: string): boolean {
-	return target === SessionType.AgentHostCopilot ||
+	return target === SessionType.AgentHostBackboard ||
 		target.startsWith('agent-host-');
 }
 

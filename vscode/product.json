@@ -86,9 +86,9 @@
 		}
 	],
 	"defaultChatAgent": {
-		"extensionId": "backboard.core",
-		"chatExtensionId": "backboard.core",
-		"chatExtensionOutputId": "Backboard.log",
+		"extensionId": "",
+		"chatExtensionId": "",
+		"chatExtensionOutputId": "",
 		"chatExtensionOutputExtensionStateCommand": "",
 		"documentationUrl": "https://app.backboard.io",
 		"termsStatementUrl": "https://app.backboard.io/terms",
@@ -211,9 +211,7 @@
 			"type": "light"
 		}
 	],
-	"builtInExtensionsEnabledWithAutoUpdates": [
-		"GitHub.copilot-chat"
-	],
+	"builtInExtensionsEnabledWithAutoUpdates": [],
 	"sessionsWindowAllowedExtensions": [],
 	"voiceWsUrl": "wss://falcon-caas.mai.microsoft.com/voice-code/api/v1/realtime/voice"
 }

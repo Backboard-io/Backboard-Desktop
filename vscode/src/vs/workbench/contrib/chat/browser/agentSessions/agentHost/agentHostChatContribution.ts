@@ -6,6 +6,7 @@
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Event } from '../../../../../../base/common/event.js';
 import { Disposable, DisposableMap, DisposableStore, toDisposable } from '../../../../../../base/common/lifecycle.js';
+import { FileAccess } from '../../../../../../base/common/network.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { localize } from '../../../../../../nls.js';
 import { AgentHostEnabledSettingId, claudePreferAgentHostSettingId, IAgentHostService, shouldSurfaceLocalAgentHostProvider, type AgentProvider } from '../../../../../../platform/agentHost/common/agentService.js';
@@ -33,6 +34,7 @@ import { AgentHostSessionListController } from './agentHostSessionListController
 import { AICustomizationSources } from '../../../common/aiCustomizationWorkspaceService.js';
 
 const LOCAL_AGENT_HOST_SESSION_TYPE_PREFIX = 'agent-host-';
+const BACKBOARD_OCTOPUS_ICON = FileAccess.asBrowserUri('vs/sessions/browser/media/sessions-icon.svg').toString(true);
 
 Registry.as<IAsyncChatSessionActivationRegistry>(ChatSessionsExtensions.AsyncActivation).register({
 	matchSessionType: sessionType => isLocalAgentHostTarget(sessionType),
@@ -232,7 +234,9 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 		// (e.g. "Copilot CLI"), so suffix with "- Agent Host" to disambiguate.
 		const displayName = this._isSessionsWindow
 			? agent.displayName
-			: localize('agentHost.displayName', "{0} - Agent Host", agent.displayName);
+			: agent.provider === 'backboard'
+				? agent.displayName
+				: localize('agentHost.displayName', "{0} - Agent Host", agent.displayName);
 
 		// Chat session contribution.
 		// Keep the delegation picker available for local agent host sessions in
@@ -244,6 +248,9 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 			displayName,
 			description: agent.description,
 			customAgentTarget: this._isSessionsWindow ? undefined : Target.GitHubCopilot,
+			icon: agent.provider === 'backboard'
+				? { light: BACKBOARD_OCTOPUS_ICON, dark: BACKBOARD_OCTOPUS_ICON }
+				: Codicon.server.id,
 			canDelegate: true,
 			requiresCustomModels: true,
 			supportsAutoModel: agentHostProviderSupportsAutoModel(agent.provider),
@@ -269,8 +276,10 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 		// `[Agent Host]` suffix disambiguates from the extension-host Copilot CLI harness, which uses the same displayName.
 		store.add(this._customizationHarnessService.registerExternalHarness({
 			id: sessionType,
-			label: localize('agentHostHarnessLabel.local', "{0} [Agent Host]", agent.displayName),
-			icon: ThemeIcon.fromId(Codicon.server.id),
+			label: agent.provider === 'backboard'
+				? agent.displayName
+				: localize('agentHostHarnessLabel.local', "{0} [Agent Host]", agent.displayName),
+			icon: ThemeIcon.fromId((agent.provider === 'backboard' ? Codicon.sparkle : Codicon.server).id),
 			hiddenSections: [],
 			hideGenerateButton: true,
 			getStorageSourceFilter: () => ({ sources: AICustomizationSources.all }),

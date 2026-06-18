@@ -63,6 +63,8 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 			.map(m => {
 				const pricing = readAgentModelPricingMeta(m._meta);
 				const multiplierNumeric = pricing.multiplierNumeric;
+				const rawPricing = typeof m._meta?.pricing === 'string' && m._meta.pricing.trim() !== '' ? m._meta.pricing : undefined;
+				const upstreamProviderLabel = typeof m._meta?.upstreamProviderLabel === 'string' && m._meta.upstreamProviderLabel.trim() !== '' ? m._meta.upstreamProviderLabel : undefined;
 				return {
 					identifier: `${this._vendor}:${m.id}`,
 					metadata: {
@@ -71,18 +73,21 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 						id: m.id,
 						vendor: this._vendor,
 						version: '1.0',
+						detail: upstreamProviderLabel,
 						family: m.id,
 						maxInputTokens: m.maxContextWindow ?? 0,
 						maxOutputTokens: 0,
 						isDefaultForLocation: {},
 						isUserSelectable: true,
-						pricing: multiplierNumeric !== undefined ? `${multiplierNumeric}x` : undefined,
+						pricing: multiplierNumeric !== undefined ? `${multiplierNumeric}x` : rawPricing,
 						multiplierNumeric,
 						inputCost: pricing.inputCost,
 						cacheCost: pricing.cacheCost,
+						cacheWriteCost: pricing.cacheWriteCost,
 						outputCost: pricing.outputCost,
 						longContextInputCost: pricing.longContextInputCost,
 						longContextCacheCost: pricing.longContextCacheCost,
+						longContextCacheWriteCost: pricing.longContextCacheWriteCost,
 						longContextOutputCost: pricing.longContextOutputCost,
 						priceCategory: pricing.priceCategory,
 						targetChatSessionType: this._sessionType,

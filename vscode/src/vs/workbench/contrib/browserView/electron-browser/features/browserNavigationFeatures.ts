@@ -84,21 +84,6 @@ class BrowserNavigationBar extends Disposable {
 			[IContextKeyService, scopedContextKeyService]
 		));
 
-		const navContainer = $('.browser-nav-toolbar');
-		const navToolbar = this._register(scopedInstantiationService.createInstance(
-			MenuWorkbenchToolBar,
-			navContainer,
-			MenuId.BrowserNavigationToolbar,
-			{
-				hoverDelegate,
-				highlightToggledItems: true,
-				// Render all actions inline regardless of group.
-				toolbarOptions: { primaryGroup: () => true, useSeparatorsInPrimaryActions: true },
-				menuOptions: { shouldForwardArgs: true }
-			}
-		));
-		navToolbar.context = editor;
-
 		const urlBarHost: IBrowserUrlBarHost = {
 			get input() { return editor.input instanceof BrowserEditorInput ? editor.input : undefined; },
 			ensureBrowserFocus: () => editor.ensureBrowserFocus(),
@@ -130,16 +115,13 @@ class BrowserNavigationBar extends Disposable {
 					observedElement: this.element,
 					getAvailableWidth: () => {
 						const toolbarBounds = this.element.getBoundingClientRect();
-						const urlBarBounds = this._urlBar.element.getBoundingClientRect();
-						return Math.max(0, toolbarBounds.right - urlBarBounds.left - 240 /* approximate: preferred width of the URL input plus padding */);
+						return Math.max(0, toolbarBounds.width);
 					}
 				},
 			}
 		));
 		actionsToolbar.context = editor;
 
-		this.element.appendChild(navContainer);
-		this.element.appendChild(this._urlBar.element);
 		this.element.appendChild(actionsContainer);
 	}
 
@@ -509,7 +491,6 @@ class OpenBrowserSettingsAction extends Action2 {
 				id: MenuId.BrowserActionsToolbar,
 				group: BrowserActionGroup.Settings,
 				order: 2,
-				isHiddenByDefault: true,
 			}
 		});
 	}

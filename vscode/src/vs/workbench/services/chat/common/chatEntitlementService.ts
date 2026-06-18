@@ -678,6 +678,18 @@ export class ChatEntitlementService extends Disposable implements IChatEntitleme
 	}
 
 	markSetupCompleted(): void {
+		if (product.defaultChatAgent?.provider?.default?.id === 'backboard') {
+			this.context?.value.update({ installed: true, disabled: false, untrusted: false, disabledInWorkspace: false });
+			this.context?.value.update({
+				entitlement: ChatEntitlement.Business,
+				organisations: ['backboard'],
+				sku: 'backboard',
+				copilotTrackingId: undefined,
+			});
+			this.context?.value.update({ completed: true });
+			return;
+		}
+
 		this.context?.value.update({ completed: true });
 	}
 

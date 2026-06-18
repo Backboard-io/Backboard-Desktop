@@ -20,11 +20,7 @@ export class ChatLayoutService extends Disposable implements IChatLayoutService 
 	constructor(@IConfigurationService configurationService: IConfigurationService) {
 		super();
 
-		const chatFontFamily = observableConfigValue<string>('chat.fontFamily', 'default', configurationService);
-		this.fontFamily = derived(reader => {
-			const fontFamily = chatFontFamily.read(reader);
-			return fontFamily === 'default' ? null : fontFamily;
-		});
+		this.fontFamily = derived(() => '"BB Mono", monospace');
 
 		this.fontSize = observableConfigValue<number>('chat.fontSize', FONT_SIZE, configurationService);
 	}

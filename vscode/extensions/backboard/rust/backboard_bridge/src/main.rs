@@ -39,6 +39,20 @@ const WEB_FETCH_MAX_BYTES: usize = 1_000_000;
 const WEB_FETCH_PREVIEW_CHARS: usize = 12_000;
 const BACKBOARD_IMAGE_TOOL_NAMES: &[&str] = &["generate_image", "image_generate"];
 const BACKBOARD_SYSTEM_PROMPT: &str = include_str!("backboard_runtime_system_prompt.md");
+const FAST_BACKBOARD_SYSTEM_PROMPT: &str = r#"# Backboard Runtime System Prompt
+
+You are Backboard, an AI coding assistant running inside the Backboard VS Code IDE.
+
+Use the native function/tool-call channel for file reads, edits, shell commands, workspace search, web fetch/search, and other tool-backed actions. Do not print tool-call JSON, XML, pseudo tool calls, patches, or shell commands as a substitute for calling a real tool.
+
+Call at most one tool in a single assistant turn. After one tool result returns, decide whether another tool call is needed. Do not invent tool results.
+
+The host appends the current workspace root, mode, and available tool names after this prompt. Treat that runtime context as authoritative. Relative paths are relative to the target workspace root unless the user explicitly says otherwise.
+
+For coding tasks, inspect relevant files before making claims or edits. Prefer small targeted edits and preserve unrelated user changes. Use shell tools for builds, tests, and validation.
+
+Be concise, direct, and factual. For completed coding work, summarize what changed, relevant files, validation run, and any caveats.
+"#;
 const RAW_TOOL_CALL_BEGIN: &str = "<|tool_call_begin|>";
 const RAW_TOOL_CALL_SEPARATOR: &str = "<|tool_sep|>";
 const RAW_TOOL_CALL_END: &str = "<|tool_call_end|>";
@@ -112,6 +126,8 @@ struct SendPromptParams {
     audio_file: Option<AudioFileParams>,
     #[serde(default)]
     mcp_calls: Option<Value>,
+    #[serde(default)]
+    tools: Option<Vec<Value>>,
     #[serde(default)]
     thread_id: Option<String>,
     #[serde(default)]
@@ -809,14 +825,6 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         .assistant_id
         .or_else(|| session_assistant_id(&state, &session_id));
     let client = client_from_params(params.config.as_ref())?;
-    let content = augment_prompt(&params.content, params.workspace.as_ref(), &mode);
-    state.writer.emit(base_event(
-        "progress",
-        &request.request_id,
-        Some(&session_id),
-        json!({ "message": "Sending to Backboard." }),
-    ));
-
     let backboard_image_generation =
         backboard_image_generation_enabled(params.image_generation.as_deref());
     let ignored_tool_call_names = if backboard_image_generation {
@@ -824,6 +832,19 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
     } else {
         &[]
     };
+    let tools = params.tools.unwrap_or_else(|| {
+        tool_definitions_for_request(
+            &mode,
+            backboard_image_generation,
+        )
+    });
+    let content = augment_prompt(&params.content, params.workspace.as_ref(), &mode, &tools);
+    state.writer.emit(base_event(
+        "progress",
+        &request.request_id,
+        Some(&session_id),
+        json!({ "message": "Sending to Backboard." }),
+    ));
 
     let send_request = SendMessageRequest {
         thread_id,
@@ -834,10 +855,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         memory,
         memory_pro,
         thinking: thinking_payload(&intensity, &provider, &model),
-        tools: Some(tool_definitions_for_request(
-            &mode,
-            backboard_image_generation,
-        )),
+        tools: Some(tools),
         parallel_tool_calls: Some(false),
         web_search: params.web_search.unwrap_or_else(|| "off".to_string()),
         image_generation: params.image_generation.clone(),
@@ -1343,7 +1361,6 @@ fn log_backboard_request(
     workspace: Option<&PathBuf>,
     mode: &str,
 ) -> Result<()> {
-    let body = message_request_log_json(request, true);
     let cwd = std::env::current_dir()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "<unknown>".to_string());
@@ -1366,7 +1383,17 @@ fn log_backboard_request(
     );
     eprintln!("  bridgeCwd: {cwd}");
     eprintln!("  mode: {mode}");
-    eprintln!("{}", serde_json::to_string_pretty(&body)?);
+    eprintln!("  provider: {}", request.provider.as_deref().unwrap_or("<default>"));
+    eprintln!("  model: {}", request.model.as_deref().unwrap_or("<default>"));
+    eprintln!("  contentChars: {}", request.content.chars().count());
+    eprintln!("  toolCount: {}", request.tools.as_ref().map(Vec::len).unwrap_or(0));
+    if std::env::var("BACKBOARD_BRIDGE_VERBOSE_REQUESTS")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        let body = message_request_log_json(request, true);
+        eprintln!("{}", serde_json::to_string_pretty(&body)?);
+    }
     Ok(())
 }
 
@@ -1379,11 +1406,12 @@ fn chrono_like_timestamp() -> String {
     format!("unix_ms={}", now.as_millis())
 }
 
-fn augment_prompt(content: &str, workspace: Option<&PathBuf>, mode: &str) -> String {
+fn augment_prompt(content: &str, workspace: Option<&PathBuf>, mode: &str, tools: &[Value]) -> String {
     let workspace = workspace
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "<none supplied by host>".to_string());
-    let available_tools = tool_names_for_prompt(mode);
+    let available_tools = tool_names_for_prompt(tools);
+    let system_prompt = system_prompt_for_request(content);
     format!(
         r#"{system_prompt}
 
@@ -1398,7 +1426,7 @@ Treat relative file, grep, glob, shell, and edit tool paths as relative to the t
 ## User Request
 
 {content}"#,
-        system_prompt = BACKBOARD_SYSTEM_PROMPT.trim(),
+        system_prompt = system_prompt,
         workspace = workspace,
         mode = mode,
         available_tools = available_tools,
@@ -1406,9 +1434,36 @@ Treat relative file, grep, glob, shell, and edit tool paths as relative to the t
     )
 }
 
-fn tool_names_for_prompt(mode: &str) -> String {
-    tool_definitions(mode)
-        .into_iter()
+fn system_prompt_for_request(content: &str) -> &'static str {
+    if should_include_backboard_api_reference(content) {
+        BACKBOARD_SYSTEM_PROMPT.trim()
+    } else {
+        FAST_BACKBOARD_SYSTEM_PROMPT.trim()
+    }
+}
+
+fn should_include_backboard_api_reference(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    lower.contains("backboard api")
+        || lower.contains("api reference")
+        || lower.contains("api endpoint")
+        || lower.contains("api endpoints")
+        || lower.contains("endpoint")
+        || lower.contains("oauth")
+        || lower.contains("sso")
+        || lower.contains("api key")
+        || lower.contains("threads/messages")
+        || lower.contains("/threads")
+        || lower.contains("/assistants")
+        || lower.contains("/models")
+        || lower.contains("/billing")
+        || lower.contains("backboard docs")
+        || lower.contains("backboard documentation")
+}
+
+fn tool_names_for_prompt(tools: &[Value]) -> String {
+    tools
+        .iter()
         .filter_map(|tool| {
             tool.pointer("/function/name")
                 .and_then(Value::as_str)
@@ -2370,10 +2425,11 @@ mod tests {
         BACKBOARD_IMAGE_TOOL_NAMES, BACKBOARD_SYSTEM_PROMPT, BridgeState, EventWriter,
         RawTextToolCallAccumulator, StreamingToolCallAccumulator, add_visible_models,
         augment_prompt, filter_ignored_tool_calls, is_duplicate_tool_outputs_error,
-        is_featherless_provider, model_is_visible, normalize_tool_output, thinking_payload,
-        tool_call_stream_finished, tool_calls_required_by_chunk, tool_definitions,
-        tool_definitions_for_request, tool_outputs_submission_key,
-        try_begin_tool_outputs_submission, validate_web_fetch_url, voice_payload,
+        is_featherless_provider, model_is_visible, normalize_tool_output,
+        should_include_backboard_api_reference, thinking_payload, tool_call_stream_finished,
+        tool_calls_required_by_chunk, tool_definitions, tool_definitions_for_request,
+        tool_outputs_submission_key, try_begin_tool_outputs_submission, validate_web_fetch_url,
+        voice_payload,
     };
 
     #[test]
@@ -2415,10 +2471,11 @@ mod tests {
     #[test]
     fn augmented_prompt_uses_backboard_runtime_system_prompt() {
         let workspace = PathBuf::from("/tmp/example-workspace");
-        let prompt = augment_prompt("make the UI better", Some(&workspace), "free");
+        let tools = tool_definitions_for_request("free", false);
+        let prompt = augment_prompt("make the UI better", Some(&workspace), "free", &tools);
 
         assert!(prompt.contains("# Backboard Runtime System Prompt"));
-        assert!(prompt.contains("Use the host's native function/tool-call channel"));
+        assert!(prompt.contains("Use the native function/tool-call channel"));
         assert!(prompt.contains("Do not print tool-call JSON"));
         assert!(prompt.contains("Call at most one tool in a single assistant turn"));
         assert!(prompt.contains("## Runtime Context"));
@@ -2426,11 +2483,24 @@ mod tests {
         assert!(prompt.contains("Available tools for this turn:"));
         assert!(prompt.contains("read_file"));
         assert!(prompt.contains("write_file"));
-        assert!(prompt.contains("Do not display file contents or proposed patches in chat"));
+        assert!(!prompt.contains("## Backboard API Reference"));
         assert!(prompt.contains("## User Request"));
         assert!(prompt.contains("make the UI better"));
         assert!(!prompt.contains("Backboard is running inside VS Code."));
         assert!(!prompt.contains("ask_user_question"));
+    }
+
+    #[test]
+    fn augmented_prompt_only_includes_api_reference_for_backboard_api_requests() {
+        let workspace = PathBuf::from("/tmp/example-workspace");
+        let tools = tool_definitions_for_request("free", false);
+        let normal = augment_prompt("make the UI better", Some(&workspace), "free", &tools);
+        let api = augment_prompt("walk me through the Backboard SSO OAuth endpoints", Some(&workspace), "free", &tools);
+
+        assert!(!normal.contains("## Backboard API Reference"));
+        assert!(api.contains("## Backboard API Reference"));
+        assert!(should_include_backboard_api_reference("Backboard API endpoints"));
+        assert!(!should_include_backboard_api_reference("make the UI faster"));
     }
 
     #[test]

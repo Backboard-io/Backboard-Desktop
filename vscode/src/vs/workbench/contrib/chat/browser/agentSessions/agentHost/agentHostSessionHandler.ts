@@ -67,6 +67,10 @@ import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitled
 import { activeTurnToProgress, completedToolCallToEditParts, completedToolCallToSerialized, finalizeToolInvocation, getTerminalContentUri, isSubagentTool, makeAhpTerminalToolSessionId, messageToVariableData, parseAhpTerminalToolSessionId, rawMarkdownToString, stringOrMarkdownToString, toolCallStateToInvocation, turnsToHistory, updateRunningToolSpecificData, usageInfoToChatUsage, type IToolCallFileEdit, type TurnModelLookup } from './stateToProgressAdapter.js';
 export { toolDataToDefinition };
 
+function agentHostSessionIcon(provider: string) {
+	return provider === 'backboard' ? Codicon.sparkle : Codicon.copilot;
+}
+
 // =============================================================================
 // AgentHostSessionHandler - renderer-side handler for a single agent host
 // chat session type. Bridges the protocol state layer with the chat UI:
@@ -792,7 +796,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			isDefault: false,
 			isDynamic: true,
 			isCore: true,
-			metadata: { themeIcon: Codicon.copilot },
+			metadata: { themeIcon: agentHostSessionIcon(this._config.provider) },
 			slashCommands: [],
 			locations: [ChatAgentLocation.Chat],
 			modes: [ChatModeKind.Agent],
@@ -2673,7 +2677,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		return {
 			resource: forkedResource,
 			label: forkedLabel,
-			iconPath: Codicon.copilot,
+			iconPath: agentHostSessionIcon(this._config.provider),
 			timing: { created: now, lastRequestStarted: now, lastRequestEnded: now },
 		};
 	}

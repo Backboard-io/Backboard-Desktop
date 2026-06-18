@@ -1048,7 +1048,7 @@ suite('buildModelPickerItems', () => {
 		assert.strictEqual(claudeItem.item?.description, undefined);
 	});
 
-	test('pinned models appear in dedicated pinned section', () => {
+	test('pinned models appear in dedicated favorites section', () => {
 		const auto = createAutoModel();
 		const modelA = createModel('gpt-4o', 'GPT-4o');
 		const modelB = createModel('claude', 'Claude');
@@ -1056,14 +1056,14 @@ suite('buildModelPickerItems', () => {
 		const items = callBuild([auto, modelA, modelB, modelC], {
 			pinnedModelIds: [modelB.identifier, modelA.identifier],
 		});
-		// Pinned section header exists
-		const pinnedSep = items.find(i => i.kind === ActionListItemKind.Separator && i.label === 'Pinned');
-		assert.ok(pinnedSep, 'Pinned separator header should exist');
-		// Pinned models appear in pin order (Claude first, then GPT-4o)
-		const pinnedSepIndex = items.indexOf(pinnedSep!);
-		const afterPinned = items.slice(pinnedSepIndex + 1);
-		const firstPinned = afterPinned.find(i => i.kind === ActionListItemKind.Action);
-		assert.strictEqual(firstPinned?.label, 'Claude');
+		// Favorites section header exists
+		const favoritesSep = items.find(i => i.kind === ActionListItemKind.Separator && i.label === 'Favorites');
+		assert.ok(favoritesSep, 'Favorites separator header should exist');
+		// Favorite models appear in pin order (Claude first, then GPT-4o)
+		const favoritesSepIndex = items.indexOf(favoritesSep!);
+		const afterFavorites = items.slice(favoritesSepIndex + 1);
+		const firstFavorite = afterFavorites.find(i => i.kind === ActionListItemKind.Action);
+		assert.strictEqual(firstFavorite?.label, 'Claude');
 	});
 
 	test('pinned models do not appear in MRU/promoted section', () => {
@@ -1103,15 +1103,32 @@ suite('buildModelPickerItems', () => {
 		assert.ok(!promotedLabels.includes('Model 1'), 'Pinned model should not be in MRU');
 	});
 
-	test('no pinned section when pinnedModelIds is empty', () => {
+	test('no favorites section when pinnedModelIds is empty', () => {
 		const auto = createAutoModel();
 		const modelA = createModel('gpt-4o', 'GPT-4o');
 		const items = callBuild([auto, modelA], {
 			pinnedModelIds: [],
 			recentModelIds: [modelA.identifier],
 		});
-		const pinnedSep = items.find(i => i.kind === ActionListItemKind.Separator && i.label === 'Pinned');
-		assert.strictEqual(pinnedSep, undefined, 'No pinned separator when there are no pinned models');
+		const favoritesSep = items.find(i => i.kind === ActionListItemKind.Separator && i.label === 'Favorites');
+		assert.strictEqual(favoritesSep, undefined, 'No Favorites separator when there are no favorite models');
+	});
+
+	test('Backboard model rows show explicit pricing labels', () => {
+		const model = createModel('aws-bedrock/anthropic.claude-sonnet-4-6', 'Claude Sonnet 4.6', 'agent-host-backboard');
+		model.metadata = {
+			...model.metadata,
+			detail: 'AWS Bedrock',
+			pricing: '$3.00/M in, $15.00/M out',
+			inputCost: 3,
+			cacheCost: 0.30,
+			cacheWriteCost: 3.75,
+			outputCost: 15,
+		} as ILanguageModelChatMetadata;
+		const items = callBuild([model], { showAutoModel: false });
+		const action = getActionItems(items).find(item => item.label === 'Claude Sonnet 4.6');
+		assert.ok(action);
+		assert.strictEqual(action.item?.description, '$3.00/M in, $15.00/M out');
 	});
 });
 
@@ -1361,4 +1378,3 @@ suite('chat model picker - languageModelChatProvider visibility regression', () 
 		);
 	});
 });
-

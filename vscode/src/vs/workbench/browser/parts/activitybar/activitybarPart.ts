@@ -130,6 +130,7 @@ export class ActivitybarPart extends Part {
 			activityHoverOptions: {
 				position: () => this.layoutService.getSideBarPosition() === Position.LEFT ? HoverPosition.RIGHT : HoverPosition.LEFT,
 			},
+			excludedViewContainerIds: ['workbench.view.debug', 'copilot-chat'],
 			preventLoopNavigation: true,
 			recomputeSizes: false,
 			fillExtraContextMenuActions: (actions, e?: MouseEvent | GestureEvent) => { },

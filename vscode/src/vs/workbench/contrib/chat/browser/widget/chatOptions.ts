@@ -6,6 +6,7 @@
 import { Color } from '../../../../../base/common/color.js';
 import { Emitter } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { EDITOR_FONT_DEFAULTS } from '../../../../../editor/common/config/fontInfo.js';
 import { IBracketPairColorizationOptions, IEditorOptions } from '../../../../../editor/common/config/editorOptions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
@@ -112,7 +113,7 @@ export class ChatEditorOptions extends Disposable {
 			resultEditor: {
 				backgroundColor: this.themeService.getColorTheme().getColor(this.resultEditorBackgroundColor),
 				fontSize: chatEditorConfig.fontSize,
-				fontFamily: chatEditorConfig.fontFamily === 'default' ? editorConfig.fontFamily : chatEditorConfig.fontFamily,
+				fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
 				fontWeight: chatEditorConfig.fontWeight,
 				lineHeight: chatEditorConfig.lineHeight ? chatEditorConfig.lineHeight : ChatEditorOptions.lineHeightEm * chatEditorConfig.fontSize,
 				bracketPairColorization: {

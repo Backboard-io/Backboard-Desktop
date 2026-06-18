@@ -12,18 +12,7 @@
   "categories": [
     "AI"
   ],
-  "activationEvents": [
-    "onView:backboard.panel",
-    "onCommand:backboard.newChat",
-    "onCommand:backboard.showHistory",
-    "onCommand:backboard.signIn",
-    "onCommand:backboard.copyOAuthRedirectUri",
-    "onCommand:backboard.completeOAuthCallback",
-    "onCommand:backboard.refreshModels",
-    "onCommand:backboard.checkForUpdates",
-    "onCommand:backboard.openPanel",
-    "onCommand:backboard.openRightPanel"
-  ],
+  "activationEvents": [],
   "extensionKind": [
     "workspace",
     "ui"
@@ -34,111 +23,6 @@
     }
   },
   "contributes": {
-    "commands": [
-      {
-        "command": "backboard.openPanel",
-        "title": "Open Backboard",
-        "category": "Backboard",
-        "icon": "$(comment-discussion)"
-      },
-      {
-        "command": "backboard.openRightPanel",
-        "title": "Open Backboard in Right Sidebar",
-        "category": "Backboard",
-        "icon": "$(layout-sidebar-right)"
-      },
-      {
-        "command": "backboard.newChat",
-        "title": "New Chat",
-        "category": "Backboard",
-        "icon": "$(add)"
-      },
-      {
-        "command": "backboard.showHistory",
-        "title": "Show History",
-        "category": "Backboard",
-        "icon": "$(history)"
-      },
-      {
-        "command": "backboard.signIn",
-        "title": "Sign in with SSO",
-        "category": "Backboard",
-        "icon": "$(account)"
-      },
-      {
-        "command": "backboard.copyOAuthRedirectUri",
-        "title": "Copy OAuth Redirect URI",
-        "category": "Backboard",
-        "icon": "$(copy)"
-      },
-      {
-        "command": "backboard.completeOAuthCallback",
-        "title": "Complete OAuth Callback",
-        "category": "Backboard",
-        "icon": "$(sign-in)"
-      },
-      {
-        "command": "backboard.refreshModels",
-        "title": "Refresh Models",
-        "category": "Backboard",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "backboard.checkForUpdates",
-        "title": "Check for Updates",
-        "category": "Backboard",
-        "icon": "$(cloud-download)"
-      }
-    ],
-    "menus": {
-      "viewContainer/title": [
-        {
-          "command": "backboard.newChat",
-          "when": "viewContainer == backboard",
-          "group": "navigation@1"
-        },
-        {
-          "command": "backboard.showHistory",
-          "when": "viewContainer == backboard",
-          "group": "navigation@2"
-        },
-        {
-          "command": "backboard.refreshModels",
-          "when": "viewContainer == backboard",
-          "group": "navigation@3"
-        },
-        {
-          "command": "backboard.signIn",
-          "when": "viewContainer == backboard && !backboard.authenticated",
-          "group": "navigation@4"
-        }
-      ],
-      "view/title": [
-        {
-          "command": "backboard.signIn",
-          "when": "view == backboard.panel && !backboard.authenticated",
-          "group": "navigation@1"
-        }
-      ]
-    },
-    "viewsContainers": {
-      "secondarySidebar": [
-        {
-          "id": "backboard",
-          "title": "\u200B",
-          "icon": "media/ai_backboard.svg"
-        }
-      ]
-    },
-    "views": {
-      "backboard": [
-        {
-          "id": "backboard.panel",
-          "type": "webview",
-          "name": "\u200B"
-        }
-      ]
-    },
     "configuration": [
       {
         "title": "Backboard",

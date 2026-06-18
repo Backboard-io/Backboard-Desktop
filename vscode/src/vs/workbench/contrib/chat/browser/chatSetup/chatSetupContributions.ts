@@ -222,7 +222,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 
 		class ChatSetupTriggerAction extends Action2 {
 
-			static CHAT_SETUP_ACTION_LABEL = localize2('triggerChatSetup', "Use AI Features with Copilot for free...");
+			static CHAT_SETUP_ACTION_LABEL = localize2('triggerChatSetup', "Use AI Features with Backboard...");
 
 			constructor() {
 				super({
@@ -250,6 +250,10 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 
 				await context.update({ hidden: false });
 				configurationService.updateValue(ChatConfiguration.AIDisabled, false);
+
+				if (product.defaultChatAgent?.provider?.default?.id === 'backboard') {
+					return Boolean(await commandService.executeCommand('backboard.signIn'));
+				}
 
 				if (mode) {
 					const chatWidget = await widgetService.revealWidget();
@@ -325,7 +329,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 			constructor() {
 				super({
 					id: 'workbench.action.chat.triggerSetupForceSignIn',
-					title: localize2('forceSignIn', "Sign in to use GitHub Copilot")
+					title: localize2('forceSignIn', "Sign in to use Backboard")
 				});
 			}
 
@@ -363,7 +367,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 			constructor() {
 				super({
 					id: 'workbench.action.chat.triggerSetupFromAccounts',
-					title: localize2('triggerChatSetupFromAccounts', "Sign in to use GitHub Copilot..."),
+					title: localize2('triggerChatSetupFromAccounts', "Sign in to use Backboard..."),
 					menu: {
 						id: MenuId.AccountsContext,
 						group: '2_copilot',
@@ -397,8 +401,9 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 					title: localize('signInIndicatorTitleBarAction', 'Sign In'),
 					f1: false,
 					menu: [{
-						id: MenuId.TitleBarAdjacentCenter,
-						order: 0, // same position as the update button
+						id: MenuId.BrowserActionsToolbar,
+						group: '5_settings',
+						order: 1,
 						when: ContextKeyExpr.and(
 							IsWebContext.negate(),
 							ChatContextKeys.Entitlement.signedOut,
@@ -406,7 +411,6 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 							ChatContextKeys.Setup.hidden.negate(),
 							ChatContextKeys.Setup.disabledInWorkspace.negate(),
 							ContextKeyExpr.equals(`config.${ChatConfiguration.TitleBarSignInEnabled}`, true),
-							ContextKeyExpr.has('updateTitleBar').negate(),
 							InEditorZenModeContext.negate(),
 						),
 					}]
@@ -650,7 +654,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 
 	private registerSignInTitleBarEntry(actionViewItemService: IActionViewItemService): void {
 		this._register(actionViewItemService.register(
-			MenuId.TitleBarAdjacentCenter,
+			MenuId.BrowserActionsToolbar,
 			SIGN_IN_TITLE_BAR_ACTION_ID,
 			(action, options) => new SignInTitleBarEntry(action, options)
 		));

@@ -260,7 +260,7 @@ export class SessionTypePickerActionItem extends ChatInputPickerActionViewItem {
 		if (contribution && ThemeIcon.isThemeIcon(contribution.icon)) {
 			return contribution.icon;
 		}
-		return Codicon.extensions;
+			return Codicon.sparkle;
 	}
 
 	override render(container: HTMLElement): void {

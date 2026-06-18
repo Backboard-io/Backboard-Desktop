@@ -633,7 +633,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 	}
 
 	private _generateFontFamily() {
-		return this._fontInfo?.fontFamily ?? `"SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace`;
+		return `"BB Mono", monospace`;
 	}
 
 	private _createLayoutStyles(): void {

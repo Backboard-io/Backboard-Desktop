@@ -31,6 +31,10 @@ function mapSessionStatus(status: SessionStatus | undefined): ChatSessionStatus 
 	return ChatSessionStatus.Completed;
 }
 
+function agentHostSessionIcon(provider: string) {
+	return provider === 'backboard' ? Codicon.sparkle : Codicon.copilot;
+}
+
 /**
  * Provides session list items for the chat sessions sidebar by querying
  * active sessions from an agent host connection. Listens to protocol
@@ -349,7 +353,7 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 			resource: URI.from({ scheme: this._sessionType, path: `/${rawId}` }),
 			label: opts.title || `Session ${rawId.substring(0, 8)}`,
 			description,
-			iconPath: Codicon.copilot,
+			iconPath: agentHostSessionIcon(this._provider),
 			status: mapSessionStatus(opts.status),
 			archived: opts.status !== undefined && (opts.status & SessionStatus.IsArchived) === SessionStatus.IsArchived,
 			metadata: this._buildMetadata(opts.workingDirectory),

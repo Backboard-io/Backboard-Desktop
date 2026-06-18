@@ -3,23 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as cp from 'child_process';
-import * as crypto from 'crypto';
-import * as fs from 'fs';
-import * as http from 'http';
-import * as https from 'https';
-import * as os from 'os';
-import * as path from 'path';
+import { VSBuffer } from '../../../../../base/common/buffer.js';
+import { dirname } from '../../../../../base/common/resources.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
+import product from '../../../../../platform/product/common/product.js';
+import { IWorkbenchContribution } from '../../../../common/contributions.js';
+import { ChatEntitlementContextKeys, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
+import { IPathService } from '../../../../services/path/common/pathService.js';
 
 const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
 const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
@@ -75,8 +76,8 @@ export function registerBackboardSsoActions(): void {
 			});
 		}
 
-		override async run(accessor: ServicesAccessor): Promise<void> {
-			await accessor.get(IInstantiationService).createInstance(BackboardSsoFlow).signIn();
+		override async run(accessor: ServicesAccessor): Promise<boolean> {
+			return accessor.get(IInstantiationService).createInstance(BackboardSsoFlow).signIn();
 		}
 	});
 
@@ -111,23 +112,59 @@ export function registerBackboardSsoActions(): void {
 	});
 }
 
+export class BackboardCredentialsContribution implements IWorkbenchContribution {
+
+	static readonly ID = 'workbench.contrib.backboardCredentials';
+
+	constructor(
+		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
+		@IFileService private readonly fileService: IFileService,
+		@IPathService private readonly pathService: IPathService,
+		@ILogService private readonly logService: ILogService,
+	) {
+		if (isBackboardProduct()) {
+			this.checkBackboardCredentials().catch(error => this.logService.error(`[Backboard] Failed to check credentials: ${error instanceof Error ? error.message : String(error)}`));
+		}
+	}
+
+	private async checkBackboardCredentials(): Promise<void> {
+		const configResource = await backboardConfigResource(this.pathService);
+		if (await hasBackboardCredentials(this.fileService, configResource)) {
+			markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
+			this.logService.info(`[Backboard] Existing credentials found in ${configResource.fsPath}; chat setup marked ready.`);
+		}
+	}
+}
+
 class BackboardSsoFlow {
 	constructor(
 		@IClipboardService private readonly clipboardService: IClipboardService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
+		@IFileService private readonly fileService: IFileService,
+		@IPathService private readonly pathService: IPathService,
 		@ILogService private readonly logService: ILogService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IOpenerService private readonly openerService: IOpenerService,
 	) { }
 
 	async signIn(): Promise<boolean> {
-		const state = crypto.randomBytes(24).toString('base64url');
-		const nonce = crypto.randomBytes(24).toString('base64url');
-		const codeVerifier = crypto.randomBytes(32).toString('base64url');
-		const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
 		let callbackServer: { dispose(): void } | undefined;
 
 		try {
+			const configResource = await backboardConfigResource(this.pathService);
+			if (await hasBackboardCredentials(this.fileService, configResource)) {
+				markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
+				this.logService.info(`[Backboard OAuth] Existing credentials found in ${configResource.fsPath}; skipping browser sign in.`);
+				return true;
+			}
+
+			const state = randomBase64Url(24);
+			const nonce = randomBase64Url(24);
+			const codeVerifier = randomBase64Url(32);
+			const codeChallenge = await sha256Base64Url(codeVerifier);
 			const redirectUri = this.backboardOAuthCallbackUri();
 			this.logService.info(`[Backboard OAuth] Redirect URI: ${redirectUri}`);
 			callbackServer = await startBackboardOAuthCallbackServer(redirectUri, this.logService);
@@ -150,7 +187,8 @@ class BackboardSsoFlow {
 			callbackServer?.dispose();
 			callbackServer = undefined;
 			const tokens = await exchangeBackboardOAuthCode(code, redirectUri, codeVerifier);
-			const saveResult = await saveBackboardOAuthTokens(tokens, this.configurationService);
+			const saveResult = await saveBackboardOAuthTokens(tokens, this.configurationService, this.fileService, configResource);
+			markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
 			this.notificationService.info(saveResult.apiKeySaved
 				? localize('backboard.ssoCompleteWithApiKey', "Backboard sign in complete. API key saved for the Rust bridge.")
 				: localize('backboard.ssoCompleteAccessTokenOnly', "Backboard sign in complete. Access token saved; the token response did not include an API key."));
@@ -188,13 +226,8 @@ class BackboardSsoFlow {
 		return stringValueFromRecord(configured) ?? defaultBackboardOAuthRedirectUri;
 	}
 
-	private openAuthorizeUrl(authorizeUrl: string): Promise<void> {
-		if (process.platform === 'darwin') {
-			return new Promise((resolve, reject) => {
-				cp.execFile('/usr/bin/open', [authorizeUrl], error => error ? reject(error) : resolve());
-			});
-		}
-		return this.openerService.open(URI.parse(authorizeUrl), { openExternal: true }).then(() => undefined);
+	private async openAuthorizeUrl(authorizeUrl: string): Promise<void> {
+		await this.openerService.open(URI.parse(authorizeUrl), { openExternal: true });
 	}
 }
 
@@ -214,35 +247,13 @@ function waitForBackboardOAuthCode(state: string): Promise<string> {
 	});
 }
 
-function startBackboardOAuthCallbackServer(redirectUri: string, logService: ILogService): Promise<{ dispose(): void } | undefined> {
+async function startBackboardOAuthCallbackServer(redirectUri: string, logService: ILogService): Promise<{ dispose(): void } | undefined> {
 	const parsed = new URL(redirectUri);
 	if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
-		return Promise.resolve(undefined);
+		return undefined;
 	}
-	const port = Number(parsed.port);
-	if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-		return Promise.reject(new Error(`Backboard OAuth redirect URI must include a valid localhost port: ${redirectUri}`));
-	}
-
-	return new Promise((resolve, reject) => {
-		const server = http.createServer((request, response) => {
-			const requestUrl = new URL(request.url ?? '/', redirectUri);
-			if (requestUrl.pathname !== parsed.pathname) {
-				response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-				response.end('Not Found');
-				return;
-			}
-
-			const handled = completeBackboardOAuthCallback(requestUrl.searchParams.toString(), logService);
-			response.writeHead(handled ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' });
-			response.end(callbackHtml(handled));
-		});
-		server.once('error', error => reject(new Error(`Could not start Backboard OAuth callback server on ${redirectUri}: ${error.message}`)));
-		server.listen(port, parsed.hostname, () => {
-			logService.info(`[Backboard OAuth] Listening for callback on ${redirectUri}`);
-			resolve({ dispose: () => server.close() });
-		});
-	});
+	logService.info(`[Backboard OAuth] Renderer cannot host a localhost callback server for ${redirectUri}; use the clipboard callback action if the browser does not return automatically.`);
+	return undefined;
 }
 
 function completeBackboardOAuthCallback(queryString: string, logService: ILogService): boolean {
@@ -303,36 +314,20 @@ async function exchangeBackboardOAuthCode(code: string, redirectUri: string, cod
 	return tokens;
 }
 
-function postForm(urlString: string, body: URLSearchParams, label: string): Promise<string> {
-	return new Promise<string>((resolve, reject) => {
-		const requestUrl = new URL(urlString);
-		const requestBody = body.toString();
-		const request = https.request(requestUrl, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/x-www-form-urlencoded',
-				'Content-Length': Buffer.byteLength(requestBody),
-			},
-		}, response => {
-			const chunks: Buffer[] = [];
-			response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-			response.on('end', () => {
-				const responseText = Buffer.concat(chunks).toString('utf8');
-				const statusCode = response.statusCode ?? 0;
-				if (statusCode < 200 || statusCode >= 300) {
-					reject(new Error(`${label} returned HTTP ${statusCode}: ${responseText}`));
-					return;
-				}
-				resolve(responseText);
-			});
-		});
-		request.on('error', reject);
-		request.write(requestBody);
-		request.end();
+async function postForm(urlString: string, body: URLSearchParams, label: string): Promise<string> {
+	const response = await fetch(urlString, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		body,
 	});
+	const responseText = await response.text();
+	if (!response.ok) {
+		throw new Error(`${label} returned HTTP ${response.status}: ${responseText}`);
+	}
+	return responseText;
 }
 
-async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens, configurationService: IConfigurationService): Promise<BackboardOAuthSaveResult> {
+async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens, configurationService: IConfigurationService, fileService: IFileService, configResource: URI): Promise<BackboardOAuthSaveResult> {
 	const accessToken = stringValueFromRecord(tokens.access_token);
 	if (!accessToken) {
 		throw new Error('Backboard token response did not include an access token.');
@@ -343,14 +338,14 @@ async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens, configurat
 	const usableApiKey = directApiKey ?? backboardApiKey ?? personalApiKey;
 	const assistantId = stringValueFromRecord(tokens.assistant_id);
 
-	const config = await readBackboardConfigJson();
+	const config = await readBackboardConfigJson(fileService, configResource);
 	const env = normalizeBackboardEnv(stringValueFromRecord(config.env) || currentBackboardEnv(configurationService));
 	const envKeys = backboardConfigEnvKeys(config);
 	if (usableApiKey) {
 		envKeys[env] = usableApiKey;
 	}
 
-	await writeBackboardConfigJson({
+	await writeBackboardConfigJson(fileService, configResource, {
 		...config,
 		env,
 		api_key: usableApiKey ?? config.api_key,
@@ -373,28 +368,21 @@ async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens, configurat
 	return { apiKeySaved: Boolean(usableApiKey), assistantId };
 }
 
-async function readBackboardConfigJson(): Promise<BackboardConfigJson> {
+async function readBackboardConfigJson(fileService: IFileService, configResource: URI): Promise<BackboardConfigJson> {
 	try {
-		const parsed: unknown = JSON.parse(await fs.promises.readFile(backboardConfigPath(), 'utf8'));
+		const parsed: unknown = JSON.parse((await fileService.readFile(configResource)).value.toString());
 		return isObjectRecord(parsed) ? parsed : {};
 	} catch (error) {
-		if (isFileNotFoundError(error) || error instanceof SyntaxError) {
+		if (toFileOperationResult(error) === FileOperationResult.FILE_NOT_FOUND || error instanceof SyntaxError) {
 			return {};
 		}
 		throw error;
 	}
 }
 
-async function writeBackboardConfigJson(config: BackboardConfigJson): Promise<void> {
-	const configPath = backboardConfigPath();
-	const configDir = path.dirname(configPath);
-	await fs.promises.mkdir(configDir, { recursive: true });
-	const tempPath = path.join(configDir, `config.${process.pid}.${Date.now()}.tmp`);
-	await fs.promises.writeFile(tempPath, `${JSON.stringify(config, undefined, '\t')}\n`, { mode: 0o600 });
-	await fs.promises.rename(tempPath, configPath);
-	if (process.platform !== 'win32') {
-		await fs.promises.chmod(configPath, 0o600);
-	}
+async function writeBackboardConfigJson(fileService: IFileService, configResource: URI, config: BackboardConfigJson): Promise<void> {
+	await fileService.createFolder(dirname(configResource));
+	await fileService.writeFile(configResource, VSBuffer.fromString(`${JSON.stringify(config, undefined, '\t')}\n`));
 }
 
 function backboardConfigEnvKeys(config: BackboardConfigJson): Record<string, string> {
@@ -409,6 +397,52 @@ function backboardConfigEnvKeys(config: BackboardConfigJson): Record<string, str
 		}
 	}
 	return result;
+}
+
+async function hasBackboardCredentials(fileService: IFileService, configResource: URI): Promise<boolean> {
+	const config = await readBackboardConfigJson(fileService, configResource);
+	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
+}
+
+function backboardConfigApiKey(config: BackboardConfigJson): string | undefined {
+	const apiKey = stringValueFromRecord(config.api_key);
+	if (apiKey) {
+		return apiKey;
+	}
+	const env = normalizeBackboardEnv(config.env);
+	return stringValueFromRecord(backboardConfigEnvKeys(config)[env]);
+}
+
+function backboardConfigAccessToken(config: BackboardConfigJson): string | undefined {
+	const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
+	return stringValueFromRecord(oauth?.access_token);
+}
+
+function markBackboardChatReady(chatEntitlementService: IChatEntitlementService, contextKeyService: IContextKeyService): void {
+	chatEntitlementService.markSetupCompleted();
+	ChatEntitlementContextKeys.Setup.completed.bindTo(contextKeyService).set(true);
+	ChatEntitlementContextKeys.Setup.installed.bindTo(contextKeyService).set(true);
+	ChatEntitlementContextKeys.Setup.hidden.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Setup.disabled.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Setup.disabledInWorkspace.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Setup.untrusted.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Setup.later.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Setup.registered.bindTo(contextKeyService).set(true);
+	ChatEntitlementContextKeys.Entitlement.signedOut.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Entitlement.canSignUp.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Entitlement.planFree.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Entitlement.planEdu.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Entitlement.planPro.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Entitlement.planProPlus.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Entitlement.planMax.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Entitlement.planEnterprise.bindTo(contextKeyService).set(false);
+	ChatEntitlementContextKeys.Entitlement.planBusiness.bindTo(contextKeyService).set(true);
+	ChatEntitlementContextKeys.Entitlement.organisations.bindTo(contextKeyService).set(['backboard']);
+	ChatEntitlementContextKeys.Entitlement.sku.bindTo(contextKeyService).set('backboard');
+}
+
+function isBackboardProduct(): boolean {
+	return product.defaultChatAgent?.provider?.default?.id === 'backboard';
 }
 
 function currentBackboardEnv(configurationService: IConfigurationService): string {
@@ -427,8 +461,28 @@ function normalizeBackboardEnv(env: string | undefined): string {
 	}
 }
 
-function backboardConfigPath(): string {
-	return path.join(os.homedir(), '.backboard_ide', 'config.json');
+async function backboardConfigResource(pathService: IPathService): Promise<URI> {
+	return URI.joinPath(await pathService.userHome({ preferLocal: true }), '.backboard_ide', 'config.json');
+}
+
+function randomBase64Url(byteLength: number): string {
+	const bytes = new Uint8Array(byteLength);
+	globalThis.crypto.getRandomValues(bytes);
+	return bytesToBase64Url(bytes);
+}
+
+async function sha256Base64Url(value: string): Promise<string> {
+	const bytes = new TextEncoder().encode(value);
+	const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+	return bytesToBase64Url(new Uint8Array(hash));
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+	let binary = '';
+	for (const byte of bytes) {
+		binary += String.fromCharCode(byte);
+	}
+	return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 function callbackQueryString(value: string): string {
@@ -440,35 +494,10 @@ function callbackQueryString(value: string): string {
 	}
 }
 
-function callbackHtml(handled: boolean): string {
-	const title = handled ? 'Backboard sign in complete' : 'Backboard sign in could not be completed';
-	const message = handled ? 'You can return to the editor. This tab may close automatically.' : 'Return to the editor and start Backboard sign in again.';
-	const color = handled ? '#1677ff' : '#dc2626';
-	return `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title}</title>
-<style>
-body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f8fb; color: #101828; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-main { width: min(520px, calc(100% - 48px)); padding: 32px; border: 1px solid #d8dee8; border-radius: 8px; background: white; box-shadow: 0 16px 48px rgba(15, 23, 42, 0.12); }
-h1 { margin: 0 0 12px; color: ${color}; font-size: 26px; line-height: 1.2; letter-spacing: 0; }
-p { margin: 0; color: #5f6b7a; font-size: 16px; line-height: 1.5; }
-</style>
-</head>
-<body><main><h1>${title}</h1><p>${message}</p></main>${handled ? '<script>window.setTimeout(() => window.close(), 1200);</script>' : ''}</body>
-</html>`;
-}
-
 function stringValueFromRecord(value: unknown): string | undefined {
 	return typeof value === 'string' ? value.trim() || undefined : undefined;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isFileNotFoundError(error: unknown): boolean {
-	return isObjectRecord(error) && error.code === 'ENOENT';
 }

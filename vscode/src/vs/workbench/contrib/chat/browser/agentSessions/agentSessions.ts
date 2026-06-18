@@ -19,7 +19,9 @@ export enum AgentSessionProviders {
 	Claude = SessionType.ClaudeCode,
 	Codex = SessionType.Codex,
 	Growth = SessionType.Growth,
-	AgentHostCopilot = SessionType.AgentHostCopilot,
+	AgentHostBackboard = SessionType.AgentHostBackboard,
+	/** @deprecated Use AgentHostBackboard. */
+	AgentHostCopilot = SessionType.AgentHostBackboard,
 	AgentHostClaude = SessionType.AgentHostClaude,
 	AgentHostCodex = SessionType.AgentHostCodex,
 }
@@ -96,9 +98,9 @@ export function getAgentSessionProviderIcon(provider: AgentSessionTarget): Theme
 		case AgentSessionProviders.Growth:
 			return Codicon.lightbulb;
 		case AgentSessionProviders.AgentHostCopilot:
-			return Codicon.copilot;
+			return Codicon.sparkle;
 		default:
-			return Codicon.extensions;
+			return Codicon.sparkle;
 	}
 }
 
@@ -190,7 +192,7 @@ export function getAgentSessionProviderDescription(provider: AgentSessionTarget)
 		case AgentSessionProviders.Growth:
 			return localize('chat.session.providerDescription.growth', "Learn about Copilot features.");
 		case AgentSessionProviders.AgentHostCopilot:
-			return localize('chat.session.providerDescription.agentHostCopilot', "Run Backboard Copilot in a dedicated agent-host process.");
+			return localize('chat.session.providerDescription.agentHostCopilot', "Run Backboard against the current workspace with local tools, model selection, and saved Backboard credentials.");
 		default:
 			return '';
 	}

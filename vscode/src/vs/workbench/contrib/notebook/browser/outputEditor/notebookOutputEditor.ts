@@ -29,12 +29,7 @@ import { getDefaultNotebookCreationOptions } from '../notebookEditorWidget.js';
 import { NotebookOptions } from '../notebookOptions.js';
 import { BackLayerWebView, INotebookDelegateForWebview } from '../view/renderers/backLayerWebView.js';
 import { NotebookOutputEditorInput } from './notebookOutputEditorInput.js';
-import { FontInfo } from '../../../../../editor/common/config/fontInfo.js';
-import { createBareFontInfoFromRawSettings } from '../../../../../editor/common/config/fontInfoFromSettings.js';
-import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IEditorOptions as ICodeEditorOptions } from '../../../../../editor/common/config/editorOptions.js';
-import { FontMeasurements } from '../../../../../editor/browser/config/fontMeasurements.js';
-import { PixelRatio } from '../../../../../base/browser/pixelRatio.js';
 import { NotebookViewModel } from '../viewModel/notebookViewModelImpl.js';
 import { NotebookEventDispatcher } from '../viewModel/eventDispatcher.js';
 import { ViewContext } from '../viewModel/viewContext.js';
@@ -87,8 +82,6 @@ export class NotebookOutputEditor extends EditorPane implements INotebookDelegat
 	private _rootElement!: HTMLElement;
 	private _outputWebview: BackLayerWebView<ICommonCellInfo> | null = null;
 
-	private _fontInfo: FontInfo | undefined;
-
 	private _notebookOptions: NotebookOptions;
 	private _notebookViewModel: NotebookViewModel | undefined;
 
@@ -100,13 +93,12 @@ export class NotebookOutputEditor extends EditorPane implements INotebookDelegat
 	constructor(
 		group: IEditorGroup,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
-		@IThemeService themeService: IThemeService,
-		@ITelemetryService telemetryService: ITelemetryService,
-		@IStorageService storageService: IStorageService,
-		@IConfigurationService private readonly configurationService: IConfigurationService,
-		@INotebookService private readonly notebookService: INotebookService,
+			@IThemeService themeService: IThemeService,
+			@ITelemetryService telemetryService: ITelemetryService,
+			@IStorageService storageService: IStorageService,
+			@INotebookService private readonly notebookService: INotebookService,
 
-	) {
+		) {
 		super(NotebookOutputEditor.ID, group, telemetryService, themeService, storageService);
 		this._notebookOptions = this.instantiationService.createInstance(NotebookOptions, this.window, false, undefined);
 		this._register(this._notebookOptions);
@@ -114,19 +106,6 @@ export class NotebookOutputEditor extends EditorPane implements INotebookDelegat
 
 	protected createEditor(parent: HTMLElement): void {
 		this._rootElement = DOM.append(parent, DOM.$('.notebook-output-editor'));
-	}
-
-	private get fontInfo() {
-		if (!this._fontInfo) {
-			this._fontInfo = this.createFontInfo();
-		}
-
-		return this._fontInfo;
-	}
-
-	private createFontInfo() {
-		const editorOptions = this.configurationService.getValue<ICodeEditorOptions>('editor');
-		return FontMeasurements.readFontInfo(this.window, createBareFontInfoFromRawSettings(editorOptions, PixelRatio.getInstance(this.window).value));
 	}
 
 	private async _createOriginalWebview(id: string, viewType: string, resource: URI): Promise<void> {
@@ -147,7 +126,7 @@ export class NotebookOutputEditor extends EditorPane implements INotebookDelegat
 	}
 
 	private _generateFontFamily(): string {
-		return this.fontInfo.fontFamily ?? `"SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace`;
+		return `"BB Mono", monospace`;
 	}
 
 	override getTitle(): string {

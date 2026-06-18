@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
+import { CancellationError } from '../../../../base/common/errors.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../base/common/network.js';
@@ -21,10 +22,12 @@ import { INativeEnvironmentService } from '../../../environment/common/environme
 import { ILogService } from '../../../log/common/log.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { AgentSession, AgentSignal, IAgent, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata } from '../../common/agentService.js';
+import { createAgentModelPricingMeta } from '../../common/agentModelPricing.js';
+import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
-import { MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolResultContentType, TurnState, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
+import { getToolOutputText, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallContributorKind, ToolResultContentType, TurnState, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 
@@ -55,6 +58,7 @@ const BACKBOARD_MEMORY_CONFIG_KEY = 'memoryMode';
 const BACKBOARD_WEB_SEARCH_CONFIG_KEY = 'webSearch';
 const BACKBOARD_IMAGE_CONFIG_KEY = 'imageGeneration';
 const IGNORED_DIRECTORIES = new Set(['.git', 'node_modules', 'out', 'dist', 'target', '.next', '.turbo']);
+const BACKBOARD_TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
 
 interface BridgeEvent {
 	readonly type: string;
@@ -83,14 +87,31 @@ interface BridgeModel {
 	readonly displayName?: string;
 	readonly contextLimit?: number;
 	readonly supportsVision?: boolean;
-	readonly inputPricePerMillion?: number;
-	readonly outputPricePerMillion?: number;
-	readonly inputCostPer1mTokens?: number;
-	readonly outputCostPer1mTokens?: number;
-	readonly inputPrice?: number;
-	readonly outputPrice?: number;
-	readonly promptPrice?: number;
-	readonly completionPrice?: number;
+	readonly pricing?: string;
+	readonly inputPricePerMillion?: number | string;
+	readonly outputPricePerMillion?: number | string;
+	readonly inputCostPer1mTokens?: number | string;
+	readonly outputCostPer1mTokens?: number | string;
+	readonly input_cost_per_1m_tokens?: number | string;
+	readonly output_cost_per_1m_tokens?: number | string;
+	readonly inputPrice?: number | string;
+	readonly outputPrice?: number | string;
+	readonly input_price?: number | string;
+	readonly output_price?: number | string;
+	readonly promptPrice?: number | string;
+	readonly completionPrice?: number | string;
+	readonly promptPricePerMillion?: number | string;
+	readonly completionPricePerMillion?: number | string;
+	readonly cachePrice?: number | string;
+	readonly cache_price?: number | string;
+	readonly cacheCost?: number | string;
+	readonly cacheCostPer1mTokens?: number | string;
+	readonly cachePricePerMillion?: number | string;
+	readonly cacheWritePrice?: number | string;
+	readonly cache_write_price?: number | string;
+	readonly cacheWriteCost?: number | string;
+	readonly cacheWriteCostPer1mTokens?: number | string;
+	readonly cacheWritePricePerMillion?: number | string;
 }
 
 interface PendingBridgeRequest {
@@ -105,6 +126,12 @@ interface BridgeRequestHandle {
 	readonly promise: Promise<BridgeEvent[]>;
 }
 
+interface CachedBackboardTools {
+	readonly expiresAt: number;
+	readonly tools?: unknown[];
+	readonly pending?: Promise<unknown[] | undefined>;
+}
+
 interface BackboardSession {
 	readonly sessionUri: URI;
 	readonly sessionId: string;
@@ -115,6 +142,9 @@ interface BackboardSession {
 	title?: string;
 	modifiedAt: number;
 	materialized: boolean;
+	clientTools?: readonly ToolDefinition[];
+	toolsClientId?: string;
+	readonly pendingClientToolCalls: PendingRequestRegistry<ToolCallResult>;
 	currentRequestId?: string;
 	disposed: boolean;
 }
@@ -217,7 +247,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 	) {
 		super();
 		this._bridge = this._register(new BackboardBridgeProcess(_logService));
-		this._refreshModels();
+		this._refreshModels(true);
 	}
 
 	getDescriptor(): IAgentDescriptor {
@@ -255,6 +285,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				config: normalizeBackboardConfig(config.config),
 				title: restoredEntry.title,
 				materialized: true,
+				pendingClientToolCalls: new PendingRequestRegistry<ToolCallResult>(),
 				disposed: false,
 			};
 			this._sessions.set(sessionId, session);
@@ -275,6 +306,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 			model: normalizeBackboardModelSelection(config.model),
 			config: normalizeBackboardConfig(config.config),
 			materialized: false,
+			pendingClientToolCalls: new PendingRequestRegistry<ToolCallResult>(),
 			disposed: false,
 		};
 		this._sessions.set(sessionId, session);
@@ -306,7 +338,10 @@ export class BackboardAgent extends Disposable implements IAgent {
 			const settings = this._turnSettings(session);
 			const firstToolRequests: ToolResultRequest[] = [];
 			const seenToolRequests = new Set<string>();
-			const submitToolsPromise = this._bridge.listTools(settings.mode).catch(() => undefined);
+			const submitToolsPromise = this._bridge.listTools(settings.mode)
+				.then(tools => mergeBackboardTools(tools, session.clientTools))
+				.catch(() => mergeBackboardTools(undefined, session.clientTools));
+			const submitTools = await submitToolsPromise;
 			const handle = this._bridge.send('sendPrompt', bridgeSessionId, {
 				content: prompt,
 				workspace: session.workingDirectory?.fsPath,
@@ -318,6 +353,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				webSearch: settings.webSearch,
 				imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
 				mcpCalls: settings.mcpCalls,
+				tools: submitTools,
 				config: settings.config,
 			}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, firstToolRequests, seenToolRequests, event));
 			session.currentRequestId = handle.requestId;
@@ -332,7 +368,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 					threadId: nextToolRequest.threadId,
 					runId: nextToolRequest.runId,
 					toolOutputs,
-					tools: await submitToolsPromise,
+					tools: submitTools,
 					config: settings.config,
 				}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, continuationToolRequests, seenToolRequests, event));
 				session.currentRequestId = continuation.requestId;
@@ -373,6 +409,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 		}
 		if (session) {
 			session.disposed = true;
+			session.pendingClientToolCalls.rejectAll(new CancellationError());
 		}
 		this._sessions.delete(sessionId);
 	}
@@ -382,6 +419,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 		if (session.currentRequestId) {
 			this._bridge.cancel(`sandbox:${session.sessionId}`, session.currentRequestId);
 		}
+		session.pendingClientToolCalls.rejectAll(new CancellationError());
 	}
 
 	async changeModel(sessionUri: URI, model: ModelSelection): Promise<void> {
@@ -437,10 +475,20 @@ export class BackboardAgent extends Disposable implements IAgent {
 		return [];
 	}
 
-	setClientTools(_session: URI, _clientId: string | undefined, _tools: ToolDefinition[]): void {
+	setClientTools(session: URI, clientId: string | undefined, tools: ToolDefinition[]): void {
+		const sessionId = AgentSession.id(session);
+		const sess = this._sessions.get(sessionId);
+		if (!sess || sess.disposed) {
+			return;
+		}
+		sess.clientTools = tools.length > 0 ? tools : undefined;
+		sess.toolsClientId = sess.clientTools ? clientId : undefined;
+		this._logService.info(`[Backboard:${sessionId}] setClientTools clientId=${clientId ?? '(none)'} tools=[${tools.map(tool => tool.name).join(', ') || '(none)'}]`);
 	}
 
-	onClientToolCallComplete(_session: URI, _toolCallId: string, _result: ToolCallResult): void {
+	onClientToolCallComplete(session: URI, toolCallId: string, result: ToolCallResult): void {
+		const sess = this._sessions.get(AgentSession.id(session));
+		sess?.pendingClientToolCalls.respondOrBuffer(toolCallId, result);
 	}
 
 	setCustomizationEnabled(_id: string, _enabled: boolean): void {
@@ -454,6 +502,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 			if (session.currentRequestId) {
 				this._bridge.cancel(`sandbox:${session.sessionId}`, session.currentRequestId);
 			}
+			session.pendingClientToolCalls.rejectAll(new CancellationError());
 		}
 		this._sessions.clear();
 	}
@@ -563,12 +612,15 @@ export class BackboardAgent extends Disposable implements IAgent {
 		for (const rawCall of toolCalls) {
 			const call = parseToolCall(rawCall);
 			const toolInput = safeJson(call.args);
+			const clientTool = clientToolForCall(session, call.name);
+			const displayName = clientTool?.title || displayToolName(call.name);
 			this._fire(session.sessionUri, {
 				type: ActionType.ChatToolCallStart,
 				turnId,
 				toolCallId: call.id,
 				toolName: call.name,
-				displayName: displayToolName(call.name),
+				displayName,
+				...(clientTool && session.toolsClientId ? { contributor: { kind: ToolCallContributorKind.Client, clientId: session.toolsClientId } } : {}),
 				_meta: { toolKind: toolKind(call.name) },
 			});
 			this._fire(session.sessionUri, {
@@ -577,6 +629,57 @@ export class BackboardAgent extends Disposable implements IAgent {
 				toolCallId: call.id,
 				content: toolInput,
 			});
+
+			if (clientTool) {
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatToolCallReady,
+					turnId,
+					toolCallId: call.id,
+					invocationMessage: describeClientToolInvocation(clientTool, call),
+					toolInput,
+					confirmed: ToolCallConfirmationReason.NotNeeded,
+					_meta: { toolKind: 'client' },
+				});
+				if (!session.toolsClientId) {
+					const message = `No active VS Code client is connected to run ${displayName}.`;
+					this._fire(session.sessionUri, {
+						type: ActionType.ChatToolCallComplete,
+						turnId,
+						toolCallId: call.id,
+						result: {
+							success: false,
+							pastTenseMessage: `${displayName} failed`,
+							content: [{ type: ToolResultContentType.Text, text: message }],
+							error: { message },
+						},
+					});
+					responseState.toolOutputs.push({ id: call.id, name: call.name, input: toolInput, success: false, output: message });
+					outputs.push(toolOutput(call.id, { success: false, content: message }));
+					continue;
+				}
+				try {
+					const result = await session.pendingClientToolCalls.register(call.id);
+					const output = toolCallResultOutput(result);
+					responseState.toolOutputs.push({ id: call.id, name: call.name, input: toolInput, success: result.success, output });
+					outputs.push(toolOutput(call.id, { success: result.success, content: output }));
+				} catch (error) {
+					const message = error instanceof CancellationError ? `${displayName} was cancelled.` : (error instanceof Error ? error.message : String(error));
+					this._fire(session.sessionUri, {
+						type: ActionType.ChatToolCallComplete,
+						turnId,
+						toolCallId: call.id,
+						result: {
+							success: false,
+							pastTenseMessage: `Tried ${displayName}`,
+							content: [{ type: ToolResultContentType.Text, text: message }],
+							error: { message },
+						},
+					});
+					responseState.toolOutputs.push({ id: call.id, name: call.name, input: toolInput, success: false, output: message });
+					outputs.push(toolOutput(call.id, { success: false, content: message }));
+				}
+				continue;
+			}
 
 			const allowed = mode === 'free' || isReadOnlyTool(call.name);
 			this._fire(session.sessionUri, {
@@ -649,22 +752,30 @@ export class BackboardAgent extends Disposable implements IAgent {
 		return outputs;
 	}
 
-	private _refreshModels(): void {
+	private _refreshModels(deferNetwork = false): void {
 		const cachedModels = this._readCachedModels();
 		if (cachedModels.length) {
 			this._models.set(backboardModelInfos(cachedModels), undefined);
 		}
-		this._bridge.send('listModels', undefined, { config: bridgeConfig() }, undefined).promise.then(events => {
-			const bridgeModels = events.find(event => event.type === 'models')?.models ?? [];
-			this._writeCachedModels(bridgeModels);
-			const models = backboardModelInfos(bridgeModels, cachedModels);
-			this._models.set(models.length ? models : [fallbackModel()], undefined);
-		}).catch(error => {
-			this._logService.warn(`[Backboard] Failed to load models: ${error instanceof Error ? error.message : String(error)}`);
-			if (!cachedModels.length) {
-				this._models.set([fallbackModel()], undefined);
-			}
-		});
+		const refresh = (): void => {
+			this._bridge.send('listModels', undefined, { config: bridgeConfig() }, undefined).promise.then(events => {
+				const bridgeModels = events.find(event => event.type === 'models')?.models ?? [];
+				this._writeCachedModels(bridgeModels);
+				const models = backboardModelInfos(bridgeModels, cachedModels);
+				this._models.set(models.length ? models : [fallbackModel()], undefined);
+			}).catch(error => {
+				this._logService.warn(`[Backboard] Failed to load models: ${error instanceof Error ? error.message : String(error)}`);
+				if (!cachedModels.length) {
+					this._models.set([fallbackModel()], undefined);
+				}
+			});
+		};
+		if (deferNetwork) {
+			const handle = setTimeout(refresh, 2500);
+			this._register({ dispose: () => clearTimeout(handle) });
+		} else {
+			refresh();
+		}
 	}
 
 	private _modelCachePath(): string {
@@ -1096,6 +1207,7 @@ async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<vo
 class BackboardBridgeProcess extends Disposable {
 	private child: ChildProcessWithoutNullStreams | undefined;
 	private readonly pending = new Map<string, PendingBridgeRequest>();
+	private readonly toolCache = new Map<string, CachedBackboardTools>();
 
 	constructor(
 		private readonly _logService: ILogService,
@@ -1134,6 +1246,26 @@ class BackboardBridgeProcess extends Disposable {
 	}
 
 	async listTools(mode: string): Promise<unknown[] | undefined> {
+		const cached = this.toolCache.get(mode);
+		if (cached?.pending) {
+			return cached.pending;
+		}
+		if (cached && cached.expiresAt > Date.now()) {
+			return cached.tools;
+		}
+		const pending = this._fetchTools(mode);
+		this.toolCache.set(mode, { expiresAt: 0, pending });
+		try {
+			const tools = await pending;
+			this.toolCache.set(mode, { expiresAt: Date.now() + BACKBOARD_TOOL_CACHE_TTL_MS, tools });
+			return tools;
+		} catch (error) {
+			this.toolCache.delete(mode);
+			throw error;
+		}
+	}
+
+	private async _fetchTools(mode: string): Promise<unknown[] | undefined> {
 		const events = await this.send('listTools', undefined, { mode }, undefined).promise;
 		return events.find(event => event.type === 'tools')?.tools;
 	}
@@ -1256,8 +1388,17 @@ function parseModelSelection(model: ModelSelection | undefined): { provider: str
 
 function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 	const id = `${model.provider}/${model.name}`;
-	const inputCost = model.inputPricePerMillion ?? model.inputCostPer1mTokens ?? model.inputPrice ?? model.promptPrice;
-	const outputCost = model.outputPricePerMillion ?? model.outputCostPer1mTokens ?? model.outputPrice ?? model.completionPrice;
+	const pricePair = modelPricePair(model);
+	const inputCost = pricePair?.[0];
+	const outputCost = pricePair?.[1];
+	const cacheCost = numericBridgeModelValue(model, ['cachePricePerMillion', 'cacheCostPer1mTokens', 'cachePrice', 'cache_price', 'cacheCost']);
+	const cacheWriteCost = numericBridgeModelValue(model, ['cacheWritePricePerMillion', 'cacheWriteCostPer1mTokens', 'cacheWritePrice', 'cache_write_price', 'cacheWriteCost']);
+	const pricingMeta = createAgentModelPricingMeta({
+		inputCost,
+		cacheCost,
+		cacheWriteCost,
+		outputCost,
+	});
 	return {
 		provider: 'backboard',
 		id,
@@ -1267,10 +1408,57 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 		_meta: {
 			upstreamProvider: normalizeProviderKey(model.provider),
 			upstreamProviderLabel: providerLabel(model.provider),
-			...(typeof inputCost === 'number' ? { inputCost } : {}),
-			...(typeof outputCost === 'number' ? { outputCost } : {}),
+			pricing: modelPriceLabel(model),
+			...(pricingMeta ?? {}),
 		},
 	};
+}
+
+function numericBridgeModelValue(model: BridgeModel, keys: readonly (keyof BridgeModel)[]): number | undefined {
+	for (const key of keys) {
+		const value = model[key];
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			return value;
+		}
+		if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+			return Number(value);
+		}
+	}
+	return undefined;
+}
+
+function formatModelPrice(value: number): string {
+	return `$${value.toFixed(2)}/M`;
+}
+
+function modelPricePair(model: BridgeModel): readonly [number, number] | undefined {
+	const explicitInput = numericBridgeModelValue(model, ['inputPricePerMillion', 'inputCostPer1mTokens', 'input_cost_per_1m_tokens', 'inputPrice', 'input_price', 'promptPrice', 'promptPricePerMillion']);
+	const explicitOutput = numericBridgeModelValue(model, ['outputPricePerMillion', 'outputCostPer1mTokens', 'output_cost_per_1m_tokens', 'outputPrice', 'output_price', 'completionPrice', 'completionPricePerMillion']);
+	if (explicitInput !== undefined && explicitOutput !== undefined) {
+		return [explicitInput, explicitOutput];
+	}
+	const id = [model.provider, model.name, model.displayName].filter(Boolean).join(' ').toLowerCase().replace(/[._]/g, '-');
+	if (id.includes('claude-haiku-4-5') || id.includes('claude-haiku-4.5')) {
+		return [1, 5];
+	}
+	if (id.includes('claude-sonnet-4')) {
+		return [3, 15];
+	}
+	if (id.includes('claude-opus-4-5') || id.includes('claude-opus-4.5') || id.includes('claude-opus-4-6') || id.includes('claude-opus-4-7') || id.includes('claude-opus-4-8')) {
+		return [5, 25];
+	}
+	if (id.includes('claude-opus-4')) {
+		return [15, 75];
+	}
+	return undefined;
+}
+
+function modelPriceLabel(model: BridgeModel): string | undefined {
+	if (typeof model.pricing === 'string' && model.pricing.trim() !== '') {
+		return model.pricing;
+	}
+	const pair = modelPricePair(model);
+	return pair ? `${formatModelPrice(pair[0])} in, ${formatModelPrice(pair[1])} out` : undefined;
 }
 
 function fallbackModel(): IAgentModelInfo {
@@ -1641,6 +1829,63 @@ function createToolContentReporter(emit: (content: string) => void): { report: (
 		},
 		flush,
 	};
+}
+
+function clientToolForCall(session: BackboardSession, name: string): ToolDefinition | undefined {
+	return session.clientTools?.find(tool => tool.name === name);
+}
+
+function mergeBackboardTools(bridgeTools: unknown[] | undefined, clientTools: readonly ToolDefinition[] | undefined): unknown[] | undefined {
+	const merged: unknown[] = [];
+	const names = new Set<string>();
+	for (const tool of bridgeTools ?? []) {
+		const name = backboardFunctionToolName(tool);
+		if (name) {
+			names.add(name);
+		}
+		merged.push(tool);
+	}
+	for (const tool of clientTools ?? []) {
+		if (!tool.name || names.has(tool.name)) {
+			continue;
+		}
+		names.add(tool.name);
+		merged.push(toBackboardFunctionTool(tool));
+	}
+	return merged.length ? merged : undefined;
+}
+
+function backboardFunctionToolName(tool: unknown): string | undefined {
+	if (!isObjectRecord(tool)) {
+		return undefined;
+	}
+	const fn = isObjectRecord(tool.function) ? tool.function : undefined;
+	return firstStringProperty(fn ?? tool, ['name']);
+}
+
+function toBackboardFunctionTool(tool: ToolDefinition): unknown {
+	return {
+		type: 'function',
+		function: {
+			name: tool.name,
+			description: tool.description ?? tool.title ?? `Run ${tool.name}`,
+			parameters: tool.inputSchema ?? { type: 'object', properties: {} },
+		},
+		_meta: { ...(tool._meta ?? {}), source: 'vscode-client' },
+	};
+}
+
+function describeClientToolInvocation(tool: ToolDefinition, call: ParsedToolCall): string {
+	const title = tool.title || displayToolName(call.name);
+	const description = tool.description?.trim();
+	return description ? `${title}: ${description}` : title;
+}
+
+function toolCallResultOutput(result: ToolCallResult): string {
+	return getToolOutputText(result)
+		?? (result.structuredContent ? compactJson(result.structuredContent) : undefined)
+		?? (typeof result.pastTenseMessage === 'string' ? result.pastTenseMessage : compactJson(result.pastTenseMessage))
+		?? (result.success ? 'Tool completed with no output.' : 'Tool failed with no output.');
 }
 
 function toolContentPreview(content: string): string {

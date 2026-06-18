@@ -164,7 +164,7 @@ export class NotebookMultiTextDiffEditor extends EditorPane {
 		this.modelSpecificResources.clear();
 	}
 	_generateFontFamily(): string {
-		return this.fontInfo.fontFamily ?? `"SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace`;
+		return `"BB Mono", monospace`;
 	}
 	override setOptions(options: IMultiDiffEditorOptions | undefined): void {
 		super.setOptions(options);

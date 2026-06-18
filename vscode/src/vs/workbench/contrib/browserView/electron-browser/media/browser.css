@@ -34,6 +34,7 @@
 	.browser-navbar {
 		display: flex;
 		align-items: center;
+		justify-content: flex-end;
 		padding: 6px 8px 3px 8px;
 		background-color: var(--vscode-editor-background);
 		flex-shrink: 0;
@@ -52,6 +53,7 @@
 	}
 
 	.browser-actions-toolbar {
+		margin-left: auto;
 		margin-right: 4px;
 	}
 

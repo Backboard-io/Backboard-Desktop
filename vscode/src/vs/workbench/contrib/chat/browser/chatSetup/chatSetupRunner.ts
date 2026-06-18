@@ -129,7 +129,7 @@ export class ChatSetup {
 
 		if (setupStrategy !== ChatSetupStrategy.Canceled && !options?.disableChatViewReveal) {
 			// Show the chat view now to better indicate progress
-			// while installing the extension or returning from sign in
+			// while setup is running or returning from sign in
 			this.widgetService.revealWidget();
 		}
 
@@ -247,7 +247,7 @@ export class ChatSetup {
 		}
 
 		if (this.context.state.entitlement === ChatEntitlement.Unknown || options?.forceSignInDialog) {
-			return localize('signIn', "Sign in to use GitHub Copilot");
+			return localize('signIn', "Sign in to use Backboard");
 		}
 
 		return localize('startUsing', "Start using AI Features");

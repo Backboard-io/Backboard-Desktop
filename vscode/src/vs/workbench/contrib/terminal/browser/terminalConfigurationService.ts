@@ -5,7 +5,6 @@
 
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, toDisposable } from '../../../../base/common/lifecycle.js';
-import { type IEditorOptions } from '../../../../editor/common/config/editorOptions.js';
 import { EDITOR_FONT_DEFAULTS } from '../../../../editor/common/config/fontInfo.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { ITerminalConfigurationService, LinuxDistro } from './terminal.js';
@@ -42,7 +41,7 @@ export class TerminalConfigurationService extends Disposable implements ITermina
 	) {
 		super();
 
-		this._fontMetrics = this._register(new TerminalFontMetrics(this, this._configurationService));
+		this._fontMetrics = this._register(new TerminalFontMetrics(this));
 
 		this._register(Event.runAndSubscribe(this._configurationService.onDidChangeConfiguration, e => {
 			if (!e || e.affectsConfiguration(TERMINAL_CONFIG_SECTION)) {
@@ -101,7 +100,6 @@ export class TerminalFontMetrics extends Disposable {
 
 	constructor(
 		private readonly _terminalConfigurationService: ITerminalConfigurationService,
-		private readonly _configurationService: IConfigurationService,
 	) {
 		super();
 		this._register(toDisposable(() => this._charMeasureElement?.remove()));
@@ -113,7 +111,7 @@ export class TerminalFontMetrics extends Disposable {
 
 	configFontIsMonospace(): boolean {
 		const fontSize = 15;
-		const fontFamily = this._terminalConfigurationService.config.fontFamily || this._configurationService.getValue<IEditorOptions>('editor').fontFamily || EDITOR_FONT_DEFAULTS.fontFamily;
+		const fontFamily = EDITOR_FONT_DEFAULTS.fontFamily;
 		const iRect = this._getBoundingRectFor('i', fontFamily, fontSize);
 		const wRect = this._getBoundingRectFor('w', fontFamily, fontSize);
 
@@ -130,23 +128,8 @@ export class TerminalFontMetrics extends Disposable {
 	 * terminal.integrated.fontSize, terminal.integrated.lineHeight configuration properties
 	 */
 	getFont(w: Window, xtermCore?: IXtermCore, excludeDimensions?: boolean): ITerminalFont {
-		const editorConfig = this._configurationService.getValue<IEditorOptions>('editor');
-
-		let fontFamily = this._terminalConfigurationService.config.fontFamily || editorConfig.fontFamily || EDITOR_FONT_DEFAULTS.fontFamily || 'monospace';
+		let fontFamily = EDITOR_FONT_DEFAULTS.fontFamily;
 		let fontSize = clampInt(this._terminalConfigurationService.config.fontSize, FontConstants.MinimumFontSize, FontConstants.MaximumFontSize, EDITOR_FONT_DEFAULTS.fontSize);
-
-		// Work around bad font on Fedora/Ubuntu
-		if (!this._terminalConfigurationService.config.fontFamily) {
-			if (this.linuxDistro === LinuxDistro.Fedora) {
-				fontFamily = '\'DejaVu Sans Mono\'';
-			}
-			if (this.linuxDistro === LinuxDistro.Ubuntu) {
-				fontFamily = '\'Ubuntu Mono\'';
-
-				// Ubuntu mono is somehow smaller, so set fontSize a bit larger to get the same perceived size.
-				fontSize = clampInt(fontSize + 2, FontConstants.MinimumFontSize, FontConstants.MaximumFontSize, EDITOR_FONT_DEFAULTS.fontSize);
-			}
-		}
 
 		// Always fallback to monospace, otherwise a proportional font may become the default
 		fontFamily += ', monospace';

@@ -5,17 +5,13 @@
 
 import { mainWindow } from './window.js';
 import type { IJSONSchemaSnippet } from '../common/jsonSchema.js';
-import { isElectron, isMacintosh, isWindows } from '../common/platform.js';
+import { isElectron } from '../common/platform.js';
 
 /**
- * The best font-family to be used in CSS based on the platform:
- * - Windows: Segoe preferred, fallback to sans-serif
- * - macOS: standard system font, fallback to sans-serif
- * - Linux: standard system font preferred, fallback to Ubuntu fonts
- *
- * Note: this currently does not adjust for different locales.
+ * Backboard's default UI font. The font-face is registered as "BB Mono" in
+ * the workbench stylesheet and backed by IBM Plex Mono assets.
  */
-export const DEFAULT_FONT_FAMILY = isWindows ? '"Segoe WPC", "Segoe UI", sans-serif' : isMacintosh ? '-apple-system, BlinkMacSystemFont, sans-serif' : 'system-ui, "Ubuntu", "Droid Sans", sans-serif';
+export const DEFAULT_FONT_FAMILY = '"BB Mono", monospace';
 
 interface FontData {
 	readonly family: string;

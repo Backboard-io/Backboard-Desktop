@@ -23,7 +23,7 @@
 	}
 
 	.monaco-list-row {
-		border-radius: 6px;
+		border-radius: 0;
 	}
 
 	.monaco-list-row .force-no-twistie {
@@ -105,7 +105,19 @@
 	.agent-session-item {
 		display: flex;
 		flex-direction: row;
-		padding: 8px 6px;
+		padding: 5px 6px;
+		margin: 0;
+		border-left: 2px solid transparent;
+
+		.monaco-list-row:hover &,
+		.monaco-list-row.focused:not(.selected) & {
+			background-color: var(--vscode-list-hoverBackground);
+		}
+
+		.monaco-list-row.selected & {
+			border-left-color: var(--vscode-focusBorder);
+			background-color: var(--vscode-list-activeSelectionBackground);
+		}
 
 		&.archived {
 			color: var(--vscode-descriptionForeground);
@@ -121,15 +133,20 @@
 		.agent-session-icon-col {
 			display: flex;
 			align-items: flex-start;
-			line-height: 17px;
+			line-height: 16px;
 
 			.agent-session-icon {
 				flex-shrink: 0;
 				font-size: 12px;
-				height: 16px;
+				width: 18px;
+				height: 18px;
 				display: flex;
 				align-items: center;
 				justify-content: center;
+				border: none;
+				border-radius: 0;
+				background-color: transparent;
+				color: var(--vscode-descriptionForeground);
 
 				&.needs-input {
 					animation: agent-session-needs-input-pulse 2s ease-in-out infinite;
@@ -144,7 +161,7 @@
 		}
 
 		.agent-session-main-col {
-			padding-left: 6px;
+			padding-left: 7px;
 		}
 
 		.agent-session-title-row,
@@ -154,15 +171,15 @@
 		}
 
 		.agent-session-title-row {
-			line-height: 17px;
-			padding-bottom: 4px;
+			line-height: 16px;
+			padding-bottom: 1px;
 		}
 
 		.agent-session-details-row {
 			gap: 4px;
 			font-size: 12px;
-			line-height: 15px;
-			max-height: 15px;
+			line-height: 14px;
+			max-height: 14px;
 			color: var(--vscode-descriptionForeground);
 
 			.agent-session-details-icon {
@@ -259,6 +276,8 @@
 
 		.agent-session-title {
 			font-size: 13px;
+			font-weight: 600;
+			letter-spacing: 0;
 		}
 
 		.agent-session-status {

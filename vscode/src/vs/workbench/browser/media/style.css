@@ -7,30 +7,138 @@
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* Font Families (with CJK support) */
+/* Font Families */
 
-.monaco-workbench.mac { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
-.monaco-workbench.mac:lang(zh-Hans) { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif; }
-.monaco-workbench.mac:lang(zh-Hant) { font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif; }
-.monaco-workbench.mac:lang(ja) { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic Pro", sans-serif; }
-.monaco-workbench.mac:lang(ko) { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Nanum Gothic", "AppleGothic", sans-serif; }
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-Thin.ttf") format("truetype");
+	font-weight: 100;
+	font-style: normal;
+	font-display: swap;
+}
 
-.monaco-workbench.windows { font-family: "Segoe WPC", "Segoe UI", sans-serif; }
-.monaco-workbench.windows:lang(zh-Hans) { font-family: "Segoe WPC", "Segoe UI", "Microsoft YaHei", sans-serif; }
-.monaco-workbench.windows:lang(zh-Hant) { font-family: "Segoe WPC", "Segoe UI", "Microsoft Jhenghei", sans-serif; }
-.monaco-workbench.windows:lang(ja) { font-family: "Segoe WPC", "Segoe UI", "Yu Gothic UI", "Meiryo UI", sans-serif; }
-.monaco-workbench.windows:lang(ko) { font-family: "Segoe WPC", "Segoe UI", "Malgun Gothic", "Dotom", sans-serif; }
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-ThinItalic.ttf") format("truetype");
+	font-weight: 100;
+	font-style: italic;
+	font-display: swap;
+}
 
-/* Linux: add `system-ui` as first font and not `Ubuntu` to allow other distribution pick their standard OS font */
-.monaco-workbench.linux { font-family: system-ui, "Ubuntu", "Droid Sans", sans-serif; }
-.monaco-workbench.linux:lang(zh-Hans) { font-family: system-ui, "Ubuntu", "Droid Sans", "Source Han Sans SC", "Source Han Sans CN", "Source Han Sans", sans-serif; }
-.monaco-workbench.linux:lang(zh-Hant) { font-family: system-ui, "Ubuntu", "Droid Sans", "Source Han Sans TC", "Source Han Sans TW", "Source Han Sans", sans-serif; }
-.monaco-workbench.linux:lang(ja) { font-family: system-ui, "Ubuntu", "Droid Sans", "Source Han Sans J", "Source Han Sans JP", "Source Han Sans", sans-serif; }
-.monaco-workbench.linux:lang(ko) { font-family: system-ui, "Ubuntu", "Droid Sans", "Source Han Sans K", "Source Han Sans JR", "Source Han Sans", "UnDotum", "FBaekmuk Gulim", sans-serif; }
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-ExtraLight.ttf") format("truetype");
+	font-weight: 200;
+	font-style: normal;
+	font-display: swap;
+}
 
-.monaco-workbench.mac { --monaco-monospace-font: "SF Mono", Monaco, Menlo, Courier, monospace; }
-.monaco-workbench.windows { --monaco-monospace-font: Consolas, "Courier New", monospace; }
-.monaco-workbench.linux { --monaco-monospace-font: "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace; }
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-ExtraLightItalic.ttf") format("truetype");
+	font-weight: 200;
+	font-style: italic;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-Light.ttf") format("truetype");
+	font-weight: 300;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-LightItalic.ttf") format("truetype");
+	font-weight: 300;
+	font-style: italic;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-Regular.ttf") format("truetype");
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-Italic.ttf") format("truetype");
+	font-weight: 400;
+	font-style: italic;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-Medium.ttf") format("truetype");
+	font-weight: 500;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-MediumItalic.ttf") format("truetype");
+	font-weight: 500;
+	font-style: italic;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-SemiBold.ttf") format("truetype");
+	font-weight: 600;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-SemiBoldItalic.ttf") format("truetype");
+	font-weight: 600;
+	font-style: italic;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-Bold.ttf") format("truetype");
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-BoldItalic.ttf") format("truetype");
+	font-weight: 700;
+	font-style: italic;
+	font-display: swap;
+}
+
+.monaco-workbench.mac,
+.monaco-workbench.windows,
+.monaco-workbench.linux,
+.monaco-workbench.mac:lang(zh-Hans),
+.monaco-workbench.mac:lang(zh-Hant),
+.monaco-workbench.mac:lang(ja),
+.monaco-workbench.mac:lang(ko),
+.monaco-workbench.windows:lang(zh-Hans),
+.monaco-workbench.windows:lang(zh-Hant),
+.monaco-workbench.windows:lang(ja),
+.monaco-workbench.windows:lang(ko),
+.monaco-workbench.linux:lang(zh-Hans),
+.monaco-workbench.linux:lang(zh-Hant),
+.monaco-workbench.linux:lang(ja),
+.monaco-workbench.linux:lang(ko) {
+	font-family: "BB Mono", monospace;
+	--monaco-monospace-font: "BB Mono", monospace;
+}
 
 /* Global Styles */
 
@@ -40,6 +148,7 @@ body {
 	margin: 0;
 	padding: 0;
 	overflow: hidden;
+	font-family: "BB Mono", monospace;
 	font-size: 11px;
 	user-select: none;
 	-webkit-user-select: none;
@@ -53,6 +162,10 @@ body {
 	z-index: 1;
 	overflow: hidden;
 	color: var(--vscode-foreground);
+	font-family: "BB Mono", monospace;
+	--vscode-font-family: "BB Mono", monospace !important;
+	--vscode-editor-font-family: "BB Mono", monospace !important;
+	--vscode-chat-font-family: "BB Mono", monospace !important;
 
 	/* Elevation shadows */
 	--vscode-shadow-sm: 0 0 4px rgba(0, 0, 0, 0.08);

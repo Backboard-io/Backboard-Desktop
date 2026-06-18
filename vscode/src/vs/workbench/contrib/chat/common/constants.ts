@@ -231,12 +231,9 @@ export function isSupportedChatFileScheme(accessor: ServicesAccessor, scheme: st
  * Returns the effective default session type for a new chat in the VS Code
  * editor window, honoring the experimental
  * {@link ChatConfiguration.EditorDefaultProvider} setting:
- * - `'copilotAh'` selects the Agent Host Copilot slot when its contribution is registered.
- * - `'copilotEh'` selects the Extension Host Copilot CLI when its contribution is
- *   registered and it is not hidden by {@link ChatConfiguration.CopilotCliHideExtensionHostEditor}.
+ * - `'backboardAh'` selects the integrated Backboard agent-host slot.
  *
- * Backboard owns the Agent Host Copilot slot in this product, so prefer that
- * provider for normal editor chat as soon as it is registered. Falls back to
+ * Backboard is the integrated default for normal editor chat. Falls back to
  * {@link localChatSessionType} when no visible non-local provider is available.
  */
 export function getDefaultNewChatSessionType(
@@ -245,7 +242,7 @@ export function getDefaultNewChatSessionType(
 ): string {
 	const defaultProvider = configurationService.getValue<string>(ChatConfiguration.EditorDefaultProvider);
 	const defaultType = getConfiguredEditorDefaultSessionType(defaultProvider);
-	if (defaultType === SessionType.AgentHostCopilot && !isEditorLocalAgentEnabled(configurationService)) {
+	if (defaultType === SessionType.AgentHostBackboard) {
 		return defaultType;
 	}
 
@@ -253,8 +250,8 @@ export function getDefaultNewChatSessionType(
 		return defaultType;
 	}
 
-	if (isVisibleEditorChatSessionType(SessionType.AgentHostCopilot, configurationService, chatSessionsService)) {
-		return SessionType.AgentHostCopilot;
+	if (isVisibleEditorChatSessionType(SessionType.AgentHostBackboard, configurationService, chatSessionsService)) {
+		return SessionType.AgentHostBackboard;
 	}
 
 	if (isEditorLocalAgentEnabled(configurationService)) {
@@ -284,7 +281,8 @@ export function isVisibleEditorChatSessionType(
 	chatSessionsService: Pick<IChatSessionsService, 'getChatSessionContribution' | 'getAllChatSessionContributions'>
 ): boolean {
 	if (sessionType === localChatSessionType) {
-		if (!isEditorLocalAgentEnabled(configurationService) && configurationService.getValue<string>(ChatConfiguration.EditorDefaultProvider) === 'copilotAh') {
+		const defaultProvider = configurationService.getValue<string>(ChatConfiguration.EditorDefaultProvider);
+		if (!isEditorLocalAgentEnabled(configurationService) && (defaultProvider === 'backboardAh' || defaultProvider === 'copilotAh')) {
 			return false;
 		}
 		return isEditorLocalAgentEnabled(configurationService) || getVisibleNonLocalEditorChatSessionTypes(configurationService, chatSessionsService).length === 0;
@@ -301,10 +299,9 @@ function getConfiguredEditorDefaultSessionType(defaultProvider: string | undefin
 	switch (defaultProvider) {
 		case 'local':
 			return localChatSessionType;
+		case 'backboardAh':
 		case 'copilotAh':
-			return SessionType.AgentHostCopilot;
-		case 'copilotEh':
-			return SessionType.CopilotCLI;
+			return SessionType.AgentHostBackboard;
 		default:
 			return undefined;
 	}
