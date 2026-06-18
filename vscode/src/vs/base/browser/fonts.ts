@@ -11,7 +11,7 @@ import { isElectron } from '../common/platform.js';
  * Backboard's default UI font. The font-face is registered as "BB Mono" in
  * the workbench stylesheet and backed by IBM Plex Mono assets.
  */
-export const DEFAULT_FONT_FAMILY = '"BB Mono", monospace';
+export const DEFAULT_FONT_FAMILY = '"BB Mono", "IBM Plex Mono", monospace';
 
 interface FontData {
 	readonly family: string;

@@ -591,6 +591,35 @@ export class OpenBackboardComposerOptionsAction extends Action2 {
 	}
 }
 
+export class BackboardUsageMetricsAction extends Action2 {
+	static readonly ID = 'workbench.action.chat.backboardUsageMetrics';
+
+	constructor() {
+		super({
+			id: BackboardUsageMetricsAction.ID,
+			title: localize2('interactive.backboardUsageMetrics.label', "Backboard Usage"),
+			tooltip: localize('interactive.backboardUsageMetrics.tooltip', "Show model, token, cost, and speed metrics"),
+			category: CHAT_CATEGORY,
+			icon: Codicon.dashboard,
+			f1: false,
+			precondition: ChatContextKeys.enabled,
+			menu: {
+				id: MenuId.ChatInputStatus,
+				order: 1,
+				group: 'navigation',
+				when: ContextKeyExpr.and(
+					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+					ChatContextKeys.inQuickChat.negate(),
+				)
+			}
+		});
+	}
+
+	override async run(): Promise<void> {
+		// Hover-only status action. The view item renders live metrics.
+	}
+}
+
 async function transcribeBackboardComposerAudio(
 	state: IBackboardComposerMicState,
 	mimeType: string,
@@ -1423,6 +1452,7 @@ export function registerChatExecuteActions(): DisposableStore {
 	store.add(registerAction2(OpenModelPickerAction));
 	store.add(registerAction2(ToggleBackboardComposerMicrophoneAction));
 	store.add(registerAction2(OpenBackboardComposerOptionsAction));
+	store.add(registerAction2(BackboardUsageMetricsAction));
 	store.add(registerAction2(OpenPermissionPickerAction));
 	store.add(registerAction2(OpenModePickerAction));
 	store.add(registerAction2(OpenSessionTargetPickerAction));

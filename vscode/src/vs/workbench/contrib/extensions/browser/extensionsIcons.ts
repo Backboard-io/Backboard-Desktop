@@ -7,7 +7,7 @@ import { Codicon } from '../../../../base/common/codicons.js';
 import { localize } from '../../../../nls.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 
-export const extensionsViewIcon = registerIcon('extensions-view-icon', Codicon.extensions, localize('extensionsViewIcon', 'View icon of the extensions view.'));
+export const extensionsViewIcon = registerIcon('extensions-view-icon', Codicon.package, localize('extensionsViewIcon', 'View icon of the extensions view.'));
 
 export const manageExtensionIcon = registerIcon('extensions-manage', Codicon.gear, localize('manageExtensionIcon', 'Icon for the \'Manage\' action in the extensions view.'));
 

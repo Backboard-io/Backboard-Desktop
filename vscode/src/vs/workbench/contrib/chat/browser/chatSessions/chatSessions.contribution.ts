@@ -537,6 +537,10 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 	}
 
 	private _registerMenuItems(contribution: IChatSessionsExtensionPoint, extensionDescription: IRelaxedExtensionDescription): IDisposable {
+		if (isCopilotCliSessionContribution(contribution)) {
+			return Disposable.None;
+		}
+
 		// If provider registers anything for the create submenu, let it fully control the creation
 		const contextKeyService = this._contextKeyService.createOverlay([
 			['chatSessionType', contribution.type]
@@ -569,6 +573,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 
 	private _registerCommands(contribution: IChatSessionsExtensionPoint): IDisposable {
 		const isAvailableInSessionTypePicker = isAgentSessionProviderType(contribution.type);
+		const showInChatNewMenu = !isAvailableInSessionTypePicker && !isCopilotCliSessionContribution(contribution);
 
 		return combinedDisposable(
 			registerAction2(class OpenChatSessionAction extends Action2 {
@@ -640,7 +645,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 						icon: Codicon.plus,
 						f1: false, // Hide from Command Palette
 						precondition: ChatContextKeys.enabled,
-						menu: !isAvailableInSessionTypePicker ? {
+						menu: showInChatNewMenu ? {
 							id: MenuId.ChatNewMenu,
 							group: '3_new_special',
 						} : undefined,
@@ -1588,6 +1593,10 @@ export function getResourceForNewChatSession(options: NewChatSessionOpenOptions)
 
 function isAgentSessionProviderType(type: string): boolean {
 	return Object.values(AgentSessionProviders).includes(type as AgentSessionProviders);
+}
+
+function isCopilotCliSessionContribution(contribution: IChatSessionsExtensionPoint): boolean {
+	return contribution.type === AgentSessionProviders.Background || contribution.displayName === 'Copilot CLI';
 }
 
 export function getSessionStatusForModel(model: IChatModel): ChatSessionStatus | undefined {

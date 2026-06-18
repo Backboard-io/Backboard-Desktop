@@ -74,18 +74,22 @@ const BACKBOARD_API_KEY_PATTERN = /^espr_[A-Za-z0-9_-]{43}$/;
 const LOCAL_AGENT_HOST_PROVIDER_ID = 'local-agent-host';
 const BACKBOARD_WELCOME_SPLASH_ICONS = [
 	'ai_open_ai.svg',
+	'ai_open_ai_compat.svg',
+	'ai_open_code.svg',
 	'ai_anthropic.svg',
 	'ai_claude.svg',
 	'ai_gemini.svg',
 	'ai_google.svg',
 	'ai_bedrock.svg',
 	'ai_deep_seek.svg',
+	'ai_edit.svg',
 	'ai_mistral.svg',
 	'ai_open_router.svg',
 	'ai_ollama.svg',
 	'ai_lm_studio.svg',
 	'ai_x_ai.svg',
 	'ai_vercel.svg',
+	'ai_backboard.svg',
 ] as const;
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -537,10 +541,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			welcomeContent.classList.add('visible');
 			continueButton.disabled = false;
 			this._focusCurrentStepElement();
-		}, 2650);
+		}, 4300);
 		const removeTimer = activeWindow.setTimeout(() => {
 			splash.remove();
-		}, 3350);
+		}, 5200);
 
 		this.stepDisposables.add(toDisposable(() => {
 			activeWindow.clearTimeout(splashTimer);
@@ -553,9 +557,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		const stream = append(parent, $('.onboarding-backboard-logo-stream'));
 		const rows = [
-			BACKBOARD_WELCOME_SPLASH_ICONS.slice(0, 5),
-			BACKBOARD_WELCOME_SPLASH_ICONS.slice(5, 9),
-			BACKBOARD_WELCOME_SPLASH_ICONS.slice(9),
+			BACKBOARD_WELCOME_SPLASH_ICONS.slice(0, 6),
+			BACKBOARD_WELCOME_SPLASH_ICONS.slice(6, 12),
+			BACKBOARD_WELCOME_SPLASH_ICONS.slice(12),
 		];
 
 		for (const [rowIndex, rowIcons] of rows.entries()) {
@@ -578,7 +582,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const finalImage = append(finalLogo, $<HTMLImageElement>('img'));
 		finalImage.alt = '';
 		finalImage.decoding = 'async';
-		finalImage.src = this._backboardMediaIcon('backboard_logo.svg');
+		finalImage.src = this._backboardMediaIcon('ai_backboard.svg');
 	}
 
 	private _playWelcomeAdvanceTransition(): void {
@@ -590,7 +594,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const activeWindow = getActiveWindow();
 		const transitionSplash = append(this.card, $('.onboarding-backboard-step-transition'));
 		transitionSplash.setAttribute('aria-hidden', 'true');
-		this._createBackboardMark(transitionSplash, 'onboarding-backboard-splash-mark');
+		this._createBackboardContinueTransition(transitionSplash);
 
 		activeWindow.requestAnimationFrame(() => {
 			transitionSplash.classList.add('visible');
@@ -598,16 +602,16 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		const nextStepTimer = activeWindow.setTimeout(() => {
 			this._nextStep();
-		}, 800);
+		}, 1150);
 
 		const fadeTimer = activeWindow.setTimeout(() => {
 			transitionSplash.classList.add('fade-out');
-		}, 1800);
+		}, 1900);
 
 		const removeTimer = activeWindow.setTimeout(() => {
 			transitionSplash.remove();
 			this._focusCurrentStepElement();
-		}, 2450);
+		}, 2600);
 
 		this.disposables.add(toDisposable(() => {
 			activeWindow.clearTimeout(nextStepTimer);
@@ -615,6 +619,32 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			activeWindow.clearTimeout(removeTimer);
 			transitionSplash.remove();
 		}));
+	}
+
+	private _createBackboardContinueTransition(parent: HTMLElement): void {
+		const burst = append(parent, $('.onboarding-backboard-transition-burst'));
+		const radius = 168;
+		for (const [iconIndex, iconName] of BACKBOARD_WELCOME_SPLASH_ICONS.entries()) {
+			const angle = (-Math.PI / 2) + ((Math.PI * 2 * iconIndex) / BACKBOARD_WELCOME_SPLASH_ICONS.length);
+			const x = Math.cos(angle) * radius;
+			const y = Math.sin(angle) * radius;
+			const cell = append(burst, $('.onboarding-backboard-transition-icon'));
+			cell.style.setProperty('--burst-index', String(iconIndex));
+			cell.style.setProperty('--burst-delay', `${iconIndex * 22}ms`);
+			cell.style.setProperty('--burst-x', `${x}px`);
+			cell.style.setProperty('--burst-y', `${y}px`);
+			cell.style.setProperty('--burst-x-start', `${x * 1.28}px`);
+			cell.style.setProperty('--burst-y-start', `${y * 1.28}px`);
+			cell.style.setProperty('--burst-x-mid', `${x * 0.18}px`);
+			cell.style.setProperty('--burst-y-mid', `${y * 0.18}px`);
+
+			const image = append(cell, $<HTMLImageElement>('img'));
+			image.alt = '';
+			image.decoding = 'async';
+			image.src = this._backboardMediaIcon(iconName);
+		}
+
+		this._createBackboardMark(parent, 'onboarding-backboard-splash-mark');
 	}
 
 	private _createBackboardMark(parent: HTMLElement, className: string): HTMLElement {
@@ -627,7 +657,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _backboardMediaIcon(fileName: string): string {
-		return FileAccess.asBrowserUri(`extensions/backboard/media/icons/${fileName}`).toString(true);
+		return FileAccess.asBrowserUri(`vs/workbench/contrib/chat/browser/widget/media/model-provider-icons/${fileName}`).toString(true);
 	}
 
 	private _renderExperienceStep(container: HTMLElement): void {

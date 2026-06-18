@@ -903,7 +903,7 @@ class ReplOptions extends Disposable implements IReplOptions {
 		const debugConsole = this.configurationService.getValue<IDebugConfiguration>('debug').console;
 		this._replConfig = {
 			fontSize: debugConsole.fontSize,
-			fontFamily: debugConsole.fontFamily,
+			fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
 			lineHeight: debugConsole.lineHeight ? debugConsole.lineHeight : ReplOptions.lineHeightEm * debugConsole.fontSize,
 			cssLineHeight: debugConsole.lineHeight ? `${debugConsole.lineHeight}px` : `${ReplOptions.lineHeightEm}em`,
 			backgroundColor: this.themeService.getColorTheme().getColor(this.backgroundColorDelegate()),

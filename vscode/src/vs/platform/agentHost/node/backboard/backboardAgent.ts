@@ -31,8 +31,8 @@ import { getToolOutputText, MessageKind, ResponsePartKind, SessionStatus, ToolCa
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 
-const DEFAULT_PROVIDER = 'aws-bedrock';
-const DEFAULT_MODEL = 'anthropic.claude-sonnet-4-6';
+const DEFAULT_PROVIDER = 'openrouter';
+const DEFAULT_MODEL = 'deepseek/deepseek-chat';
 const DEFAULT_MODEL_ID = `${DEFAULT_PROVIDER}/${DEFAULT_MODEL}`;
 const BACKBOARD_MODEL_CACHE_VERSION = 2;
 const HIDDEN_MODEL_PROVIDERS = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
@@ -1462,8 +1462,8 @@ function fallbackModel(): IAgentModelInfo {
 	return {
 		provider: 'backboard',
 		id: DEFAULT_MODEL_ID,
-		name: 'Claude Sonnet 4.6',
-		supportsVision: true,
+		name: 'DeepSeek Chat',
+		supportsVision: false,
 	};
 }
 

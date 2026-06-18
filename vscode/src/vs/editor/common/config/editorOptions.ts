@@ -2015,7 +2015,7 @@ class EditorFontInfo extends ComputedEditorOption<EditorOption.fontInfo, FontInf
 	constructor() {
 		super(EditorOption.fontInfo, new FontInfo({
 			pixelRatio: 0,
-			fontFamily: '',
+			fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
 			fontWeight: '',
 			fontSize: 0,
 			fontFeatureSettings: '',
@@ -3249,7 +3249,7 @@ export type EditorInlayHintsOptions = Readonly<Required<IEditorInlayHintsOptions
 class EditorInlayHints extends BaseEditorOption<EditorOption.inlayHints, IEditorInlayHintsOptions, EditorInlayHintsOptions> {
 
 	constructor() {
-		const defaults: EditorInlayHintsOptions = { enabled: 'on', fontSize: 0, fontFamily: '', padding: false, maximumLength: 43 };
+		const defaults: EditorInlayHintsOptions = { enabled: 'on', fontSize: 0, fontFamily: EDITOR_FONT_DEFAULTS.fontFamily, padding: false, maximumLength: 43 };
 		super(
 			EditorOption.inlayHints, 'inlayHints', defaults,
 			{
@@ -3300,7 +3300,7 @@ class EditorInlayHints extends BaseEditorOption<EditorOption.inlayHints, IEditor
 		return {
 			enabled: stringSet<'on' | 'off' | 'offUnlessPressed' | 'onUnlessPressed'>(input.enabled, this.defaultValue.enabled, ['on', 'off', 'offUnlessPressed', 'onUnlessPressed']),
 			fontSize: EditorIntOption.clampedInt(input.fontSize, this.defaultValue.fontSize, 0, 100),
-			fontFamily: EditorStringOption.string(input.fontFamily, this.defaultValue.fontFamily),
+			fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
 			padding: boolean(input.padding, this.defaultValue.padding),
 			maximumLength: EditorIntOption.clampedInt(input.maximumLength, this.defaultValue.maximumLength, 0, Number.MAX_SAFE_INTEGER),
 		};
@@ -4551,7 +4551,7 @@ class InlineEditorSuggest extends BaseEditorOption<EditorOption.inlineSuggest, I
 			showToolbar: 'onHover',
 			suppressSuggestions: false,
 			keepOnBlur: false,
-			fontFamily: 'default',
+			fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
 			syntaxHighlightingEnabled: true,
 			minShowDelay: 0,
 			suppressInSnippetMode: true,
@@ -4698,7 +4698,7 @@ class InlineEditorSuggest extends BaseEditorOption<EditorOption.inlineSuggest, I
 			showToolbar: stringSet(input.showToolbar, this.defaultValue.showToolbar, ['always', 'onHover', 'never']),
 			suppressSuggestions: boolean(input.suppressSuggestions, this.defaultValue.suppressSuggestions),
 			keepOnBlur: boolean(input.keepOnBlur, this.defaultValue.keepOnBlur),
-			fontFamily: EditorStringOption.string(input.fontFamily, this.defaultValue.fontFamily),
+			fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
 			syntaxHighlightingEnabled: boolean(input.syntaxHighlightingEnabled, this.defaultValue.syntaxHighlightingEnabled),
 			minShowDelay: EditorIntOption.clampedInt(input.minShowDelay, 0, 0, 10000),
 			suppressInSnippetMode: boolean(input.suppressInSnippetMode, this.defaultValue.suppressInSnippetMode),

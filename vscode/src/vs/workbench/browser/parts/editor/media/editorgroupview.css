@@ -100,7 +100,8 @@
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper > .editor-group-watermark  {
 	display: flex;
 	height: 100%;
-	max-width: 272px;
+	width: 100%;
+	max-width: 540px;
 	margin: auto;
 	flex-direction: column;
 	align-items: center;
@@ -151,6 +152,163 @@
 
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts {
 	width: 100%;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-page {
+	box-sizing: border-box;
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	padding: clamp(32px, 8vh, 96px) 40px 32px;
+	color: var(--vscode-editor-foreground);
+	font-family: var(--vscode-editor-font-family, var(--vscode-font-family, monospace));
+	text-align: left;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-shell {
+	display: flex;
+	flex-direction: column;
+	gap: 24px;
+	width: 540px;
+	max-width: 100%;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-header {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 16px;
+	margin-bottom: 2px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-logo {
+	width: 38px;
+	height: 52px;
+	flex: 0 0 auto;
+	background-color: #fff;
+	color: #fff;
+	-webkit-mask: url('../../../../contrib/welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
+	mask: url('../../../../contrib/welcomeGettingStarted/browser/media/backboard_mark.svg') center / contain no-repeat;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-header-copy {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-title {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.2;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-subtitle {
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	font-style: italic;
+	font-weight: 500;
+	line-height: 1.2;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-section-heading {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-section-rule {
+	height: 1px;
+	flex: 1;
+	background-color: var(--vscode-editorGroupHeader-tabsBorder);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-action-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-action {
+	box-sizing: border-box;
+	display: grid;
+	grid-template-columns: 20px 1fr auto;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-height: 32px;
+	padding: 0 12px;
+	color: var(--vscode-editor-foreground);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0;
+	text-align: left;
+	background: transparent;
+	border: 0;
+	border-radius: 5px;
+	cursor: pointer;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-action:hover,
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-action:focus-visible {
+	background-color: var(--vscode-list-hoverBackground);
+	outline: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-action:first-child {
+	background-color: var(--vscode-list-activeSelectionBackground);
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-action-icon {
+	color: var(--vscode-icon-foreground);
+	font-size: 14px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-action-keybinding {
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-footer-link {
+	align-self: center;
+	margin-top: 0;
+	color: var(--vscode-editor-foreground);
+	background: transparent;
+	border: 0;
+	cursor: pointer;
+	font-family: inherit;
+	font-size: 11px;
+	font-weight: 600;
+	padding: 4px 8px;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-footer-link:hover {
+	text-decoration: underline;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-footer-link:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
 }
 
 .monaco-workbench .part.editor > .content:not(.empty) .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts,

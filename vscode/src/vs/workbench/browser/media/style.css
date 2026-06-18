@@ -177,7 +177,7 @@
 .monaco-workbench.linux:lang(ja),
 .monaco-workbench.linux:lang(ko) {
 	font-family: "BB Mono", monospace;
-	--monaco-monospace-font: "BB Mono", monospace;
+	--monaco-monospace-font: "BB Mono", "IBM Plex Mono", monospace;
 }
 
 /* Global Styles */
@@ -188,9 +188,9 @@ body {
 	margin: 0;
 	padding: 0;
 	overflow: hidden;
-	font-family: "BB Mono", monospace;
-	--monaco-monospace-font: "BB Mono", monospace;
-	--vscode-editor-font-family: "BB Mono", monospace;
+	font-family: "BB Mono", "IBM Plex Mono", monospace;
+	--monaco-monospace-font: "BB Mono", "IBM Plex Mono", monospace;
+	--vscode-editor-font-family: "BB Mono", "IBM Plex Mono", monospace;
 	font-size: 11px;
 	user-select: none;
 	-webkit-user-select: none;
@@ -201,7 +201,7 @@ body {
 .monaco-editor .view-line span,
 .monaco-editor .margin-view-overlays,
 .monaco-editor .line-numbers {
-	font-family: "BB Mono", monospace !important;
+	font-family: "BB Mono", "IBM Plex Mono", monospace !important;
 }
 
 .monaco-workbench {
@@ -212,10 +212,10 @@ body {
 	z-index: 1;
 	overflow: hidden;
 	color: var(--vscode-foreground);
-	font-family: "BB Mono", monospace;
-	--vscode-font-family: "BB Mono", monospace !important;
-	--vscode-editor-font-family: "BB Mono", monospace !important;
-	--vscode-chat-font-family: "BB Mono", monospace !important;
+	font-family: "BB Mono", "IBM Plex Mono", monospace;
+	--vscode-font-family: "BB Mono", "IBM Plex Mono", monospace !important;
+	--vscode-editor-font-family: "BB Mono", "IBM Plex Mono", monospace !important;
+	--vscode-chat-font-family: "BB Mono", "IBM Plex Mono", monospace !important;
 
 	/* Elevation shadows */
 	--vscode-shadow-sm: 0 0 4px rgba(0, 0, 0, 0.08);

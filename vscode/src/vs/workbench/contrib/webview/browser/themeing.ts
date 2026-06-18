@@ -54,7 +54,7 @@ export class WebviewThemeDataProvider extends Disposable {
 	public getWebviewThemeData(): WebviewThemeData {
 		if (!this._cachedWebViewThemeData) {
 			const configuration = this._configurationService.getValue<IEditorOptions>('editor');
-			const editorFontFamily = configuration.fontFamily || EDITOR_FONT_DEFAULTS.fontFamily;
+			const editorFontFamily = EDITOR_FONT_DEFAULTS.fontFamily;
 			const editorFontWeight = configuration.fontWeight || EDITOR_FONT_DEFAULTS.fontWeight;
 			const editorFontSize = configuration.fontSize || EDITOR_FONT_DEFAULTS.fontSize;
 			const editorFontLigatures = new EditorFontLigatures().validate(configuration.fontLigatures);

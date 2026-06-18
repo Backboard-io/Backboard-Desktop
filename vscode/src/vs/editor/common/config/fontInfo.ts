@@ -219,19 +219,19 @@ export const FONT_VARIATION_TRANSLATE = 'translate';
 /**
  * @internal
  */
-export const DEFAULT_WINDOWS_FONT_FAMILY = '\'BB Mono\', monospace';
+export const DEFAULT_WINDOWS_FONT_FAMILY = '"BB Mono", "IBM Plex Mono", monospace';
 /**
  * @internal
  */
-export const DEFAULT_MAC_FONT_FAMILY = '\'BB Mono\', monospace';
+export const DEFAULT_MAC_FONT_FAMILY = '"BB Mono", "IBM Plex Mono", monospace';
 /**
  * @internal
  */
-export const DEFAULT_LINUX_FONT_FAMILY = '\'BB Mono\', monospace';
+export const DEFAULT_LINUX_FONT_FAMILY = '"BB Mono", "IBM Plex Mono", monospace';
 /**
  * @internal
  */
-export const DEFAULT_BB_MONO_FONT_FAMILY = '\'BB Mono\', monospace';
+export const DEFAULT_BB_MONO_FONT_FAMILY = '"BB Mono", "IBM Plex Mono", monospace';
 /**
  * @internal
  */

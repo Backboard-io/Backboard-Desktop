@@ -8,6 +8,7 @@ import { FileAccess } from '../../../../base/common/network.js';
 import { isMacintosh, isWeb } from '../../../../base/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
 import { EditorContributionInstantiation, registerEditorContribution } from '../../../../editor/browser/editorExtensions.js';
+import { EDITOR_FONT_DEFAULTS } from '../../../../editor/common/config/fontInfo.js';
 import * as nls from '../../../../nls.js';
 import { AccessibleViewRegistry } from '../../../../platform/accessibility/browser/accessibleViewRegistry.js';
 import { ICommandActionTitle, Icon } from '../../../../platform/action/common/action.js';
@@ -578,7 +579,7 @@ configurationRegistry.registerConfiguration({
 		'debug.console.fontFamily': {
 			type: 'string',
 			description: nls.localize('debug.console.fontFamily', "Controls the font family in the Debug Console."),
-			default: 'default'
+			default: EDITOR_FONT_DEFAULTS.fontFamily
 		},
 		'debug.console.lineHeight': {
 			type: 'number',

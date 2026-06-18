@@ -771,7 +771,7 @@ class DecorationCSSRules {
 			return '';
 		}
 		const cssTextArr: string[] = [];
-		this.collectCSSText(opts, ['fontStyle', 'fontWeight', 'fontFamily', 'fontSize', 'textDecoration', 'cursor', 'color', 'opacity', 'letterSpacing'], cssTextArr);
+		this.collectCSSText(opts, ['fontStyle', 'fontWeight', 'fontSize', 'textDecoration', 'cursor', 'color', 'opacity', 'letterSpacing'], cssTextArr);
 		if (opts.letterSpacing) {
 			this._hasLetterSpacing = true;
 		}
@@ -798,7 +798,7 @@ class DecorationCSSRules {
 
 				cssTextArr.push(strings.format(_CSS_MAP.contentText, escaped));
 			}
-			this.collectCSSText(opts, ['verticalAlign', 'fontStyle', 'fontWeight', 'fontSize', 'fontFamily', 'textDecoration', 'color', 'opacity', 'backgroundColor', 'margin', 'padding'], cssTextArr);
+			this.collectCSSText(opts, ['verticalAlign', 'fontStyle', 'fontWeight', 'fontSize', 'textDecoration', 'color', 'opacity', 'backgroundColor', 'margin', 'padding'], cssTextArr);
 			if (this.collectCSSText(opts, ['width', 'height'], cssTextArr)) {
 				cssTextArr.push('display:inline-block;');
 			}

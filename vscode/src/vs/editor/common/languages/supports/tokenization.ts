@@ -438,9 +438,6 @@ export function generateTokensCSSForFontMap(fontMap: readonly IFontTokenOptions[
 		}
 		fonts.add(className);
 		let rule = `.${className} {`;
-		if (font.fontFamily) {
-			rule += `font-family: ${font.fontFamily};`;
-		}
 		if (font.fontSizeMultiplier) {
 			rule += `font-size: calc(var(--editor-font-size)*${font.fontSizeMultiplier});`;
 		}

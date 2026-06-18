@@ -101,7 +101,7 @@ import { IChatResponseViewModel, isResponseVM } from '../../../common/model/chat
 import { IChatAgentService } from '../../../common/participants/chatAgents.js';
 import { ILanguageModelToolsService } from '../../../common/tools/languageModelToolsService.js';
 import { ChatHistoryNavigator } from '../../../common/widget/chatWidgetHistoryService.js';
-import { ChatSessionPrimaryPickerAction, ChatSubmitAction, IChatExecuteActionContext, OpenBackboardComposerOptionsAction, OpenDelegationPickerAction, OpenModelPickerAction, OpenModePickerAction, OpenPermissionPickerAction, OpenSessionTargetPickerAction, OpenWorkspacePickerAction } from '../../actions/chatExecuteActions.js';
+import { BackboardUsageMetricsAction, ChatSessionPrimaryPickerAction, ChatSubmitAction, IChatExecuteActionContext, OpenBackboardComposerOptionsAction, OpenDelegationPickerAction, OpenModelPickerAction, OpenModePickerAction, OpenPermissionPickerAction, OpenSessionTargetPickerAction, OpenWorkspacePickerAction } from '../../actions/chatExecuteActions.js';
 import { AgentSessionProviders, AgentSessionTarget, getAgentSessionProvider } from '../../agentSessions/agentSessions.js';
 import { IAgentSessionsService } from '../../agentSessions/agentSessionsService.js';
 import { ChatAttachmentModel } from '../../attachments/chatAttachmentModel.js';
@@ -202,6 +202,17 @@ export interface IChatInputPartOptions {
 
 export interface IWorkingSetEntry {
 	uri: URI;
+}
+
+export interface IBackboardUsageMetricRow {
+	readonly label: string;
+	readonly value: string;
+}
+
+export interface IBackboardUsageMetrics {
+	readonly title: string;
+	readonly description: string;
+	readonly rows: readonly IBackboardUsageMetricRow[];
 }
 
 export const enum ChatWidgetLocation {
@@ -457,6 +468,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private readonly _optionContextKeys: Map<string, IContextKey<string>> = new Map();
 
 	private _currentLanguageModel = observableValue<ILanguageModelChatMetadataAndIdentifier | undefined>('_currentLanguageModel', undefined);
+	private readonly _usageMetricsStartedAt = Date.now();
 
 	/**
 	 * Per-editor store of each model's configuration (e.g. context size, thinking
@@ -1154,6 +1166,72 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	public getBackboardOptionsAnchor(): HTMLElement | undefined {
 		return this.backboardOptionsAnchor;
+	}
+
+	public getBackboardUsageMetrics(): IBackboardUsageMetrics {
+		const selectedModel = this._currentLanguageModel.get();
+		const metadata = selectedModel?.metadata;
+		const items = this._widget?.viewModel?.getItems() ?? [];
+		const latestResponse = findLast(items, isResponseVM);
+		const usage = latestResponse?.usageObs.get();
+		const streamStats = latestResponse?.contentUpdateTimings;
+		const promptTokens = usage?.promptTokens;
+		const completionTokens = usage?.completionTokens ?? latestResponse?.completionTokenCountObs.get();
+		const totalTokens = typeof promptTokens === 'number' && typeof completionTokens === 'number'
+			? promptTokens + completionTokens
+			: undefined;
+		const estimatedCost = this._formatEstimatedCost(promptTokens, completionTokens, metadata);
+		const speed = streamStats && streamStats.impliedWordLoadRate > 0
+			? localize('backboardUsageMetrics.speedWords', "{0}/sec", `${streamStats.impliedWordLoadRate.toFixed(1)} words`)
+			: localize('backboardUsageMetrics.pending', "Waiting for usage data");
+
+		return {
+			title: localize('backboardUsageMetrics.title', "Backboard run metrics"),
+			description: latestResponse
+				? localize('backboardUsageMetrics.descriptionWithResponse', "Latest response metrics from the current chat session.")
+				: localize('backboardUsageMetrics.descriptionNoResponse', "Send a message to populate response metrics."),
+			rows: [
+				{ label: localize('backboardUsageMetrics.model', "Model"), value: metadata?.name ?? selectedModel?.identifier ?? localize('backboardUsageMetrics.unknown', "Unknown") },
+				{ label: localize('backboardUsageMetrics.provider', "Provider"), value: metadata?.vendor ?? localize('backboardUsageMetrics.unknown', "Unknown") },
+				{ label: localize('backboardUsageMetrics.family', "Family"), value: metadata?.family ?? localize('backboardUsageMetrics.unknown', "Unknown") },
+				{ label: localize('backboardUsageMetrics.tokens', "Tokens"), value: typeof totalTokens === 'number' ? this._formatNumber(totalTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
+				{ label: localize('backboardUsageMetrics.promptTokens', "Input"), value: typeof promptTokens === 'number' ? this._formatNumber(promptTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
+				{ label: localize('backboardUsageMetrics.completionTokens', "Output"), value: typeof completionTokens === 'number' ? this._formatNumber(completionTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
+				{ label: localize('backboardUsageMetrics.cost', "Cost"), value: estimatedCost ?? metadata?.pricing ?? metadata?.priceCategory ?? localize('backboardUsageMetrics.pending', "Waiting for usage data") },
+				{ label: localize('backboardUsageMetrics.speed', "Speed"), value: speed },
+				{ label: localize('backboardUsageMetrics.time', "Time"), value: this._formatElapsed(Date.now() - this._usageMetricsStartedAt) },
+				{ label: localize('backboardUsageMetrics.responses', "Responses"), value: this._formatNumber(items.filter(isResponseVM).length) },
+			],
+		};
+	}
+
+	private _formatEstimatedCost(promptTokens: number | undefined, completionTokens: number | undefined, metadata: ILanguageModelChatMetadata | undefined): string | undefined {
+		if (typeof promptTokens !== 'number' || typeof completionTokens !== 'number' || !metadata) {
+			return undefined;
+		}
+		const inputCost = metadata.inputCost;
+		const outputCost = metadata.outputCost;
+		if (typeof inputCost !== 'number' || typeof outputCost !== 'number') {
+			return undefined;
+		}
+		const cost = ((promptTokens * inputCost) + (completionTokens * outputCost)) / 1_000_000;
+		return cost < 0.01
+			? localize('backboardUsageMetrics.costTiny', "<$0.01")
+			: `$${cost.toFixed(2)}`;
+	}
+
+	private _formatNumber(value: number): string {
+		return value.toLocaleString();
+	}
+
+	private _formatElapsed(milliseconds: number): string {
+		const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		if (minutes > 0) {
+			return localize('backboardUsageMetrics.elapsedMinutes', "{0}m {1}s", minutes, seconds);
+		}
+		return localize('backboardUsageMetrics.elapsedSeconds', "{0}s", seconds);
 	}
 
 	/**
@@ -3221,7 +3299,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			hoverDelegate,
 			actionViewItemProvider: (action, _opts) => {
 				if (action instanceof MenuItemAction) {
-					return this.instantiationService.createInstance(ChatInputStatusActionViewItem, action);
+					if (action.id === BackboardUsageMetricsAction.ID) {
+						return this.instantiationService.createInstance(ChatInputStatusActionViewItem, action, this);
+					}
+						return this.instantiationService.createInstance(ChatInputStatusActionViewItem, action, this);
 				}
 				return undefined;
 			},

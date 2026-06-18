@@ -144,10 +144,9 @@ export class ChatView extends AbstractChatView {
 					progressMessageAtBottomOfResponse: mode => mode !== ChatModeKind.Ask,
 				},
 				enableImplicitContext: true,
-				enableWorkingSet: 'implicit',
+				enableWorkingSet: 'explicit',
 				supportsChangingModes: true,
-				inputEditorMinLines: 2,
-				isSessionsWindow: true
+				dndContainer: this.element,
 			},
 			this._buildStyles(this._isActive)
 		));

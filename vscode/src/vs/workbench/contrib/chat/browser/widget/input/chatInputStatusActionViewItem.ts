@@ -27,8 +27,10 @@ import { INotificationService } from '../../../../../../platform/notification/co
 import { defaultButtonStyles } from '../../../../../../platform/theme/browser/defaultStyles.js';
 import { IThemeService } from '../../../../../../platform/theme/common/themeService.js';
 import { ChatStatusEntry, IChatStatusItemService } from '../../chatStatus/chatStatusItemService.js';
+import type { ChatInputPart } from './chatInputPart.js';
 
 const $ = dom.$;
+const BACKBOARD_USAGE_METRICS_ACTION_ID = 'workbench.action.chat.backboardUsageMetrics';
 
 interface IStatusActionDescriptor {
 	readonly entryId: string;
@@ -69,6 +71,7 @@ export class ChatInputStatusActionViewItem extends MenuEntryActionViewItem {
 
 	constructor(
 		action: MenuItemAction,
+		private readonly _inputPart: ChatInputPart | undefined,
 		@IKeybindingService keybindingService: IKeybindingService,
 		@INotificationService notificationService: INotificationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
@@ -109,6 +112,11 @@ export class ChatInputStatusActionViewItem extends MenuEntryActionViewItem {
 	}
 
 	protected override getHoverContents(): IManagedHoverContent | undefined {
+		if (this._commandAction.id === BACKBOARD_USAGE_METRICS_ACTION_ID && this._inputPart) {
+			return {
+				element: () => this._renderBackboardUsageMetrics(),
+			};
+		}
 		const descriptor = STATUS_COMMAND_DESCRIPTORS.get(this._commandAction.id);
 		if (!descriptor) {
 			return super.getHoverContents();
@@ -129,6 +137,28 @@ export class ChatInputStatusActionViewItem extends MenuEntryActionViewItem {
 			}
 		}
 		return undefined;
+	}
+
+	private _renderBackboardUsageMetrics(): HTMLElement {
+		const metrics = this._inputPart!.getBackboardUsageMetrics();
+		const root = $('div.chat-input-status-hover-content.chat-input-status-hover.backboard-usage-metrics-hover');
+
+		const titleEl = root.appendChild($('div.chat-input-status-hover-title'));
+		titleEl.textContent = metrics.title;
+
+		const descEl = root.appendChild($('div.chat-input-status-hover-description'));
+		descEl.textContent = metrics.description;
+
+		const detailEl = root.appendChild($('div.chat-input-status-hover-detail'));
+		const table = detailEl.appendChild($('table.backboard-usage-metrics-table'));
+		const tbody = table.appendChild($('tbody'));
+		for (const row of metrics.rows) {
+			const tr = tbody.appendChild($('tr'));
+			tr.appendChild($('td', undefined, row.label));
+			tr.appendChild($('td', undefined, row.value));
+		}
+
+		return root;
 	}
 
 	private _renderHoverContent(entry: ChatStatusEntry, descriptor: IStatusActionDescriptor): HTMLElement {

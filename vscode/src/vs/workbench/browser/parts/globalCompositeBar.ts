@@ -48,7 +48,7 @@ import { ICommandService } from '../../../platform/commands/common/commands.js';
 export class GlobalCompositeBar extends Disposable {
 
 	private static readonly ACCOUNTS_ACTION_INDEX = 0;
-	static readonly ACCOUNTS_ICON = registerIcon('accounts-view-bar-icon', Codicon.account, localize('accountsViewBarIcon', "Accounts icon in the view bar."));
+	static readonly ACCOUNTS_ICON = registerIcon('accounts-view-bar-icon', Codicon.key, localize('accountsViewBarIcon', "Accounts icon in the view bar."));
 
 	readonly element: HTMLElement;
 

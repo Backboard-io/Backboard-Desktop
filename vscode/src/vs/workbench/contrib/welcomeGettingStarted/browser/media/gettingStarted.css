@@ -81,8 +81,8 @@
 	width: 38px;
 	height: 52px;
 	flex: 0 0 auto;
-	background-color: currentColor;
-	color: var(--vscode-editor-foreground);
+	background-color: #fff;
+	color: #fff;
 	-webkit-mask: url('./backboard_mark.svg') center / contain no-repeat;
 	mask: url('./backboard_mark.svg') center / contain no-repeat;
 }

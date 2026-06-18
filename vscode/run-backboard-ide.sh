@@ -2,16 +2,31 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP="$ROOT/.build/electron/Code - OSS.app/Contents/MacOS/Code - OSS"
-APP_BUNDLE="$ROOT/.build/electron/Code - OSS.app"
 DEV_ICON_SOURCE="$ROOT/resources/darwin/code.icns"
-DEV_ICON_DEST="$APP_BUNDLE/Contents/Resources/Code - OSS.icns"
-RUN_DIR="${RUN_DIR:-/tmp/backboard-ide-$(date +%s)}"
+RUN_DIR="${RUN_DIR:-/tmp/backboard-studio-dev-$(date +%s)}"
 NODE24="$HOME/.nvm/versions/node/v24.15.0/bin"
 
+APP_BUNDLE=""
+for candidate in "$ROOT/.build/electron/Backboard Studio Dev.app" "$ROOT/.build/electron/Backboard IDE.app" "$ROOT/.build/electron/Code - OSS.app"; do
+	if [[ -d "$candidate" ]]; then
+		APP_BUNDLE="$candidate"
+		break
+	fi
+done
+
+if [[ -z "$APP_BUNDLE" ]]; then
+	echo "Missing dev app bundle under: $ROOT/.build/electron" >&2
+	echo "Run: source \"\$HOME/.nvm/nvm.sh\" && nvm use && npm run electron && npm run compile-client" >&2
+	exit 1
+fi
+
+APP_EXECUTABLE="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || basename "$APP_BUNDLE" .app)"
+APP="$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE"
+DEV_ICON_DEST="$APP_BUNDLE/Contents/Resources/$APP_EXECUTABLE.icns"
+
 if [[ ! -x "$APP" ]]; then
-	echo "Missing Code OSS app binary at: $APP" >&2
-	echo "Run: PATH=\"\$HOME/.nvm/versions/node/v24.15.0/bin:\$PATH\" npm run transpile && node build/lib/preLaunch.ts" >&2
+	echo "Missing dev app binary at: $APP" >&2
+	echo "Run: source \"\$HOME/.nvm/nvm.sh\" && nvm use && npm run electron && npm run compile-client" >&2
 	exit 1
 fi
 
@@ -45,7 +60,7 @@ if [[ ! -f "$ROOT/out/nls.messages.json" ]]; then
 	printf '{}\n' > "$ROOT/out/nls.messages.json"
 fi
 
-echo "Starting Backboard IDE"
+echo "Starting Backboard Studio Dev"
 echo "Profile: $RUN_DIR/user-data"
 echo "Log: $RUN_DIR/code.log"
 

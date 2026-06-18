@@ -289,7 +289,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 			hiddenItemStrategy: HiddenItemStrategy.NoHide,
 			actionViewItemProvider: (action) => {
 				if (action instanceof MenuItemAction) {
-					return this.instantiationService.createInstance(ChatInputStatusActionViewItem, action);
+						return this.instantiationService.createInstance(ChatInputStatusActionViewItem, action, undefined);
 				}
 				return undefined;
 			},

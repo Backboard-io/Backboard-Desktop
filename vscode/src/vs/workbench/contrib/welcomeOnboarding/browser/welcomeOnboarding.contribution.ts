@@ -6,6 +6,7 @@
 // Load styles for the remaining onboarding variant.
 import './media/variationA.css';
 
+import { getActiveWindow } from '../../../../base/browser/dom.js';
 import { localize2 } from '../../../../nls.js';
 import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
@@ -19,16 +20,21 @@ import { OnboardingVariationA } from './onboardingVariationA.js';
 
 registerSingleton(IOnboardingService, OnboardingVariationA, InstantiationType.Delayed);
 
+const BACKBOARD_ONBOARDING_SHOWN_THIS_SESSION_KEY = 'backboard.onboarding.shownThisSession';
+
 class BackboardOnboardingFirstLaunchContribution implements IWorkbenchContribution {
 	static readonly ID = 'workbench.contrib.backboardOnboarding.firstLaunch';
 
 	constructor(
-		@IStorageService storageService: IStorageService,
 		@IOnboardingService onboardingService: IOnboardingService,
 	) {
-		if (!storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)) {
-			onboardingService.show();
+		const sessionStorage = getActiveWindow().sessionStorage;
+		if (sessionStorage.getItem(BACKBOARD_ONBOARDING_SHOWN_THIS_SESSION_KEY)) {
+			return;
 		}
+
+		sessionStorage.setItem(BACKBOARD_ONBOARDING_SHOWN_THIS_SESSION_KEY, 'true');
+		onboardingService.show();
 	}
 }
 
