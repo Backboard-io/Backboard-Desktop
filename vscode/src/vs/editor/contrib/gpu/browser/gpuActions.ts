@@ -19,6 +19,7 @@ import { EditorAction, registerEditorAction, type ServicesAccessor } from '../..
 import { ensureNonNullable } from '../../../browser/gpu/gpuUtils.js';
 import { GlyphRasterizer } from '../../../browser/gpu/raster/glyphRasterizer.js';
 import { ViewGpuContext } from '../../../browser/gpu/viewGpuContext.js';
+import { EDITOR_FONT_DEFAULTS } from '../../../common/config/fontInfo.js';
 
 class DebugEditorGpuRendererAction extends EditorAction {
 
@@ -103,7 +104,7 @@ class DebugEditorGpuRendererAction extends EditorAction {
 					}
 
 					const atlas = ViewGpuContext.atlas;
-					const fontFamily = configurationService.getValue<string>('editor.fontFamily');
+					const fontFamily = EDITOR_FONT_DEFAULTS.fontFamily;
 					const fontSize = configurationService.getValue<number>('editor.fontSize');
 					const rasterizer = new GlyphRasterizer(fontSize, fontFamily, getActiveWindow().devicePixelRatio, ViewGpuContext.decorationStyleCache);
 					let chars = await quickInputService.input({

@@ -30,7 +30,6 @@ import { IViewsService } from '../../../../services/views/common/viewsService.js
 import { ChatViewPane } from '../widgetHosts/viewPane/chatViewPane.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
-import { AgentSessionsPicker } from './agentSessionsPicker.js';
 import { ActiveEditorContext, IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { IQuickInputService } from '../../../../../platform/quickinput/common/quickInput.js';
 import { KeybindingWeight } from '../../../../../platform/keybinding/common/keybindingsRegistry.js';
@@ -39,8 +38,10 @@ import { coalesce } from '../../../../../base/common/arrays.js';
 import { toErrorMessage } from '../../../../../base/common/errorMessage.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IPaneCompositePartService } from '../../../../services/panecomposite/browser/panecomposite.js';
+import { AgentSessionsHistoryModal } from './agentSessionsHistoryModal.js';
 
 const AGENT_SESSIONS_CATEGORY = localize2('chatSessions', "Chat Agent Sessions");
+let currentAgentSessionsHistoryModal: AgentSessionsHistoryModal | undefined;
 
 //#region Chat View
 
@@ -131,10 +132,7 @@ export class PickAgentSessionAction extends Action2 {
 			menu: [
 				{
 					id: MenuId.ViewTitle,
-					when: ContextKeyExpr.and(
-						ContextKeyExpr.equals('view', ChatViewId),
-						ContextKeyExpr.equals(`config.${ChatConfiguration.ChatViewSessionsEnabled}`, false)
-					),
+					when: ContextKeyExpr.equals('view', ChatViewId),
 					group: 'navigation',
 					order: 2
 				},
@@ -153,8 +151,9 @@ export class PickAgentSessionAction extends Action2 {
 	async run(accessor: ServicesAccessor): Promise<void> {
 		const instantiationService = accessor.get(IInstantiationService);
 
-		const agentSessionsPicker = instantiationService.createInstance(AgentSessionsPicker, undefined, undefined);
-		await agentSessionsPicker.pickAgentSession();
+		currentAgentSessionsHistoryModal?.dispose();
+		currentAgentSessionsHistoryModal = instantiationService.createInstance(AgentSessionsHistoryModal);
+		currentAgentSessionsHistoryModal.show();
 	}
 }
 

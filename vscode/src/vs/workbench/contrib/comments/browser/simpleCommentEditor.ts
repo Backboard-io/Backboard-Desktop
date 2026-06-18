@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { EditorOption, IEditorOptions } from '../../../../editor/common/config/editorOptions.js';
+import { EDITOR_FONT_DEFAULTS } from '../../../../editor/common/config/fontInfo.js';
 import { EditorAction, EditorContributionInstantiation, EditorExtensionsRegistry, IEditorContributionDescription } from '../../../../editor/browser/editorExtensions.js';
 import { ICodeEditorService } from '../../../../editor/browser/services/codeEditorService.js';
 import { CodeEditorWidget, ICodeEditorWidgetOptions } from '../../../../editor/browser/widget/codeEditor/codeEditorWidget.js';
@@ -148,7 +149,7 @@ export class SimpleCommentEditor extends CodeEditorWidget {
 			autoClosingBrackets: configurationService.getValue('editor.autoClosingBrackets'),
 			quickSuggestions: false,
 			accessibilitySupport: configurationService.getValue<'auto' | 'off' | 'on'>('editor.accessibilitySupport'),
-			fontFamily: configurationService.getValue('editor.fontFamily'),
+			fontFamily: EDITOR_FONT_DEFAULTS.fontFamily,
 			fontSize: configurationService.getValue('editor.fontSize'),
 			allowVariableLineHeights: false
 		};

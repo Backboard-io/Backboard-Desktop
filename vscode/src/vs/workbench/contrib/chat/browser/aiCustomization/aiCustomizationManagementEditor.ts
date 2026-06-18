@@ -92,6 +92,7 @@ import { AICustomizationWelcomePage } from './aiCustomizationWelcomePage.js';
 import { IViewsService } from '../../../../services/views/common/viewsService.js';
 
 const $ = DOM.$;
+const HIDE_CUSTOMIZATION_SECTION_NAV = true;
 
 //#region Telemetry
 
@@ -534,6 +535,16 @@ export class AICustomizationManagementEditor extends EditorPane {
 	 * section, the first visible section is selected instead.
 	 */
 	private rebuildVisibleSections(): void {
+		if (HIDE_CUSTOMIZATION_SECTION_NAV) {
+			this.sections.length = 0;
+			if (this.sectionsList) {
+				this.sectionsList.splice(0, this.sectionsList.length);
+			}
+			this.welcomePage?.rebuildCards(new Set());
+			this.selectedSection = undefined;
+			this.ensureSectionsListReflectsActiveSection();
+			return;
+		}
 		const activeId = this.harnessService.activeHarness.get();
 		const descriptor = this.harnessService.findHarnessById(activeId);
 		const hidden = new Set(descriptor?.hiddenSections ?? []);
@@ -569,6 +580,7 @@ export class AICustomizationManagementEditor extends EditorPane {
 
 		// Main sections list container (takes remaining space)
 		const sectionsListContainer = DOM.append(sidebarContent, $('.sidebar-sections-list'));
+		sectionsListContainer.classList.toggle('hidden', HIDE_CUSTOMIZATION_SECTION_NAV);
 
 		this.sectionsList = this.editorDisposables.add(this.instantiationService.createInstance(
 			WorkbenchList<ISectionItem>,

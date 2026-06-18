@@ -314,11 +314,11 @@ class SCMInputWidgetEditorOptions {
 		const inputFontFamily = this.configurationService.getValue<string>('scm.inputFontFamily').trim();
 
 		if (inputFontFamily.toLowerCase() === 'editor') {
-			return this.configurationService.getValue<string>('editor.fontFamily').trim();
+			return this.defaultInputFontFamily;
 		}
 
 		if (inputFontFamily.length !== 0 && inputFontFamily.toLowerCase() !== 'default') {
-			return inputFontFamily;
+			return this.defaultInputFontFamily;
 		}
 
 		return this.defaultInputFontFamily;

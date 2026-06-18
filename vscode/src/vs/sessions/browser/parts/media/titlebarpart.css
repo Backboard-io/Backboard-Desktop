@@ -36,35 +36,15 @@
 .agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-center {
 	flex: 0 1 auto;
 	max-width: none;
-	/* Grid with symmetric 1fr side tracks keeps the command center (auto track)
-	 * window-centered. When the right actions container widens on hover (e.g.
-	 * "Open in VS Code" label animating in), the left 1fr track grows to mirror
-	 * it so the center track does not shift. */
 	display: grid;
-	grid-template-columns: 1fr auto 1fr;
+	grid-template-columns: auto;
 	align-items: center;
-	column-gap: 4px;
 	min-width: 0;
 }
 
-.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-center > .titlebar-center-nav-container {
-	grid-column: 1;
-	justify-self: end;
-}
-
-.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-center > .window-title {
-	grid-column: 2;
-}
-
 .agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-center > .titlebar-center-actions-container {
-	grid-column: 3;
-	justify-self: start;
-}
-
-.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-center .window-title {
-	margin: unset;
-	/* Match the VS Code window command center font size. */
-	font-size: var(--vscode-agents-fontSize-label1);
+	grid-column: 1;
+	justify-self: center;
 }
 
 .agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-right {

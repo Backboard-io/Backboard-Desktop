@@ -214,6 +214,92 @@ function isBackboardModel(model: ILanguageModelChatMetadataAndIdentifier): boole
 	return model.metadata.vendor === 'agent-host-backboard';
 }
 
+function sanitizeModelPickerClassPart(value: string): string {
+	return value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}
+
+function getProviderIconKeyForVendor(vendor: string): string {
+	const normalizedVendor = vendor.toLowerCase();
+	if (normalizedVendor.includes('backboard')) {
+		return 'ai-backboard';
+	}
+	if (normalizedVendor.includes('bedrock') || normalizedVendor.includes('aws')) {
+		return 'ai-bedrock';
+	}
+	if (normalizedVendor.includes('copilot')) {
+		return 'ai-open-ai';
+	}
+	if (normalizedVendor.includes('claude') || normalizedVendor.includes('anthropic')) {
+		return normalizedVendor.includes('claude') ? 'ai-claude' : 'ai-anthropic';
+	}
+	if (normalizedVendor.includes('openai') || normalizedVendor.includes('codex')) {
+		return normalizedVendor.includes('compatible') ? 'ai-open-ai-compat' : 'ai-open-ai';
+	}
+	if (normalizedVendor.includes('deepseek')) {
+		return 'ai-deep-seek';
+	}
+	if (normalizedVendor.includes('google') || normalizedVendor.includes('gemini')) {
+		return normalizedVendor.includes('google') ? 'ai-google' : 'ai-gemini';
+	}
+	if (normalizedVendor.includes('mistral')) {
+		return 'ai-mistral';
+	}
+	if (normalizedVendor.includes('xai') || normalizedVendor.includes('grok')) {
+		return 'ai-x-ai';
+	}
+	if (normalizedVendor.includes('ollama')) {
+		return 'ai-ollama';
+	}
+	if (normalizedVendor.includes('lmstudio') || normalizedVendor.includes('lm-studio')) {
+		return 'ai-lm-studio';
+	}
+	if (normalizedVendor.includes('openrouter') || normalizedVendor.includes('open-router')) {
+		return 'ai-open-router';
+	}
+	if (normalizedVendor.includes('vercel')) {
+		return 'ai-vercel';
+	}
+	return 'ai-open-code';
+}
+
+function getProviderIconKeyForModel(model: ILanguageModelChatMetadataAndIdentifier): string {
+	return getProviderIconKeyForVendor(model.metadata.vendor);
+}
+
+function renderProviderIconForModel(model: ILanguageModelChatMetadataAndIdentifier): HTMLElement {
+	const icon = dom.$('span.model-picker-provider-icon');
+	icon.classList.add(`model-picker-provider-icon-${sanitizeModelPickerClassPart(getProviderIconKeyForModel(model))}`);
+	return icon;
+}
+
+function getModelProviderClassName(model: ILanguageModelChatMetadataAndIdentifier): string {
+	const iconKey = getProviderIconKeyForModel(model);
+	return [
+		'chat-model-picker-model',
+		`chat-model-picker-provider-${sanitizeModelPickerClassPart(model.metadata.vendor)}`,
+		`chat-model-picker-provider-icon-${sanitizeModelPickerClassPart(iconKey)}`,
+	].join(' ');
+}
+
+function compareModelsByProviderThenName(
+	a: ILanguageModelChatMetadataAndIdentifier,
+	b: ILanguageModelChatMetadataAndIdentifier,
+	modelToGroup: Map<string, IProviderGroupInfo>,
+	languageModelsService: ILanguageModelsService,
+): number {
+	const aGroup = getProviderGroupForModel(a, modelToGroup, languageModelsService);
+	const bGroup = getProviderGroupForModel(b, modelToGroup, languageModelsService);
+	const providerCmp = aGroup.groupName.localeCompare(bGroup.groupName);
+	if (providerCmp !== 0) {
+		return providerCmp;
+	}
+	const vendorCmp = aGroup.vendor.localeCompare(bGroup.vendor);
+	if (vendorCmp !== 0) {
+		return vendorCmp;
+	}
+	return a.metadata.name.localeCompare(b.metadata.name);
+}
+
 function createModelItem(
 	action: IActionWidgetDropdownAction & { section?: string },
 	model?: ILanguageModelChatMetadataAndIdentifier,
@@ -236,7 +322,7 @@ function createModelItem(
 		group: { title: '', icon: action.icon ?? ThemeIcon.fromId(action.checked ? Codicon.check.id : Codicon.blank.id) },
 		hideIcon: false,
 		section: action.section,
-		className: vendorLabel ? 'chat-model-picker-inline-source' : undefined,
+		className: model ? `${getModelProviderClassName(model)}${vendorLabel ? ' chat-model-picker-inline-source' : ''}` : undefined,
 		badge: vendorLabel,
 		hover: hover ? { content: hover.element, disposable: hover.disposable } : undefined,
 		tooltip: action.tooltip,
@@ -613,6 +699,7 @@ export function buildModelPickerItems(
 			}
 			if (pinnedModels.length > 0) {
 				items.push({ kind: ActionListItemKind.Separator, label: localize('chat.modelPicker.favorites', "Favorites") });
+				pinnedModels.sort((a, b) => compareModelsByProviderThenName(a, b, modelToGroup, languageModelsService!));
 				for (const model of pinnedModels) {
 					const groupLabel = showGroupLabel
 						? getProviderGroupForModel(model, modelToGroup, languageModelsService!).groupName
@@ -708,6 +795,9 @@ export function buildModelPickerItems(
 					if (aAvail !== bAvail) {
 						return aAvail - bAvail;
 					}
+					if (a.kind === 'available' && b.kind === 'available') {
+						return compareModelsByProviderThenName(a.model, b.model, modelToGroup, languageModelsService!);
+					}
 					const aName = a.kind === 'available' ? a.model.metadata.name : a.entry.label;
 					const bName = b.kind === 'available' ? b.model.metadata.name : b.entry.label;
 					return aName.localeCompare(bName);
@@ -777,11 +867,10 @@ export function buildModelPickerItems(
 					bucket.models.push(model);
 				}
 
-				// Sort buckets: copilot vendor first, then alphabetically by group name
+				// Sort buckets by provider group, then vendor id for stable BYOK ordering.
 				const sortedBuckets = [...providerGroups.values()].sort((a, b) => {
-					if (a.vendor === 'copilot' && b.vendor !== 'copilot') { return -1; }
-					if (b.vendor === 'copilot' && a.vendor !== 'copilot') { return 1; }
-					return a.groupName.localeCompare(b.groupName);
+					const groupCmp = a.groupName.localeCompare(b.groupName);
+					return groupCmp !== 0 ? groupCmp : a.vendor.localeCompare(b.vendor);
 				});
 
 				const showGroupHeaders = sortedBuckets.length > 1;
@@ -802,7 +891,7 @@ export function buildModelPickerItems(
 						const aAvail = aEntry?.minVSCodeVersion && !isVersionAtLeast(currentVSCodeVersion, aEntry.minVSCodeVersion) ? 1 : 0;
 						const bAvail = bEntry?.minVSCodeVersion && !isVersionAtLeast(currentVSCodeVersion, bEntry.minVSCodeVersion) ? 1 : 0;
 						if (aAvail !== bAvail) { return aAvail - bAvail; }
-						return a.metadata.name.localeCompare(b.metadata.name);
+						return compareModelsByProviderThenName(a, b, modelToGroup, languageModelsService!);
 					});
 
 					for (const model of sortedBucketModels) {
@@ -837,9 +926,15 @@ export function buildModelPickerItems(
 			const { action: flatAutoAction, ariaDescription: flatAutoAriaDesc } = createModelAction(autoModel, selectedModelId, onSelect, configAccess, undefined, undefined, isUBB);
 			items.push(createModelItem(flatAutoAction, autoModel, openerService, undefined, isUBB, flatAutoAriaDesc));
 		}
+		const flatModelToGroup = languageModelsService
+			? buildModelToProviderGroupMap(languageModelsService)
+			: undefined;
 		const sortedModels = models
 			.filter(m => m !== autoModel)
 			.sort((a, b) => {
+				if (languageModelsService && flatModelToGroup) {
+					return compareModelsByProviderThenName(a, b, flatModelToGroup, languageModelsService);
+				}
 				const vendorCmp = a.metadata.vendor.localeCompare(b.metadata.vendor);
 				return vendorCmp !== 0 ? vendorCmp : a.metadata.name.localeCompare(b.metadata.name);
 			});
@@ -1206,7 +1301,9 @@ export class ModelPickerWidget extends Disposable {
 				}
 				void this._openerService.open(uri, { allowCommands: true });
 			},
-			minWidth: 200,
+			minWidth: 620,
+			maxWidth: 820,
+			detailItemHeight: 56,
 		};
 		const previouslyFocusedElement = dom.getActiveElement();
 
@@ -1274,6 +1371,9 @@ export class ModelPickerWidget extends Disposable {
 
 		// --- Name section ---
 		const nameChildren: (HTMLElement | string)[] = [];
+		if (this._selectedModel && !noModelsAvailable) {
+			nameChildren.push(renderProviderIconForModel(this._selectedModel));
+		}
 		if (statusIcon && !noModelsAvailable) {
 			nameChildren.push(renderIcon(statusIcon));
 		}

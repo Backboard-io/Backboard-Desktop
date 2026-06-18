@@ -52,7 +52,6 @@ const SANDBOX_PROVIDER_ORDER = new Map<string, number>([
 	['lm-studio', 10],
 	['ollama', 11],
 ]);
-const BACKBOARD_MCP_CONFIG_KEY = 'mcpCalls';
 const BACKBOARD_INTENSITY_CONFIG_KEY = 'intensity';
 const BACKBOARD_MEMORY_CONFIG_KEY = 'memoryMode';
 const BACKBOARD_WEB_SEARCH_CONFIG_KEY = 'webSearch';
@@ -221,7 +220,6 @@ export interface BackboardTurnSettings {
 	readonly memoryMode: string;
 	readonly webSearch: string;
 	readonly imageGeneration: string;
-	readonly mcpCalls?: string[];
 	readonly config: Record<string, unknown>;
 }
 
@@ -352,7 +350,6 @@ export class BackboardAgent extends Disposable implements IAgent {
 				memoryMode: settings.memoryMode,
 				webSearch: settings.webSearch,
 				imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
-				mcpCalls: settings.mcpCalls,
 				tools: submitTools,
 				config: settings.config,
 			}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, firstToolRequests, seenToolRequests, event));
@@ -1680,24 +1677,6 @@ function resolveBackboardSessionConfig(rawConfig: Record<string, unknown> | unde
 						],
 						sessionMutable: true,
 					},
-					[BACKBOARD_MCP_CONFIG_KEY]: {
-						type: 'string',
-						title: localize('backboard.config.mcp.title', "MCP"),
-						description: localize('backboard.config.mcp.description', "Choose which connected MCP tools Backboard can call."),
-						default: 'off',
-						enum: ['off', 'figma', 'notion', 'google', 'figma,notion', 'figma,google', 'notion,google', 'all'],
-						enumLabels: [
-							localize('backboard.config.mcp.off', "MCP Off"),
-							localize('backboard.config.mcp.figma', "Figma"),
-							localize('backboard.config.mcp.notion', "Notion"),
-							localize('backboard.config.mcp.google', "Google"),
-							localize('backboard.config.mcp.figmaNotion', "Figma + Notion"),
-							localize('backboard.config.mcp.figmaGoogle', "Figma + Google"),
-							localize('backboard.config.mcp.notionGoogle', "Notion + Google"),
-							localize('backboard.config.mcp.all', "All MCP"),
-						],
-						sessionMutable: true,
-					},
 					[BACKBOARD_MEMORY_CONFIG_KEY]: {
 						type: 'string',
 						title: localize('backboard.config.memory.title', "Memory"),
@@ -1724,7 +1703,6 @@ function normalizeBackboardConfig(rawConfig: Record<string, unknown> | undefined
 	return {
 		[SessionConfigKey.Mode]: normalizeBackboardMode(merged[SessionConfigKey.Mode]),
 		[BACKBOARD_INTENSITY_CONFIG_KEY]: oneOf(merged[BACKBOARD_INTENSITY_CONFIG_KEY], ['fast', 'balanced', 'deep'], 'fast'),
-		[BACKBOARD_MCP_CONFIG_KEY]: oneOf(merged[BACKBOARD_MCP_CONFIG_KEY], ['off', 'figma', 'notion', 'google', 'figma,notion', 'figma,google', 'notion,google', 'all'], 'off'),
 		[BACKBOARD_WEB_SEARCH_CONFIG_KEY]: normalizeWebSearchMode(merged[BACKBOARD_WEB_SEARCH_CONFIG_KEY]),
 		[BACKBOARD_MEMORY_CONFIG_KEY]: normalizeMemoryMode(merged[BACKBOARD_MEMORY_CONFIG_KEY]),
 		[BACKBOARD_IMAGE_CONFIG_KEY]: oneOf(merged[BACKBOARD_IMAGE_CONFIG_KEY], ['off', 'auto'], 'off'),
@@ -1738,7 +1716,6 @@ export function createBackboardTurnSettings(
 ): BackboardTurnSettings {
 	const values = normalizeBackboardConfig(storedConfig, sessionConfig);
 	const parsedModel = parseModelSelection(model) ?? parseModelSelection({ id: DEFAULT_MODEL_ID })!;
-	const mcpValue = stringConfigValue(values, BACKBOARD_MCP_CONFIG_KEY, 'off');
 	return {
 		provider: parsedModel.provider,
 		model: parsedModel.model,
@@ -1747,7 +1724,6 @@ export function createBackboardTurnSettings(
 		memoryMode: stringConfigValue(values, BACKBOARD_MEMORY_CONFIG_KEY, 'Auto'),
 		webSearch: stringConfigValue(values, BACKBOARD_WEB_SEARCH_CONFIG_KEY, 'off'),
 		imageGeneration: stringConfigValue(values, BACKBOARD_IMAGE_CONFIG_KEY, 'off'),
-		mcpCalls: mcpCallsFromConfig(mcpValue),
 		config: bridgeConfig(),
 	};
 }
@@ -1787,17 +1763,6 @@ function stringConfigValue(config: Record<string, unknown>, key: string, fallbac
 
 function bridgeModeFromConfig(config: Record<string, unknown>): string {
 	return stringConfigValue(config, SessionConfigKey.Mode, 'free');
-}
-
-function mcpCallsFromConfig(value: string): string[] | undefined {
-	if (value === 'all') {
-		return ['figma', 'notion', 'google'];
-	}
-	const allowed = new Set(['figma', 'notion', 'google']);
-	const enabled = value.split(',')
-		.map(part => part.trim())
-		.filter((part): part is 'figma' | 'notion' | 'google' => allowed.has(part));
-	return enabled.length ? [...new Set(enabled)] : undefined;
 }
 
 function bridgeConfig(): Record<string, unknown> {

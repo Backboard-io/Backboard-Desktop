@@ -28,7 +28,7 @@ import { toAgentHostBackendSessionUri } from './agentHostSessionUri.js';
  * well-known picker (e.g. Claude's custom approval-mode property).
  *
  * Unlike the dedicated chips, this lane is not registered with
- * `MenuId.ChatInputSecondary`. It owns its own DOM container and creates
+ * dedicated `MenuId.ChatInput` action. It owns its own DOM container and creates
  * one {@link AgentHostChatInputPicker} per generic property, syncing the
  * set of chips whenever the active session's schema changes.
  */

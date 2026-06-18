@@ -286,12 +286,16 @@
 	height: 152px;
 	border-radius: 0;
 	border: none;
-	background: transparent;
+	background: var(--vscode-button-background);
 	box-shadow: none;
-	background-image: url('../../../../browser/media/code-icon.svg');
-	background-repeat: no-repeat;
-	background-position: center center;
-	background-size: 148px;
+	-webkit-mask-image: url('../../../chat/browser/media/backboard_icon.svg');
+	mask-image: url('../../../chat/browser/media/backboard_icon.svg');
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	mask-position: center;
+	-webkit-mask-size: 124px auto;
+	mask-size: 124px auto;
 }
 
 .onboarding-a-signin-content {
@@ -512,6 +516,15 @@
 	background-size: contain;
 	align-items: center;
 	justify-content: center;
+}
+
+.onboarding-a-provider-mark.backboard {
+	background-image: none;
+}
+
+.onboarding-a-provider-mark.backboard .codicon {
+	font-size: 18px;
+	color: currentColor;
 }
 
 .onboarding-a-provider-mark.github {
@@ -1013,6 +1026,7 @@
 		0 0 0 4px var(--vscode-focusBorder);
 }
 
+.onboarding-a-signin-btn.primary .onboarding-a-provider-mark.backboard .codicon,
 .onboarding-a-signin-btn.primary .onboarding-a-provider-mark.github .codicon {
 	color: var(--vscode-button-foreground);
 }
@@ -1044,7 +1058,8 @@
 	}
 
 	.onboarding-a-signin-brand-icon {
-		background-size: 78px;
+		-webkit-mask-size: 96px auto;
+		mask-size: 96px auto;
 	}
 
 	.onboarding-a-signin-content {

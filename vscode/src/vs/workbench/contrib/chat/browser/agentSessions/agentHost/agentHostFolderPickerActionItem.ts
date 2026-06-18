@@ -98,6 +98,11 @@ export class AgentHostFolderPickerActionItem extends ChatInputPickerActionViewIt
 		}));
 	}
 
+	override render(container: HTMLElement): void {
+		container.classList.add('agent-host-folder-picker-host');
+		super.render(container);
+	}
+
 	private _sessionResource(): URI | undefined {
 		return this._widget.viewModel?.sessionResource;
 	}

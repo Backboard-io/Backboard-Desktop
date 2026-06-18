@@ -52,7 +52,7 @@ export class MarkdownPreviewConfiguration {
 		this.doubleClickToSwitchToEditor = !!markdownConfig.get<boolean>('preview.doubleClickToSwitchToEditor', true);
 		this.markEditorSelection = !!markdownConfig.get<boolean>('preview.markEditorSelection', true);
 
-		this.fontFamily = markdownConfig.get<string | undefined>('preview.fontFamily', undefined);
+		this.fontFamily = '"BB Mono", monospace';
 		this.fontSize = Math.max(8, +markdownConfig.get<number>('preview.fontSize', NaN));
 		this.lineHeight = Math.max(0.6, +markdownConfig.get<number>('preview.lineHeight', NaN));
 

@@ -81,6 +81,8 @@ export function getAgentSessionProviderName(provider: AgentSessionTarget): strin
 	}
 }
 
+export const BackboardLogoIcon = ThemeIcon.fromId('backboard-logo');
+
 export function getAgentSessionProviderIcon(provider: AgentSessionTarget): ThemeIcon {
 	switch (provider) {
 		case AgentSessionProviders.Local:
@@ -98,7 +100,7 @@ export function getAgentSessionProviderIcon(provider: AgentSessionTarget): Theme
 		case AgentSessionProviders.Growth:
 			return Codicon.lightbulb;
 		case AgentSessionProviders.AgentHostCopilot:
-			return Codicon.sparkle;
+			return BackboardLogoIcon;
 		default:
 			return Codicon.sparkle;
 	}

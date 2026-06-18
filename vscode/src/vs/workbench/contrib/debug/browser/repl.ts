@@ -395,7 +395,7 @@ export class Repl extends FilterViewPane implements IHistoryNavigationWidget {
 			this.replInput.updateOptions({
 				fontSize: this.replOptions.replConfiguration.fontSize,
 				lineHeight: this.replOptions.replConfiguration.lineHeight,
-				fontFamily: this.replOptions.replConfiguration.fontFamily === 'default' ? EDITOR_FONT_DEFAULTS.fontFamily : this.replOptions.replConfiguration.fontFamily
+				fontFamily: EDITOR_FONT_DEFAULTS.fontFamily
 			});
 
 			const replInputLineHeight = this.replInput.getOption(EditorOption.lineHeight);
@@ -410,7 +410,7 @@ export class Repl extends FilterViewPane implements IHistoryNavigationWidget {
 					background-color: ${this.replOptions.replConfiguration.backgroundColor};
 				}
 			`;
-			const cssFontFamily = this.replOptions.replConfiguration.fontFamily === 'default' ? 'var(--monaco-monospace-font)' : this.replOptions.replConfiguration.fontFamily;
+			const cssFontFamily = 'var(--monaco-monospace-font)';
 			this.container.style.setProperty(`--vscode-repl-font-family`, cssFontFamily);
 			this.container.style.setProperty(`--vscode-repl-font-size`, `${this.replOptions.replConfiguration.fontSize}px`);
 			this.container.style.setProperty(`--vscode-repl-font-size-for-twistie`, `${this.replOptions.replConfiguration.fontSizeForTwistie}px`);

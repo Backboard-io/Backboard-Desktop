@@ -728,7 +728,7 @@
           },
           "markdown.preview.fontFamily": {
             "type": "string",
-            "default": "-apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif",
+            "default": "\"BB Mono\", monospace",
             "description": "%markdown.preview.fontFamily.desc%",
             "scope": "resource"
           },

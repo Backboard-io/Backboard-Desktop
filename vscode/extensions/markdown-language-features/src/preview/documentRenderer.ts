@@ -208,7 +208,7 @@ export class MdDocumentRenderer {
 
 	#getSettingsOverrideStyles(config: MarkdownPreviewConfiguration): string {
 		return [
-			config.fontFamily ? `--markdown-font-family: ${config.fontFamily};` : '',
+				'--markdown-font-family: "BB Mono", monospace;',
 			isNaN(config.fontSize) ? '' : `--markdown-font-size: ${config.fontSize}px;`,
 			isNaN(config.lineHeight) ? '' : `--markdown-line-height: ${config.lineHeight};`,
 		].join(' ');

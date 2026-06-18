@@ -295,7 +295,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	async openAgentsWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI): Promise<ICodeWindow[]> {
 		this.logService.trace('windowsManager#openAgentsWindow');
 
-		// Open in a new browser window with the agent sessions workspace
+		// Open the agent sessions workspace, reusing the calling window when requested.
 		const windows = await this.open(await this.ensureAgentsWindow(openConfig));
 
 		// Single IPC carrying the folder to pre-select and an optional existing-
@@ -322,15 +322,20 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			await this.fileService.writeFile(agentSessionsWorkspaceUri, VSBuffer.fromString(emptyWorkspaceContent));
 		}
 
+		const reuseWindowId = openConfig.forceReuseWindow
+			? openConfig.contextWindowId ?? this.getFocusedWindow()?.id ?? this.getLastActiveWindow()?.id
+			: undefined;
+
 		return {
 			urisToOpen: [{ workspaceUri: agentSessionsWorkspaceUri }],
 			userEnv: openConfig.userEnv,
 			cli: openConfig.cli,
 			noRecentEntry: true,
 			context: openConfig.context,
-			contextWindowId: openConfig.contextWindowId,
+			contextWindowId: reuseWindowId ?? openConfig.contextWindowId,
 			initialStartup: openConfig.initialStartup,
-			forceNewWindow: true,
+			forceNewWindow: !openConfig.forceReuseWindow,
+			forceReuseWindow: openConfig.forceReuseWindow,
 		};
 	}
 
@@ -641,7 +646,9 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		if (allWorkspacesToOpen.length > 0) {
 
 			// Check for existing instances
-			const windowsOnWorkspace = coalesce(allWorkspacesToOpen.map(workspaceToOpen => findWindowOnWorkspaceOrFolder(this.getWindows(), workspaceToOpen.workspace.configPath)));
+			const windowsOnWorkspace = openConfig.forceReuseWindow && typeof openConfig.contextWindowId === 'number'
+				? []
+				: coalesce(allWorkspacesToOpen.map(workspaceToOpen => findWindowOnWorkspaceOrFolder(this.getWindows(), workspaceToOpen.workspace.configPath)));
 			if (windowsOnWorkspace.length > 0) {
 				const windowOnWorkspace = windowsOnWorkspace[0];
 				const filesToOpenInWindow = isEqualAuthority(filesToOpen?.remoteAuthority, windowOnWorkspace.remoteAuthority) ? filesToOpen : undefined;
@@ -771,7 +778,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	private resolveContextWindow(openConfig: IOpenConfiguration, forceNewWindow: boolean): { windowToUse: ICodeWindow | undefined; forceNewWindow: boolean } {
 		if (!forceNewWindow && typeof openConfig.contextWindowId === 'number') {
 			const contextWindow = this.getWindowById(openConfig.contextWindowId);
-			if (contextWindow?.config?.isSessionsWindow) {
+			if (contextWindow?.config?.isSessionsWindow && !openConfig.forceReuseWindow) {
 				return { windowToUse: undefined, forceNewWindow: true }; // do not replace the agents window
 			}
 			return { windowToUse: contextWindow, forceNewWindow };

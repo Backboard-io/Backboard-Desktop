@@ -357,7 +357,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 			readOnly: false,
 			ariaLabel: this._getAriaLabel(),
 			placeholder: this.options.placeholder ?? getRandomChatInputPlaceholder(),
-			fontFamily: 'system-ui, -apple-system, sans-serif',
+				fontFamily: '"BB Mono", monospace',
 			fontSize: 13,
 			lineHeight: 20,
 			cursorWidth: 1,

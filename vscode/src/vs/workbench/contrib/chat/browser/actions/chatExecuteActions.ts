@@ -563,23 +563,15 @@ export class OpenSessionTargetPickerAction extends Action2 {
 				{
 					id: MenuId.ChatInput,
 					order: 0,
-					when: ContextKeyExpr.and(
-						ChatContextKeys.enabled,
-						ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
-						ChatContextKeys.inQuickChat.negate(),
-						ChatContextKeys.chatSessionIsEmpty,
-						IsSessionsWindowContext),
+					// Backboard ships with a single local provider, so there is
+					// no session target to choose from in the composer.
+					when: ContextKeyExpr.false(),
 					group: 'navigation',
 				},
 				{
 					id: MenuId.ChatInputSecondary,
 					order: 0,
-					when: ContextKeyExpr.and(
-						ChatContextKeys.enabled,
-						ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
-						ChatContextKeys.inQuickChat.negate(),
-						IsSessionsWindowContext.negate(),
-						ChatContextKeys.chatSessionIsEmpty),
+					when: ContextKeyExpr.false(),
 					group: 'navigation',
 				},
 			]

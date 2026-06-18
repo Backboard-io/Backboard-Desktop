@@ -133,7 +133,7 @@ interface IActionMenuTemplateData {
 	readonly toolbar: HTMLElement;
 	readonly submenuIndicator: HTMLElement;
 	readonly elementDisposables: DisposableStore;
-	previousClassName?: string;
+	previousClassNames?: string[];
 }
 
 export const enum ActionListItemKind {
@@ -284,14 +284,19 @@ class ActionItemRenderer<T> implements IListRenderer<IActionListItem<T>, IAction
 
 		// Apply optional className - clean up previous to avoid stale classes
 		// from virtualized row reuse
-		if (data.previousClassName) {
-			data.container.classList.remove(data.previousClassName);
+		if (data.previousClassNames) {
+			data.container.classList.remove(...data.previousClassNames);
 		}
 		data.container.classList.toggle('action-list-custom', !!element.className);
 		if (element.className) {
-			data.container.classList.add(element.className);
+			const classNames = element.className.split(/\s+/).filter(className => className.length > 0);
+			if (classNames.length > 0) {
+				data.container.classList.add(...classNames);
+			}
+			data.previousClassNames = classNames;
+		} else {
+			data.previousClassNames = undefined;
 		}
-		data.previousClassName = element.className;
 
 		data.text.textContent = stripNewlines(element.label);
 
@@ -875,7 +880,20 @@ export class ActionListWidget<T> extends Disposable {
 			const matchesFilter = (item: IActionListItem<T>) => {
 				const label = (item.label ?? '').toLowerCase();
 				const descValue = typeof item.description === 'string' ? item.description : (item.description?.value ?? '');
-				return label.includes(filterLower) || descValue.toLowerCase().includes(filterLower);
+				const detail = item.detail ?? '';
+				const badge = item.badge ?? '';
+				const groupTitle = item.group?.title ?? '';
+				const tooltip = item.tooltip ?? '';
+				const itemId = typeof (item.item as { id?: unknown } | undefined)?.id === 'string'
+					? (item.item as { id: string }).id
+					: '';
+				return label.includes(filterLower)
+					|| descValue.toLowerCase().includes(filterLower)
+					|| detail.toLowerCase().includes(filterLower)
+					|| badge.toLowerCase().includes(filterLower)
+					|| groupTitle.toLowerCase().includes(filterLower)
+					|| tooltip.toLowerCase().includes(filterLower)
+					|| itemId.toLowerCase().includes(filterLower);
 			};
 
 			for (const item of this._allMenuItems) {

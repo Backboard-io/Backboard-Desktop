@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import './media/openInAgents.css';
-import { $, append } from '../../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, EventHelper, EventType } from '../../../../../base/browser/dom.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IAction } from '../../../../../base/common/actions.js';
@@ -20,12 +20,11 @@ import { IKeybindingService } from '../../../../../platform/keybinding/common/ke
 import { KeyCode, KeyMod } from '../../../../../base/common/keyCodes.js';
 import { KeybindingWeight } from '../../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { INativeHostService } from '../../../../../platform/native/common/native.js';
-import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { Schemas } from '../../../../../base/common/network.js';
 import { URI, UriComponents } from '../../../../../base/common/uri.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../platform/workspace/common/workspace.js';
 import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
-import { TitleBarLeadingActionsGroup, ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
+import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
 import { IChatWidgetService } from '../../browser/chat.js';
@@ -38,6 +37,10 @@ import { OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDI
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
+
+const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
+const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
 
 export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 	constructor() {
@@ -47,20 +50,20 @@ export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 			category: CHAT_CATEGORY,
 			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
 			f1: true,
-			menu: [{
-				id: MenuId.ChatTitleBarMenu,
-				group: 'c_sessions',
-				order: 1,
-				when: OPEN_AGENTS_WINDOW_PRECONDITION,
-			}, {
-				id: MenuId.TitleBar,
-				group: TitleBarLeadingActionsGroup,
-				order: -1000,
-				when: ContextKeyExpr.and(
-					OPEN_AGENTS_WINDOW_PRECONDITION,
-					ContextKeyExpr.notEquals(`config.${ChatConfiguration.TitleBarOpenInAgentsWindowEnabled}`, false),
-				),
-			}]
+				menu: [{
+					id: MenuId.ChatTitleBarMenu,
+					group: 'c_sessions',
+					order: 1,
+					when: OPEN_AGENTS_WINDOW_PRECONDITION,
+				}, {
+					id: MenuId.TitleBarAdjacentCenter,
+					group: 'navigation',
+					order: 0,
+					when: ContextKeyExpr.and(
+						OPEN_AGENTS_WINDOW_PRECONDITION,
+						ContextKeyExpr.notEquals(`config.${ChatConfiguration.TitleBarOpenInAgentsWindowEnabled}`, false),
+					),
+				}]
 		});
 	}
 
@@ -68,7 +71,7 @@ export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 		const nativeHostService = accessor.get(INativeHostService);
 		const workspaceContextService = accessor.get(IWorkspaceContextService);
 		const folderUri = workspaceContextService.getWorkspace().folders[0]?.uri;
-		await nativeHostService.openAgentsWindow({ folderUri: folderUri?.scheme === Schemas.file ? folderUri : undefined });
+		await nativeHostService.openAgentsWindow({ folderUri: folderUri?.scheme === Schemas.file ? folderUri.toJSON() : undefined });
 	}
 }
 
@@ -76,8 +79,8 @@ export class ToggleOpenInAgentsWindowTitleBarAction extends ToggleTitleBarConfig
 	constructor() {
 		super(
 			ChatConfiguration.TitleBarOpenInAgentsWindowEnabled,
-			localize('toggle.openInAgentsWindow', 'Open in Agents Window'),
-			localize('toggle.openInAgentsWindowDescription', "Toggle visibility of the Open in Agents Window button in title bar"),
+			localize('toggle.openInAgentsWindow', 'Agents Switcher'),
+			localize('toggle.openInAgentsWindowDescription', "Toggle visibility of the Editor / Agents switcher in the title bar"),
 			6,
 			OPEN_AGENTS_WINDOW_PRECONDITION,
 		);
@@ -88,7 +91,7 @@ export class OpenAgentsWindowAction extends Action2 {
 	constructor() {
 		super({
 			id: OPEN_AGENTS_WINDOW_COMMAND_ID,
-			title: localize2('openAgentsWindow', "Open Agents Window"),
+			title: localize2('openAgentsWindow', "Open Agents"),
 			category: CHAT_CATEGORY,
 			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
 			f1: true,
@@ -107,15 +110,14 @@ export class OpenAgentsWindowAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents }) {
-		const nativeHostService = accessor.get(INativeHostService);
-		await nativeHostService.openAgentsWindow(args);
+		await accessor.get(INativeHostService).openAgentsWindow(args);
 	}
 }
 
 /**
- * Opens the current chat session inside the Agents window. Visible only when
+ * Opens the current chat session inside the same-window Agents surface. Visible only when
  * the active chat is a first-party agent-host session (Copilot CLI today)
- * since those are the session types the Agents window can render directly.
+ * since those are the session types the Agents surface can render directly.
  */
 export class OpenChatSessionInAgentsWindowAction extends Action2 {
 
@@ -124,7 +126,7 @@ export class OpenChatSessionInAgentsWindowAction extends Action2 {
 	constructor() {
 		super({
 			id: OpenChatSessionInAgentsWindowAction.ID,
-			title: localize2('openSessionInAgentsWindow', "Open in Agents Window"),
+			title: localize2('openSessionInAgentsWindow', "Open in Agents"),
 			category: CHAT_CATEGORY,
 			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
 			f1: false,
@@ -162,30 +164,29 @@ export class OpenChatSessionInAgentsWindowAction extends Action2 {
 			sessionResource = chatWidgetService.lastFocusedWidget?.viewModel?.sessionResource;
 		}
 
-		// Hand off a real (persisted, non-untitled) session so the agents window
-		// opens that same session (it carries its own workspace). Otherwise fall
-		// back to forwarding the workspace folder so the agents window scopes its
-		// new-session composer to it.
-		const hasRealSession = sessionResource && !isUntitledChatSession(sessionResource);
 		const folderUri = workspaceContextService.getWorkspace().folders[0]?.uri;
 		await nativeHostService.openAgentsWindow({
-			folderUri: !hasRealSession && folderUri?.scheme === Schemas.file ? folderUri.toJSON() : undefined,
-			sessionResource: hasRealSession ? sessionResource?.toJSON() : undefined,
+			folderUri: folderUri?.scheme === Schemas.file ? folderUri.toJSON() : undefined,
+			sessionResource: sessionResource && !isUntitledChatSession(sessionResource) ? sessionResource.toJSON() : undefined,
 		});
 	}
 }
 
 /**
- * Renders the "Open in Agents" titlebar entry as an icon-only button that
- * expands to reveal a label on hover / keyboard focus.
+ * Renders a stable Editor / Agents titlebar switcher.
  */
 class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
+
+	private editorButton: HTMLButtonElement | undefined;
+	private agentsButton: HTMLButtonElement | undefined;
 
 	constructor(
 		action: IAction,
 		options: IBaseActionViewItemOptions | undefined,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
+		@ICommandService private readonly commandService: ICommandService,
+		@IEditorService private readonly editorService: IEditorService,
 	) {
 		super(undefined, action, options);
 	}
@@ -194,18 +195,58 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 		super.render(container);
 
 		container.classList.add('open-in-agents-titlebar-widget');
-		container.setAttribute('role', 'button');
+		container.setAttribute('role', 'group');
 
-		const label = this.action.label;
-		const hoverText = this.keybindingService.appendKeybinding(localize('openInAgentsHover', "Open in Agents Window"), OPEN_AGENTS_WINDOW_COMMAND_ID);
+		const hoverText = this.keybindingService.appendKeybinding(localize('openInAgentsHover', "Switch to Agents"), OPEN_AGENTS_WINDOW_COMMAND_ID);
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 
-		const icon = append(container, $('span.open-in-agents-titlebar-widget-icon'));
-		icon.setAttribute('aria-hidden', 'true');
+		this.editorButton = append(container, $('button.open-in-agents-titlebar-widget-option.editor'));
+		this.editorButton.textContent = localize('openInAgentsSwitcher.editor', "Editor");
 
-		const labelEl = append(container, $('span.open-in-agents-titlebar-widget-label'));
-		labelEl.textContent = label;
+		this.agentsButton = append(container, $('button.open-in-agents-titlebar-widget-option.agents'));
+		const icon = append(this.agentsButton, $('span.open-in-agents-titlebar-widget-icon'));
+		icon.setAttribute('aria-hidden', 'true');
+		append(this.agentsButton, $('span.open-in-agents-titlebar-widget-label')).textContent = localize('openInAgentsSwitcher.agents', "Agents");
+
+		this._register(addDisposableListener(this.editorButton, EventType.CLICK, e => {
+			EventHelper.stop(e, true);
+			this.openEditor();
+		}));
+		this._register(addDisposableListener(this.agentsButton, EventType.CLICK, e => {
+			EventHelper.stop(e, true);
+			this.openAgents();
+		}));
+		this._register(addDisposableListener(this.editorButton, EventType.KEY_DOWN, e => this.handleKeyDown(e, () => this.openEditor())));
+		this._register(addDisposableListener(this.agentsButton, EventType.KEY_DOWN, e => this.handleKeyDown(e, () => this.openAgents())));
+		this._register(this.editorService.onDidActiveEditorChange(() => this.updateState()));
+
+		this.updateState();
+	}
+
+	private handleKeyDown(event: KeyboardEvent, run: () => void): void {
+		if (event.key === 'Enter' || event.key === ' ') {
+			EventHelper.stop(event, true);
+			run();
+		}
+	}
+
+	private openAgents(): void {
+		this.action.run();
+	}
+
+	private openEditor(): void {
+		if (this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID) {
+			this.commandService.executeCommand(CLOSE_ACTIVE_EDITOR_COMMAND_ID);
+		}
+	}
+
+	private updateState(): void {
+		const agentsActive = this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID;
+		this.editorButton?.classList.toggle('checked', !agentsActive);
+		this.editorButton?.setAttribute('aria-pressed', String(!agentsActive));
+		this.agentsButton?.classList.toggle('checked', agentsActive);
+		this.agentsButton?.setAttribute('aria-pressed', String(agentsActive));
 	}
 }
 
@@ -216,11 +257,9 @@ export class OpenWorkspaceInAgentsContribution extends Disposable implements IWo
 	constructor(
 		@IActionViewItemService actionViewItemService: IActionViewItemService,
 		@IInstantiationService instantiationService: IInstantiationService,
-		@IContextKeyService contextKeyService: IContextKeyService,
-		@IProductService productService: IProductService,
 	) {
 		super();
-		this._register(actionViewItemService.register(MenuId.TitleBar, OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, (action, options) => {
+		this._register(actionViewItemService.register(MenuId.TitleBarAdjacentCenter, OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, (action, options) => {
 			return instantiationService.createInstance(OpenWorkspaceInAgentsTitleBarWidget, action, options);
 		}, undefined));
 	}
@@ -256,8 +295,8 @@ type AgentsHandoffTipActionClassification = {
 /**
  * Posts a tip notification above the chat input whenever the focused chat
  * widget is showing a contributed session (Copilot CLI, Cloud, Claude, etc.)
- * that the Agents Window can render directly. The notification provides a
- * one-click button to hand off the current session to the Agents Window.
+ * that the same-window Agents surface can render directly. The notification provides a
+ * one-click button to hand off the current session to Agents.
  */
 export class AgentsHandoffInputTipContribution extends Disposable implements IWorkbenchContribution {
 
@@ -280,7 +319,7 @@ export class AgentsHandoffInputTipContribution extends Disposable implements IWo
 	 */
 	private static readonly TIP_MUTE_COMMAND_ID = 'workbench.action.chat.agentsHandoffTip.mute';
 
-	/** Session types eligible for the handoff tip — the same set the Agents window can render directly. */
+	/** Session types eligible for the handoff tip — the same set the Agents surface can render directly. */
 	private static readonly ELIGIBLE_SESSION_TYPES: ReadonlySet<string> = new Set([SessionType.CopilotCLI, SessionType.AgentHostCopilot]);
 
 	/** Pseudo-key used as the {@link _lastPostedFor} value for the empty-workspace tip (no real session URI exists). */
@@ -445,17 +484,17 @@ export class AgentsHandoffInputTipContribution extends Disposable implements IWo
 		const useEmptyWorkspaceCopy = emptyWorkspaceEligible && !eligible;
 		const message = useEmptyWorkspaceCopy
 			? localize('chat.agentsHandoff.tip.emptyWorkspace.message', "Backboard isn't available without an open folder")
-			: localize('chat.agentsHandoff.tip.message', "Continue this session in the Agents Window");
+			: localize('chat.agentsHandoff.tip.message', "Continue this session in Agents");
 		const description = useEmptyWorkspaceCopy
-			? localize('chat.agentsHandoff.tip.emptyWorkspace.description', "Open the Agents Window to start a Backboard session.")
+			? localize('chat.agentsHandoff.tip.emptyWorkspace.description', "Open Agents to start a Backboard session.")
 			: mode === AgentsHandoffTipMode.Custom
 				? localize('chat.agentsHandoff.tip.description.copilot', "Free with your Copilot plan — get a dedicated, multi-pane view alongside your workspace.")
 				: localize('chat.agentsHandoff.tip.description', "Get a dedicated, multi-pane view alongside your workspace.");
 		const actionLabel = useEmptyWorkspaceCopy
-			? localize('chat.agentsHandoff.tip.action', "Open in Agents Window")
+			? localize('chat.agentsHandoff.tip.action', "Open Agents")
 			: mode === AgentsHandoffTipMode.Custom
 				? localize('chat.agentsHandoff.tip.action.custom', "Give your agent more room?")
-				: localize('chat.agentsHandoff.tip.action.default', "Continue in Agents Window");
+				: localize('chat.agentsHandoff.tip.action.default', "Continue in Agents");
 
 		this._notificationService.setNotification({
 			id: AgentsHandoffInputTipContribution.NOTIFICATION_ID,

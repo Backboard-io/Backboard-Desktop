@@ -32,7 +32,7 @@ export interface IAgentsBannerResult {
 
 /**
  * Returns whether the agents banner can be shown.
- * The banner requires the open agents window command
+ * The banner requires the open agents command
  * to be registered (desktop builds only) and is limited to Insiders quality.
  * It is also hidden when AI features are disabled.
  */
@@ -57,7 +57,7 @@ export interface IAgentsBannerOptions {
 
 /**
  * Creates a banner that promotes the Agents app.
- * The banner contains a button that opens the Agents window.
+ * The banner contains a button that opens Agents.
  */
 export function createAgentsBanner(
 	options: IAgentsBannerOptions,
@@ -65,7 +65,7 @@ export function createAgentsBanner(
 	telemetryService: ITelemetryService,
 ): IAgentsBannerResult {
 	const disposables = new DisposableStore();
-	const label = options.label ?? localize('agentsBanner.tryAgentsAppLabel', "Try out the new Agents window");
+	const label = options.label ?? localize('agentsBanner.tryAgentsAppLabel', "Try out the new Agents page");
 
 	const button = $('button.agents-banner-button', {
 		title: label,

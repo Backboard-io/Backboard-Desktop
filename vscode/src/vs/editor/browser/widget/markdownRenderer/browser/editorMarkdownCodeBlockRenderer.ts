@@ -5,10 +5,9 @@
 
 import { isHTMLElement } from '../../../../../base/browser/dom.js';
 import { createTrustedTypesPolicy } from '../../../../../base/browser/trustedTypes.js';
-import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IMarkdownCodeBlockRenderer, IMarkdownRendererExtraOptions } from '../../../../../platform/markdown/browser/markdownRenderer.js';
-import { EditorOption, IEditorOptions } from '../../../../common/config/editorOptions.js';
-import { BareFontInfo } from '../../../../common/config/fontInfo.js';
+import { EditorOption } from '../../../../common/config/editorOptions.js';
+import { BareFontInfo, EDITOR_FONT_DEFAULTS } from '../../../../common/config/fontInfo.js';
 import { createBareFontInfoFromRawSettings } from '../../../../common/config/fontInfoFromSettings.js';
 import { ILanguageService } from '../../../../common/languages/language.js';
 import { PLAINTEXT_LANGUAGE_ID } from '../../../../common/languages/modesRegistry.js';
@@ -29,7 +28,6 @@ export class EditorMarkdownCodeBlockRenderer implements IMarkdownCodeBlockRender
 	});
 
 	constructor(
-		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@ILanguageService private readonly _languageService: ILanguageService,
 	) { }
 
@@ -72,7 +70,7 @@ export class EditorMarkdownCodeBlockRenderer implements IMarkdownCodeBlockRender
 			// Otherwise use the global font settings.
 			// Pass in fake pixel ratio of 1 since we only need the font info to apply font family
 			return createBareFontInfoFromRawSettings({
-				fontFamily: this._configurationService.getValue<IEditorOptions>('editor').fontFamily
+				fontFamily: EDITOR_FONT_DEFAULTS.fontFamily
 			}, 1);
 		}
 	}

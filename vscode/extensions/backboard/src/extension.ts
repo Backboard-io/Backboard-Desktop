@@ -241,14 +241,6 @@ async function setApiKey(): Promise<boolean> {
 }
 
 async function promptBackboardSso(bridge: BackboardBridge): Promise<boolean> {
-	const choice = await vscode.window.showInformationMessage(
-		'Sign in to Backboard Studio.',
-		{ modal: true },
-		'Continue with SSO'
-	);
-	if (choice !== 'Continue with SSO') {
-		return false;
-	}
 	return signInBackboard(bridge);
 }
 
@@ -432,7 +424,7 @@ body {
 	padding: 32px;
 	background: var(--bg);
 	color: var(--text);
-	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+		font-family: "BB Mono", monospace;
 }
 main {
 	width: min(520px, 100%);
@@ -1765,7 +1757,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		this.view = webviewView;
 		webviewView.title = '\u200B';
 		webviewView.webview.options = { enableScripts: true, localResourceRoots: webviewLocalResourceRoots(this.context) };
-		webviewView.webview.html = panelHtml(webviewView.webview, codiconsStylesheetUri(this.context, webviewView.webview), iconBaseUri(this.context, webviewView.webview), { showHeader: false, initialState: this.readPanelState() });
+		webviewView.webview.html = panelHtml(webviewView.webview, codiconsStylesheetUri(this.context, webviewView.webview), iconBaseUri(this.context, webviewView.webview), fontBaseUri(this.context, webviewView.webview), { showHeader: false, initialState: this.readPanelState() });
 		webviewView.webview.onDidReceiveMessage(message => {
 			if (message?.type === 'send' && typeof message.prompt === 'string') {
 				this.runPrompt(message.prompt, asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, undefined, typeof message.workspace === 'string' ? message.workspace : undefined);
@@ -1967,10 +1959,17 @@ function iconBaseUri(context: vscode.ExtensionContext, webview: vscode.Webview):
 	return webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'icons'));
 }
 
-function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, iconBase: vscode.Uri, options: { readonly showHeader: boolean; readonly initialState?: PanelPersistedState }): string {
+function fontBaseUri(context: vscode.ExtensionContext, webview: vscode.Webview): vscode.Uri {
+	return webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'fonts', 'bb-mono'));
+}
+
+function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, iconBase: vscode.Uri, fontBase: vscode.Uri, options: { readonly showHeader: boolean; readonly initialState?: PanelPersistedState }): string {
 	const nonce = newId();
 	const csp = `default-src 'none'; img-src ${webview.cspSource} https: data: blob:; media-src ${webview.cspSource} https: data: blob:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';`;
 	const backboardLogo = `${iconBase.toString()}/backboard_logo.svg`;
+	const bbMonoRegular = `${fontBase.toString()}/IBMPlexMono-Regular.ttf`;
+	const bbMonoSemiBold = `${fontBase.toString()}/IBMPlexMono-SemiBold.ttf`;
+	const bbMonoBold = `${fontBase.toString()}/IBMPlexMono-Bold.ttf`;
 	const rootRows = `${options.showHeader ? '42px ' : ''}35px 24px minmax(0, 1fr) auto`;
 	const logLabel = options.showHeader ? 'aria-labelledby="chatTab"' : 'aria-label="Chat"';
 	const initialStateJson = scriptJson(options.initialState ?? {});
@@ -2010,9 +2009,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 	<meta charset="UTF-8">
 	<meta http-equiv="Content-Security-Policy" content="${csp}">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<link href="${codiconsStylesheet}" rel="stylesheet">
-	<style>
-		:root {
+		<link href="${codiconsStylesheet}" rel="stylesheet">
+		<style>
+			@font-face { font-family: "BB Mono"; src: url("${bbMonoRegular}") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+			@font-face { font-family: "BB Mono"; src: url("${bbMonoSemiBold}") format("truetype"); font-weight: 600; font-style: normal; font-display: swap; }
+			@font-face { font-family: "BB Mono"; src: url("${bbMonoBold}") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+			:root {
 			--bb-bg: var(--vscode-sideBar-background, var(--vscode-editor-background, #ffffff));
 			--bb-surface: color-mix(in srgb, var(--vscode-sideBar-background, #fbfcfd) 88%, var(--vscode-editor-background, #ffffff));
 			--bb-card: color-mix(in srgb, var(--vscode-editorWidget-background, #ffffff) 86%, var(--bb-bg));
@@ -2031,7 +2033,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		}
 		* { box-sizing: border-box; }
 		html, body { width: 100%; height: 100%; min-width: 0; overflow: hidden; }
-		body { padding: 0; margin: 0; color: var(--bb-text); background: var(--bb-bg); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
+			body { padding: 0; margin: 0; color: var(--bb-text); background: var(--bb-bg); font-family: "BB Mono", monospace; font-size: var(--vscode-font-size); }
 			.root { position: relative; display: grid; grid-template-rows: ${rootRows}; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; background: var(--bb-bg); }
 			.root > :not(.authOverlay) { transition: filter .18s ease, opacity .18s ease; }
 			.root.authRequired > :not(.authOverlay) { filter: blur(4px); opacity: .48; pointer-events: none; user-select: none; }
@@ -2119,7 +2121,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.queueBlock { width: 100%; box-sizing: border-box; display: grid; gap: 6px; padding: 8px; border: 1px solid var(--bb-border); border-radius: 8px; background: color-mix(in srgb, var(--bb-card) 84%, transparent); }
 		.queueHeader { display: flex; align-items: center; gap: 7px; color: var(--bb-muted); font-size: 12px; font-weight: 600; }
 		.queueCard { display: grid; gap: 6px; padding: 7px; border: 1px solid color-mix(in srgb, var(--bb-border) 78%, transparent); border-radius: 7px; background: var(--bb-bg); }
-		.queueTextarea { width: 100%; min-height: 42px; max-height: 110px; box-sizing: border-box; resize: vertical; padding: 6px; border: 1px solid var(--bb-border); border-radius: 6px; color: var(--bb-text); background: var(--vscode-input-background, transparent); font-family: var(--vscode-font-family); font-size: 12px; line-height: 17px; }
+			.queueTextarea { width: 100%; min-height: 42px; max-height: 110px; box-sizing: border-box; resize: vertical; padding: 6px; border: 1px solid var(--bb-border); border-radius: 6px; color: var(--bb-text); background: var(--vscode-input-background, transparent); font-family: "BB Mono", monospace; font-size: 12px; line-height: 17px; }
 		.queueActions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
 		.queueButton { min-height: 22px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 3px 7px; border-radius: 4px; color: var(--bb-muted); background: transparent; font-size: 11px; }
 		.queueButton:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
@@ -2158,12 +2160,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.toolStatusIcon .codicon { font-size: 12px; }
 		.toolMain { min-width: 0; display: flex; align-items: baseline; gap: 6px; }
 		.toolLabel { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; font-weight: 600; line-height: 14px; }
-		.toolMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-muted); font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; line-height: 14px; }
+		.toolMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-muted); font-family: "BB Mono", monospace; font-size: 10.5px; line-height: 14px; }
 		.toolDuration { min-width: 34px; flex: 0 0 auto; padding: 0 4px; border: 0; border-radius: 999px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-border) 18%, transparent); font-size: 10px; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; }
 		.toolToggle { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border-radius: 3px; color: var(--bb-muted); background: transparent; }
 		.toolToggle .codicon { font-size: 12px; }
 		.toolToggle:hover { color: var(--bb-text); background: var(--vscode-toolbar-hoverBackground); }
-		.toolDetails { display: none; max-height: 160px; overflow: auto; border-top: 1px solid color-mix(in srgb, var(--bb-border) 36%, transparent); padding: 5px 7px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-bg) 78%, transparent); font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; line-height: 14px; white-space: pre-wrap; word-break: break-word; }
+		.toolDetails { display: none; max-height: 160px; overflow: auto; border-top: 1px solid color-mix(in srgb, var(--bb-border) 36%, transparent); padding: 5px 7px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-bg) 78%, transparent); font-family: "BB Mono", monospace; font-size: 10.5px; line-height: 14px; white-space: pre-wrap; word-break: break-word; }
 		.toolCard.open .toolDetails { display: block; }
 		.usageRow { width: 100%; box-sizing: border-box; display: flex; align-items: flex-start; gap: 8px; padding: 3px 2px; color: var(--bb-muted); font-size: 12px; line-height: 16px; }
 		.usageToggle { --usage-percent: 0; position: relative; width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; padding: 0; border-radius: 50%; color: var(--bb-text); background: conic-gradient(var(--bb-primary) calc(var(--usage-percent) * 1%), color-mix(in srgb, var(--bb-border) 60%, transparent) 0); }
@@ -2181,11 +2183,11 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.usageMetricValue { color: var(--bb-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; }
 		.fileCard { width: 100%; overflow: hidden; border: 1px solid color-mix(in srgb, var(--bb-border) 72%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--bb-card) 54%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--bb-primary) 34%, transparent); }
 		.fileHeader { min-height: 34px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 7px 9px 7px 10px; border-bottom: 1px solid color-mix(in srgb, var(--bb-border) 70%, transparent); }
-		.fileName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-text); font-family: var(--vscode-editor-font-family, monospace); font-size: 11.5px; font-weight: 600; }
+		.fileName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-text); font-family: "BB Mono", monospace; font-size: 11.5px; font-weight: 600; }
 		.fileCount { flex: 0 0 auto; font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
 		.fileCount.add { color: var(--bb-success); }
 		.fileCount.remove { color: var(--bb-danger); }
-		.diffLine { min-height: 18px; padding: 1px 10px; color: var(--bb-text); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; line-height: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+		.diffLine { min-height: 18px; padding: 1px 10px; color: var(--bb-text); font-family: "BB Mono", monospace; font-size: 11px; line-height: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
 		.diffLine.add { color: var(--bb-success); background: var(--bb-success-bg); }
 		.diffLine.remove { color: var(--bb-danger); background: var(--bb-danger-bg); }
 		.reviewWrap { width: 100%; padding: 0; }
@@ -2195,7 +2197,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.typeDot { width: 16px; height: 16px; flex: 0 0 auto; display: grid; place-items: center; color: var(--bb-muted); }
 		.typeDot .codicon { font-size: 14px; }
 		.reviewTitle { min-width: 0; color: var(--bb-text); font-size: 12.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.reviewFileName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-text); font-family: var(--vscode-editor-font-family, monospace); font-size: 11.5px; font-weight: 600; }
+		.reviewFileName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-text); font-family: "BB Mono", monospace; font-size: 11.5px; font-weight: 600; }
 		.reviewButton { min-width: 52px; min-height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 3px 9px; border-radius: 4px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); font-size: 11.5px; font-weight: 600; }
 		.reviewButton.secondary { color: var(--bb-muted); background: transparent; }
 		.reviewButton:disabled { cursor: default; color: var(--bb-muted); background: transparent; }
@@ -2245,14 +2247,14 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.composerCard { min-height: 98px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--bb-border); border-radius: 10px; background: color-mix(in srgb, var(--vscode-input-background, var(--bb-card)) 92%, var(--bb-bg)); overflow: hidden; box-shadow: 0 1px 3px color-mix(in srgb, var(--bb-shadow) 40%, transparent); transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
 		.composerCard:hover { border-color: color-mix(in srgb, var(--bb-border) 60%, var(--bb-primary) 20%); box-shadow: 0 2px 8px color-mix(in srgb, var(--bb-shadow) 60%, transparent); }
 		.composerCard:focus-within { border-color: color-mix(in srgb, var(--bb-primary) 62%, var(--bb-border)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--bb-primary) 14%, transparent), 0 2px 8px color-mix(in srgb, var(--bb-shadow) 50%, transparent); }
-		textarea { width: 100%; min-height: 44px; max-height: 132px; box-sizing: border-box; resize: vertical; padding: 0; border: 0; outline: 0; line-height: 20px; background: transparent; color: var(--bb-text); font-family: var(--vscode-font-family); font-size: 13px; }
+		textarea { width: 100%; min-height: 44px; max-height: 132px; box-sizing: border-box; resize: vertical; padding: 0; border: 0; outline: 0; line-height: 20px; background: transparent; color: var(--bb-text); font-family: "BB Mono", monospace; font-size: 13px; }
 		textarea::placeholder { color: var(--bb-muted); }
 		.composerRule { display: none; }
 		.composerBar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 24px; padding: 0; overflow: hidden; }
 		.barLeft, .barRight { display: flex; align-items: center; min-width: 0; }
 		.barLeft { flex: 1 1 auto; gap: 8px; overflow: hidden; }
 		.barRight { flex: 0 0 auto; justify-content: flex-end; gap: 11px; overflow: hidden; }
-		button { border: 0; cursor: pointer; font-family: var(--vscode-font-family); }
+		button { border: 0; cursor: pointer; font-family: "BB Mono", monospace; }
 		.iconButton { width: 20px; height: 22px; min-width: 20px; display: inline-grid; place-items: center; padding: 0; border-radius: 0; color: var(--bb-muted); background: transparent; line-height: 1; flex: 0 0 auto; }
 		.iconButton .codicon { font-size: 16px; }
 		.iconButton:hover { color: var(--bb-text); background: transparent; }

@@ -26,6 +26,165 @@
 	--vscode-chat-font-size-body-xxl: 1.538em;
 }
 
+.interactive-session .codicon.codicon-backboard-logo {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	font-size: 0;
+	background-color: currentColor;
+	-webkit-mask: url('../../media/backboard_icon.svg') center / contain no-repeat;
+	mask: url('../../media/backboard_icon.svg') center / contain no-repeat;
+}
+
+.interactive-session .codicon.codicon-backboard-logo::before {
+	content: '';
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.action .title {
+	min-width: 0;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.action .detail {
+	padding-left: 20px;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.action .action-list-item-toolbar {
+	flex-shrink: 0;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-model .title {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-model .title::before {
+	display: inline-block;
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
+	content: "";
+	background-color: var(--vscode-icon-foreground);
+}
+
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon {
+	display: inline-block;
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
+	background-color: var(--vscode-icon-foreground);
+}
+
+.vs-dark .action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-model .title::before,
+.hc-black .action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-model .title::before,
+.vs-dark .chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon,
+.hc-black .chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon {
+	background-color: #fff !important;
+}
+
+.vs .action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-model .title::before,
+.hc-light .action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-model .title::before,
+.vs .chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon,
+.hc-light .chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon {
+	background-color: #000 !important;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-anthropic .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-anthropic {
+	-webkit-mask: url('./model-provider-icons/ai_anthropic.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_anthropic.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-backboard .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-backboard {
+	-webkit-mask: url('./model-provider-icons/ai_backboard.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_backboard.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-bedrock .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-bedrock {
+	-webkit-mask: url('./model-provider-icons/ai_bedrock.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_bedrock.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-claude .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-claude {
+	-webkit-mask: url('./model-provider-icons/ai_claude.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_claude.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-deep-seek .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-deep-seek {
+	-webkit-mask: url('./model-provider-icons/ai_deep_seek.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_deep_seek.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-gemini .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-gemini {
+	-webkit-mask: url('./model-provider-icons/ai_gemini.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_gemini.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-google .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-google {
+	-webkit-mask: url('./model-provider-icons/ai_google.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_google.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-lm-studio .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-lm-studio {
+	-webkit-mask: url('./model-provider-icons/ai_lm_studio.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_lm_studio.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-mistral .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-mistral {
+	-webkit-mask: url('./model-provider-icons/ai_mistral.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_mistral.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-ollama .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-ollama {
+	-webkit-mask: url('./model-provider-icons/ai_ollama.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_ollama.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-open-ai .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-open-ai {
+	-webkit-mask: url('./model-provider-icons/ai_open_ai.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_open_ai.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-open-ai-compat .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-open-ai-compat {
+	-webkit-mask: url('./model-provider-icons/ai_open_ai_compat.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_open_ai_compat.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-open-code .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-open-code {
+	-webkit-mask: url('./model-provider-icons/ai_open_code.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_open_code.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-open-router .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-open-router {
+	-webkit-mask: url('./model-provider-icons/ai_open_router.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_open_router.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-vercel .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-vercel {
+	-webkit-mask: url('./model-provider-icons/ai_vercel.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_vercel.svg') center / contain no-repeat;
+}
+
+.action-widget:has(.chat-model-picker-filter-input) .monaco-list-row.chat-model-picker-provider-icon-ai-x-ai .title::before,
+.chat-input-picker-item .action-label.model-picker-split .model-picker-provider-icon-ai-x-ai {
+	-webkit-mask: url('./model-provider-icons/ai_x_ai.svg') center / contain no-repeat;
+	mask: url('./model-provider-icons/ai_x_ai.svg') center / contain no-repeat;
+}
+
 .interactive-list > .monaco-list > .monaco-scrollable-element > .monaco-list-rows > .monaco-list-row > .monaco-tl-row > .monaco-tl-twistie {
 	/* Hide twisties from chat tree rows, but not from nested trees within a chat response */
 	display: none !important;

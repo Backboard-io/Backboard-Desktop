@@ -65,10 +65,11 @@ import { AgentHostSnapshotController } from './agentHostSnapshotController.js';
 import { toolDataToDefinition } from './agentHostToolUtils.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
 import { activeTurnToProgress, completedToolCallToEditParts, completedToolCallToSerialized, finalizeToolInvocation, getTerminalContentUri, isSubagentTool, makeAhpTerminalToolSessionId, messageToVariableData, parseAhpTerminalToolSessionId, rawMarkdownToString, stringOrMarkdownToString, toolCallStateToInvocation, turnsToHistory, updateRunningToolSpecificData, usageInfoToChatUsage, type IToolCallFileEdit, type TurnModelLookup } from './stateToProgressAdapter.js';
+import { BackboardLogoIcon } from '../agentSessions.js';
 export { toolDataToDefinition };
 
 function agentHostSessionIcon(provider: string) {
-	return provider === 'backboard' ? Codicon.sparkle : Codicon.copilot;
+	return provider === 'backboard' ? BackboardLogoIcon : Codicon.copilot;
 }
 
 // =============================================================================

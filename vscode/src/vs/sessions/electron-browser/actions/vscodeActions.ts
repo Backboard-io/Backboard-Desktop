@@ -4,8 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../base/common/codicons.js';
-import { getWindowId } from '../../../base/browser/dom.js';
-import { mainWindow } from '../../../base/browser/window.js';
 import { Schemas } from '../../../base/common/network.js';
 import { URI } from '../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../editor/browser/editorExtensions.js';
@@ -18,7 +16,7 @@ import { ContextKeyExpr } from '../../../platform/contextkey/common/contextkey.j
 import { KeybindingWeight } from '../../../platform/keybinding/common/keybindingsRegistry.js';
 import { ITelemetryService } from '../../../platform/telemetry/common/telemetry.js';
 import { IsAuxiliaryWindowContext } from '../../../workbench/common/contextkeys.js';
-import { IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../common/contextkeys.js';
+import { IsPhoneLayoutContext } from '../../common/contextkeys.js';
 import { logSessionsInteraction } from '../../common/sessionsTelemetry.js';
 import { Menus } from '../../browser/menus.js';
 import { ISessionsService } from '../../services/sessions/browser/sessionsService.js';
@@ -39,12 +37,12 @@ export class OpenSessionInVSCodeAction extends Action2 {
 			id: OpenSessionInVSCodeAction.ID,
 			title: localize2('openInVSCode', 'Open in Editor'),
 			icon: Codicon.vscodeInsiders,
-			precondition: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
+			precondition: IsAuxiliaryWindowContext.toNegated(),
 			menu: [{
 				id: Menus.TitleBarCenterRight,
 				group: 'navigation',
 				order: 7,
-				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
+				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsPhoneLayoutContext.negate()),
 			}]
 		});
 	}
@@ -60,9 +58,9 @@ export class OpenSessionInVSCodeAction extends Action2 {
 
 		const folderUri = this.getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService);
 		if (!folderUri) {
-			return nativeHostService.openWindow();
+			return nativeHostService.openWindow({ forceReuseWindow: true });
 		}
-		return nativeHostService.openWindow([{ folderUri }], { forceNewWindow: true });
+		return nativeHostService.openWindow([{ folderUri }], { forceReuseWindow: true });
 	}
 
 	private getFolderUriToOpen(sessionsService: ISessionsService, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService): URI | undefined {
@@ -108,16 +106,7 @@ export class OpenVSCodeWindowAction extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const nativeHostService = accessor.get(INativeHostService);
-
-		const windows = await nativeHostService.getWindows({ includeAuxiliaryWindows: false });
-		const currentWindowId = getWindowId(mainWindow);
-		const vscodeWindow = windows.find(w => w.id !== currentWindowId);
-
-		if (vscodeWindow) {
-			await nativeHostService.focusWindow({ targetWindowId: vscodeWindow.id });
-		} else {
-			await nativeHostService.openWindow();
-		}
+		await nativeHostService.openWindow({ forceReuseWindow: true });
 	}
 }
 

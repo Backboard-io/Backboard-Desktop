@@ -17,6 +17,7 @@ import { IWorkspaceContextService } from '../../../../../../platform/workspace/c
 import { ChatSessionStatus, IChatNewSessionRequest, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta } from '../../../common/chatSessionsService.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
+import { BackboardLogoIcon } from '../agentSessions.js';
 
 function mapSessionStatus(status: SessionStatus | undefined): ChatSessionStatus {
 	if (status !== undefined && (status & SessionStatus.InputNeeded) === SessionStatus.InputNeeded) {
@@ -32,7 +33,7 @@ function mapSessionStatus(status: SessionStatus | undefined): ChatSessionStatus 
 }
 
 function agentHostSessionIcon(provider: string) {
-	return provider === 'backboard' ? Codicon.sparkle : Codicon.copilot;
+	return provider === 'backboard' ? BackboardLogoIcon : Codicon.copilot;
 }
 
 /**

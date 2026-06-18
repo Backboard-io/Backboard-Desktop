@@ -3,6 +3,22 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-Regular.ttf") format("truetype");
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "BB Mono";
+	src: url("./fonts/bb-mono/IBMPlexMono-SemiBold.ttf") format("truetype");
+	font-weight: 600;
+	font-style: normal;
+	font-display: swap;
+}
+
 :root {
 	/* Dark theme colors (default) */
 	--vscode-foreground: #CCCCCC;
@@ -43,7 +59,7 @@ body {
 	display: flex;
 	flex-direction: column;
 	color: var(--vscode-foreground);
-	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, "Ubuntu", "Droid Sans", sans-serif;
+	font-family: "BB Mono", monospace;
 	background-color: var(--vscode-editor-background);
 }
 

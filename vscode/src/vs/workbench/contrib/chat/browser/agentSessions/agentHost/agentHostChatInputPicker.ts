@@ -37,6 +37,7 @@ import { IAgentHostSessionWorkingDirectoryResolver } from './agentHostSessionWor
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
 import { toAgentHostBackendSessionUri } from './agentHostSessionUri.js';
+import { BackboardLogoIcon } from '../agentSessions.js';
 
 const FILTER_THRESHOLD = 10;
 
@@ -55,7 +56,7 @@ function getConfigIcon(property: string, value: unknown | undefined): ThemeIcon 
 			case 'plan': return Codicon.checklist;
 			case 'autopilot': return Codicon.rocket;
 			case 'interactive': return Codicon.comment;
-			case 'agent': return Codicon.sparkle;
+			case 'agent': return BackboardLogoIcon;
 			case 'ask': return Codicon.comment;
 			case 'manual': return Codicon.shield;
 			case 'free': return Codicon.rocket;
@@ -74,9 +75,6 @@ function getConfigIcon(property: string, value: unknown | undefined): ThemeIcon 
 	if (property === 'imageGeneration') {
 		return value === 'off' ? Codicon.circleSlash : Codicon.symbolColor;
 	}
-	if (property === 'mcpCalls') {
-		return value === 'off' ? Codicon.circleSlash : Codicon.server;
-	}
 	if (property === 'memoryMode') {
 		return value === 'off' ? Codicon.circleSlash : Codicon.database;
 	}
@@ -94,7 +92,7 @@ function getConfigIcon(property: string, value: unknown | undefined): ThemeIcon 
 			case 'default': return Codicon.shield;
 			case 'acceptEdits': return Codicon.edit;
 			case 'plan': return Codicon.lightbulb;
-			case 'auto': return Codicon.sparkle;
+			case 'auto': return BackboardLogoIcon;
 			case 'bypassPermissions': return Codicon.warning;
 		}
 	}
@@ -154,6 +152,10 @@ function renderPickerTrigger(slot: HTMLElement, disabled: boolean, disposables: 
 	}
 	slot.classList.toggle('disabled', disabled);
 	return trigger;
+}
+
+function classNameForConfigProperty(property: string): string {
+	return property.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
 }
 
 /**
@@ -401,9 +403,14 @@ export class AgentHostChatInputPicker extends Disposable {
 		const label = this._labelFor(schema, value);
 		const labelSpan = dom.append(trigger, dom.$('span.agent-host-chat-input-picker-label'));
 		labelSpan.textContent = label;
-		trigger.setAttribute('aria-label', isReadOnly
+		const accessibleLabel = isReadOnly
 			? localize('agentHostChatInputPicker.triggerAriaReadOnly', "{0}: {1}, Read-Only", schema.title, label)
-			: localize('agentHostChatInputPicker.triggerAria', "{0}: {1}", schema.title, label));
+			: localize('agentHostChatInputPicker.triggerAria', "{0}: {1}", schema.title, label);
+		trigger.setAttribute('aria-label', accessibleLabel);
+		trigger.title = accessibleLabel;
+		trigger.dataset.configProperty = this._property;
+		trigger.dataset.configValue = typeof value === 'string' ? value : String(value ?? '');
+		trigger.classList.add(`agent-host-config-${classNameForConfigProperty(this._property)}`);
 	}
 
 	private _labelFor(schema: SessionConfigPropertySchema, value: unknown | undefined): string {

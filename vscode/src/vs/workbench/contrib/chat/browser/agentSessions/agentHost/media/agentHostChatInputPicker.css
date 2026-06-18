@@ -6,6 +6,7 @@
 .agent-host-chat-input-picker-host {
 	display: inline-flex;
 	align-items: center;
+	margin: 0 1px;
 }
 
 /*
@@ -25,6 +26,20 @@
 	display: none;
 }
 
+.agent-host-chat-input-picker-host .codicon.codicon-backboard-logo {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	font-size: 0;
+	background-color: currentColor;
+	-webkit-mask: url('../../../media/backboard_icon.svg') center / contain no-repeat;
+	mask: url('../../../media/backboard_icon.svg') center / contain no-repeat;
+}
+
+.agent-host-chat-input-picker-host .codicon.codicon-backboard-logo::before {
+	content: '';
+}
+
 .agent-host-chat-input-picker-slot {
 	display: inline-flex;
 	align-items: center;
@@ -35,33 +50,49 @@
 .agent-host-chat-input-picker-slot span.action-label {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
-	min-height: 20px;
-	height: 20px;
-	padding: 0 7px;
-	border: 1px solid var(--vscode-widget-border, transparent);
-	border-radius: 6px;
-	background-color: color-mix(in srgb, var(--vscode-editorWidget-background) 72%, transparent);
+	justify-content: center;
+	position: relative;
+	min-height: 24px;
+	width: 26px;
+	height: 24px;
+	padding: 0;
+	box-sizing: border-box;
+	border: 1px solid transparent;
+	border-radius: 5px;
+	background-color: transparent;
 	color: var(--vscode-icon-foreground);
 	font-weight: 500;
-	line-height: 18px;
-	transition: background-color 80ms ease, border-color 80ms ease;
+	line-height: 20px;
+	opacity: 0.88;
+	transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease, opacity 80ms ease;
 }
 
 .agent-host-chat-input-picker-slot a.action-label:hover,
 .agent-host-chat-input-picker-slot span.action-label:hover {
 	background-color: var(--vscode-toolbar-hoverBackground);
 	border-color: var(--vscode-focusBorder);
+	color: var(--vscode-foreground);
+	opacity: 1;
+}
+
+.agent-host-chat-input-picker-slot a.action-label:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+	background-color: var(--vscode-toolbar-hoverBackground);
+	opacity: 1;
+}
+
+.agent-host-chat-input-picker-slot .action-label .codicon {
+	font-size: 13px;
+	line-height: 1;
 }
 
 .agent-host-chat-input-picker-slot .action-label .codicon-chevron-down {
-	font-size: 10px;
-	margin-left: 4px;
-	opacity: 0.75;
+	display: none;
 }
 
 .agent-host-chat-input-picker-slot.disabled span.action-label {
-	opacity: 0.6;
+	opacity: 0.45;
 	cursor: default;
 }
 
@@ -79,7 +110,9 @@
 .chat-secondary-generic-chips {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
+	gap: 2px;
+	flex-shrink: 0;
+	margin-left: 1px;
 
 	&:empty {
 		display: none;
@@ -90,22 +123,40 @@
 
 		.action-label {
 			font-size: 11px;
-			min-height: 20px;
-			height: 20px;
-			padding: 0 7px;
-			border: 1px solid var(--vscode-widget-border, transparent);
-			border-radius: 6px;
-			background-color: color-mix(in srgb, var(--vscode-editorWidget-background) 72%, transparent);
+			min-height: 24px;
+			width: 26px;
+			height: 24px;
+			padding: 0;
+			box-sizing: border-box;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			border: 1px solid transparent;
+			border-radius: 5px;
+			background-color: transparent;
+			color: var(--vscode-icon-foreground);
 			font-weight: 500;
+			opacity: 0.88;
+			transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease, opacity 80ms ease;
 
 			&:hover {
 				background-color: var(--vscode-toolbar-hoverBackground);
 				border-color: var(--vscode-focusBorder);
+				color: var(--vscode-foreground);
+				opacity: 1;
+			}
+
+			&:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: -1px;
+				background-color: var(--vscode-toolbar-hoverBackground);
+				opacity: 1;
 			}
 		}
 
 		.codicon {
-			font-size: 12px;
+			font-size: 13px;
+			line-height: 1;
 		}
 	}
 
@@ -114,15 +165,38 @@
 	}
 }
 
-/* Collapse agent host picker labels to icon-only when the secondary toolbar gets narrow. */
-.interactive-session .chat-secondary-toolbar {
-	container-type: inline-size;
+.interactive-session .chat-input-toolbars > .chat-secondary-generic-chips {
+	order: 1;
 }
 
-@container (max-width: 400px) {
-	.agent-host-chat-input-picker-label {
-		display: none;
-	}
+.interactive-session .chat-input-toolbars > .chat-execute-toolbar {
+	order: 2;
+}
+
+.agent-host-folder-picker-host .action-label {
+	width: 26px;
+	min-width: 26px;
+	height: 24px;
+	padding: 0;
+	box-sizing: border-box;
+	justify-content: center;
+}
+
+.agent-host-chat-input-picker-slot .action-label[data-config-value="off"],
+.agent-host-chat-input-picker-slot .action-label[data-config-value="false"] {
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.68;
+}
+
+.agent-host-chat-input-picker-slot .action-label[data-config-value="on"],
+.agent-host-chat-input-picker-slot .action-label[data-config-value="true"] {
+	color: var(--vscode-charts-blue);
+	opacity: 1;
+}
+
+.agent-host-folder-picker-host .chat-input-picker-label,
+.agent-host-folder-picker-host .codicon-chevron-down {
+	display: none;
 }
 
 /*
@@ -156,6 +230,7 @@
 }
 
 .agent-host-chat-input-picker-label {
+	display: none;
 	max-width: 16em;
 	overflow: hidden;
 	text-overflow: ellipsis;

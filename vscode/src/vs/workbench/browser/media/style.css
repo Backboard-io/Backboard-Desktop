@@ -7,6 +7,32 @@
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+/* Backboard branding: render Copilot glyph slots with the octopus mark. */
+.monaco-workbench .codicon.codicon-copilot,
+.monaco-workbench .codicon.codicon-copilot-large,
+.monaco-workbench .codicon.codicon-copilot-warning,
+.monaco-workbench .codicon.codicon-copilot-warning-large {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+	background: url('../../../sessions/browser/media/sessions-icon.svg') center / contain no-repeat;
+	color: transparent !important;
+	font-size: 0;
+}
+
+.monaco-workbench .codicon.codicon-copilot-large,
+.monaco-workbench .codicon.codicon-copilot-warning-large {
+	width: 32px;
+	height: 32px;
+}
+
+.monaco-workbench .codicon.codicon-copilot::before,
+.monaco-workbench .codicon.codicon-copilot-large::before,
+.monaco-workbench .codicon.codicon-copilot-warning::before,
+.monaco-workbench .codicon.codicon-copilot-warning-large::before {
+	content: '';
+}
+
 /* Font Families */
 
 @font-face {

@@ -10,21 +10,14 @@ import { IsSessionsWindowContext, WorkspaceFolderCountContext } from '../../../.
 import { ChatContextKeys, ChatContextKeyExprs } from '../../../common/actions/chatContextKeys.js';
 
 /**
- * Agent-host pickers live under `MenuId.ChatInputSecondary` group
- * `'navigation'` because non-navigation groups are routed to the overflow
- * menu by VS Code's menu/toolbar convention.
+ * Agent-host pickers live in `MenuId.ChatInput` so Backboard controls stay
+ * inside the composer instead of occupying a secondary row below the input.
  *
- * Order layout in the secondary toolbar (existing items annotated):
- *   0    OpenSessionTargetPickerAction        (Copilot CLI - Agent Host)
- *   0.5  OpenDelegationPickerAction
- *   0.6  OpenWorkspacePickerAction
- *   0.7  OpenAgentHostModePickerAction        (NEW — Mode)
- *   0.8  OpenAgentHostAutoApprovePickerAction (NEW — Auto-Approve)
- *   0.9  OpenAgentHostPermissionModePickerAction (NEW — Claude Approvals)
- *   1    OpenPermissionPickerAction           (Default Approvals)
- *   1.1  OpenAgentHostFolderPickerAction      (NEW — Folder, multi-root only;
- *                                              ordered last to match the
- *                                              extension-host Copilot CLI)
+ * Order layout in the primary toolbar:
+ *   3    OpenModelPickerAction
+ *   3.2  OpenAgentHostAutoApprovePickerAction
+ *   3.3  OpenAgentHostPermissionModePickerAction
+ *   3.4  OpenAgentHostFolderPickerAction      (multi-root only)
  */
 
 export class OpenAgentHostFolderPickerAction extends Action2 {
@@ -39,9 +32,9 @@ export class OpenAgentHostFolderPickerAction extends Action2 {
 			// chip stays visible afterwards but is disabled.
 			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.chatSessionIsEmpty),
 			menu: [{
-				id: MenuId.ChatInputSecondary,
+				id: MenuId.ChatInput,
 				group: 'navigation',
-				order: 1.1,
+				order: 3.4,
 				// Only relevant when there is more than one root folder to choose
 				// from and we are in a regular editor window (the agent sessions
 				// window has its own workspace picker). Ordered last in the chip
@@ -65,12 +58,6 @@ export class OpenAgentHostModePickerAction extends Action2 {
 			title: localize2('agentHost.modePicker', "Agent Mode"),
 			f1: false,
 			precondition: ChatContextKeys.enabled,
-			menu: [{
-				id: MenuId.ChatInputSecondary,
-				group: 'navigation',
-				order: 0.7,
-				when: ChatContextKeyExprs.isAgentHostSession,
-			}],
 		});
 	}
 	override async run(): Promise<void> { /* the action view item handles interaction */ }
@@ -85,9 +72,9 @@ export class OpenAgentHostAutoApprovePickerAction extends Action2 {
 			f1: false,
 			precondition: ChatContextKeys.enabled,
 			menu: [{
-				id: MenuId.ChatInputSecondary,
+				id: MenuId.ChatInput,
 				group: 'navigation',
-				order: 0.8,
+				order: 3.2,
 				when: ChatContextKeyExprs.isAgentHostSession,
 			}],
 		});
@@ -104,9 +91,9 @@ export class OpenAgentHostPermissionModePickerAction extends Action2 {
 			f1: false,
 			precondition: ChatContextKeys.enabled,
 			menu: [{
-				id: MenuId.ChatInputSecondary,
+				id: MenuId.ChatInput,
 				group: 'navigation',
-				order: 0.9,
+				order: 3.3,
 				when: ChatContextKeyExprs.isAgentHostSession,
 			}],
 		});

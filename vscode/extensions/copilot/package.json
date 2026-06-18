@@ -19,7 +19,7 @@
     "url": "https://github.com/microsoft/vscode/issues"
   },
   "qna": "https://github.com/github-community/community/discussions/categories/copilot",
-  "icon": "assets/copilot.png",
+  "icon": "assets/octopus.png",
   "pricing": "Trial",
   "engines": {
     "vscode": "^1.126.0",
@@ -6473,14 +6473,6 @@
       }
     ],
     "views": {
-      "copilot-chat": [
-        {
-          "id": "copilot-chat",
-          "name": "Chat Debug",
-          "icon": "assets/debug-icon.svg",
-          "when": "github.copilot.chat.showLogView"
-        }
-      ],
       "context-inspector": [
         {
           "id": "context-inspector",
@@ -6492,11 +6484,6 @@
     },
     "viewsContainers": {
       "activitybar": [
-        {
-          "id": "copilot-chat",
-          "title": "Chat Debug",
-          "icon": "assets/debug-icon.svg"
-        },
         {
           "id": "context-inspector",
           "title": "Language Context Inspector",

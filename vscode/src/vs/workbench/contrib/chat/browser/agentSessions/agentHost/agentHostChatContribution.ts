@@ -32,9 +32,10 @@ import { AgentHostSessionHandler } from './agentHostSessionHandler.js';
 import { IAgentHostActiveClientService } from './agentHostActiveClientService.js';
 import { AgentHostSessionListController } from './agentHostSessionListController.js';
 import { AICustomizationSources } from '../../../common/aiCustomizationWorkspaceService.js';
+import { BackboardLogoIcon } from '../agentSessions.js';
 
 const LOCAL_AGENT_HOST_SESSION_TYPE_PREFIX = 'agent-host-';
-const BACKBOARD_OCTOPUS_ICON = FileAccess.asBrowserUri('vs/sessions/browser/media/sessions-icon.svg').toString(true);
+const BACKBOARD_OCTOPUS_ICON = FileAccess.asBrowserUri('vs/workbench/contrib/chat/browser/media/backboard_icon.svg').toString(true);
 
 Registry.as<IAsyncChatSessionActivationRegistry>(ChatSessionsExtensions.AsyncActivation).register({
 	matchSessionType: sessionType => isLocalAgentHostTarget(sessionType),
@@ -279,7 +280,7 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 			label: agent.provider === 'backboard'
 				? agent.displayName
 				: localize('agentHostHarnessLabel.local', "{0} [Agent Host]", agent.displayName),
-			icon: ThemeIcon.fromId((agent.provider === 'backboard' ? Codicon.sparkle : Codicon.server).id),
+			icon: agent.provider === 'backboard' ? BackboardLogoIcon : ThemeIcon.fromId(Codicon.server.id),
 			hiddenSections: [],
 			hideGenerateButton: true,
 			getStorageSourceFilter: () => ({ sources: AICustomizationSources.all }),

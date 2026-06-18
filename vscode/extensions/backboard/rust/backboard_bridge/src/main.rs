@@ -125,8 +125,6 @@ struct SendPromptParams {
     #[serde(default)]
     audio_file: Option<AudioFileParams>,
     #[serde(default)]
-    mcp_calls: Option<Value>,
-    #[serde(default)]
     tools: Option<Vec<Value>>,
     #[serde(default)]
     thread_id: Option<String>,
@@ -871,7 +869,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
             .map(|_| DEFAULT_IMAGE_MODEL.to_string()),
         voice: voice_payload(&voice_mode),
         send_to_llm: send_to_llm_for_voice(&voice_mode),
-        mcp_calls: params.mcp_calls,
+        mcp_calls: None,
         max_tokens: params.max_tokens,
         audio_file,
     };

@@ -155,7 +155,7 @@
 	top: 44px;
 	left: 0;
 	right: 0;
-	font-family: var(--monaco-monospace-font, 'SF Mono', Menlo, Monaco, Consolas, monospace);
+	font-family: "BB Mono", monospace;
 	font-size: 12px;
 	line-height: 18px;
 	overflow-x: auto;

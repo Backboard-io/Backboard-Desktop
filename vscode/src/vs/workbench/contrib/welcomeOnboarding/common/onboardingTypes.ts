@@ -55,7 +55,6 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
 export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
 	OnboardingStepId.SignIn,
 	OnboardingStepId.Personalize,
-	OnboardingStepId.AgentSessions,
 ];
 
 /**

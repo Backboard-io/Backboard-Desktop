@@ -679,8 +679,8 @@ configurationRegistry.registerConfiguration({
 		},
 		[ChatConfiguration.ChatViewSessionsEnabled]: {
 			type: 'boolean',
-			default: true,
-			description: nls.localize('chat.viewSessions.enabled', "Show chat agent sessions when chat is empty or to the side when chat view is wide enough."),
+			default: false,
+			description: nls.localize('chat.viewSessions.enabled', "Show chat agent sessions when chat is empty or to the side when chat view is wide enough. Backboard uses the history modal as the default session surface."),
 			agentsWindow: { default: false },
 		},
 		[ChatConfiguration.ChatViewSessionsOrientation]: {
@@ -709,11 +709,11 @@ configurationRegistry.registerConfiguration({
 			default: 'hidden',
 			tags: ['experimental'],
 			experiment: { mode: 'startup' },
-			description: nls.localize('chat.agentsHandoffTip.mode', "Controls the tip shown above the chat input offering to continue eligible agent sessions in the Agents Window."),
+			description: nls.localize('chat.agentsHandoffTip.mode', "Controls the tip shown above the chat input offering to continue eligible agent sessions in Agents."),
 		},
 		[ClaudePreferAgentHostAgentsSettingId]: {
 			type: 'boolean',
-			description: nls.localize('chat.agents.claude.preferAgentHost', "When enabled, Claude sessions opened from the Agents Window run inside the agent host process instead of the GitHub Copilot Chat extension. Only one Claude implementation surfaces per window."),
+			description: nls.localize('chat.agents.claude.preferAgentHost', "When enabled, Claude sessions opened from Agents run inside the agent host process instead of the GitHub Copilot Chat extension. Only one Claude implementation surfaces per window."),
 			default: false,
 			tags: ['experimental'],
 			experiment: { mode: 'startup' },
@@ -1732,7 +1732,7 @@ configurationRegistry.registerConfiguration({
 		},
 		[ChatConfiguration.TitleBarOpenInAgentsWindowEnabled]: {
 			type: 'boolean',
-			description: nls.localize('chat.titleBar.openInAgentsWindow.enabled', "Controls whether the Open in Agents Window button is shown in the title bar."),
+			description: nls.localize('chat.titleBar.openInAgentsWindow.enabled', "Controls whether the Editor / Agents switcher is shown in the title bar."),
 			default: true,
 		},
 		'chat.approvedAccountOrganizations': {

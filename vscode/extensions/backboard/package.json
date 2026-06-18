@@ -12,7 +12,18 @@
   "categories": [
     "AI"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:backboard.signIn",
+    "onCommand:backboard.setApiKey",
+    "onCommand:backboard.copyOAuthRedirectUri",
+    "onCommand:backboard.completeOAuthCallback",
+    "onCommand:backboard.refreshModels",
+    "onCommand:backboard.openRightPanel",
+    "onCommand:backboard.openPanel",
+    "onCommand:backboard.newChat",
+    "onCommand:backboard.showHistory",
+    "onUri"
+  ],
   "extensionKind": [
     "workspace",
     "ui"
@@ -23,6 +34,44 @@
     }
   },
   "contributes": {
+    "commands": [
+      {
+        "command": "backboard.signIn",
+        "title": "Backboard: Sign In with SSO"
+      },
+      {
+        "command": "backboard.setApiKey",
+        "title": "Backboard: Set API Key"
+      },
+      {
+        "command": "backboard.copyOAuthRedirectUri",
+        "title": "Backboard: Copy OAuth Redirect URI"
+      },
+      {
+        "command": "backboard.completeOAuthCallback",
+        "title": "Backboard: Complete OAuth Callback"
+      },
+      {
+        "command": "backboard.refreshModels",
+        "title": "Backboard: Refresh Models"
+      },
+      {
+        "command": "backboard.openRightPanel",
+        "title": "Backboard: Open Right Panel"
+      },
+      {
+        "command": "backboard.openPanel",
+        "title": "Backboard: Open Panel"
+      },
+      {
+        "command": "backboard.newChat",
+        "title": "Backboard: New Chat"
+      },
+      {
+        "command": "backboard.showHistory",
+        "title": "Backboard: Show History"
+      }
+    ],
     "configuration": [
       {
         "title": "Backboard",

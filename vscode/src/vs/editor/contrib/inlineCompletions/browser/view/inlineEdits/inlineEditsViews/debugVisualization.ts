@@ -161,7 +161,7 @@ class HtmlHorizontalOffsetRangeVisualizer implements IVisualizationEffect {
 		label.style.borderRadius = '2px';
 		label.style.whiteSpace = 'nowrap';
 		label.style.boxShadow = '0 1px 2px rgba(0,0,0,0.15)';
-		label.style.fontFamily = 'monospace';
+		label.style.fontFamily = '"BB Mono", monospace';
 
 		container.appendChild(horizontalLine);
 		container.appendChild(startBar);

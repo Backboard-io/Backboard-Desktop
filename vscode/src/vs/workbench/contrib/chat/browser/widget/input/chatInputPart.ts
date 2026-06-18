@@ -2825,6 +2825,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._register(dom.addStandardDisposableListener(this.attachmentsContainer, dom.EventType.CLICK, e => this.inputEditor.focus()));
 		const shorterChatInputActionIds = new Set<string>([
 			OpenModePickerAction.ID,
+			OpenAgentHostModePickerAction.ID,
+			OpenAgentHostAutoApprovePickerAction.ID,
+			OpenAgentHostPermissionModePickerAction.ID,
+			OpenAgentHostFolderPickerAction.ID,
 			ConfigureToolsAction.ID,
 		]);
 		this.inputActionsToolbar = this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, this.options.renderInputToolbarBelowInput ? this.attachmentsContainer : toolbarsContainer, MenuId.ChatInput, {
@@ -2870,6 +2874,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					const itemDelegate: IModelPickerDelegate = this._createModelPickerDelegate();
 					return this.modelWidget = this.instantiationService.createInstance(ModelPickerActionItem, action, itemDelegate, pickerOptions);
 				} else if (action.id === OpenModePickerAction.ID && action instanceof MenuItemAction) {
+					const sessionType = this.getCurrentSessionType();
+					if (sessionType && isAgentHostTarget(sessionType)) {
+						return new HiddenActionViewItem(action);
+					}
 					const delegate: IModePickerDelegate = this._createModePickerDelegate();
 					return this.modeWidget = this.instantiationService.createInstance(ModePickerActionItem, action, delegate, pickerOptions);
 				} else if ((action.id === OpenSessionTargetPickerAction.ID || action.id === OpenDelegationPickerAction.ID) && action instanceof MenuItemAction) {
@@ -2896,6 +2904,27 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						return new HiddenActionViewItem(action);
 					}
 					return this.instantiationService.createInstance(ChatSessionPickersContainerActionItem, action, widgets);
+				} else if (
+					(action.id === OpenAgentHostModePickerAction.ID
+						|| action.id === OpenAgentHostAutoApprovePickerAction.ID
+						|| action.id === OpenAgentHostPermissionModePickerAction.ID)
+					&& action instanceof MenuItemAction
+				) {
+					if (this.options.isSessionsWindow) {
+						return new HiddenActionViewItem(action);
+					}
+					const property = action.id === OpenAgentHostAutoApprovePickerAction.ID
+						? SessionConfigKey.AutoApprove
+						: action.id === OpenAgentHostPermissionModePickerAction.ID
+							? ClaudeSessionConfigKey.PermissionMode
+							: SessionConfigKey.Mode;
+					const picker = this.instantiationService.createInstance(AgentHostChatInputPicker, widget, property);
+					return new AgentHostChatInputPickerActionViewItem(action, picker);
+				} else if (action.id === OpenAgentHostFolderPickerAction.ID && action instanceof MenuItemAction) {
+					if (this.options.isSessionsWindow) {
+						return new HiddenActionViewItem(action);
+					}
+					return this.instantiationService.createInstance(AgentHostFolderPickerActionItem, action, widget, pickerOptions);
 				}
 				return undefined;
 			}
@@ -2965,11 +2994,18 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			toolbarSide.context = { widget } satisfies IChatExecuteActionContext;
 		}
 
+		const genericChipsContainer = dom.$('.chat-secondary-generic-chips');
+		const genericChipsLane = this._register(this.instantiationService.createInstance(
+			AgentHostGenericConfigChips,
+			widget,
+		));
+		genericChipsLane.render(genericChipsContainer);
+		dom.append(toolbarsContainer, genericChipsContainer);
+
 		// Secondary toolbar (permissions) — below the input box.
-		// Per-action minimum widths (in pixels) for pickers that collapse to an
-		// icon-only label via a CSS container query in `AgentHostChatInputPicker`.
-		// Most pickers reserve ~22px for the icon; the tunnel-sharing toggle has
-		// no chevron, so it can collapse further to 16px.
+		// Most Backboard agent-host config pickers now render in the primary
+		// composer toolbar; keep these min widths for any session-provider
+		// actions that still land in the secondary toolbar.
 		const agentHostShortPickerMinWidths = new Map<string, number>([
 			[OpenAgentHostModePickerAction.ID, 22],
 			[OpenAgentHostAutoApprovePickerAction.ID, 22],
@@ -2977,18 +3013,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			[OpenAgentHostFolderPickerAction.ID, 22],
 			['sessions.tunnelHost.toggleSharing', 16],
 		]);
-		// Direct-rendered chip lane for agent-host config properties that
-		// are advertised by the agent's schema but not handled by a
-		// dedicated `MenuId.ChatInputSecondary` action. Sits as a sibling
-		// of the secondary toolbar so the toolbar can take the available
-		// space (`flex: 1 1 0`) while the chips pin to the right next to
-		// the context-usage widget.
-		const genericChipsContainer = dom.$('.chat-secondary-generic-chips');
-		const genericChipsLane = this._register(this.instantiationService.createInstance(
-			AgentHostGenericConfigChips,
-			widget,
-		));
-		genericChipsLane.render(genericChipsContainer);
 		this.secondaryToolbar = this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, this.secondaryToolbarContainer, MenuId.ChatInputSecondary, {
 			telemetrySource: this.options.menus.telemetrySource,
 			menuOptions: { shouldForwardArgs: true },
@@ -3107,7 +3131,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}));
 		this.secondaryToolbar.getElement().classList.add('chat-secondary-input-toolbar');
 		this.secondaryToolbar.context = { widget } satisfies IChatExecuteActionContext;
-		dom.append(this.secondaryToolbarContainer, genericChipsContainer);
 		this._register(this.secondaryToolbar.onDidChangeMenuItems(() => {
 			// Update container reference for the pickers when the secondary toolbar hosts one.
 			// Only assign when found so we don't overwrite a valid primary container reference
