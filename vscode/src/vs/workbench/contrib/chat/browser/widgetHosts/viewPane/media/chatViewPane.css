@@ -52,6 +52,16 @@
 		}
 	}
 
+	.chat-controls-container.backboard-chat-controls {
+		background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+
+		.interactive-session,
+		.chat-welcome-view-container,
+		.monaco-list.chat-list {
+			background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+		}
+	}
+
 	.backboard-auth-gate-overlay {
 		position: absolute;
 		inset: 0;

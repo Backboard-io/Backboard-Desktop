@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 const BRIDGE_PROTOCOL_VERSION: u32 = 1;
 const DEFAULT_PROVIDER: &str = "openrouter";
-const DEFAULT_MODEL: &str = "deepseek/deepseek-chat";
+const DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash";
 const DEFAULT_INTENSITY: &str = "fast";
 const DEFAULT_IMAGE_PROVIDER: &str = "openrouter";
 const DEFAULT_IMAGE_MODEL: &str = "google/gemini-3.1-flash-image-preview";

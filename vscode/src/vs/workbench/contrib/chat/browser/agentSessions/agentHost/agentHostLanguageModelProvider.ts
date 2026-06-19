@@ -9,6 +9,7 @@ import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import { ConfigSchema, SessionModelInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { readAgentModelPricingMeta } from '../../../../../../platform/agentHost/common/agentModelPricing.js';
 import { nullExtensionDescription } from '../../../../../services/extensions/common/extensions.js';
+import { ChatAgentLocation } from '../../../common/constants.js';
 import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelChatProvider, ILanguageModelConfigurationSchema } from '../../../common/languageModels.js';
 
 /**
@@ -58,6 +59,7 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 	}
 
 	async provideLanguageModelChatInfo(_options: unknown, _token: CancellationToken): Promise<ILanguageModelChatMetadataAndIdentifier[]> {
+		const defaultModelId = this._models[0]?.id;
 		return this._models
 			.filter(m => m.policyState !== 'disabled')
 			.map(m => {
@@ -77,7 +79,7 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 						family: m.id,
 						maxInputTokens: m.maxContextWindow ?? 0,
 						maxOutputTokens: 0,
-						isDefaultForLocation: {},
+						isDefaultForLocation: { [ChatAgentLocation.Chat]: m.id === defaultModelId },
 						isUserSelectable: true,
 						pricing: multiplierNumeric !== undefined ? `${multiplierNumeric}x` : rawPricing,
 						multiplierNumeric,

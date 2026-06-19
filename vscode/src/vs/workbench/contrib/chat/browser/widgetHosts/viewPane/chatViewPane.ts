@@ -686,7 +686,9 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		}
 
 		let newSessionsContainerVisible: boolean;
-		if (!this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewSessionsEnabled)) {
+		if (isBackboardProduct()) {
+			newSessionsContainerVisible = false;
+		} else if (!this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewSessionsEnabled)) {
 			newSessionsContainerVisible = false; // disabled in settings
 		} else {
 
@@ -737,6 +739,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 	private createChatControl(parent: HTMLElement): ChatWidget {
 		const chatControlsContainer = append(parent, $('.chat-controls-container'));
 		this.chatControlsContainer = chatControlsContainer;
+		chatControlsContainer.classList.toggle('backboard-chat-controls', isBackboardProduct());
 
 		const locationBasedColors = this.getLocationBasedColors();
 

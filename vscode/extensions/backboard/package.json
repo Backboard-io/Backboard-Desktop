@@ -132,12 +132,12 @@
           },
           "backboard.defaultProvider": {
             "type": "string",
-            "default": "aws-bedrock",
+            "default": "openrouter",
             "description": "Default Backboard model provider."
           },
           "backboard.defaultModel": {
             "type": "string",
-            "default": "anthropic.claude-sonnet-4-6",
+            "default": "deepseek/deepseek-v4-flash",
             "description": "Default Backboard model name."
           },
           "backboard.mode": {

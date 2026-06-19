@@ -49,6 +49,8 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		const triggerButton = append(container, $('button.open-in-vscode-titlebar-widget-trigger'));
 		triggerButton.setAttribute('aria-haspopup', 'menu');
 		triggerButton.setAttribute('aria-expanded', 'false');
+		const currentIcon = append(triggerButton, $('span.open-in-vscode-titlebar-widget-icon.codicon'));
+		currentIcon.setAttribute('aria-hidden', 'true');
 		const currentLabel = append(triggerButton, $('span.open-in-vscode-titlebar-widget-label'));
 		const chevron = append(triggerButton, $('span.open-in-vscode-titlebar-widget-chevron.codicon.codicon-chevron-down'));
 		chevron.setAttribute('aria-hidden', 'true');
@@ -82,7 +84,11 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		};
 
 		const updateLabel = () => {
-			currentLabel.textContent = this.editorService.activeEditorPane?.getId() === BACKBOARD_WORKSPACE_EDITOR_ID
+			const workspaceActive = this.editorService.activeEditorPane?.getId() === BACKBOARD_WORKSPACE_EDITOR_ID;
+			currentIcon.className = workspaceActive
+				? 'open-in-vscode-titlebar-widget-icon codicon codicon-robot'
+				: 'open-in-vscode-titlebar-widget-icon codicon codicon-window';
+			currentLabel.textContent = workspaceActive
 				? localize('openInVSCodeSwitcher.workspace', "Workspace")
 				: localize('openInVSCodeSwitcher.agents', "Agents");
 		};

@@ -23,7 +23,7 @@ export const loopbackTemplate = `
 			display: flex;
 			flex-direction: column;
 			color: white;
-				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+				font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 			background-color: #2C2C32;
 		}
 

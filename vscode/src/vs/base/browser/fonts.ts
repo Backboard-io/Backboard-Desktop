@@ -5,9 +5,9 @@
 
 import { mainWindow } from './window.js';
 import type { IJSONSchemaSnippet } from '../common/jsonSchema.js';
-import { isElectron, isMacintosh, isWindows } from '../common/platform.js';
+import { isElectron } from '../common/platform.js';
 
-export const DEFAULT_FONT_FAMILY = isMacintosh ? '-apple-system, BlinkMacSystemFont, sans-serif' : isWindows ? '"Segoe WPC", "Segoe UI", sans-serif' : 'system-ui, "Ubuntu", "Droid Sans", sans-serif';
+export const DEFAULT_FONT_FAMILY = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 interface FontData {
 	readonly family: string;

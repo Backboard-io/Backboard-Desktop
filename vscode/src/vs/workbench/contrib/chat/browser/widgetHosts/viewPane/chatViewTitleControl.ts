@@ -9,8 +9,9 @@ import { renderAsPlaintext } from '../../../../../../base/browser/markdownRender
 import { Gesture, EventType as TouchEventType } from '../../../../../../base/browser/touch.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
-import { Disposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { MarshalledId } from '../../../../../../base/common/marshallingIds.js';
+import { isEqual } from '../../../../../../base/common/resources.js';
 import { localize } from '../../../../../../nls.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../../../platform/actions/browser/toolbar.js';
 import { Action2, MenuId, registerAction2 } from '../../../../../../platform/actions/common/actions.js';
@@ -20,6 +21,9 @@ import { IChatModel } from '../../../common/model/chatModel.js';
 import { ActionViewItem, IActionViewItemOptions } from '../../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IAction } from '../../../../../../base/common/actions.js';
 import { AgentSessionsPicker } from '../../agentSessions/agentSessionsPicker.js';
+import { IAgentSession } from '../../agentSessions/agentSessionsModel.js';
+import { IAgentSessionsService } from '../../agentSessions/agentSessionsService.js';
+import { openSession } from '../../agentSessions/agentSessionsOpener.js';
 
 export interface IChatViewTitleDelegate {
 	focusChat(): void;
@@ -27,7 +31,7 @@ export interface IChatViewTitleDelegate {
 
 export class ChatViewTitleControl extends Disposable {
 
-	private static readonly DEFAULT_TITLE = localize('chat', "Chat");
+	private static readonly DEFAULT_TITLE = localize('chat', "Backboard");
 	private static readonly PICK_AGENT_SESSION_ACTION_ID = 'workbench.action.chat.pickAgentSession';
 
 	private readonly _onDidChangeHeight = this._register(new Emitter<void>());
@@ -43,6 +47,10 @@ export class ChatViewTitleControl extends Disposable {
 
 	private navigationToolbar?: MenuWorkbenchToolBar;
 	private actionsToolbar?: MenuWorkbenchToolBar;
+	private activeTabLabel: HTMLElement | undefined;
+	private tabsContainer: HTMLElement | undefined;
+	private tabDisposables = this._register(new DisposableStore());
+	private readonly closedSessionTabs = new Set<string>();
 
 	private lastKnownHeight = 0;
 
@@ -50,10 +58,12 @@ export class ChatViewTitleControl extends Disposable {
 		private readonly container: HTMLElement,
 		private readonly delegate: IChatViewTitleDelegate,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@IAgentSessionsService private readonly agentSessionsService: IAgentSessionsService,
 	) {
 		super();
 
 		this.render(this.container);
+		this._register(this.agentSessionsService.model.onDidChangeSessions(() => this.updateTabs(this.getResolvedTitle())));
 
 		this.registerActions();
 	}
@@ -87,10 +97,12 @@ export class ChatViewTitleControl extends Disposable {
 	private render(parent: HTMLElement): void {
 		const elements = h('div.chat-view-title-container', [
 			h('div.chat-view-title-inner', [
+				h('div.chat-view-title-tabs@tabsContainer'),
 				h('div.chat-view-title-navigation-toolbar@navigationToolbar'),
 				h('div.chat-view-title-actions-toolbar@actionsToolbar'),
 			]),
 		]);
+		this.tabsContainer = elements.tabsContainer;
 
 		// Toolbar on the left
 		this.navigationToolbar = this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, elements.navigationToolbar, MenuId.ChatViewSessionTitleNavigationToolbar, {
@@ -124,6 +136,7 @@ export class ChatViewTitleControl extends Disposable {
 		}
 
 		parent.appendChild(this.titleContainer);
+		this.updateTitle(ChatViewTitleControl.DEFAULT_TITLE);
 	}
 
 	update(model: IChatModel | undefined): void {
@@ -139,10 +152,9 @@ export class ChatViewTitleControl extends Disposable {
 	}
 
 	private doUpdate(): void {
-		const markdownTitle = new MarkdownString(this.model?.title ?? '');
-		this.title = renderAsPlaintext(markdownTitle);
+		const title = this.getResolvedTitle();
 
-		this.updateTitle(this.title ?? ChatViewTitleControl.DEFAULT_TITLE);
+		this.updateTitle(title);
 
 		const context = this.model && {
 			$mid: MarshalledId.ChatViewContext,
@@ -158,6 +170,12 @@ export class ChatViewTitleControl extends Disposable {
 		}
 	}
 
+	private getResolvedTitle(): string {
+		const markdownTitle = new MarkdownString(this.model?.title ?? '');
+		this.title = renderAsPlaintext(markdownTitle);
+		return this.title.trim() || ChatViewTitleControl.DEFAULT_TITLE;
+	}
+
 	private updateTitle(title: string): void {
 		if (!this.titleContainer) {
 			return;
@@ -165,6 +183,10 @@ export class ChatViewTitleControl extends Disposable {
 
 		this.titleContainer.classList.toggle('visible', this.shouldRender());
 		this.titleLabel.value?.updateTitle(title);
+		if (this.activeTabLabel) {
+			this.activeTabLabel.textContent = title;
+		}
+		this.updateTabs(title);
 
 		const currentHeight = this.getHeight();
 		if (currentHeight !== this.lastKnownHeight) {
@@ -175,7 +197,84 @@ export class ChatViewTitleControl extends Disposable {
 	}
 
 	private shouldRender(): boolean {
-		return !!this.model?.title; // we need a chat showing and not being empty
+		return true;
+	}
+
+	private updateTabs(currentTitle: string): void {
+		if (!this.tabsContainer) {
+			return;
+		}
+
+		this.tabDisposables.clear();
+		this.tabsContainer.replaceChildren();
+
+		const currentSessionResource = this.model?.sessionResource;
+		this.addTab({
+			label: currentTitle,
+			active: true,
+			isCurrent: true,
+		});
+
+		const sessions = this.agentSessionsService.model.sessions
+			.filter(session => !session.isArchived())
+			.filter(session => !currentSessionResource || !isEqual(session.resource, currentSessionResource))
+			.filter(session => !this.closedSessionTabs.has(session.resource.toString()))
+			.slice(0, 4);
+
+		for (const session of sessions) {
+			this.addTab({
+				label: session.label,
+				active: false,
+				session,
+			});
+		}
+	}
+
+	private addTab(options: { label: string; active: boolean; isCurrent?: boolean; session?: IAgentSession }): void {
+		if (!this.tabsContainer) {
+			return;
+		}
+
+		const label = options.label.trim() || ChatViewTitleControl.DEFAULT_TITLE;
+		let closeElement: HTMLElement | undefined;
+		const tabElements = options.isCurrent
+			? h('div.chat-view-title-tab', { role: 'button', tabIndex: 0, title: label }, [
+				h('span.codicon.codicon-backboard-logo.chat-view-title-brand-icon'),
+				h('span.chat-view-title-tab-label@label', [label]),
+			])
+			: h('div.chat-view-title-tab', { role: 'button', tabIndex: 0, title: label }, [
+				h('span.chat-view-title-tab-label@label', [label]),
+				h('span.codicon.codicon-close.chat-view-title-tab-close@close', { role: 'button', title: localize('chat.closeSessionTab', "Close Tab"), ariaLabel: localize('chat.closeSessionTab', "Close Tab") }),
+			]);
+		if (!options.isCurrent) {
+			closeElement = tabElements.close;
+		}
+		const tab = tabElements.root;
+		tab.classList.toggle('chat-view-title-tab-active', options.active);
+
+		if (options.active) {
+			this.activeTabLabel = tabElements.label;
+		}
+
+		this.tabsContainer.appendChild(tab);
+		this.tabDisposables.add(addDisposableListener(tab, EventType.CLICK, e => {
+			e.preventDefault();
+			e.stopPropagation();
+			if (options.session) {
+				void this.instantiationService.invokeFunction(openSession, options.session);
+			} else {
+				this.delegate.focusChat();
+			}
+		}));
+
+		if (options.session && closeElement) {
+			this.tabDisposables.add(addDisposableListener(closeElement, EventType.CLICK, e => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.closedSessionTabs.add(options.session!.resource.toString());
+				this.updateTabs(this.getResolvedTitle());
+			}));
+		}
 	}
 
 	getHeight(): number {

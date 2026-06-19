@@ -127,6 +127,7 @@ export interface IChatViewWelcomeContent {
 	readonly inputPart?: HTMLElement;
 	readonly useLargeIcon?: boolean;
 	readonly useImageIcon?: boolean;
+	readonly styleVariant?: 'backboard';
 }
 
 export interface IChatViewWelcomeRenderOptions {
@@ -148,6 +149,9 @@ export class ChatViewWelcomePart extends Disposable {
 		super();
 
 		this.element = dom.$('.chat-welcome-view');
+		if (content.styleVariant === 'backboard') {
+			this.element.classList.add('backboard-welcome-view');
+		}
 
 		try {
 

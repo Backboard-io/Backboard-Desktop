@@ -1287,7 +1287,7 @@ export class ModelPickerWidget extends Disposable {
 			filterPlaceholder: localize('chat.modelPicker.search', "Search models"),
 			filterActions: !isUBB && manageModelsAction ? [manageModelsAction] : undefined,
 			focusFilterOnOpen: true,
-			collapsedByDefault: new Set([ModelPickerSection.Other]),
+			collapsedByDefault: this._delegate.expandOtherModelsByDefault?.() ? undefined : new Set([ModelPickerSection.Other]),
 			onDidToggleSection: (section: string, collapsed: boolean) => {
 				if (section === ModelPickerSection.Other) {
 					logModelPickerInteraction(collapsed ? 'otherModelsCollapsed' : 'otherModelsExpanded');

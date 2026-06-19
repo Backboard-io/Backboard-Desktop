@@ -8,18 +8,114 @@
 	.chat-view-title-container {
 		display: none;
 		cursor: pointer;
+		flex-shrink: 0;
+		height: 34px;
+		border-bottom: 1px solid var(--vscode-panel-border);
+		background: var(--vscode-sideBar-background, var(--vscode-editor-background));
 
 		.chat-view-title-inner {
 			display: flex;
 			align-items: center;
-			/* center it above the chat which has this max-width restriction */
-			max-width: 950px;
-			margin: 0 auto;
+			gap: 4px;
+			height: 100%;
 			width: 100%;
+			padding: 0 6px;
 			box-sizing: border-box;
 		}
 
+		.chat-view-title-tabs {
+			display: flex;
+			align-items: center;
+			gap: 3px;
+			min-width: 0;
+			flex: 1 1 auto;
+			overflow: hidden;
+			height: 100%;
+		}
+
+		.chat-view-title-tab {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			height: 24px;
+			min-width: 52px;
+			max-width: 106px;
+			padding: 0 7px;
+			border: 1px solid transparent;
+			border-radius: 4px;
+			color: var(--vscode-descriptionForeground);
+			background: transparent;
+			cursor: pointer;
+			font: inherit;
+			box-sizing: border-box;
+			flex: 0 1 96px;
+			position: relative;
+		}
+
+		.chat-view-title-tab:hover {
+			color: var(--vscode-foreground);
+			background: var(--vscode-toolbar-hoverBackground);
+		}
+
+		.chat-view-title-tab-active {
+			color: var(--vscode-foreground);
+			border-color: var(--vscode-panel-border);
+			background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-toolbar-hoverBackground));
+		}
+
+		.chat-view-title-tab-active::after {
+			content: "";
+			position: absolute;
+			left: 6px;
+			right: 6px;
+			bottom: -1px;
+			height: 2px;
+			background: var(--vscode-focusBorder);
+		}
+
+		.chat-view-title-brand-icon {
+			width: 13px;
+			height: 13px;
+			color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+			flex: 0 0 auto;
+		}
+
+		.chat-view-title-tab-label {
+			overflow: hidden;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+			font-size: 11px;
+			font-weight: 500;
+			line-height: 16px;
+			letter-spacing: 0;
+		}
+
+		.chat-view-title-tab-close {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 14px;
+			height: 14px;
+			margin-right: -2px;
+			border-radius: 3px;
+			color: var(--vscode-descriptionForeground);
+			font-size: 12px;
+			flex: 0 0 auto;
+			opacity: 0;
+		}
+
+		.chat-view-title-tab:hover .chat-view-title-tab-close,
+		.chat-view-title-tab:focus-within .chat-view-title-tab-close {
+			opacity: 1;
+		}
+
+		.chat-view-title-tab-close:hover {
+			color: var(--vscode-foreground);
+			background: var(--vscode-toolbar-hoverBackground);
+		}
+
 		.chat-view-title-navigation-toolbar {
+			display: none;
 			overflow: hidden;
 
 			.chat-view-title-action-item {
@@ -46,9 +142,28 @@
 		}
 
 		.chat-view-title-actions-toolbar {
+			display: none;
 			margin-left: auto;
-			padding-left: 4px;
+			padding: 0 6px 0 2px;
 			flex-shrink: 0;
+		}
+
+		.chat-view-title-actions-toolbar .monaco-toolbar {
+			height: 100%;
+		}
+
+		.chat-view-title-actions-toolbar .actions-container {
+			height: 100%;
+			align-items: center;
+		}
+
+		.chat-view-title-actions-toolbar .action-label {
+			color: var(--vscode-descriptionForeground);
+		}
+
+		.chat-view-title-actions-toolbar .action-label:hover {
+			color: var(--vscode-foreground);
+			background: var(--vscode-toolbar-hoverBackground);
 		}
 	}
 
@@ -72,28 +187,28 @@
 	&.chat-view-location-panel,
 	&.chat-view-location-auxiliarybar {
 		.chat-view-title-inner {
-			padding: 0 12px 0 16px;
+			padding: 0 6px;
 		}
 	}
 
 	/* Auxiliarybar with non-default activity bar position */
 	&.activity-bar-location-other.chat-view-location-auxiliarybar {
 		.chat-view-title-inner {
-			padding: 0 8px 0 16px;
+			padding: 0 6px;
 		}
 	}
 
 	/* Side-by-side sessions: left position (any activity bar) */
 	&.has-sessions-control.sessions-control-orientation-sidebyside.chat-view-position-left {
 		.chat-view-title-inner {
-			padding: 0 8px;
+			padding: 0 6px;
 		}
 	}
 
 	/* Side-by-side sessions: right position (default activity bar only) */
 	&.activity-bar-location-default.has-sessions-control.sessions-control-orientation-sidebyside.chat-view-position-right {
 		.chat-view-title-inner {
-			padding: 0 8px 0 16px;
+			padding: 0 6px;
 		}
 	}
 }

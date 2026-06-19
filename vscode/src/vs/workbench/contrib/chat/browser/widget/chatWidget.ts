@@ -1224,14 +1224,17 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	private getWelcomeViewContent(additionalMessage: string | IMarkdownString | undefined): IChatViewWelcomeContent {
 		if (this.isLockedToCodingAgent) {
 			return {
-				title: localize('backboardWelcomeTitle', "Backboard"),
+				title: localize('backboardWelcomeTitle', "New Agent"),
 				message: new MarkdownString([
-					localize('backboardWelcomeExampleLandingPage', "Make me a landing page"),
-					localize('backboardWelcomeExampleBlueWebsite', "Make this website blue"),
+					localize('backboardWelcomeSubtitle', "Start with a task."),
+					localize('backboardWelcomeExampleTypeScript', "Fix TypeScript errors"),
+					localize('backboardWelcomeExampleRefactor', "Refactor this component"),
+					localize('backboardWelcomeExampleDarkMode', "Add dark mode support"),
 				].join('\n\n')),
 				icon: FileAccess.asBrowserUri('vs/workbench/contrib/chat/browser/media/backboard_logo_blue.svg'),
 				useImageIcon: true,
 				useLargeIcon: true,
+				styleVariant: 'backboard',
 			};
 		}
 

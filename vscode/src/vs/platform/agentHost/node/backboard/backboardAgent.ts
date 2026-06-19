@@ -32,7 +32,7 @@ import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 
 const DEFAULT_PROVIDER = 'openrouter';
-const DEFAULT_MODEL = 'deepseek/deepseek-chat';
+const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
 const DEFAULT_MODEL_ID = `${DEFAULT_PROVIDER}/${DEFAULT_MODEL}`;
 const BACKBOARD_MODEL_CACHE_VERSION = 2;
 const HIDDEN_MODEL_PROVIDERS = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
@@ -1474,7 +1474,7 @@ function fallbackModel(): IAgentModelInfo {
 	return {
 		provider: 'backboard',
 		id: DEFAULT_MODEL_ID,
-		name: 'DeepSeek Chat',
+		name: 'DeepSeek V4 Flash',
 		supportsVision: false,
 	};
 }
