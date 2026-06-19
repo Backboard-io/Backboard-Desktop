@@ -316,6 +316,18 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 		}
 	}
 
+	async openBackboardWorkspaceWindow(windowId: number | undefined, options?: { folderUri?: UriComponents; sessionResource?: UriComponents }): Promise<void> {
+		const windows = await this.windowsMainService.openBackboardWorkspaceWindow({
+			context: OpenContext.API,
+			contextWindowId: windowId,
+			cli: this.environmentMainService.args,
+			forceReuseWindow: true,
+		}, options?.folderUri ? URI.revive(options.folderUri) : undefined, options?.sessionResource ? URI.revive(options.sessionResource) : undefined);
+		if (windows.length > 0) {
+			windows[0].focus();
+		}
+	}
+
 	async isFullScreen(windowId: number | undefined, options?: INativeHostOptions): Promise<boolean> {
 		const window = this.windowById(options?.targetWindowId, windowId);
 		return window?.isFullScreen ?? false;

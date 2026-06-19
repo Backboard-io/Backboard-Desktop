@@ -975,9 +975,6 @@ export class GettingStartedPage extends EditorPane {
 				$('.backboard-welcome-action-list', {}, ...actions),
 			);
 
-			const returnToOnboarding = $('button.backboard-welcome-footer-link', { type: 'button' }, localize('backboardWelcome.returnToOnboarding', "Return to Onboarding")) as HTMLButtonElement;
-			this.categoriesSlideDisposables.add(addDisposableListener(returnToOnboarding, 'click', () => runCommand('workbench.action.welcomeOnboarding2026')));
-
 			const welcome = $('.backboard-welcome-page', {},
 				$('.backboard-welcome-shell', {},
 					$('.backboard-welcome-header', {},
@@ -1001,8 +998,6 @@ export class GettingStartedPage extends EditorPane {
 						createActionRow(Codicon.keyboard, localize('backboardWelcome.customizeKeymaps', "Customize Keymaps"), 'workbench.action.openGlobalKeybindings'),
 						createActionRow(Codicon.extensions, localize('backboardWelcome.exploreExtensions', "Explore Extensions"), 'workbench.view.extensions'),
 					),
-
-					returnToOnboarding,
 				),
 			);
 

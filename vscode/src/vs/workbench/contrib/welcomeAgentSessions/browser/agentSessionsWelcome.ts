@@ -858,6 +858,13 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		this.lastDimension = dimension;
 		this.container.style.height = `${dimension.height}px`;
 		this.container.style.width = `${dimension.width}px`;
+		if (this.scrollableElement) {
+			const scrollableDomNode = this.scrollableElement.getDomNode();
+			scrollableDomNode.style.height = `${dimension.height}px`;
+			scrollableDomNode.style.width = `${dimension.width}px`;
+		}
+		this.contentContainer.style.height = `${dimension.height}px`;
+		this.contentContainer.style.width = `${dimension.width}px`;
 
 		// Layout chat widget
 		this.layoutChatWidget();

@@ -20,7 +20,13 @@ if [[ -z "$APP_BUNDLE" ]]; then
 	exit 1
 fi
 
-APP_EXECUTABLE="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || basename "$APP_BUNDLE" .app)"
+APP_EXECUTABLE="$(basename "$APP_BUNDLE" .app)"
+if [[ -f "$APP_BUNDLE/Contents/Info.plist" ]]; then
+	PLIST_EXECUTABLE="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true)"
+	if [[ -n "$PLIST_EXECUTABLE" ]]; then
+		APP_EXECUTABLE="$PLIST_EXECUTABLE"
+	fi
+fi
 APP="$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE"
 DEV_ICON_DEST="$APP_BUNDLE/Contents/Resources/$APP_EXECUTABLE.icns"
 

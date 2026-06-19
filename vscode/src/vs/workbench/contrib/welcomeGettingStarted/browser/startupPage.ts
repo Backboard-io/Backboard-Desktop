@@ -254,17 +254,28 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
 			return; // only show onboarding for new users who have never used the product before
 		}
 
-		if (this.storageService.getBoolean(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)) {
-			return; // onboarding already completed
+		if (this.hasSeenOnboarding()) {
+			return; // onboarding already completed or dismissed
 		}
 
 		// Show the onboarding overlay on top of the welcome page
 		this.onboardingService.show();
+	}
 
-		// Mark onboarding as completed when dismissed
-		this._register(this.onboardingService.onDidDismiss(() => {
-			this.storageService.store(ONBOARDING_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
-		}));
+	private hasSeenOnboarding(): boolean {
+		const value = this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION);
+		if (!value) {
+			return false;
+		}
+		if (value === 'true') {
+			return true;
+		}
+		try {
+			const parsed: unknown = JSON.parse(value);
+			return !!parsed && typeof parsed === 'object';
+		} catch {
+			return true;
+		}
 	}
 }
 

@@ -64,9 +64,11 @@ export class SessionsBrowserViewPane extends ViewPane {
 		this._body = dom.append(container, $('.sessions-browser-view'));
 
 		const urlRow = dom.append(this._body, $('.sessions-browser-url-row'));
+		const urlIcon = dom.append(urlRow, $('.sessions-browser-url-icon'));
+		urlIcon.appendChild(renderIcon(Codicon.globe));
 		this._input = dom.append(urlRow, $('input.sessions-browser-url-input')) as HTMLInputElement;
 		this._input.type = 'text';
-		this._input.placeholder = localize('sessions.browser.urlPlaceholder', "Enter URL or localhost port");
+		this._input.placeholder = localize('sessions.browser.urlPlaceholder', "Paste a URL or type a port");
 		this._input.setAttribute('aria-label', localize('sessions.browser.urlAriaLabel', "Browser URL"));
 
 		const openButton = dom.append(urlRow, $('button.sessions-browser-open-button')) as HTMLButtonElement;
@@ -140,7 +142,12 @@ export class SessionsBrowserViewPane extends ViewPane {
 
 		if (browserInputs.length === 0) {
 			const empty = dom.append(this._list, $('.sessions-browser-empty'));
-			empty.textContent = localize('sessions.browser.empty', "Open a browser page to preview localhost apps and web pages here.");
+			const emptyIcon = dom.append(empty, $('.sessions-browser-empty-icon'));
+			emptyIcon.appendChild(renderIcon(Codicon.globe));
+			const emptyTitle = dom.append(empty, $('.sessions-browser-empty-title'));
+			emptyTitle.textContent = localize('sessions.browser.emptyTitle', "No browser page open");
+			const emptyMessage = dom.append(empty, $('.sessions-browser-empty-message'));
+			emptyMessage.textContent = localize('sessions.browser.empty', "Preview localhost apps and web pages here.");
 			return;
 		}
 

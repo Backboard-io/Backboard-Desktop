@@ -784,26 +784,34 @@
 	--simple-mode-hover-background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--vscode-foreground) 6%, transparent));
 	--simple-mode-accent: var(--vscode-button-background);
 	--simple-mode-accent-foreground: var(--vscode-button-foreground);
+	position: relative;
 	background: var(--vscode-editor-background);
 	color: var(--vscode-foreground);
 	font-family: var(--vscode-font-family);
+	overflow: hidden;
 }
 
-.agentSessionsWelcome-scrollable {
+.agentSessionsWelcome > .monaco-scrollable-element.agentSessionsWelcome-scrollable {
+	position: absolute !important;
+	inset: 0;
+	width: 100%;
 	height: 100%;
 	align-items: stretch;
 	justify-content: stretch;
 }
 
-.agentSessionsWelcome-scrollable > .monaco-scrollable-element {
+.agentSessionsWelcome > .monaco-scrollable-element.agentSessionsWelcome-scrollable > .agentSessionsWelcome-content {
 	width: 100%;
+	height: 100%;
+	min-height: 0;
+	overflow: hidden;
 }
 
 .agentSessionsWelcome-content {
 	display: block;
 	width: 100%;
 	height: 100%;
-	min-height: 100%;
+	min-height: 0;
 	max-width: none;
 	padding: 0;
 	box-sizing: border-box;
@@ -814,6 +822,7 @@
 	grid-template-columns: var(--simple-mode-rail-width) var(--simple-mode-chat-width) minmax(360px, 1fr);
 	width: 100%;
 	height: 100%;
+	max-height: 100%;
 	min-height: 0;
 	overflow: hidden;
 	background: var(--vscode-editor-background);
@@ -972,7 +981,7 @@
 
 .agentSessionsWelcome-mainRegion {
 	display: grid;
-	grid-template-rows: 44px minmax(0, 1fr) auto;
+	grid-template-rows: 40px minmax(0, 1fr) auto;
 	min-width: 0;
 	min-height: 0;
 	border-right: 1px solid var(--simple-mode-border);
@@ -986,6 +995,7 @@
 	min-width: 0;
 	padding: 0 8px 0 12px;
 	border-bottom: 1px solid var(--simple-mode-border);
+	background: var(--vscode-editor-background);
 	box-sizing: border-box;
 }
 
@@ -1096,20 +1106,20 @@
 	width: 100%;
 	max-width: none;
 	margin: 0;
-	padding: 0 16px 16px;
+	padding: 0;
 	box-sizing: border-box;
 }
 
 .agentSessionsWelcome-chatWidget {
 	overflow: hidden;
-	border: 1px solid var(--vscode-input-border, var(--simple-mode-border));
-	border-radius: 14px;
-	background: var(--simple-mode-soft-background);
+	border: 0;
+	border-radius: 0;
+	background: var(--vscode-editor-background);
 	box-shadow: none;
 }
 
 .agentSessionsWelcome-chatWidget .interactive-input-part {
-	padding: 12px;
+	padding: 8px 12px 0;
 }
 
 .agentSessionsWelcome-chatWidget .interactive-session .chat-input-container {
@@ -1142,7 +1152,8 @@
 	height: 48px;
 	padding: 0 10px 0 14px;
 	box-sizing: border-box;
-	background: var(--simple-mode-soft-background);
+	border-bottom: 1px solid var(--simple-mode-border);
+	background: var(--vscode-editor-background);
 }
 
 .agentSessionsWelcome-artifactTitle {

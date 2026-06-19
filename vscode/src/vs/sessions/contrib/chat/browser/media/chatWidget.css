@@ -111,6 +111,10 @@
 	display: none !important;
 }
 
+.new-chat-widget-content > .interactive-session .chat-mode-picker-item {
+	display: none !important;
+}
+
 .new-chat-widget-content > .interactive-session .chat-welcome-view {
 	gap: 16px;
 	padding: 4px 12px 30px;

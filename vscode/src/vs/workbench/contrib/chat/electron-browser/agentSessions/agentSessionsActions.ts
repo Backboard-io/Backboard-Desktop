@@ -42,6 +42,7 @@ import { IContextMenuService } from '../../../../../platform/contextview/browser
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
 const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
+const BACKBOARD_WORKSPACE_EDITOR_ID = 'workbench.editor.backboardWorkspace';
 
 export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 	constructor() {
@@ -110,7 +111,7 @@ export class OpenAgentsWindowAction extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents }) {
+	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents; openWorkspace?: boolean }) {
 		await accessor.get(INativeHostService).openAgentsWindow(args);
 	}
 }
@@ -232,6 +233,7 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 		}
 
 		const agentsActive = this.isAgentsActive();
+		const workspaceActive = this.isWorkspaceActive();
 		this.triggerButton.setAttribute('aria-expanded', 'true');
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => this.triggerButton!,
@@ -239,7 +241,7 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 				toAction({
 					id: 'workbench.action.mode.editor',
 					label: localize('openInAgentsSwitcher.editor', "Editor"),
-					checked: !agentsActive,
+					checked: !agentsActive && !workspaceActive,
 					run: () => this.openEditor(),
 				}),
 				toAction({
@@ -248,6 +250,12 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 					checked: agentsActive,
 					run: () => this.openAgents(),
 				}),
+				toAction({
+					id: 'workbench.action.mode.workspace',
+					label: localize('openInAgentsSwitcher.workspace', "Workspace"),
+					checked: workspaceActive,
+					run: () => this.openWorkspace(),
+				}),
 			],
 			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
 		});
@@ -255,6 +263,10 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 
 	private openAgents(): void {
 		this.action.run();
+	}
+
+	private openWorkspace(): void {
+		this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID, { openWorkspace: true });
 	}
 
 	private openEditor(): void {
@@ -267,9 +279,16 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 		return this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID;
 	}
 
+	private isWorkspaceActive(): boolean {
+		return this.editorService.activeEditorPane?.getId() === BACKBOARD_WORKSPACE_EDITOR_ID;
+	}
+
 	private updateState(): void {
 		const agentsActive = this.isAgentsActive();
-		this.currentLabel?.replaceChildren(agentsActive
+		const workspaceActive = this.isWorkspaceActive();
+		this.currentLabel?.replaceChildren(workspaceActive
+			? localize('openInAgentsSwitcher.workspace', "Workspace")
+			: agentsActive
 			? localize('openInAgentsSwitcher.agents', "Agents")
 			: localize('openInAgentsSwitcher.editor', "Editor"));
 	}

@@ -445,7 +445,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 					descriptionDisposable.value = this.markdownRendererService.render(description, { sanitizerConfig: { replaceWithPlaintext: true } }, statusEl);
 				} else {
 					descriptionDisposable.clear();
-					statusEl.textContent = localize('working', "Working...");
+					statusEl.textContent = localize('running', "Running...");
 				}
 				parts.push(statusEl);
 			} else if (sessionStatus === SessionStatus.NeedsInput) {

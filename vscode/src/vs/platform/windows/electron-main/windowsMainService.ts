@@ -309,6 +309,17 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		return windows;
 	}
 
+	async openBackboardWorkspaceWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI): Promise<ICodeWindow[]> {
+		this.logService.trace('windowsManager#openBackboardWorkspaceWindow');
+
+		const windows = await this.open(await this.ensureAgentsWindow(openConfig));
+		if (windows.length > 0) {
+			windows[0].sendWhenReady('vscode:openBackboardWorkspace', CancellationToken.None, folderUri?.toJSON(), sessionResource?.toJSON());
+		}
+
+		return windows;
+	}
+
 	private async ensureAgentsWindow(openConfig: IOpenConfiguration): Promise<IOpenConfiguration> {
 		const agentSessionsWorkspaceUri = this.environmentMainService.agentSessionsWorkspace;
 		if (!agentSessionsWorkspaceUri) {

@@ -224,6 +224,7 @@ export class AgentHostChatInputPicker extends Disposable {
 	private readonly _subRef = this._register(new MutableDisposable<IDisposable & { readonly sub: IAgentSubscription<SessionState>; readonly backendSession: URI }>());
 	private _container: HTMLElement | undefined;
 	private _trigger: HTMLElement | undefined;
+	private _isDisposed = false;
 
 	private _initialResolved: { readonly sessionResource: URI; readonly result: ResolveSessionConfigResult } | undefined;
 	private readonly _initialResolveCts = this._register(new MutableDisposable<CancellationTokenSource>());
@@ -333,7 +334,7 @@ export class AgentHostChatInputPicker extends Disposable {
 				provider: backendSession.scheme,
 				workingDirectory: this._readWorkingDirectory(),
 			});
-			if (cts.token.isCancellationRequested || this._widget.viewModel?.sessionResource?.toString() !== sessionResource.toString()) {
+			if (this._isDisposed || cts.token.isCancellationRequested || this._widget.viewModel?.sessionResource?.toString() !== sessionResource.toString()) {
 				return;
 			}
 			this._initialResolved = { sessionResource, result };
@@ -344,11 +345,12 @@ export class AgentHostChatInputPicker extends Disposable {
 	}
 
 	private _renderChip(): void {
-		if (!this._container) {
+		if (this._isDisposed || !this._container) {
 			return;
 		}
 		this._renderDisposables.clear();
 		dom.clearNode(this._container);
+		this._trigger = undefined;
 
 		const ctx = this._readContext();
 		// For sessions that have already started (i.e. no longer untitled —
@@ -387,6 +389,11 @@ export class AgentHostChatInputPicker extends Disposable {
 			this._renderDisposables.add(this._hoverService.setupDelayedHover(trigger, { content: tooltip }));
 		}
 		this._renderTrigger(trigger, ctx.schema, ctx.value, isReadOnly);
+	}
+
+	override dispose(): void {
+		this._isDisposed = true;
+		super.dispose();
 	}
 
 	private _renderTrigger(trigger: HTMLElement, schema: SessionConfigPropertySchema, value: unknown | undefined, isReadOnly: boolean): void {

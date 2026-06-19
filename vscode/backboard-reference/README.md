@@ -15,6 +15,7 @@ backboard-reference/
   AGENTS.md
   README.md
   docs/
+    BACKBOARD_AGENT_WORKSPACE_FROM_ZED.md
     CREDENTIALS.md
     BACKBOARD_COPILOT_REWIRE_PLAN.md
     ENDPOINTS.md
@@ -305,6 +306,11 @@ Use these strings to jump to the important implementation points:
 
 ## Deep-Dive Docs
 
+- `docs/BACKBOARD_AGENT_WORKSPACE_FROM_ZED.md` maps Zed's Backboard Agent
+  Workspace architecture into the VS Code/Copilot-style workbench. Use it for
+  the new page with a center 3-by-N agent grid and a right-panel Backboard
+  composer/detail surface. Editor context comes later as actions and context,
+  not as the center of the first page.
 - `docs/CREDENTIALS.md` documents exactly where the API key is stored, the JSON
   shape, SSO-derived key precedence, manual key storage, environment scoping,
   file permissions, and how TypeScript/Rust read credentials.

@@ -28,6 +28,12 @@ Then read the wiring map:
 docs/SANDBOX_COPILOT_WIRING.md
 ```
 
+Then read the Zed workspace mapping when implementing the new agents/editor page:
+
+```text
+docs/BACKBOARD_AGENT_WORKSPACE_FROM_ZED.md
+```
+
 Use the other docs for deeper context:
 
 ```text
@@ -83,6 +89,23 @@ It maps:
 - tool ownership
 
 This is the main architecture map.
+
+### `BACKBOARD_AGENT_WORKSPACE_FROM_ZED.md`
+
+Use this when building the new Backboard workspace page with the center 3-by-N
+agent grid and the right Backboard detail panel.
+
+It maps Zed's Agent Workspace into VS Code:
+
+- Copilot is the product shell, not the backend.
+- The center of the page should be agent cards/panels, not the code editor.
+- The right panel composer/detail should use the Backboard agent host.
+- Agent cards should wrap Backboard sessions with local run metadata.
+- Tool calls should stay in the Backboard bridge and VS Code client-tool loop.
+- Editor context should be added as actions/context after the grid and right panel work.
+- Worktrees and apply flows should come after one normal thread works.
+
+This is the main doc for the next UI/workspace implementation.
 
 ### `TOOL_CALLS_AND_API.md`
 
@@ -347,4 +370,3 @@ Do not delete every hit blindly. Some hits are valid if GitHub Copilot remains a
 - Do not update `product.json` until Backboard Chat routing works.
 - Keep user-facing strings localized in VS Code source.
 - Keep changes phase-scoped and verify each phase before moving on.
-

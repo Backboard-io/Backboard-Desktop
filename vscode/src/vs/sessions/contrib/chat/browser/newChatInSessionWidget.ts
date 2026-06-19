@@ -88,6 +88,7 @@ export class NewChatInSessionWidget extends Disposable {
 				enableImplicitContext: true,
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: true,
+				isSessionsWindow: true,
 				submitHandler: async query => this._sendFromSharedComposer(query),
 			},
 			{

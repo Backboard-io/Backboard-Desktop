@@ -114,6 +114,7 @@ export class NewChatWidget extends Disposable {
 				enableImplicitContext: true,
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: true,
+				isSessionsWindow: true,
 				workspacePickerDelegate: this._createWorkspacePickerDelegate(),
 				sessionTypePickerDelegate: this._createSessionTypePickerDelegate(),
 				submitHandler: async query => this._sendFromSharedComposer(query),

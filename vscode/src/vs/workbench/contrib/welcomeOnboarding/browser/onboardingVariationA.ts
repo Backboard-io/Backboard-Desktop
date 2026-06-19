@@ -163,6 +163,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private selectedExperience = OnboardingExperience.Developer;
 	private hasConfirmedBackboardSignIn = false;
 	private hasImportedApiKey = false;
+	private hasPlayedWelcomeSplash = false;
 
 	constructor(
 		@ILayoutService private readonly layoutService: ILayoutService,
@@ -202,6 +203,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		this._isShowing = true;
 		this.currentStepIndex = 0;
+		this.hasPlayedWelcomeSplash = false;
 		this.previouslyFocusedElement = getActiveWindow().document.activeElement as HTMLElement | undefined;
 
 		const container = this.layoutService.activeContainer;
@@ -632,6 +634,14 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this._playWelcomeAdvanceTransition();
 		}));
 
+		if (this.hasPlayedWelcomeSplash) {
+			splash.remove();
+			welcomeContent.classList.add('visible');
+			continueButton.disabled = false;
+			return;
+		}
+
+		this.hasPlayedWelcomeSplash = true;
 		const activeWindow = getActiveWindow();
 		const splashTimer = activeWindow.setTimeout(() => {
 			splash.classList.add('fade-out');
@@ -646,7 +656,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.stepDisposables.add(toDisposable(() => {
 			activeWindow.clearTimeout(splashTimer);
 			activeWindow.clearTimeout(removeTimer);
-			}));
+		}));
 	}
 
 	private _createBackboardWelcomeSplash(parent: HTMLElement): void {

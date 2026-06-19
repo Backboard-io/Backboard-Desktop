@@ -7,11 +7,29 @@
 	flex: 1 1 auto;
 	height: 100%;
 	min-height: 0;
+	--sessions-row-hover-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 7%, transparent);
+	--sessions-row-selected-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 9%, transparent);
+	--sessions-row-selected-border: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 14%, transparent);
+	--sessions-row-muted-fg: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 58%, transparent);
 
 	.monaco-list-row:has(.session-item) {
-		border-radius: var(--vscode-cornerRadius-medium);
-		margin: 0 10px;
-		width: calc(100% - 20px);
+		border-radius: 10px;
+		margin: 0 12px;
+		width: calc(100% - 24px);
+		overflow: hidden;
+	}
+
+	.monaco-list-row:has(.session-item):hover,
+	.monaco-list-row.focused:not(.selected):has(.session-item) {
+		background: var(--sessions-row-hover-bg) !important;
+	}
+
+	.monaco-list-row.selected:has(.session-item),
+	.monaco-list:focus .monaco-list-row.selected:has(.session-item) {
+		background: var(--sessions-row-selected-bg) !important;
+		outline: 1px solid var(--sessions-row-selected-border) !important;
+		outline-offset: -1px;
+		box-shadow: none;
 	}
 
 	.monaco-list-row .force-no-twistie {
@@ -19,7 +37,7 @@
 	}
 
 	.monaco-list-row.selected .session-details-row {
-		color: unset;
+		color: var(--sessions-row-muted-fg);
 	}
 
 	.monaco-list:focus .monaco-list-row.selected .session-details-row {
@@ -33,12 +51,12 @@
 	}
 
 	.monaco-list-row.selected .session-title {
-		color: unset;
+		color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
 	}
 
 	.monaco-list:focus .monaco-list-row.selected .session-icon > .codicon,
 	.monaco-list:focus .monaco-list-row.selected .session-icon > .monaco-pixel-spinner {
-		color: var(--vscode-list-activeSelectionForeground) !important;
+		color: color-mix(in srgb, var(--vscode-icon-foreground) 76%, transparent) !important;
 	}
 
 	.monaco-list:not(:focus) .monaco-list-row.selected .session-details-row {
@@ -54,6 +72,16 @@
 			position: relative;
 			right: 0;
 			top: 0;
+		}
+
+		.monaco-action-bar .action-label {
+			border-radius: 6px;
+			color: color-mix(in srgb, var(--vscode-icon-foreground) 72%, transparent);
+		}
+
+		.monaco-action-bar .action-label:hover {
+			color: var(--vscode-icon-foreground);
+			background: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 8%, transparent);
 		}
 	}
 
@@ -91,7 +119,8 @@
 	flex-direction: row;
 	height: 100%;
 	box-sizing: border-box;
-	padding: 8px 6px 8px 12px;
+	padding: 9px 10px 9px 14px;
+	border-radius: inherit;
 
 	&.archived {
 		color: var(--vscode-descriptionForeground);
@@ -112,7 +141,8 @@
 	.session-icon {
 		display: flex;
 		align-items: flex-start;
-		line-height: 17px;
+		line-height: 18px;
+		color: color-mix(in srgb, var(--vscode-icon-foreground) 70%, transparent);
 		/* Anchor for outgoing icons during a cross-fade swap (see swapIconWithCrossfade). */
 		position: relative;
 
@@ -143,7 +173,7 @@
 	}
 
 	.session-main {
-		padding-left: 6px;
+		padding-left: 8px;
 	}
 
 	.session-title-row,
@@ -153,17 +183,17 @@
 	}
 
 	.session-title-row {
-		line-height: 17px;
-		padding-bottom: 4px;
+		line-height: 18px;
+		padding-bottom: 5px;
 	}
 
 	.session-details-row {
 		gap: 4px;
 		font-size: var(--vscode-agents-fontSize-label2, 11px);
-		line-height: 15px;
-		max-height: 15px;
+		line-height: 16px;
+		max-height: 16px;
 		overflow: hidden;
-		color: var(--vscode-descriptionForeground);
+		color: color-mix(in srgb, var(--vscode-descriptionForeground) 86%, transparent);
 
 		.session-details-icon {
 			display: flex;
@@ -230,6 +260,8 @@
 
 	.session-title {
 		font-size: var(--vscode-agents-fontSize-body1, 13px);
+		font-weight: 500;
+		letter-spacing: 0;
 	}
 
 	.session-title {
@@ -241,6 +273,7 @@
 	&.unread .session-title,
 	&.needs-input .session-title {
 		color: var(--vscode-strongForeground);
+		font-weight: 600;
 	}
 
 	.session-time {
@@ -354,9 +387,10 @@
 	display: flex;
 	align-items: center;
 	font-size: var(--vscode-agents-fontSize-label2, 11px);
-	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
-	color: var(--vscode-descriptionForeground);
-	padding: 0 10px;
+	font-weight: 600;
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 82%, transparent);
+	padding: 2px 12px 0;
+	letter-spacing: 0;
 
 	.session-section-label {
 		flex: 1 1 auto;
@@ -368,7 +402,7 @@
 
 	.session-section-count {
 		flex-shrink: 0;
-		opacity: 0.7;
+		opacity: 0.55;
 		margin-left: 4px;
 		margin-right: 4px;
 	}
@@ -422,11 +456,11 @@
 		background: transparent !important;
 	}
 
-	.monaco-list-row:hover .session-section .session-section-label,
-	.monaco-list-row.focused .session-section .session-section-label,
-	.monaco-list-row:hover .session-show-more-folders .session-show-more-label,
-	.monaco-list-row.focused .session-show-more-folders .session-show-more-label {
-		color: var(--vscode-strongForeground);
+.monaco-list-row:hover .session-section .session-section-label,
+.monaco-list-row.focused .session-section .session-section-label,
+.monaco-list-row:hover .session-show-more-folders .session-show-more-label,
+.monaco-list-row.focused .session-show-more-folders .session-show-more-label {
+		color: color-mix(in srgb, var(--vscode-strongForeground) 86%, transparent);
 	}
 
 	&.session-section-focus-from-pointer {
