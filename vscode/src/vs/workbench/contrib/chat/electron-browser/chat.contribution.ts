@@ -49,7 +49,7 @@ import { BackboardCredentialsContribution, registerBackboardSsoActions } from '.
 import { registerExportAgentTracesDbAction } from './actions/exportAgentTracesDb.js';
 import { shouldWarnForSessionShutdown } from './chatLifecycle.js';
 import { HoldToVoiceChatInChatViewAction, InlineVoiceChatAction, KeywordActivationContribution, QuickVoiceChatAction, ReadChatResponseAloud, StartVoiceChatAction, StopListeningAction, StopListeningAndSubmitAction, StopReadAloud, StopReadChatItemAloud, VoiceChatInChatViewAction } from './actions/voiceChatActions.js';
-import { OpenWorkspaceInAgentsWindowAction, OpenWorkspaceInAgentsContribution, OpenAgentsWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution, ToggleOpenInAgentsWindowTitleBarAction } from './agentSessions/agentSessionsActions.js';
+import { OpenWorkspaceInAgentsWindowAction, OpenWorkspaceInAgentsContribution, OpenAgentsWindowAction, OpenBackboardWorkspaceWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution, ToggleOpenInAgentsWindowTitleBarAction } from './agentSessions/agentSessionsActions.js';
 import { NativeBuiltinToolsContribution } from './builtInTools/tools.js';
 import { NativePluginGitCommandService } from './pluginGitCommandService.js';
 
@@ -236,6 +236,7 @@ class ChatLifecycleHandler extends Disposable {
 registerAction2(OpenWorkspaceInAgentsWindowAction);
 registerAction2(ToggleOpenInAgentsWindowTitleBarAction);
 registerAction2(OpenAgentsWindowAction);
+registerAction2(OpenBackboardWorkspaceWindowAction);
 registerAction2(OpenChatSessionInAgentsWindowAction);
 registerAction2(StartVoiceChatAction);
 

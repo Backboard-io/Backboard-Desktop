@@ -40,14 +40,23 @@ class SelectAgentsFolderContribution extends Disposable implements IWorkbenchCon
 		const handleSelectAgentsFolder = (_: unknown, ...args: unknown[]) => {
 			const folderUri = args[0] ? URI.revive(args[0] as UriComponents) : undefined;
 			const sessionResource = args[1] ? URI.revive(args[1] as UriComponents) : undefined;
-			const openWorkspace = args[2] === true;
-			this.logService.info(`[AgentsHandoff] IPC received: folderUri=${folderUri?.toString() ?? '(none)'} sessionResource=${sessionResource?.toString() ?? '(none)'} openWorkspace=${openWorkspace}`);
+			this.logService.info(`[AgentsHandoff] IPC received: folderUri=${folderUri?.toString() ?? '(none)'} sessionResource=${sessionResource?.toString() ?? '(none)'}`);
 
-			this.handleOpenIntent(folderUri, sessionResource, openWorkspace)
+			this.handleOpenIntent(folderUri, sessionResource, false)
 				.catch(err => this.logService.error('[AgentsHandoff] handleOpenIntent failed', err));
 		};
+		const handleOpenBackboardWorkspace = (_: unknown, ...args: unknown[]) => {
+			const folderUri = args[0] ? URI.revive(args[0] as UriComponents) : undefined;
+			const sessionResource = args[1] ? URI.revive(args[1] as UriComponents) : undefined;
+			this.logService.info(`[BackboardWorkspace] IPC received: folderUri=${folderUri?.toString() ?? '(none)'} sessionResource=${sessionResource?.toString() ?? '(none)'}`);
+
+			this.handleOpenIntent(folderUri, sessionResource, true)
+				.catch(err => this.logService.error('[BackboardWorkspace] handleOpenIntent failed', err));
+		};
 		ipcRenderer.on('vscode:selectAgentsFolder', handleSelectAgentsFolder);
+		ipcRenderer.on('vscode:openBackboardWorkspace', handleOpenBackboardWorkspace);
 		this._register({ dispose: () => ipcRenderer.removeListener('vscode:selectAgentsFolder', handleSelectAgentsFolder) });
+		this._register({ dispose: () => ipcRenderer.removeListener('vscode:openBackboardWorkspace', handleOpenBackboardWorkspace) });
 	}
 
 	private async handleOpenIntent(folderUri: URI | undefined, sessionResource: URI | undefined, openWorkspace: boolean): Promise<void> {

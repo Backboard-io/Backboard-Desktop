@@ -33,7 +33,7 @@ import { SessionType } from '../../common/chatSessionsService.js';
 import { IChatViewTitleActionContext } from '../../common/actions/chatActions.js';
 import { getChatSessionType, isUntitledChatSession } from '../../common/model/chatUri.js';
 import { ChatInputNotificationSeverity, IChatInputNotificationService } from '../../browser/widget/input/chatInputNotificationService.js';
-import { OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION, OPEN_AGENTS_WINDOW_COMMAND_ID, ChatConfiguration } from '../../common/constants.js';
+import { OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID, OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION, OPEN_AGENTS_WINDOW_COMMAND_ID, ChatConfiguration } from '../../common/constants.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -111,8 +111,30 @@ export class OpenAgentsWindowAction extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents; openWorkspace?: boolean }) {
+	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents }) {
 		await accessor.get(INativeHostService).openAgentsWindow(args);
+	}
+}
+
+export class OpenBackboardWorkspaceWindowAction extends Action2 {
+	constructor() {
+		super({
+			id: OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID,
+			title: localize2('openBackboardWorkspaceWindow', "Open Workspace"),
+			category: CHAT_CATEGORY,
+			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents }) {
+		const nativeHostService = accessor.get(INativeHostService);
+		const workspaceContextService = accessor.get(IWorkspaceContextService);
+		const folderUri = args?.folderUri ?? workspaceContextService.getWorkspace().folders[0]?.uri.toJSON();
+		await nativeHostService.openBackboardWorkspaceWindow({
+			folderUri,
+			sessionResource: args?.sessionResource,
+		});
 	}
 }
 
@@ -266,7 +288,7 @@ class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
 	}
 
 	private openWorkspace(): void {
-		this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID, { openWorkspace: true });
+		this.commandService.executeCommand(OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID);
 	}
 
 	private openEditor(): void {
