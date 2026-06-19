@@ -27,6 +27,8 @@ function readPortEnv(name: string, fallback: number): number {
 }
 
 const defaultGitHubRedirectPort = readPortEnv('BACKBOARD_GITHUB_OAUTH_REDIRECT_PORT', 3001);
+const defaultGitHubClientId = 'Ov23liqywLfp4vQtPQAu';
+const defaultGitHubClientSecret = 'f677047d35b848774a1834211e09473c07fa3ea4';
 
 // For easy access to mixin client ID and secret
 //
@@ -34,8 +36,8 @@ const defaultGitHubRedirectPort = readPortEnv('BACKBOARD_GITHUB_OAUTH_REDIRECT_P
 // not really a secret... so we allow the client secret in code. It is brought in before we publish VS Code. Reference:
 // https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/best-practices-for-creating-an-oauth-app#client-secrets
 export const Config: IConfig = {
-	gitHubClientId: readEnv('BACKBOARD_GITHUB_OAUTH_CLIENT_ID') ?? 'Ov23liqywLfp4vQtPQAu',
-	gitHubClientSecret: readEnv('BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET'),
+	gitHubClientId: readEnv('BACKBOARD_GITHUB_OAUTH_CLIENT_ID') ?? defaultGitHubClientId,
+	gitHubClientSecret: readEnv('BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET') ?? defaultGitHubClientSecret,
 	gitHubRedirectPort: defaultGitHubRedirectPort,
 	gitHubRedirectUri: readEnv('BACKBOARD_GITHUB_OAUTH_REDIRECT_URI') ?? `http://127.0.0.1:${defaultGitHubRedirectPort}/redirect`
 };
