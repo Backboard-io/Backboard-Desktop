@@ -15,6 +15,9 @@ import { autorun } from '../../../../base/common/observable.js';
 import { IWorkspaceFolderCreationData } from '../../../../platform/workspaces/common/workspaces.js';
 import { Queue } from '../../../../base/common/async.js';
 import { ISession } from '../../../services/sessions/common/session.js';
+import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
+
+const BACKBOARD_WORKSPACE_EDITOR_ID = 'workbench.editor.backboardWorkspace';
 
 export class WorkspaceFolderManagementContribution extends Disposable implements IWorkbenchContribution {
 
@@ -27,6 +30,7 @@ export class WorkspaceFolderManagementContribution extends Disposable implements
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@IWorkspaceEditingService private readonly workspaceEditingService: IWorkspaceEditingService,
 		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService,
+		@IEditorService private readonly editorService: IEditorService,
 	) {
 		super();
 		this._register(autorun(reader => {
@@ -34,9 +38,16 @@ export class WorkspaceFolderManagementContribution extends Disposable implements
 			activeSession?.workspace.read(reader);
 			this.queue.queue(() => this.updateWorkspaceFoldersForSession(activeSession));
 		}));
+		this._register(this.editorService.onDidActiveEditorChange(() => {
+			this.queue.queue(() => this.updateWorkspaceFoldersForSession(this.sessionsService.activeSession.get()));
+		}));
 	}
 
 	private async updateWorkspaceFoldersForSession(session: ISession | undefined): Promise<void> {
+		if (this.editorService.activeEditorPane?.getId() === BACKBOARD_WORKSPACE_EDITOR_ID) {
+			return;
+		}
+
 		await this.manageTrustWorkspaceForSession(session);
 		const activeSessionFolderData = this.getActiveSessionFolderData(session);
 		const currentRepo = this.workspaceContextService.getWorkspace().folders[0]?.uri;
