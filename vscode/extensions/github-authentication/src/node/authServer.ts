@@ -87,7 +87,7 @@ export class LoopbackAuthServer implements ILoopbackServer {
 		return this._startingRedirect.searchParams.get('state') ?? undefined;
 	}
 
-	constructor(serveRoot: string, startingRedirect: string, callbackUri: string, isPortable: boolean) {
+	constructor(serveRoot: string, startingRedirect: string, callbackUri: string, isPortable: boolean, redirectEndpoint?: string) {
 		if (!serveRoot) {
 			throw new Error('serveRoot must be defined');
 		}
@@ -135,7 +135,8 @@ export class LoopbackAuthServer implements ILoopbackServer {
 					if (isPortable) {
 						res.writeHead(302, { location: `/?app_name=${encodeURIComponent(env.appName)}` });
 					} else {
-						res.writeHead(302, { location: `/?redirect_uri=${encodeURIComponent(callbackUri)}${appNameQueryParam}` });
+						const redirectEndpointQueryParam = redirectEndpoint ? `&redirect_endpoint=${encodeURIComponent(redirectEndpoint)}` : '';
+						res.writeHead(302, { location: `/?redirect_uri=${encodeURIComponent(callbackUri)}${redirectEndpointQueryParam}${appNameQueryParam}` });
 					}
 					res.end();
 					break;

@@ -156,17 +156,15 @@ async function exchangeCodeForToken(
 	logger.info('Exchanging code for token...');
 
 	const clientSecret = Config.gitHubClientSecret;
-	if (!clientSecret) {
-		throw new Error('No client secret configured for GitHub authentication.');
-	}
-
 	const body = new URLSearchParams([
 		['code', code],
 		['client_id', Config.gitHubClientId],
 		['redirect_uri', redirectUri.toString(true)],
-		['client_secret', clientSecret],
 		['code_verifier', codeVerifier]
 	]);
+	if (clientSecret) {
+		body.append('client_secret', clientSecret);
+	}
 	if (enterpriseUri) {
 		body.append('github_enterprise', enterpriseUri.toString(true));
 	}
@@ -206,8 +204,7 @@ class UrlHandlerFlow implements IFlow {
 		supportsHostedGitHubEnterprise: true,
 		supportsRemoteExtensionHost: true,
 		supportsWebWorkerExtensionHost: true,
-		// exchanging a code for a token requires a client secret
-		supportsNoClientSecret: false,
+		supportsNoClientSecret: true,
 		supportsSupportedClients: true,
 		supportsUnsupportedClients: false
 	};
@@ -299,8 +296,7 @@ class LocalServerFlow implements IFlow {
 		supportsRemoteExtensionHost: false,
 		// Web worker can't open a port to listen for the redirect
 		supportsWebWorkerExtensionHost: false,
-		// exchanging a code for a token requires a client secret
-		supportsNoClientSecret: false,
+		supportsNoClientSecret: true,
 		supportsSupportedClients: true,
 		supportsUnsupportedClients: true
 	};
@@ -354,7 +350,7 @@ class LocalServerFlow implements IFlow {
 				path: '/login/oauth/authorize',
 				query: searchParams.toString()
 			});
-			const server = new LoopbackAuthServer(path.join(__dirname, '../media'), loginUrl.toString(true), callbackUri.toString(true), env.isAppPortable);
+			const server = new LoopbackAuthServer(path.join(__dirname, '../media'), loginUrl.toString(true), callbackUri.toString(true), env.isAppPortable, redirectUri.toString(true));
 			const port = await server.start();
 
 			let codeToExchange;
@@ -394,7 +390,7 @@ class DeviceCodeFlow implements IFlow {
 		// CORS prevents this from working in web workers
 		supportsWebWorkerExtensionHost: false,
 		supportsNoClientSecret: true,
-		supportsSupportedClients: true,
+		supportsSupportedClients: false,
 		supportsUnsupportedClients: true
 	};
 	async trigger({ scopes, baseUri, signInProvider, extraAuthorizeParameters, logger }: IFlowTriggerOptions) {

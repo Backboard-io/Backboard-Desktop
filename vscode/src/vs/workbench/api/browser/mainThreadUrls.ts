@@ -11,6 +11,19 @@ import { Disposable, IDisposable } from '../../../base/common/lifecycle.js';
 import { IExtensionContributedURLHandler, IExtensionUrlHandler } from '../../services/extensions/browser/extensionUrlHandler.js';
 import { ExtensionIdentifier } from '../../../platform/extensions/common/extensions.js';
 import { ITrustedDomainService } from '../../contrib/url/browser/trustedDomainService.js';
+import { equalsIgnoreCase } from '../../../base/common/strings.js';
+
+const GITHUB_AUTHENTICATION_EXTENSION_ID = 'vscode.github-authentication';
+const BACKBOARD_GITHUB_AUTHENTICATION_EXTENSION_ALIAS = 'backboard.github-authentication';
+
+function isExtensionUriAuthority(extensionId: ExtensionIdentifier, authority: string): boolean {
+	if (ExtensionIdentifier.equals(extensionId, authority)) {
+		return true;
+	}
+
+	return ExtensionIdentifier.equals(extensionId, GITHUB_AUTHENTICATION_EXTENSION_ID)
+		&& equalsIgnoreCase(authority, BACKBOARD_GITHUB_AUTHENTICATION_EXTENSION_ALIAS);
+}
 
 class ExtensionUrlHandler implements IExtensionContributedURLHandler {
 
@@ -22,7 +35,7 @@ class ExtensionUrlHandler implements IExtensionContributedURLHandler {
 	) { }
 
 	async handleURL(uri: URI, options?: IOpenURLOptions): Promise<boolean> {
-		if (!ExtensionIdentifier.equals(this.extensionId, uri.authority)) {
+		if (!isExtensionUriAuthority(this.extensionId, uri.authority)) {
 			return false;
 		}
 

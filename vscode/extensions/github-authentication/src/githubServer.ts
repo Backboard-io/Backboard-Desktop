@@ -14,9 +14,9 @@ import { ExtensionHost, GitHubSocialSignInProvider, GitHubTarget, getFlows } fro
 import { CANCELLATION_ERROR, NETWORK_ERROR, USER_CANCELLATION_ERROR } from './common/errors';
 import { Config } from './config';
 import { base64Encode } from './node/buffer';
+import { ensureBackboardRedirectServer } from './node/redirectServer';
 
-const REDIRECT_URL_STABLE = 'https://vscode.dev/redirect';
-const REDIRECT_URL_INSIDERS = 'https://insiders.vscode.dev/redirect';
+const BACKBOARD_GITHUB_AUTHENTICATION_AUTHORITY = 'backboard.github-authentication';
 
 export interface IGitHubServer {
 	login(scopes: string, signInProvider?: GitHubSocialSignInProvider, extraAuthorizeParameters?: Record<string, string>, existingLogin?: string): Promise<string>;
@@ -56,23 +56,7 @@ export class GitHubServer implements IGitHubServer {
 		if (this._redirectEndpoint) {
 			return this._redirectEndpoint;
 		}
-		if (this._type === AuthProviderType.github) {
-			const proxyEndpoints = await vscode.commands.executeCommand<{ [providerId: string]: string } | undefined>('workbench.getCodeExchangeProxyEndpoints');
-			// If we are running in insiders vscode.dev, then ensure we use the redirect route on that.
-			this._redirectEndpoint = REDIRECT_URL_STABLE;
-			if (proxyEndpoints?.github && new URL(proxyEndpoints.github).hostname === 'insiders.vscode.dev') {
-				this._redirectEndpoint = REDIRECT_URL_INSIDERS;
-			}
-		} else {
-			// GHE only supports a single redirect endpoint, so we can't use
-			// insiders.vscode.dev/redirect when we're running in Insiders, unfortunately.
-			// Additionally, we make the assumption that this function will only be used
-			// in flows that target supported GHE targets, not on-prem GHES. Because of this
-			// assumption, we can assume that the GHE version used is at least 3.8 which is
-			// the version that changed the redirect endpoint to this URI from the old
-			// GitHub maintained server.
-			this._redirectEndpoint = 'https://vscode.dev/redirect';
-		}
+		this._redirectEndpoint = await ensureBackboardRedirectServer(this._logger);
 		return this._redirectEndpoint;
 	}
 
@@ -82,7 +66,7 @@ export class GitHubServer implements IGitHubServer {
 		if (this._isNoCorsEnvironment !== undefined) {
 			return this._isNoCorsEnvironment;
 		}
-		const uri = await vscode.env.asExternalUri(vscode.Uri.parse(`${vscode.env.uriScheme}://vscode.github-authentication/dummy`));
+		const uri = await vscode.env.asExternalUri(vscode.Uri.parse(`${vscode.env.uriScheme}://${BACKBOARD_GITHUB_AUTHENTICATION_AUTHORITY}/dummy`));
 		this._isNoCorsEnvironment = (uri.scheme === 'https' && /^((insiders\.)?vscode|github)\./.test(uri.authority)) || (uri.scheme === 'http' && /^localhost/.test(uri.authority));
 		return this._isNoCorsEnvironment;
 	}
@@ -109,7 +93,7 @@ export class GitHubServer implements IGitHubServer {
 		};
 
 		const nonce: string = crypto.getRandomValues(new Uint32Array(2)).reduce((prev, curr) => prev += curr.toString(16), '');
-		const callbackUri = await vscode.env.asExternalUri(vscode.Uri.parse(`${vscode.env.uriScheme}://vscode.github-authentication/did-authenticate?nonce=${encodeURIComponent(nonce)}`));
+		const callbackUri = await vscode.env.asExternalUri(vscode.Uri.parse(`${vscode.env.uriScheme}://${BACKBOARD_GITHUB_AUTHENTICATION_AUTHORITY}/did-authenticate?nonce=${encodeURIComponent(nonce)}`));
 
 		const supportedClient = isSupportedClient(callbackUri);
 		const supportedTarget = isSupportedTarget(this._type, this._ghesUri);

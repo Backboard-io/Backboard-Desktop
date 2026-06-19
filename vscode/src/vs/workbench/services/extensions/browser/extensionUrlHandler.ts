@@ -33,9 +33,17 @@ const THIRTY_SECONDS = 30 * 1000;
 const URL_TO_HANDLE = 'extensionUrlHandler.urlToHandle';
 const USER_TRUSTED_EXTENSIONS_CONFIGURATION_KEY = 'extensions.confirmedUriHandlerExtensionIds';
 const USER_TRUSTED_EXTENSIONS_STORAGE_KEY = 'extensionUrlHandler.confirmedExtensions';
+const GITHUB_AUTHENTICATION_EXTENSION_ID = 'vscode.github-authentication';
+const BACKBOARD_GITHUB_AUTHENTICATION_EXTENSION_ALIAS = 'backboard.github-authentication';
 
 function isExtensionId(value: string): boolean {
 	return /^[a-z0-9][a-z0-9\-]*\.[a-z0-9][a-z0-9\-]*$/i.test(value);
+}
+
+function getExtensionIdForUriAuthority(authority: string): string {
+	return equalsIgnoreCase(authority, BACKBOARD_GITHUB_AUTHENTICATION_EXTENSION_ALIAS)
+		? GITHUB_AUTHENTICATION_EXTENSION_ID
+		: authority;
 }
 
 class UserTrustedExtensionIdStorage {
@@ -164,7 +172,7 @@ class ExtensionUrlHandler implements IExtensionUrlHandler, IURLHandler {
 			}
 		}
 
-		const extensionId = uri.authority;
+		const extensionId = getExtensionIdForUriAuthority(uri.authority);
 
 		const initialHandler = this.extensionHandlers.get(ExtensionIdentifier.toKey(extensionId));
 		let extensionDisplayName: string;
