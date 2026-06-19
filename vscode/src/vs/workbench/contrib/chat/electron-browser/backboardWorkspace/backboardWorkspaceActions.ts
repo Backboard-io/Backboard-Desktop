@@ -91,6 +91,7 @@ export class OpenBackboardWorkspaceWindowAction extends Action2 {
 class BackboardModeTitleBarWidget extends BaseActionViewItem {
 
 	private triggerButton: HTMLButtonElement | undefined;
+	private currentIcon: HTMLElement | undefined;
 	private currentLabel: HTMLElement | undefined;
 
 	constructor(
@@ -117,6 +118,8 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		this.triggerButton = append(container, $('button.backboard-mode-titlebar-widget-trigger'));
 		this.triggerButton.setAttribute('aria-haspopup', 'menu');
 		this.triggerButton.setAttribute('aria-expanded', 'false');
+		this.currentIcon = append(this.triggerButton, $('span.backboard-mode-titlebar-widget-icon.codicon'));
+		this.currentIcon.setAttribute('aria-hidden', 'true');
 		this.currentLabel = append(this.triggerButton, $('span.backboard-mode-titlebar-widget-label'));
 		const chevron = append(this.triggerButton, $('span.backboard-mode-titlebar-widget-chevron.codicon.codicon-chevron-down'));
 		chevron.setAttribute('aria-hidden', 'true');
@@ -197,6 +200,8 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 	private updateState(): void {
 		const agentsActive = this.isAgentsActive();
 		const workspaceActive = this.isWorkspaceActive();
+		this.currentIcon?.classList.toggle('codicon-window', !agentsActive && !workspaceActive);
+		this.currentIcon?.classList.toggle('codicon-robot', agentsActive || workspaceActive);
 		this.currentLabel?.replaceChildren(workspaceActive
 			? localize('backboardModeSwitcher.workspace', "Workspace")
 			: agentsActive

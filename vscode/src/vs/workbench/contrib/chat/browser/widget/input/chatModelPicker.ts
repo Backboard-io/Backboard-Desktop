@@ -612,12 +612,12 @@ export function buildModelPickerItems(
 			return items;
 		} else {
 			items.push(createModelItem({
-				id: 'auto',
-				enabled: true,
+				id: 'loadingModels',
+				enabled: false,
 				checked: true,
 				class: undefined,
-				tooltip: localize('chat.modelPicker.auto', "Auto"),
-				label: localize('chat.modelPicker.auto', "Auto"),
+				tooltip: localize('chat.modelPicker.loadingModels', "Loading models"),
+				label: localize('chat.modelPicker.loadingModels', "Loading models"),
 				run: () => { }
 			}));
 		}
@@ -1287,7 +1287,7 @@ export class ModelPickerWidget extends Disposable {
 			filterPlaceholder: localize('chat.modelPicker.search', "Search models"),
 			filterActions: !isUBB && manageModelsAction ? [manageModelsAction] : undefined,
 			focusFilterOnOpen: true,
-			collapsedByDefault: this._delegate.expandOtherModelsByDefault?.() ? undefined : new Set([ModelPickerSection.Other]),
+			collapsedByDefault: new Set<string>(),
 			onDidToggleSection: (section: string, collapsed: boolean) => {
 				if (section === ModelPickerSection.Other) {
 					logModelPickerInteraction(collapsed ? 'otherModelsCollapsed' : 'otherModelsExpanded');
@@ -1368,6 +1368,7 @@ export class ModelPickerWidget extends Disposable {
 		// session type) so the label matches the dropdown's "No models
 		// available" entry.
 		const noModelsAvailable = !(this._delegate.showAutoModel?.() ?? false) && this._delegate.getModels().length === 0;
+		const loadingModels = !noModelsAvailable && !this._selectedModel && this._delegate.getModels().length === 0;
 
 		// --- Name section ---
 		const nameChildren: (HTMLElement | string)[] = [];
@@ -1379,6 +1380,8 @@ export class ModelPickerWidget extends Disposable {
 		}
 		const modelLabel = noModelsAvailable
 			? localize('chat.modelPicker.noModels', "No models available")
+			: loadingModels
+				? localize('chat.modelPicker.loadingModels', "Loading models")
 			: (name ?? localize('chat.modelPicker.auto', "Auto"));
 		// In PRU mode, append the config description (e.g. thinking effort) to the button label
 		const isUBB = !!this._entitlementService.quotas.usageBasedBilling;

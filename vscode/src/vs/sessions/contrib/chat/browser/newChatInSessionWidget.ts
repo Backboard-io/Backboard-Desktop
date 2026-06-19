@@ -35,6 +35,7 @@ import { isEqual } from '../../../../base/common/resources.js';
 // #region --- New Chat In Session Widget ---
 
 const STORAGE_KEY_SUB_SESSION_TIP_DISMISSED = 'sessions.subSessionTipDismissed';
+const NEW_CHAT_IN_SESSION_COMPOSER_LAYOUT_HEIGHT = 104;
 
 /**
  * A widget for composing a secondary chat within an existing session.
@@ -89,7 +90,6 @@ export class NewChatInSessionWidget extends Disposable {
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: false,
 				isSessionsWindow: true,
-				inputEditorMinLines: 2,
 				submitHandler: async query => this._sendFromSharedComposer(query),
 			},
 			{
@@ -233,7 +233,7 @@ export class NewChatInSessionWidget extends Disposable {
 	}
 
 	layout(height: number, width: number): void {
-		this._widget.layout(this._chatWidgetContent?.clientHeight || height, this._chatWidgetContent?.clientWidth || width);
+		this._widget.layout(Math.min(this._chatWidgetContent?.clientHeight || height, NEW_CHAT_IN_SESSION_COMPOSER_LAYOUT_HEIGHT), this._chatWidgetContent?.clientWidth || width);
 	}
 
 	focusInput(): void {

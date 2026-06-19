@@ -255,7 +255,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 	) {
 		super();
 		this._bridge = this._register(new BackboardBridgeProcess(_logService));
-		this._refreshModels(true);
+		this._refreshModels();
 	}
 
 	getDescriptor(): IAgentDescriptor {

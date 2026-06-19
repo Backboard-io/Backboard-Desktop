@@ -238,16 +238,17 @@ export class ChatViewTitleControl extends Disposable {
 		const label = options.label.trim() || ChatViewTitleControl.DEFAULT_TITLE;
 		let closeElement: HTMLElement | undefined;
 		const tabElements = options.isCurrent
-			? h('div.chat-view-title-tab', { role: 'button', tabIndex: 0, title: label }, [
+			? h('div.chat-view-title-tab@root', { role: 'button', tabIndex: 0, title: label }, [
 				h('span.codicon.codicon-backboard-logo.chat-view-title-brand-icon'),
-				h('span.chat-view-title-tab-label@label', [label]),
+				h('span.chat-view-title-tab-label@label'),
 			])
-			: h('div.chat-view-title-tab', { role: 'button', tabIndex: 0, title: label }, [
-				h('span.chat-view-title-tab-label@label', [label]),
+			: h('div.chat-view-title-tab@root', { role: 'button', tabIndex: 0, title: label }, [
+				h('span.chat-view-title-tab-label@label'),
 				h('span.codicon.codicon-close.chat-view-title-tab-close@close', { role: 'button', title: localize('chat.closeSessionTab', "Close Tab"), ariaLabel: localize('chat.closeSessionTab', "Close Tab") }),
-			]);
-		if (!options.isCurrent) {
-			closeElement = tabElements.close;
+		]);
+		tabElements.label.textContent = label;
+		if ('close' in tabElements) {
+			closeElement = (tabElements as { close: HTMLElement }).close;
 		}
 		const tab = tabElements.root;
 		tab.classList.toggle('chat-view-title-tab-active', options.active);

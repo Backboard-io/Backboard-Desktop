@@ -15,7 +15,7 @@ use backboard::{
     AudioAttachment, BackboardClient, BackboardConfig, BackboardModel, RecentUsageQuery,
     SendMessageRequest, SubmitToolOutputsRequest, UsageSummaryQuery, message_request_log_json,
 };
-use futures::StreamExt as _;
+use futures::{StreamExt as _, stream};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt as _, BufReader};
@@ -379,20 +379,27 @@ async fn collect_models(
         return Ok(models);
     }
 
-    add_visible_models(
-        &mut models,
-        &mut seen,
-        client.list_models(None, Some("llm"), None).await?,
+    let (base_models, providers) = futures::join!(
+        client.list_models(None, Some("llm"), None),
+        client.list_providers(),
     );
-    for provider in client.list_providers().await.unwrap_or_default() {
-        if is_featherless_provider(&provider) {
-            continue;
-        }
-        add_visible_models(
-            &mut models,
-            &mut seen,
-            client.list_models_by_provider(&provider, None).await?,
-        );
+    add_visible_models(&mut models, &mut seen, base_models?);
+
+    let provider_names = providers
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|provider| !is_featherless_provider(provider))
+        .collect::<Vec<_>>();
+    let provider_concurrency = provider_names.len().max(1);
+    let provider_results = stream::iter(provider_names.into_iter().map(|provider| async move {
+        client.list_models_by_provider(&provider, None).await
+    }))
+    .buffer_unordered(provider_concurrency)
+    .collect::<Vec<_>>()
+    .await;
+
+    for provider_models in provider_results {
+        add_visible_models(&mut models, &mut seen, provider_models?);
     }
 
     Ok(models)

@@ -48,11 +48,6 @@ export interface IModelPickerDelegate {
 	showUnavailableFeatured(): boolean;
 	showFeatured(): boolean;
 	/**
-	 * Whether the collapsed "Other Models" section should open expanded.
-	 * Defaults to false to preserve the standard picker behavior.
-	 */
-	expandOtherModelsByDefault?(): boolean;
-	/**
 	 * Whether the synthetic "Auto" model is available for the current session,
 	 * so it can fall back to Auto. Defaults to `true` when omitted. When this
 	 * returns `false` and {@link getModels} is empty, the picker shows a

@@ -38,6 +38,8 @@ import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBa
 
 // #region --- New Chat Widget ---
 
+const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 104;
+
 export class NewChatWidget extends Disposable {
 
 	private readonly _workspacePicker: WorkspacePicker;
@@ -115,7 +117,6 @@ export class NewChatWidget extends Disposable {
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: false,
 				isSessionsWindow: true,
-				inputEditorMinLines: 2,
 				workspacePickerDelegate: this._createWorkspacePickerDelegate(),
 				sessionTypePickerDelegate: this._createSessionTypePickerDelegate(),
 				submitHandler: async query => this._sendFromSharedComposer(query),
@@ -496,7 +497,7 @@ export class NewChatWidget extends Disposable {
 
 	layout(_height: number, _width: number): void {
 		const width = this._chatWidgetContent?.clientWidth || _width;
-		const height = this._chatWidgetContent?.clientHeight || _height;
+		const height = Math.min(this._chatWidgetContent?.clientHeight || _height, NEW_CHAT_COMPOSER_LAYOUT_HEIGHT);
 		this._widget.layout(height, width);
 	}
 
