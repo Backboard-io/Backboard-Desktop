@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import './media/backboardModeSwitcher.css';
 import { $, addDisposableListener, append, EventHelper, EventType } from '../../../../../base/browser/dom.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
@@ -21,11 +22,10 @@ import { IKeybindingService } from '../../../../../platform/keybinding/common/ke
 import { INativeHostService } from '../../../../../platform/native/common/native.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
-import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
-import { BACKBOARD_MODE_SWITCHER_COMMAND_ID, ChatConfiguration, OPEN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION, OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID, OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION } from '../../common/constants.js';
+import { BACKBOARD_MODE_SWITCHER_COMMAND_ID, ChatConfiguration, OPEN_AGENTS_WINDOW_COMMAND_ID, OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID, OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION } from '../../common/constants.js';
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
 const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
@@ -61,7 +61,7 @@ export class ToggleBackboardModeSwitcherTitleBarAction extends ToggleTitleBarCon
 			localize('toggle.backboardModeSwitcher', 'Backboard Switcher'),
 			localize('toggle.backboardModeSwitcherDescription', "Toggle visibility of the Editor / Agents / Workspace switcher in the title bar"),
 			6,
-			OPEN_AGENTS_WINDOW_PRECONDITION,
+			OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION,
 		);
 	}
 }
@@ -108,17 +108,17 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 	override render(container: HTMLElement): void {
 		super.render(container);
 
-		container.classList.add('open-in-agents-titlebar-widget');
+		container.classList.add('backboard-mode-titlebar-widget');
 
 		const hoverText = this.keybindingService.appendKeybinding(localize('backboardModeSwitcherHover', "Switch Backboard mode"), BACKBOARD_MODE_SWITCHER_COMMAND_ID);
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 
-		this.triggerButton = append(container, $('button.open-in-agents-titlebar-widget-trigger'));
+		this.triggerButton = append(container, $('button.backboard-mode-titlebar-widget-trigger'));
 		this.triggerButton.setAttribute('aria-haspopup', 'menu');
 		this.triggerButton.setAttribute('aria-expanded', 'false');
-		this.currentLabel = append(this.triggerButton, $('span.open-in-agents-titlebar-widget-label'));
-		const chevron = append(this.triggerButton, $('span.open-in-agents-titlebar-widget-chevron.codicon.codicon-chevron-down'));
+		this.currentLabel = append(this.triggerButton, $('span.backboard-mode-titlebar-widget-label'));
+		const chevron = append(this.triggerButton, $('span.backboard-mode-titlebar-widget-chevron.codicon.codicon-chevron-down'));
 		chevron.setAttribute('aria-hidden', 'true');
 
 		this._register(addDisposableListener(this.triggerButton, EventType.CLICK, e => {

@@ -312,7 +312,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	async openBackboardWorkspaceWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI): Promise<ICodeWindow[]> {
 		this.logService.trace('windowsManager#openBackboardWorkspaceWindow');
 
-		const windows = await this.open(await this.ensureAgentsWindow(openConfig));
+		const windows = await this.open(await this.ensureBackboardWorkspaceWindow(openConfig));
 		if (windows.length > 0) {
 			windows[0].sendWhenReady('vscode:openBackboardWorkspace', CancellationToken.None, folderUri?.toJSON(), sessionResource?.toJSON());
 		}
@@ -339,6 +339,35 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 
 		return {
 			urisToOpen: [{ workspaceUri: agentSessionsWorkspaceUri }],
+			userEnv: openConfig.userEnv,
+			cli: openConfig.cli,
+			noRecentEntry: true,
+			context: openConfig.context,
+			contextWindowId: reuseWindowId ?? openConfig.contextWindowId,
+			initialStartup: openConfig.initialStartup,
+			forceNewWindow: !openConfig.forceReuseWindow,
+			forceReuseWindow: openConfig.forceReuseWindow,
+		};
+	}
+
+	private async ensureBackboardWorkspaceWindow(openConfig: IOpenConfiguration): Promise<IOpenConfiguration> {
+		const workspaceUri = this.environmentMainService.agentSessionsWorkspace;
+		if (!workspaceUri) {
+			throw new Error('Backboard workspace host is not configured');
+		}
+
+		const workspaceExists = await this.fileService.exists(workspaceUri);
+		if (!workspaceExists) {
+			const emptyWorkspaceContent = JSON.stringify({ folders: [] }, null, '\t');
+			await this.fileService.writeFile(workspaceUri, VSBuffer.fromString(emptyWorkspaceContent));
+		}
+
+		const reuseWindowId = openConfig.forceReuseWindow
+			? openConfig.contextWindowId ?? this.getFocusedWindow()?.id ?? this.getLastActiveWindow()?.id
+			: undefined;
+
+		return {
+			urisToOpen: [{ workspaceUri }],
 			userEnv: openConfig.userEnv,
 			cli: openConfig.cli,
 			noRecentEntry: true,

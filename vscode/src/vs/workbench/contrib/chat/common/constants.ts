@@ -333,7 +333,13 @@ export const OPEN_AGENTS_WINDOW_PRECONDITION = ContextKeyExpr.and(
 	ContextKeyExpr.has(`config.${ChatConfiguration.AgentEnabled}`),
 	IsAuxiliaryWindowContext.negate()
 );
-export const OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION = OPEN_AGENTS_WINDOW_PRECONDITION;
+export const OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION = ContextKeyExpr.and(
+	ChatEntitlementContextKeys.Setup.hidden.negate(),
+	ChatEntitlementContextKeys.Setup.disabledInWorkspace.negate(),
+	IsSessionsWindowContext.negate(),
+	ContextKeyExpr.has(`config.${ChatConfiguration.AgentEnabled}`),
+	IsAuxiliaryWindowContext.negate()
+);
 
 export const ChatEditorTitleMaxLength = 30;
 

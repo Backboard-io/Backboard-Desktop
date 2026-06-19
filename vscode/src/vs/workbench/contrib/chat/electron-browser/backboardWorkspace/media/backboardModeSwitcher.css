@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-.monaco-workbench .open-in-agents-titlebar-widget {
+.monaco-workbench .backboard-mode-titlebar-widget {
 	display: inline-flex;
 	align-items: center;
 	height: 28px;
@@ -16,7 +16,7 @@
 	white-space: nowrap;
 }
 
-.monaco-workbench .open-in-agents-titlebar-widget > .open-in-agents-titlebar-widget-trigger {
+.monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger {
 	all: unset;
 	box-sizing: border-box;
 	display: inline-flex;
@@ -31,16 +31,16 @@
 	line-height: 26px;
 }
 
-.monaco-workbench .open-in-agents-titlebar-widget > .open-in-agents-titlebar-widget-trigger:hover {
+.monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger:hover {
 	background-color: var(--vscode-toolbar-hoverBackground);
 }
 
-.monaco-workbench .open-in-agents-titlebar-widget > .open-in-agents-titlebar-widget-trigger:focus-visible {
+.monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);
 	outline-offset: -1px;
 }
 
-.monaco-workbench .open-in-agents-titlebar-widget-chevron {
+.monaco-workbench .backboard-mode-titlebar-widget-chevron {
 	margin-left: 6px;
 	font-size: 13px;
 }

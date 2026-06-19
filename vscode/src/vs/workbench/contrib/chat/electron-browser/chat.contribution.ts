@@ -47,9 +47,10 @@ import { registerChatDeveloperActions } from './actions/chatDeveloperActions.js'
 import { registerChatExportZipAction } from './actions/chatExportZip.js';
 import { BackboardCredentialsContribution, registerBackboardSsoActions } from './actions/backboardSsoActions.js';
 import { registerExportAgentTracesDbAction } from './actions/exportAgentTracesDb.js';
+import { BackboardModeSwitcherAction, BackboardModeSwitcherContribution, OpenBackboardWorkspaceWindowAction, ToggleBackboardModeSwitcherTitleBarAction } from './backboardWorkspace/backboardWorkspaceActions.js';
 import { shouldWarnForSessionShutdown } from './chatLifecycle.js';
 import { HoldToVoiceChatInChatViewAction, InlineVoiceChatAction, KeywordActivationContribution, QuickVoiceChatAction, ReadChatResponseAloud, StartVoiceChatAction, StopListeningAction, StopListeningAndSubmitAction, StopReadAloud, StopReadChatItemAloud, VoiceChatInChatViewAction } from './actions/voiceChatActions.js';
-import { OpenWorkspaceInAgentsWindowAction, OpenWorkspaceInAgentsContribution, OpenAgentsWindowAction, OpenBackboardWorkspaceWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution, ToggleOpenInAgentsWindowTitleBarAction } from './agentSessions/agentSessionsActions.js';
+import { OpenWorkspaceInAgentsWindowAction, OpenAgentsWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution } from './agentSessions/agentSessionsActions.js';
 import { NativeBuiltinToolsContribution } from './builtInTools/tools.js';
 import { NativePluginGitCommandService } from './pluginGitCommandService.js';
 
@@ -234,7 +235,8 @@ class ChatLifecycleHandler extends Disposable {
 }
 
 registerAction2(OpenWorkspaceInAgentsWindowAction);
-registerAction2(ToggleOpenInAgentsWindowTitleBarAction);
+registerAction2(BackboardModeSwitcherAction);
+registerAction2(ToggleBackboardModeSwitcherTitleBarAction);
 registerAction2(OpenAgentsWindowAction);
 registerAction2(OpenBackboardWorkspaceWindowAction);
 registerAction2(OpenChatSessionInAgentsWindowAction);
@@ -265,7 +267,7 @@ registerWorkbenchContribution2(ChatLifecycleHandler.ID, ChatLifecycleHandler, Wo
 registerWorkbenchContribution2(BackboardCredentialsContribution.ID, BackboardCredentialsContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostContribution.ID, AgentHostContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostTerminalContribution.ID, AgentHostTerminalContribution, WorkbenchPhase.AfterRestored);
-registerWorkbenchContribution2(OpenWorkspaceInAgentsContribution.ID, OpenWorkspaceInAgentsContribution, WorkbenchPhase.BlockRestore);
+registerWorkbenchContribution2(BackboardModeSwitcherContribution.ID, BackboardModeSwitcherContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(AgentsHandoffInputTipContribution.ID, AgentsHandoffInputTipContribution, WorkbenchPhase.Eventually);
 
 // How long to wait for the agent host to surface an AgentInfo before

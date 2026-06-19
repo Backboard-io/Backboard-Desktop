@@ -2,21 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import './media/openInAgents.css';
-import { $, addDisposableListener, append, EventHelper, EventType } from '../../../../../base/browser/dom.js';
-import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
-import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
-import { IAction, toAction } from '../../../../../base/common/actions.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../../nls.js';
-import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId } from '../../../../../platform/actions/common/actions.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { CONTEXT_ACCESSIBILITY_MODE_ENABLED } from '../../../../../platform/accessibility/common/accessibility.js';
-import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
-import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
-import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
 import { KeyCode, KeyMod } from '../../../../../base/common/keyCodes.js';
 import { KeybindingWeight } from '../../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { INativeHostService } from '../../../../../platform/native/common/native.js';
@@ -24,7 +15,6 @@ import { Schemas } from '../../../../../base/common/network.js';
 import { URI, UriComponents } from '../../../../../base/common/uri.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../platform/workspace/common/workspace.js';
 import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
-import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
 import { IChatWidgetService } from '../../browser/chat.js';
@@ -33,16 +23,10 @@ import { SessionType } from '../../common/chatSessionsService.js';
 import { IChatViewTitleActionContext } from '../../common/actions/chatActions.js';
 import { getChatSessionType, isUntitledChatSession } from '../../common/model/chatUri.js';
 import { ChatInputNotificationSeverity, IChatInputNotificationService } from '../../browser/widget/input/chatInputNotificationService.js';
-import { OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID, OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION, OPEN_AGENTS_WINDOW_COMMAND_ID, ChatConfiguration } from '../../common/constants.js';
+import { OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION, OPEN_AGENTS_WINDOW_COMMAND_ID, ChatConfiguration } from '../../common/constants.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
-import { IEditorService } from '../../../../services/editor/common/editorService.js';
-import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
-
-const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
-const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
-const BACKBOARD_WORKSPACE_EDITOR_ID = 'workbench.editor.backboardWorkspace';
 
 export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 	constructor() {
@@ -57,14 +41,6 @@ export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 					group: 'c_sessions',
 					order: 1,
 					when: OPEN_AGENTS_WINDOW_PRECONDITION,
-				}, {
-					id: MenuId.TitleBarLeft,
-					group: 'navigation',
-					order: 0,
-					when: ContextKeyExpr.and(
-						OPEN_AGENTS_WINDOW_PRECONDITION,
-						ContextKeyExpr.notEquals(`config.${ChatConfiguration.TitleBarOpenInAgentsWindowEnabled}`, false),
-					),
 				}]
 		});
 	}
@@ -74,18 +50,6 @@ export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 		const workspaceContextService = accessor.get(IWorkspaceContextService);
 		const folderUri = workspaceContextService.getWorkspace().folders[0]?.uri;
 		await nativeHostService.openAgentsWindow({ folderUri: folderUri?.scheme === Schemas.file ? folderUri.toJSON() : undefined });
-	}
-}
-
-export class ToggleOpenInAgentsWindowTitleBarAction extends ToggleTitleBarConfigAction {
-	constructor() {
-		super(
-			ChatConfiguration.TitleBarOpenInAgentsWindowEnabled,
-			localize('toggle.openInAgentsWindow', 'Agents Switcher'),
-			localize('toggle.openInAgentsWindowDescription', "Toggle visibility of the Editor / Agents switcher in the title bar"),
-			6,
-			OPEN_AGENTS_WINDOW_PRECONDITION,
-		);
 	}
 }
 
@@ -113,28 +77,6 @@ export class OpenAgentsWindowAction extends Action2 {
 
 	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents }) {
 		await accessor.get(INativeHostService).openAgentsWindow(args);
-	}
-}
-
-export class OpenBackboardWorkspaceWindowAction extends Action2 {
-	constructor() {
-		super({
-			id: OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID,
-			title: localize2('openBackboardWorkspaceWindow', "Open Workspace"),
-			category: CHAT_CATEGORY,
-			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
-			f1: true,
-		});
-	}
-
-	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents }) {
-		const nativeHostService = accessor.get(INativeHostService);
-		const workspaceContextService = accessor.get(IWorkspaceContextService);
-		const folderUri = args?.folderUri ?? workspaceContextService.getWorkspace().folders[0]?.uri.toJSON();
-		await nativeHostService.openBackboardWorkspaceWindow({
-			folderUri,
-			sessionResource: args?.sessionResource,
-		});
 	}
 }
 
@@ -193,141 +135,6 @@ export class OpenChatSessionInAgentsWindowAction extends Action2 {
 			folderUri: folderUri?.scheme === Schemas.file ? folderUri.toJSON() : undefined,
 			sessionResource: sessionResource && !isUntitledChatSession(sessionResource) ? sessionResource.toJSON() : undefined,
 		});
-	}
-}
-
-/**
- * Renders a stable Editor / Agents titlebar switcher.
- */
-class OpenWorkspaceInAgentsTitleBarWidget extends BaseActionViewItem {
-
-	private triggerButton: HTMLButtonElement | undefined;
-	private currentLabel: HTMLElement | undefined;
-
-	constructor(
-		action: IAction,
-		options: IBaseActionViewItemOptions | undefined,
-		@IHoverService private readonly hoverService: IHoverService,
-		@IKeybindingService private readonly keybindingService: IKeybindingService,
-		@ICommandService private readonly commandService: ICommandService,
-		@IEditorService private readonly editorService: IEditorService,
-		@IContextMenuService private readonly contextMenuService: IContextMenuService,
-	) {
-		super(undefined, action, options);
-	}
-
-	override render(container: HTMLElement): void {
-		super.render(container);
-
-		container.classList.add('open-in-agents-titlebar-widget');
-
-		const hoverText = this.keybindingService.appendKeybinding(localize('openInAgentsHover', "Switch to Agents"), OPEN_AGENTS_WINDOW_COMMAND_ID);
-		container.setAttribute('aria-label', hoverText);
-		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
-
-		this.triggerButton = append(container, $('button.open-in-agents-titlebar-widget-trigger'));
-		this.triggerButton.setAttribute('aria-haspopup', 'menu');
-		this.triggerButton.setAttribute('aria-expanded', 'false');
-		this.currentLabel = append(this.triggerButton, $('span.open-in-agents-titlebar-widget-label'));
-		const chevron = append(this.triggerButton, $('span.open-in-agents-titlebar-widget-chevron.codicon.codicon-chevron-down'));
-		chevron.setAttribute('aria-hidden', 'true');
-
-		this._register(addDisposableListener(this.triggerButton, EventType.CLICK, e => {
-			EventHelper.stop(e, true);
-			this.showMenu();
-		}));
-		this._register(addDisposableListener(this.triggerButton, EventType.KEY_DOWN, e => this.handleKeyDown(e)));
-		this._register(this.editorService.onDidActiveEditorChange(() => this.updateState()));
-
-		this.updateState();
-	}
-
-	private handleKeyDown(event: KeyboardEvent): void {
-		if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
-			EventHelper.stop(event, true);
-			this.showMenu();
-		}
-	}
-
-	private showMenu(): void {
-		if (!this.triggerButton) {
-			return;
-		}
-
-		const agentsActive = this.isAgentsActive();
-		const workspaceActive = this.isWorkspaceActive();
-		this.triggerButton.setAttribute('aria-expanded', 'true');
-		this.contextMenuService.showContextMenu({
-			getAnchor: () => this.triggerButton!,
-			getActions: () => [
-				toAction({
-					id: 'workbench.action.mode.editor',
-					label: localize('openInAgentsSwitcher.editor', "Editor"),
-					checked: !agentsActive && !workspaceActive,
-					run: () => this.openEditor(),
-				}),
-				toAction({
-					id: 'workbench.action.mode.agents',
-					label: localize('openInAgentsSwitcher.agents', "Agents"),
-					checked: agentsActive,
-					run: () => this.openAgents(),
-				}),
-				toAction({
-					id: 'workbench.action.mode.workspace',
-					label: localize('openInAgentsSwitcher.workspace', "Workspace"),
-					checked: workspaceActive,
-					run: () => this.openWorkspace(),
-				}),
-			],
-			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
-		});
-	}
-
-	private openAgents(): void {
-		this.action.run();
-	}
-
-	private openWorkspace(): void {
-		this.commandService.executeCommand(OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID);
-	}
-
-	private openEditor(): void {
-		if (this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID) {
-			this.commandService.executeCommand(CLOSE_ACTIVE_EDITOR_COMMAND_ID);
-		}
-	}
-
-	private isAgentsActive(): boolean {
-		return this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID;
-	}
-
-	private isWorkspaceActive(): boolean {
-		return this.editorService.activeEditorPane?.getId() === BACKBOARD_WORKSPACE_EDITOR_ID;
-	}
-
-	private updateState(): void {
-		const agentsActive = this.isAgentsActive();
-		const workspaceActive = this.isWorkspaceActive();
-		this.currentLabel?.replaceChildren(workspaceActive
-			? localize('openInAgentsSwitcher.workspace', "Workspace")
-			: agentsActive
-			? localize('openInAgentsSwitcher.agents', "Agents")
-			: localize('openInAgentsSwitcher.editor', "Editor"));
-	}
-}
-
-export class OpenWorkspaceInAgentsContribution extends Disposable implements IWorkbenchContribution {
-
-	static readonly ID = 'workbench.contrib.openWorkspaceInAgents.desktop';
-
-	constructor(
-		@IActionViewItemService actionViewItemService: IActionViewItemService,
-		@IInstantiationService instantiationService: IInstantiationService,
-	) {
-		super();
-		this._register(actionViewItemService.register(MenuId.TitleBarLeft, OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, (action, options) => {
-			return instantiationService.createInstance(OpenWorkspaceInAgentsTitleBarWidget, action, options);
-		}, undefined));
 	}
 }
 
