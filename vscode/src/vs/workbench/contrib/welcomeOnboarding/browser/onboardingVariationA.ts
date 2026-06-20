@@ -12,6 +12,7 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
 import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../base/common/network.js';
+import { isLinux, isMacintosh, isWindows } from '../../../../base/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
@@ -27,6 +28,7 @@ import { IAccessibilityService } from '../../../../platform/accessibility/common
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
+import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
 import { OPEN_AGENTS_WINDOW_COMMAND_ID } from '../../chat/common/constants.js';
 import { SessionType } from '../../chat/common/chatSessionsService.js';
 import { IOnboardingService } from '../common/onboardingService.js';
@@ -68,10 +70,24 @@ type OnboardingActionEvent = {
 	argument: string | undefined;
 };
 
+interface ISettingsImportSource {
+	readonly id: string;
+	readonly label: string;
+	readonly description: string;
+	readonly icon: string;
+	readonly userDataHome: URI;
+}
+
+interface ISettingsImportResult {
+	readonly imported: string[];
+	readonly missing: string[];
+}
+
 const BACKBOARD_SIGN_IN_URL = 'https://app.backboard.io/signup';
 const BACKBOARD_API_KEYS_URL = 'https://app.backboard.io/dashboard/api-keys';
 const BACKBOARD_API_KEY_PATTERN = /^espr_[A-Za-z0-9_-]{43}$/;
 const LOCAL_AGENT_HOST_PROVIDER_ID = 'local-agent-host';
+const SOURCE_SETTINGS_RESOURCE_NAMES = ['settings.json', 'keybindings.json'] as const;
 const BACKBOARD_WELCOME_SPLASH_ICONS = [
 	'ai_open_ai.svg',
 	'ai_open_ai_compat.svg',
@@ -177,6 +193,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		@IStorageService private readonly storageService: IStorageService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
+		@IUserDataProfileService private readonly userDataProfileService: IUserDataProfileService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
 	) {
 		super();
@@ -537,10 +554,12 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		const stepId = this.steps[this.currentStepIndex];
 		const isWelcome = stepId === OnboardingStepId.Welcome;
+		const isImportSettings = stepId === OnboardingStepId.ImportSettings;
 
 		this.card.classList.toggle('onboarding-a-card-welcome', isWelcome);
-		this.titleEl.style.display = isWelcome ? 'none' : '';
-		this.subtitleEl.style.display = isWelcome ? 'none' : '';
+		this.card.classList.toggle('onboarding-a-card-import', isImportSettings);
+		this.titleEl.style.display = isWelcome || isImportSettings ? 'none' : '';
+		this.subtitleEl.style.display = isWelcome || isImportSettings ? 'none' : '';
 		this.titleEl.textContent = getOnboardingStepTitle(stepId);
 		this.subtitleEl.textContent = getOnboardingStepSubtitle(stepId);
 
@@ -903,51 +922,212 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 	private _renderImportSettingsStep(container: HTMLElement): void {
 		const wrapper = append(container, $('.onboarding-backboard-import'));
-		const grid = append(wrapper, $('.onboarding-backboard-import-grid'));
+		wrapper.setAttribute('aria-label', getOnboardingStepTitle(OnboardingStepId.ImportSettings));
 
-		this._createImportCard(
-			grid,
-			'vscode',
-			localize('onboarding.backboard.import.vscode', "Editor"),
-			localize('onboarding.backboard.import.vscode.description', "Bring keybindings and settings."),
-			'onboarding-vscode.png'
-		);
+		const title = append(wrapper, $('h1.onboarding-backboard-import-heading'));
+		title.textContent = localize('onboarding.backboard.import.heading', "Import Settings");
 
-		this._createImportCard(
-			grid,
-			'cursor',
-			localize('onboarding.backboard.import.cursor', "Cursor"),
-			localize('onboarding.backboard.import.cursor.description', "Bring your Cursor setup."),
-			'onboarding-cursor.png'
-		);
+		const options = append(wrapper, $('.onboarding-backboard-import-options'));
+		for (const source of this._getSettingsImportSources()) {
+			this._createImportOption(options, source);
+		}
+
+		const skipButton = this._registerStepFocusable(append(wrapper, $<HTMLButtonElement>('button.onboarding-backboard-import-skip')));
+		skipButton.type = 'button';
+		skipButton.textContent = localize('onboarding.backboard.import.skip', "Skip Import");
+		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
+			this._logAction('skipImportSettings');
+			this._nextStep();
+		}));
 	}
 
-	private _createImportCard(parent: HTMLElement, id: string, label: string, description: string, icon: string): void {
-		const card = append(parent, $('.onboarding-backboard-import-card'));
+	private _createImportOption(parent: HTMLElement, source: ISettingsImportSource): void {
+		const button = this._registerStepFocusable(append(parent, $<HTMLButtonElement>('button.onboarding-backboard-import-option')));
+		button.type = 'button';
+		button.dataset.id = source.id;
+		button.title = source.description;
+		button.setAttribute('aria-label', localize('onboarding.backboard.import.option.aria', "Import settings from {0}. {1}", source.label, source.description));
 
-		const iconWrap = append(card, $('.onboarding-backboard-import-icon'));
-		const img = append(iconWrap, $<HTMLImageElement>('img'));
+		const img = append(button, $<HTMLImageElement>('img.onboarding-backboard-import-option-icon'));
 		img.alt = '';
 		img.decoding = 'async';
-		img.src = this._mediaUri(icon);
+		img.src = this._mediaUri(source.icon);
 
-		const copy = append(card, $('.onboarding-backboard-import-copy'));
-		const title = append(copy, $('div.onboarding-backboard-import-title'));
-		title.textContent = label;
-		const desc = append(copy, $('p.onboarding-backboard-import-description'));
-		desc.textContent = description;
-
-		const button = this._registerStepFocusable(append(card, $<HTMLButtonElement>('button.onboarding-a-btn.onboarding-a-btn-secondary.onboarding-backboard-import-button')));
-		button.type = 'button';
-		button.textContent = localize('onboarding.backboard.import.button', "Import");
+		const label = append(button, $('span.onboarding-backboard-import-option-label'));
+		label.textContent = source.label;
 
 		this.stepDisposables.add(addDisposableListener(button, EventType.CLICK, () => {
-			this._logAction('importSettings', undefined, id);
+			void this._importSettingsFromSource(source, button);
+		}));
+	}
+
+	private _getSettingsImportSources(): readonly ISettingsImportSource[] {
+		return [
+			{
+				id: 'vscode',
+				label: localize('onboarding.backboard.import.vscode', "Visual Studio Code"),
+				description: localize('onboarding.backboard.import.vscode.description', "Bring settings, keyboard shortcuts, and snippets."),
+				icon: 'onboarding-vscode.png',
+				userDataHome: this._getExternalUserDataHome('Code'),
+			},
+			{
+				id: 'cursor',
+				label: localize('onboarding.backboard.import.cursor', "Cursor"),
+				description: localize('onboarding.backboard.import.cursor.description', "Bring settings, keyboard shortcuts, and snippets."),
+				icon: 'onboarding-cursor.png',
+				userDataHome: this._getExternalUserDataHome('Cursor'),
+			},
+		];
+	}
+
+	private _getExternalUserDataHome(applicationDataFolderName: string): URI {
+		const home = this.pathService.userHome({ preferLocal: true });
+		if (isMacintosh) {
+			return URI.joinPath(home, 'Library', 'Application Support', applicationDataFolderName, 'User');
+		}
+		if (isWindows) {
+			return URI.joinPath(home, 'AppData', 'Roaming', applicationDataFolderName, 'User');
+		}
+		if (isLinux) {
+			return URI.joinPath(home, '.config', applicationDataFolderName, 'User');
+		}
+		return URI.joinPath(home, '.config', applicationDataFolderName, 'User');
+	}
+
+	private async _importSettingsFromSource(source: ISettingsImportSource, button: HTMLButtonElement): Promise<void> {
+		if (button.disabled) {
+			return;
+		}
+
+		button.disabled = true;
+		button.classList.add('importing');
+		button.setAttribute('aria-busy', 'true');
+		this._logAction('importSettings', undefined, source.id);
+
+		try {
+			const result = await this._copySettingsFromSource(source);
+			if (!result.imported.length) {
+				this.notificationService.notify({
+					severity: Severity.Warning,
+					message: localize('onboarding.backboard.import.noneFound', "No {0} settings were found to import.", source.label),
+					source: source.userDataHome.fsPath,
+				});
+				this.accessibilityService.alert(localize('onboarding.backboard.import.noneFound.alert', "No {0} settings were found to import.", source.label));
+				return;
+			}
+
 			this.notificationService.notify({
 				severity: Severity.Info,
-				message: localize('onboarding.backboard.import.pending', "{0} settings import is not wired up in this build yet.", label),
+				message: localize('onboarding.backboard.import.complete', "Imported {0}: {1}.", source.label, result.imported.join(', ')),
 			});
-		}));
+			this.accessibilityService.alert(localize('onboarding.backboard.import.complete.alert', "{0} settings imported", source.label));
+			this._nextStep();
+		} catch (error) {
+			this.notificationService.notify({
+				severity: Severity.Error,
+				message: localize('onboarding.backboard.import.failed', "Could not import {0} settings.", source.label),
+				source: error instanceof Error ? error.message : undefined,
+			});
+		} finally {
+			button.disabled = false;
+			button.classList.remove('importing');
+			button.removeAttribute('aria-busy');
+		}
+	}
+
+	private async _copySettingsFromSource(source: ISettingsImportSource): Promise<ISettingsImportResult> {
+		const profile = this.userDataProfileService.currentProfile;
+		const imported: string[] = [];
+		const missing: string[] = [];
+
+		await this._tryCreateFolder(profile.location);
+
+		const resourceTargets = [
+			{
+				sourceName: SOURCE_SETTINGS_RESOURCE_NAMES[0],
+				target: profile.settingsResource,
+				label: localize('onboarding.backboard.import.resource.settings', "Settings"),
+			},
+			{
+				sourceName: SOURCE_SETTINGS_RESOURCE_NAMES[1],
+				target: profile.keybindingsResource,
+				label: localize('onboarding.backboard.import.resource.keybindings', "Keyboard Shortcuts"),
+			},
+		];
+
+		for (const resource of resourceTargets) {
+			const sourceResource = URI.joinPath(source.userDataHome, resource.sourceName);
+			const contents = await this._tryReadFile(sourceResource);
+			if (contents === undefined) {
+				missing.push(resource.label);
+				continue;
+			}
+
+			await this.fileService.writeFile(resource.target, VSBuffer.fromString(contents));
+			imported.push(resource.label);
+		}
+
+		const snippetCount = await this._copySnippets(URI.joinPath(source.userDataHome, 'snippets'), profile.snippetsHome);
+		if (snippetCount > 0) {
+			imported.push(localize('onboarding.backboard.import.resource.snippets', "Snippets"));
+		} else {
+			missing.push(localize('onboarding.backboard.import.resource.snippets', "Snippets"));
+		}
+
+		return { imported, missing };
+	}
+
+	private async _copySnippets(sourceSnippetsHome: URI, targetSnippetsHome: URI): Promise<number> {
+		const sourceStat = await this._tryResolve(sourceSnippetsHome);
+		if (!sourceStat?.isDirectory) {
+			return 0;
+		}
+
+		const snippetFiles = (sourceStat.children ?? []).filter(child => {
+			const name = child.name.toLowerCase();
+			return child.isFile && (name.endsWith('.json') || name.endsWith('.code-snippets'));
+		});
+		if (!snippetFiles.length) {
+			return 0;
+		}
+
+		await this._tryCreateFolder(targetSnippetsHome);
+		for (const snippetFile of snippetFiles) {
+			await this.fileService.copy(snippetFile.resource, URI.joinPath(targetSnippetsHome, snippetFile.name), true);
+		}
+		return snippetFiles.length;
+	}
+
+	private async _tryReadFile(resource: URI): Promise<string | undefined> {
+		try {
+			return (await this.fileService.readFile(resource)).value.toString();
+		} catch (error) {
+			if (toFileOperationResult(error) === FileOperationResult.FILE_NOT_FOUND) {
+				return undefined;
+			}
+			throw error;
+		}
+	}
+
+	private async _tryResolve(resource: URI) {
+		try {
+			return await this.fileService.resolve(resource);
+		} catch (error) {
+			if (toFileOperationResult(error) === FileOperationResult.FILE_NOT_FOUND) {
+				return undefined;
+			}
+			throw error;
+		}
+	}
+
+	private async _tryCreateFolder(resource: URI): Promise<void> {
+		try {
+			await this.fileService.createFolder(resource);
+		} catch (error) {
+			if (toFileOperationResult(error) !== FileOperationResult.FILE_IS_DIRECTORY) {
+				throw error;
+			}
+		}
 	}
 
 	private _renderSignInStep(container: HTMLElement): void {

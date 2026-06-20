@@ -6,6 +6,7 @@ import { Uri } from 'vscode';
 import { AuthProviderType } from '../github';
 
 const VALID_DESKTOP_CALLBACK_SCHEMES = [
+	'backboard',
 	'vscode',
 	'vscode-insiders',
 	'vscode-exploration',

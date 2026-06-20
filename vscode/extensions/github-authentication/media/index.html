@@ -43,6 +43,7 @@
 
 		const error = urlParams.get('error');
 		const redirectUri = urlParams.get('redirect_uri');
+		const redirectEndpoint = urlParams.get('redirect_endpoint');
 		if (error) {
 			document.querySelector('.error-message > .detail').textContent = error;
 			document.querySelector('body').classList.add('error');
@@ -52,17 +53,26 @@
 			document.querySelector('.success-message > .subtitle').textContent = 'You have successfully signed in.';
 			document.querySelector('.success-message > .detail').textContent = 'You can now close this window.';
 		} else {
-			// Wrap the redirect URI so that the browser remembers who triggered the redirect
-			const wrappedRedirectUri = `https://vscode.dev/redirect?url=${encodeURIComponent(redirectUri)}`;
+			let launchUri = redirectUri;
+			if (redirectEndpoint) {
+				try {
+					const endpoint = new URL(redirectEndpoint);
+					endpoint.searchParams.set('url', redirectUri);
+					launchUri = endpoint.toString();
+				} catch {
+					// Fall back to opening the app URI directly.
+				}
+			}
+
 			// Set up the fallback link
 			const fallbackLink = document.getElementById('fallback-link');
 			if (fallbackLink) {
-				fallbackLink.href = wrappedRedirectUri;
+				fallbackLink.href = launchUri;
 			}
 
 			// Redirect after a delay
 			setTimeout(() => {
-				window.location = wrappedRedirectUri;
+				window.location = launchUri;
 			}, 1000);
 		}
 	</script>
