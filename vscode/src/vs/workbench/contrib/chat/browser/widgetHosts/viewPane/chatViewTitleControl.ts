@@ -218,8 +218,7 @@ export class ChatViewTitleControl extends Disposable {
 		const sessions = this.agentSessionsService.model.sessions
 			.filter(session => !session.isArchived())
 			.filter(session => !currentSessionResource || !isEqual(session.resource, currentSessionResource))
-			.filter(session => !this.closedSessionTabs.has(session.resource.toString()))
-			.slice(0, 4);
+			.filter(session => !this.closedSessionTabs.has(session.resource.toString()));
 
 		for (const session of sessions) {
 			this.addTab({
@@ -236,20 +235,12 @@ export class ChatViewTitleControl extends Disposable {
 		}
 
 		const label = options.label.trim() || ChatViewTitleControl.DEFAULT_TITLE;
-		let closeElement: HTMLElement | undefined;
-		const tabElements = options.isCurrent
-			? h('div.chat-view-title-tab@root', { role: 'button', tabIndex: 0, title: label }, [
-				h('span.codicon.codicon-backboard-logo.chat-view-title-brand-icon'),
-				h('span.chat-view-title-tab-label@label'),
-			])
-			: h('div.chat-view-title-tab@root', { role: 'button', tabIndex: 0, title: label }, [
-				h('span.chat-view-title-tab-label@label'),
-				h('span.codicon.codicon-close.chat-view-title-tab-close@close', { role: 'button', title: localize('chat.closeSessionTab', "Close Tab"), ariaLabel: localize('chat.closeSessionTab', "Close Tab") }),
+		const tabElements = h('div.chat-view-title-tab@root', { role: 'button', tabIndex: 0, title: label }, [
+			h('span.codicon.codicon-info.chat-view-title-brand-icon'),
+			h('span.chat-view-title-tab-label@label'),
+			h('span.codicon.codicon-close.chat-view-title-tab-close@close', { role: 'button', title: localize('chat.closeSessionTab', "Close Tab"), ariaLabel: localize('chat.closeSessionTab', "Close Tab") }),
 		]);
 		tabElements.label.textContent = label;
-		if ('close' in tabElements) {
-			closeElement = (tabElements as { close: HTMLElement }).close;
-		}
 		const tab = tabElements.root;
 		tab.classList.toggle('chat-view-title-tab-active', options.active);
 
@@ -268,14 +259,14 @@ export class ChatViewTitleControl extends Disposable {
 			}
 		}));
 
-		if (options.session && closeElement) {
-			this.tabDisposables.add(addDisposableListener(closeElement, EventType.CLICK, e => {
-				e.preventDefault();
-				e.stopPropagation();
-				this.closedSessionTabs.add(options.session!.resource.toString());
-				this.updateTabs(this.getResolvedTitle());
-			}));
-		}
+		this.tabDisposables.add(addDisposableListener(tabElements.close, EventType.CLICK, e => {
+			e.preventDefault();
+			e.stopPropagation();
+			if (options.session) {
+				this.closedSessionTabs.add(options.session.resource.toString());
+			}
+			this.updateTabs(this.getResolvedTitle());
+		}));
 	}
 
 	getHeight(): number {

@@ -39,12 +39,10 @@ import { MobileSessionFilterChips } from '../../../../browser/parts/mobile/mobil
 import { IMobileSortGroupSheetItem, showMobileSortGroupSheet } from '../../../../browser/parts/mobile/mobileSortGroupSheet.js';
 import { isPhoneLayout } from '../../../../browser/parts/mobile/mobileLayout.js';
 import { IsPhoneLayoutContext } from '../../../../common/contextkeys.js';
-import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { NEW_SESSION_ACTION_ID } from '../../../chat/common/constants.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
-const GROUPING_STORAGE_KEY = 'sessionsViewPane.grouping';
+const GROUPING_STORAGE_KEY = 'sessionsViewPane.grouping.v2';
 const SORTING_STORAGE_KEY = 'sessionsViewPane.sorting';
 
 /**
@@ -64,7 +62,7 @@ export async function openSessionToTheSide(sessionsService: ISessionsService, se
 
 export const SessionsViewFilterSubMenu = new MenuId('SessionsViewPaneFilterSubMenu');
 export const SessionsViewFilterOptionsSubMenu = new MenuId('SessionsViewPaneFilterOptionsSubMenu');
-export const SessionsViewGroupingContext = new RawContextKey<string>('sessionsViewPane.grouping', SessionsGrouping.Workspace);
+export const SessionsViewGroupingContext = new RawContextKey<string>('sessionsViewPane.grouping', SessionsGrouping.Date);
 export const SessionsViewSortingContext = new RawContextKey<string>('sessionsViewPane.sorting', SessionsSorting.Created);
 export const IsWorkspaceGroupCappedContext = new RawContextKey<boolean>('sessionsViewPane.workspaceGroupCapped', true);
 
@@ -76,9 +74,10 @@ export class SessionsView extends ViewPane {
 	private headerRow: HTMLElement | undefined;
 	private headerLabel: HTMLElement | undefined;
 	private headerActions: HTMLElement | undefined;
+	private groupingToggleLabel: HTMLElement | undefined;
 	private isFindWidgetOpen = false;
 	sessionsControl: SessionsList | undefined;
-	private currentGrouping: SessionsGrouping = SessionsGrouping.Workspace;
+	private currentGrouping: SessionsGrouping = SessionsGrouping.Date;
 	private currentSorting: SessionsSorting = SessionsSorting.Created;
 	private groupingContextKey: IContextKey | undefined;
 	private sortingContextKey: IContextKey | undefined;
@@ -102,7 +101,6 @@ export class SessionsView extends ViewPane {
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@IStorageService private readonly storageService: IStorageService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
-		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -175,9 +173,10 @@ export class SessionsView extends ViewPane {
 
 			this.createSidebarAction(headerActions, Codicon.edit, localize('newChat', "New chat"), () => {
 				logSessionsInteraction(this.telemetryService, 'newSession');
-				this.commandService.executeCommand(NEW_SESSION_ACTION_ID);
+				this.sessionsService.openNewSession({ forceNew: true });
 			});
 			this.createSidebarAction(headerActions, Codicon.search, localize('search', "Search"), () => this.openFind());
+			this.createGroupingToggle(headerActions);
 		} else {
 			headerRow.classList.add('phone-layout-empty');
 		}
@@ -317,6 +316,35 @@ export class SessionsView extends ViewPane {
 			e.preventDefault();
 			run();
 		}));
+	}
+
+	private createGroupingToggle(container: HTMLElement): void {
+		const button = DOM.append(container, $('button.agent-sessions-sidebar-action.agent-sessions-grouping-action')) as HTMLButtonElement;
+		button.type = 'button';
+		const iconElement = DOM.append(button, $('span.agent-sessions-sidebar-action-icon'));
+		iconElement.appendChild(renderIcon(Codicon.filter));
+		this.groupingToggleLabel = DOM.append(button, $('span.agent-sessions-sidebar-action-label'));
+		DOM.append(button, $('span.agent-sessions-grouping-action-chevron')).appendChild(renderIcon(Codicon.chevronDown));
+		this._register(DOM.addDisposableListener(button, DOM.EventType.CLICK, e => {
+			e.preventDefault();
+			this.setGrouping(this.currentGrouping === SessionsGrouping.Date ? SessionsGrouping.Workspace : SessionsGrouping.Date);
+		}));
+		this.updateGroupingToggleState();
+	}
+
+	private updateGroupingToggleState(): void {
+		if (!this.groupingToggleLabel) {
+			return;
+		}
+
+		const groupedByTime = this.currentGrouping === SessionsGrouping.Date;
+		const label = groupedByTime
+			? localize('groupedByTime', "Group by Time")
+			: localize('groupedByWorkspace', "Group by Workspace");
+		this.groupingToggleLabel.textContent = label;
+		const button = this.groupingToggleLabel.closest('button');
+		button?.setAttribute('title', label);
+		button?.setAttribute('aria-label', label);
 	}
 
 	focusCustomizations(): void {
@@ -486,7 +514,7 @@ export class SessionsView extends ViewPane {
 			return;
 		}
 
-		this.sessionsControl.layout(this.sessionsControlContainer.offsetHeight, width);
+		this.sessionsControl.layout(this.sessionsControlContainer.offsetHeight, this.sessionsControlContainer.offsetWidth || width);
 	}
 
 	override focus(): void {
@@ -590,6 +618,7 @@ export class SessionsView extends ViewPane {
 		this.currentGrouping = grouping;
 		this.storageService.store(GROUPING_STORAGE_KEY, this.currentGrouping, StorageScope.PROFILE, StorageTarget.USER);
 		this.groupingContextKey?.set(this.currentGrouping);
+		this.updateGroupingToggleState();
 		this.sessionsControl?.resetSectionCollapseState();
 		this.sessionsControl?.update(true);
 	}

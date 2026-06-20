@@ -1231,8 +1231,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 					localize('backboardWelcomeExampleRefactor', "Refactor this component"),
 					localize('backboardWelcomeExampleDarkMode', "Add dark mode support"),
 				].join('\n\n')),
-				icon: FileAccess.asBrowserUri('vs/workbench/contrib/chat/browser/media/backboard_logo_blue.svg'),
-				useImageIcon: true,
+				icon: FileAccess.asBrowserUri('vs/workbench/contrib/chat/browser/widget/media/model-provider-icons/ai_backboard.svg'),
 				useLargeIcon: true,
 				styleVariant: 'backboard',
 			};

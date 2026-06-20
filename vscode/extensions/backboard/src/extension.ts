@@ -2576,9 +2576,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				<option value="deep">Deep</option>
 			</select>
 			<select id="memoryMode" class="stateControl" aria-hidden="true">
+				<option value="off">Off</option>
 				<option value="Auto">Memory Lite</option>
 				<option value="Readonly">Memory Read Only</option>
-				<option value="off">Off</option>
 				<option value="ProAuto">Memory Pro</option>
 				<option value="ProReadonly">Memory Pro Read Only</option>
 			</select>
@@ -3794,7 +3794,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				renderModels();
 			setSelect(controls.mode, settings.mode || 'free');
 			setSelect(controls.intensity, settings.intensity || 'fast');
-			setSelect(controls.memoryMode, settings.memoryMode || 'Auto');
+			setSelect(controls.memoryMode, settings.memoryMode || 'off');
 			setSelect(controls.webSearch, settings.webSearch || 'off');
 			setSelect(controls.imageGeneration, settings.imageGeneration || 'off');
 			setSelect(controls.voiceMode, settings.voiceMode || 'off');
@@ -6142,7 +6142,7 @@ function readSettings(): {
 		defaultModel: config.get<string>('defaultModel') || 'deepseek/deepseek-v4-flash',
 		mode: config.get<string>('mode') || 'free',
 		intensity: config.get<string>('intensity') || 'fast',
-		memoryMode: config.get<string>('memoryMode') || 'Auto',
+		memoryMode: config.get<string>('memoryMode') || 'off',
 		webSearch: config.get<string>('webSearch') || 'off',
 		imageGeneration: config.get<string>('imageGeneration') || 'off',
 		voiceMode: config.get<string>('voiceMode') || 'off',

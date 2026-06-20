@@ -5,7 +5,9 @@
 
 import './media/chatWidget.css';
 import * as dom from '../../../../base/browser/dom.js';
+import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
+import { Codicon } from '../../../../base/common/codicons.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { derivedObservableWithCache, IObservable } from '../../../../base/common/observable.js';
@@ -38,7 +40,7 @@ import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBa
 
 // #region --- New Chat Widget ---
 
-const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 104;
+const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 180;
 
 export class NewChatWidget extends Disposable {
 
@@ -117,6 +119,7 @@ export class NewChatWidget extends Disposable {
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: false,
 				isSessionsWindow: true,
+				inputEditorMinLines: 2,
 				workspacePickerDelegate: this._createWorkspacePickerDelegate(),
 				sessionTypePickerDelegate: this._createSessionTypePickerDelegate(),
 				submitHandler: async query => this._sendFromSharedComposer(query),
@@ -191,7 +194,7 @@ export class NewChatWidget extends Disposable {
 		const chatWidgetContent = dom.append(chatWidgetContainer, dom.$('.new-chat-widget-content'));
 		this._chatWidgetContent = chatWidgetContent;
 
-		const workspacePickerContainer = dom.append(chatWidgetContent, dom.$('.new-session-workspace-picker-container'));
+		const workspacePickerContainer = this._renderSimpleHeader(chatWidgetContent);
 		// On web (vscode.dev / insiders.vscode.dev) the workspace picker is
 		// scoped to the currently selected agent host. When no hosts are
 		// known there is nothing for the user to pick, so swap the picker
@@ -202,8 +205,12 @@ export class NewChatWidget extends Disposable {
 			? this._renderEmptyStateGate(workspacePickerContainer, chatWidgetContent)
 			: this._renderWorkspacePicker(workspacePickerContainer));
 
+		this._renderMiddleSection(chatWidgetContent);
 		this._widget.render(chatWidgetContent);
 		this._widget.setVisible(true);
+		this._widget.setInputPartMaxHeightOverride(NEW_CHAT_COMPOSER_LAYOUT_HEIGHT);
+		this._makeComposerEasyToFocus();
+		this.layout(NEW_CHAT_COMPOSER_LAYOUT_HEIGHT, chatWidgetContent.clientWidth);
 
 		// Create initial session for any workspace already selected at construct time.
 		// If the selection arrives later (provider registers asynchronously), the
@@ -216,6 +223,58 @@ export class NewChatWidget extends Disposable {
 		}
 
 		chatWidgetContainer.classList.add('revealed');
+	}
+
+	private _makeComposerEasyToFocus(): void {
+		const inputContainer = this._widget.inputPart.inputContainerElement;
+		if (!inputContainer) {
+			return;
+		}
+
+		const focusInput = () => {
+			this._widget.focusInput();
+			this._widget.input.inputEditor.focus();
+		};
+		this._register(dom.addDisposableListener(inputContainer, dom.EventType.POINTER_DOWN, focusInput));
+		this._register(dom.addDisposableListener(inputContainer, dom.EventType.CLICK, focusInput));
+	}
+
+	private _renderSimpleHeader(container: HTMLElement): HTMLElement {
+		const header = dom.append(container, dom.$('.new-chat-simple-header'));
+		const pickerSlot = dom.append(header, dom.$('.new-session-workspace-picker-container'));
+		dom.append(header, dom.$('.new-chat-simple-header-spacer'));
+		const more = dom.append(header, dom.$('span.new-chat-simple-header-more'));
+		more.appendChild(renderIcon(Codicon.more));
+		return pickerSlot;
+	}
+
+	private _renderMiddleSection(container: HTMLElement): void {
+		const middle = dom.append(container, dom.$('.new-chat-middle-section'));
+
+		const title = dom.append(middle, dom.$('h2.new-chat-middle-title'));
+		title.textContent = localize('newChatMiddleTitle', "What should Backboard do?");
+
+		const description = dom.append(middle, dom.$('.new-chat-middle-description'));
+		const descriptionLineOne = dom.append(description, dom.$('p'));
+		descriptionLineOne.textContent = localize('newChatMiddleDescriptionOne', "Ask for a code change, file edit, bug fix, or UI update.");
+		const descriptionLineTwo = dom.append(description, dom.$('p'));
+		descriptionLineTwo.textContent = localize('newChatMiddleDescriptionTwo', "Pick a workspace, then describe the next step.");
+
+		const suggestionsContainer = dom.append(middle, dom.$('.new-chat-middle-suggestions'));
+		const suggestions = [
+			localize('newChatSuggestionLandingPage', "Build a feature"),
+			localize('newChatSuggestionPricingSection', "Fix a bug"),
+			localize('newChatSuggestionSettingsScreen', "Polish this UI"),
+		];
+		for (const suggestion of suggestions) {
+			const button = dom.append(suggestionsContainer, dom.$('button.new-chat-middle-suggestion')) as HTMLButtonElement;
+			button.type = 'button';
+			button.textContent = suggestion;
+			this._register(dom.addDisposableListener(button, dom.EventType.CLICK, () => {
+				this._widget.setInput(suggestion);
+				this._widget.focusInput();
+			}));
+		}
 	}
 
 	/**
@@ -453,10 +512,17 @@ export class NewChatWidget extends Disposable {
 
 	private async _sendFromSharedComposer(query: string): Promise<boolean> {
 		const input = this._widget.inputPart;
-		const session = this._session.get();
+		let session = this._session.get();
 		if (!session) {
-			this._workspacePicker.showPicker();
-			return true;
+			const folderUri = this._workspacePicker.selectedFolderUri;
+			if (folderUri) {
+				await this._onWorkspaceSelected(folderUri);
+				session = this._session.get();
+			}
+			if (!session) {
+				this._workspacePicker.showPicker();
+				return true;
+			}
 		}
 		const provider = this.sessionsProvidersService.getProvider(session.providerId);
 		if (input.currentLanguageModel) {
@@ -497,8 +563,7 @@ export class NewChatWidget extends Disposable {
 
 	layout(_height: number, _width: number): void {
 		const width = this._chatWidgetContent?.clientWidth || _width;
-		const height = Math.min(this._chatWidgetContent?.clientHeight || _height, NEW_CHAT_COMPOSER_LAYOUT_HEIGHT);
-		this._widget.layout(height, width);
+		this._widget.layout(NEW_CHAT_COMPOSER_LAYOUT_HEIGHT, width);
 	}
 
 	focusInput(): void {
@@ -511,6 +576,7 @@ export class NewChatWidget extends Disposable {
 			return;
 		}
 		this._widget.focusInput();
+		this._widget.input.inputEditor.focus();
 	}
 
 	/**

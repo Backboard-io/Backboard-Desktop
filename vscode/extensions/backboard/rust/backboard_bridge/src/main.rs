@@ -7,7 +7,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context as _, Result, anyhow};
@@ -787,6 +787,7 @@ fn u64_arg(args: &Value, names: &[&str]) -> Option<u64> {
 }
 
 async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
+    let request_started_at = Instant::now();
     let session_id = request
         .session_id
         .clone()
@@ -806,7 +807,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         file_name: audio.file_name,
         mime_type: audio.mime_type,
     });
-    let (memory, memory_pro) = memory_payload(params.memory_mode.as_deref().unwrap_or("Auto"));
+    let (memory, memory_pro) = memory_payload(params.memory_mode.as_deref().unwrap_or("off"));
     let cancel_flag = session_cancel_flag(&state, &session_id);
     cancel_flag.store(false, Ordering::SeqCst);
 
@@ -831,6 +832,23 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         )
     });
     let content = augment_prompt(&params.content, params.workspace.as_ref(), &mode, &tools);
+    emit_trace(
+        &state,
+        &request.request_id,
+        Some(&session_id),
+        "request_built",
+        request_started_at,
+        json!({
+            "provider": provider.clone(),
+            "model": model.clone(),
+            "mode": mode.clone(),
+            "intensity": intensity.clone(),
+            "memory": memory.clone(),
+            "memoryPro": memory_pro.clone(),
+            "toolCount": tools.len(),
+            "promptChars": content.len()
+        }),
+    );
     state.writer.emit(base_event(
         "progress",
         &request.request_id,
@@ -868,7 +886,23 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         audio_file,
     };
     log_backboard_request(&send_request, params.workspace.as_ref(), &mode)?;
+    emit_trace(
+        &state,
+        &request.request_id,
+        Some(&session_id),
+        "post_start",
+        request_started_at,
+        json!({}),
+    );
     let stream = client.send_message_stream(send_request).await?;
+    emit_trace(
+        &state,
+        &request.request_id,
+        Some(&session_id),
+        "post_stream_open",
+        request_started_at,
+        json!({}),
+    );
 
     consume_stream(
         state,
@@ -876,11 +910,14 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         &session_id,
         stream,
         ignored_tool_call_names,
+        request_started_at,
+        "sendPrompt",
     )
     .await
 }
 
 async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Result<()> {
+    let request_started_at = Instant::now();
     let session_id = request
         .session_id
         .clone()
@@ -906,6 +943,14 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
         emit_duplicate_tool_outputs_submitted(&state, &request.request_id, &session_id);
         return Ok(());
     }
+    emit_trace(
+        &state,
+        &request.request_id,
+        Some(&session_id),
+        "tool_outputs_post_start",
+        request_started_at,
+        json!({ "threadId": thread_id.clone(), "runId": run_id.clone() }),
+    );
     let stream = match client
         .submit_tool_outputs_stream(
             &thread_id,
@@ -919,6 +964,14 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
     {
         Ok(stream) => {
             finish_tool_outputs_submission(&state, &submission_key, true);
+            emit_trace(
+                &state,
+                &request.request_id,
+                Some(&session_id),
+                "tool_outputs_stream_open",
+                request_started_at,
+                json!({}),
+            );
             stream
         }
         Err(error) if is_duplicate_tool_outputs_error(&error) => {
@@ -931,7 +984,17 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
             return Err(error);
         }
     };
-    match consume_stream(state.clone(), &request.request_id, &session_id, stream, &[]).await {
+    match consume_stream(
+        state.clone(),
+        &request.request_id,
+        &session_id,
+        stream,
+        &[],
+        request_started_at,
+        "submitToolResult",
+    )
+    .await
+    {
         Ok(()) => Ok(()),
         Err(error) if is_duplicate_tool_outputs_error(&error) => {
             finish_tool_outputs_submission(&state, &submission_key, true);
@@ -1015,10 +1078,13 @@ async fn consume_stream(
     session_id: &str,
     mut stream: std::pin::Pin<Box<dyn futures::Stream<Item = Result<Value>> + Send>>,
     ignored_tool_call_names: &[&str],
+    request_started_at: Instant,
+    phase: &str,
 ) -> Result<()> {
     let mut streaming_tool_calls = StreamingToolCallAccumulator::default();
     let mut raw_tool_calls = RawTextToolCallAccumulator::default();
     let mut last_chunk: Option<Value> = None;
+    let mut saw_first_chunk = false;
     while let Some(chunk) = stream.next().await {
         if session_cancel_flag(&state, session_id).load(Ordering::SeqCst) {
             state.writer.emit(base_event(
@@ -1036,6 +1102,17 @@ async fn consume_stream(
             .get("type")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        if !saw_first_chunk {
+            saw_first_chunk = true;
+            emit_trace(
+                &state,
+                request_id,
+                Some(session_id),
+                "stream_first_chunk",
+                request_started_at,
+                json!({ "phase": phase, "chunkType": chunk_type }),
+            );
+        }
 
         let saw_streaming_tool_call = streaming_tool_calls.push_chunk(&chunk);
         if tool_call_stream_finished(&chunk)
@@ -1476,11 +1553,12 @@ fn thinking_payload(intensity: &str, provider: &str, model: &str) -> Option<Valu
 
 fn memory_payload(memory_mode: &str) -> (Option<String>, Option<String>) {
     match memory_mode {
+        "Auto" => (Some("Auto".to_string()), None),
         "Readonly" => (Some("Readonly".to_string()), None),
         "off" => (None, None),
         "ProAuto" => (None, Some("Auto".to_string())),
         "ProReadonly" => (None, Some("Readonly".to_string())),
-        _ => (Some("Auto".to_string()), None),
+        _ => (None, None),
     }
 }
 
@@ -2362,6 +2440,26 @@ fn base_event(kind: &str, request_id: &str, session_id: Option<&str>, mut extra:
     Value::Object(event)
 }
 
+fn emit_trace(
+    state: &BridgeState,
+    request_id: &str,
+    session_id: Option<&str>,
+    stage: &str,
+    started_at: Instant,
+    details: Value,
+) {
+    state.writer.emit(base_event(
+        "trace",
+        request_id,
+        session_id,
+        json!({
+            "stage": stage,
+            "elapsedMs": started_at.elapsed().as_millis(),
+            "details": details
+        }),
+    ));
+}
+
 fn emit_error(
     writer: &EventWriter,
     error: &anyhow::Error,
@@ -2459,7 +2557,7 @@ mod tests {
         assert!(prompt.contains("## User Request"));
         assert!(prompt.contains("make the UI better"));
         assert!(BACKBOARD_SYSTEM_PROMPT.contains("## Backboard API Reference"));
-        assert!(prompt.contains("Do not display file contents or proposed patches in chat"));
+        assert!(prompt.contains("The exact tool schemas are sent separately in the API request"));
         assert!(!prompt.contains("ask_user_question"));
     }
 

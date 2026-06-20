@@ -7,10 +7,13 @@
 	flex: 1 1 auto;
 	height: 100%;
 	min-height: 0;
-	--sessions-row-hover-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 7%, transparent);
-	--sessions-row-selected-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 9%, transparent);
-	--sessions-row-selected-border: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 14%, transparent);
-	--sessions-row-muted-fg: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 58%, transparent);
+	--sessions-row-hover-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 4%, transparent);
+	--sessions-row-selected-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 6%, transparent);
+	--sessions-row-selected-border: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 10%, transparent);
+	--sessions-row-title-fg: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 78%, transparent);
+	--sessions-row-attention-fg: color-mix(in srgb, var(--vscode-strongForeground, var(--vscode-foreground)) 84%, transparent);
+	--sessions-row-muted-fg: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 48%, transparent);
+	--sessions-row-icon-fg: color-mix(in srgb, var(--vscode-focusBorder) 48%, var(--vscode-descriptionForeground));
 
 	.monaco-list-row:has(.session-item) {
 		border-radius: 10px;
@@ -56,7 +59,7 @@
 
 	.monaco-list:focus .monaco-list-row.selected .session-icon > .codicon,
 	.monaco-list:focus .monaco-list-row.selected .session-icon > .monaco-pixel-spinner {
-		color: color-mix(in srgb, var(--vscode-icon-foreground) 76%, transparent) !important;
+		color: var(--sessions-row-icon-fg) !important;
 	}
 
 	.monaco-list:not(:focus) .monaco-list-row.selected .session-details-row {
@@ -119,7 +122,7 @@
 	flex-direction: row;
 	height: 100%;
 	box-sizing: border-box;
-	padding: 9px 10px 9px 14px;
+	padding: 6px 10px 6px 14px;
 	border-radius: inherit;
 
 	&.archived {
@@ -142,17 +145,18 @@
 		display: flex;
 		align-items: flex-start;
 		line-height: 18px;
-		color: color-mix(in srgb, var(--vscode-icon-foreground) 70%, transparent);
+		color: var(--sessions-row-icon-fg);
 		/* Anchor for outgoing icons during a cross-fade swap (see swapIconWithCrossfade). */
 		position: relative;
 
 		> .codicon {
 			flex-shrink: 0;
-			font-size: var(--vscode-codiconFontSize, 16px);
+			font-size: 13px;
 			height: 16px;
 			display: flex;
 			align-items: center;
 			justify-content: center;
+			opacity: 0.78;
 		}
 
 		> .monaco-pixel-spinner {
@@ -174,6 +178,9 @@
 
 	.session-main {
 		padding-left: 8px;
+		max-width: 100%;
+		display: flex;
+		align-items: center;
 	}
 
 	.session-title-row,
@@ -184,10 +191,14 @@
 
 	.session-title-row {
 		line-height: 18px;
-		padding-bottom: 5px;
+		padding-bottom: 0;
+		gap: 6px;
+		width: 100%;
 	}
 
 	.session-details-row {
+		flex: 1 1 auto;
+		min-width: 36px;
 		gap: 4px;
 		font-size: var(--vscode-agents-fontSize-label2, 11px);
 		line-height: 16px;
@@ -198,6 +209,7 @@
 		.session-details-icon {
 			display: flex;
 			align-items: center;
+			color: color-mix(in srgb, var(--vscode-icon-foreground) 62%, transparent);
 
 			> .codicon {
 				font-size: var(--vscode-codiconFontSize-compact, 12px);
@@ -240,8 +252,6 @@
 
 	.session-title,
 	.session-description {
-		/* push other items to the end */
-		flex: 1;
 		overflow: hidden;
 		white-space: nowrap;
 		text-overflow: ellipsis;
@@ -259,21 +269,24 @@
 	}
 
 	.session-title {
+		flex: 0 1 auto;
+		min-width: 42px;
+		max-width: 58%;
 		font-size: var(--vscode-agents-fontSize-body1, 13px);
 		font-weight: 500;
 		letter-spacing: 0;
 	}
 
 	.session-title {
-		color: var(--vscode-foreground);
+		color: var(--sessions-row-title-fg);
 	}
 
 	/* Strong foreground is reserved for sessions that need attention: */
 	/* unread, input required, or selected. All others use foreground. */
 	&.unread .session-title,
 	&.needs-input .session-title {
-		color: var(--vscode-strongForeground);
-		font-weight: 600;
+		color: var(--sessions-row-attention-fg);
+		font-weight: 560;
 	}
 
 	.session-time {
@@ -341,7 +354,7 @@
 	align-items: center;
 	padding: 0 10px;
 	font-size: var(--vscode-agents-fontSize-label2, 11px);
-	color: var(--vscode-descriptionForeground);
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 78%, transparent);
 	min-height: 26px;
 	cursor: pointer;
 
@@ -357,7 +370,7 @@
 		content: '';
 		flex: 1;
 		height: 1px;
-		background: var(--vscode-widget-border, var(--vscode-contrastBorder));
+		background: color-mix(in srgb, var(--vscode-widget-border, var(--vscode-contrastBorder)) 62%, transparent);
 	}
 }
 
@@ -387,8 +400,8 @@
 	display: flex;
 	align-items: center;
 	font-size: var(--vscode-agents-fontSize-label2, 11px);
-	font-weight: 600;
-	color: color-mix(in srgb, var(--vscode-descriptionForeground) 82%, transparent);
+	font-weight: 560;
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 74%, transparent);
 	padding: 2px 12px 0;
 	letter-spacing: 0;
 
@@ -558,6 +571,8 @@
  * keep these rules in sync if paddings/font sizes change here.
  */
 .agent-sessions-workbench.phone-layout .sessions-list-control {
+	min-width: 0;
+
 	.monaco-list-row:has(.session-item) {
 		/* Horizontal-only margin: virtual list rows are absolutely
 		 * positioned with JS-set `top`/`height`, so vertical margins
@@ -597,17 +612,19 @@
 		/* Reserve space for the right-aligned toolbar so long titles
 		 * don't overlap the action icons. Sized to fit two 44px actions
 		 * (88px) plus a small gap. */
-		padding-right: 96px;
+		padding-right: min(96px, 32%);
+		min-width: 0;
 	}
 
 	.session-item .session-title-row {
 		line-height: 20px;
-		padding-bottom: 4px;
+		padding-bottom: 0;
 	}
 
 	.session-item .session-title {
 		font-size: 15px;
 		line-height: 20px;
+		max-width: 52%;
 	}
 
 	.session-item .session-details-row {
@@ -639,5 +656,17 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
+	}
+}
+
+@media (max-width: 360px) {
+	.agent-sessions-workbench.phone-layout .sessions-list-control {
+		.session-item .session-main {
+			padding-right: 40px;
+		}
+
+		.monaco-list-row .session-title-toolbar .action-item:not(:last-child) {
+			display: none;
+		}
 	}
 }

@@ -106,11 +106,12 @@
 		height: 26px;
 		padding: 0 4px;
 		border: none;
-		border-radius: var(--vscode-cornerRadius-small);
+		border-radius: 8px;
 		background: transparent;
-		color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+		color: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 72%, transparent);
 		font-family: inherit;
 		font-size: var(--vscode-agents-fontSize-body1, 13px);
+		font-weight: 500;
 		line-height: 18px;
 		text-align: left;
 		cursor: pointer;
@@ -118,7 +119,8 @@
 
 	.agent-sessions-sidebar-action:hover,
 	.agent-sessions-sidebar-action:focus-visible {
-		background: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 6%, transparent);
+		background: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 4%, transparent);
+		color: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 84%, transparent);
 	}
 
 	.agent-sessions-sidebar-action:focus-visible {
@@ -133,7 +135,7 @@
 		width: 16px;
 		height: 16px;
 		flex: 0 0 16px;
-		color: var(--vscode-icon-foreground);
+		color: color-mix(in srgb, var(--vscode-icon-foreground) 68%, transparent);
 	}
 
 	.agent-sessions-sidebar-action-icon .codicon {
@@ -144,6 +146,25 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.agent-sessions-grouping-action {
+		margin-top: 4px;
+	}
+
+	.agent-sessions-grouping-action-chevron {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 14px;
+		height: 14px;
+		flex: 0 0 14px;
+		margin-left: auto;
+		color: color-mix(in srgb, var(--vscode-icon-foreground) 58%, transparent);
+	}
+
+	.agent-sessions-grouping-action-chevron .codicon {
+		font-size: 11px;
 	}
 
 	/* Inline search input — replaces label + actions when active */

@@ -19,12 +19,13 @@
 	display: flex;
 	flex-direction: column;
 	align-items: stretch;
-	justify-content: center;
+	justify-content: flex-start;
 	width: 100%;
 	height: 100%;
 	box-sizing: border-box;
 	overflow: hidden;
-	padding: 12px;
+	padding: 0;
+	background: var(--vscode-editor-background);
 	/* Establishes a size container so the @container (max-width: 330px) query below
 	 * can collapse picker labels to icon-only when the new-chat area is narrow. */
 	container-type: size;
@@ -32,7 +33,7 @@
 }
 
 .new-chat-widget-container.revealed {
-	justify-content: center;
+	justify-content: flex-start;
 }
 
 .new-chat-widget-container.revealed .new-chat-input-container {
@@ -45,7 +46,7 @@
 	display: none;
 	width: 100%;
 	padding: 0;
-	margin-bottom: 4px;
+	margin-bottom: 0;
 	box-sizing: border-box;
 }
 
@@ -73,17 +74,79 @@
 
 .new-chat-widget-content {
 	width: 100%;
-	max-width: min(var(--session-view-centered-content-max-width, 900px), calc(100% - 72px));
+	max-width: none;
+	height: 100%;
 	display: flex;
 	flex-direction: column;
 	align-items: stretch;
-	align-self: center;
-	gap: 12px;
+	align-self: stretch;
+	gap: 0;
 	min-width: 0;
 	min-height: 0;
 	box-sizing: border-box;
 	overflow: hidden;
-	flex: 0 0 auto;
+	flex: 1 1 auto;
+	background: color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-sideBar-background));
+	border-right: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-contrastBorder)) 48%, transparent);
+}
+
+.new-chat-simple-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 42px;
+	padding: 0 10px 0 14px;
+	box-sizing: border-box;
+	flex: 0 0 42px;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-contrastBorder)) 36%, transparent);
+	background: color-mix(in srgb, var(--vscode-editor-background) 90%, var(--vscode-sideBar-background));
+	color: var(--vscode-foreground);
+	overflow: hidden;
+}
+
+.new-chat-simple-header-icon,
+.new-chat-simple-header-chevron,
+.new-chat-simple-header-more {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	flex: 0 0 16px;
+	color: var(--vscode-icon-foreground);
+	opacity: 0.84;
+}
+
+.new-chat-simple-header-chevron {
+	width: 12px;
+	height: 12px;
+	flex-basis: 12px;
+	opacity: 0.68;
+}
+
+.new-chat-simple-header-title {
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 18px;
+	color: var(--vscode-foreground);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.new-chat-simple-header-spacer {
+	flex: 1 1 auto;
+	min-width: 8px;
+}
+
+.new-chat-simple-header > .new-session-workspace-picker-container {
+	display: block;
+	width: auto;
+	min-width: 0;
+	flex: 0 1 auto;
+	margin: 0;
+	padding: 0;
+	animation: none;
 }
 
 .new-chat-widget-content > .interactive-session {
@@ -95,10 +158,90 @@
 	margin: 0;
 	box-sizing: border-box;
 	align-self: stretch;
+	flex: 0 0 auto;
+	padding: 0 16px 16px;
 }
 
 .new-chat-widget-content > .interactive-session .chat-welcome-view-container {
 	display: none !important;
+}
+
+.new-chat-middle-section {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 10px;
+	width: min(560px, 100%);
+	align-self: center;
+	padding: 24px 18px 32px;
+	box-sizing: border-box;
+	text-align: center;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.new-chat-widget-content.no-agent-host > .new-chat-middle-section {
+	display: none;
+}
+
+.new-chat-middle-title {
+	margin: 0;
+	color: var(--vscode-foreground);
+	font-size: 17px;
+	font-weight: 600;
+	line-height: 24px;
+}
+
+.new-chat-middle-description {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	min-width: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 20px;
+}
+
+.new-chat-middle-description p {
+	margin: 0;
+}
+
+.new-chat-middle-suggestions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 8px;
+	margin-top: 6px;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.new-chat-middle-suggestion {
+	appearance: none;
+	border: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-contrastBorder)) 52%, transparent);
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--vscode-editorWidget-background) 56%, transparent);
+	color: color-mix(in srgb, var(--vscode-foreground) 88%, var(--vscode-descriptionForeground));
+	cursor: pointer;
+	font-family: inherit;
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 16px;
+	padding: 6px 10px;
+	white-space: nowrap;
+}
+
+.new-chat-middle-suggestion:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 44%, transparent);
+	color: var(--vscode-foreground);
+}
+
+.new-chat-middle-suggestion:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
 }
 
 .new-chat-widget-content > .interactive-session .interactive-list {
@@ -130,10 +273,22 @@
 }
 
 .new-chat-widget-content > .interactive-session .chat-editor-container {
+	display: flex;
 	padding: 0;
 	flex: 1 1 auto;
-	min-height: 0;
+	min-height: 48px;
 	width: 100%;
+}
+
+.new-chat-widget-content > .interactive-session .interactive-input-editor {
+	flex: 1 1 auto;
+	min-height: 48px;
+	width: 100%;
+}
+
+.new-chat-widget-content > .interactive-session .interactive-input-editor .monaco-editor,
+.new-chat-widget-content > .interactive-session .interactive-input-editor .overflow-guard {
+	min-height: 48px;
 }
 
 .new-chat-widget-content > .interactive-session .chat-input-toolbars {

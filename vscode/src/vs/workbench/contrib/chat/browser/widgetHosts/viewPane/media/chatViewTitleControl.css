@@ -9,46 +9,50 @@
 		display: none;
 		cursor: pointer;
 		flex-shrink: 0;
-		height: 34px;
+		height: 28px;
 		border-bottom: 1px solid var(--vscode-panel-border);
 		background: var(--vscode-sideBar-background, var(--vscode-editor-background));
 
 		.chat-view-title-inner {
 			display: flex;
 			align-items: center;
-			gap: 4px;
+			gap: 0;
 			height: 100%;
 			width: 100%;
-			padding: 0 6px;
+			padding: 0;
 			box-sizing: border-box;
 		}
 
 		.chat-view-title-tabs {
 			display: flex;
 			align-items: center;
-			gap: 3px;
+			gap: 0;
 			min-width: 0;
 			flex: 1 1 auto;
-			overflow: hidden;
+			overflow-x: auto;
+			overflow-y: hidden;
 			height: 100%;
+			scrollbar-width: thin;
 		}
 
 		.chat-view-title-tab {
 			display: flex;
 			align-items: center;
-			gap: 6px;
-			height: 24px;
-			min-width: 52px;
-			max-width: 106px;
-			padding: 0 7px;
-			border: 1px solid transparent;
-			border-radius: 4px;
+			gap: 4px;
+			height: 100%;
+			width: 104px;
+			min-width: 104px;
+			max-width: 104px;
+			padding: 0 6px;
+			border: 0;
+			border-right: 1px solid var(--vscode-panel-border);
+			border-radius: 0;
 			color: var(--vscode-descriptionForeground);
 			background: transparent;
 			cursor: pointer;
 			font: inherit;
 			box-sizing: border-box;
-			flex: 0 1 96px;
+			flex: 0 0 104px;
 			position: relative;
 		}
 
@@ -59,24 +63,28 @@
 
 		.chat-view-title-tab-active {
 			color: var(--vscode-foreground);
-			border-color: var(--vscode-panel-border);
-			background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-toolbar-hoverBackground));
+			background: var(--vscode-toolbar-hoverBackground, transparent);
 		}
 
 		.chat-view-title-tab-active::after {
 			content: "";
 			position: absolute;
-			left: 6px;
-			right: 6px;
-			bottom: -1px;
+			left: 0;
+			right: 0;
+			bottom: 0;
 			height: 2px;
 			background: var(--vscode-focusBorder);
 		}
 
 		.chat-view-title-brand-icon {
-			width: 13px;
-			height: 13px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 9px;
+			height: 9px;
 			color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+			font-size: 9px;
+			line-height: 9px;
 			flex: 0 0 auto;
 		}
 
@@ -86,7 +94,7 @@
 			text-overflow: ellipsis;
 			font-size: 11px;
 			font-weight: 500;
-			line-height: 16px;
+			line-height: 14px;
 			letter-spacing: 0;
 		}
 
@@ -94,18 +102,14 @@
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			width: 14px;
-			height: 14px;
+			width: 12px;
+			height: 12px;
+			margin-left: auto;
 			margin-right: -2px;
 			border-radius: 3px;
 			color: var(--vscode-descriptionForeground);
-			font-size: 12px;
+			font-size: 10px;
 			flex: 0 0 auto;
-			opacity: 0;
-		}
-
-		.chat-view-title-tab:hover .chat-view-title-tab-close,
-		.chat-view-title-tab:focus-within .chat-view-title-tab-close {
 			opacity: 1;
 		}
 
@@ -187,28 +191,28 @@
 	&.chat-view-location-panel,
 	&.chat-view-location-auxiliarybar {
 		.chat-view-title-inner {
-			padding: 0 6px;
+			padding: 0;
 		}
 	}
 
 	/* Auxiliarybar with non-default activity bar position */
 	&.activity-bar-location-other.chat-view-location-auxiliarybar {
 		.chat-view-title-inner {
-			padding: 0 6px;
+			padding: 0;
 		}
 	}
 
 	/* Side-by-side sessions: left position (any activity bar) */
 	&.has-sessions-control.sessions-control-orientation-sidebyside.chat-view-position-left {
 		.chat-view-title-inner {
-			padding: 0 6px;
+			padding: 0;
 		}
 	}
 
 	/* Side-by-side sessions: right position (default activity bar only) */
 	&.activity-bar-location-default.has-sessions-control.sessions-control-orientation-sidebyside.chat-view-position-right {
 		.chat-view-title-inner {
-			padding: 0 6px;
+			padding: 0;
 		}
 	}
 }

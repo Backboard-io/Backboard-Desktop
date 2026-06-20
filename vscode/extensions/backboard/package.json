@@ -164,13 +164,13 @@
           "backboard.memoryMode": {
             "type": "string",
             "enum": [
+              "off",
               "Auto",
               "Readonly",
-              "off",
               "ProAuto",
               "ProReadonly"
             ],
-            "default": "Auto",
+            "default": "off",
             "description": "Memory mode sent to Backboard turns. Pro modes use memory_pro and omit memory."
           },
           "backboard.webSearch": {

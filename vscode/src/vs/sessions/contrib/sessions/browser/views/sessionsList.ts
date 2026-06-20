@@ -125,7 +125,7 @@ const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000;
 //#region Tree Delegate
 
 class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
-	private static readonly ITEM_HEIGHT = 54;
+	private static readonly ITEM_HEIGHT = 38;
 	/**
 	 * Phone layout uses a taller row so the inline action toolbar can
 	 * meet the 44px minimum touch target without overflowing. Sized to
@@ -133,7 +133,7 @@ class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
 	 * Keep in sync with the `.phone-layout .session-item` rules in
 	 * `sessionsList.css`.
 	 */
-	private static readonly ITEM_HEIGHT_PHONE = 76;
+	private static readonly ITEM_HEIGHT_PHONE = 56;
 	private static readonly SECTION_HEIGHT = 26;
 	private static readonly SHOW_MORE_HEIGHT = 26;
 
@@ -254,6 +254,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 		const mainCol = DOM.append(container, $('.session-main'));
 		const titleRow = DOM.append(mainCol, $('.session-title-row'));
 		const title = disposables.add(new HighlightedLabel(DOM.append(titleRow, $('.session-title'))));
+		const detailsRow = DOM.append(titleRow, $('.session-details-row'));
 		const titleToolbarContainer = DOM.append(titleRow, $('.session-title-toolbar'));
 		// The list opens a session on click and on Gesture `tap` (touch).
 		// DOM event propagation stops only cover mouse/pointer events; the
@@ -265,8 +266,6 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			disposables.add(DOM.addDisposableListener(titleToolbarContainer, eventType, e => e.stopPropagation()));
 		}
 		disposables.add(Gesture.ignoreTarget(titleToolbarContainer));
-		const detailsRow = DOM.append(mainCol, $('.session-details-row'));
-
 		// Approval row
 		const approvalRow = DOM.append(mainCol, $('.session-approval-row'));
 		const approvalLabel = DOM.append(approvalRow, $('span.session-approval-label'));
@@ -384,7 +383,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			DOM.clearNode(template.detailsRow);
 			const parts: HTMLElement[] = [];
 
-			if (sessionStatus !== SessionStatus.InProgress) {
+			if (sessionStatus !== SessionStatus.InProgress && this.options.grouping() !== SessionsGrouping.Workspace) {
 				const isWorkspaceSession = workspace &&
 					workspace.folders.length > 0 &&
 					workspace?.folders[0]?.gitRepository?.workTreeUri === undefined;
@@ -1224,7 +1223,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		const grouping = this.options.grouping();
 		const sections = groupSessionsForList(filtered, grouping, this.options.sorting(), session => this.isSessionPinned(session));
 
-		const hasTodaySessions = sections.some(s => s.id === 'today' && s.sessions.length > 0);
+		const hasRecentSessions = sections.some(s => s.id === 'recent' && s.sessions.length > 0);
 
 		// Partition workspace sections into "primary" (meets criteria) and "more"
 		// when grouping by workspace. An active find pattern bypasses partitioning
@@ -1306,8 +1305,8 @@ export class SessionsList extends Disposable implements ISessionsList {
 
 			// Default collapse state for older time sections
 			let defaultCollapsed: boolean | ObjectTreeElementCollapseState = ObjectTreeElementCollapseState.PreserveOrExpanded;
-			if (grouping === SessionsGrouping.Date && hasTodaySessions) {
-				const olderSections = ['yesterday', 'thisWeek', 'older', 'archived'];
+			if (grouping === SessionsGrouping.Date && hasRecentSessions) {
+				const olderSections = ['past7Days', 'past30Days', 'older', 'archived'];
 				if (olderSections.includes(section.id)) {
 					defaultCollapsed = ObjectTreeElementCollapseState.PreserveOrCollapsed;
 				}
@@ -1853,12 +1852,12 @@ export function groupByWorkspace(sessions: ISession[]): ISessionSection[] {
 export function groupByDate(sessions: ISession[], sorting: SessionsSorting): ISessionSection[] {
 	const now = new Date();
 	const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-	const startOfYesterday = startOfToday - 86_400_000;
-	const startOfWeek = startOfToday - 7 * 86_400_000;
+	const startOfPast7Days = startOfToday - 7 * 86_400_000;
+	const startOfPast30Days = startOfToday - 30 * 86_400_000;
 
-	const today: ISession[] = [];
-	const yesterday: ISession[] = [];
-	const week: ISession[] = [];
+	const recent: ISession[] = [];
+	const past7Days: ISession[] = [];
+	const past30Days: ISession[] = [];
 	const older: ISession[] = [];
 
 	for (const session of sessions) {
@@ -1867,11 +1866,11 @@ export function groupByDate(sessions: ISession[], sorting: SessionsSorting): ISe
 			: session.createdAt.getTime();
 
 		if (time >= startOfToday) {
-			today.push(session);
-		} else if (time >= startOfYesterday) {
-			yesterday.push(session);
-		} else if (time >= startOfWeek) {
-			week.push(session);
+			recent.push(session);
+		} else if (time >= startOfPast7Days) {
+			past7Days.push(session);
+		} else if (time >= startOfPast30Days) {
+			past30Days.push(session);
 		} else {
 			older.push(session);
 		}
@@ -1884,9 +1883,9 @@ export function groupByDate(sessions: ISession[], sorting: SessionsSorting): ISe
 		}
 	};
 
-	addGroup('today', localize('today', "Today"), today);
-	addGroup('yesterday', localize('yesterday', "Yesterday"), yesterday);
-	addGroup('thisWeek', localize('lastSevenDays', "Last 7 Days"), week);
+	addGroup('recent', localize('recentlyToday', "Recently"), recent);
+	addGroup('past7Days', localize('pastSevenDays', "Past 7 Days"), past7Days);
+	addGroup('past30Days', localize('pastThirtyDays', "Past 30 Days"), past30Days);
 	addGroup('older', localize('older', "Older"), older);
 
 	return sections;

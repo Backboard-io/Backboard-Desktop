@@ -76,6 +76,9 @@ interface BridgeEvent {
 	readonly stopReason?: string;
 	readonly usage?: unknown;
 	readonly chunk?: unknown;
+	readonly stage?: string;
+	readonly elapsedMs?: number | string;
+	readonly details?: unknown;
 }
 
 interface BridgeModel {
@@ -112,6 +115,30 @@ interface BridgeModel {
 	readonly cacheWriteCostPer1mTokens?: number | string;
 	readonly cacheWritePricePerMillion?: number | string;
 }
+
+const BUNDLED_BACKBOARD_MODELS: readonly BridgeModel[] = [
+	{ provider: 'openrouter', name: 'deepseek/deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', modelType: 'llm' },
+	{ provider: 'openrouter', name: 'openai/gpt-5-chat', displayName: 'GPT-5 Chat', modelType: 'llm' },
+	{ provider: 'openrouter', name: 'openai/gpt-5', displayName: 'GPT-5', modelType: 'llm' },
+	{ provider: 'openrouter', name: 'openai/gpt-5-mini', displayName: 'GPT-5 Mini', modelType: 'llm' },
+	{ provider: 'openrouter', name: 'anthropic/claude-sonnet-4.5', displayName: 'Claude Sonnet 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 3, outputPricePerMillion: 15 },
+	{ provider: 'openrouter', name: 'anthropic/claude-opus-4.5', displayName: 'Claude Opus 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 5, outputPricePerMillion: 25 },
+	{ provider: 'openrouter', name: 'anthropic/claude-haiku-4.5', displayName: 'Claude Haiku 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 1, outputPricePerMillion: 5 },
+	{ provider: 'openrouter', name: 'google/gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', modelType: 'llm' },
+	{ provider: 'openrouter', name: 'google/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', modelType: 'llm' },
+	{ provider: 'openrouter', name: 'x-ai/grok-4', displayName: 'Grok 4', modelType: 'llm' },
+	{ provider: 'openrouter', name: 'mistralai/mistral-large', displayName: 'Mistral Large', modelType: 'llm' },
+	{ provider: 'aws-bedrock', name: 'anthropic.claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 3, outputPricePerMillion: 15 },
+	{ provider: 'aws-bedrock', name: 'anthropic.claude-opus-4-6', displayName: 'Claude Opus 4.6', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 5, outputPricePerMillion: 25 },
+	{ provider: 'aws-bedrock', name: 'anthropic.claude-haiku-4-5', displayName: 'Claude Haiku 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 1, outputPricePerMillion: 5 },
+	{ provider: 'openai', name: 'gpt-5', displayName: 'GPT-5', modelType: 'llm' },
+	{ provider: 'openai', name: 'gpt-5-mini', displayName: 'GPT-5 Mini', modelType: 'llm' },
+	{ provider: 'google', name: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', modelType: 'llm' },
+	{ provider: 'google', name: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', modelType: 'llm' },
+	{ provider: 'anthropic', name: 'claude-sonnet-4.5', displayName: 'Claude Sonnet 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 3, outputPricePerMillion: 15 },
+	{ provider: 'anthropic', name: 'claude-opus-4.5', displayName: 'Claude Opus 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 5, outputPricePerMillion: 25 },
+	{ provider: 'anthropic', name: 'claude-haiku-4.5', displayName: 'Claude Haiku 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 1, outputPricePerMillion: 5 },
+];
 
 interface PendingBridgeRequest {
 	readonly events?: BridgeEvent[];
@@ -196,6 +223,8 @@ interface BackboardPanelHistoryEntry {
 
 interface BackboardResponseState {
 	didCreatePart: boolean;
+	didCreateReasoningPart?: boolean;
+	reasoningPartId?: string;
 	pendingText: string;
 	assistantText: string;
 	toolOutputs: StoredToolOutput[];
@@ -331,6 +360,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 
 	async sendMessage(sessionUri: URI, prompt: string, _attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
 		const session = this._session(sessionUri);
+		const turnStartedAt = Date.now();
 		const effectiveTurnId = turnId ?? generateUuid();
 		await this._materialize(session);
 
@@ -341,48 +371,57 @@ export class BackboardAgent extends Disposable implements IAgent {
 		session.title ??= panelHistoryTitle(prompt);
 		let failedMessage: string | undefined;
 
-		try {
-			await writeSharedBackboardThread(session, prompt, '', undefined, responseState, this._logService, 'running');
-			const settings = this._turnSettings(session);
-			const firstToolRequests: ToolResultRequest[] = [];
-			const seenToolRequests = new Set<string>();
-			const submitToolsPromise = this._bridge.listTools(settings.mode, settings.config)
-				.then(tools => mergeBackboardTools(tools, session.clientTools))
-				.catch(() => mergeBackboardTools(undefined, session.clientTools));
-			const submitTools = await submitToolsPromise;
-			const handle = this._bridge.send('sendPrompt', bridgeSessionId, {
-				content: prompt,
-				workspace: session.workingDirectory?.fsPath,
-				provider: settings.provider,
-				model: settings.model,
-				mode: settings.mode,
-				intensity: settings.intensity,
-				memoryMode: settings.memoryMode,
-				webSearch: settings.webSearch,
-				imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
-				tools: submitTools,
-				config: settings.config,
-			}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, firstToolRequests, seenToolRequests, event));
-			session.currentRequestId = handle.requestId;
-			await handle.promise;
-			this._flushAssistantText(session, effectiveTurnId, partId, responseState);
-
-			let nextToolRequest = firstToolRequests.shift();
-			while (nextToolRequest) {
-				const toolOutputs = await this._executeToolCalls(session, effectiveTurnId, nextToolRequest.toolCalls, settings.mode, responseState);
-				const continuationToolRequests: ToolResultRequest[] = [];
-				const continuation = this._bridge.send('submitToolResult', bridgeSessionId, {
-					threadId: nextToolRequest.threadId,
-					runId: nextToolRequest.runId,
-					toolOutputs,
+			try {
+				await writeSharedBackboardThread(session, prompt, '', undefined, responseState, this._logService, 'running');
+				const settings = this._turnSettings(session);
+				this._logService.info(`[Backboard latency] turn_start session=${session.sessionId} provider=${settings.provider} model=${settings.model} mode=${settings.mode} intensity=${settings.intensity} memory=${settings.memoryMode} web=${settings.webSearch}`);
+				const firstToolRequests: ToolResultRequest[] = [];
+				const seenToolRequests = new Set<string>();
+				const listToolsStartedAt = Date.now();
+				const submitToolsPromise = this._bridge.listTools(settings.mode, settings.config)
+					.then(tools => mergeBackboardTools(tools, session.clientTools))
+					.catch(() => mergeBackboardTools(undefined, session.clientTools));
+				const submitTools = await submitToolsPromise;
+				this._logService.info(`[Backboard latency] list_tools_done elapsedMs=${Date.now() - listToolsStartedAt} totalElapsedMs=${Date.now() - turnStartedAt} toolCount=${submitTools?.length ?? 0}`);
+				const sendPromptStartedAt = Date.now();
+				const handle = this._bridge.send('sendPrompt', bridgeSessionId, {
+					content: prompt,
+					workspace: session.workingDirectory?.fsPath,
+					provider: settings.provider,
+					model: settings.model,
+					mode: settings.mode,
+					intensity: settings.intensity,
+					memoryMode: settings.memoryMode,
+					webSearch: settings.webSearch,
+					imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
 					tools: submitTools,
 					config: settings.config,
-				}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, continuationToolRequests, seenToolRequests, event));
-				session.currentRequestId = continuation.requestId;
-				await continuation.promise;
+				}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, firstToolRequests, seenToolRequests, event));
+				session.currentRequestId = handle.requestId;
+				await handle.promise;
+				this._logService.info(`[Backboard latency] send_prompt_done elapsedMs=${Date.now() - sendPromptStartedAt} totalElapsedMs=${Date.now() - turnStartedAt}`);
 				this._flushAssistantText(session, effectiveTurnId, partId, responseState);
-				nextToolRequest = continuationToolRequests.shift();
-			}
+
+				let nextToolRequest = firstToolRequests.shift();
+				while (nextToolRequest) {
+					const toolExecutionStartedAt = Date.now();
+					const toolOutputs = await this._executeToolCalls(session, effectiveTurnId, nextToolRequest.toolCalls, settings.mode, responseState);
+					this._logService.info(`[Backboard latency] local_tools_done elapsedMs=${Date.now() - toolExecutionStartedAt} totalElapsedMs=${Date.now() - turnStartedAt} toolCount=${nextToolRequest.toolCalls.length}`);
+					const continuationToolRequests: ToolResultRequest[] = [];
+					const submitToolStartedAt = Date.now();
+					const continuation = this._bridge.send('submitToolResult', bridgeSessionId, {
+						threadId: nextToolRequest.threadId,
+						runId: nextToolRequest.runId,
+						toolOutputs,
+						tools: submitTools,
+						config: settings.config,
+					}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, continuationToolRequests, seenToolRequests, event));
+					session.currentRequestId = continuation.requestId;
+					await continuation.promise;
+					this._logService.info(`[Backboard latency] submit_tool_result_done elapsedMs=${Date.now() - submitToolStartedAt} totalElapsedMs=${Date.now() - turnStartedAt}`);
+					this._flushAssistantText(session, effectiveTurnId, partId, responseState);
+					nextToolRequest = continuationToolRequests.shift();
+				}
 		} catch (error) {
 			const message = backboardDisplayErrorMessage(error instanceof Error ? error.message : String(error));
 			if (isDuplicateToolOutputError(message)) {
@@ -553,6 +592,9 @@ export class BackboardAgent extends Disposable implements IAgent {
 		event: BridgeEvent,
 	): void {
 		switch (event.type) {
+			case 'trace':
+				this._logService.info(`[Backboard latency] bridge_stage=${event.stage ?? '(unknown)'} elapsedMs=${event.elapsedMs ?? '(unknown)'} details=${safeStringifyForLog(event.details)}`);
+				return;
 			case 'assistantTextDelta':
 				if (!event.text) {
 					return;
@@ -563,6 +605,27 @@ export class BackboardAgent extends Disposable implements IAgent {
 				}
 				responseState.pendingText += visibleText;
 				responseState.flushHandle ??= setTimeout(() => this._flushAssistantText(session, turnId, partId, responseState), 16);
+				return;
+			case 'reasoningDelta':
+				if (!event.text) {
+					return;
+				}
+				this._flushAssistantText(session, turnId, partId, responseState);
+				responseState.reasoningPartId ??= generateUuid();
+				if (!responseState.didCreateReasoningPart) {
+					responseState.didCreateReasoningPart = true;
+					this._fire(session.sessionUri, {
+						type: ActionType.ChatResponsePart,
+						turnId,
+						part: { kind: ResponsePartKind.Reasoning, id: responseState.reasoningPartId, content: '' },
+					});
+				}
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatReasoning,
+					turnId,
+					partId: responseState.reasoningPartId,
+					content: event.text,
+				});
 				return;
 			case 'toolRequested':
 				this._flushAssistantText(session, turnId, partId, responseState);
@@ -761,18 +824,23 @@ export class BackboardAgent extends Disposable implements IAgent {
 
 	private _refreshModels(deferNetwork = false): void {
 		const cachedModels = this._readCachedModels();
-		if (cachedModels.length) {
-			this._models.set(backboardModelInfos(cachedModels), undefined);
+		const initialModels = cachedModels.length ? cachedModels : BUNDLED_BACKBOARD_MODELS;
+		if (initialModels.length) {
+			this._models.set(backboardModelInfos(initialModels), undefined);
 		}
 		const refresh = (): void => {
 			this._bridge.send('listModels', undefined, { config: bridgeConfig() }, undefined).promise.then(events => {
 				const bridgeModels = events.find(event => event.type === 'models')?.models ?? [];
-				this._writeCachedModels(bridgeModels);
-				const models = backboardModelInfos(bridgeModels, cachedModels);
+				if (bridgeModels.length) {
+					this._writeCachedModels(bridgeModels);
+				}
+				const models = bridgeModels.length
+					? backboardModelInfos(bridgeModels)
+					: backboardModelInfos(cachedModels, BUNDLED_BACKBOARD_MODELS);
 				this._models.set(models.length ? models : [fallbackModel()], undefined);
 			}).catch(error => {
 				this._logService.warn(`[Backboard] Failed to load models: ${error instanceof Error ? error.message : String(error)}`);
-				if (!cachedModels.length) {
+				if (!initialModels.length) {
 					this._models.set([fallbackModel()], undefined);
 				}
 			});
@@ -1369,7 +1437,18 @@ function backboardDisplayErrorMessage(message: string): string {
 	if (/api key|authentication|unauthorized|missing auth/i.test(message)) {
 		return `${message} Run "Backboard: Sign In" from the Command Palette to save credentials in ~/.backboard_ide/config.json.`;
 	}
+	if (/upstream idle timeout/i.test(message)) {
+		return `${message} The selected model did not stream a response before Backboard's idle watchdog fired. Use a faster model such as DeepSeek V4 Flash, keep Reasoning on Fast, and keep Memory Off for low-latency IDE turns.`;
+	}
 	return message;
+}
+
+function safeStringifyForLog(value: unknown): string {
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
 }
 
 function normalizeBackboardModelSelection(model: ModelSelection | undefined): ModelSelection | undefined {
@@ -1693,12 +1772,12 @@ function resolveBackboardSessionConfig(rawConfig: Record<string, unknown> | unde
 						type: 'string',
 						title: localize('backboard.config.memory.title', "Memory"),
 						description: localize('backboard.config.memory.description', "Controls Backboard memory behavior."),
-						default: 'Auto',
-						enum: ['Auto', 'Readonly', 'off', 'ProAuto', 'ProReadonly'],
+						default: 'off',
+						enum: ['off', 'Auto', 'Readonly', 'ProAuto', 'ProReadonly'],
 						enumLabels: [
+							localize('backboard.config.memory.off', "Memory Off"),
 							localize('backboard.config.memory.auto', "Memory Lite"),
 							localize('backboard.config.memory.readonly', "Read Only"),
-							localize('backboard.config.memory.off', "Memory Off"),
 							localize('backboard.config.memory.proAuto', "Memory Pro"),
 							localize('backboard.config.memory.proReadonly', "Pro Read Only"),
 						],
@@ -1733,7 +1812,7 @@ export function createBackboardTurnSettings(
 		model: parsedModel.model,
 		mode: bridgeModeFromConfig(values),
 		intensity: stringConfigValue(values, BACKBOARD_INTENSITY_CONFIG_KEY, 'fast'),
-		memoryMode: stringConfigValue(values, BACKBOARD_MEMORY_CONFIG_KEY, 'Auto'),
+		memoryMode: stringConfigValue(values, BACKBOARD_MEMORY_CONFIG_KEY, 'off'),
 		webSearch: stringConfigValue(values, BACKBOARD_WEB_SEARCH_CONFIG_KEY, 'off'),
 		imageGeneration: stringConfigValue(values, BACKBOARD_IMAGE_CONFIG_KEY, 'off'),
 		config: bridgeConfig(),
@@ -1761,7 +1840,7 @@ function normalizeMemoryMode(value: unknown): string {
 	if (value === 'Off') {
 		return 'off';
 	}
-	return oneOf(value, ['Auto', 'Readonly', 'off', 'ProAuto', 'ProReadonly'], 'Auto');
+	return oneOf(value, ['off', 'Auto', 'Readonly', 'ProAuto', 'ProReadonly'], 'off');
 }
 
 function oneOf(value: unknown, values: readonly string[], fallback: string): string {

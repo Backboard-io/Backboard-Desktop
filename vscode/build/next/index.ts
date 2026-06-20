@@ -246,6 +246,8 @@ const commonResourcePatterns = [
 	// SVGs referenced from CSS (needed for transpile/dev builds where CSS is copied as-is)
 	'vs/workbench/browser/media/code-icon.svg',
 	'vs/workbench/browser/parts/editor/media/letterpress*.svg',
+	'vs/workbench/contrib/chat/browser/media/*.svg',
+	'vs/workbench/contrib/chat/browser/widget/media/**/*.svg',
 	'vs/sessions/contrib/chat/browser/media/*.svg',
 	'vs/sessions/contrib/welcome/browser/media/themePreviews/*.svg'
 ];
@@ -290,6 +292,10 @@ const desktopResourcePatterns = [
 	'vs/workbench/contrib/welcomeGettingStarted/common/media/**/*.png',
 	'vs/workbench/contrib/welcomeOnboarding/browser/media/**/*.svg',
 	'vs/workbench/contrib/welcomeOnboarding/browser/media/**/*.png',
+	'vs/workbench/contrib/chat/browser/media/**/*.svg',
+	'vs/workbench/contrib/chat/browser/media/**/*.png',
+	'vs/workbench/contrib/chat/browser/widget/media/**/*.svg',
+	'vs/workbench/contrib/chat/browser/widget/media/**/*.png',
 	'vs/workbench/contrib/extensions/browser/media/{theme-icon.png,language-icon.svg}',
 	'vs/workbench/services/extensionManagement/common/media/*.svg',
 	'vs/workbench/services/extensionManagement/common/media/*.png',

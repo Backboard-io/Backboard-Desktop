@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, append, clearNode, EventType, getActiveWindow } from '../../../../base/browser/dom.js';
+import { asCSSUrl } from '../../../../base/browser/cssValue.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
@@ -667,10 +668,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			welcomeContent.classList.add('visible');
 			continueButton.disabled = false;
 			this._focusCurrentStepElement();
-		}, 6000);
+		}, 7400);
 		const removeTimer = activeWindow.setTimeout(() => {
 			splash.remove();
-		}, 7050);
+		}, 8500);
 
 		this.stepDisposables.add(toDisposable(() => {
 			activeWindow.clearTimeout(splashTimer);
@@ -683,9 +684,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		const stream = append(parent, $('.onboarding-backboard-logo-stream'));
 		const rows = [
-			BACKBOARD_WELCOME_SPLASH_ICONS.slice(0, 6),
-			BACKBOARD_WELCOME_SPLASH_ICONS.slice(6, 12),
-			BACKBOARD_WELCOME_SPLASH_ICONS.slice(12),
+			BACKBOARD_WELCOME_SPLASH_ICONS.slice(0, 5),
+			BACKBOARD_WELCOME_SPLASH_ICONS.slice(5, 9),
+			BACKBOARD_WELCOME_SPLASH_ICONS.slice(9, 13),
+			BACKBOARD_WELCOME_SPLASH_ICONS.slice(13),
 		];
 
 		for (const [rowIndex, rowIcons] of rows.entries()) {
@@ -695,20 +697,15 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				const cell = append(row, $('.onboarding-backboard-logo-cell'));
 				cell.style.setProperty('--icon-index', String(iconIndex));
 				cell.style.setProperty('--icon-total', String(rowIcons.length));
-				cell.style.setProperty('--icon-left', `${(iconIndex + 0.5) * (100 / rowIcons.length)}%`);
-
-				const image = append(cell, $<HTMLImageElement>('img'));
-				image.alt = '';
-				image.decoding = 'async';
-				image.src = this._backboardMediaIcon(iconName);
+				cell.style.setProperty('--icon-left', `${8 + (iconIndex * (84 / Math.max(rowIcons.length - 1, 1)))}%`);
+				cell.style.setProperty('--icon-mask', this._backboardMediaIconCss(iconName));
+				append(cell, $('.onboarding-backboard-logo-symbol'));
 			}
 		}
 
 		const finalLogo = append(parent, $('.onboarding-backboard-splash-final'));
-		const finalImage = append(finalLogo, $<HTMLImageElement>('img'));
-		finalImage.alt = '';
-		finalImage.decoding = 'async';
-		finalImage.src = this._backboardMediaIcon('ai_backboard.svg');
+		finalLogo.style.setProperty('--icon-mask', this._backboardMediaIconCss('ai_backboard.svg'));
+		append(finalLogo, $('.onboarding-backboard-splash-final-symbol'));
 	}
 
 	private _playWelcomeAdvanceTransition(): void {
@@ -764,10 +761,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			cell.style.setProperty('--burst-x-mid', `${x * 0.18}px`);
 			cell.style.setProperty('--burst-y-mid', `${y * 0.18}px`);
 
-			const image = append(cell, $<HTMLImageElement>('img'));
-			image.alt = '';
-			image.decoding = 'async';
-			image.src = this._backboardMediaIcon(iconName);
+			cell.style.setProperty('--icon-mask', this._backboardMediaIconCss(iconName));
+			append(cell, $('.onboarding-backboard-transition-symbol'));
 		}
 
 		this._createBackboardMark(parent, 'onboarding-backboard-splash-mark');
@@ -782,8 +777,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		return mark;
 	}
 
-	private _backboardMediaIcon(fileName: string): string {
-		return FileAccess.asBrowserUri(`vs/workbench/contrib/welcomeOnboarding/browser/media/model-provider-icons/${fileName}`).toString(true);
+	private _backboardMediaIconCss(fileName: string): string {
+		return asCSSUrl(FileAccess.asBrowserUri(`vs/workbench/contrib/welcomeOnboarding/browser/media/model-provider-icons/${fileName}`));
 	}
 
 	private _renderExperienceStep(container: HTMLElement): void {

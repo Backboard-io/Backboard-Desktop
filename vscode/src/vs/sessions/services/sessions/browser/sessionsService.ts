@@ -48,6 +48,11 @@ export interface IOpenNewSessionOptions extends ICreateNewSessionOptions {
 	 * (restoring any pending draft).
 	 */
 	readonly folderUri?: URI;
+	/**
+	 * Discard any pending draft before showing the new-session composer.
+	 * Use for explicit "New chat" affordances that should start clean.
+	 */
+	readonly forceNew?: boolean;
 }
 
 /**
@@ -637,6 +642,7 @@ export class SessionsService extends Disposable implements ISessionsService {
 
 	openNewSession(options?: IOpenNewSessionOptions): ISession | undefined {
 		const folderUri = options?.folderUri;
+		const forceNew = options?.forceNew === true;
 		if (folderUri) {
 			this._startOpenSession();
 			try {
@@ -653,8 +659,9 @@ export class SessionsService extends Disposable implements ISessionsService {
 
 		// Without a folder (or when folder resolution failed above): switch to
 		// the new-session composer view.
-		// No-op when no session is active (empty new-session placeholder showing).
-		if (this._visibility.activeSession.get() === undefined) {
+		// No-op when no session is active (empty new-session placeholder showing),
+		// unless the caller explicitly wants to discard a pending draft.
+		if (this._visibility.activeSession.get() === undefined && !forceNew) {
 			return undefined;
 		}
 		if (!folderUri) {
@@ -664,6 +671,11 @@ export class SessionsService extends Disposable implements ISessionsService {
 		// Restore the in-progress new session if one exists, so pickers re-derive
 		// their state from the still-alive session object. Otherwise clear the
 		// active session (first time / after send).
+		if (forceNew) {
+			this.sessionsManagementService.discardNewSession();
+			this._activate(undefined);
+			return undefined;
+		}
 		const newSession = this.sessionsManagementService.newSession.get();
 		this._activate(newSession ?? undefined);
 		return newSession ?? undefined;
