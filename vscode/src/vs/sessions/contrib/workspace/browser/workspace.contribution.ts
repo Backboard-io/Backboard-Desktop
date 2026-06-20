@@ -16,6 +16,7 @@ import { EditorExtensions } from '../../../../workbench/common/editor.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
+import { IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { BackboardWorkspaceEditor } from './backboardWorkspaceEditor.js';
 import { BackboardWorkspaceEditorInput } from './backboardWorkspaceEditorInput.js';
 import { WorkspaceFolderManagementContribution } from './workspaceFolderManagement.js';
@@ -49,10 +50,11 @@ registerAction2(class OpenBackboardWorkspaceAction extends Action2 {
 
 	async run(accessor: ServicesAccessor): Promise<void> {
 		const editorService = accessor.get(IEditorService);
+		const editorGroupsService = accessor.get(IEditorGroupsService);
 		const layoutService = accessor.get(IWorkbenchLayoutService);
 		layoutService.setPartHidden(false, Parts.EDITOR_PART);
 		layoutService.mainContainer.classList.add(BACKBOARD_WORKSPACE_PAGE_ACTIVE_CLASS);
-		await editorService.openEditor(BackboardWorkspaceEditorInput.instance, { pinned: true });
+		await editorService.openEditor(BackboardWorkspaceEditorInput.instance, { pinned: true }, editorGroupsService.mainPart.activeGroup);
 		layoutService.setPartHidden(true, Parts.SESSIONS_PART);
 		layoutService.setPartHidden(true, Parts.SIDEBAR_PART);
 		layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
