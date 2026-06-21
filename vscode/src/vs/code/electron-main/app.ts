@@ -600,6 +600,7 @@ export class CodeApplication extends Disposable {
 		validatedIpcMain.handle('vscode:optimusSharedChatHistorySnapshot', async (_event, snapshot: unknown) => writeOptimusSharedChatHistorySnapshot(snapshot));
 		validatedIpcMain.handle('vscode:optimusDevHotRefreshState', async () => readOptimusDevHotRefreshState(this.environmentMainService.appRoot));
 		validatedIpcMain.handle('vscode:jarvisVoiceTranscribe', async (_event, request: unknown) => transcribeJarvisVoice(request));
+		validatedIpcMain.handle('vscode:jarvisInterpretCommand', async (_event, request: unknown) => interpretJarvisCommand(request));
 		validatedIpcMain.handle('vscode:jarvisSelectWorkspaceFolder', async (event, currentPath: unknown) => selectJarvisWorkspaceFolder(event.sender, currentPath));
 		validatedIpcMain.handle('vscode:jarvisTerminalCommand', async (event, command: unknown) => handleJarvisTerminalCommand(event.sender, command));
 		validatedIpcMain.handle('vscode:jarvisSwitchWindowKind', async (event, target: unknown) => {
@@ -1970,7 +1971,21 @@ interface IJarvisTerminalProcess {
 interface IJarvisVoiceTranscribeResult {
 	readonly accepted: boolean;
 	readonly transcript?: string;
+	readonly toolCalls?: readonly IJarvisVoiceToolCall[];
 	readonly error?: string;
+}
+
+interface IJarvisCommandInterpretationResult {
+	readonly accepted: boolean;
+	readonly text?: string;
+	readonly toolCalls?: readonly IJarvisVoiceToolCall[];
+	readonly error?: string;
+}
+
+interface IJarvisVoiceToolCall {
+	readonly callId?: string;
+	readonly name: string;
+	readonly args: Record<string, unknown>;
 }
 
 let jarvisNodePtyModule: typeof import('node-pty') | undefined;
@@ -2009,19 +2024,53 @@ async function transcribeJarvisVoice(value: unknown): Promise<IJarvisVoiceTransc
 		const tools = Array.isArray(value.tools) ? value.tools : undefined;
 		const apiUrl = jarvisBackboardApiUrl(config);
 
-		let response = await postJarvisVoiceToBackboard(apiUrl, apiKey, audioBytes, mimeType, systemPrompt, tools);
+		let response = await postJarvisVoiceToBackboard(apiUrl, apiKey, audioBytes, mimeType, systemPrompt, tools, true);
 		if (!response.ok && (systemPrompt || tools)) {
-			response = await postJarvisVoiceToBackboard(apiUrl, apiKey, audioBytes, mimeType, undefined, undefined);
+			response = await postJarvisVoiceToBackboard(apiUrl, apiKey, audioBytes, mimeType, undefined, undefined, false);
 		}
 		if (!response.ok) {
 			return { accepted: false, error: `${response.status} ${response.statusText}: ${await response.text()}` };
 		}
 		const payload: unknown = await response.json();
 		const transcript = extractJarvisBackboardTranscript(payload);
-		if (!transcript) {
-			return { accepted: false, error: 'Backboard response did not include a transcript.' };
+		const toolCalls = extractJarvisBackboardToolCalls(payload);
+		if (!transcript && toolCalls.length === 0) {
+			return { accepted: false, error: 'Backboard response did not include a transcript or tool call.' };
 		}
-		return { accepted: true, transcript };
+		return { accepted: true, transcript, toolCalls };
+	} catch (error) {
+		return { accepted: false, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+async function interpretJarvisCommand(value: unknown): Promise<IJarvisCommandInterpretationResult> {
+	try {
+		if (!isOptimusObjectRecord(value)) {
+			return { accepted: false, error: 'Invalid Jarvis command interpretation request.' };
+		}
+		const text = stringValueFromOptimusRecord(value.text)?.trim();
+		if (!text) {
+			return { accepted: false, error: 'No Jarvis command text was provided.' };
+		}
+		const config = readJarvisBackboardConfig();
+		const apiKey = jarvisBackboardApiKey(config);
+		if (!apiKey) {
+			return { accepted: false, error: 'No Backboard API key found in ~/.backboard_ide/config.json.' };
+		}
+		const systemPrompt = stringValueFromOptimusRecord(value.systemPrompt);
+		const tools = Array.isArray(value.tools) ? value.tools : undefined;
+		const apiUrl = jarvisBackboardApiUrl(config);
+		let response = await postJarvisTextToBackboard(apiUrl, apiKey, text, systemPrompt, tools);
+		if (!response.ok && (systemPrompt || tools)) {
+			response = await postJarvisTextToBackboard(apiUrl, apiKey, text, undefined, undefined);
+		}
+		if (!response.ok) {
+			return { accepted: false, error: `${response.status} ${response.statusText}: ${await response.text()}` };
+		}
+		const payload: unknown = await response.json();
+		const interpretedText = extractJarvisBackboardTranscript(payload) ?? text;
+		const toolCalls = extractJarvisBackboardToolCalls(payload);
+		return { accepted: true, text: interpretedText, toolCalls };
 	} catch (error) {
 		return { accepted: false, error: error instanceof Error ? error.message : String(error) };
 	}
@@ -2034,11 +2083,12 @@ async function postJarvisVoiceToBackboard(
 	mimeType: string,
 	systemPrompt: string | undefined,
 	tools: readonly unknown[] | undefined,
+	sendToLlm: boolean,
 ): Promise<Response> {
 	const form = new FormData();
 	form.append('stream', 'false');
 	form.append('content', '');
-	form.append('send_to_llm', 'false');
+	form.append('send_to_llm', sendToLlm ? 'true' : 'false');
 	form.append('voice', JSON.stringify({
 		stt: {
 			provider: 'openai',
@@ -2047,6 +2097,7 @@ async function postJarvisVoiceToBackboard(
 		},
 		...(systemPrompt ? { system_prompt: systemPrompt } : {}),
 		...(tools ? { tools } : {}),
+		send_to_llm: sendToLlm,
 		client: 'jarvis',
 	}));
 	if (systemPrompt) {
@@ -2061,6 +2112,32 @@ async function postJarvisVoiceToBackboard(
 		method: 'POST',
 		headers: { 'X-API-Key': apiKey },
 		body: form,
+	});
+}
+
+async function postJarvisTextToBackboard(
+	apiUrl: string,
+	apiKey: string,
+	text: string,
+	systemPrompt: string | undefined,
+	tools: readonly unknown[] | undefined,
+): Promise<Response> {
+	const body = {
+		content: text,
+		stream: false,
+		send_to_llm: true,
+		parallel_tool_calls: false,
+		metadata: { client: 'jarvis' },
+		...(systemPrompt ? { system_prompt: systemPrompt } : {}),
+		...(tools ? { tools } : {}),
+	};
+	return fetch(`${apiUrl}/threads/messages`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			'X-API-Key': apiKey
+		},
+		body: JSON.stringify(body),
 	});
 }
 
@@ -2116,6 +2193,110 @@ function extractJarvisBackboardTranscript(value: unknown): string | undefined {
 		}
 	}
 	return undefined;
+}
+
+function extractJarvisBackboardToolCalls(value: unknown): IJarvisVoiceToolCall[] {
+	const calls: IJarvisVoiceToolCall[] = [];
+	collectJarvisBackboardToolCalls(value, calls, new Set());
+	return calls;
+}
+
+function collectJarvisBackboardToolCalls(value: unknown, calls: IJarvisVoiceToolCall[], seen: Set<unknown>): void {
+	if (!value || seen.has(value)) {
+		return;
+	}
+	if (typeof value === 'object') {
+		seen.add(value);
+	}
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			collectJarvisBackboardToolCalls(item, calls, seen);
+		}
+		return;
+	}
+	if (!isOptimusObjectRecord(value)) {
+		return;
+	}
+
+	const direct = normalizeJarvisVoiceToolCall(value);
+	if (direct) {
+		calls.push(direct);
+		return;
+	}
+
+	for (const key of ['tool_calls', 'toolCalls', 'actions', 'function_calls', 'functionCalls']) {
+		const child = value[key];
+		if (Array.isArray(child)) {
+			for (const item of child) {
+				collectJarvisBackboardToolCalls(item, calls, seen);
+			}
+		}
+	}
+
+	for (const key of ['message', 'messages', 'response', 'output', 'data', 'choice', 'choices', 'assistant', 'run', 'runs', 'required_action', 'requiredAction', 'submit_tool_outputs', 'submitToolOutputs']) {
+		collectJarvisBackboardToolCalls(value[key], calls, seen);
+	}
+
+	const content = stringValueFromOptimusRecord(value.content) ?? stringValueFromOptimusRecord(value.text);
+	if (content) {
+		const parsed = parseJarvisToolCallJson(content);
+		if (parsed) {
+			collectJarvisBackboardToolCalls(parsed, calls, seen);
+		}
+	}
+}
+
+function normalizeJarvisVoiceToolCall(value: Record<string, unknown>): IJarvisVoiceToolCall | undefined {
+	if ((value.type === 'function' || value.type === 'tool') && value.parameters !== undefined && value.args === undefined && value.arguments === undefined && value.input === undefined) {
+		return undefined;
+	}
+	const functionRecord = isOptimusObjectRecord(value.function) ? value.function : undefined;
+	if ((value.type === 'function' || value.type === 'tool') && functionRecord?.parameters !== undefined && functionRecord.arguments === undefined && value.args === undefined && value.arguments === undefined && value.input === undefined) {
+		return undefined;
+	}
+	const rawName = stringValueFromOptimusRecord(value.name)
+		?? stringValueFromOptimusRecord(value.tool_name)
+		?? stringValueFromOptimusRecord(value.toolName)
+		?? stringValueFromOptimusRecord(functionRecord?.name);
+	if (!rawName || !isJarvisVoiceToolName(rawName)) {
+		return undefined;
+	}
+
+	const rawArgs = value.args ?? value.arguments ?? value.parameters ?? value.input ?? functionRecord?.arguments;
+	const args = normalizeJarvisVoiceToolArgs(rawArgs);
+	const callId = stringValueFromOptimusRecord(value.call_id) ?? stringValueFromOptimusRecord(value.callId) ?? stringValueFromOptimusRecord(value.id);
+	return { callId, name: rawName, args };
+}
+
+function normalizeJarvisVoiceToolArgs(value: unknown): Record<string, unknown> {
+	if (isOptimusObjectRecord(value)) {
+		return value;
+	}
+	if (typeof value === 'string') {
+		try {
+			const parsed: unknown = JSON.parse(value);
+			return isOptimusObjectRecord(parsed) ? parsed : {};
+		} catch {
+			return {};
+		}
+	}
+	return {};
+}
+
+function parseJarvisToolCallJson(value: string): unknown | undefined {
+	const trimmed = value.trim();
+	if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) {
+		return undefined;
+	}
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		return undefined;
+	}
+}
+
+function isJarvisVoiceToolName(value: string): value is IJarvisVoiceToolCall['name'] {
+	return value === 'open_terminal' || value === 'send_terminal_input' || value === 'close_terminal';
 }
 
 async function handleJarvisTerminalCommand(sender: WebContents, value: unknown): Promise<{ readonly accepted: boolean; readonly slotId?: string; readonly error?: string }> {

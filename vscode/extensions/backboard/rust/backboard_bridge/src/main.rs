@@ -40,6 +40,66 @@ const WEB_FETCH_PREVIEW_CHARS: usize = 12_000;
 const BACKBOARD_IMAGE_TOOL_NAMES: &[&str] = &["generate_image", "image_generate"];
 const BACKBOARD_SYSTEM_PROMPT: &str = include_str!("backboard_runtime_system_prompt.md");
 const BACKBOARD_API_REFERENCE_HEADING: &str = "## Backboard API Reference";
+const BACKBOARD_HTTP_ENDPOINT_REFERENCE: &str = r#"## Backboard HTTP Endpoints
+
+Backboard has real HTTP/REST endpoints. Runtime tools such as `read_file`, `edit_file`, `bash`, and `grep` are local IDE tool calls, not Backboard HTTP endpoints. Use the configured API base URL: production `https://app.backboard.io/api`, development `https://dev.app.backboard.io/api`, and local development `http://localhost:8000`. API-key requests use the `X-API-Key` header.
+
+Assistants:
+- `GET /assistants`
+- `POST /assistants`
+- `GET /assistants/{assistant_id}`
+- `PUT /assistants/{assistant_id}`
+- `DELETE /assistants/{assistant_id}`
+- `POST /assistants/{assistant_id}/threads`
+- `GET /assistants/{assistant_id}/threads`
+- `GET /assistants/{assistant_id}/documents`
+- `POST /assistants/{assistant_id}/documents`
+
+Threads:
+- `GET /threads`
+- `GET /threads/{thread_id}`
+- `DELETE /threads/{thread_id}`
+- `POST /threads/messages`
+- `POST /threads/tool-outputs`
+- `POST /threads/{thread_id}/messages`
+- `POST /threads/{thread_id}/runs/{run_id}/submit-tool-outputs`
+- `POST /threads/{thread_id}/runs/{run_id}/cancel`
+- `GET /threads/{thread_id}/documents`
+- `POST /threads/{thread_id}/documents`
+
+Documents:
+- `GET /documents/{document_id}/status`
+- `DELETE /documents/{document_id}`
+
+Memories:
+- `GET /assistants/{assistant_id}/memories`
+- `POST /assistants/{assistant_id}/memories`
+- `DELETE /assistants/{assistant_id}/memories`
+- `POST /assistants/{assistant_id}/memories/search`
+- `GET /assistants/{assistant_id}/memories/{memory_id}`
+- `PUT /assistants/{assistant_id}/memories/{memory_id}`
+- `DELETE /assistants/{assistant_id}/memories/{memory_id}`
+- `GET /assistants/memories/operations/{operation_id}`
+
+Models:
+- `GET /models`
+- `GET /models/{model_name}`
+- `GET /models/providers`
+- `GET /models/provider/{provider_name}`
+- `GET /models/embedding/all`
+- `GET /models/embedding/providers`
+- `GET /models/embedding/{model_name}`
+
+Billing:
+- `GET /billing/balance`
+- `GET /billing/usage/recent`
+- `GET /billing/usage/summary`
+
+OAuth and SSO:
+- `GET /oauth/authorize`
+- `POST /oauth/token`
+- `GET /oauth/userinfo`
+- `POST /oauth/revoke`"#;
 const RAW_TOOL_CALL_BEGIN: &str = "<|tool_call_begin|>";
 const RAW_TOOL_CALL_SEPARATOR: &str = "<|tool_sep|>";
 const RAW_TOOL_CALL_END: &str = "<|tool_call_end|>";
@@ -1640,6 +1700,8 @@ fn augment_prompt(
     format!(
         r#"{system_prompt}
 
+{http_endpoints}
+
 ## Runtime Context
 
 - Target workspace root: {workspace}
@@ -1654,6 +1716,7 @@ For generated files larger than about 3000 characters, write a small first chunk
 
 {content}"#,
         system_prompt = system_prompt,
+        http_endpoints = BACKBOARD_HTTP_ENDPOINT_REFERENCE,
         workspace = workspace,
         mode = mode,
         available_tools = available_tools,
@@ -2959,6 +3022,12 @@ mod tests {
         assert!(prompt.contains("append 2000-3000 character chunks with append_file"));
         assert!(prompt.contains("read_file"));
         assert!(prompt.contains("write_file"));
+        assert!(prompt.contains("## Backboard HTTP Endpoints"));
+        assert!(prompt.contains("Backboard has real HTTP/REST endpoints"));
+        assert!(prompt.contains("POST /threads/messages"));
+        assert!(prompt.contains("POST /threads/tool-outputs"));
+        assert!(prompt.contains("GET /models"));
+        assert!(prompt.contains("GET /oauth/authorize"));
         assert!(!prompt.contains("## Backboard API Reference"));
         assert!(prompt.contains("## User Request"));
         assert!(prompt.contains("make the UI better"));
@@ -2981,6 +3050,9 @@ mod tests {
 
         assert!(!normal.contains("## Backboard API Reference"));
         assert!(!api.contains("## Backboard API Reference"));
+        assert!(normal.contains("## Backboard HTTP Endpoints"));
+        assert!(api.contains("## Backboard HTTP Endpoints"));
+        assert!(api.contains("POST /threads/messages"));
     }
 
     #[test]

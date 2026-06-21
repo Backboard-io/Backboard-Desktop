@@ -2676,3 +2676,153 @@ body.optimus-standalone .optimus-root,
 .optimus-content.optimus-panel-tight .composerBar {
 	min-height: 18px;
 }
+
+.optimus-standalone-document {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+}
+
+body.optimus-standalone {
+	width: 100vw;
+	height: 100vh;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.optimus-content {
+	min-height: 0;
+	overflow: hidden;
+}
+
+.optimus-grid {
+	display: block;
+	min-height: 0;
+	height: 100%;
+	overflow-x: hidden;
+	overflow-y: auto;
+	scrollbar-gutter: stable;
+}
+
+.optimus-content.optimus-fit-normal .optimus-grid,
+.optimus-content.optimus-fit-compact .optimus-grid,
+.optimus-content.optimus-fit-tight .optimus-grid {
+	overflow-x: hidden;
+	overflow-y: auto;
+	scrollbar-gutter: stable;
+}
+
+.optimus-task-board {
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+	align-content: stretch;
+	justify-content: stretch;
+	align-items: stretch;
+}
+
+.optimus-grid.is-history-feed {
+	overflow-x: hidden;
+	overflow-y: auto;
+}
+
+.optimus-task-board.is-history-feed {
+	height: auto;
+	min-height: 100%;
+	align-content: start;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-rows: none;
+	grid-auto-rows: var(--optimus-history-row-height, minmax(220px, 1fr));
+	padding-bottom: 2px;
+}
+
+.optimus-content.optimus-grid-three .optimus-task-board.is-history-feed,
+.optimus-content.optimus-grid-two .optimus-task-board.is-history-feed,
+.optimus-content.optimus-grid-one .optimus-task-board.is-history-feed {
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-rows: none;
+}
+
+.optimus-content.optimus-grid-three .optimus-task-board {
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.optimus-content.optimus-grid-two .optimus-task-board {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+.optimus-content.optimus-grid-one .optimus-task-board {
+	grid-template-columns: minmax(0, 1fr);
+	grid-template-rows: repeat(6, minmax(0, 1fr));
+}
+
+.optimus-starter-card {
+	min-height: 0;
+	height: 100%;
+	grid-template-rows: minmax(34px, 44px) minmax(52px, .55fr) minmax(0, 1fr) minmax(38px, .24fr) minmax(36px, 48px);
+}
+
+.optimus-content.optimus-fit-normal .optimus-starter-card {
+	grid-template-rows: minmax(34px, 44px) minmax(52px, .55fr) minmax(0, 1fr) minmax(38px, .24fr) minmax(36px, 48px);
+}
+
+.optimus-content.optimus-fit-compact .optimus-starter-card {
+	grid-template-rows: 34px minmax(42px, .42fr) minmax(0, 1fr);
+}
+
+.optimus-content.optimus-fit-compact .optimus-starter-preview-title,
+.optimus-content.optimus-fit-compact .optimus-starter-preview-rows {
+	display: flex;
+}
+
+.optimus-content.optimus-fit-tight .optimus-starter-card {
+	grid-template-rows: 30px minmax(0, 1fr);
+}
+
+.optimus-task-board.is-history-feed .optimus-starter-card {
+	height: 100%;
+	grid-template-rows: minmax(30px, 38px) minmax(58px, .42fr) minmax(0, 1fr) minmax(32px, .18fr);
+}
+
+.optimus-task-board.is-history-feed .optimus-starter-preview-title {
+	gap: 4px;
+	padding: 8px 12px;
+}
+
+.optimus-task-board.is-history-feed .optimus-starter-preview-composer {
+	display: none;
+}
+
+.optimus-starter-preview-rows {
+	min-height: 0;
+}
+
+.optimus-starter-preview-row {
+	flex: 0 0 auto;
+}
+
+.optimus-drawer {
+	display: grid;
+	grid-template-rows: minmax(0, 1fr);
+	min-height: 0;
+	height: 100%;
+	overflow: hidden;
+}
+
+.optimus-drawer-body {
+	grid-row: 1;
+	min-height: 0;
+	height: 100%;
+}
+
+.viewStack {
+	min-height: 0;
+	height: 100%;
+}
+
+.composer {
+	align-self: end;
+}

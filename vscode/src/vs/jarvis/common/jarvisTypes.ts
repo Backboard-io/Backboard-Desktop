@@ -31,9 +31,23 @@ export interface IJarvisWorkspaceSelectionResult {
 	readonly error?: string;
 }
 
+export interface IJarvisVoiceToolCall {
+	readonly callId?: string;
+	readonly name: string;
+	readonly args: Record<string, unknown>;
+}
+
 export interface IJarvisVoiceTranscriptionResult {
 	readonly accepted?: boolean;
 	readonly transcript?: string;
+	readonly toolCalls?: readonly IJarvisVoiceToolCall[];
+	readonly error?: string;
+}
+
+export interface IJarvisCommandInterpretationResult {
+	readonly accepted?: boolean;
+	readonly text?: string;
+	readonly toolCalls?: readonly IJarvisVoiceToolCall[];
 	readonly error?: string;
 }
 
@@ -45,6 +59,7 @@ export interface IJarvisBridge {
 	disposeTerminal(slotId: string): Promise<void>;
 	selectWorkspaceFolder(currentPath?: string): Promise<IJarvisWorkspaceSelectionResult>;
 	transcribeVoice(audio: Uint8Array, mimeType: string, systemPrompt: string, tools: readonly unknown[]): Promise<IJarvisVoiceTranscriptionResult>;
+	interpretCommand(text: string, systemPrompt: string, tools: readonly unknown[]): Promise<IJarvisCommandInterpretationResult>;
 	openEditor(): Promise<void>;
 	openAgents(): Promise<void>;
 	openOptimus(): Promise<void>;

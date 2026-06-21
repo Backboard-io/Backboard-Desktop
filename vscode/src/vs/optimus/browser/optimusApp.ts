@@ -144,13 +144,14 @@ export class OptimusApp extends Disposable {
 		const contentWidth = this.content.clientWidth;
 		const contentHeight = this.content.clientHeight;
 		const gridWidth = this.cardGrid.clientWidth;
+		const gridHeight = this.cardGrid.clientHeight;
 		const drawerHeight = this.drawer.clientHeight;
 		const panelBelow = this.isDrawerOpen && contentWidth > 0 && contentWidth < 760;
 		const effectiveGridWidth = panelBelow ? contentWidth : gridWidth;
 		const oneColumn = effectiveGridWidth > 0 && effectiveGridWidth < 560;
 		const twoColumn = !oneColumn && effectiveGridWidth > 0 && effectiveGridWidth < 920;
-		const fitTight = contentHeight > 0 && contentHeight < 520;
-		const fitCompact = !fitTight && contentHeight > 0 && contentHeight < 700;
+		const fitTight = contentHeight > 0 && contentHeight < 420;
+		const fitCompact = !fitTight && contentHeight > 0 && contentHeight < 560;
 		const panelTight = this.isDrawerOpen && drawerHeight > 0 && drawerHeight < 360;
 		const panelCompact = this.isDrawerOpen && !panelTight && drawerHeight > 0 && drawerHeight < 520;
 
@@ -164,6 +165,13 @@ export class OptimusApp extends Disposable {
 		this.content.classList.toggle('optimus-fit-tight', fitTight);
 		this.content.classList.toggle('optimus-panel-compact', panelCompact);
 		this.content.classList.toggle('optimus-panel-tight', panelTight);
+
+		const computedGridStyle = this.container.ownerDocument.defaultView?.getComputedStyle(this.cardGrid);
+		const gap = computedGridStyle ? parseCssPixels(computedGridStyle.gap) : 12;
+		const paddingTop = computedGridStyle ? parseCssPixels(computedGridStyle.paddingTop) : 0;
+		const paddingBottom = computedGridStyle ? parseCssPixels(computedGridStyle.paddingBottom) : 0;
+		const historyRowHeight = Math.max(180, Math.floor((gridHeight - paddingTop - paddingBottom - gap) / 2));
+		this.cardGrid.style.setProperty('--optimus-history-row-height', `${historyRowHeight}px`);
 	}
 
 	private renderModeSwitcher(): HTMLElement {
@@ -274,15 +282,43 @@ export class OptimusApp extends Disposable {
 
 		const slottedRuns = this.slottedRuns();
 		const promptEntries = this.promptTileEntries();
+		const renderHistoryFeed = slottedRuns.size === 0 && promptEntries.length > 0;
+		board.classList.toggle('is-history-feed', renderHistoryFeed);
+		this.cardGrid.classList.toggle('is-history-feed', renderHistoryFeed);
+
+		if (renderHistoryFeed) {
+			for (const entry of promptEntries) {
+				board.appendChild(this.renderPromptTask(entry));
+			}
+			return board;
+		}
+
 		for (let slot = 0; slot < starterTasks.length; slot++) {
 			const run = slottedRuns.get(slot);
-			board.appendChild(run ? this.renderRunCard(run) : this.renderStarterTask(slot, promptEntries[slot]));
+			board.appendChild(run ? this.renderRunCard(run) : this.renderStarterTask(slot));
 		}
 
 		return board;
 	}
 
-	private renderStarterTask(slot: number, historyEntry: IOptimusHistoryEntry | undefined): HTMLElement {
+	private renderPromptTask(historyEntry: IOptimusHistoryEntry): HTMLElement {
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = `optimus-starter-card optimus-prompt-card has-prompt${this.selectedHistory?.id === historyEntry.id ? ' selected' : ''}`;
+		button.setAttribute('aria-label', localize('optimus.slot.openPrompt', "Open Backboard prompt {0}", promptTileTitle(historyEntry)));
+		button.addEventListener('click', () => this.openHistoryEntry(historyEntry));
+
+		button.append(
+			this.renderStarterHeaderSkeleton(historyEntry),
+			this.renderStarterPromptTitle(historyEntry),
+			this.renderStarterPromptRows(historyEntry),
+			this.renderStarterPromptFooter(historyEntry),
+			this.renderStarterComposerSkeleton()
+		);
+		return button;
+	}
+
+	private renderStarterTask(slot: number, historyEntry?: IOptimusHistoryEntry): HTMLElement {
 		const starter = starterTasks[slot];
 		const button = document.createElement('button');
 		button.type = 'button';
@@ -515,8 +551,7 @@ export class OptimusApp extends Disposable {
 
 	private promptTileEntries(): readonly IOptimusHistoryEntry[] {
 		return [...this.filteredHistoryEntries()]
-			.sort((first, second) => (second.updatedAt ?? second.startedAt ?? 0) - (first.updatedAt ?? first.startedAt ?? 0))
-			.slice(0, starterTasks.length);
+			.sort((first, second) => (second.updatedAt ?? second.startedAt ?? 0) - (first.updatedAt ?? first.startedAt ?? 0));
 	}
 
 	private firstAvailableSlot(usedSlots: Set<number>): number | undefined {
@@ -1402,6 +1437,11 @@ function actionButton(label: string, handler: () => void): HTMLButtonElement {
 		handler();
 	});
 	return button;
+}
+
+function parseCssPixels(value: string): number {
+	const parsed = Number.parseFloat(value);
+	return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

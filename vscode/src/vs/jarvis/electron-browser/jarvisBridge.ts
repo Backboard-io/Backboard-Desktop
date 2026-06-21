@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { ipcRenderer } from '../../base/parts/sandbox/electron-browser/globals.js';
-import { IJarvisBridge, IJarvisCommandResult, IJarvisTerminalDataEvent, IJarvisTerminalExitEvent, IJarvisVoiceTranscriptionResult, IJarvisWorkspaceSelectionResult } from '../common/jarvisTypes.js';
+import { IJarvisBridge, IJarvisCommandInterpretationResult, IJarvisCommandResult, IJarvisTerminalDataEvent, IJarvisTerminalExitEvent, IJarvisVoiceTranscriptionResult, IJarvisWorkspaceSelectionResult } from '../common/jarvisTypes.js';
 
 export class ElectronJarvisBridge implements IJarvisBridge {
 
@@ -59,6 +59,18 @@ export class ElectronJarvisBridge implements IJarvisBridge {
 		}) as IJarvisVoiceTranscriptionResult | undefined;
 		if (!result?.accepted) {
 			return { accepted: false, error: result?.error ?? 'Backboard voice transcription failed.' };
+		}
+		return result;
+	}
+
+	async interpretCommand(text: string, systemPrompt: string, tools: readonly unknown[]): Promise<IJarvisCommandInterpretationResult> {
+		const result = await ipcRenderer.invoke('vscode:jarvisInterpretCommand', {
+			text,
+			systemPrompt,
+			tools
+		}) as IJarvisCommandInterpretationResult | undefined;
+		if (!result?.accepted) {
+			return { accepted: false, error: result?.error ?? 'Backboard command interpretation failed.' };
 		}
 		return result;
 	}

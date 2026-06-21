@@ -12,6 +12,7 @@ import { ElectronOptimusHistoryProvider, ElectronOptimusNavigationProvider } fro
 
 export async function main(): Promise<void> {
 	await domContentLoaded(mainWindow);
+	mainWindow.document.documentElement.classList.add('optimus-standalone-document');
 	mainWindow.document.body.classList.add('optimus-standalone');
 	const bridge = new ElectronOptimusBackboardBridge();
 	const historyProvider = new ElectronOptimusHistoryProvider();

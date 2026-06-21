@@ -5,17 +5,18 @@
 
 import { localize } from '../../nls.js';
 import { Disposable } from '../../base/common/lifecycle.js';
-import { IJarvisBridge, IJarvisTerminalSlot } from '../common/jarvisTypes.js';
+import { IJarvisBridge, IJarvisTerminalSlot, IJarvisVoiceToolCall } from '../common/jarvisTypes.js';
 import type { Terminal as XtermTerminal, IDisposable as IXtermDisposable, ITheme } from '@xterm/xterm';
 
 const terminalSlots: readonly IJarvisTerminalSlot[] = [
 	{ id: 'erin', name: 'Erin' },
 	{ id: 'seif', name: 'Seif' },
 	{ id: 'youseph', name: 'Youseph' },
-	{ id: 'jon', name: 'Jon' }
+	{ id: 'nir', name: 'Nir' }
 ];
 
 type JarvisSlotStatus = 'idle' | 'opening' | 'running' | 'closed' | 'error';
+type JarvisCliKind = 'backboard' | 'codex';
 
 interface IJarvisSlotState {
 	readonly id: string;
@@ -23,6 +24,7 @@ interface IJarvisSlotState {
 	status: JarvisSlotStatus;
 	output: string;
 	commandDraft: string;
+	cli: JarvisCliKind;
 	terminal?: XtermTerminal;
 	terminalInputDisposable?: IXtermDisposable;
 	lastPrompt?: string;
@@ -32,8 +34,9 @@ interface IJarvisSlotState {
 const JARVIS_SYSTEM_PROMPT = [
 	'You are Jarvis, the Backboard IDE voice control surface.',
 	'Your job is to convert short voice commands into tool calls for the Jarvis page.',
-	'Available terminal slots are Erin, Seif, Youseph, and Jon.',
+	'Available terminal slots are Erin, Seif, Youseph, and Nir.',
 	'When the user says "hey backboard, open a terminal", call open_terminal. If the user says "open 3 terminals", call open_terminal with count: 3.',
+	'When the user says "open Codex CLI", call open_terminal with cli: "codex". Use cli: "backboard" by default.',
 	'If the user names a slot, use that slot. If the user gives a task for a slot, such as "make Erin tell me a short story", call send_terminal_input with slot: "Erin" and input: "tell me a short story".',
 	'When the user asks to type, run, ask, make, or tell something in a terminal, call send_terminal_input with the exact requested input.',
 	'When the user asks to close a terminal, call close_terminal.',
@@ -43,40 +46,47 @@ const JARVIS_SYSTEM_PROMPT = [
 const JARVIS_VOICE_TOOLS = [
 	{
 		type: 'function',
-		name: 'open_terminal',
-		description: 'Open one of the four Jarvis terminal cards and start the Backboard CLI in it.',
-		parameters: {
-			type: 'object',
-			properties: {
-				slot: { type: 'string', enum: terminalSlots.map(slot => slot.name), description: 'Optional terminal owner slot.' }
-			}
-		}
-	},
-	{
-		type: 'function',
-		name: 'send_terminal_input',
-		description: 'Send text to a running Jarvis terminal.',
-		parameters: {
-			type: 'object',
-			properties: {
-				slot: { type: 'string', enum: terminalSlots.map(slot => slot.name), description: 'Optional terminal owner slot.' },
-				input: { type: 'string', description: 'Text to send to the terminal.' }
-			},
-			required: ['input']
-		}
-	},
-	{
-		type: 'function',
-		name: 'close_terminal',
-		description: 'Close a running Jarvis terminal card.',
+		function: {
+			name: 'open_terminal',
+			description: 'Open one of the four Jarvis terminal cards and start Backboard or Codex CLI in it.',
 			parameters: {
 				type: 'object',
 				properties: {
 					slot: { type: 'string', enum: terminalSlots.map(slot => slot.name), description: 'Optional terminal owner slot.' },
-					count: { type: 'number', minimum: 1, maximum: terminalSlots.length, description: 'Optional number of terminals to open.' }
+					count: { type: 'number', minimum: 1, maximum: terminalSlots.length, description: 'Optional number of terminals to open.' },
+					cli: { type: 'string', enum: ['backboard', 'codex'], description: 'CLI to start in the terminal. Defaults to backboard.' }
 				}
 			}
 		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'send_terminal_input',
+			description: 'Send text to a running Jarvis terminal.',
+			parameters: {
+				type: 'object',
+				properties: {
+					slot: { type: 'string', enum: terminalSlots.map(slot => slot.name), description: 'Optional terminal owner slot.' },
+					input: { type: 'string', description: 'Text to send to the terminal.' }
+				},
+				required: ['input']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'close_terminal',
+			description: 'Close a running Jarvis terminal card.',
+			parameters: {
+				type: 'object',
+				properties: {
+					slot: { type: 'string', enum: terminalSlots.map(slot => slot.name), description: 'Optional terminal owner slot.' }
+				}
+			}
+		}
+	}
 ];
 
 export class JarvisApp extends Disposable {
@@ -107,7 +117,8 @@ export class JarvisApp extends Disposable {
 				name: slot.name,
 				status: 'idle',
 				output: '',
-				commandDraft: ''
+				commandDraft: '',
+				cli: 'backboard'
 			});
 		}
 		this._register(this.bridge.onTerminalData(event => {
@@ -290,7 +301,7 @@ export class JarvisApp extends Disposable {
 		commandBar.className = 'jarvis-command-bar';
 		commandBar.addEventListener('submit', event => {
 			event.preventDefault();
-			this.acceptNaturalCommand(this.promptInput.value);
+			this.runCommand(this.promptInput.value).catch(error => this.updateStatus(errorMessage(error)));
 			this.promptInput.value = '';
 		});
 
@@ -350,7 +361,7 @@ export class JarvisApp extends Disposable {
 		openButton.setAttribute('aria-label', openButton.title);
 		openButton.textContent = '+';
 		openButton.disabled = slot.status === 'opening' || slot.status === 'running';
-		openButton.addEventListener('click', () => this.openTerminal(slot.id));
+		openButton.addEventListener('click', () => this.openTerminal(slot.id, 'backboard'));
 		header.appendChild(openButton);
 		card.appendChild(header);
 
@@ -587,10 +598,24 @@ export class JarvisApp extends Disposable {
 		const blob = new Blob(chunks, { type: mimeType });
 		const audio = new Uint8Array(await blob.arrayBuffer());
 		const result = await this.bridge.transcribeVoice(audio, mimeType, JARVIS_SYSTEM_PROMPT, JARVIS_VOICE_TOOLS);
-		if (!result.accepted || !result.transcript) {
+		if (!result.accepted) {
 			throw new Error(result.error ?? localize('jarvis.voice.noTranscript', "Backboard did not return a transcript."));
 		}
-		this.handleVoiceTranscript(result.transcript, true);
+		if (result.transcript) {
+			this.promptInput.value = result.transcript;
+		}
+		if (result.toolCalls?.length) {
+			const summaries: string[] = [];
+			for (const toolCall of result.toolCalls) {
+				summaries.push(await this.executeVoiceToolCall(toolCall));
+			}
+			this.updateStatus(localize('jarvis.voice.toolsExecuted', "Jarvis ran: {0}.", summaries.filter(Boolean).join(', ')));
+			return;
+		}
+		if (!result.transcript) {
+			throw new Error(localize('jarvis.voice.noTranscript', "Backboard response did not include a transcript or tool call."));
+		}
+		await this.runCommand(result.transcript);
 	}
 
 	private setVoiceListening(listening: boolean): void {
@@ -599,21 +624,59 @@ export class JarvisApp extends Disposable {
 		this.voiceButton.textContent = listening ? localize('jarvis.voice.listening', "Listening") : localize('jarvis.voice.start', "Voice");
 	}
 
-	private handleVoiceTranscript(text: string, isFinal: boolean): void {
-		const transcript = text.trim();
-		if (!transcript) {
+	private async runCommand(rawCommand: string): Promise<void> {
+		const command = rawCommand.trim();
+		if (!command) {
 			return;
 		}
-		this.promptInput.value = transcript;
-		this.updateStatus(isFinal
-			? localize('jarvis.voice.heard', "Jarvis heard: {0}", transcript)
-			: localize('jarvis.voice.partial', "Listening: {0}", transcript));
-		if (isFinal) {
-			if (this.voiceFallbackTimer) {
-				clearTimeout(this.voiceFallbackTimer);
+		this.updateStatus(localize('jarvis.command.processing', "Asking Backboard to choose a Jarvis tool..."));
+		const result = await this.bridge.interpretCommand(command, JARVIS_SYSTEM_PROMPT, JARVIS_VOICE_TOOLS);
+		if (result.accepted && result.toolCalls?.length) {
+			const summaries: string[] = [];
+			for (const toolCall of result.toolCalls) {
+				summaries.push(await this.executeVoiceToolCall(toolCall));
 			}
+			this.updateStatus(localize('jarvis.command.toolsExecuted', "Jarvis ran: {0}.", summaries.filter(Boolean).join(', ')));
+			return;
+		}
+		this.acceptNaturalCommand(command);
+	}
+
+	private async executeVoiceToolCall(toolCall: IJarvisVoiceToolCall): Promise<string> {
+		if (this.voiceFallbackTimer) {
+			clearTimeout(this.voiceFallbackTimer);
 			this.voiceFallbackTimer = undefined;
-			this.acceptNaturalCommand(transcript);
+		}
+		switch (toolCall.name) {
+			case 'open_terminal': {
+				const cli = cliFromArgs(toolCall.args);
+				const count = countFromArgs(toolCall.args);
+				const slot = slotFromArgs(toolCall.args);
+				const opened = await this.openAvailableTerminals(count, slot, cli);
+				if (opened.length === 0) {
+					return localize('jarvis.voice.tool.open.none', "no terminals opened");
+				}
+				return localize('jarvis.voice.tool.open', "opened {0} with {1}", opened.map(slot => slot.name).join(', '), cliLabel(cli));
+			}
+			case 'send_terminal_input': {
+				const slot = slotFromArgs(toolCall.args) ?? terminalSlots.find(candidate => this.slots.get(candidate.id)?.status === 'running');
+				const input = stringArg(toolCall.args, 'input') ?? stringArg(toolCall.args, 'text') ?? stringArg(toolCall.args, 'command') ?? stringArg(toolCall.args, 'prompt');
+				if (!slot || !input) {
+					return localize('jarvis.voice.tool.send.missing', "missing terminal or input");
+				}
+				await this.sendPromptToSlot(slot, input);
+				return localize('jarvis.voice.tool.send', "sent prompt to {0}", slot.name);
+			}
+			case 'close_terminal': {
+				const slot = slotFromArgs(toolCall.args) ?? terminalSlots.find(candidate => this.slots.get(candidate.id)?.status === 'running');
+				if (!slot) {
+					return localize('jarvis.voice.tool.close.none', "no running terminal to close");
+				}
+				await this.disposeTerminal(slot.id);
+				return localize('jarvis.voice.tool.close', "closed {0}", slot.name);
+			}
+			default:
+				return localize('jarvis.voice.tool.unsupported', "ignored {0}", toolCall.name);
 		}
 	}
 
@@ -624,11 +687,12 @@ export class JarvisApp extends Disposable {
 		}
 		const normalized = command.toLocaleLowerCase().replace(/[.,!?]/g, ' ').replace(/\s+/g, ' ').trim();
 		const withoutWakeWord = normalized.replace(/^hey\s+(backboard|jarvis)\s+/, '');
-		const wantsTerminal = /\b(open|start|create|launch)\b/.test(withoutWakeWord) && /\b(term|terminal|shell)\b/.test(withoutWakeWord);
+		const cli = cliFromCommand(withoutWakeWord);
+		const wantsTerminal = /\b(open|start|create|launch)\b/.test(withoutWakeWord) && /\b(terms?|terminals?|shells?|cli|codex|backboard)\b/.test(withoutWakeWord);
 		const namedSlot = terminalSlots.find(slot => withoutWakeWord.includes(slot.name.toLocaleLowerCase()));
 		if (wantsTerminal) {
 			const requestedCount = numberFromCommand(withoutWakeWord) ?? 1;
-			this.openAvailableTerminals(requestedCount, namedSlot).then(opened => {
+			this.openAvailableTerminals(requestedCount, namedSlot, cli).then(opened => {
 				if (opened.length === 0) {
 					this.updateStatus(localize('jarvis.terminals.full', "All four Jarvis terminals are already open."));
 					return;
@@ -639,7 +703,7 @@ export class JarvisApp extends Disposable {
 						slot.lastPrompt = command;
 					}
 				}
-				this.updateStatus(localize('jarvis.openedMultiple', "Opened {0}.", opened.map(slot => slot.name).join(', ')));
+				this.updateStatus(localize('jarvis.openedMultiple', "Opened {0} with {1}.", opened.map(slot => slot.name).join(', '), cliLabel(cli)));
 			}).catch(error => this.updateStatus(errorMessage(error)));
 			return;
 		}
@@ -659,7 +723,7 @@ export class JarvisApp extends Disposable {
 		this.updateStatus(localize('jarvis.command.unsupported', "Jarvis heard \"{0}\". Try: Hey Backboard, open 3 terminals.", command));
 	}
 
-	private async openAvailableTerminals(count: number, preferredSlot?: IJarvisTerminalSlot): Promise<IJarvisTerminalSlot[]> {
+	private async openAvailableTerminals(count: number, preferredSlot: IJarvisTerminalSlot | undefined, cli: JarvisCliKind): Promise<IJarvisTerminalSlot[]> {
 		const candidates = preferredSlot
 			? [preferredSlot]
 			: terminalSlots.filter(slot => {
@@ -675,7 +739,7 @@ export class JarvisApp extends Disposable {
 			if (!state || state.status === 'running' || state.status === 'opening') {
 				continue;
 			}
-			await this.openTerminal(candidate.id);
+			await this.openTerminal(candidate.id, cli);
 			opened.push(candidate);
 		}
 		return opened;
@@ -688,31 +752,32 @@ export class JarvisApp extends Disposable {
 		}
 		slot.lastPrompt = prompt;
 		if (slot.status !== 'running') {
-			await this.openTerminal(slot.id);
+			await this.openTerminal(slot.id, 'backboard');
 			await timeout(700);
 		}
 		await this.sendTerminalInput(slot.id, prompt);
 	}
 
-	private async openTerminal(slotId: string): Promise<void> {
+	private async openTerminal(slotId: string, cli: JarvisCliKind): Promise<void> {
 		const slot = this.slots.get(slotId);
 		if (!slot || slot.status === 'running' || slot.status === 'opening') {
 			return;
 		}
 		slot.status = 'opening';
 		slot.error = undefined;
+		slot.cli = cli;
 		slot.output = slot.output || `[Jarvis] Opening ${slot.name}...\r\n`;
 		this.renderGrid();
 		this.updateStatus(localize('jarvis.opening', "Opening {0}.", slot.name));
 		try {
 			await this.bridge.openTerminal(slot.id, slot.name, this.selectedWorkspacePath);
-			await this.bridge.writeTerminal(slot.id, 'Backboard\r');
+			await this.bridge.writeTerminal(slot.id, `${cliCommand(cli)}\r`);
 			slot.status = 'running';
 			if (slot.terminal) {
 				slot.terminal.options.disableStdin = false;
 				slot.terminal.focus();
 			}
-			this.updateStatus(localize('jarvis.opened', "{0} terminal is running Backboard.", slot.name));
+			this.updateStatus(localize('jarvis.opened', "{0} terminal is running {1}.", slot.name, cliLabel(cli)));
 		} catch (error) {
 			slot.status = 'error';
 			slot.error = errorMessage(error);
@@ -760,9 +825,9 @@ export class JarvisApp extends Disposable {
 			case 'idle':
 				return localize('jarvis.card.idle', "Ready to open by voice or button");
 			case 'opening':
-				return localize('jarvis.card.opening', "Opening terminal");
+				return localize('jarvis.card.opening', "Opening {0}", cliLabel(slot.cli));
 			case 'running':
-				return localize('jarvis.card.running', "Terminal running");
+				return localize('jarvis.card.running', "{0} running", cliLabel(slot.cli));
 			case 'closed':
 				return localize('jarvis.card.closed', "Terminal closed");
 			case 'error':
@@ -834,6 +899,42 @@ function numberFromCommand(command: string): number | undefined {
 	return undefined;
 }
 
+function cliFromCommand(command: string): JarvisCliKind {
+	return /\bcodex\b/i.test(command) ? 'codex' : 'backboard';
+}
+
+function cliFromArgs(args: Record<string, unknown>): JarvisCliKind {
+	const raw = stringArg(args, 'cli') ?? stringArg(args, 'tool') ?? stringArg(args, 'terminalType');
+	return raw?.toLocaleLowerCase().includes('codex') ? 'codex' : 'backboard';
+}
+
+function cliCommand(cli: JarvisCliKind): string {
+	return cli === 'codex' ? 'codex' : 'Backboard';
+}
+
+function cliLabel(cli: JarvisCliKind): string {
+	return cli === 'codex' ? 'Codex CLI' : 'Backboard';
+}
+
+function countFromArgs(args: Record<string, unknown>): number {
+	const raw = args.count;
+	const value = typeof raw === 'number'
+		? raw
+		: typeof raw === 'string'
+			? Number.parseInt(raw, 10)
+			: 1;
+	return clampInteger(value, 1, terminalSlots.length);
+}
+
+function slotFromArgs(args: Record<string, unknown>): IJarvisTerminalSlot | undefined {
+	const requested = stringArg(args, 'slot') ?? stringArg(args, 'name') ?? stringArg(args, 'person') ?? stringArg(args, 'terminal');
+	if (!requested) {
+		return undefined;
+	}
+	const normalized = requested.toLocaleLowerCase();
+	return terminalSlots.find(slot => slot.id === normalized || slot.name.toLocaleLowerCase() === normalized);
+}
+
 function promptForNamedSlot(command: string, slot: IJarvisTerminalSlot): string | undefined {
 	const withoutWakeWord = command.trim().replace(/^hey\s+(backboard|jarvis)[,\s]+/i, '').trim();
 	const name = escapeRegExp(slot.name);
@@ -872,6 +973,11 @@ function workspaceLabel(path: string): string {
 
 function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stringArg(args: Record<string, unknown>, key: string): string | undefined {
+	const value = args[key];
+	return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function shellQuote(value: string): string {
