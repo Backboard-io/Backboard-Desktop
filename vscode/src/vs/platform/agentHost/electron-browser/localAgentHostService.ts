@@ -31,6 +31,7 @@ import { AGENT_HOST_CLIENT_RESOURCE_CHANNEL, AgentHostClientResourceChannel } fr
 import { TELEMETRY_CRASH_REPORTER_SETTING_ID, TELEMETRY_OLD_SETTING_ID, TELEMETRY_SETTING_ID } from '../../telemetry/common/telemetry.js';
 import { getTelemetryLevel } from '../../telemetry/common/telemetryUtils.js';
 import { AgentHostTelemetryLevelConfigKey, AgentHostSessionSyncEnabledConfigKey, SESSION_SYNC_ENABLED_SETTING_ID, telemetryLevelToAgentHostConfigValue } from '../common/agentHostSchema.js';
+import { IWorkspaceContextService } from '../../workspace/common/workspace.js';
 
 /**
  * Renderer-side implementation of {@link IAgentHostService} that connects
@@ -86,6 +87,7 @@ export class LocalAgentHostServiceClient extends Disposable implements IAgentHos
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IEnvironmentService environmentService: IEnvironmentService,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
 
@@ -203,17 +205,29 @@ export class LocalAgentHostServiceClient extends Disposable implements IAgentHos
 		return this._proxy.listSessions();
 	}
 	createSession(config?: IAgentCreateSessionConfig): Promise<URI> {
-		const promise = this._proxy.createSession(config);
+		const effectiveConfig = this._withDefaultWorkingDirectory(config);
+		const promise = this._proxy.createSession(effectiveConfig);
 		// When the caller pre-specifies the session URI, a subscribe for
 		// that URI can race the in-flight create. Register the promise so
 		// `AgentSubscriptionManager.getSubscription` gates the wire-level
 		// subscribe on it (avoids transient `AHP_SESSION_NOT_FOUND`).
 		// When the server assigns the URI, no caller can subscribe to it
 		// ahead of `await createSession()`, so there's no race to track.
-		if (config?.session) {
-			this._subscriptionManager.trackSessionCreate(config.session, promise);
+		if (effectiveConfig?.session) {
+			this._subscriptionManager.trackSessionCreate(effectiveConfig.session, promise);
 		}
 		return promise;
+	}
+
+	private _withDefaultWorkingDirectory(config: IAgentCreateSessionConfig | undefined): IAgentCreateSessionConfig | undefined {
+		if (config?.workingDirectory) {
+			return config;
+		}
+		const workingDirectory = this._workspaceContextService.getWorkspace().folders[0]?.uri;
+		if (!workingDirectory) {
+			return config;
+		}
+		return { ...config, workingDirectory };
 	}
 	resolveSessionConfig(params: IAgentResolveSessionConfigParams): Promise<ResolveSessionConfigResult> {
 		return this._proxy.resolveSessionConfig(params);

@@ -641,6 +641,10 @@
 			"project": "vscode-sessions"
 		},
 		{
+			"name": "vs/jarvis",
+			"project": "vscode-sessions"
+		},
+		{
 			"name": "vs/sessions",
 			"project": "vscode-sessions"
 		},

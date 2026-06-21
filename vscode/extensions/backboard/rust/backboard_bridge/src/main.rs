@@ -114,8 +114,6 @@ struct SendPromptParams {
     #[serde(default)]
     image_generation: Option<String>,
     #[serde(default)]
-    memory_mode: Option<String>,
-    #[serde(default)]
     voice_mode: Option<String>,
     #[serde(default)]
     audio_file: Option<AudioFileParams>,
@@ -162,8 +160,6 @@ struct SubmitToolResultParams {
     #[serde(default)]
     image_generation: Option<String>,
     #[serde(default)]
-    memory_mode: Option<String>,
-    #[serde(default)]
     max_tokens: Option<u32>,
     #[serde(default)]
     config: Option<ConfigParams>,
@@ -194,10 +190,6 @@ struct ApiEndpointParams {
     thread_id: Option<String>,
     #[serde(default)]
     document_id: Option<String>,
-    #[serde(default)]
-    memory_id: Option<String>,
-    #[serde(default)]
-    operation_id: Option<String>,
     #[serde(default)]
     model_name: Option<String>,
     #[serde(default)]
@@ -545,13 +537,6 @@ fn is_api_command(command: &str) -> bool {
             | "addThreadMessage"
             | "getDocumentStatus"
             | "deleteDocument"
-            | "listMemories"
-            | "searchMemories"
-            | "addMemory"
-            | "getMemory"
-            | "updateMemory"
-            | "deleteMemory"
-            | "getMemoryOperationStatus"
             | "getModel"
             | "listProviders"
             | "listModelsByProvider"
@@ -654,60 +639,6 @@ async fn call_api_endpoint(state: BridgeState, request: BridgeRequest) -> Result
         "deleteDocument" => {
             client
                 .delete_document(&required(params.document_id.as_deref(), "documentId")?)
-                .await?
-        }
-        "listMemories" => json!({
-            "memories": client
-                .list_memories(&required(params.assistant_id.as_deref(), "assistantId")?)
-                .await?
-        }),
-        "searchMemories" => {
-            client
-                .search_memories(
-                    &required(params.assistant_id.as_deref(), "assistantId")?,
-                    api_body(&params),
-                )
-                .await?
-        }
-        "addMemory" => {
-            client
-                .add_memory_value(
-                    &required(params.assistant_id.as_deref(), "assistantId")?,
-                    api_body(&params),
-                )
-                .await?
-        }
-        "getMemory" => {
-            client
-                .get_memory(
-                    &required(params.assistant_id.as_deref(), "assistantId")?,
-                    &required(params.memory_id.as_deref(), "memoryId")?,
-                )
-                .await?
-        }
-        "updateMemory" => {
-            client
-                .update_memory(
-                    &required(params.assistant_id.as_deref(), "assistantId")?,
-                    &required(params.memory_id.as_deref(), "memoryId")?,
-                    api_body(&params),
-                )
-                .await?
-        }
-        "deleteMemory" => {
-            client
-                .delete_memory(
-                    &required(params.assistant_id.as_deref(), "assistantId")?,
-                    &required(params.memory_id.as_deref(), "memoryId")?,
-                )
-                .await?
-        }
-        "getMemoryOperationStatus" => {
-            client
-                .get_memory_operation_status(&required(
-                    params.operation_id.as_deref(),
-                    "operationId",
-                )?)
                 .await?
         }
         "getModel" => {
@@ -835,16 +766,13 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         file_name: audio.file_name,
         mime_type: audio.mime_type,
     });
-    let (memory, memory_pro) = memory_payload(params.memory_mode.as_deref().unwrap_or("off"));
     let cancel_flag = session_cancel_flag(&state, &session_id);
     cancel_flag.store(false, Ordering::SeqCst);
 
     let thread_id = params
         .thread_id
         .or_else(|| session_thread_id(&state, &session_id));
-    let assistant_id = params
-        .assistant_id
-        .or_else(|| session_assistant_id(&state, &session_id));
+    let assistant_id = params.assistant_id;
     let client = client_from_params(params.config.as_ref())?;
     let backboard_image_generation =
         backboard_image_generation_enabled(params.image_generation.as_deref());
@@ -868,8 +796,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
             "model": model.clone(),
             "mode": mode.clone(),
             "intensity": intensity.clone(),
-            "memory": memory.clone(),
-            "memoryPro": memory_pro.clone(),
+            "memory": "off",
             "toolCount": tools.len(),
             "promptChars": content.len()
         }),
@@ -887,8 +814,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         content,
         provider: Some(provider.clone()),
         model: Some(model.clone()),
-        memory,
-        memory_pro,
+        memory: Some("off".to_string()),
         thinking: thinking_payload(&intensity, &provider, &model),
         tools: Some(tools),
         parallel_tool_calls: Some(false),
@@ -1070,8 +996,6 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
             let intensity = params
                 .intensity
                 .unwrap_or_else(|| DEFAULT_INTENSITY.to_string());
-            let (memory, memory_pro) =
-                memory_payload(params.memory_mode.as_deref().unwrap_or("off"));
             let recovery_prompt = upstream_idle_recovery_prompt(&message, "submitToolResult");
             let recovery_content = augment_prompt(
                 &recovery_prompt,
@@ -1081,12 +1005,11 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
             );
             let recovery_request = SendMessageRequest {
                 thread_id: Some(thread_id.clone()),
-                assistant_id: session_assistant_id(&state, &session_id),
+                assistant_id: None,
                 content: recovery_content,
                 provider: Some(provider.clone()),
                 model: Some(model.clone()),
-                memory,
-                memory_pro,
+                memory: Some("off".to_string()),
                 thinking: thinking_payload(&intensity, &provider, &model),
                 tools: tools.clone(),
                 parallel_tool_calls: Some(false),
@@ -1783,17 +1706,6 @@ fn thinking_payload(intensity: &str, provider: &str, model: &str) -> Option<Valu
         Some(json!({ "max_tokens": if deep { 4096 } else { 1024 } }))
     } else {
         None
-    }
-}
-
-fn memory_payload(memory_mode: &str) -> (Option<String>, Option<String>) {
-    match memory_mode {
-        "Auto" => (Some("Auto".to_string()), None),
-        "Readonly" => (Some("Readonly".to_string()), None),
-        "off" => (None, None),
-        "ProAuto" => (None, Some("Auto".to_string())),
-        "ProReadonly" => (None, Some("Readonly".to_string())),
-        _ => (None, None),
     }
 }
 

@@ -56,6 +56,7 @@ export interface NativeParsedArgs {
 	'reuse-window'?: boolean;
 	'agents'?: boolean;
 	'optimus'?: boolean;
+	'jarvis'?: boolean;
 	locale?: string;
 	'user-data-dir'?: string;
 	'prof-startup'?: boolean;

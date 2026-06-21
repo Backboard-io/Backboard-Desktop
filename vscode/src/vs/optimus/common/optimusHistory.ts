@@ -12,6 +12,13 @@ export interface IOptimusHistoryProvider {
 	sendBackboardPrompt?(prompt: string, chatId?: string, workspace?: string): Promise<void>;
 }
 
+export interface IOptimusNavigationProvider {
+	openEditor(): Promise<void>;
+	openAgents(): Promise<void>;
+	openOptimus(): Promise<void>;
+	openJarvis(): Promise<void>;
+}
+
 export interface IOptimusWorkspaceEntry {
 	readonly id: string;
 	readonly label: string;

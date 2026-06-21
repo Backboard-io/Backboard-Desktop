@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { app, BrowserWindow, desktopCapturer, Details, GPUFeatureStatus, powerMonitor, protocol, screen as electronScreen, session, Session, systemPreferences, WebFrameMain } from 'electron';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { app, BrowserWindow, desktopCapturer, Details, dialog, GPUFeatureStatus, powerMonitor, protocol, screen as electronScreen, session, Session, systemPreferences, WebContents, WebFrameMain } from 'electron';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'fs';
 import { addUNCHostToAllowlist, disableUNCAccessRestrictions } from '../../base/node/unc.js';
 import { validatedIpcMain } from '../../base/parts/ipc/electron-main/ipcMain.js';
 import { hostname, homedir, release } from 'os';
@@ -598,6 +598,112 @@ export class CodeApplication extends Disposable {
 		validatedIpcMain.handle('vscode:optimusBackboardWorkspaces', async () => readOptimusBackboardWorkspaces());
 		validatedIpcMain.handle('vscode:optimusBackboardCommand', async (_event, command: unknown) => writeOptimusBackboardCommand(command, this.windowsMainService));
 		validatedIpcMain.handle('vscode:optimusSharedChatHistorySnapshot', async (_event, snapshot: unknown) => writeOptimusSharedChatHistorySnapshot(snapshot));
+		validatedIpcMain.handle('vscode:optimusDevHotRefreshState', async () => readOptimusDevHotRefreshState(this.environmentMainService.appRoot));
+		validatedIpcMain.handle('vscode:jarvisVoiceTranscribe', async (_event, request: unknown) => transcribeJarvisVoice(request));
+		validatedIpcMain.handle('vscode:jarvisSelectWorkspaceFolder', async (event, currentPath: unknown) => selectJarvisWorkspaceFolder(event.sender, currentPath));
+		validatedIpcMain.handle('vscode:jarvisTerminalCommand', async (event, command: unknown) => handleJarvisTerminalCommand(event.sender, command));
+		validatedIpcMain.handle('vscode:jarvisSwitchWindowKind', async (event, target: unknown) => {
+			const windowsMainService = this.windowsMainService;
+			if (!windowsMainService) {
+				return { accepted: false, error: 'Windows service is not ready.' };
+			}
+
+			const window = windowsMainService.getWindowByWebContents(event.sender);
+			if (!window) {
+				return { accepted: false, error: 'Could not resolve the current window.' };
+			}
+
+			if (target === 'editor') {
+				await windowsMainService.openEmptyWindow({
+					context: OpenContext.API,
+					contextWindowId: window.id
+				}, { forceReuseWindow: true });
+				return { accepted: true };
+			}
+
+			if (target === 'agents') {
+				await windowsMainService.openAgentsWindow({
+					context: OpenContext.API,
+					contextWindowId: window.id,
+					cli: this.environmentMainService.args,
+					forceReuseWindow: true
+				});
+				return { accepted: true };
+			}
+
+			if (target === 'optimus') {
+				await windowsMainService.openOptimusWindow({
+					context: OpenContext.API,
+					contextWindowId: window.id,
+					cli: this.environmentMainService.args
+				});
+				return { accepted: true };
+			}
+
+			if (target === 'jarvis') {
+				if (!window.config?.isJarvisWindow) {
+					await windowsMainService.openJarvisWindow({
+						context: OpenContext.API,
+						contextWindowId: window.id,
+						cli: this.environmentMainService.args
+					});
+				}
+				return { accepted: true };
+			}
+
+			return { accepted: false, error: `Unknown window kind: ${String(target)}` };
+		});
+		validatedIpcMain.handle('vscode:optimusSwitchWindowKind', async (event, target: unknown) => {
+			const windowsMainService = this.windowsMainService;
+			if (!windowsMainService) {
+				return { accepted: false, error: 'Windows service is not ready.' };
+			}
+
+			const window = windowsMainService.getWindowByWebContents(event.sender);
+			if (!window) {
+				return { accepted: false, error: 'Could not resolve the current window.' };
+			}
+
+			if (target === 'editor') {
+				await windowsMainService.openEmptyWindow({
+					context: OpenContext.API,
+					contextWindowId: window.id
+				}, { forceReuseWindow: true });
+				return { accepted: true };
+			}
+
+			if (target === 'agents') {
+				await windowsMainService.openAgentsWindow({
+					context: OpenContext.API,
+					contextWindowId: window.id,
+					cli: this.environmentMainService.args,
+					forceReuseWindow: true
+				});
+				return { accepted: true };
+			}
+
+			if (target === 'optimus') {
+				if (!window.config?.isOptimusWindow) {
+					await windowsMainService.openOptimusWindow({
+						context: OpenContext.API,
+						contextWindowId: window.id,
+						cli: this.environmentMainService.args
+					});
+				}
+				return { accepted: true };
+			}
+
+			if (target === 'jarvis') {
+				await windowsMainService.openJarvisWindow({
+					context: OpenContext.API,
+					contextWindowId: window.id,
+					cli: this.environmentMainService.args
+				});
+				return { accepted: true };
+			}
+
+			return { accepted: false, error: `Unknown window kind: ${String(target)}` };
+		});
 
 		validatedIpcMain.on('vscode:toggleDevTools', event => event.sender.toggleDevTools());
 		validatedIpcMain.on('vscode:openDevTools', event => event.sender.openDevTools());
@@ -1411,13 +1517,19 @@ export class CodeApplication extends Disposable {
 		}
 
 		if (args['optimus']) {
-			const windows = await windowsMainService.open({
+			return windowsMainService.openOptimusWindow({
 				context,
 				cli: args,
 				initialStartup: true
 			});
-			windows[0]?.sendWhenReady('vscode:openOptimus', CancellationToken.None);
-			return windows;
+		}
+
+		if (args['jarvis']) {
+			return windowsMainService.openJarvisWindow({
+				context,
+				cli: args,
+				initialStartup: true
+			});
 		}
 
 		// Then check for windows from protocol links to open
@@ -1834,6 +1946,346 @@ interface IOptimusBackboardPanelCommand {
 	readonly options?: unknown;
 }
 
+interface IOptimusDevHotRefreshState {
+	readonly enabled: boolean;
+	readonly version?: string;
+	readonly error?: string;
+}
+
+type JarvisTerminalCommandType = 'openTerminal' | 'writeTerminal' | 'disposeTerminal';
+
+interface IJarvisTerminalCommand {
+	readonly type: JarvisTerminalCommandType;
+	readonly slotId: string;
+	readonly terminalName?: string;
+	readonly data?: string;
+	readonly cwd?: string;
+}
+
+interface IJarvisTerminalProcess {
+	readonly ownerId: number;
+	readonly pty: import('node-pty').IPty;
+}
+
+interface IJarvisVoiceTranscribeResult {
+	readonly accepted: boolean;
+	readonly transcript?: string;
+	readonly error?: string;
+}
+
+let jarvisNodePtyModule: typeof import('node-pty') | undefined;
+const jarvisTerminals = new Map<string, IJarvisTerminalProcess>();
+const jarvisOwnerDestroyListeners = new Set<number>();
+
+function readJarvisBackboardConfig(): Record<string, unknown> {
+	const configPath = nodeJoin(homedir(), '.backboard_ide', 'config.json');
+	try {
+		if (!existsSync(configPath)) {
+			return {};
+		}
+		const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as unknown;
+		return isOptimusObjectRecord(parsed) ? parsed : {};
+	} catch {
+		return {};
+	}
+}
+
+async function transcribeJarvisVoice(value: unknown): Promise<IJarvisVoiceTranscribeResult> {
+	try {
+		if (!isOptimusObjectRecord(value)) {
+			return { accepted: false, error: 'Invalid Jarvis voice request.' };
+		}
+		const audioBytes = jarvisVoiceAudioBytes(value.audio);
+		if (!audioBytes || audioBytes.length === 0) {
+			return { accepted: false, error: 'No Jarvis voice audio was provided.' };
+		}
+		const config = readJarvisBackboardConfig();
+		const apiKey = jarvisBackboardApiKey(config);
+		if (!apiKey) {
+			return { accepted: false, error: 'No Backboard API key found in ~/.backboard_ide/config.json.' };
+		}
+		const mimeType = stringValueFromOptimusRecord(value.mimeType) ?? 'audio/webm';
+		const systemPrompt = stringValueFromOptimusRecord(value.systemPrompt);
+		const tools = Array.isArray(value.tools) ? value.tools : undefined;
+		const apiUrl = jarvisBackboardApiUrl(config);
+
+		let response = await postJarvisVoiceToBackboard(apiUrl, apiKey, audioBytes, mimeType, systemPrompt, tools);
+		if (!response.ok && (systemPrompt || tools)) {
+			response = await postJarvisVoiceToBackboard(apiUrl, apiKey, audioBytes, mimeType, undefined, undefined);
+		}
+		if (!response.ok) {
+			return { accepted: false, error: `${response.status} ${response.statusText}: ${await response.text()}` };
+		}
+		const payload: unknown = await response.json();
+		const transcript = extractJarvisBackboardTranscript(payload);
+		if (!transcript) {
+			return { accepted: false, error: 'Backboard response did not include a transcript.' };
+		}
+		return { accepted: true, transcript };
+	} catch (error) {
+		return { accepted: false, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+async function postJarvisVoiceToBackboard(
+	apiUrl: string,
+	apiKey: string,
+	audioBytes: Uint8Array,
+	mimeType: string,
+	systemPrompt: string | undefined,
+	tools: readonly unknown[] | undefined,
+): Promise<Response> {
+	const form = new FormData();
+	form.append('stream', 'false');
+	form.append('content', '');
+	form.append('send_to_llm', 'false');
+	form.append('voice', JSON.stringify({
+		stt: {
+			provider: 'openai',
+			model: 'gpt-4o-mini-transcribe',
+			language: 'en',
+		},
+		...(systemPrompt ? { system_prompt: systemPrompt } : {}),
+		...(tools ? { tools } : {}),
+		client: 'jarvis',
+	}));
+	if (systemPrompt) {
+		form.append('system_prompt', systemPrompt);
+	}
+	if (tools) {
+		form.append('tools', JSON.stringify(tools));
+	}
+	const audioBuffer = audioBytes.buffer.slice(audioBytes.byteOffset, audioBytes.byteOffset + audioBytes.byteLength) as ArrayBuffer;
+	form.append('audio_file', new Blob([audioBuffer], { type: mimeType }), 'jarvis-voice.webm');
+	return fetch(`${apiUrl}/threads/messages`, {
+		method: 'POST',
+		headers: { 'X-API-Key': apiKey },
+		body: form,
+	});
+}
+
+function jarvisVoiceAudioBytes(value: unknown): Uint8Array | undefined {
+	if (Array.isArray(value) && value.every(item => typeof item === 'number')) {
+		return Uint8Array.from(value);
+	}
+	if (value instanceof ArrayBuffer) {
+		return new Uint8Array(value);
+	}
+	if (ArrayBuffer.isView(value)) {
+		return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+	}
+	return undefined;
+}
+
+function jarvisBackboardApiUrl(config: Record<string, unknown>): string {
+	return (stringValueFromOptimusRecord(config.api_url) || 'https://app.backboard.io/api').replace(/\/+$/, '');
+}
+
+function jarvisBackboardApiKey(config: Record<string, unknown>): string | undefined {
+	const env = stringValueFromOptimusRecord(config.env)?.trim().toLowerCase() || 'prod';
+	const envKeys = isOptimusObjectRecord(config.env_keys) ? config.env_keys : undefined;
+	return stringValueFromOptimusRecord(config.api_key)
+		?? stringValueFromOptimusRecord(config.apiKey)
+		?? stringValueFromOptimusRecord(config.backboard_api_key)
+		?? stringValueFromOptimusRecord(config.personal_api_key)
+		?? stringValueFromOptimusRecord(envKeys?.[env]);
+}
+
+function extractJarvisBackboardTranscript(value: unknown): string | undefined {
+	if (!isOptimusObjectRecord(value)) {
+		return undefined;
+	}
+	const direct = stringValueFromOptimusRecord(value.transcript) ?? stringValueFromOptimusRecord(value.text);
+	if (direct) {
+		return direct;
+	}
+	const messages = Array.isArray(value.messages) ? value.messages : [value];
+	for (const message of messages) {
+		if (!isOptimusObjectRecord(message)) {
+			continue;
+		}
+		const voiceRecords = isOptimusObjectRecord(message.voice_records) ? message.voice_records : isOptimusObjectRecord(message.voiceRecords) ? message.voiceRecords : undefined;
+		const stt = isOptimusObjectRecord(voiceRecords?.stt) ? voiceRecords.stt : undefined;
+		const transcript = stringValueFromOptimusRecord(stt?.transcript) ?? stringValueFromOptimusRecord(stt?.text) ?? stringValueFromOptimusRecord(stt?.message);
+		if (transcript) {
+			return transcript;
+		}
+		const content = stringValueFromOptimusRecord(message.content) ?? stringValueFromOptimusRecord(message.message);
+		if (content) {
+			return content;
+		}
+	}
+	return undefined;
+}
+
+async function handleJarvisTerminalCommand(sender: WebContents, value: unknown): Promise<{ readonly accepted: boolean; readonly slotId?: string; readonly error?: string }> {
+	const command = parseJarvisTerminalCommand(value);
+	if (!command) {
+		return { accepted: false, error: 'Invalid Jarvis terminal command.' };
+	}
+
+	ensureJarvisOwnerCleanup(sender);
+
+	try {
+		switch (command.type) {
+			case 'openTerminal':
+				await openJarvisTerminal(sender, command);
+				return { accepted: true, slotId: command.slotId };
+			case 'writeTerminal':
+				writeJarvisTerminal(command);
+				return { accepted: true, slotId: command.slotId };
+			case 'disposeTerminal':
+				disposeJarvisTerminal(command.slotId);
+				return { accepted: true, slotId: command.slotId };
+		}
+	} catch (error) {
+		return { accepted: false, slotId: command.slotId, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+async function selectJarvisWorkspaceFolder(sender: WebContents, currentPath: unknown): Promise<{ readonly accepted: boolean; readonly path?: string; readonly error?: string }> {
+	const defaultPath = typeof currentPath === 'string' && currentPath ? currentPath : homedir();
+	const ownerWindow = BrowserWindow.fromWebContents(sender) ?? undefined;
+	const result = await (ownerWindow
+		? dialog.showOpenDialog(ownerWindow, {
+			title: 'Select Jarvis workspace',
+			defaultPath,
+			properties: ['openDirectory', 'createDirectory']
+		})
+		: dialog.showOpenDialog({
+			title: 'Select Jarvis workspace',
+			defaultPath,
+			properties: ['openDirectory', 'createDirectory']
+		}));
+	if (result.canceled || result.filePaths.length === 0) {
+		return { accepted: false };
+	}
+	return { accepted: true, path: result.filePaths[0] };
+}
+
+function parseJarvisTerminalCommand(value: unknown): IJarvisTerminalCommand | undefined {
+	if (!isOptimusObjectRecord(value)) {
+		return undefined;
+	}
+	const type = value.type;
+	const slotId = value.slotId;
+	if ((type !== 'openTerminal' && type !== 'writeTerminal' && type !== 'disposeTerminal') || typeof slotId !== 'string' || !slotId) {
+		return undefined;
+	}
+	return {
+		type,
+		slotId,
+		terminalName: typeof value.terminalName === 'string' ? value.terminalName : undefined,
+		data: typeof value.data === 'string' ? value.data : undefined,
+		cwd: typeof value.cwd === 'string' ? value.cwd : undefined
+	};
+}
+
+async function openJarvisTerminal(sender: WebContents, command: IJarvisTerminalCommand): Promise<void> {
+	const existing = jarvisTerminals.get(command.slotId);
+	if (existing) {
+		sender.send('vscode:jarvisTerminalData', {
+			slotId: command.slotId,
+			data: `\r\n[Jarvis] ${command.terminalName ?? command.slotId} is already running.\r\n`
+		});
+		return;
+	}
+
+	const nodePty = await getJarvisNodePty();
+	const shell = jarvisDefaultShell();
+	const cwd = jarvisTerminalCwd(command.cwd);
+	const pty = nodePty.spawn(shell.executable, shell.args, {
+		name: isWindows ? 'xterm' : 'xterm-256color',
+		cols: 124,
+		rows: 34,
+		cwd,
+		env: {
+			...process.env,
+			TERM_PROGRAM: 'jarvis'
+		}
+	});
+
+	jarvisTerminals.set(command.slotId, { ownerId: sender.id, pty });
+	pty.onData(data => {
+		if (!sender.isDestroyed()) {
+			sender.send('vscode:jarvisTerminalData', { slotId: command.slotId, data });
+		}
+	});
+	pty.onExit(event => {
+		jarvisTerminals.delete(command.slotId);
+		if (!sender.isDestroyed()) {
+			sender.send('vscode:jarvisTerminalExit', {
+				slotId: command.slotId,
+				exitCode: event.exitCode,
+				signal: event.signal
+			});
+		}
+	});
+
+	sender.send('vscode:jarvisTerminalData', {
+		slotId: command.slotId,
+		data: `[Jarvis] Opened ${command.terminalName ?? 'terminal'} in ${cwd}.\r\n`
+	});
+}
+
+function jarvisTerminalCwd(cwd: string | undefined): string {
+	if (cwd) {
+		try {
+			if (existsSync(cwd) && statSync(cwd).isDirectory()) {
+				return cwd;
+			}
+		} catch {
+			// Fall back to the home directory below.
+		}
+	}
+	return homedir();
+}
+
+function writeJarvisTerminal(command: IJarvisTerminalCommand): void {
+	const terminal = jarvisTerminals.get(command.slotId);
+	if (!terminal) {
+		throw new Error(`Jarvis terminal ${command.slotId} is not running.`);
+	}
+	terminal.pty.write(command.data ?? '');
+}
+
+function disposeJarvisTerminal(slotId: string): void {
+	const terminal = jarvisTerminals.get(slotId);
+	if (!terminal) {
+		return;
+	}
+	jarvisTerminals.delete(slotId);
+	terminal.pty.kill();
+}
+
+async function getJarvisNodePty(): Promise<typeof import('node-pty')> {
+	jarvisNodePtyModule ??= await import('node-pty');
+	return jarvisNodePtyModule;
+}
+
+function jarvisDefaultShell(): { readonly executable: string; readonly args: string[] } {
+	if (isWindows) {
+		return { executable: process.env['ComSpec'] || 'cmd.exe', args: [] };
+	}
+	return { executable: process.env['SHELL'] || '/bin/zsh', args: ['-l'] };
+}
+
+function ensureJarvisOwnerCleanup(sender: WebContents): void {
+	if (jarvisOwnerDestroyListeners.has(sender.id)) {
+		return;
+	}
+	jarvisOwnerDestroyListeners.add(sender.id);
+	sender.once('destroyed', () => {
+		jarvisOwnerDestroyListeners.delete(sender.id);
+		for (const [slotId, terminal] of jarvisTerminals) {
+			if (terminal.ownerId === sender.id) {
+				terminal.pty.kill();
+				jarvisTerminals.delete(slotId);
+			}
+		}
+	});
+}
+
 function writeOptimusBackboardCommand(value: unknown, windowsMainService: IWindowsMainService | undefined): { readonly accepted: boolean; readonly id?: string; readonly error?: string } {
 	if (!isOptimusObjectRecord(value) || typeof value.type !== 'string') {
 		return { accepted: false, error: 'Invalid Optimus Backboard command.' };
@@ -1881,6 +2333,46 @@ function writeOptimusSharedChatHistorySnapshot(value: unknown): { readonly accep
 		return { accepted: true };
 	} catch (error) {
 		return { accepted: false, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+function readOptimusDevHotRefreshState(appRoot: string): IOptimusDevHotRefreshState {
+	if (!process.env['VSCODE_DEV']) {
+		return { enabled: false };
+	}
+
+	const root = nodeJoin(appRoot, 'out', 'vs', 'optimus');
+	if (!existsSync(root)) {
+		return { enabled: false, error: 'Optimus output folder does not exist.' };
+	}
+
+	try {
+		const versions: string[] = [];
+		collectOptimusDevHotRefreshVersions(root, versions);
+		if (!versions.length) {
+			return { enabled: false, error: 'No Optimus output assets were found.' };
+		}
+
+		return { enabled: true, version: versions.sort().join('|') };
+	} catch (error) {
+		return { enabled: false, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+function collectOptimusDevHotRefreshVersions(dir: string, versions: string[]): void {
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const path = nodeJoin(dir, entry.name);
+		if (entry.isDirectory()) {
+			collectOptimusDevHotRefreshVersions(path, versions);
+			continue;
+		}
+
+		if (!entry.isFile() || !/\.(?:css|html|js|json)$/i.test(entry.name)) {
+			continue;
+		}
+
+		const stat = statSync(path);
+		versions.push(`${path}:${stat.mtimeMs}:${stat.size}`);
 	}
 }
 
@@ -2129,4 +2621,8 @@ function workspaceLabelFromPath(path: string): string {
 
 function isOptimusObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringValueFromOptimusRecord(value: unknown): string | undefined {
+	return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }

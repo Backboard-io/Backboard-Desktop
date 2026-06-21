@@ -54,6 +54,7 @@ export interface IWindowCreationOptions {
 	readonly isExtensionTestHost?: boolean;
 	readonly isSessionsWindow?: boolean;
 	readonly isOptimusWindow?: boolean;
+	readonly isJarvisWindow?: boolean;
 }
 
 interface ITouchBarSegment extends electron.SegmentedControlSegment {
@@ -709,7 +710,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				additionalArguments: [`--vscode-window-config=${this.configObjectUrl.resource.toString()}`],
 				v8CacheOptions: this.environmentMainService.useCodeCache ? 'bypassHeatCheck' : 'none'
 			};
-			if (config.isSessionsWindow || config.isOptimusWindow) {
+			if (config.isSessionsWindow || config.isOptimusWindow || config.isJarvisWindow) {
 				webPreferences.backgroundThrottling = false; // keep agents window responsive when in background
 			}
 
@@ -1209,12 +1210,14 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 		// Load URL
 		let windowUrl: string;
-		if (process.env.VSCODE_DEV && process.env.VSCODE_DEV_SERVER_URL) {
-			windowUrl = process.env.VSCODE_DEV_SERVER_URL; // support URL override for development
+		if (configuration.isJarvisWindow) {
+			windowUrl = FileAccess.asBrowserUri(`vs/jarvis/electron-browser/jarvis${this.environmentMainService.isBuilt ? '' : '-dev'}.html`).toString(true);
 		} else if (configuration.isOptimusWindow) {
 			windowUrl = FileAccess.asBrowserUri(`vs/optimus/electron-browser/optimus${this.environmentMainService.isBuilt ? '' : '-dev'}.html`).toString(true);
 		} else if (configuration.isSessionsWindow) {
 			windowUrl = FileAccess.asBrowserUri(`vs/sessions/electron-browser/sessions${this.environmentMainService.isBuilt ? '' : '-dev'}.html`).toString(true);
+		} else if (process.env.VSCODE_DEV && process.env.VSCODE_DEV_SERVER_URL) {
+			windowUrl = process.env.VSCODE_DEV_SERVER_URL; // support URL override for development
 		} else {
 			windowUrl = FileAccess.asBrowserUri(`vs/code/electron-browser/workbench/workbench${this.environmentMainService.isBuilt ? '' : '-dev'}.html`).toString(true);
 		}

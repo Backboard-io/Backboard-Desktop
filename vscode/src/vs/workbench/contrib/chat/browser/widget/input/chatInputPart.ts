@@ -3203,6 +3203,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					}
 				}
 
+				if (this.options.isSessionsWindow && action.id === 'sessions.agentHost.runningSessionModePicker') {
+					return new HiddenActionViewItem(action);
+				}
+
 				if (action.id === OpenModelPickerAction.ID && action instanceof MenuItemAction) {
 					if (!this._currentLanguageModel.get()) {
 						logChangesToStateModel(this._inputModel, `actionViewItemProvider[desktop]: _currentLanguageModel is undefined at toolbar build, forcing default for ${this._currentSessionKey}`, undefined, undefined, this.logService);

@@ -67,6 +67,7 @@ const vscodeResourceIncludes = [
 	'out-build/vs/code/electron-browser/workbench/workbench.html',
 	'out-build/vs/sessions/electron-browser/sessions.html',
 	'out-build/vs/optimus/electron-browser/optimus.html',
+	'out-build/vs/jarvis/electron-browser/jarvis.html',
 
 	// Electron Preload
 	'out-build/vs/base/parts/sandbox/electron-browser/preload.js',
@@ -162,7 +163,7 @@ const bundleVSCodeTask = task.define('bundle-vscode', task.series(
 					...bootstrapEntryPoints
 				],
 				resources: vscodeResources,
-				skipTSBoilerplateRemoval: entryPoint => entryPoint === 'vs/code/electron-browser/workbench/workbench' || entryPoint === 'vs/sessions/electron-browser/sessions' || entryPoint === 'vs/optimus/electron-browser/optimus'
+				skipTSBoilerplateRemoval: entryPoint => entryPoint === 'vs/code/electron-browser/workbench/workbench' || entryPoint === 'vs/sessions/electron-browser/sessions' || entryPoint === 'vs/optimus/electron-browser/optimus' || entryPoint === 'vs/jarvis/electron-browser/jarvis'
 			}
 		}
 	)
@@ -262,7 +263,12 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 			'vs/optimus/optimus.desktop.main.js',
 			'vs/optimus/browser/media/optimus.css',
 			'vs/optimus/electron-browser/optimus.html',
-			'vs/optimus/electron-browser/optimus.js'
+			'vs/optimus/electron-browser/optimus.js',
+			'vs/jarvis/jarvis.desktop.main.js',
+			'vs/jarvis/browser/media/jarvis.css',
+			'vs/jarvis/browser/media/jarvis-background.mp4',
+			'vs/jarvis/electron-browser/jarvis.html',
+			'vs/jarvis/electron-browser/jarvis.js'
 		]);
 
 		const src = gulp.src(out + '/**', { base: '.' })

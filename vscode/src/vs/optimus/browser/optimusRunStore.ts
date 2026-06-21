@@ -33,6 +33,12 @@ export class OptimusRunStore extends Disposable {
 		this._onDidChange.fire();
 	}
 
+	addRun(run: IOptimusRun): void {
+		this._runs.set(run.id, run);
+		this._selectedRunId = run.id;
+		this._onDidChange.fire();
+	}
+
 	async createRun(request: IOptimusRunRequest): Promise<void> {
 		const run = await this.chatBridge.createRun(request);
 		this._runs.set(run.id, run);

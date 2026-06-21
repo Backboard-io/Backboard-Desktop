@@ -17,6 +17,7 @@ import { IContextMenuService } from '../../../../../platform/contextview/browser
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
+import { INativeHostService } from '../../../../../platform/native/common/native.js';
 import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
@@ -25,6 +26,8 @@ import { BACKBOARD_MODE_SWITCHER_COMMAND_ID, ChatConfiguration, OPEN_AGENTS_WIND
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
 const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
+const OPEN_OPTIMUS_WINDOW_COMMAND_ID = 'workbench.action.openOptimusWindow';
+const OPEN_JARVIS_WINDOW_COMMAND_ID = 'workbench.action.openJarvisWindow';
 
 export class BackboardModeSwitcherAction extends Action2 {
 	constructor() {
@@ -54,7 +57,7 @@ export class ToggleBackboardModeSwitcherTitleBarAction extends ToggleTitleBarCon
 		super(
 			ChatConfiguration.TitleBarOpenInAgentsWindowEnabled,
 			localize('toggle.backboardModeSwitcher', 'Backboard Switcher'),
-			localize('toggle.backboardModeSwitcherDescription', "Toggle visibility of the Editor / Agents switcher in the title bar"),
+			localize('toggle.backboardModeSwitcherDescription', "Toggle visibility of the Editor / Agents / Optimus / Jarvis switcher in the title bar"),
 			6,
 			OPEN_AGENTS_WINDOW_PRECONDITION,
 		);
@@ -75,6 +78,7 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		@ICommandService private readonly commandService: ICommandService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
+		@INativeHostService private readonly nativeHostService: INativeHostService,
 	) {
 		super(undefined, action, options);
 	}
@@ -136,6 +140,16 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 					checked: agentsActive,
 					run: () => this.openAgents(),
 				}),
+				toAction({
+					id: 'workbench.action.mode.optimus',
+					label: localize('backboardModeSwitcher.optimus', "Optimus"),
+					run: () => this.openOptimus(),
+				}),
+				toAction({
+					id: 'workbench.action.mode.jarvis',
+					label: localize('backboardModeSwitcher.jarvis', "Jarvis"),
+					run: () => this.openJarvis(),
+				}),
 			],
 			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
 		});
@@ -143,6 +157,15 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 
 	private openAgents(): void {
 		this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID);
+	}
+
+	private openOptimus(): void {
+		this.commandService.executeCommand(OPEN_OPTIMUS_WINDOW_COMMAND_ID);
+	}
+
+	private openJarvis(): void {
+		this.nativeHostService.openJarvisWindow()
+			.catch(() => this.commandService.executeCommand(OPEN_JARVIS_WINDOW_COMMAND_ID));
 	}
 
 	private openEditor(): void {

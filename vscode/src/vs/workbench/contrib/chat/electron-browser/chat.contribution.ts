@@ -50,7 +50,7 @@ import { registerExportAgentTracesDbAction } from './actions/exportAgentTracesDb
 import { BackboardModeSwitcherAction, BackboardModeSwitcherContribution, ToggleBackboardModeSwitcherTitleBarAction } from './backboardModeSwitcher/backboardModeSwitcherActions.js';
 import { shouldWarnForSessionShutdown } from './chatLifecycle.js';
 import { HoldToVoiceChatInChatViewAction, InlineVoiceChatAction, KeywordActivationContribution, QuickVoiceChatAction, ReadChatResponseAloud, StartVoiceChatAction, StopListeningAction, StopListeningAndSubmitAction, StopReadAloud, StopReadChatItemAloud, VoiceChatInChatViewAction } from './actions/voiceChatActions.js';
-import { OpenWorkspaceInAgentsWindowAction, OpenAgentsWindowAction, OpenOptimusWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution } from './agentSessions/agentSessionsActions.js';
+import { OpenWorkspaceInAgentsWindowAction, OpenAgentsWindowAction, OpenOptimusWindowAction, OpenJarvisWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution } from './agentSessions/agentSessionsActions.js';
 import { OptimusSharedChatHistoryContribution } from './agentSessions/optimusSharedChatHistory.js';
 import { NativeBuiltinToolsContribution } from './builtInTools/tools.js';
 import { NativePluginGitCommandService } from './pluginGitCommandService.js';
@@ -99,13 +99,6 @@ class ChatCommandLineHandler extends Disposable {
 		};
 		ipcRenderer.on('vscode:openChatSession', handleOpenChatSession);
 		this._register({ dispose: () => ipcRenderer.removeListener('vscode:openChatSession', handleOpenChatSession) });
-
-		const handleOpenOptimus = () => {
-			this.commandService.executeCommand(OpenOptimusWindowAction.ID)
-				.catch(err => this.logService.error('vscode:openOptimus failed', err));
-		};
-		ipcRenderer.on('vscode:openOptimus', handleOpenOptimus);
-		this._register({ dispose: () => ipcRenderer.removeListener('vscode:openOptimus', handleOpenOptimus) });
 	}
 
 	private async prompt(args: typeof this.environmentService.args.chat): Promise<void> {
@@ -247,6 +240,7 @@ registerAction2(BackboardModeSwitcherAction);
 registerAction2(ToggleBackboardModeSwitcherTitleBarAction);
 registerAction2(OpenAgentsWindowAction);
 registerAction2(OpenOptimusWindowAction);
+registerAction2(OpenJarvisWindowAction);
 registerAction2(OpenChatSessionInAgentsWindowAction);
 registerAction2(StartVoiceChatAction);
 

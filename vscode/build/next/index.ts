@@ -99,6 +99,7 @@ const desktopEntryPoints = [
 	'vs/workbench/workbench.desktop.main',
 	'vs/sessions/sessions.desktop.main',
 	'vs/optimus/optimus.desktop.main',
+	'vs/jarvis/jarvis.desktop.main',
 	'vs/workbench/contrib/debug/node/telemetryApp',
 	'vs/platform/files/node/watcher/watcherMain',
 	'vs/platform/terminal/node/ptyHostMain',
@@ -113,6 +114,7 @@ const codeEntryPoints = [
 	'vs/code/electron-browser/workbench/workbench',
 	'vs/sessions/electron-browser/sessions',
 	'vs/optimus/electron-browser/optimus',
+	'vs/jarvis/electron-browser/jarvis',
 ];
 
 // Web entry points (used in server-web and vscode-web)
@@ -219,6 +221,8 @@ function getCssBundleEntryPointsForTarget(target: BuildTarget): Set<string> {
 					'vs/sessions/electron-browser/sessions',
 					'vs/optimus/optimus.desktop.main',
 					'vs/optimus/electron-browser/optimus',
+					'vs/jarvis/jarvis.desktop.main',
+					'vs/jarvis/electron-browser/jarvis',
 				]);
 		case 'server':
 			return new Set(); // Server has no UI
@@ -267,6 +271,8 @@ const desktopResourcePatterns = [
 		'vs/sessions/electron-browser/sessions-dev.html',
 		'vs/optimus/electron-browser/optimus.html',
 		'vs/optimus/electron-browser/optimus-dev.html',
+		'vs/jarvis/electron-browser/jarvis.html',
+		'vs/jarvis/electron-browser/jarvis-dev.html',
 		'vs/workbench/services/extensions/worker/webWorkerExtensionHostIframe.html',
 	'vs/workbench/contrib/webview/browser/pre/*.html',
 

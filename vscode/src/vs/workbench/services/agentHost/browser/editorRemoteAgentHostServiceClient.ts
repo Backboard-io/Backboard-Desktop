@@ -19,6 +19,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { AgentHostEnabledSettingId, AgentHostIpcChannels, IAgentCreateSessionConfig, IAgentHostInspectInfo, IAgentHostService, IAgentHostSocketInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, AuthenticateParams, AuthenticateResult, isAgentHostEnabled, IMcpNotification } from '../../../../platform/agentHost/common/agentService.js';
 import { AgentHostIpcChannelTransport } from '../../../../platform/agentHost/browser/agentHostIpcChannelTransport.js';
 import { RemoteAgentHostProtocolClient } from '../../../../platform/agentHost/browser/remoteAgentHostProtocolClient.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import type { IActiveSubscriptionInfo, IAgentSubscription } from '../../../../platform/agentHost/common/state/agentSubscription.js';
 import type { CompletionsParams, CompletionsResult, CreateTerminalParams, ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../../../platform/agentHost/common/state/protocol/commands.js';
 import type { InvokeChangesetOperationParams, InvokeChangesetOperationResult } from '../../../../platform/agentHost/common/state/protocol/channels-changeset/commands.js';
@@ -67,6 +68,7 @@ export class EditorRemoteAgentHostServiceClient extends Disposable implements IA
 		@IConfigurationService configurationService: IConfigurationService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@ILogService private readonly _logService: ILogService,
+		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
 
@@ -198,7 +200,18 @@ export class EditorRemoteAgentHostServiceClient extends Disposable implements IA
 	}
 
 	createSession(config?: IAgentCreateSessionConfig): Promise<URI> {
-		return this._requireClient().createSession(config);
+		return this._requireClient().createSession(this._withDefaultWorkingDirectory(config));
+	}
+
+	private _withDefaultWorkingDirectory(config: IAgentCreateSessionConfig | undefined): IAgentCreateSessionConfig | undefined {
+		if (config?.workingDirectory) {
+			return config;
+		}
+		const workingDirectory = this._workspaceContextService.getWorkspace().folders[0]?.uri;
+		if (!workingDirectory) {
+			return config;
+		}
+		return { ...config, workingDirectory };
 	}
 
 	resolveSessionConfig(params: IAgentResolveSessionConfigParams): Promise<ResolveSessionConfigResult> {

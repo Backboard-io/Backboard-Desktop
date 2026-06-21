@@ -53,7 +53,6 @@ const SANDBOX_PROVIDER_ORDER = new Map<string, number>([
 	['ollama', 11],
 ]);
 const BACKBOARD_INTENSITY_CONFIG_KEY = 'intensity';
-const BACKBOARD_MEMORY_CONFIG_KEY = 'memoryMode';
 const BACKBOARD_WEB_SEARCH_CONFIG_KEY = 'webSearch';
 const BACKBOARD_IMAGE_CONFIG_KEY = 'imageGeneration';
 const IGNORED_DIRECTORIES = new Set(['.git', 'node_modules', 'out', 'dist', 'target', '.next', '.turbo']);
@@ -273,7 +272,6 @@ export interface BackboardTurnSettings {
 	readonly model: string;
 	readonly mode: string;
 	readonly intensity: string;
-	readonly memoryMode: string;
 	readonly webSearch: string;
 	readonly imageGeneration: string;
 	readonly config: Record<string, unknown>;
@@ -383,7 +381,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 
 		const partId = generateUuid();
 		const responseState: BackboardResponseState = { didCreatePart: false, pendingText: '', assistantText: '', toolOutputs: [] };
-		const bridgeSessionId = `sandbox:${session.sessionId}`;
+		const bridgeSessionId = sandboxBridgeSessionId(session);
 		session.modifiedAt = Date.now();
 		session.title ??= panelHistoryTitle(prompt);
 		let failedMessage: string | undefined;
@@ -406,7 +404,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 			try {
 				await writeSharedBackboardThread(session, prompt, '', undefined, responseState, this._logService, 'running');
 				const settings = this._turnSettings(session);
-				this._logService.info(`[Backboard latency] turn_start session=${session.sessionId} provider=${settings.provider} model=${settings.model} mode=${settings.mode} intensity=${settings.intensity} memory=${settings.memoryMode} web=${settings.webSearch}`);
+				this._logService.info(`[Backboard latency] turn_start session=${session.sessionId} provider=${settings.provider} model=${settings.model} mode=${settings.mode} intensity=${settings.intensity} web=${settings.webSearch}`);
 				this._logService.info(`[Backboard workspace] session=${session.sessionId} workingDirectory=${session.workingDirectory?.fsPath ?? '(missing)'}`);
 				this._appendBackboardProgress(session, effectiveTurnId, responseState, localize('backboard.progress.status', "Streaming Backboard response. Tool calls and file writes appear below."));
 				if (session.workingDirectory) {
@@ -434,7 +432,6 @@ export class BackboardAgent extends Disposable implements IAgent {
 					model: settings.model,
 					mode: settings.mode,
 					intensity: settings.intensity,
-					memoryMode: settings.memoryMode,
 					webSearch: settings.webSearch,
 					imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
 					tools: submitTools,
@@ -468,7 +465,6 @@ export class BackboardAgent extends Disposable implements IAgent {
 						model: settings.model,
 						mode: settings.mode,
 						intensity: settings.intensity,
-						memoryMode: settings.memoryMode,
 						webSearch: settings.webSearch,
 						imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
 						config: settings.config,
@@ -510,7 +506,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 		const sessionId = AgentSession.id(sessionUri);
 		const session = this._sessions.get(sessionId);
 		if (session?.currentRequestId) {
-			this._bridge.cancel(`sandbox:${session.sessionId}`, session.currentRequestId);
+			this._bridge.cancel(sandboxBridgeSessionId(session), session.currentRequestId);
 		}
 		if (session) {
 			session.disposed = true;
@@ -522,7 +518,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 	async abortSession(sessionUri: URI): Promise<void> {
 		const session = await this._session(sessionUri);
 		if (session.currentRequestId) {
-			this._bridge.cancel(`sandbox:${session.sessionId}`, session.currentRequestId);
+			this._bridge.cancel(sandboxBridgeSessionId(session), session.currentRequestId);
 		}
 		session.pendingClientToolCalls.rejectAll(new CancellationError());
 	}
@@ -609,7 +605,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 	async shutdown(): Promise<void> {
 		for (const session of this._sessions.values()) {
 			if (session.currentRequestId) {
-				this._bridge.cancel(`sandbox:${session.sessionId}`, session.currentRequestId);
+				this._bridge.cancel(sandboxBridgeSessionId(session), session.currentRequestId);
 			}
 			session.pendingClientToolCalls.rejectAll(new CancellationError());
 		}
@@ -1426,14 +1422,10 @@ function listSharedBackboardThreadFiles(logService: ILogService): string[] {
 	try {
 		for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
 			const entryPath = path.join(root, entry.name);
-			if (entry.isFile() && entry.name.endsWith('.json')) {
-				files.push(entryPath);
-			} else if (entry.isDirectory()) {
+			if (entry.isDirectory()) {
 				for (const threadEntry of fs.readdirSync(entryPath, { withFileTypes: true })) {
 					const threadEntryPath = path.join(entryPath, threadEntry.name);
-					if (threadEntry.isFile() && threadEntry.name.endsWith('.json')) {
-						files.push(threadEntryPath);
-					} else if (threadEntry.isDirectory()) {
+					if (threadEntry.isDirectory()) {
 						const threadPath = path.join(threadEntryPath, 'thread.json');
 						if (fs.existsSync(threadPath)) {
 							files.push(threadPath);
@@ -1452,6 +1444,10 @@ function listSharedBackboardThreadFiles(logService: ILogService): string[] {
 
 function sharedBackboardThreadPath(workspace: string | undefined, id: string): string {
 	return path.join(sharedBackboardThreadsDir(), safeWorkspaceThreadDirName(workspace), safePanelThreadFileName(id), 'thread.json');
+}
+
+function sandboxBridgeSessionId(session: BackboardSession): string {
+	return `sandbox:${safeWorkspaceThreadDirName(session.workingDirectory?.fsPath)}:${session.sessionId}`;
 }
 
 function safeWorkspaceThreadDirName(workspace: string | undefined): string {
@@ -2079,21 +2075,6 @@ function resolveBackboardSessionConfig(rawConfig: Record<string, unknown> | unde
 						],
 						sessionMutable: true,
 					},
-					[BACKBOARD_MEMORY_CONFIG_KEY]: {
-						type: 'string',
-						title: localize('backboard.config.memory.title', "Memory"),
-						description: localize('backboard.config.memory.description', "Controls Backboard memory behavior."),
-						default: 'off',
-						enum: ['off', 'Auto', 'Readonly', 'ProAuto', 'ProReadonly'],
-						enumLabels: [
-							localize('backboard.config.memory.off', "Memory Off"),
-							localize('backboard.config.memory.auto', "Memory Lite"),
-							localize('backboard.config.memory.readonly', "Read Only"),
-							localize('backboard.config.memory.proAuto', "Memory Pro"),
-							localize('backboard.config.memory.proReadonly', "Pro Read Only"),
-						],
-						sessionMutable: true,
-					},
 				},
 			},
 		values,
@@ -2106,7 +2087,6 @@ function normalizeBackboardConfig(rawConfig: Record<string, unknown> | undefined
 		[SessionConfigKey.Mode]: normalizeBackboardMode(merged[SessionConfigKey.Mode]),
 		[BACKBOARD_INTENSITY_CONFIG_KEY]: oneOf(merged[BACKBOARD_INTENSITY_CONFIG_KEY], ['fast', 'balanced', 'deep'], 'fast'),
 		[BACKBOARD_WEB_SEARCH_CONFIG_KEY]: normalizeWebSearchMode(merged[BACKBOARD_WEB_SEARCH_CONFIG_KEY]),
-		[BACKBOARD_MEMORY_CONFIG_KEY]: normalizeMemoryMode(merged[BACKBOARD_MEMORY_CONFIG_KEY]),
 		[BACKBOARD_IMAGE_CONFIG_KEY]: oneOf(merged[BACKBOARD_IMAGE_CONFIG_KEY], ['off', 'auto'], 'off'),
 	};
 }
@@ -2123,7 +2103,6 @@ export function createBackboardTurnSettings(
 		model: parsedModel.model,
 		mode: bridgeModeFromConfig(values),
 		intensity: stringConfigValue(values, BACKBOARD_INTENSITY_CONFIG_KEY, 'fast'),
-		memoryMode: stringConfigValue(values, BACKBOARD_MEMORY_CONFIG_KEY, 'off'),
 		webSearch: stringConfigValue(values, BACKBOARD_WEB_SEARCH_CONFIG_KEY, 'off'),
 		imageGeneration: stringConfigValue(values, BACKBOARD_IMAGE_CONFIG_KEY, 'off'),
 		config: bridgeConfig(),
@@ -2145,13 +2124,6 @@ function normalizeWebSearchMode(value: unknown): string {
 		return 'Auto';
 	}
 	return oneOf(value, ['off', 'Auto'], 'off');
-}
-
-function normalizeMemoryMode(value: unknown): string {
-	if (value === 'Off') {
-		return 'off';
-	}
-	return oneOf(value, ['off', 'Auto', 'Readonly', 'ProAuto', 'ProReadonly'], 'off');
 }
 
 function oneOf(value: unknown, values: readonly string[], fallback: string): string {

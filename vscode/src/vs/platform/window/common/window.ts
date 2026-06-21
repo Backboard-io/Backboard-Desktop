@@ -468,6 +468,7 @@ export interface INativeWindowConfiguration extends IWindowConfiguration, Native
 
 	isSessionsWindow?: boolean;
 	isOptimusWindow?: boolean;
+	isJarvisWindow?: boolean;
 }
 
 /**

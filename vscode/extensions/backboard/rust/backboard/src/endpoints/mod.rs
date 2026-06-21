@@ -3,7 +3,6 @@ mod billing;
 mod client;
 mod config;
 mod documents;
-mod memories;
 mod models;
 mod routes;
 mod stream;

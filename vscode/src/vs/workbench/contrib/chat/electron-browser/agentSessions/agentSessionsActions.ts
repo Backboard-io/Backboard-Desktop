@@ -14,10 +14,8 @@ import { INativeHostService } from '../../../../../platform/native/common/native
 import { Schemas } from '../../../../../base/common/network.js';
 import { URI, UriComponents } from '../../../../../base/common/uri.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../platform/workspace/common/workspace.js';
-import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
-import { OptimusEditorInput } from '../../../optimus/electron-browser/optimusEditorInput.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
 import { IChatWidgetService } from '../../browser/chat.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
@@ -101,7 +99,30 @@ export class OpenOptimusWindowAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		await accessor.get(IEditorService).openEditor(OptimusEditorInput.instance, { pinned: true, revealIfOpened: true });
+		await accessor.get(INativeHostService).openOptimusWindow();
+	}
+}
+
+export class OpenJarvisWindowAction extends Action2 {
+
+	static readonly ID = 'workbench.action.openJarvisWindow';
+
+	constructor() {
+		super({
+			id: OpenJarvisWindowAction.ID,
+			title: localize2('openJarvisWindow', "Open Jarvis"),
+			category: localize2('jarvis', "Jarvis"),
+			f1: true,
+			menu: [{
+				id: MenuId.MenubarFileMenu,
+				group: '1_new',
+				order: 5,
+			}]
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(INativeHostService).openJarvisWindow();
 	}
 }
 

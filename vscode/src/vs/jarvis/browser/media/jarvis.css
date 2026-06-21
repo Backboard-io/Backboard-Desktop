@@ -1,0 +1,572 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body.jarvis-standalone,
+body.jarvis-standalone .jarvis-root,
+.jarvis-root {
+	width: 100vw;
+	height: 100vh;
+	margin: 0;
+	overflow: hidden;
+	background: #f6d6cc;
+	color: var(--jarvis-text);
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+}
+
+.jarvis-root {
+	--jarvis-bg: #f6d6cc;
+	--jarvis-glass: rgba(248, 242, 234, .82);
+	--jarvis-card: rgba(51, 43, 62, .82);
+	--jarvis-card-solid: rgba(248, 242, 234, .9);
+	--jarvis-border: rgba(255, 120, 92, .76);
+	--jarvis-border-strong: rgba(255, 120, 92, .92);
+	--jarvis-focus: #ff755f;
+	--jarvis-text: var(--vscode-foreground, #f9f4ef);
+	--jarvis-muted: rgba(255, 232, 225, .68);
+	--jarvis-control-text: #463934;
+	--jarvis-button-bg: #ff7e67;
+	--jarvis-button-fg: var(--vscode-button-foreground, #ffffff);
+	--jarvis-button-hover: #ff684d;
+	--jarvis-success: var(--vscode-testing-iconPassed, #41c76d);
+	--jarvis-danger: var(--vscode-errorForeground, #ff6480);
+	--jarvis-terminal: rgba(39, 36, 53, .42);
+	--jarvis-shadow: rgba(39, 23, 34, .32);
+}
+
+.jarvis-root * {
+	box-sizing: border-box;
+}
+
+.jarvis-root button,
+.jarvis-root input,
+.jarvis-root select {
+	font: inherit;
+}
+
+.jarvis-shell {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--jarvis-bg);
+}
+
+.jarvis-background {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	overflow: hidden;
+	background: #f6d6cc;
+}
+
+.jarvis-background::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background:
+		radial-gradient(circle at 82% 8%, rgba(255, 255, 255, .46), transparent 24%),
+		radial-gradient(circle at 18% 18%, rgba(255, 174, 187, .28), transparent 26%),
+		linear-gradient(180deg, rgba(255, 242, 231, .2), rgba(22, 20, 39, .08));
+	pointer-events: none;
+}
+
+.jarvis-background-video {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	filter: saturate(1.18) contrast(1.04) brightness(1.16);
+}
+
+.jarvis-header,
+.jarvis-command-bar,
+.jarvis-grid,
+.jarvis-side-rail {
+	position: absolute;
+	z-index: 1;
+	-webkit-app-region: no-drag;
+}
+
+.jarvis-header {
+	top: 14px;
+	left: 50%;
+	display: grid;
+	grid-template-columns: auto auto auto auto;
+	align-items: center;
+	gap: 12px;
+	min-height: 48px;
+	padding: 8px 12px;
+	border: 1px solid rgba(255, 255, 255, .62);
+	border-radius: 18px;
+	background: var(--jarvis-glass);
+	box-shadow: 0 16px 34px var(--jarvis-shadow);
+	backdrop-filter: blur(22px) saturate(1.25);
+	transform: translateX(-50%);
+	-webkit-app-region: drag;
+}
+
+.jarvis-header button,
+.jarvis-header select {
+	-webkit-app-region: no-drag;
+}
+
+.jarvis-mode-select {
+	min-width: 104px;
+	height: 32px;
+	padding: 0 28px 0 12px;
+	border: 0;
+	border-radius: 13px;
+	background: rgba(255, 255, 255, .38);
+	color: var(--jarvis-control-text);
+	font-size: 13px;
+	font-weight: 700;
+	outline: none;
+}
+
+.jarvis-workspace-select {
+	max-width: 180px;
+	height: 32px;
+	overflow: hidden;
+	padding: 0 13px;
+	border: 1px solid rgba(255, 126, 103, .22);
+	border-radius: 13px;
+	background: rgba(255, 255, 255, .42);
+	color: var(--jarvis-control-text);
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 700;
+	outline: none;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.jarvis-brand {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	white-space: nowrap;
+}
+
+.jarvis-brand h1 {
+	margin: 0;
+	color: var(--jarvis-control-text);
+	font-size: 13px;
+	font-weight: 700;
+	letter-spacing: 0;
+}
+
+.jarvis-brand p {
+	display: none;
+}
+
+.jarvis-status-line {
+	max-width: 240px;
+	overflow: hidden;
+	color: color-mix(in srgb, var(--jarvis-control-text) 72%, transparent);
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.jarvis-side-rail {
+	top: 50%;
+	left: 24px;
+	display: grid;
+	gap: 9px;
+	width: 58px;
+	padding: 12px 9px;
+	border: 1px solid rgba(255, 255, 255, .64);
+	border-radius: 22px;
+	background: rgba(248, 242, 234, .88);
+	box-shadow: 0 16px 38px rgba(64, 35, 47, .22);
+	backdrop-filter: blur(22px) saturate(1.18);
+	transform: translateY(-50%);
+}
+
+.jarvis-side-rail button {
+	display: grid;
+	place-items: center;
+	width: 40px;
+	height: 38px;
+	padding: 0;
+	border: 0;
+	border-radius: 12px;
+	background: transparent;
+	color: rgba(78, 67, 62, .72);
+	cursor: pointer;
+	font-size: 13px;
+}
+
+.jarvis-side-rail button:hover,
+.jarvis-side-rail button:focus {
+	background: rgba(255, 126, 103, .2);
+	color: #f0523e;
+	outline: none;
+}
+
+.jarvis-command-bar {
+	left: 50%;
+	bottom: 26px;
+	display: grid;
+	grid-template-columns: minmax(180px, 1fr) auto auto;
+	gap: 10px;
+	width: min(760px, calc(100vw - 260px));
+	padding: 12px;
+	border: 2px solid rgba(255, 126, 103, .86);
+	border-radius: 22px;
+	background: rgba(248, 242, 234, .82);
+	box-shadow: 0 20px 44px rgba(64, 35, 47, .22);
+	backdrop-filter: blur(24px) saturate(1.2);
+	transform: translateX(-50%);
+}
+
+.jarvis-prompt-input,
+.jarvis-terminal-command input {
+	min-width: 0;
+	height: 40px;
+	border: 1px solid rgba(255, 126, 103, .24);
+	border-radius: 14px;
+	background: rgba(255, 255, 255, .4);
+	color: var(--jarvis-control-text);
+	outline: none;
+}
+
+.jarvis-prompt-input {
+	padding: 0 14px;
+	text-align: center;
+}
+
+.jarvis-prompt-input::placeholder,
+.jarvis-terminal-command input::placeholder {
+	color: rgba(78, 67, 62, .58);
+}
+
+.jarvis-prompt-input:focus,
+.jarvis-terminal-command input:focus,
+.jarvis-mode-select:focus,
+.jarvis-workspace-select:focus,
+.jarvis-button:focus,
+.jarvis-icon-button:focus {
+	border-color: var(--jarvis-focus);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--jarvis-focus) 54%, transparent);
+}
+
+.jarvis-button,
+.jarvis-icon-button {
+	border: 1px solid rgba(255, 126, 103, .32);
+	border-radius: 13px;
+	background: rgba(255, 255, 255, .42);
+	color: var(--jarvis-control-text);
+	cursor: pointer;
+}
+
+.jarvis-button {
+	height: 40px;
+	padding: 0 16px;
+	font-weight: 600;
+}
+
+.jarvis-button.primary,
+.jarvis-button.listening {
+	border-color: var(--jarvis-button-bg);
+	background: var(--jarvis-button-bg);
+	color: var(--jarvis-button-fg);
+}
+
+.jarvis-button:hover,
+.jarvis-workspace-select:hover,
+.jarvis-icon-button:hover {
+	background: var(--jarvis-button-hover);
+	color: var(--jarvis-button-fg);
+}
+
+.jarvis-button:disabled,
+.jarvis-icon-button:disabled,
+.jarvis-terminal-command input:disabled {
+	opacity: .48;
+	cursor: default;
+}
+
+.jarvis-grid {
+	inset: 76px 74px 92px 74px;
+	display: grid;
+	grid-template-columns: repeat(2, minmax(360px, 1fr));
+	grid-template-rows: repeat(2, minmax(280px, 1fr));
+	gap: clamp(18px, 1.8vw, 30px);
+	min-width: 0;
+	min-height: 0;
+	pointer-events: none;
+}
+
+.jarvis-grid.empty {
+	display: block;
+}
+
+.jarvis-grid.count-1 {
+	grid-template-columns: minmax(0, 1fr);
+	grid-template-rows: minmax(0, 1fr);
+	padding-inline: max(48px, 6vw);
+}
+
+.jarvis-grid.count-2 {
+	grid-template-columns: repeat(2, minmax(360px, 1fr));
+	grid-template-rows: minmax(0, 1fr);
+	padding-inline: clamp(18px, 3vw, 48px);
+}
+
+.jarvis-grid.count-3 {
+	grid-template-rows: repeat(2, minmax(280px, 1fr));
+}
+
+.jarvis-grid.count-3 .jarvis-card:first-child {
+	grid-row: span 2;
+}
+
+.jarvis-card {
+	display: grid;
+	grid-template-rows: auto auto minmax(0, 1fr) auto;
+	min-width: 0;
+	min-height: 280px;
+	overflow: hidden;
+	border: 2px solid var(--jarvis-border);
+	border-radius: 14px;
+	background: var(--jarvis-card);
+	box-shadow: 0 24px 56px var(--jarvis-shadow), inset 0 1px 0 rgba(255, 255, 255, .08);
+	backdrop-filter: blur(18px) saturate(1.1);
+	pointer-events: auto;
+}
+
+.jarvis-card.running {
+	border-color: var(--jarvis-border-strong);
+}
+
+.jarvis-card.error {
+	border-color: color-mix(in srgb, var(--jarvis-danger) 58%, var(--jarvis-border));
+}
+
+.jarvis-card-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	min-height: 46px;
+	padding: 8px 14px;
+	border-bottom: 1px solid rgba(255, 126, 103, .22);
+	background: rgba(70, 31, 45, .36);
+}
+
+.jarvis-card-identity {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	gap: 8px;
+}
+
+.jarvis-card-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: var(--jarvis-muted);
+}
+
+.jarvis-card.running .jarvis-card-dot {
+	background: #ff6e49;
+	box-shadow: 0 0 0 4px rgba(255, 110, 73, .14);
+}
+
+.jarvis-card.opening .jarvis-card-dot {
+	background: var(--jarvis-focus);
+}
+
+.jarvis-card.error .jarvis-card-dot {
+	background: var(--jarvis-danger);
+}
+
+.jarvis-card h2 {
+	margin: 0;
+	overflow: hidden;
+	color: #fff8f4;
+	font-size: 14px;
+	font-weight: 700;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.jarvis-icon-button {
+	display: inline-grid;
+	place-items: center;
+	flex: 0 0 auto;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	font-size: 15px;
+	font-weight: 700;
+}
+
+.jarvis-card-meta {
+	overflow: hidden;
+	padding: 5px 10px;
+	color: var(--jarvis-muted);
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.jarvis-terminal {
+	min-width: 0;
+	min-height: 0;
+	margin: 0 14px 10px;
+	padding: 12px;
+	overflow: hidden;
+	border: 1px solid rgba(255, 126, 103, .18);
+	border-radius: 10px;
+	background: var(--jarvis-terminal);
+	color: var(--jarvis-text);
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 13px;
+	line-height: 1.4;
+}
+
+.jarvis-terminal .xterm {
+	width: 100%;
+	height: 100%;
+	padding: 0;
+}
+
+.jarvis-terminal .xterm-viewport {
+	background: transparent !important;
+}
+
+.jarvis-terminal .xterm-screen {
+	width: 100% !important;
+}
+
+.jarvis-terminal .xterm-rows {
+	line-height: 1.22;
+}
+
+.jarvis-terminal-command {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto auto;
+	gap: 8px;
+	padding: 0 14px 14px;
+}
+
+.jarvis-terminal-command input {
+	padding: 0 9px;
+	background: rgba(255, 255, 255, .1);
+	color: #fff8f4;
+}
+
+.jarvis-terminal-command input::placeholder {
+	color: rgba(255, 232, 225, .54);
+}
+
+@media (max-width: 1120px) {
+	.jarvis-grid {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: repeat(4, minmax(300px, 1fr));
+		inset-inline: 64px 24px;
+		overflow: auto;
+	}
+
+	.jarvis-status-line {
+		display: none;
+	}
+
+	.jarvis-grid.count-1,
+	.jarvis-grid.count-2,
+	.jarvis-grid.count-3,
+	.jarvis-grid.count-4 {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: repeat(var(--jarvis-active-count, 4), minmax(300px, 1fr));
+		padding-inline: 0;
+	}
+
+	.jarvis-grid.count-1 { --jarvis-active-count: 1; }
+	.jarvis-grid.count-2 { --jarvis-active-count: 2; }
+	.jarvis-grid.count-3 { --jarvis-active-count: 3; }
+	.jarvis-grid.count-4 { --jarvis-active-count: 4; }
+
+	.jarvis-grid.count-3 .jarvis-card:first-child {
+		grid-row: auto;
+	}
+}
+
+@media (max-width: 720px) {
+	.jarvis-header {
+		left: 12px;
+		right: 12px;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		transform: none;
+	}
+
+	.jarvis-workspace-select {
+		max-width: none;
+	}
+
+	.jarvis-side-rail {
+		display: none;
+	}
+
+	.jarvis-grid {
+		inset: 70px 12px 86px;
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: repeat(4, minmax(300px, 1fr));
+		overflow: auto;
+	}
+
+	.jarvis-grid.count-1,
+	.jarvis-grid.count-2,
+	.jarvis-grid.count-3,
+	.jarvis-grid.count-4 {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: repeat(var(--jarvis-active-count, 4), minmax(300px, 1fr));
+		padding-inline: 0;
+	}
+
+	.jarvis-command-bar {
+		width: calc(100vw - 24px);
+		grid-template-columns: minmax(0, 1fr) auto;
+	}
+
+	.jarvis-button:not(.primary) {
+		display: none;
+	}
+}
+
+@media (max-height: 620px) {
+	.jarvis-header {
+		top: 8px;
+		min-height: 34px;
+		padding-block: 4px;
+	}
+
+	.jarvis-grid {
+		inset-block: 54px 70px;
+	}
+
+	.jarvis-command-bar {
+		bottom: 12px;
+		padding: 7px;
+	}
+
+	.jarvis-card-meta {
+		display: none;
+	}
+
+	.jarvis-terminal {
+		margin-bottom: 7px;
+		padding: 8px;
+		font-size: 12px;
+	}
+
+	.jarvis-terminal-command {
+		padding-bottom: 7px;
+	}
+}

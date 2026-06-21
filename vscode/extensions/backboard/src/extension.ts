@@ -107,7 +107,6 @@ interface PanelOptions {
 	readonly model?: string;
 	readonly mode?: string;
 	readonly intensity?: string;
-	readonly memoryMode?: string;
 	readonly webSearch?: string;
 	readonly imageGeneration?: string;
 	readonly voiceMode?: string;
@@ -1695,14 +1694,10 @@ function listPanelThreadFilesSync(): string[] {
 	try {
 		for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
 			const entryPath = path.join(root, entry.name);
-			if (entry.isFile() && entry.name.endsWith('.json')) {
-				files.push(entryPath);
-			} else if (entry.isDirectory()) {
+			if (entry.isDirectory()) {
 				for (const threadEntry of fs.readdirSync(entryPath, { withFileTypes: true })) {
 					const threadEntryPath = path.join(entryPath, threadEntry.name);
-					if (threadEntry.isFile() && threadEntry.name.endsWith('.json')) {
-						files.push(threadEntryPath);
-					} else if (threadEntry.isDirectory()) {
+					if (threadEntry.isDirectory()) {
 						const threadPath = path.join(threadEntryPath, 'thread.json');
 						if (fs.existsSync(threadPath)) {
 							files.push(threadPath);
@@ -2247,7 +2242,6 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				model: settings.defaultModel,
 				mode: settings.mode,
 				intensity: settings.intensity,
-				memoryMode: settings.memoryMode,
 				webSearch: settings.webSearch,
 				imageGeneration: imageGeneration === 'auto' ? 'auto' : undefined,
 				voiceMode,
@@ -2760,13 +2754,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				<option value="balanced">Balanced</option>
 				<option value="deep">Deep</option>
 			</select>
-			<select id="memoryMode" class="stateControl" aria-hidden="true">
-				<option value="off">Off</option>
-				<option value="Auto">Memory Lite</option>
-				<option value="Readonly">Memory Read Only</option>
-				<option value="ProAuto">Memory Pro</option>
-				<option value="ProReadonly">Memory Pro Read Only</option>
-			</select>
 			<select id="webSearch" class="stateControl" aria-hidden="true">
 				<option value="off">Off</option>
 				<option value="Auto">Auto</option>
@@ -2871,7 +2858,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			model: document.getElementById('model'),
 			mode: document.getElementById('mode'),
 			intensity: document.getElementById('intensity'),
-			memoryMode: document.getElementById('memoryMode'),
 			webSearch: document.getElementById('webSearch'),
 			imageGeneration: document.getElementById('imageGeneration'),
 			voiceMode: document.getElementById('voiceMode'),
@@ -2957,7 +2943,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				model: controls.model.value,
 				mode: controls.mode.value,
 				intensity: controls.intensity.value,
-				memoryMode: controls.memoryMode.value,
 				webSearch: controls.webSearch.value,
 				imageGeneration: controls.imageGeneration.value,
 				voiceMode: controls.voiceMode.value,
@@ -4009,7 +3994,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				renderModels();
 			setSelect(controls.mode, settings.mode || 'free');
 			setSelect(controls.intensity, settings.intensity || 'fast');
-			setSelect(controls.memoryMode, settings.memoryMode || 'off');
 			setSelect(controls.webSearch, settings.webSearch || 'off');
 			setSelect(controls.imageGeneration, settings.imageGeneration || 'off');
 			setSelect(controls.voiceMode, settings.voiceMode || 'off');
@@ -5000,7 +4984,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const inputTokens = firstNumber(summary, ['token_input_tokens', 'tokenInputTokens', 'input_tokens']);
 			const outputTokens = firstNumber(summary, ['token_output_tokens', 'tokenOutputTokens', 'output_tokens']);
 			const reads = firstNumber(summary, ['reads_count', 'readsCount', 'vector_reads']);
-			const writes = firstNumber(summary, ['writes_count', 'writesCount', 'memory_writes']);
+			const writes = firstNumber(summary, ['writes_count', 'writesCount']);
 			const recentData = Array.isArray(recent.data) ? recent.data : Array.isArray(recent.usage) ? recent.usage : [];
 			if (balanceUsd !== undefined) {
 				metrics.push(['Balance', formatMoney(balanceUsd)]);
@@ -6355,7 +6339,6 @@ function readSettings(): {
 	readonly defaultModel: string;
 	readonly mode: string;
 	readonly intensity: string;
-	readonly memoryMode: string;
 	readonly webSearch: string;
 	readonly imageGeneration: string;
 	readonly voiceMode: string;
@@ -6372,7 +6355,6 @@ function readSettings(): {
 		defaultModel: config.get<string>('defaultModel') || 'deepseek/deepseek-v4-flash',
 		mode: config.get<string>('mode') || 'free',
 		intensity: config.get<string>('intensity') || 'fast',
-		memoryMode: config.get<string>('memoryMode') || 'off',
 		webSearch: config.get<string>('webSearch') || 'off',
 		imageGeneration: config.get<string>('imageGeneration') || 'off',
 		voiceMode: config.get<string>('voiceMode') || 'off',
@@ -6395,7 +6377,6 @@ function resolveTurnSettings(options: PanelOptions): BackboardSettings {
 		defaultModel: options.model || settings.defaultModel,
 		mode: options.mode || settings.mode,
 		intensity: options.intensity || settings.intensity,
-		memoryMode: options.memoryMode || settings.memoryMode,
 		webSearch: options.webSearch || settings.webSearch,
 		imageGeneration: options.imageGeneration || settings.imageGeneration,
 		voiceMode: options.voiceMode || settings.voiceMode,
@@ -6434,7 +6415,6 @@ function asPanelOptions(value: unknown): PanelOptions {
 		model: stringValue(raw.model),
 		mode: stringValue(raw.mode),
 		intensity: stringValue(raw.intensity),
-		memoryMode: stringValue(raw.memoryMode),
 		webSearch: stringValue(raw.webSearch),
 		imageGeneration: stringValue(raw.imageGeneration),
 		voiceMode: stringValue(raw.voiceMode),
@@ -6451,7 +6431,6 @@ async function savePanelOptions(options: PanelOptions): Promise<void> {
 		['defaultModel', options.model],
 		['mode', options.mode],
 		['intensity', options.intensity],
-		['memoryMode', options.memoryMode],
 		['webSearch', options.webSearch],
 		['imageGeneration', options.imageGeneration],
 		['voiceMode', options.voiceMode],
@@ -6590,7 +6569,6 @@ function publicSettings(settings: BackboardSettings): PanelOptions {
 		model: settings.defaultModel,
 		mode: settings.mode,
 		intensity: settings.intensity,
-		memoryMode: settings.memoryMode,
 		webSearch: settings.webSearch,
 		imageGeneration: settings.imageGeneration,
 		voiceMode: settings.voiceMode,

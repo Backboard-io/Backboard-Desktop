@@ -20,10 +20,6 @@ pub fn assistant_documents(assistant_id: &str) -> String {
     format!("/assistants/{assistant_id}/documents")
 }
 
-pub fn assistant_memories(assistant_id: &str) -> String {
-    format!("/assistants/{assistant_id}/memories")
-}
-
 pub fn thread(thread_id: &str) -> String {
     format!("/threads/{thread_id}")
 }

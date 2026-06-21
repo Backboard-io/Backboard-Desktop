@@ -161,18 +161,6 @@
             "default": "fast",
             "description": "Reasoning intensity sent to Backboard."
           },
-          "backboard.memoryMode": {
-            "type": "string",
-            "enum": [
-              "off",
-              "Auto",
-              "Readonly",
-              "ProAuto",
-              "ProReadonly"
-            ],
-            "default": "off",
-            "description": "Memory mode sent to Backboard turns. Pro modes use memory_pro and omit memory."
-          },
           "backboard.webSearch": {
             "type": "string",
             "enum": [

@@ -153,6 +153,11 @@ export class LaunchMainService implements ILaunchMainService {
 			usedWindows = await this.windowsMainService.openOptimusWindow(baseConfig);
 		}
 
+		// Jarvis
+		else if (args['jarvis']) {
+			usedWindows = await this.windowsMainService.openJarvisWindow(baseConfig);
+		}
+
 		// Start without file/folder arguments
 		else if (!args._.length && !args['folder-uri'] && !args['file-uri']) {
 			let openNewWindow = false;

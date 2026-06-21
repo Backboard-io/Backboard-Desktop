@@ -25,6 +25,8 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		action: IAction,
 		options: IBaseActionViewItemOptions | undefined,
 		private readonly keybindingCommandId: string,
+		private readonly optimusCommandId: string | undefined,
+		private readonly jarvisCommandId: string | undefined,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
@@ -52,22 +54,40 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		chevron.setAttribute('aria-hidden', 'true');
 
 		const showMenu = () => {
+			const actions = [
+				toAction({
+					id: 'agents.action.mode.editor',
+					label: localize('openInVSCodeSwitcher.editor', "Editor"),
+					run: () => this.action.run(),
+				}),
+				toAction({
+					id: 'agents.action.mode.agents',
+					label: localize('openInVSCodeSwitcher.agents', "Agents"),
+					checked: true,
+					run: () => this.commandService.executeCommand(OPEN_BACKBOARD_AGENTS_COMMAND_ID),
+				}),
+			];
+			const optimusCommandId = this.optimusCommandId;
+			if (optimusCommandId) {
+				actions.push(toAction({
+					id: 'agents.action.mode.optimus',
+					label: localize('openInVSCodeSwitcher.optimus', "Optimus"),
+					run: () => this.commandService.executeCommand(optimusCommandId),
+				}));
+			}
+			const jarvisCommandId = this.jarvisCommandId;
+			if (jarvisCommandId) {
+				actions.push(toAction({
+					id: 'agents.action.mode.jarvis',
+					label: localize('openInVSCodeSwitcher.jarvis', "Jarvis"),
+					run: () => this.commandService.executeCommand(jarvisCommandId),
+				}));
+			}
+
 			triggerButton.setAttribute('aria-expanded', 'true');
 			this.contextMenuService.showContextMenu({
 				getAnchor: () => triggerButton,
-				getActions: () => [
-					toAction({
-						id: 'agents.action.mode.editor',
-						label: localize('openInVSCodeSwitcher.editor', "Editor"),
-						run: () => this.action.run(),
-					}),
-					toAction({
-						id: 'agents.action.mode.agents',
-						label: localize('openInVSCodeSwitcher.agents', "Agents"),
-						checked: true,
-						run: () => this.commandService.executeCommand(OPEN_BACKBOARD_AGENTS_COMMAND_ID),
-					}),
-				],
+				getActions: () => actions,
 				onHide: () => triggerButton.setAttribute('aria-expanded', 'false'),
 			});
 		};

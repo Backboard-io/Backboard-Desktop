@@ -1,0 +1,27 @@
+<!-- Copyright (C) Microsoft Corporation. All rights reserved. -->
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="
+				default-src 'none';
+				img-src 'self' data: blob: vscode-remote-resource: vscode-managed-remote-resource: https:;
+				script-src 'self' 'unsafe-eval' blob:;
+				style-src 'self' 'unsafe-inline';
+				media-src 'self' blob:;
+				connect-src 'self' https: ws: wss:;
+				font-src 'self' vscode-remote-resource: vscode-managed-remote-resource: https://*.vscode-unpkg.net;
+				require-trusted-types-for 'script';
+				trusted-types vscode-bootstrapImportMap amdLoader defaultWorkerFactory lit-html;
+		"/>
+
+		<link rel="stylesheet" href="../browser/media/jarvis.css">
+	</head>
+
+	<body aria-label="Jarvis">
+	</body>
+
+	<script src="./jarvis.js" type="module"></script>
+</html>

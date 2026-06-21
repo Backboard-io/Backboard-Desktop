@@ -317,10 +317,21 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 	}
 
 	async openOptimusWindow(windowId: number | undefined): Promise<void> {
-		const window = typeof windowId === 'number' ? this.windowsMainService.getWindowById(windowId) : undefined;
-		const targetWindow = window ?? this.windowsMainService.getFocusedWindow() ?? this.windowsMainService.getLastActiveWindow();
-		targetWindow?.sendWhenReady('vscode:openOptimus', CancellationToken.None);
-		targetWindow?.focus();
+		const windows = await this.windowsMainService.openOptimusWindow({
+			context: OpenContext.API,
+			contextWindowId: windowId,
+			cli: this.environmentMainService.args,
+		});
+		windows[0]?.focus();
+	}
+
+	async openJarvisWindow(windowId: number | undefined): Promise<void> {
+		const windows = await this.windowsMainService.openJarvisWindow({
+			context: OpenContext.API,
+			contextWindowId: windowId,
+			cli: this.environmentMainService.args,
+		});
+		windows[0]?.focus();
 	}
 
 	async isFullScreen(windowId: number | undefined, options?: INativeHostOptions): Promise<boolean> {

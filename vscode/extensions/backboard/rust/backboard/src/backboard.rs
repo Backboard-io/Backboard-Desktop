@@ -597,8 +597,6 @@ pub struct CreateAssistantRequest {
     pub tools: Option<Vec<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_fact_extraction_prompt: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_update_memory_prompt: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -631,8 +629,6 @@ pub struct SendMessageRequest {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory_pro: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -671,8 +667,7 @@ impl Default for SendMessageRequest {
             content: String::new(),
             provider: None,
             model: None,
-            memory: Some("Auto".to_string()),
-            memory_pro: None,
+            memory: Some("off".to_string()),
             thinking: None,
             tools: None,
             parallel_tool_calls: None,
@@ -1071,94 +1066,6 @@ impl BackboardClient {
         self.json_value(
             self.client
                 .delete(self.url(&format!("/documents/{document_id}")))
-                .headers(self.json_headers()?),
-        )
-        .await
-    }
-
-    pub async fn list_memories(&self, assistant_id: &str) -> Result<Vec<Value>> {
-        self.json(
-            self.client
-                .get(self.url(&format!("/assistants/{assistant_id}/memories")))
-                .headers(self.json_headers()?),
-        )
-        .await
-    }
-
-    pub async fn add_memory(
-        &self,
-        assistant_id: &str,
-        content: impl Into<String>,
-        tags: Vec<String>,
-    ) -> Result<Value> {
-        self.json(
-            self.client
-                .post(self.url(&format!("/assistants/{assistant_id}/memories")))
-                .headers(self.json_headers()?)
-                .body(serde_json::to_vec(
-                    &json!({ "content": content.into(), "tags": tags }),
-                )?),
-        )
-        .await
-    }
-
-    pub async fn search_memories(&self, assistant_id: &str, request: Value) -> Result<Value> {
-        self.json_value(
-            self.client
-                .post(self.url(&format!("/assistants/{assistant_id}/memories/search")))
-                .headers(self.json_headers()?)
-                .body(serde_json::to_vec(&request)?),
-        )
-        .await
-    }
-
-    pub async fn add_memory_value(&self, assistant_id: &str, request: Value) -> Result<Value> {
-        self.json_value(
-            self.client
-                .post(self.url(&format!("/assistants/{assistant_id}/memories")))
-                .headers(self.json_headers()?)
-                .body(serde_json::to_vec(&request)?),
-        )
-        .await
-    }
-
-    pub async fn get_memory(&self, assistant_id: &str, memory_id: &str) -> Result<Value> {
-        self.json_value(
-            self.client
-                .get(self.url(&format!("/assistants/{assistant_id}/memories/{memory_id}")))
-                .headers(self.json_headers()?),
-        )
-        .await
-    }
-
-    pub async fn update_memory(
-        &self,
-        assistant_id: &str,
-        memory_id: &str,
-        request: Value,
-    ) -> Result<Value> {
-        self.json_value(
-            self.client
-                .put(self.url(&format!("/assistants/{assistant_id}/memories/{memory_id}")))
-                .headers(self.json_headers()?)
-                .body(serde_json::to_vec(&request)?),
-        )
-        .await
-    }
-
-    pub async fn delete_memory(&self, assistant_id: &str, memory_id: &str) -> Result<Value> {
-        self.json_value(
-            self.client
-                .delete(self.url(&format!("/assistants/{assistant_id}/memories/{memory_id}")))
-                .headers(self.json_headers()?),
-        )
-        .await
-    }
-
-    pub async fn get_memory_operation_status(&self, operation_id: &str) -> Result<Value> {
-        self.json_value(
-            self.client
-                .get(self.url(&format!("/assistants/memories/operations/{operation_id}")))
                 .headers(self.json_headers()?),
         )
         .await
@@ -1580,9 +1487,6 @@ fn message_form(request: &SendMessageRequest, stream: bool) -> Result<Vec<(Strin
     if let Some(memory) = request.memory.clone() {
         form.push(("memory".to_string(), memory));
     }
-    if let Some(memory_pro) = request.memory_pro.clone() {
-        form.push(("memory_pro".to_string(), memory_pro));
-    }
     if let Some(thread_id) = request.thread_id.clone() {
         form.push(("thread_id".to_string(), thread_id));
     }
@@ -1638,9 +1542,6 @@ fn message_json(request: &SendMessageRequest, stream: bool) -> Value {
     body.insert("web_search".to_string(), request.web_search.clone().into());
     if let Some(memory) = request.memory.clone() {
         body.insert("memory".to_string(), memory.into());
-    }
-    if let Some(memory_pro) = request.memory_pro.clone() {
-        body.insert("memory_pro".to_string(), memory_pro.into());
     }
     if let Some(thread_id) = request.thread_id.clone() {
         body.insert("thread_id".to_string(), thread_id.into());

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { ipcRenderer } from '../../base/parts/sandbox/electron-browser/globals.js';
-import { IOptimusHistoryEntry, IOptimusHistoryProvider, IOptimusWorkspaceEntry } from '../common/optimusHistory.js';
+import { IOptimusHistoryEntry, IOptimusHistoryProvider, IOptimusNavigationProvider, IOptimusWorkspaceEntry } from '../common/optimusHistory.js';
 
 export class ElectronOptimusHistoryProvider implements IOptimusHistoryProvider {
 
@@ -35,6 +35,25 @@ export class ElectronOptimusHistoryProvider implements IOptimusHistoryProvider {
 	}
 }
 
+export class ElectronOptimusNavigationProvider implements IOptimusNavigationProvider {
+
+	async openEditor(): Promise<void> {
+		await switchWindowKind('editor');
+	}
+
+	async openAgents(): Promise<void> {
+		await switchWindowKind('agents');
+	}
+
+	async openOptimus(): Promise<void> {
+		await switchWindowKind('optimus');
+	}
+
+	async openJarvis(): Promise<void> {
+		await switchWindowKind('jarvis');
+	}
+}
+
 async function sendBackboardPanelCommand(command: Record<string, unknown>): Promise<void> {
 	const result = await ipcRenderer.invoke('vscode:optimusBackboardCommand', {
 		id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -42,6 +61,13 @@ async function sendBackboardPanelCommand(command: Record<string, unknown>): Prom
 	}) as { readonly accepted?: boolean; readonly error?: string } | undefined;
 	if (!result?.accepted) {
 		throw new Error(result?.error ?? 'Backboard editor panel did not accept the Optimus command.');
+	}
+}
+
+async function switchWindowKind(target: 'editor' | 'agents' | 'optimus' | 'jarvis'): Promise<void> {
+	const result = await ipcRenderer.invoke('vscode:optimusSwitchWindowKind', target) as { readonly accepted?: boolean; readonly error?: string } | undefined;
+	if (!result?.accepted) {
+		throw new Error(result?.error ?? `Could not switch to ${target}.`);
 	}
 }
 

@@ -423,6 +423,8 @@ export function getResource(sourceFile: string): Resource {
 			return { name: 'vs/sessions', project: sessionsProject };
 		} else if (/^vs\/optimus/.test(sourceFile)) {
 			return { name: 'vs/optimus', project: sessionsProject };
+		} else if (/^vs\/jarvis/.test(sourceFile)) {
+			return { name: 'vs/jarvis', project: sessionsProject };
 		}
 
 	throw new Error(`Could not identify the XLF bundle for ${sourceFile}`);

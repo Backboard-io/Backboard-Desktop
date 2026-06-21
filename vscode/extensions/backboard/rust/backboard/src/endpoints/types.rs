@@ -9,8 +9,6 @@ pub struct CreateAssistantRequest {
     pub tools: Option<Vec<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_fact_extraction_prompt: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_update_memory_prompt: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -45,7 +43,7 @@ pub struct SendMessageRequest {
 }
 
 fn default_memory() -> String {
-    "Auto".into()
+    "off".into()
 }
 
 fn default_web_search() -> String {
