@@ -93,6 +93,8 @@ echo "Output: terminal"
 
 ARGS=(
 	--disable-extension=vscode.vscode-api-tests
+	--new-window
+	--disable-layout-restore
 )
 
 if [[ "$ISOLATED_PROFILE" == "1" ]]; then

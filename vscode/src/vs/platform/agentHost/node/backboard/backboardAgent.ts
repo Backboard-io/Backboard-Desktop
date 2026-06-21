@@ -478,8 +478,8 @@ export class BackboardAgent extends Disposable implements IAgent {
 				}
 		} catch (error) {
 			const message = backboardDisplayErrorMessage(error instanceof Error ? error.message : String(error));
-			if (isDuplicateToolOutputError(message)) {
-				this._logService.info(`[Backboard] Suppressed duplicate tool-output submission error: ${message}`);
+			if (isRecoverableToolOutputSubmissionError(message)) {
+				this._logService.info(`[Backboard] Suppressed recoverable tool-output submission error: ${message}`);
 			} else {
 				failedMessage = message;
 				this._fire(session.sessionUri, {
@@ -726,8 +726,8 @@ export class BackboardAgent extends Disposable implements IAgent {
 			case 'error':
 				this._flushAssistantText(session, turnId, partId, responseState);
 				this._logService.error(`[Backboard provider error] ${safeStringifyForLog(event)}`);
-				if (isDuplicateToolOutputError(event.message)) {
-					this._logService.info(`[Backboard] Suppressed duplicate tool-output submission error: ${event.message}`);
+				if (isRecoverableToolOutputSubmissionError(event.message)) {
+					this._logService.info(`[Backboard] Suppressed recoverable tool-output submission error: ${event.message}`);
 					return;
 				}
 				this._fire(session.sessionUri, {
@@ -1674,10 +1674,12 @@ function formatLineCount(count: number): string {
 	return localize('backboard.streamingTool.linesCount', "{0} lines", count);
 }
 
-function isDuplicateToolOutputError(message: string | undefined): boolean {
+function isRecoverableToolOutputSubmissionError(message: string | undefined): boolean {
 	return typeof message === 'string'
-		&& message.includes('Tool outputs for run ID')
-		&& message.includes('were already submitted');
+		&& (
+			(message.includes('Tool outputs for run ID') && message.includes('were already submitted'))
+			|| message.includes('No assistant message found requiring action for run ID')
+		);
 }
 
 function backboardDisplayErrorMessage(message: string): string {
@@ -2404,9 +2406,9 @@ async function executeBackboardTool(bridge: BackboardBridgeProcess, rootPath: st
 		case 'write_file':
 		case 'create_file':
 		case 'overwrite_file':
-			return writeFileTool(rootPath, call.args);
+			return writeFileTool(rootPath, call.name, call.args, reportContent);
 		case 'append_file':
-			return appendFileTool(rootPath, call.args);
+			return appendFileTool(rootPath, call.args, reportContent);
 		case 'edit':
 		case 'edit_file':
 		case 'search_replace':
@@ -2602,20 +2604,66 @@ async function codebaseSearchTool(rootPath: string | undefined, args: Record<str
 		.join('\n');
 }
 
-async function writeFileTool(rootPath: string | undefined, args: Record<string, unknown>): Promise<string> {
-	const file = resolveWorkspacePath(rootPath, filePathArg(args));
-	const content = stringArg(args, 'content', 'contents', 'new_text', 'newText');
-	await fs.promises.mkdir(path.dirname(file), { recursive: true });
-	await fs.promises.writeFile(file, content, 'utf8');
-	return `Wrote ${relativePath(workspaceRoot(rootPath), file)}`;
+const BACKBOARD_LARGE_WRITE_PROGRESS_CHARS = 8_000;
+const BACKBOARD_LARGE_WRITE_CHUNK_CHARS = 4_000;
+const BACKBOARD_MAX_WRITE_TOOL_CONTENT_CHARS = 6_000;
+
+function largeWriteChunkCount(content: string): number {
+	return Math.max(1, Math.ceil(content.length / BACKBOARD_LARGE_WRITE_CHUNK_CHARS));
 }
 
-async function appendFileTool(rootPath: string | undefined, args: Record<string, unknown>): Promise<string> {
+async function writeStringInChunks(file: string, content: string, append: boolean, reportProgress?: (written: number, total: number) => void): Promise<number> {
+	if (!append) {
+		await fs.promises.writeFile(file, '', 'utf8');
+	}
+	let written = 0;
+	const chunks = largeWriteChunkCount(content);
+	for (let offset = 0; offset < content.length; offset += BACKBOARD_LARGE_WRITE_CHUNK_CHARS) {
+		const chunk = content.slice(offset, offset + BACKBOARD_LARGE_WRITE_CHUNK_CHARS);
+		await fs.promises.appendFile(file, chunk, 'utf8');
+		written += chunk.length;
+		reportProgress?.(written, content.length);
+	}
+	return chunks;
+}
+
+async function writeFileTool(rootPath: string | undefined, toolName: string, args: Record<string, unknown>, reportContent?: (content: string) => void): Promise<string> {
 	const file = resolveWorkspacePath(rootPath, filePathArg(args));
 	const content = stringArg(args, 'content', 'contents', 'new_text', 'newText');
+	const relative = relativePath(workspaceRoot(rootPath), file);
+	assertWriteToolContentSize(toolName, relative, content);
 	await fs.promises.mkdir(path.dirname(file), { recursive: true });
+	if (content.length > BACKBOARD_LARGE_WRITE_PROGRESS_CHARS) {
+		reportContent?.(`Writing ${relative}: 0/${content.length} chars`);
+		const chunks = await writeStringInChunks(file, content, false, (written, total) => reportContent?.(`Writing ${relative}: ${written}/${total} chars`));
+		reportContent?.(`Wrote ${relative}: ${content.length} chars in ${chunks} chunks`);
+		return `Wrote ${relative} (${content.length} chars in ${chunks} chunks)`;
+	}
+	await fs.promises.writeFile(file, content, 'utf8');
+	return `Wrote ${relative}`;
+}
+
+async function appendFileTool(rootPath: string | undefined, args: Record<string, unknown>, reportContent?: (content: string) => void): Promise<string> {
+	const file = resolveWorkspacePath(rootPath, filePathArg(args));
+	const content = stringArg(args, 'content', 'contents', 'new_text', 'newText');
+	const relative = relativePath(workspaceRoot(rootPath), file);
+	assertWriteToolContentSize('append_file', relative, content);
+	await fs.promises.mkdir(path.dirname(file), { recursive: true });
+	if (content.length > BACKBOARD_LARGE_WRITE_PROGRESS_CHARS) {
+		reportContent?.(`Appending ${relative}: 0/${content.length} chars`);
+		const chunks = await writeStringInChunks(file, content, true, (written, total) => reportContent?.(`Appending ${relative}: ${written}/${total} chars`));
+		reportContent?.(`Appended ${content.length} chars to ${relative} in ${chunks} chunks`);
+		return `Appended ${content.length} chars to ${relative} in ${chunks} chunks`;
+	}
 	await fs.promises.appendFile(file, content, 'utf8');
-	return `Appended ${content.length} chars to ${relativePath(workspaceRoot(rootPath), file)}`;
+	return `Appended ${content.length} chars to ${relative}`;
+}
+
+function assertWriteToolContentSize(toolName: string, relative: string, content: string): void {
+	if (content.length <= BACKBOARD_MAX_WRITE_TOOL_CONTENT_CHARS) {
+		return;
+	}
+	throw new Error(`${toolName} for ${relative} is too large (${content.length} chars). Split generated files into chunks: call write_file/create_file with the first chunk under ${BACKBOARD_MAX_WRITE_TOOL_CONTENT_CHARS} chars, then append_file with each remaining chunk under ${BACKBOARD_MAX_WRITE_TOOL_CONTENT_CHARS} chars.`);
 }
 
 async function editFileTool(rootPath: string | undefined, args: Record<string, unknown>): Promise<string> {

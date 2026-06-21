@@ -1944,6 +1944,7 @@ interface IOptimusBackboardPanelCommand {
 	readonly chatId?: string;
 	readonly workspace?: string;
 	readonly provider?: string;
+	readonly newChat?: boolean;
 	readonly options?: unknown;
 }
 
@@ -2479,6 +2480,7 @@ function writeOptimusBackboardCommand(value: unknown, windowsMainService: IWindo
 		chatId: typeof value.chatId === 'string' ? value.chatId : undefined,
 		workspace: typeof value.workspace === 'string' ? value.workspace : undefined,
 		provider: typeof value.provider === 'string' ? value.provider : undefined,
+		newChat: value.newChat === true,
 		options: value.options
 	};
 	if (command.type === 'openHistoryEntry' && command.chatId && isOptimusWorkbenchSessionId(command.chatId)) {

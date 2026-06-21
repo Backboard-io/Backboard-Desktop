@@ -17,24 +17,35 @@ body.optimus-standalone .optimus-root,
 }
 
 .optimus-root {
-	--optimus-bg: var(--vscode-editor-background, #1f1f1f);
-	--optimus-surface: color-mix(in srgb, var(--vscode-sideBar-background, #181818) 88%, var(--optimus-bg));
-	--optimus-card: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 88%, var(--optimus-bg));
-	--optimus-card-soft: color-mix(in srgb, var(--vscode-input-background, #252526) 90%, var(--optimus-bg));
-	--optimus-border: color-mix(in srgb, var(--vscode-widget-border, #3c3c3c) 76%, var(--vscode-sideBar-border, #2b2b2b));
+	--optimus-bg: var(--vscode-editor-background, Canvas);
+	--optimus-text: var(--vscode-foreground, var(--vscode-editor-foreground, var(--vscode-input-foreground, CanvasText)));
+	--optimus-muted: var(--vscode-descriptionForeground, var(--vscode-disabledForeground, color-mix(in srgb, var(--optimus-text) 64%, var(--optimus-bg))));
+	--optimus-surface: var(--vscode-sideBar-background, var(--optimus-bg));
+	--optimus-card: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, var(--optimus-bg)));
+	--optimus-card-soft: var(--vscode-input-background, var(--optimus-card));
+	--optimus-border: var(--vscode-widget-border, var(--vscode-sideBar-border, var(--vscode-contrastBorder, var(--optimus-muted))));
 	--optimus-border-subtle: color-mix(in srgb, var(--optimus-border) 62%, transparent);
-	--optimus-focus: var(--vscode-focusBorder, #5b8cff);
-	--optimus-text: var(--vscode-foreground, #cccccc);
-	--optimus-muted: var(--vscode-descriptionForeground, #8f8f8f);
+	--optimus-focus: var(--vscode-focusBorder, Highlight);
 	--optimus-subtle: color-mix(in srgb, var(--optimus-muted) 62%, transparent);
-	--optimus-button-bg: var(--vscode-button-background, #0078d4);
-	--optimus-button-fg: var(--vscode-button-foreground, #ffffff);
-	--optimus-button-hover: var(--vscode-button-hoverBackground, #0e86dd);
+	--optimus-button-bg: var(--vscode-button-background, Highlight);
+	--optimus-button-fg: var(--vscode-button-foreground, HighlightText);
+	--optimus-button-hover: var(--vscode-button-hoverBackground, color-mix(in srgb, var(--optimus-button-bg) 86%, var(--optimus-text)));
 	--optimus-toolbar-hover: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--optimus-focus) 12%, transparent));
-	--optimus-success: var(--vscode-testing-iconPassed, #2f9f5b);
-	--optimus-danger: var(--vscode-errorForeground, #d83e64);
-	--optimus-warning: var(--vscode-editorWarning-foreground, #cca700);
-	--optimus-shadow: color-mix(in srgb, var(--vscode-widget-shadow, #000000) 28%, transparent);
+	--optimus-success: var(--vscode-testing-iconPassed, var(--vscode-terminal-ansiGreen, var(--optimus-focus)));
+	--optimus-danger: var(--vscode-errorForeground, var(--vscode-terminal-ansiRed, var(--optimus-focus)));
+	--optimus-warning: var(--vscode-editorWarning-foreground, var(--vscode-terminal-ansiYellow, var(--optimus-focus)));
+	--optimus-shadow: color-mix(in srgb, var(--vscode-widget-shadow, var(--optimus-bg)) 28%, transparent);
+	color-scheme: light dark;
+}
+
+.optimus-standalone-document.vs,
+.optimus-standalone-document.hc-light {
+	color-scheme: light;
+}
+
+.optimus-standalone-document.vs-dark,
+.optimus-standalone-document.hc-black {
+	color-scheme: dark;
 }
 
 .optimus-root * {
@@ -67,11 +78,12 @@ body.optimus-standalone .optimus-root,
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 16px;
-	min-height: 48px;
-	padding: 0 16px;
-	border-bottom: 1px solid var(--optimus-border-subtle);
-	background: var(--optimus-surface);
+	gap: 4px;
+	height: 36px;
+	min-height: 36px;
+	padding: 4px 8px 4px 78px;
+	border-bottom: 1px solid var(--vscode-titleBar-border, var(--optimus-border-subtle));
+	background: var(--vscode-titleBar-activeBackground, var(--optimus-surface));
 	-webkit-app-region: drag;
 	user-select: none;
 }
@@ -86,43 +98,81 @@ body.optimus-standalone .optimus-root,
 .optimus-brand {
 	display: flex;
 	align-items: baseline;
-	gap: 12px;
+	gap: 8px;
+	flex: 1 1 auto;
 	min-width: 0;
 	margin-right: auto;
+	opacity: 0;
+	pointer-events: none;
 }
 
 .optimus-mode-switcher {
+	position: relative;
 	flex: 0 0 auto;
 	min-width: 0;
 }
 
+.optimus-mode-switcher::before {
+	position: absolute;
+	top: 6px;
+	left: 7px;
+	z-index: 1;
+	width: 16px;
+	height: 16px;
+	display: grid;
+	place-items: center;
+	color: var(--optimus-muted);
+	font-size: 12px;
+	line-height: 16px;
+	pointer-events: none;
+	content: "</>";
+	transform: scale(.78);
+	transform-origin: center;
+}
+
+.optimus-mode-switcher::after {
+	position: absolute;
+	top: 6px;
+	right: 6px;
+	z-index: 1;
+	width: 16px;
+	height: 16px;
+	display: grid;
+	place-items: center;
+	color: var(--optimus-muted);
+	font-size: 14px;
+	line-height: 16px;
+	pointer-events: none;
+	content: "⌄";
+}
+
 .optimus-mode-select {
-	width: 126px;
-	height: 30px;
-	padding: 0 26px 0 32px;
+	width: auto;
+	min-width: 104px;
+	height: 28px;
+	padding: 0 24px 0 28px;
 	border: 1px solid transparent;
-	border-radius: 5px;
+	border-radius: 4px;
 	outline: 0;
-	background:
-		linear-gradient(90deg, var(--optimus-subtle) 0 0) 11px center / 14px 14px no-repeat,
-		var(--optimus-surface);
+	appearance: none;
+	background: transparent;
 	color: var(--optimus-text);
-	font-size: 13px;
-	font-weight: 600;
+	font-size: 12px;
+	font-weight: 400;
 }
 
 .optimus-mode-select:hover,
 .optimus-mode-select:focus {
-	border-color: color-mix(in srgb, var(--optimus-focus) 58%, var(--optimus-border));
-	background-color: var(--optimus-card-soft);
+	border-color: transparent;
+	background-color: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--optimus-text) 8%, transparent));
 }
 
 .optimus-brand h1 {
 	margin: 0;
 	overflow: hidden;
 	color: var(--optimus-text);
-	font-size: 14px;
-	font-weight: 650;
+	font-size: 12px;
+	font-weight: 600;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -131,7 +181,7 @@ body.optimus-standalone .optimus-root,
 	margin: 0;
 	overflow: hidden;
 	color: var(--optimus-muted);
-	font-size: 12px;
+	font-size: 11px;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -139,47 +189,58 @@ body.optimus-standalone .optimus-root,
 .optimus-header-actions {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 4px;
 	min-width: 0;
 }
 
 .optimus-header-button {
 	min-width: 0;
-	height: 26px;
-	padding: 0 9px;
-	border: 1px solid var(--optimus-border-subtle);
-	border-radius: 5px;
+	height: 28px;
+	padding: 0 8px;
+	border: 1px solid transparent;
+	border-radius: 4px;
 	background: transparent;
 	color: var(--optimus-muted);
 	font-size: 12px;
 }
 
 .optimus-header-button:hover {
-	background: var(--optimus-toolbar-hover);
+	background: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--optimus-text) 8%, transparent));
 	color: var(--optimus-text);
 }
 
 .optimus-header-button.icon {
-	width: 26px;
+	width: 28px;
 	padding: 0;
 }
 
+.optimus-new-agent-button {
+	width: 28px;
+	padding: 0;
+	color: var(--optimus-muted);
+	font-size: 18px;
+	font-weight: 350;
+	line-height: 24px;
+}
+
 .optimus-workspace-select {
-	max-width: 220px;
-	height: 26px;
-	min-width: 132px;
-	padding: 0 26px 0 9px;
-	border: 1px solid var(--optimus-border-subtle);
-	border-radius: 5px;
+	max-width: 180px;
+	height: 28px;
+	min-width: 126px;
+	padding: 0 24px 0 8px;
+	border: 1px solid color-mix(in srgb, var(--optimus-border) 72%, transparent);
+	border-radius: 4px;
 	outline: 0;
-	background: var(--optimus-card-soft);
+	background: var(--vscode-dropdown-background, var(--optimus-card-soft));
 	color: var(--optimus-text);
 	font-size: 12px;
+	font-weight: 400;
 }
 
 .optimus-workspace-select:hover,
 .optimus-workspace-select:focus {
-	border-color: color-mix(in srgb, var(--optimus-focus) 58%, var(--optimus-border));
+	border-color: color-mix(in srgb, var(--optimus-focus) 42%, var(--optimus-border));
+	color: var(--optimus-text);
 }
 
 .optimus-agent-count {
@@ -191,7 +252,7 @@ body.optimus-standalone .optimus-root,
 .optimus-content {
 	--optimus-panel-below-height: clamp(128px, 38vh, 280px);
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(260px, var(--optimus-drawer-width, 430px));
+	grid-template-columns: minmax(0, 1fr);
 	grid-template-rows: minmax(0, 1fr);
 	width: 100%;
 	height: 100%;
@@ -888,17 +949,17 @@ body.optimus-standalone .optimus-root,
 }
 
 .optimus-drawer-body {
-	--bb-bg: var(--vscode-sideBar-background, var(--vscode-editor-background, #1f1f1f));
-	--bb-surface: color-mix(in srgb, var(--vscode-sideBar-background, #181818) 88%, var(--vscode-editor-background, #1f1f1f));
-	--bb-card: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 86%, var(--bb-bg));
-	--bb-border: color-mix(in srgb, var(--vscode-widget-border, #3c3c3c) 72%, var(--vscode-sideBar-border, #2b2b2b));
-	--bb-primary: var(--vscode-focusBorder, #5b8cff);
-	--bb-text: var(--vscode-foreground, #cccccc);
-	--bb-muted: var(--vscode-descriptionForeground, #8f8f8f);
-	--bb-subtle: color-mix(in srgb, var(--vscode-descriptionForeground, #8f8f8f) 62%, transparent);
-	--bb-success: var(--vscode-testing-iconPassed, #2f9f5b);
-	--bb-danger: var(--vscode-errorForeground, #d83e64);
-	--bb-shadow: color-mix(in srgb, var(--vscode-widget-shadow, #000000) 8%, transparent);
+	--bb-bg: var(--optimus-surface);
+	--bb-surface: var(--optimus-surface);
+	--bb-card: var(--optimus-card);
+	--bb-border: var(--optimus-border);
+	--bb-primary: var(--vscode-focusBorder, Highlight);
+	--bb-text: var(--vscode-foreground, var(--vscode-editor-foreground, var(--vscode-input-foreground, CanvasText)));
+	--bb-muted: var(--vscode-descriptionForeground, var(--vscode-disabledForeground, color-mix(in srgb, var(--bb-text) 64%, var(--bb-bg))));
+	--bb-subtle: color-mix(in srgb, var(--bb-muted) 62%, transparent);
+	--bb-success: var(--vscode-testing-iconPassed, var(--vscode-terminal-ansiGreen, var(--bb-primary)));
+	--bb-danger: var(--vscode-errorForeground, var(--vscode-terminal-ansiRed, var(--bb-primary)));
+	--bb-shadow: color-mix(in srgb, var(--vscode-widget-shadow, var(--vscode-editor-background)) 8%, transparent);
 	--bb-composer-safe-bottom: 0px;
 	--bb-composer-card-min: 54px;
 	--bb-composer-card-max: min(112px, 34vh);
@@ -1524,7 +1585,7 @@ body.optimus-standalone .optimus-root,
 .sendButton.ready {
 	border-radius: 4px;
 	background: var(--vscode-button-background, var(--bb-primary));
-	color: var(--vscode-button-foreground, #fff);
+	color: var(--vscode-button-foreground, var(--bb-text));
 	box-shadow: 0 1px 3px color-mix(in srgb, var(--bb-primary) 28%, transparent);
 }
 
@@ -2144,7 +2205,7 @@ body.optimus-standalone .optimus-root,
 
 @media (max-width: 1180px) {
 	.optimus-content {
-		grid-template-columns: minmax(300px, 1fr) clamp(320px, var(--optimus-drawer-width, 380px), 42vw);
+		grid-template-columns: minmax(0, 1fr);
 	}
 
 	.optimus-grid,
@@ -2169,7 +2230,7 @@ body.optimus-standalone .optimus-root,
 
 @media (max-width: 1040px) {
 	.optimus-content {
-		grid-template-columns: minmax(0, 1fr) minmax(300px, 36vw);
+		grid-template-columns: minmax(0, 1fr);
 	}
 
 	.optimus-header-button:not(.icon) {
@@ -2180,7 +2241,7 @@ body.optimus-standalone .optimus-root,
 @media (max-width: 900px) {
 	.optimus-content {
 		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: minmax(0, 1fr) minmax(300px, 46vh);
+		grid-template-rows: minmax(0, 1fr);
 	}
 
 	.optimus-grid,
@@ -2825,4 +2886,394 @@ body.optimus-standalone {
 
 .composer {
 	align-self: end;
+}
+
+/* Agent workspace tile treatment, modeled on the Backboard/Figma card flow. */
+.optimus-root {
+	--optimus-agent-card-bg: var(--optimus-card);
+	--optimus-agent-card-bg-raised: var(--optimus-card-soft);
+	--optimus-agent-command-bg: var(--optimus-bg);
+	--optimus-agent-row-bg: color-mix(in srgb, var(--optimus-focus) 8%, var(--optimus-card));
+	--optimus-agent-chip-bg: var(--optimus-card-soft);
+}
+
+.optimus-task-board.is-history-feed {
+	grid-auto-rows: var(--optimus-history-row-height, minmax(0, 1fr));
+}
+
+.optimus-content.optimus-fit-compact .optimus-task-board.is-history-feed {
+	grid-auto-rows: var(--optimus-history-row-height, minmax(0, 1fr));
+}
+
+.optimus-content.optimus-fit-tight .optimus-task-board.is-history-feed {
+	grid-auto-rows: var(--optimus-history-row-height, minmax(0, 1fr));
+}
+
+.optimus-starter-card,
+.optimus-card {
+	border-color: color-mix(in srgb, var(--optimus-border) 84%, var(--vscode-contrastBorder, var(--optimus-border)));
+	border-radius: 10px;
+	background: var(--optimus-agent-card-bg);
+	box-shadow: none;
+}
+
+.optimus-starter-card:hover,
+.optimus-starter-card:focus,
+.optimus-starter-card.selected,
+.optimus-card:hover,
+.optimus-card:focus,
+.optimus-card.selected {
+	border-color: color-mix(in srgb, var(--optimus-focus) 54%, var(--optimus-border));
+	background: var(--optimus-agent-card-bg-raised);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--optimus-focus) 12%, transparent);
+}
+
+.optimus-starter-card {
+	grid-template-rows: 40px minmax(50px, .34fr) minmax(0, 1fr) 38px 0;
+}
+
+.optimus-content.optimus-fit-normal .optimus-starter-card {
+	grid-template-rows: 40px minmax(50px, .34fr) minmax(0, 1fr) 38px 0;
+}
+
+.optimus-task-board.is-history-feed .optimus-starter-card {
+	grid-template-rows: 40px minmax(50px, .32fr) minmax(0, 1fr) 38px;
+}
+
+.optimus-content.optimus-fit-compact .optimus-starter-card,
+.optimus-content.optimus-fit-compact .optimus-task-board.is-history-feed .optimus-starter-card {
+	grid-template-rows: 40px minmax(42px, .28fr) minmax(0, 1fr);
+}
+
+.optimus-content.optimus-fit-tight .optimus-starter-card,
+.optimus-content.optimus-fit-tight .optimus-task-board.is-history-feed .optimus-starter-card {
+	grid-template-rows: 32px minmax(0, 1fr);
+}
+
+.optimus-starter-preview-header,
+.optimus-card-header {
+	min-height: 40px;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--optimus-border-subtle);
+	background: var(--optimus-agent-card-bg);
+}
+
+.optimus-starter-preview-header {
+	gap: 10px;
+}
+
+.optimus-card-header {
+	grid-template-columns: 8px minmax(0, 1fr) auto;
+	gap: 10px;
+}
+
+.optimus-starter-preview-header .optimus-skeleton-dot,
+.optimus-card-header .optimus-status-dot {
+	width: 8px;
+	height: 8px;
+}
+
+.optimus-starter-workspace,
+.optimus-card-header h2 {
+	color: var(--optimus-text);
+	font-size: 12.5px;
+	font-weight: 600;
+	letter-spacing: 0;
+}
+
+.optimus-starter-status,
+.optimus-status-badge {
+	max-width: 110px;
+	margin-left: auto;
+	padding: 2px 6px;
+	overflow: hidden;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-size: 10px;
+	font-weight: 550;
+	line-height: 14px;
+	text-overflow: ellipsis;
+	text-transform: none;
+	white-space: nowrap;
+}
+
+.optimus-starter-status.status-live,
+.optimus-status-badge.running,
+.optimus-status-badge.queued {
+	color: color-mix(in srgb, var(--optimus-focus) 70%, var(--optimus-muted));
+	background: color-mix(in srgb, var(--optimus-focus) 8%, transparent);
+}
+
+.optimus-starter-status.status-done,
+.optimus-status-badge.done {
+	color: color-mix(in srgb, var(--optimus-success) 78%, var(--optimus-muted));
+	background: color-mix(in srgb, var(--optimus-success) 8%, transparent);
+}
+
+.optimus-starter-status.status-blocked,
+.optimus-status-badge.blocked,
+.optimus-status-badge.error,
+.optimus-status-badge.canceled {
+	color: color-mix(in srgb, var(--optimus-danger) 78%, var(--optimus-muted));
+	background: color-mix(in srgb, var(--optimus-danger) 8%, transparent);
+}
+
+.optimus-starter-card.status-done .optimus-skeleton-dot,
+.optimus-starter-card.status-done .optimus-starter-preview-row.active .optimus-skeleton-dot,
+.optimus-starter-card.status-done .optimus-starter-preview-row.active .optimus-skeleton-bar {
+	background: var(--optimus-success);
+}
+
+.optimus-starter-card.status-blocked .optimus-skeleton-dot,
+.optimus-starter-card.status-blocked .optimus-starter-preview-row.active .optimus-skeleton-dot,
+.optimus-starter-card.status-blocked .optimus-starter-preview-row.active .optimus-skeleton-bar {
+	background: var(--optimus-danger);
+}
+
+.optimus-starter-action {
+	width: 22px;
+	height: 22px;
+	margin-left: 0;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1;
+}
+
+.optimus-starter-card:hover .optimus-starter-action,
+.optimus-starter-card:focus .optimus-starter-action,
+.optimus-starter-card.selected .optimus-starter-action {
+	background: color-mix(in srgb, var(--optimus-focus) 10%, transparent);
+	color: color-mix(in srgb, var(--optimus-focus) 80%, var(--optimus-text));
+}
+
+.optimus-starter-preview-title,
+.optimus-card-command {
+	min-height: 50px;
+	padding: 8px 12px;
+	border-top: 1px solid var(--optimus-border-subtle);
+	border-bottom: 1px solid var(--optimus-border-subtle);
+	background: var(--optimus-agent-command-bg);
+}
+
+.optimus-starter-preview-title {
+	justify-content: center;
+	gap: 4px;
+}
+
+.optimus-starter-prompt-meta,
+.optimus-card-command span {
+	color: color-mix(in srgb, var(--optimus-muted) 82%, transparent);
+	font-family: var(--vscode-editor-font-family, "SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", monospace);
+	font-size: 10.5px;
+	line-height: 14px;
+}
+
+.optimus-starter-prompt-title,
+.optimus-card-command code {
+	color: var(--optimus-text);
+	font-size: 12px;
+	font-weight: 560;
+	line-height: 16px;
+}
+
+.optimus-card-task {
+	display: none;
+}
+
+.optimus-starter-preview-rows,
+.optimus-activity {
+	gap: 4px;
+	padding: 9px 12px;
+	background: var(--optimus-agent-card-bg);
+}
+
+.optimus-starter-preview-row,
+.optimus-activity li {
+	min-height: 21px;
+	padding: 0 4px;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-size: 11.5px;
+	line-height: 16px;
+}
+
+.optimus-starter-preview-row.prompt-line,
+.optimus-starter-preview-row.active,
+.optimus-activity li.active,
+.optimus-activity li.waiting,
+.optimus-activity li.done {
+	background: var(--optimus-agent-row-bg);
+}
+
+.optimus-starter-preview-row.active .optimus-skeleton-dot,
+.optimus-starter-preview-row.active .optimus-skeleton-bar {
+	background: var(--optimus-success);
+}
+
+.optimus-starter-prompt-line,
+.optimus-activity li span:last-child {
+	color: color-mix(in srgb, var(--optimus-text) 88%, var(--optimus-muted));
+	font-size: 11.5px;
+	font-weight: 450;
+	line-height: 16px;
+}
+
+.optimus-starter-preview-footer,
+.optimus-chips,
+.optimus-card-footer {
+	min-height: 38px;
+	padding: 7px 12px;
+	border-top: 1px solid var(--optimus-border-subtle);
+	background: var(--optimus-agent-card-bg);
+}
+
+.optimus-starter-preview-footer {
+	flex-direction: row;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 6px;
+}
+
+.optimus-starter-preview-footer .optimus-starter-prompt-meta,
+.optimus-chips span,
+.optimus-meta {
+	max-width: 160px;
+	height: 20px;
+	display: inline-flex;
+	align-items: center;
+	padding: 0 7px;
+	border: 1px solid var(--optimus-border-subtle);
+	border-radius: 5px;
+	background: color-mix(in srgb, var(--optimus-agent-chip-bg) 68%, transparent);
+	color: var(--optimus-muted);
+	font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", sans-serif);
+	font-size: 10.5px;
+	line-height: 18px;
+}
+
+.optimus-starter-preview-composer {
+	display: none;
+}
+
+.optimus-card {
+	grid-template-rows: 40px 50px minmax(0, 1fr) auto 38px auto;
+}
+
+.optimus-card .optimus-card-command {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 8px;
+	align-content: center;
+}
+
+.optimus-card .optimus-card-command span::before {
+	content: "$ ";
+}
+
+.optimus-card .optimus-activity {
+	margin: 0;
+}
+
+.optimus-chips {
+	flex-wrap: wrap;
+	gap: 6px;
+	overflow: hidden;
+}
+
+.optimus-chips:empty {
+	display: none;
+}
+
+.optimus-chips span::before {
+	content: "";
+}
+
+.optimus-actions {
+	min-height: 36px;
+	padding: 6px 10px;
+	border-top: 1px solid var(--optimus-border-subtle);
+	background: var(--optimus-agent-card-bg);
+}
+
+.optimus-actions button {
+	min-height: 22px;
+	padding: 0 7px;
+}
+
+.optimus-content.optimus-fit-compact .optimus-starter-status,
+.optimus-content.optimus-fit-tight .optimus-starter-status,
+.optimus-content.optimus-fit-tight .optimus-status-badge {
+	display: none;
+}
+
+.optimus-content.optimus-fit-compact .optimus-starter-preview-title,
+.optimus-content.optimus-fit-compact .optimus-card-command {
+	min-height: 42px;
+	padding: 6px 10px;
+}
+
+.optimus-content.optimus-fit-compact .optimus-starter-preview-footer,
+.optimus-content.optimus-fit-compact .optimus-chips,
+.optimus-content.optimus-fit-compact .optimus-card-footer {
+	display: none;
+}
+
+.optimus-content.optimus-fit-tight .optimus-starter-preview-title,
+.optimus-content.optimus-fit-tight .optimus-card-command,
+.optimus-content.optimus-fit-tight .optimus-card-task,
+.optimus-content.optimus-fit-tight .optimus-chips,
+.optimus-content.optimus-fit-tight .optimus-card-footer,
+.optimus-content.optimus-fit-tight .optimus-actions {
+	display: none;
+}
+
+/* Keep the standalone page header aligned with the compact Figma main toolbar. */
+.optimus-header {
+	flex-wrap: nowrap;
+	height: 36px;
+	min-height: 36px;
+	align-content: center;
+	padding: 4px 8px 4px 78px;
+}
+
+.optimus-mode-select {
+	height: 28px;
+	min-width: 104px;
+}
+
+.optimus-header-actions {
+	width: auto;
+	justify-content: flex-end;
+}
+
+.optimus-header-button.optimus-new-agent-button {
+	display: inline-grid;
+	place-items: center;
+}
+
+.optimus-brand p,
+.optimus-agent-count {
+	display: block;
+}
+
+@media (max-width: 700px) {
+	.optimus-header {
+		padding-left: 68px;
+	}
+
+	.optimus-workspace-select {
+		min-width: 104px;
+		max-width: 128px;
+	}
+
+	.optimus-agent-count {
+		display: none;
+	}
 }

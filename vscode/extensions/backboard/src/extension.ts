@@ -146,6 +146,7 @@ interface OptimusPanelCommand {
 	readonly chatId?: string;
 	readonly workspace?: string;
 	readonly provider?: string;
+	readonly newChat?: boolean;
 	readonly options?: unknown;
 }
 
@@ -226,6 +227,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(panelThreadsWatcher.onDidCreate(refreshPanelHistory));
 	context.subscriptions.push(panelThreadsWatcher.onDidChange(refreshPanelHistory));
 	context.subscriptions.push(panelThreadsWatcher.onDidDelete(refreshPanelHistory));
+	context.subscriptions.push(vscode.window.registerWebviewViewProvider('backboard.panel', panelProvider, { webviewOptions: { retainContextWhenHidden: true } }));
 	const handleOptimusCommand = () => {
 		void handleOptimusPanelCommand(panelProvider);
 	};
@@ -233,7 +235,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(optimusCommandWatcher.onDidCreate(handleOptimusCommand));
 	context.subscriptions.push(optimusCommandWatcher.onDidChange(handleOptimusCommand));
 	handleOptimusCommand();
-	context.subscriptions.push(vscode.window.registerWebviewViewProvider('backboard.panel', panelProvider, { webviewOptions: { retainContextWhenHidden: true } }));
 	startBackboardUpdateChecks(context);
 }
 
@@ -1318,7 +1319,8 @@ function isOptimusPanelCommand(value: unknown): value is OptimusPanelCommand {
 		&& (value.prompt === undefined || typeof value.prompt === 'string')
 		&& (value.chatId === undefined || typeof value.chatId === 'string')
 		&& (value.workspace === undefined || typeof value.workspace === 'string')
-		&& (value.provider === undefined || typeof value.provider === 'string');
+		&& (value.provider === undefined || typeof value.provider === 'string')
+		&& (value.newChat === undefined || typeof value.newChat === 'boolean');
 }
 
 async function handleOptimusPanelCommand(panelProvider: BackboardPanelProvider): Promise<void> {
@@ -1342,23 +1344,28 @@ async function handleOptimusPanelCommand(panelProvider: BackboardPanelProvider):
 	backboardToolOutput?.appendLine(`[optimus] received ${command.type}`);
 	switch (command.type) {
 		case 'newChat':
-			await openBackboardView();
+			await openBackboardViewForOptimus(panelProvider);
 			await panelProvider.postUiCommand('newChat', command.workspace);
 			break;
 		case 'showHistory':
-			await openBackboardView();
+			await openBackboardViewForOptimus(panelProvider);
 			await panelProvider.postUiCommand('showHistory', command.workspace);
 			break;
 		case 'showChat':
-			await openBackboardView();
+			await openBackboardViewForOptimus(panelProvider);
 			await panelProvider.postUiCommand('showChat', command.workspace);
 			break;
 		case 'openHistoryEntry':
-			await openBackboardView();
+			await openBackboardViewForOptimus(panelProvider);
 			await panelProvider.openHistoryEntry(command.chatId);
 			break;
 		case 'sendPrompt':
-			await openBackboardView();
+			await openBackboardViewForOptimus(panelProvider);
+			if (command.chatId) {
+				await panelProvider.openHistoryEntry(command.chatId);
+			} else if (command.newChat) {
+				await panelProvider.postUiCommand('newChat', command.workspace);
+			}
 			panelProvider.submitPromptFromOptimus(command.prompt ?? '', asPanelOptions(command.options), command.chatId, command.workspace);
 			break;
 		case 'cancel':
@@ -1369,6 +1376,13 @@ async function handleOptimusPanelCommand(panelProvider: BackboardPanelProvider):
 			break;
 		default:
 			backboardToolOutput?.appendLine(`[optimus] ignored unknown command: ${command.type}`);
+	}
+}
+
+async function openBackboardViewForOptimus(panelProvider: BackboardPanelProvider): Promise<void> {
+	await openBackboardView();
+	if (!(await panelProvider.whenReady())) {
+		backboardToolOutput?.appendLine('[optimus] Backboard panel webview was not ready for command dispatch.');
 	}
 }
 
@@ -2017,6 +2031,10 @@ function renderBridgeEvent(event: BridgeEvent, response: ResponseSink, currentTo
 			response.progress(`Running ${event.toolCalls?.length ?? 0} local tool call(s).`);
 			return { threadId: event.threadId, runId: event.runId, toolCalls: event.toolCalls ?? [] };
 		case 'error':
+			if (isRecoverableToolOutputSubmissionError(event.message)) {
+				response.progress(event.message ?? 'Tool output was already handled.');
+				return currentToolRequest;
+			}
 			response.markdown(`\n\nBackboard error: ${event.message ?? 'request failed'}\n\n`);
 			return currentToolRequest;
 		default:
@@ -2027,6 +2045,14 @@ function renderBridgeEvent(event: BridgeEvent, response: ResponseSink, currentTo
 function toolResultRequestKey(request: ToolResultRequest): string {
 	const toolCallIds = request.toolCalls.map(toolCallIdentity).join(',');
 	return `${request.threadId ?? ''}:${request.runId ?? ''}:${toolCallIds}`;
+}
+
+function isRecoverableToolOutputSubmissionError(message: string | undefined): boolean {
+	return typeof message === 'string'
+		&& (
+			(message.includes('Tool outputs for run ID') && message.includes('were already submitted'))
+			|| message.includes('No assistant message found requiring action for run ID')
+		);
 }
 
 function toolCallIdentity(raw: unknown): string {
@@ -2073,6 +2099,17 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 
 	async postUiCommand(command: 'newChat' | 'showHistory' | 'showChat', workspace?: string): Promise<boolean> {
 		return this.view?.webview.postMessage({ type: 'command', command, workspace }) ?? false;
+	}
+
+	async whenReady(timeoutMs = 2000): Promise<boolean> {
+		if (this.view) {
+			return true;
+		}
+		const expires = Date.now() + timeoutMs;
+		while (!this.view && Date.now() < expires) {
+			await new Promise(resolve => setTimeout(resolve, 50));
+		}
+		return !!this.view;
 	}
 
 	async openHistoryEntry(chatId: string | undefined): Promise<boolean> {
@@ -5858,7 +5895,9 @@ async function executeTool(bridge: BackboardBridge, name: string, args: Record<s
 		case 'write_file':
 		case 'create_file':
 		case 'overwrite_file':
-			return writeFileTool(args, response);
+			return writeFileTool(name, args, response);
+		case 'append_file':
+			return appendFileTool(args, response);
 		case 'edit':
 		case 'edit_file':
 		case 'search_replace':
@@ -6020,10 +6059,52 @@ async function readLints(args: Record<string, unknown>, token: vscode.Cancellati
 	return diagnostics.map(item => `${item.source ?? 'diagnostic'}: ${item.message}`).join('\n');
 }
 
-async function writeFileTool(args: Record<string, unknown>, response: ResponseSink): Promise<string> {
+const BACKBOARD_PANEL_LARGE_WRITE_PROGRESS_CHARS = 8_000;
+const BACKBOARD_PANEL_LARGE_WRITE_CHUNK_CHARS = 4_000;
+const BACKBOARD_PANEL_MAX_WRITE_TOOL_CONTENT_CHARS = 6_000;
+
+function panelLargeWriteChunkCount(content: string): number {
+	return Math.max(1, Math.ceil(content.length / BACKBOARD_PANEL_LARGE_WRITE_CHUNK_CHARS));
+}
+
+async function writeWorkspaceTextInChunks(uri: vscode.Uri, content: string, append: boolean, response: ResponseSink, verb: string): Promise<number> {
+	await vscode.workspace.fs.createDirectory(parentUri(uri));
+	const relative = vscode.workspace.asRelativePath(uri);
+	const chunks = panelLargeWriteChunkCount(content);
+	response.progress(`${verb} ${relative}: 0/${content.length} chars`);
+	if (uri.scheme === 'file') {
+		if (!append) {
+			await fs.promises.writeFile(uri.fsPath, '', 'utf8');
+		}
+		let written = 0;
+		for (let offset = 0; offset < content.length; offset += BACKBOARD_PANEL_LARGE_WRITE_CHUNK_CHARS) {
+			const chunk = content.slice(offset, offset + BACKBOARD_PANEL_LARGE_WRITE_CHUNK_CHARS);
+			await fs.promises.appendFile(uri.fsPath, chunk, 'utf8');
+			written += chunk.length;
+			response.progress(`${verb} ${relative}: ${written}/${content.length} chars`);
+		}
+		return chunks;
+	}
+	const before = append ? Buffer.from((await tryReadFile(uri)) ?? new Uint8Array()).toString('utf8') : '';
+	await vscode.workspace.fs.writeFile(uri, Buffer.from(`${before}${content}`, 'utf8'));
+	response.progress(`${verb} ${relative}: ${content.length}/${content.length} chars`);
+	return chunks;
+}
+
+async function writeFileTool(toolName: string, args: Record<string, unknown>, response: ResponseSink): Promise<string> {
 	const uri = resolveWorkspaceUri(filePathArg(args));
 	const content = stringArg(args, 'content', 'contents', 'new_text', 'newText');
+	const relative = vscode.workspace.asRelativePath(uri);
+	assertPanelWriteToolContentSize(toolName, relative, content);
 	await vscode.workspace.fs.createDirectory(parentUri(uri));
+	if (content.length > BACKBOARD_PANEL_LARGE_WRITE_PROGRESS_CHARS) {
+		const before = await tryReadFile(uri);
+		const beforeText = before ? Buffer.from(before).toString('utf8') : undefined;
+		const chunks = await writeWorkspaceTextInChunks(uri, content, false, response, 'Writing');
+		await vscode.workspace.saveAll(false);
+		response.event?.('fileChange', summarizeFileChange(uri, beforeText, content));
+		return `Wrote ${relative} (${content.length} chars in ${chunks} chunks)`;
+	}
 	const edit = new vscode.WorkspaceEdit();
 	let before: string | undefined;
 	try {
@@ -6040,7 +6121,46 @@ async function writeFileTool(args: Record<string, unknown>, response: ResponseSi
 	if (ok) {
 		response.event?.('fileChange', summarizeFileChange(uri, before, content));
 	}
-	return ok ? `Wrote ${vscode.workspace.asRelativePath(uri)}` : `Failed to write ${vscode.workspace.asRelativePath(uri)}`;
+	return ok ? `Wrote ${relative}` : `Failed to write ${relative}`;
+}
+
+async function appendFileTool(args: Record<string, unknown>, response: ResponseSink): Promise<string> {
+	const uri = resolveWorkspaceUri(filePathArg(args));
+	const content = stringArg(args, 'content', 'contents', 'new_text', 'newText');
+	const relative = vscode.workspace.asRelativePath(uri);
+	assertPanelWriteToolContentSize('append_file', relative, content);
+	await vscode.workspace.fs.createDirectory(parentUri(uri));
+	const before = await tryReadFile(uri);
+	const beforeText = before ? Buffer.from(before).toString('utf8') : '';
+	const afterText = `${beforeText}${content}`;
+	if (content.length > BACKBOARD_PANEL_LARGE_WRITE_PROGRESS_CHARS) {
+		const chunks = await writeWorkspaceTextInChunks(uri, content, true, response, 'Appending');
+		await vscode.workspace.saveAll(false);
+		response.event?.('fileChange', summarizeFileChange(uri, beforeText || undefined, afterText));
+		return `Appended ${content.length} chars to ${relative} in ${chunks} chunks`;
+	}
+	try {
+		const document = await vscode.workspace.openTextDocument(uri);
+		const edit = new vscode.WorkspaceEdit();
+		edit.insert(uri, document.positionAt(document.getText().length), content);
+		const ok = await vscode.workspace.applyEdit(edit);
+		await document.save();
+		if (ok) {
+			response.event?.('fileChange', summarizeFileChange(uri, beforeText || undefined, afterText));
+		}
+		return ok ? `Appended ${content.length} chars to ${relative}` : `Failed to append to ${relative}`;
+	} catch {
+		await vscode.workspace.fs.writeFile(uri, Buffer.from(afterText, 'utf8'));
+		response.event?.('fileChange', summarizeFileChange(uri, beforeText || undefined, afterText));
+		return `Appended ${content.length} chars to ${relative}`;
+	}
+}
+
+function assertPanelWriteToolContentSize(toolName: string, relative: string, content: string): void {
+	if (content.length <= BACKBOARD_PANEL_MAX_WRITE_TOOL_CONTENT_CHARS) {
+		return;
+	}
+	throw new Error(`${toolName} for ${relative} is too large (${content.length} chars). Split generated files into chunks: call write_file/create_file with the first chunk under ${BACKBOARD_PANEL_MAX_WRITE_TOOL_CONTENT_CHARS} chars, then append_file with each remaining chunk under ${BACKBOARD_PANEL_MAX_WRITE_TOOL_CONTENT_CHARS} chars.`);
 }
 
 async function editFileTool(args: Record<string, unknown>, response: ResponseSink): Promise<string> {

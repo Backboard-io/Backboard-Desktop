@@ -12,6 +12,7 @@
 	margin: 0 0 0 0;
 	background: var(--vscode-editor-background);
 	border: none;
+	border-top: 1px solid var(--vscode-agentsPanel-border, var(--vscode-sideBar-border));
 	border-radius: 0;
 	box-sizing: border-box;
 	overflow: hidden;

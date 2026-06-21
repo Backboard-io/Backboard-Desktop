@@ -26,7 +26,8 @@ export class ElectronOptimusBackboardBridge implements IOptimusChatBridge {
 			type: 'sendPrompt',
 			prompt: request.task,
 			provider: request.provider,
-			workspace: request.workspace
+			workspace: request.workspace,
+			newChat: true
 		});
 		const run: IOptimusRun = {
 			id,
@@ -42,7 +43,6 @@ export class ElectronOptimusBackboardBridge implements IOptimusChatBridge {
 			],
 			touchedFiles: [],
 			model: request.provider === OptimusProvider.Copilot ? 'Copilot / Backboard panel' : 'Backboard panel',
-			chatRef: id,
 			workspace: request.workspace,
 			capabilities: capabilitiesForStatus(OptimusRunStatus.Running)
 		};

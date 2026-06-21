@@ -15,6 +15,7 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { observableConfigValue } from '../../../../platform/observable/common/platformObservableUtils.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkspaceEditingService } from '../../../../workbench/services/workspaces/common/workspaceEditing.js';
 import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ViewContainerLocation } from '../../../../workbench/common/views.js';
 import { IEditorGroupsService, IEditorWorkingSet } from '../../../../workbench/services/editor/common/editorGroupsService.js';
@@ -79,6 +80,7 @@ export class LayoutController extends Disposable {
 		@IEditorService private readonly _editorService: IEditorService,
 		@IEditorGroupsService private readonly _editorGroupsService: IEditorGroupsService,
 		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService,
+		@IWorkspaceEditingService private readonly _workspaceEditingService: IWorkspaceEditingService,
 	) {
 		super();
 
@@ -116,6 +118,14 @@ export class LayoutController extends Disposable {
 			return activeSession?.workspace.read(reader)?.folders?.[0]?.root !== undefined;
 		});
 
+		const activeSessionWorkspaceFolderUriObs = derivedOpts<URI | undefined>({
+			equalsFn: isEqual
+		}, reader => {
+			const activeSession = this._sessionsService.activeSession.read(reader);
+			const folder = activeSession?.workspace.read(reader)?.folders?.[0];
+			return folder?.workingDirectory ?? folder?.root;
+		});
+
 		const multipleSessionsVisibleObs = derived<boolean>(reader => {
 			return this._sessionsService.visibleSessions.read(reader).length > 1;
 		});
@@ -137,6 +147,11 @@ export class LayoutController extends Disposable {
 				this._panelVisibilityBySession.delete(session.resource);
 				this._pendingTurnStateByResource.delete(session.resource);
 			}
+		}));
+
+		this._register(autorun(reader => {
+			const activeWorkspaceFolderUri = activeSessionWorkspaceFolderUriObs.read(reader);
+			void this._syncWorkspaceFolder(activeWorkspaceFolderUri);
 		}));
 
 		// Switch between sessions — sync auxiliary bar (skip on mobile to avoid
@@ -299,6 +314,22 @@ export class LayoutController extends Disposable {
 	}
 
 	// --- Auxiliary bar ---
+
+	private async _syncWorkspaceFolder(workspaceFolderUri: URI | undefined): Promise<void> {
+		const currentFolders = this._workspaceContextService.getWorkspace().folders;
+		if (!workspaceFolderUri) {
+			if (currentFolders.length > 0) {
+				await this._workspaceEditingService.updateFolders(0, currentFolders.length, []);
+			}
+			return;
+		}
+
+		if (currentFolders.length === 1 && isEqual(currentFolders[0].uri, workspaceFolderUri)) {
+			return;
+		}
+
+		await this._workspaceEditingService.updateFolders(0, currentFolders.length, [{ uri: workspaceFolderUri }]);
+	}
 
 	/**
 	 * Reveals the editor part. Editor working sets are restored into the shared

@@ -34,6 +34,7 @@ const DEFAULT_TTS_FORMAT: &str = "mp3";
 const DEFAULT_STT_PROVIDER: &str = "openai";
 const DEFAULT_STT_MODEL: &str = "gpt-4o-mini-transcribe";
 const DEFAULT_STT_LANGUAGE: &str = "en";
+const LOCAL_CONTINUATION_IDLE_TIMEOUT_SECS: u64 = 25;
 const WEB_FETCH_TIMEOUT_SECS: u64 = 15;
 const WEB_FETCH_MAX_BYTES: usize = 1_000_000;
 const WEB_FETCH_PREVIEW_CHARS: usize = 12_000;
@@ -42,64 +43,66 @@ const BACKBOARD_SYSTEM_PROMPT: &str = include_str!("backboard_runtime_system_pro
 const BACKBOARD_API_REFERENCE_HEADING: &str = "## Backboard API Reference";
 const BACKBOARD_HTTP_ENDPOINT_REFERENCE: &str = r#"## Backboard HTTP Endpoints
 
-Backboard has real HTTP/REST endpoints. Runtime tools such as `read_file`, `edit_file`, `bash`, and `grep` are local IDE tool calls, not Backboard HTTP endpoints. Use the configured API base URL: production `https://app.backboard.io/api`, development `https://dev.app.backboard.io/api`, and local development `http://localhost:8000`. API-key requests use the `X-API-Key` header.
+Backboard has real HTTP/REST endpoints. Runtime tools such as `read_file`, `edit_file`, `bash`, and `grep` are local IDE tool calls, not Backboard HTTP endpoints. Use the configured API base URL: production `https://app.backboard.io/api`, development `https://dev.app.backboard.io/api`, and local development `http://localhost:8000`. API-key requests use the `X-API-Key` header. Realtime voice uses the websocket form of the configured base URL.
 
 Assistants:
-- `GET /assistants`
-- `POST /assistants`
-- `GET /assistants/{assistant_id}`
-- `PUT /assistants/{assistant_id}`
-- `DELETE /assistants/{assistant_id}`
-- `POST /assistants/{assistant_id}/threads`
-- `GET /assistants/{assistant_id}/threads`
-- `GET /assistants/{assistant_id}/documents`
-- `POST /assistants/{assistant_id}/documents`
+- `GET /assistants` - list assistants.
+- `POST /assistants` - create assistant.
+- `GET /assistants/{assistant_id}` - get assistant.
+- `PUT /assistants/{assistant_id}` - update assistant.
+- `DELETE /assistants/{assistant_id}` - delete assistant.
+- `POST /assistants/{assistant_id}/threads` - create thread for assistant.
+- `GET /assistants/{assistant_id}/threads` - list assistant threads.
+- `GET /assistants/{assistant_id}/documents` - list assistant documents.
+- `POST /assistants/{assistant_id}/documents` - upload document to assistant.
 
 Threads:
-- `GET /threads`
-- `GET /threads/{thread_id}`
-- `DELETE /threads/{thread_id}`
-- `POST /threads/messages`
-- `POST /threads/tool-outputs`
-- `POST /threads/{thread_id}/messages`
-- `POST /threads/{thread_id}/runs/{run_id}/submit-tool-outputs`
-- `POST /threads/{thread_id}/runs/{run_id}/cancel`
-- `GET /threads/{thread_id}/documents`
-- `POST /threads/{thread_id}/documents`
+- `GET /threads` - list all threads.
+- `GET /threads/{thread_id}` - get thread.
+- `DELETE /threads/{thread_id}` - delete thread.
+- `POST /threads/messages` - send message; set `stream=true` in the request body for SSE streaming.
+- `wss://app.backboard.io/api/threads/messages?api_key=YOUR_API_KEY` - realtime voice websocket in production. Local/dev websocket URLs use the configured base URL transformed from `http` to `ws` or `https` to `wss`.
+- `POST /threads/tool-outputs` - submit tool outputs with the simple tool-output API.
+- `POST /threads/{thread_id}/messages` - add message to thread, legacy route.
+- `POST /threads/{thread_id}/runs/{run_id}/submit-tool-outputs` - submit tool outputs, legacy route.
+- `POST /threads/{thread_id}/runs/{run_id}/submit-tool-outputs?stream=true` - submit tool outputs and stream the continuation, legacy route.
+- `POST /threads/{thread_id}/runs/{run_id}/cancel` - cancel a run.
+- `GET /threads/{thread_id}/documents` - list thread documents.
+- `POST /threads/{thread_id}/documents` - upload document to thread.
 
 Documents:
-- `GET /documents/{document_id}/status`
-- `DELETE /documents/{document_id}`
+- `GET /documents/{document_id}/status` - get document processing status.
+- `DELETE /documents/{document_id}` - delete document.
 
 Memories:
-- `GET /assistants/{assistant_id}/memories`
-- `POST /assistants/{assistant_id}/memories`
-- `DELETE /assistants/{assistant_id}/memories`
-- `POST /assistants/{assistant_id}/memories/search`
-- `GET /assistants/{assistant_id}/memories/{memory_id}`
-- `PUT /assistants/{assistant_id}/memories/{memory_id}`
-- `DELETE /assistants/{assistant_id}/memories/{memory_id}`
-- `GET /assistants/memories/operations/{operation_id}`
+- `GET /assistants/{assistant_id}/memories` - list memories.
+- `POST /assistants/{assistant_id}/memories` - add memory.
+- `DELETE /assistants/{assistant_id}/memories` - reset all memories.
+- `POST /assistants/{assistant_id}/memories/search` - search memories.
+- `GET /assistants/{assistant_id}/memories/{memory_id}` - get memory.
+- `PUT /assistants/{assistant_id}/memories/{memory_id}` - update memory.
+- `DELETE /assistants/{assistant_id}/memories/{memory_id}` - delete memory.
+- `GET /assistants/memories/operations/{operation_id}` - get async memory operation status.
 
 Models:
-- `GET /models`
-- `GET /models/{model_name}`
-- `GET /models/providers`
-- `GET /models/provider/{provider_name}`
-- `GET /models/embedding/all`
-- `GET /models/embedding/providers`
-- `GET /models/embedding/{model_name}`
+- `GET /models` - list models; supports query params such as `provider`, `type`, `skip`, and `limit`.
+- `GET /models/{model_name}` - get model by name.
+- `GET /models/providers` - list model providers.
+- `GET /models/provider/{provider_name}` - list models by provider; supports pagination query params such as `skip` and `limit`.
+- `GET /models/embedding/all` - list embedding models.
+- `GET /models/embedding/providers` - list embedding providers.
+- `GET /models/embedding/{model_name}` - get embedding model by name.
 
 Billing:
-- `GET /billing/balance`
-- `GET /billing/usage/recent`
-- `GET /billing/usage/summary`
+- `GET /billing/balance` - get billing balance.
+- `GET /billing/usage/recent` - get recent usage; supports query params such as `page`, `page_size`, `model`, `input_tokens`, `output_tokens`, `start`, `end`, `credit_type`, `sort_by`, and `sort_order`.
+- `GET /billing/usage/summary` - get usage summary; supports query param `range`.
 
 OAuth and SSO:
-- `GET /oauth/authorize`
-- `POST /oauth/token`
-- `GET /oauth/userinfo`
-- `POST /oauth/revoke`"#;
+- `GET /oauth/authorize` - start OAuth authorization.
+- `POST /oauth/token` - exchange authorization code or refresh token.
+- `GET /oauth/userinfo` - get authenticated user profile.
+- `POST /oauth/revoke` - revoke OAuth token."#;
 const RAW_TOOL_CALL_BEGIN: &str = "<|tool_call_begin|>";
 const RAW_TOOL_CALL_SEPARATOR: &str = "<|tool_sep|>";
 const RAW_TOOL_CALL_END: &str = "<|tool_call_end|>";
@@ -1029,6 +1032,11 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
             emit_duplicate_tool_outputs_submitted(&state, &request.request_id, &session_id);
             return Ok(());
         }
+        Err(error) if is_stale_tool_outputs_error(&error) => {
+            finish_tool_outputs_submission(&state, &submission_key, true);
+            emit_stale_tool_outputs_ignored(&state, &request.request_id, &session_id);
+            return Ok(());
+        }
         Err(error) => {
             finish_tool_outputs_submission(&state, &submission_key, false);
             return Err(error);
@@ -1128,6 +1136,11 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
             emit_duplicate_tool_outputs_submitted(&state, &request.request_id, &session_id);
             Ok(())
         }
+        Err(error) if is_stale_tool_outputs_error(&error) => {
+            finish_tool_outputs_submission(&state, &submission_key, true);
+            emit_stale_tool_outputs_ignored(&state, &request.request_id, &session_id);
+            Ok(())
+        }
         Err(error) => Err(error),
     }
 }
@@ -1144,6 +1157,21 @@ fn emit_duplicate_tool_outputs_submitted(state: &BridgeState, request_id: &str, 
         request_id,
         Some(session_id),
         json!({ "stopReason": "duplicate_tool_result" }),
+    ));
+}
+
+fn emit_stale_tool_outputs_ignored(state: &BridgeState, request_id: &str, session_id: &str) {
+    state.writer.emit(base_event(
+        "progress",
+        request_id,
+        Some(session_id),
+        json!({ "message": "Tool output arrived after the run stopped waiting for it; ignoring stale result." }),
+    ));
+    state.writer.emit(base_event(
+        "done",
+        request_id,
+        Some(session_id),
+        json!({ "stopReason": "stale_tool_result" }),
     ));
 }
 
@@ -1199,6 +1227,14 @@ fn is_duplicate_tool_outputs_error(error: &anyhow::Error) -> bool {
     message.contains("Tool outputs for run ID") && message.contains("were already submitted")
 }
 
+fn is_stale_tool_outputs_message(message: &str) -> bool {
+    message.contains("No assistant message found requiring action for run ID")
+}
+
+fn is_stale_tool_outputs_error(error: &anyhow::Error) -> bool {
+    is_stale_tool_outputs_message(&error.to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StreamOutcome {
     Done,
@@ -1218,7 +1254,24 @@ async fn consume_stream(
     let mut raw_tool_calls = RawTextToolCallAccumulator::default();
     let mut last_chunk: Option<Value> = None;
     let mut saw_first_chunk = false;
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let next_chunk = match stream_idle_timeout(phase, saw_first_chunk) {
+            Some(duration) => match tokio::time::timeout(duration, stream.next()).await {
+                Ok(chunk) => chunk,
+                Err(_) => {
+                    return Ok(StreamOutcome::UpstreamIdleTimeout {
+                        message: format!(
+                            "Local IDE stream idle timeout exceeded in {phase}: no text or tool-call chunk arrived for {}s after the stream opened.",
+                            duration.as_secs()
+                        ),
+                    });
+                }
+            },
+            None => stream.next().await,
+        };
+        let Some(chunk) = next_chunk else {
+            break;
+        };
         if session_cancel_flag(&state, session_id).load(Ordering::SeqCst) {
             state.writer.emit(base_event(
                 "done",
@@ -1412,6 +1465,10 @@ async fn consume_stream(
                         message: message.to_string(),
                     });
                 }
+                if phase == "submitToolResult" && is_stale_tool_outputs_message(message) {
+                    emit_stale_tool_outputs_ignored(&state, request_id, session_id);
+                    return Ok(StreamOutcome::Done);
+                }
                 state.writer.emit(base_event(
                     "error",
                     request_id,
@@ -1453,6 +1510,18 @@ async fn consume_stream(
         json!({ "stopReason": "end_turn" }),
     ));
     Ok(StreamOutcome::Done)
+}
+
+fn stream_idle_timeout(phase: &str, saw_first_chunk: bool) -> Option<Duration> {
+    if !saw_first_chunk {
+        return None;
+    }
+    match phase {
+        "submitToolResult" | "idleRecovery" => {
+            Some(Duration::from_secs(LOCAL_CONTINUATION_IDLE_TIMEOUT_SECS))
+        }
+        _ => None,
+    }
 }
 
 fn emit_tool_requested_events(
@@ -1526,6 +1595,7 @@ The previous request failed with: {message}. \
 Do not repeat completed tool calls or rewrite files that were already written successfully. \
 Emit the next needed tool call immediately. \
 For generated files larger than about 3000 characters, write only a small first chunk with write_file/create_file and continue with append_file chunks of about 2000-3000 characters. \
+Never put more than about 6000 characters in one write_file, create_file, overwrite_file, or append_file content argument. \
 Do not silently generate a whole large file before calling a tool."
     )
 }
@@ -1710,7 +1780,7 @@ fn augment_prompt(
 
 Treat relative file, grep, glob, shell, and edit tool paths as relative to the target workspace root unless the user explicitly provides another path.
 The target workspace root is the only current project root. Ignore stale absolute paths from previous chat turns, pasted logs, old tool transcripts, restored sessions, or previous IDE windows unless the user's latest request explicitly repeats that path. If a file is missing, list or search the target workspace instead of trying unrelated absolute paths.
-For generated files larger than about 3000 characters, write a small first chunk with write_file/create_file and then append 2000-3000 character chunks with append_file. Emit each chunk as a tool call as soon as it is ready instead of silently generating the full file first.
+For generated files larger than about 3000 characters, write a small first chunk with write_file/create_file and then append 2000-3000 character chunks with append_file. Emit each chunk as a tool call as soon as it is ready instead of silently generating the full file first. Never put more than about 6000 characters in one write_file, create_file, overwrite_file, or append_file content argument.
 
 ## User Request
 
@@ -1845,11 +1915,11 @@ fn all_tool_definitions() -> Vec<Value> {
         json!({"type":"function","function":{"name":"bash","description":"Execute a shell command. Do not use for file operations; use read_file, edit, write, grep, or glob instead.","parameters":{"type":"object","properties":{"command":{"type":"string"},"cmd":{"type":"string"},"description":{"type":"string"},"timeout":{"type":"integer"},"timeout_ms":{"type":"integer"},"working_directory":{"type":"string"},"cwd":{"type":"string"},"is_background":{"type":"boolean"}},"required":["command"]}}}),
         json!({"type":"function","function":{"name":"run_terminal_cmd","description":"Execute a shell command and render output in an IDE terminal.","parameters":{"type":"object","properties":{"command":{"type":"string"},"cmd":{"type":"string"},"description":{"type":"string"},"timeout":{"type":"integer"},"timeout_ms":{"type":"integer"},"working_directory":{"type":"string"},"cwd":{"type":"string"},"is_background":{"type":"boolean"}},"required":["command"]}}}),
         json!({"type":"function","function":{"name":"read_file","description":"Read a text file from the workspace. Supports offset and limit line ranges.","parameters":{"type":"object","properties":{"path":{"type":"string"},"target_file":{"type":"string"},"file_path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}}}),
-        json!({"type":"function","function":{"name":"write","description":"Write a complete file in the workspace. Prefer edit for existing files.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"}}}}}),
-        json!({"type":"function","function":{"name":"write_file","description":"Write a complete file in the workspace. Alias for write. For generated files above about 3000 chars, write only the first chunk and continue with append_file chunks.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
-        json!({"type":"function","function":{"name":"create_file","description":"Create a file in the workspace, creating parent directories when the host supports it. Alias for write_file. For generated files above about 3000 chars, create the first chunk and continue with append_file chunks.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
-        json!({"type":"function","function":{"name":"overwrite_file","description":"Overwrite a complete file in the workspace. Alias for write_file. For generated files above about 3000 chars, write only the first chunk and continue with append_file chunks.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
-        json!({"type":"function","function":{"name":"append_file","description":"Append text to a workspace file. Use this for generated-file chunks of about 2000-3000 chars so the runtime sees frequent tool activity instead of one huge silent generation.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"write","description":"Write a complete file in the workspace. Prefer edit for existing files. For generated files above about 3000 chars, write only the first chunk and continue with append_file chunks. Keep content under about 6000 chars per call.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"content":{"type":"string","maxLength":6000},"contents":{"type":"string","maxLength":6000}}}}}),
+        json!({"type":"function","function":{"name":"write_file","description":"Write a complete file in the workspace. Alias for write. For generated files above about 3000 chars, write only the first chunk and continue with append_file chunks. Keep content under about 6000 chars per call.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string","maxLength":6000},"contents":{"type":"string","maxLength":6000},"new_text":{"type":"string","maxLength":6000},"newText":{"type":"string","maxLength":6000}}}}}),
+        json!({"type":"function","function":{"name":"create_file","description":"Create a file in the workspace, creating parent directories when the host supports it. Alias for write_file. For generated files above about 3000 chars, create the first chunk and continue with append_file chunks. Keep content under about 6000 chars per call.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string","maxLength":6000},"contents":{"type":"string","maxLength":6000},"new_text":{"type":"string","maxLength":6000},"newText":{"type":"string","maxLength":6000}}}}}),
+        json!({"type":"function","function":{"name":"overwrite_file","description":"Overwrite a complete file in the workspace. Alias for write_file. For generated files above about 3000 chars, write only the first chunk and continue with append_file chunks. Keep content under about 6000 chars per call.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string","maxLength":6000},"contents":{"type":"string","maxLength":6000},"new_text":{"type":"string","maxLength":6000},"newText":{"type":"string","maxLength":6000}}}}}),
+        json!({"type":"function","function":{"name":"append_file","description":"Append text to a workspace file. Use this for generated-file chunks of about 2000-3000 chars so the runtime sees frequent tool activity instead of one huge silent generation. Keep content under about 6000 chars per call.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string","maxLength":6000},"contents":{"type":"string","maxLength":6000},"new_text":{"type":"string","maxLength":6000},"newText":{"type":"string","maxLength":6000}}}}}),
         json!({"type":"function","function":{"name":"edit","description":"Perform exact string replacement in a file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"edit_file","description":"Perform exact string replacement in a file. Alias for edit.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"old_string":{"type":"string"},"oldString":{"type":"string"},"new_string":{"type":"string"},"newString":{"type":"string"},"replace_all":{"type":"boolean"},"replaceAll":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"search_replace","description":"Search and replace text in a file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}}}}}),
@@ -2955,17 +3025,17 @@ mod tests {
     };
 
     use backboard::BackboardModel;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::{
         BACKBOARD_IMAGE_TOOL_NAMES, BACKBOARD_SYSTEM_PROMPT, BridgeState, EventWriter,
         RawTextToolCallAccumulator, StreamingToolCallAccumulator, add_visible_models,
         augment_prompt, filter_ignored_tool_calls, is_duplicate_tool_outputs_error,
-        is_featherless_provider, model_is_visible, normalize_tool_output,
-        sanitize_visible_assistant_text, thinking_payload, tool_call_stream_finished,
-        tool_calls_required_by_chunk, tool_definitions, tool_definitions_for_request,
-        tool_outputs_submission_key, try_begin_tool_outputs_submission, validate_web_fetch_url,
-        voice_payload,
+        is_featherless_provider, is_stale_tool_outputs_error, is_stale_tool_outputs_message,
+        model_is_visible, normalize_tool_output, sanitize_visible_assistant_text, thinking_payload,
+        tool_call_stream_finished, tool_calls_required_by_chunk, tool_definitions,
+        tool_definitions_for_request, tool_outputs_submission_key,
+        try_begin_tool_outputs_submission, validate_web_fetch_url, voice_payload,
     };
 
     #[test]
@@ -3026,7 +3096,14 @@ mod tests {
         assert!(prompt.contains("Backboard has real HTTP/REST endpoints"));
         assert!(prompt.contains("POST /threads/messages"));
         assert!(prompt.contains("POST /threads/tool-outputs"));
+        assert!(prompt.contains("submit-tool-outputs?stream=true"));
+        assert!(
+            prompt.contains("wss://app.backboard.io/api/threads/messages?api_key=YOUR_API_KEY")
+        );
         assert!(prompt.contains("GET /models"));
+        assert!(prompt.contains("provider`, `type`, `skip`, and `limit"));
+        assert!(prompt.contains("GET /billing/usage/recent"));
+        assert!(prompt.contains("page_size"));
         assert!(prompt.contains("GET /oauth/authorize"));
         assert!(!prompt.contains("## Backboard API Reference"));
         assert!(prompt.contains("## User Request"));
@@ -3099,6 +3176,39 @@ mod tests {
                 "computer",
             ]
         );
+    }
+
+    #[test]
+    fn write_tools_advertise_content_max_length() {
+        for tool in tool_definitions("free") {
+            let Some(name) = tool.pointer("/function/name").and_then(Value::as_str) else {
+                continue;
+            };
+            if ![
+                "write",
+                "write_file",
+                "create_file",
+                "overwrite_file",
+                "append_file",
+            ]
+            .contains(&name)
+            {
+                continue;
+            }
+            let properties = tool
+                .pointer("/function/parameters/properties")
+                .and_then(Value::as_object)
+                .expect("write tool has properties");
+            for field in ["content", "contents", "new_text", "newText"] {
+                if let Some(schema) = properties.get(field) {
+                    assert_eq!(
+                        schema.get("maxLength").and_then(Value::as_u64),
+                        Some(6000),
+                        "{name}.{field} should advertise maxLength"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -3261,6 +3371,21 @@ mod tests {
 
         assert!(is_duplicate_tool_outputs_error(&error));
         assert!(!is_duplicate_tool_outputs_error(&anyhow::anyhow!(
+            "Backboard API returned 500 Internal Server Error"
+        )));
+    }
+
+    #[test]
+    fn stale_tool_output_api_error_is_detected() {
+        let error = anyhow::anyhow!(
+            "Backboard API returned 400 Bad Request: No assistant message found requiring action for run ID 'run_123'"
+        );
+
+        assert!(is_stale_tool_outputs_error(&error));
+        assert!(is_stale_tool_outputs_message(
+            "No assistant message found requiring action for run ID 'run_123'"
+        ));
+        assert!(!is_stale_tool_outputs_error(&anyhow::anyhow!(
             "Backboard API returned 500 Internal Server Error"
         )));
     }

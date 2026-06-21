@@ -19,6 +19,7 @@
 		const configuration = await preloadGlobals.context.resolveConfiguration() as INativeWindowConfiguration;
 		globalThis._VSCODE_NLS_MESSAGES = configuration.nls.messages;
 		globalThis._VSCODE_NLS_LANGUAGE = configuration.nls.language;
+		applyInitialTheme(configuration);
 
 		if (isDev) {
 			registerDeveloperKeybindings();
@@ -42,6 +43,68 @@
 	} catch (error) {
 		onUnexpectedError(error);
 		throw error;
+	}
+
+	function applyInitialTheme(configuration: INativeWindowConfiguration): void {
+		const theme = resolveInitialTheme(configuration);
+		document.documentElement.classList.toggle('vs', theme.baseTheme === 'vs');
+		document.documentElement.classList.toggle('vs-dark', theme.baseTheme === 'vs-dark');
+		document.documentElement.classList.toggle('hc-black', theme.baseTheme === 'hc-black');
+		document.documentElement.classList.toggle('hc-light', theme.baseTheme === 'hc-light');
+
+		const style = document.createElement('style');
+		style.className = 'optimus-initial-theme';
+		document.head.appendChild(style);
+		style.textContent = `:root {
+	--vscode-foreground: ${theme.foreground};
+	--vscode-editor-foreground: ${theme.foreground};
+	--vscode-editor-background: ${theme.editorBackground};
+	--vscode-titleBar-activeBackground: ${theme.titleBarBackground};
+	--vscode-titleBar-border: ${theme.titleBarBorder};
+	--vscode-sideBar-background: ${theme.sideBarBackground};
+	--vscode-sideBar-border: ${theme.sideBarBorder};
+	--vscode-editorWidget-background: ${theme.sideBarBackground};
+	--vscode-input-background: ${theme.editorBackground};
+	--vscode-widget-border: ${theme.sideBarBorder};
+	--vscode-contrastBorder: ${theme.sideBarBorder};
+}`;
+	}
+
+	function resolveInitialTheme(configuration: INativeWindowConfiguration): IOptimusInitialTheme {
+		const splash = configuration.partsSplash;
+		const baseTheme = splash?.baseTheme
+			?? (configuration.colorScheme.highContrast
+				? configuration.colorScheme.dark ? 'hc-black' : 'hc-light'
+				: configuration.colorScheme.dark ? 'vs-dark' : 'vs');
+		const dark = baseTheme === 'vs-dark' || baseTheme === 'hc-black' || configuration.colorScheme.dark;
+		const highContrast = baseTheme === 'hc-black' || baseTheme === 'hc-light' || configuration.colorScheme.highContrast;
+		const fallbackBackground = dark ? 'rgb(30, 30, 30)' : 'rgb(255, 255, 255)';
+		const fallbackForeground = dark ? 'rgb(204, 204, 204)' : 'rgb(0, 0, 0)';
+		const fallbackBorder = highContrast
+			? fallbackForeground
+			: dark ? 'rgb(61, 61, 61)' : 'rgb(224, 224, 224)';
+		const editorBackground = cssColor(splash?.colorInfo.editorBackground) ?? cssColor(splash?.colorInfo.background) ?? fallbackBackground;
+		const foreground = cssColor(splash?.colorInfo.foreground) ?? fallbackForeground;
+		const sideBarBackground = cssColor(splash?.colorInfo.sideBarBackground) ?? editorBackground;
+		return {
+			baseTheme,
+			foreground,
+			editorBackground,
+			titleBarBackground: cssColor(splash?.colorInfo.titleBarBackground) ?? sideBarBackground,
+			titleBarBorder: cssColor(splash?.colorInfo.titleBarBorder) ?? cssColor(splash?.colorInfo.windowBorder) ?? fallbackBorder,
+			sideBarBackground,
+			sideBarBorder: cssColor(splash?.colorInfo.sideBarBorder) ?? fallbackBorder
+		};
+	}
+
+	function cssColor(value: string | undefined): string | undefined {
+		if (!value) {
+			return undefined;
+		}
+		const trimmed = value.trim();
+		return /^#[\da-f]{3,8}$/i.test(trimmed) || /^rgba?\([\d\s.,%]+\)$/i.test(trimmed) || /^hsla?\([\d\s.,%degturnrad]+\)$/i.test(trimmed)
+			? trimmed
+			: undefined;
 	}
 
 	function registerDeveloperKeybindings(): void {
@@ -130,5 +193,15 @@
 	interface IOptimusDevHotRefreshState {
 		readonly enabled: boolean;
 		readonly version?: string;
+	}
+
+	interface IOptimusInitialTheme {
+		readonly baseTheme: 'vs' | 'vs-dark' | 'hc-black' | 'hc-light';
+		readonly foreground: string;
+		readonly editorBackground: string;
+		readonly titleBarBackground: string;
+		readonly titleBarBorder: string;
+		readonly sideBarBackground: string;
+		readonly sideBarBorder: string;
 	}
 }());

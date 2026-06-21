@@ -311,16 +311,11 @@ export class JarvisApp extends Disposable {
 		this.promptInput.setAttribute('aria-label', localize('jarvis.prompt.aria', "Jarvis command"));
 		commandBar.appendChild(this.promptInput);
 
-		const submit = document.createElement('button');
-		submit.type = 'submit';
-		submit.className = 'jarvis-button primary';
-		submit.textContent = localize('jarvis.runCommand', "Run");
-		commandBar.appendChild(submit);
-
 		this.voiceButton = document.createElement('button');
 		this.voiceButton.type = 'button';
-		this.voiceButton.className = 'jarvis-button';
-		this.voiceButton.textContent = localize('jarvis.voice.start', "Voice");
+		this.voiceButton.className = 'jarvis-button jarvis-mic-button';
+		this.voiceButton.title = localize('jarvis.voice.start', "Voice");
+		this.voiceButton.setAttribute('aria-label', localize('jarvis.voice.start', "Voice"));
 		this.voiceButton.addEventListener('click', () => this.toggleVoice());
 		commandBar.appendChild(this.voiceButton);
 
@@ -621,7 +616,9 @@ export class JarvisApp extends Disposable {
 	private setVoiceListening(listening: boolean): void {
 		this.isListening = listening;
 		this.voiceButton.classList.toggle('listening', listening);
-		this.voiceButton.textContent = listening ? localize('jarvis.voice.listening', "Listening") : localize('jarvis.voice.start', "Voice");
+		const label = listening ? localize('jarvis.voice.listening', "Listening") : localize('jarvis.voice.start', "Voice");
+		this.voiceButton.title = label;
+		this.voiceButton.setAttribute('aria-label', label);
 	}
 
 	private async runCommand(rawCommand: string): Promise<void> {

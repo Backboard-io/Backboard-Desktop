@@ -18,6 +18,10 @@ export class ElectronOptimusHistoryProvider implements IOptimusHistoryProvider {
 		return Array.isArray(result) ? result.filter(isOptimusWorkspaceEntry) : [];
 	}
 
+	async openBackboardPanel(): Promise<void> {
+		await sendBackboardPanelCommand({ type: 'showChat' });
+	}
+
 	async openBackboardHistory(): Promise<void> {
 		await sendBackboardPanelCommand({ type: 'showHistory' });
 	}
@@ -31,7 +35,7 @@ export class ElectronOptimusHistoryProvider implements IOptimusHistoryProvider {
 	}
 
 	async sendBackboardPrompt(prompt: string, chatId?: string, workspace?: string): Promise<void> {
-		await sendBackboardPanelCommand({ type: 'sendPrompt', prompt, chatId, workspace });
+		await sendBackboardPanelCommand({ type: 'sendPrompt', prompt, chatId, workspace, newChat: !chatId });
 	}
 }
 

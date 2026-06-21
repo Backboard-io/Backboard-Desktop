@@ -211,39 +211,48 @@ body.jarvis-standalone .jarvis-root,
 
 .jarvis-command-bar {
 	left: 50%;
-	bottom: 26px;
+	bottom: 24px;
 	display: grid;
-	grid-template-columns: minmax(180px, 1fr) auto auto;
-	gap: 10px;
-	width: min(760px, calc(100vw - 260px));
-	padding: 12px;
-	border: 2px solid rgba(255, 126, 103, .86);
+	grid-template-columns: minmax(220px, 1fr) auto;
+	align-items: center;
+	gap: 12px;
+	width: min(760px, calc(100vw - 180px));
+	padding: 10px 12px 10px 18px;
+	border: 1px solid color-mix(in srgb, var(--jarvis-border) 62%, transparent);
 	border-radius: 22px;
-	background: rgba(248, 242, 234, .82);
-	box-shadow: 0 20px 44px rgba(64, 35, 47, .22);
-	backdrop-filter: blur(24px) saturate(1.2);
+	background: color-mix(in srgb, var(--jarvis-card-solid) 88%, transparent);
+	box-shadow: 0 16px 38px rgba(64, 35, 47, .2), inset 0 1px 0 rgba(255, 255, 255, .44);
+	backdrop-filter: blur(24px) saturate(1.18);
 	transform: translateX(-50%);
 }
 
-.jarvis-prompt-input,
 .jarvis-terminal-command input {
 	min-width: 0;
-	height: 40px;
-	border: 1px solid rgba(255, 126, 103, .24);
-	border-radius: 14px;
-	background: rgba(255, 255, 255, .4);
+	height: 38px;
+	border: 1px solid rgba(255, 126, 103, .18);
+	border-radius: 12px;
+	background: rgba(255, 255, 255, .5);
 	color: var(--jarvis-control-text);
 	outline: none;
 }
 
 .jarvis-prompt-input {
-	padding: 0 14px;
-	text-align: center;
+	min-width: 0;
+	height: 42px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--jarvis-control-text);
+	font-size: 15px;
+	font-weight: 600;
+	line-height: 42px;
+	outline: none;
+	text-align: left;
 }
 
 .jarvis-prompt-input::placeholder,
 .jarvis-terminal-command input::placeholder {
-	color: rgba(78, 67, 62, .58);
+	color: color-mix(in srgb, var(--jarvis-control-text) 54%, transparent);
 }
 
 .jarvis-prompt-input:focus,
@@ -256,6 +265,10 @@ body.jarvis-standalone .jarvis-root,
 	box-shadow: 0 0 0 1px color-mix(in srgb, var(--jarvis-focus) 54%, transparent);
 }
 
+.jarvis-prompt-input:focus {
+	box-shadow: none;
+}
+
 .jarvis-button,
 .jarvis-icon-button {
 	border: 1px solid rgba(255, 126, 103, .32);
@@ -266,9 +279,69 @@ body.jarvis-standalone .jarvis-root,
 }
 
 .jarvis-button {
-	height: 40px;
+	min-width: 72px;
+	height: 38px;
 	padding: 0 16px;
-	font-weight: 600;
+	border-radius: 12px;
+	font-size: 13px;
+	font-weight: 700;
+}
+
+.jarvis-mic-button {
+	position: relative;
+	display: grid;
+	place-items: center;
+	min-width: 0;
+	width: 58px;
+	height: 58px;
+	padding: 0;
+	border: 1px solid color-mix(in srgb, var(--jarvis-border-strong) 84%, transparent);
+	border-radius: 50%;
+	background: var(--jarvis-button-bg);
+	color: var(--jarvis-button-fg);
+	box-shadow: 0 12px 28px rgba(255, 104, 77, .28);
+}
+
+.jarvis-mic-button::before {
+	content: "";
+	width: 16px;
+	height: 23px;
+	border: 3px solid currentColor;
+	border-radius: 11px;
+}
+
+.jarvis-mic-button::after {
+	content: "";
+	position: absolute;
+	left: 50%;
+	top: 31px;
+	width: 24px;
+	height: 16px;
+	border: 3px solid currentColor;
+	border-top: 0;
+	border-radius: 0 0 14px 14px;
+	transform: translateX(-50%);
+}
+
+.jarvis-mic-button:hover,
+.jarvis-mic-button:focus {
+	background: var(--jarvis-button-hover);
+	color: var(--jarvis-button-fg);
+}
+
+.jarvis-mic-button.listening {
+	animation: jarvis-mic-pulse 1.35s ease-in-out infinite;
+}
+
+@keyframes jarvis-mic-pulse {
+	0%,
+	100% {
+		box-shadow: 0 12px 28px rgba(255, 104, 77, .28), 0 0 0 0 rgba(255, 126, 103, .28);
+	}
+
+	50% {
+		box-shadow: 0 12px 28px rgba(255, 104, 77, .28), 0 0 0 8px rgba(255, 126, 103, 0);
+	}
 }
 
 .jarvis-button.primary,
@@ -535,8 +608,21 @@ body.jarvis-standalone .jarvis-root,
 		grid-template-columns: minmax(0, 1fr) auto;
 	}
 
-	.jarvis-button:not(.primary) {
-		display: none;
+	.jarvis-button:not(.jarvis-mic-button) {
+		min-width: 62px;
+		padding-inline: 12px;
+	}
+}
+
+@media (max-width: 520px) {
+	.jarvis-command-bar {
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 7px;
+	}
+
+	.jarvis-mic-button {
+		width: 52px;
+		height: 52px;
 	}
 }
 
@@ -552,8 +638,28 @@ body.jarvis-standalone .jarvis-root,
 	}
 
 	.jarvis-command-bar {
-		bottom: 12px;
-		padding: 7px;
+		bottom: 10px;
+		padding: 6px;
+	}
+
+	.jarvis-prompt-input {
+		height: 34px;
+	}
+
+	.jarvis-mic-button {
+		width: 48px;
+		height: 48px;
+	}
+
+	.jarvis-mic-button::before {
+		width: 13px;
+		height: 19px;
+	}
+
+	.jarvis-mic-button::after {
+		top: 27px;
+		width: 20px;
+		height: 13px;
 	}
 
 	.jarvis-card-meta {

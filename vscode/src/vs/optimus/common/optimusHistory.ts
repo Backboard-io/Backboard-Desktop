@@ -6,6 +6,7 @@
 export interface IOptimusHistoryProvider {
 	listBackboardHistory(): Promise<readonly IOptimusHistoryEntry[]>;
 	listBackboardWorkspaces?(): Promise<readonly IOptimusWorkspaceEntry[]>;
+	openBackboardPanel?(): Promise<void>;
 	openBackboardHistory?(): Promise<void>;
 	openBackboardHistoryEntry?(id: string): Promise<void>;
 	openBackboardNewChat?(workspace?: string): Promise<void>;
