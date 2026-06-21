@@ -27,7 +27,7 @@ import { INotificationService } from '../../../../../../platform/notification/co
 import { defaultButtonStyles } from '../../../../../../platform/theme/browser/defaultStyles.js';
 import { IThemeService } from '../../../../../../platform/theme/common/themeService.js';
 import { ChatStatusEntry, IChatStatusItemService } from '../../chatStatus/chatStatusItemService.js';
-import type { ChatInputPart } from './chatInputPart.js';
+import type { ChatInputPart, IBackboardUsageEventMetric, IBackboardUsageMetrics } from './chatInputPart.js';
 
 const $ = dom.$;
 const BACKBOARD_USAGE_METRICS_ACTION_ID = 'workbench.action.chat.backboardUsageMetrics';
@@ -98,6 +98,11 @@ export class ChatInputStatusActionViewItem extends MenuEntryActionViewItem {
 	override render(container: HTMLElement): void {
 		super.render(container);
 
+		if (this._commandAction.id === BACKBOARD_USAGE_METRICS_ACTION_ID) {
+			container.classList.add('backboard-usage-status-action');
+			this.element?.classList.add('backboard-usage-status-control');
+		}
+
 		const descriptor = STATUS_COMMAND_DESCRIPTORS.get(this._commandAction.id);
 		if (!descriptor) {
 			return;
@@ -109,6 +114,24 @@ export class ChatInputStatusActionViewItem extends MenuEntryActionViewItem {
 				this.updateTooltip();
 			}
 		}));
+	}
+
+	override async onClick(event: MouseEvent): Promise<void> {
+		if (this._commandAction.id === BACKBOARD_USAGE_METRICS_ACTION_ID && this._inputPart && this.element) {
+			event.preventDefault();
+			event.stopPropagation();
+			this.hoverService.hideHover(true);
+			this.hoverService.showInstantHover({
+				content: this._renderBackboardUsageMetrics(),
+				target: this.element,
+				trapFocus: true,
+				position: { hoverPosition: HoverPosition.ABOVE },
+				appearance: { showPointer: true, compact: true },
+			}, true);
+			return;
+		}
+
+		return super.onClick(event);
 	}
 
 	protected override getHoverContents(): IManagedHoverContent | undefined {
@@ -143,19 +166,52 @@ export class ChatInputStatusActionViewItem extends MenuEntryActionViewItem {
 		const metrics = this._inputPart!.getBackboardUsageMetrics();
 		const root = $('div.chat-input-status-hover-content.chat-input-status-hover.backboard-usage-metrics-hover');
 
+		this._renderBackboardUsageMetricsInto(root, metrics);
+		this._inputPart!.getBackboardRecentUsageMetrics().then(recentMetrics => {
+			this._renderBackboardUsageMetricsInto(root, recentMetrics);
+		}).catch(() => undefined);
+
+		return root;
+	}
+
+	private _renderBackboardUsageMetricsInto(root: HTMLElement, metrics: IBackboardUsageMetrics): void {
+		root.replaceChildren();
+
 		const titleEl = root.appendChild($('div.chat-input-status-hover-title'));
 		titleEl.textContent = metrics.title;
 
 		const descEl = root.appendChild($('div.chat-input-status-hover-description'));
 		descEl.textContent = metrics.description;
 
-		const detailEl = root.appendChild($('div.chat-input-status-hover-detail'));
-		const table = detailEl.appendChild($('table.backboard-usage-metrics-table'));
-		const tbody = table.appendChild($('tbody'));
+		const detailEl = root.appendChild($('div.chat-input-status-hover-detail.backboard-usage-summary-grid'));
 		for (const row of metrics.rows) {
-			const tr = tbody.appendChild($('tr'));
-			tr.appendChild($('td', undefined, row.label));
-			tr.appendChild($('td', undefined, row.value));
+			const rowEl = detailEl.appendChild($('div.backboard-usage-summary-item'));
+			rowEl.appendChild($('span.backboard-usage-summary-label', undefined, row.label));
+			rowEl.appendChild($('span.backboard-usage-summary-value', undefined, row.value));
+		}
+
+		if (metrics.events?.length) {
+			const eventsEl = root.appendChild($('div.backboard-usage-events'));
+			for (const event of metrics.events) {
+				eventsEl.appendChild(this._renderBackboardUsageEvent(event));
+			}
+		}
+	}
+
+	private _renderBackboardUsageEvent(event: IBackboardUsageEventMetric): HTMLElement {
+		const root = $('div.backboard-usage-event');
+
+		const header = root.appendChild($('div.backboard-usage-event-header'));
+		header.appendChild($('div.backboard-usage-event-title', undefined, event.title));
+		if (event.subtitle) {
+			header.appendChild($('div.backboard-usage-event-subtitle', undefined, event.subtitle));
+		}
+
+		const rows = root.appendChild($('div.backboard-usage-event-rows'));
+		for (const row of event.rows) {
+			const rowEl = rows.appendChild($('div.backboard-usage-event-row'));
+			rowEl.appendChild($('span.backboard-usage-event-row-label', undefined, row.label));
+			rowEl.appendChild($('span.backboard-usage-event-row-value', undefined, row.value));
 		}
 
 		return root;

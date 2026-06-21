@@ -170,11 +170,11 @@
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	justify-content: flex-end;
+	justify-content: center;
 	gap: 10px;
 	width: min(560px, 100%);
 	align-self: center;
-	padding: 24px 18px 32px;
+	padding: 24px 18px;
 	box-sizing: border-box;
 	text-align: center;
 	flex: 1 1 auto;
@@ -269,32 +269,51 @@
 	border-radius: 10px;
 	display: flex;
 	flex-direction: column;
-	justify-content: flex-end;
+	justify-content: flex-start;
+	gap: 8px;
+	overflow: hidden;
+	position: relative;
+}
+
+.monaco-workbench .new-chat-widget-content > .interactive-session .chat-input-container.working {
+	overflow: hidden;
 }
 
 .new-chat-widget-content > .interactive-session .chat-editor-container {
 	display: flex;
 	padding: 0;
 	flex: 1 1 auto;
-	min-height: 48px;
+	min-height: 56px;
 	width: 100%;
+	position: relative;
+	z-index: 2;
 }
 
 .new-chat-widget-content > .interactive-session .interactive-input-editor {
 	flex: 1 1 auto;
-	min-height: 48px;
+	min-height: 56px;
 	width: 100%;
+	position: relative;
+	z-index: 2;
 }
 
 .new-chat-widget-content > .interactive-session .interactive-input-editor .monaco-editor,
 .new-chat-widget-content > .interactive-session .interactive-input-editor .overflow-guard {
-	min-height: 48px;
+	min-height: 56px;
+	position: relative;
+	z-index: 2;
 }
 
 .new-chat-widget-content > .interactive-session .chat-input-toolbars {
 	flex: 0 0 auto;
-	margin-top: auto;
+	margin-top: 0;
 	width: 100%;
+	position: relative;
+	z-index: 3;
+}
+
+.new-chat-widget-content > .interactive-session .chat-input-overlay:not(.disabled) {
+	pointer-events: none;
 }
 
 .new-chat-widget-content > .interactive-session .chat-session-target-picker-item {

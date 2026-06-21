@@ -925,7 +925,7 @@
 	min-width: 0;
 }
 .chat-debug-cache-group-count {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10.5px;
 	color: var(--vscode-badge-foreground);
 	background: var(--vscode-badge-background);
@@ -934,7 +934,7 @@
 	flex-shrink: 0;
 }
 .chat-debug-cache-group-meta {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10.5px;
 	color: var(--vscode-descriptionForeground);
 	overflow: hidden;
@@ -943,7 +943,7 @@
 	margin-left: 16px;
 }
 .chat-debug-cache-request-id {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	user-select: text;
 	cursor: text;
 	overflow-wrap: anywhere;
@@ -971,7 +971,7 @@
 	color: var(--vscode-list-activeSelectionForeground);
 }
 .chat-debug-cache-turn-idx {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	color: var(--vscode-descriptionForeground);
 	font-size: 11px;
 	text-align: right;
@@ -1001,7 +1001,7 @@
 	max-width: 100%;
 }
 .chat-debug-cache-turn-chip {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10.5px;
 	color: var(--vscode-descriptionForeground);
 }
@@ -1132,7 +1132,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	color: var(--vscode-foreground);
 }
 .chat-debug-cache-finding-detail {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11px;
 	line-height: 1.5;
 	color: var(--vscode-foreground);
@@ -1153,7 +1153,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	gap: 8px;
 }
 .chat-debug-cache-session-health-stats {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11.5px;
 	color: var(--vscode-foreground);
 }
@@ -1166,7 +1166,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	display: inline-flex;
 	align-items: center;
 	gap: 5px;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10.5px;
 	padding: 2px 8px;
 	border-radius: 10px;
@@ -1194,7 +1194,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	align-items: center;
 	gap: 6px;
 	padding: 3px 10px;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10px;
 	color: var(--vscode-charts-yellow);
 	opacity: 0.9;
@@ -1239,7 +1239,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	margin-bottom: 4px;
 }
 .chat-debug-cache-perf-line {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11.5px;
 	color: var(--vscode-foreground);
 	line-height: 1.5;
@@ -1249,7 +1249,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	color: var(--vscode-descriptionForeground);
 }
 .chat-debug-cache-options-banner {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11.5px;
 	color: var(--vscode-charts-yellow);
 	background: var(--vscode-editorWidget-background);
@@ -1269,7 +1269,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	grid-template-columns: 200px 1fr 1fr;
 	gap: 12px;
 	padding: 6px 12px;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11.5px;
 	border-top: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
 }
@@ -1298,7 +1298,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	display: flex;
 	justify-content: space-between;
 	gap: 12px;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11.5px;
 	flex-wrap: wrap;
 }
@@ -1321,7 +1321,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 6px 16px;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10.5px;
 	color: var(--vscode-descriptionForeground);
 	margin-bottom: 8px;
@@ -1376,14 +1376,14 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	align-items: center;
 }
 .chat-debug-cache-sig-lane-label {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10.5px;
 	color: var(--vscode-descriptionForeground);
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
 }
 .chat-debug-cache-sig-lane-total {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10.5px;
 	color: var(--vscode-descriptionForeground);
 	text-align: right;
@@ -1401,7 +1401,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10.5px;
 	overflow: hidden;
 	white-space: nowrap;
@@ -1487,7 +1487,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	opacity: 0.8;
 }
 .chat-debug-cache-sig-summary {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11.5px;
 	color: var(--vscode-foreground);
 	margin-top: 8px;
@@ -1539,7 +1539,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	border-top: none;
 }
 .chat-debug-cache-sig-breakdown-row.head {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10px;
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
@@ -1559,7 +1559,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	white-space: nowrap;
 }
 .chat-debug-cache-sig-breakdown-row .cell.idx {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	color: var(--vscode-descriptionForeground);
 }
 .chat-debug-cache-sig-breakdown-row .cell.chunk {
@@ -1577,7 +1577,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	white-space: nowrap;
 }
 .chat-debug-cache-sig-breakdown-row .cell.num {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	text-align: right;
 }
 .chat-debug-cache-acc {
@@ -1632,7 +1632,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	transform: rotate(90deg);
 }
 .chat-debug-cache-acc-name {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 12px;
 	color: var(--vscode-foreground);
 	overflow: hidden;
@@ -1648,7 +1648,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	vertical-align: text-bottom;
 }
 .chat-debug-cache-acc-badge {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 10.5px;
 	padding: 2px 8px;
 	border-radius: 10px;
@@ -1677,7 +1677,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	border: 1px solid var(--vscode-charts-blue);
 }
 .chat-debug-cache-acc-sizes {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11px;
 	color: var(--vscode-descriptionForeground);
 	min-width: 130px;
@@ -1721,7 +1721,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 }
 .chat-debug-cache-acc-change-note {
 	padding: 6px 12px;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11px;
 	line-height: 1.5;
 	color: var(--vscode-foreground);
@@ -1736,7 +1736,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 .chat-debug-cache-diff {
 	display: grid;
 	grid-template-columns: 1fr 1fr;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11.5px;
 }
 .chat-debug-cache-diff-col {
@@ -1758,7 +1758,7 @@ button.chat-debug-cache-finding.is-clickable:focus-visible {
 	text-transform: uppercase;
 }
 .chat-debug-cache-diff-body {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11.5px;
 	line-height: 1.4;
 	white-space: pre-wrap;

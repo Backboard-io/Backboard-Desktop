@@ -468,5 +468,5 @@
 }
 
 .monaco-editor .suggest-details p code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }

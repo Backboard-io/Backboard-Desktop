@@ -655,7 +655,6 @@ export function registerChatActions() {
 				icon: Codicon.plus,
 				f1: true,
 				category: CHAT_CATEGORY,
-				precondition: ChatContextKeys.enabled,
 				keybinding: {
 					weight: KeybindingWeight.WorkbenchContrib,
 					primary: KeyMod.CtrlCmd | KeyCode.KeyN,
@@ -692,7 +691,6 @@ export function registerChatActions() {
 				icon: BackboardLogoIcon,
 				f1: false,
 				category: CHAT_CATEGORY,
-				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.EditorTitle,
 					group: 'navigation',
@@ -716,7 +714,6 @@ export function registerChatActions() {
 				icon: Codicon.newSession,
 				f1: false,
 				category: CHAT_CATEGORY,
-				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.EditorTitle,
 					group: 'navigation',
@@ -740,7 +737,6 @@ export function registerChatActions() {
 				icon: Codicon.comment,
 				f1: false,
 				category: CHAT_CATEGORY,
-				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.EditorTitle,
 					group: 'navigation',
@@ -763,7 +759,6 @@ export function registerChatActions() {
 				title: localize2('interactiveSession.openToSide', "New Chat Editor to the Side"),
 				f1: true,
 				category: CHAT_CATEGORY,
-				precondition: ChatContextKeys.enabled,
 			});
 		}
 
@@ -780,7 +775,6 @@ export function registerChatActions() {
 				title: localize2('interactiveSession.newChatWindow', "New Chat Window"),
 				f1: true,
 				category: CHAT_CATEGORY,
-				precondition: ChatContextKeys.enabled,
 				menu: [{
 					id: MenuId.ChatTitleBarMenu,
 					group: 'b_new',

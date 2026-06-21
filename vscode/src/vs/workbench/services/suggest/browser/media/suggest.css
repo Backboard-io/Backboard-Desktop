@@ -441,5 +441,5 @@
 }
 
 .workbench-suggest-widget .suggest-details p code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }

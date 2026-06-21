@@ -14,8 +14,10 @@ import { INativeHostService } from '../../../../../platform/native/common/native
 import { Schemas } from '../../../../../base/common/network.js';
 import { URI, UriComponents } from '../../../../../base/common/uri.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../platform/workspace/common/workspace.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IsSessionsWindowContext } from '../../../../common/contextkeys.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
+import { OptimusEditorInput } from '../../../optimus/electron-browser/optimusEditorInput.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
 import { IChatWidgetService } from '../../browser/chat.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
@@ -77,6 +79,29 @@ export class OpenAgentsWindowAction extends Action2 {
 
 	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents }) {
 		await accessor.get(INativeHostService).openAgentsWindow(args);
+	}
+}
+
+export class OpenOptimusWindowAction extends Action2 {
+
+	static readonly ID = 'workbench.action.openOptimusWindow';
+
+	constructor() {
+		super({
+			id: OpenOptimusWindowAction.ID,
+			title: localize2('openOptimusWindow', "Open Optimus"),
+			category: localize2('optimus', "Optimus"),
+			f1: true,
+			menu: [{
+				id: MenuId.MenubarFileMenu,
+				group: '1_new',
+				order: 4,
+			}]
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(IEditorService).openEditor(OptimusEditorInput.instance, { pinned: true, revealIfOpened: true });
 	}
 }
 

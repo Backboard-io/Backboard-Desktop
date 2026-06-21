@@ -148,6 +148,11 @@ export class LaunchMainService implements ILaunchMainService {
 			usedWindows = await this.windowsMainService.openAgentsWindow(baseConfig);
 		}
 
+		// Optimus
+		else if (args['optimus']) {
+			usedWindows = await this.windowsMainService.openOptimusWindow(baseConfig);
+		}
+
 		// Start without file/folder arguments
 		else if (!args._.length && !args['folder-uri'] && !args['file-uri']) {
 			let openNewWindow = false;

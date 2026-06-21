@@ -171,7 +171,7 @@
 
 /** Dialog: File Path */
 .monaco-dialog-box code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 /** Dialog: Buttons Row */

@@ -94,7 +94,7 @@
 
 .monaco-workbench .part.editor > .content .walkThroughContent code,
 .monaco-workbench .part.editor > .content .walkThroughContent .shortcut {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 14px;
 	line-height: 19px;
 }

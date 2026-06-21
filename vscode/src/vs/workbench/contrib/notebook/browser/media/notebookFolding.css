@@ -52,7 +52,7 @@
 
 .monaco-workbench .notebookOverlay > .cell-list-container .notebook-folded-hint-label {
 	font-size: var(--notebook-cell-output-font-size);
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-style: italic;
 	opacity: 0.7;
 }

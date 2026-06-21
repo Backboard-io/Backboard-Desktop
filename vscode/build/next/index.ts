@@ -98,6 +98,7 @@ const desktopWorkerEntryPoints = [
 const desktopEntryPoints = [
 	'vs/workbench/workbench.desktop.main',
 	'vs/sessions/sessions.desktop.main',
+	'vs/optimus/optimus.desktop.main',
 	'vs/workbench/contrib/debug/node/telemetryApp',
 	'vs/platform/files/node/watcher/watcherMain',
 	'vs/platform/terminal/node/ptyHostMain',
@@ -111,6 +112,7 @@ const codeEntryPoints = [
 	'vs/code/electron-utility/sharedProcess/sharedProcessMain',
 	'vs/code/electron-browser/workbench/workbench',
 	'vs/sessions/electron-browser/sessions',
+	'vs/optimus/electron-browser/optimus',
 ];
 
 // Web entry points (used in server-web and vscode-web)
@@ -212,10 +214,12 @@ function getCssBundleEntryPointsForTarget(target: BuildTarget): Set<string> {
 		case 'desktop':
 			return new Set([
 				'vs/workbench/workbench.desktop.main',
-				'vs/code/electron-browser/workbench/workbench',
-				'vs/sessions/sessions.desktop.main',
-				'vs/sessions/electron-browser/sessions',
-			]);
+					'vs/code/electron-browser/workbench/workbench',
+					'vs/sessions/sessions.desktop.main',
+					'vs/sessions/electron-browser/sessions',
+					'vs/optimus/optimus.desktop.main',
+					'vs/optimus/electron-browser/optimus',
+				]);
 		case 'server':
 			return new Set(); // Server has no UI
 		case 'server-web':
@@ -258,10 +262,12 @@ const desktopResourcePatterns = [
 
 	// HTML
 	'vs/code/electron-browser/workbench/workbench.html',
-	'vs/code/electron-browser/workbench/workbench-dev.html',
-	'vs/sessions/electron-browser/sessions.html',
-	'vs/sessions/electron-browser/sessions-dev.html',
-	'vs/workbench/services/extensions/worker/webWorkerExtensionHostIframe.html',
+		'vs/code/electron-browser/workbench/workbench-dev.html',
+		'vs/sessions/electron-browser/sessions.html',
+		'vs/sessions/electron-browser/sessions-dev.html',
+		'vs/optimus/electron-browser/optimus.html',
+		'vs/optimus/electron-browser/optimus-dev.html',
+		'vs/workbench/services/extensions/worker/webWorkerExtensionHostIframe.html',
 	'vs/workbench/contrib/webview/browser/pre/*.html',
 
 	// Webview pre scripts

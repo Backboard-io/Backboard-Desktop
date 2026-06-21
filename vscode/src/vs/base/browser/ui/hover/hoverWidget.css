@@ -61,7 +61,7 @@
 }
 
 .monaco-hover code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .monaco-hover hr {

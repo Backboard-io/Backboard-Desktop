@@ -1,0 +1,1334 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body.optimus-standalone,
+body.optimus-standalone .optimus-root,
+.optimus-root {
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	overflow: hidden;
+	background: var(--optimus-bg);
+	color: var(--optimus-text);
+	font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", sans-serif);
+	font-size: var(--vscode-font-size, 13px);
+}
+
+.optimus-root {
+	--optimus-bg: var(--vscode-editor-background, #1f1f1f);
+	--optimus-surface: color-mix(in srgb, var(--vscode-sideBar-background, #181818) 88%, var(--optimus-bg));
+	--optimus-card: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 88%, var(--optimus-bg));
+	--optimus-card-soft: color-mix(in srgb, var(--vscode-input-background, #252526) 90%, var(--optimus-bg));
+	--optimus-border: color-mix(in srgb, var(--vscode-widget-border, #3c3c3c) 76%, var(--vscode-sideBar-border, #2b2b2b));
+	--optimus-border-subtle: color-mix(in srgb, var(--optimus-border) 62%, transparent);
+	--optimus-focus: var(--vscode-focusBorder, #5b8cff);
+	--optimus-text: var(--vscode-foreground, #cccccc);
+	--optimus-muted: var(--vscode-descriptionForeground, #8f8f8f);
+	--optimus-subtle: color-mix(in srgb, var(--optimus-muted) 62%, transparent);
+	--optimus-button-bg: var(--vscode-button-background, #0078d4);
+	--optimus-button-fg: var(--vscode-button-foreground, #ffffff);
+	--optimus-button-hover: var(--vscode-button-hoverBackground, #0e86dd);
+	--optimus-toolbar-hover: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--optimus-focus) 12%, transparent));
+	--optimus-success: var(--vscode-testing-iconPassed, #2f9f5b);
+	--optimus-danger: var(--vscode-errorForeground, #d83e64);
+	--optimus-warning: var(--vscode-editorWarning-foreground, #cca700);
+	--optimus-shadow: color-mix(in srgb, var(--vscode-widget-shadow, #000000) 28%, transparent);
+}
+
+* {
+	box-sizing: border-box;
+}
+
+button,
+select,
+textarea,
+input {
+	font: inherit;
+}
+
+button,
+select {
+	cursor: pointer;
+}
+
+.optimus-shell {
+	display: grid;
+	grid-template-rows: auto 1fr;
+	width: 100%;
+	height: 100%;
+	background: var(--optimus-bg);
+}
+
+.optimus-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	min-height: 48px;
+	padding: 0 16px;
+	border-bottom: 1px solid var(--optimus-border-subtle);
+	background: var(--optimus-surface);
+}
+
+.optimus-brand {
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
+	min-width: 0;
+}
+
+.optimus-brand h1 {
+	margin: 0;
+	overflow: hidden;
+	color: var(--optimus-text);
+	font-size: 14px;
+	font-weight: 650;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-brand p {
+	margin: 0;
+	overflow: hidden;
+	color: var(--optimus-muted);
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-header-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.optimus-header-button {
+	min-width: 0;
+	height: 26px;
+	padding: 0 9px;
+	border: 1px solid var(--optimus-border-subtle);
+	border-radius: 5px;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-size: 12px;
+}
+
+.optimus-header-button:hover {
+	background: var(--optimus-toolbar-hover);
+	color: var(--optimus-text);
+}
+
+.optimus-header-button.icon {
+	width: 26px;
+	padding: 0;
+}
+
+.optimus-workspace-select {
+	max-width: 220px;
+	height: 26px;
+	min-width: 132px;
+	padding: 0 26px 0 9px;
+	border: 1px solid var(--optimus-border-subtle);
+	border-radius: 5px;
+	outline: 0;
+	background: var(--optimus-card-soft);
+	color: var(--optimus-text);
+	font-size: 12px;
+}
+
+.optimus-workspace-select:hover,
+.optimus-workspace-select:focus {
+	border-color: color-mix(in srgb, var(--optimus-focus) 58%, var(--optimus-border));
+}
+
+.optimus-agent-count {
+	color: var(--optimus-muted);
+	font-size: 12px;
+	white-space: nowrap;
+}
+
+.optimus-content {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) var(--optimus-drawer-width, 430px);
+	min-height: 0;
+}
+
+.optimus-content.panel-closed {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.optimus-content.panel-closed .optimus-drawer {
+	display: none;
+}
+
+.optimus-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-auto-rows: auto;
+	gap: 14px;
+	align-content: start;
+	min-height: 0;
+	padding: 14px;
+	overflow: auto;
+	background: var(--optimus-bg);
+}
+
+.optimus-task-board {
+	display: grid;
+	grid-column: 1 / -1;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-rows: repeat(2, minmax(330px, auto));
+	grid-auto-rows: minmax(330px, auto);
+	gap: 14px;
+}
+
+.optimus-starter-card {
+	display: grid;
+	grid-template-rows: 44px 128px minmax(0, 1fr) 72px 48px;
+	gap: 0;
+	min-height: 330px;
+	overflow: hidden;
+	padding: 0;
+	border: 1px solid var(--optimus-border);
+	border-radius: 8px;
+	background: var(--optimus-card);
+	color: var(--optimus-text);
+	text-align: left;
+	box-shadow: 0 1px 2px var(--optimus-shadow);
+	transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+.optimus-starter-card:hover,
+.optimus-starter-card:focus,
+.optimus-starter-card.selected {
+	border-color: color-mix(in srgb, var(--optimus-focus) 66%, var(--optimus-border));
+	outline: none;
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--optimus-focus) 24%, transparent), 0 6px 16px var(--optimus-shadow);
+}
+
+.optimus-starter-preview-header,
+.optimus-starter-preview-title,
+.optimus-starter-preview-rows,
+.optimus-starter-preview-footer,
+.optimus-starter-preview-composer {
+	display: flex;
+	min-width: 0;
+}
+
+.optimus-starter-preview-header {
+	align-items: center;
+	gap: 12px;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-starter-preview-header .optimus-skeleton-bar {
+	flex: 0 1 176px;
+}
+
+.optimus-starter-action {
+	width: 32px;
+	height: 22px;
+	margin-left: auto;
+	flex: 0 0 auto;
+	display: inline-grid;
+	place-items: center;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--optimus-focus) 26%, transparent);
+	color: var(--optimus-focus);
+	font-size: 20px;
+	font-weight: 500;
+	line-height: 20px;
+}
+
+.optimus-starter-preview-title {
+	flex-direction: column;
+	gap: 14px;
+	padding: 34px 12px;
+	border-bottom: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-starter-preview-rows {
+	flex-direction: column;
+	gap: 12px;
+	padding: 14px 12px;
+}
+
+.optimus-starter-preview-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-height: 28px;
+	padding: 0 8px;
+	border-radius: 7px;
+	background: color-mix(in srgb, var(--optimus-focus) 24%, var(--optimus-card));
+}
+
+.optimus-starter-preview-row.active .optimus-skeleton-dot,
+.optimus-starter-preview-row.active .optimus-skeleton-bar {
+	background: var(--optimus-success);
+}
+
+.optimus-starter-preview-footer {
+	flex-direction: column;
+	gap: 8px;
+	justify-content: center;
+	padding: 0 12px;
+	border-top: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-starter-preview-composer {
+	align-items: center;
+	gap: 10px;
+	padding: 0 12px;
+	border-top: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-starter-preview-composer .optimus-skeleton-bar.medium {
+	max-width: 220px;
+}
+
+.optimus-skeleton-dot {
+	width: 9px;
+	height: 9px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	background: color-mix(in srgb, var(--optimus-focus) 42%, var(--optimus-muted));
+}
+
+.optimus-skeleton-bar {
+	display: block;
+	width: 100%;
+	height: 10px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--optimus-focus) 18%, var(--optimus-muted));
+}
+
+.optimus-skeleton-bar.full {
+	max-width: none;
+}
+
+.optimus-skeleton-bar.wide {
+	max-width: 68%;
+}
+
+.optimus-skeleton-bar.mid {
+	max-width: 48%;
+}
+
+.optimus-skeleton-bar.medium {
+	max-width: 168px;
+}
+
+.optimus-skeleton-bar.short {
+	max-width: 112px;
+}
+
+.optimus-skeleton-bar.small {
+	max-width: 84px;
+}
+
+.optimus-skeleton-bar.tiny {
+	max-width: 64px;
+}
+
+.optimus-skeleton-bar.icon {
+	width: 20px;
+	height: 20px;
+	flex: 0 0 auto;
+	border-radius: 6px;
+}
+
+.optimus-task-input {
+	display: grid;
+	grid-template-rows: 1fr auto;
+	min-height: 160px;
+	overflow: hidden;
+	border: 1px solid var(--optimus-border);
+	border-radius: 10px;
+	background: var(--optimus-card-soft);
+	box-shadow: 0 1px 3px var(--optimus-shadow);
+	transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+
+.optimus-task-input:hover {
+	border-color: color-mix(in srgb, var(--optimus-border) 58%, var(--optimus-focus) 22%);
+	box-shadow: 0 2px 8px var(--optimus-shadow);
+}
+
+.optimus-task-input:focus-within {
+	border-color: var(--optimus-focus);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--optimus-focus) 16%, transparent), 0 2px 8px var(--optimus-shadow);
+}
+
+.optimus-task-input textarea {
+	width: 100%;
+	min-height: 104px;
+	padding: 12px 12px 4px;
+	resize: none;
+	border: 0;
+	outline: none;
+	background: transparent;
+	color: var(--optimus-text);
+	font-family: var(--vscode-editor-font-family, "SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", monospace);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.optimus-task-input textarea::placeholder,
+.optimus-panel-composer textarea::placeholder,
+.optimus-card-chat input::placeholder {
+	color: var(--optimus-muted);
+}
+
+.optimus-task-input footer,
+.optimus-panel-composer-bar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	min-height: 34px;
+	padding: 8px 10px 10px;
+}
+
+.optimus-task-input select {
+	min-width: 0;
+	max-width: 142px;
+	height: 22px;
+	padding: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-size: 12px;
+}
+
+.optimus-task-input select:hover {
+	color: var(--optimus-text);
+}
+
+.optimus-toolbar-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+	max-width: 150px;
+	height: 22px;
+	overflow: hidden;
+	color: var(--optimus-muted);
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-toolbar-chip::before {
+	width: 9px;
+	height: 9px;
+	flex: 0 0 auto;
+	border-radius: 2px;
+	background: currentColor;
+	opacity: .85;
+	content: "";
+}
+
+.optimus-toolbar-spacer {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.optimus-send-button {
+	width: 24px;
+	height: 24px;
+	flex: 0 0 auto;
+	display: inline-grid;
+	place-items: center;
+	padding: 0;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-weight: 650;
+}
+
+.optimus-send-button:hover,
+.optimus-send-button:focus {
+	background: var(--optimus-button-bg);
+	color: var(--optimus-button-fg);
+	outline: none;
+}
+
+.optimus-send-button:disabled {
+	background: transparent;
+	color: var(--vscode-disabledForeground, var(--optimus-subtle));
+	cursor: default;
+}
+
+.optimus-card {
+	display: grid;
+	grid-template-rows: auto auto auto minmax(120px, 1fr) auto auto auto auto;
+	min-height: 330px;
+	overflow: hidden;
+	border: 1px solid var(--optimus-border);
+	border-radius: 10px;
+	background: var(--optimus-card);
+	box-shadow: 0 1px 2px var(--optimus-shadow);
+	cursor: pointer;
+	transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+.optimus-card.selected,
+.optimus-card:focus,
+.optimus-card:hover {
+	border-color: color-mix(in srgb, var(--optimus-focus) 64%, var(--optimus-border));
+	outline: none;
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--optimus-focus) 24%, transparent), 0 2px 8px var(--optimus-shadow);
+}
+
+.optimus-card-header {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	gap: 8px;
+	align-items: center;
+	min-height: 44px;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-card-header h2 {
+	margin: 0;
+	overflow: hidden;
+	color: var(--optimus-text);
+	font-size: 12.5px;
+	font-weight: 650;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-status-dot {
+	width: 8px;
+	height: 8px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	background: var(--optimus-muted);
+}
+
+.optimus-status-dot.running,
+.optimus-status-dot.queued,
+.optimus-activity-glyph.active,
+.optimus-activity-glyph.waiting {
+	background: var(--optimus-focus);
+}
+
+.optimus-status-dot.done,
+.optimus-activity-glyph.done {
+	background: var(--optimus-success);
+}
+
+.optimus-status-dot.blocked,
+.optimus-status-dot.error,
+.optimus-status-dot.canceled,
+.optimus-activity-glyph.failed {
+	background: var(--optimus-danger);
+}
+
+.optimus-status-badge {
+	max-width: 90px;
+	padding: 2px 6px;
+	overflow: hidden;
+	border-radius: 4px;
+	color: var(--optimus-muted);
+	background: color-mix(in srgb, var(--optimus-border) 32%, transparent);
+	font-size: 10px;
+	font-weight: 650;
+	text-overflow: ellipsis;
+	text-transform: uppercase;
+	white-space: nowrap;
+}
+
+.optimus-status-badge.done {
+	color: var(--optimus-success);
+	background: color-mix(in srgb, var(--optimus-success) 12%, transparent);
+}
+
+.optimus-status-badge.blocked,
+.optimus-status-badge.error,
+.optimus-status-badge.canceled {
+	color: var(--optimus-danger);
+	background: color-mix(in srgb, var(--optimus-danger) 12%, transparent);
+}
+
+.optimus-card-command {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 8px;
+	align-items: center;
+	padding: 10px 12px 0;
+	color: var(--optimus-muted);
+}
+
+.optimus-card-command span {
+	font-size: 11px;
+}
+
+.optimus-card-command span::before {
+	content: "$ ";
+}
+
+.optimus-card-command code {
+	overflow: hidden;
+	color: var(--optimus-text);
+	font-family: var(--vscode-editor-font-family, "SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", monospace);
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-card-task {
+	margin: 0;
+	padding: 4px 12px 12px;
+	border-bottom: 1px solid var(--optimus-border-subtle);
+	color: var(--optimus-text);
+	font-size: 12px;
+	line-height: 1.35;
+}
+
+.optimus-activity {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin: 0;
+	padding: 12px;
+	overflow: hidden;
+	list-style: none;
+}
+
+.optimus-activity li {
+	display: grid;
+	grid-template-columns: 16px minmax(0, 1fr);
+	gap: 8px;
+	align-items: center;
+	min-width: 0;
+	color: var(--optimus-text);
+	font-size: 12px;
+}
+
+.optimus-activity li.muted,
+.optimus-activity li.waiting {
+	color: var(--optimus-muted);
+}
+
+.optimus-activity li span:last-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-activity-glyph {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 10px;
+	height: 10px;
+	margin-left: 3px;
+	border: 1px solid color-mix(in srgb, var(--optimus-focus) 42%, transparent);
+	border-radius: 50%;
+	background: transparent;
+	color: transparent;
+	font-size: 0;
+}
+
+.optimus-activity-glyph.done,
+.optimus-activity-glyph.failed {
+	border-color: transparent;
+}
+
+.optimus-chips,
+.optimus-card-footer,
+.optimus-actions {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	min-width: 0;
+	padding: 8px 12px;
+	border-top: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-chips span,
+.optimus-meta {
+	max-width: 120px;
+	padding: 3px 7px;
+	overflow: hidden;
+	border: 1px solid var(--optimus-border-subtle);
+	border-radius: 5px;
+	background: color-mix(in srgb, var(--optimus-card-soft) 74%, transparent);
+	color: var(--optimus-muted);
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-chips span::before {
+	content: "i ";
+	color: var(--optimus-focus);
+	font-weight: 700;
+}
+
+.optimus-card-footer {
+	min-height: 40px;
+	color: var(--optimus-muted);
+}
+
+.optimus-actions {
+	justify-content: flex-end;
+}
+
+.optimus-actions button,
+.optimus-panel-empty button,
+.optimus-panel-review-card button {
+	min-height: 24px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-textLink-foreground, var(--optimus-focus));
+	font-size: 11.5px;
+	font-weight: 600;
+}
+
+.optimus-actions button:hover,
+.optimus-panel-empty button:hover,
+.optimus-panel-review-card button:hover {
+	background: var(--optimus-toolbar-hover);
+	color: var(--vscode-textLink-activeForeground, var(--optimus-text));
+}
+
+.optimus-panel-review-card button:disabled {
+	color: var(--vscode-disabledForeground, var(--optimus-subtle));
+	background: transparent;
+	cursor: default;
+}
+
+.optimus-blocked-reason {
+	align-self: center;
+	justify-self: center;
+	max-width: 260px;
+	margin: 16px 12px;
+	color: var(--optimus-danger);
+	font-size: 13px;
+	font-weight: 650;
+	line-height: 1.35;
+	text-align: center;
+}
+
+.optimus-blocked-reason::before {
+	display: block;
+	margin-bottom: 8px;
+	content: "!";
+	font-size: 18px;
+	font-weight: 500;
+}
+
+.optimus-drawer {
+	position: relative;
+	min-width: 0;
+	border-left: 1px solid var(--optimus-border-subtle);
+	background: var(--vscode-sideBar-background, var(--optimus-bg));
+}
+
+.optimus-drawer-resize-handle {
+	position: absolute;
+	top: 0;
+	left: -4px;
+	z-index: 2;
+	width: 8px;
+	height: 100%;
+	cursor: col-resize;
+}
+
+.optimus-drawer-resize-handle::before {
+	position: absolute;
+	top: 0;
+	left: 3px;
+	width: 1px;
+	height: 100%;
+	background: var(--optimus-border-subtle);
+	content: "";
+}
+
+.optimus-drawer-body {
+	display: grid;
+	grid-template-rows: auto auto minmax(0, 1fr) auto;
+	height: 100%;
+	min-height: 0;
+}
+
+.optimus-panel-header {
+	position: relative;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	min-height: 32px;
+	overflow: hidden;
+	border-bottom: 1px solid color-mix(in srgb, var(--optimus-border) 78%, transparent);
+	background: color-mix(in srgb, var(--optimus-bg) 96%, var(--optimus-surface));
+}
+
+.optimus-panel-header::after {
+	position: absolute;
+	top: 0;
+	right: 54px;
+	bottom: 0;
+	width: 22px;
+	pointer-events: none;
+	background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--optimus-bg) 84%, transparent) 58%, var(--optimus-bg));
+	content: "";
+}
+
+.optimus-panel-tabs {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	overflow-x: auto;
+	overflow-y: hidden;
+	padding: 4px 26px 4px 7px;
+	scrollbar-width: none;
+}
+
+.optimus-panel-tabs::-webkit-scrollbar {
+	display: none;
+}
+
+.optimus-panel-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	width: max-content;
+	min-width: 34px;
+	max-width: min(176px, calc(50vw - 50px));
+	height: 23px;
+	flex: 0 1 auto;
+	padding: 0 7px;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-size: 11.5px;
+	line-height: 15px;
+	text-align: left;
+}
+
+.optimus-panel-tab:hover {
+	color: var(--optimus-text);
+	background: var(--vscode-toolbar-hoverBackground, var(--optimus-toolbar-hover));
+}
+
+.optimus-panel-tab.active {
+	color: var(--optimus-text);
+	border-color: color-mix(in srgb, var(--optimus-border) 82%, transparent);
+	background: color-mix(in srgb, var(--vscode-editor-background, var(--optimus-card)) 88%, var(--optimus-bg));
+	box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--optimus-focus) 34%, transparent);
+}
+
+.optimus-panel-tab span:last-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-panel-actions {
+	position: relative;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	gap: 1px;
+	padding: 4px 7px 4px 2px;
+	background: var(--optimus-bg);
+}
+
+.optimus-panel-icon-button {
+	min-width: 22px;
+	height: 22px;
+	display: inline-grid;
+	place-items: center;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-size: 14px;
+	line-height: 1;
+}
+
+.optimus-panel-icon-button:hover {
+	background: var(--vscode-toolbar-hoverBackground, var(--optimus-toolbar-hover));
+	color: var(--optimus-text);
+}
+
+.optimus-panel-status {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-height: 24px;
+	padding: 3px 10px 4px;
+	border-bottom: 1px solid color-mix(in srgb, var(--optimus-border) 68%, transparent);
+	background: color-mix(in srgb, var(--optimus-bg) 96%, var(--optimus-surface));
+	color: var(--optimus-muted);
+	font-size: 11px;
+}
+
+.optimus-panel-status span:last-child {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-panel-clock {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 42px;
+	padding: 0 6px;
+	border: 1px solid color-mix(in srgb, var(--optimus-border) 62%, transparent);
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--optimus-bg) 72%, transparent);
+	font-size: 10.5px;
+	line-height: 14px;
+	font-variant-numeric: tabular-nums;
+	text-align: center;
+}
+
+.optimus-panel-empty,
+.optimus-panel-log {
+	min-height: 0;
+	background: var(--optimus-bg);
+}
+
+.optimus-panel-empty {
+	display: grid;
+	place-items: center;
+	align-content: center;
+	gap: 12px;
+	transform: translateY(-8%);
+	padding: 0 20px;
+}
+
+.optimus-panel-empty-icon {
+	width: 48px;
+	height: 64px;
+	display: block;
+	background:
+		linear-gradient(currentColor 0 0) center 11px / 22px 3px no-repeat,
+		linear-gradient(currentColor 0 0) center 20px / 30px 3px no-repeat,
+		linear-gradient(currentColor 0 0) center 29px / 26px 3px no-repeat;
+	color: color-mix(in srgb, var(--vscode-icon-foreground, var(--optimus-text)) 62%, var(--optimus-focus));
+	opacity: .72;
+}
+
+.optimus-panel-empty-tagline {
+	max-width: 220px;
+	color: var(--optimus-muted);
+	font-size: 13px;
+	line-height: 20px;
+	text-align: center;
+}
+
+.optimus-panel-empty-hints {
+	display: grid;
+	gap: 4px;
+	margin-top: 4px;
+}
+
+.optimus-panel-empty-hint {
+	color: var(--optimus-subtle);
+	font-size: 11px;
+	line-height: 16px;
+	text-align: center;
+}
+
+.optimus-panel-starter {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	min-height: 0;
+	padding: 14px 12px;
+	overflow: auto;
+	background: var(--optimus-bg);
+}
+
+.optimus-panel-starter-card {
+	display: grid;
+	gap: 7px;
+	padding: 12px;
+	border: 1px solid var(--optimus-border-subtle);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--optimus-card) 76%, transparent);
+	box-shadow: inset 2px 0 0 var(--optimus-focus);
+}
+
+.optimus-panel-starter-card.green {
+	box-shadow: inset 2px 0 0 var(--optimus-success);
+}
+
+.optimus-panel-starter-card.pink {
+	box-shadow: inset 2px 0 0 var(--optimus-danger);
+}
+
+.optimus-panel-starter-card span {
+	color: var(--optimus-muted);
+	font-family: var(--vscode-editor-font-family, "SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", monospace);
+	font-size: 11px;
+}
+
+.optimus-panel-starter-card h2 {
+	margin: 0;
+	color: var(--optimus-text);
+	font-size: 14px;
+	font-weight: 650;
+}
+
+.optimus-panel-starter-card p {
+	margin: 0;
+	color: var(--optimus-text);
+	font-size: 12.5px;
+	line-height: 1.45;
+}
+
+.optimus-panel-starter-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.optimus-panel-starter-row {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) 96px;
+	gap: 8px;
+	align-items: center;
+	min-height: 28px;
+	padding: 5px 7px;
+	border: 1px solid var(--optimus-border-subtle);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-size: 11.5px;
+}
+
+.optimus-panel-starter-row span:first-child {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--optimus-focus);
+}
+
+.optimus-panel-starter-row span:nth-child(2) {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-panel-starter-row span:last-child {
+	height: 7px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--optimus-focus) 24%, var(--optimus-card-soft));
+}
+
+.optimus-history-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-height: 0;
+	padding: 8px 10px 12px;
+	overflow: auto;
+	background: var(--optimus-bg);
+	scrollbar-width: thin;
+}
+
+.optimus-history-item {
+	display: grid;
+	gap: 3px;
+	width: 100%;
+	min-height: 46px;
+	padding: 7px 8px;
+	border: 1px solid transparent;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--optimus-text);
+	text-align: left;
+}
+
+.optimus-history-item:hover,
+.optimus-history-item:focus,
+.optimus-history-item.active {
+	border-color: var(--optimus-border);
+	background: color-mix(in srgb, var(--optimus-card) 74%, transparent);
+	outline: none;
+}
+
+.optimus-history-item.active {
+	border-color: color-mix(in srgb, var(--optimus-focus) 50%, var(--optimus-border));
+	background: color-mix(in srgb, var(--optimus-focus) 10%, transparent);
+	box-shadow: none;
+}
+
+.optimus-history-title,
+.optimus-history-meta,
+.optimus-history-preview {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-history-title {
+	color: var(--optimus-text);
+	font-size: 12px;
+	font-weight: 650;
+	line-height: 16px;
+}
+
+.optimus-history-meta {
+	color: var(--optimus-muted);
+	font-size: 10.5px;
+	line-height: 14px;
+}
+
+.optimus-history-preview {
+	color: color-mix(in srgb, var(--optimus-muted) 84%, var(--optimus-text));
+	font-size: 11px;
+	line-height: 15px;
+}
+
+.optimus-history-empty {
+	margin: auto;
+	max-width: 240px;
+	padding: 20px;
+	color: var(--optimus-muted);
+	font-size: 12px;
+	line-height: 18px;
+	text-align: center;
+}
+
+.optimus-history-empty.error {
+	color: var(--optimus-danger);
+}
+
+.optimus-panel-log {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 10px;
+	padding: 14px 12px 18px;
+	overflow: auto;
+	scrollbar-width: thin;
+}
+
+.optimus-panel-message {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	width: 100%;
+	min-width: 0;
+	padding: 0;
+	border-radius: 6px;
+	overflow-wrap: anywhere;
+	word-break: normal;
+}
+
+.optimus-panel-message.agent {
+	align-self: stretch;
+	width: 100%;
+	max-width: 100%;
+	padding: 2px 2px 4px 10px;
+	border-left: 2px solid color-mix(in srgb, var(--optimus-border) 82%, transparent);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.optimus-panel-message-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.optimus-panel-message strong {
+	color: var(--optimus-muted);
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.optimus-panel-message p {
+	margin: 0;
+	color: var(--optimus-text);
+	font-size: var(--vscode-font-size, 13px);
+	line-height: 1.48;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.optimus-panel-message.user {
+	position: relative;
+	align-self: stretch;
+	padding: 2px 2px 4px;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+	color: var(--optimus-text);
+}
+
+.optimus-panel-message.agent .optimus-panel-message-header {
+	display: none;
+}
+
+.optimus-panel-change-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding-bottom: 6px;
+}
+
+.optimus-panel-review-card,
+.optimus-panel-file-card {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 7px;
+	min-height: 26px;
+	padding: 4px 6px;
+	border: 1px solid var(--optimus-border-subtle);
+	border-radius: 5px;
+	color: var(--optimus-muted);
+	background: transparent;
+	font-size: 11px;
+}
+
+.optimus-panel-review-card span:nth-child(2),
+.optimus-panel-file-card span:first-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-panel-review-icon {
+	width: 14px;
+	height: 14px;
+	display: inline-grid;
+	place-items: center;
+	color: var(--optimus-focus);
+}
+
+.optimus-panel-file-card {
+	grid-template-columns: minmax(0, 1fr) auto;
+	font-family: var(--vscode-editor-font-family, "SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", monospace);
+}
+
+.optimus-panel-file-card span:last-child {
+	color: var(--optimus-success);
+	font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+}
+
+.optimus-panel-composer {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-height: 98px;
+	margin: 0 10px 10px;
+	padding: 10px;
+	overflow: hidden;
+	border: 1px solid var(--optimus-border);
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--vscode-input-background, var(--optimus-card)) 92%, var(--optimus-bg));
+	box-shadow: 0 1px 3px color-mix(in srgb, var(--optimus-shadow) 40%, transparent);
+	transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+
+.optimus-panel-composer:hover {
+	border-color: color-mix(in srgb, var(--optimus-border) 60%, var(--optimus-focus) 20%);
+	box-shadow: 0 2px 8px color-mix(in srgb, var(--optimus-shadow) 60%, transparent);
+}
+
+.optimus-panel-composer:focus-within {
+	border-color: color-mix(in srgb, var(--optimus-focus) 62%, var(--optimus-border));
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--optimus-focus) 14%, transparent), 0 2px 8px color-mix(in srgb, var(--optimus-shadow) 50%, transparent);
+}
+
+.optimus-panel-composer textarea {
+	width: 100%;
+	min-height: 44px;
+	max-height: 132px;
+	box-sizing: border-box;
+	padding: 0;
+	resize: vertical;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: var(--optimus-text);
+	font-family: var(--vscode-editor-font-family, "SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", monospace);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.optimus-panel-composer textarea:disabled {
+	color: var(--vscode-disabledForeground, var(--optimus-muted));
+}
+
+.optimus-panel-composer-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	min-height: 24px;
+	padding: 0;
+	overflow: hidden;
+}
+
+.optimus-panel-composer-left,
+.optimus-panel-composer-right {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+}
+
+.optimus-panel-composer-left {
+	flex: 1 1 auto;
+	gap: 8px;
+	overflow: hidden;
+}
+
+.optimus-panel-composer-right {
+	flex: 0 0 auto;
+	justify-content: flex-end;
+	gap: 11px;
+	overflow: hidden;
+}
+
+@media (max-width: 1180px) {
+	.optimus-content {
+		grid-template-columns: minmax(0, 1fr) 380px;
+	}
+
+	.optimus-grid,
+	.optimus-task-board {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
+@media (max-width: 900px) {
+	.optimus-content {
+		grid-template-columns: 1fr;
+	}
+
+	.optimus-grid,
+	.optimus-task-board {
+		grid-template-columns: 1fr;
+	}
+
+	.optimus-drawer {
+		display: none;
+	}
+}

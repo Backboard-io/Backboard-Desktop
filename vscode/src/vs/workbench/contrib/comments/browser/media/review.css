@@ -368,7 +368,7 @@
 	background-color: var(--vscode-editorCommentsWidget-replyInputBackground);
 	color: var(--vscode-editor-foreground);
 	font-size: inherit;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .review-widget .body .comment-form-container .review-thread-reply-button:focus {

@@ -345,6 +345,7 @@ export class Sound {
 	public static readonly chatUserActionRequired = Sound.register({ fileName: 'chatUserActionRequired.mp3' });
 	public static readonly codeActionTriggered = Sound.register({ fileName: 'codeActionTriggered.mp3' });
 	public static readonly codeActionApplied = Sound.register({ fileName: 'codeActionApplied.mp3' });
+	public static readonly notificationReceived = Sound.register({ fileName: 'chatUserActionRequired.mp3' });
 
 	private constructor(public readonly fileName: string) { }
 }
@@ -696,5 +697,12 @@ export class AccessibilitySignal {
 		sound: Sound.chatUserActionRequired,
 		announcementMessage: localize('accessibility.signals.chatUserActionRequired', 'Chat User Action Required'),
 		settingsKey: 'accessibility.signals.chatUserActionRequired'
+	});
+
+	public static readonly notificationReceived = AccessibilitySignal.register({
+		name: localize('accessibilitySignals.notificationReceived', 'Notification Received'),
+		sound: Sound.notificationReceived,
+		announcementMessage: localize('accessibility.signals.notificationReceived', 'Notification Received'),
+		settingsKey: 'accessibility.signals.notificationReceived'
 	});
 }

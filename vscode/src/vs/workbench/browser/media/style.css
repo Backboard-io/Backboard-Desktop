@@ -115,6 +115,7 @@
 	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	--vscode-font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	--vscode-editor-font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
+	--monaco-monospace-font: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 /* Global Styles */

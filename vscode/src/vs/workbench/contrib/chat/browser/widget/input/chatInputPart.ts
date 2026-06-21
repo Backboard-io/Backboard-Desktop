@@ -61,7 +61,7 @@ import { IActionWidgetService } from '../../../../../../platform/actionWidget/br
 import { IActionWidgetDropdownAction, IActionWidgetDropdownActionProvider, IActionWidgetDropdownOptions } from '../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../../platform/contextkey/common/contextkey.js';
-import { IFileService } from '../../../../../../platform/files/common/files.js';
+import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../../platform/files/common/files.js';
 import { registerAndCreateHistoryNavigationContext } from '../../../../../../platform/history/browser/contextScopedHistoryWidget.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../../../platform/instantiation/common/serviceCollection.js';
@@ -77,6 +77,7 @@ import { ISharedWebContentExtractorService } from '../../../../../../platform/we
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../../platform/workspace/common/workspace.js';
 import { ISCMService } from '../../../../scm/common/scm.js';
 import { IWorkbenchLayoutService, Position } from '../../../../../services/layout/browser/layoutService.js';
+import { IPathService } from '../../../../../services/path/common/pathService.js';
 import { IViewDescriptorService, ViewContainerLocation } from '../../../../../common/views.js';
 import { ResourceLabels } from '../../../../../browser/labels.js';
 import { IChatEntitlementService } from '../../../../../services/chat/common/chatEntitlementService.js';
@@ -209,10 +210,17 @@ export interface IBackboardUsageMetricRow {
 	readonly value: string;
 }
 
+export interface IBackboardUsageEventMetric {
+	readonly title: string;
+	readonly subtitle: string;
+	readonly rows: readonly IBackboardUsageMetricRow[];
+}
+
 export interface IBackboardUsageMetrics {
 	readonly title: string;
 	readonly description: string;
 	readonly rows: readonly IBackboardUsageMetricRow[];
+	readonly events?: readonly IBackboardUsageEventMetric[];
 }
 
 export const enum ChatWidgetLocation {
@@ -591,6 +599,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private _chatSessionIsEmpty = false;
 	private _pendingDelegationTarget: AgentSessionTarget | undefined = undefined;
 	private _currentSessionType: string | undefined = undefined;
+	private _backboardRecentUsageCache: { readonly fetchedAt: number; readonly metrics: IBackboardUsageMetrics } | undefined;
+	private _backboardRecentUsagePromise: Promise<IBackboardUsageMetrics> | undefined;
 
 	constructor(
 		// private readonly editorOptions: ChatEditorOptions, // TODO this should be used
@@ -622,6 +632,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@ISCMService private readonly scmService: ISCMService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
+		@IPathService private readonly pathService: IPathService,
 		@IViewDescriptorService private readonly viewDescriptorService: IViewDescriptorService,
 		@IChatAttachmentWidgetRegistry private readonly _chatAttachmentWidgetRegistry: IChatAttachmentWidgetRegistry,
 		@IChatInputNotificationService private readonly chatInputNotificationService: IChatInputNotificationService,
@@ -1172,36 +1183,251 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const selectedModel = this._currentLanguageModel.get();
 		const metadata = selectedModel?.metadata;
 		const items = this._widget?.viewModel?.getItems() ?? [];
-		const latestResponse = findLast(items, isResponseVM);
+		const responses = items.filter(isResponseVM);
+		const latestResponse = responses[responses.length - 1];
 		const usage = latestResponse?.usageObs.get();
 		const streamStats = latestResponse?.contentUpdateTimings;
+		const sessionUsage = this._getSessionUsageMetrics(responses);
 		const promptTokens = usage?.promptTokens;
 		const completionTokens = usage?.completionTokens ?? latestResponse?.completionTokenCountObs.get();
-		const totalTokens = typeof promptTokens === 'number' && typeof completionTokens === 'number'
+		const latestTokens = typeof promptTokens === 'number' && typeof completionTokens === 'number'
 			? promptTokens + completionTokens
-			: undefined;
+			: completionTokens;
 		const estimatedCost = this._formatEstimatedCost(promptTokens, completionTokens, metadata);
+		const estimatedSessionCost = this._formatEstimatedCost(sessionUsage.promptTokens, sessionUsage.completionTokens, metadata);
 		const speed = streamStats && streamStats.impliedWordLoadRate > 0
 			? localize('backboardUsageMetrics.speedWords', "{0}/sec", `${streamStats.impliedWordLoadRate.toFixed(1)} words`)
-			: localize('backboardUsageMetrics.pending', "Waiting for usage data");
+			: latestResponse && !latestResponse.isComplete
+				? localize('backboardUsageMetrics.pending', "Waiting for usage data")
+				: localize('backboardUsageMetrics.notAvailable', "Not available");
 
 		return {
 			title: localize('backboardUsageMetrics.title', "Backboard run metrics"),
-			description: latestResponse
-				? localize('backboardUsageMetrics.descriptionWithResponse', "Latest response metrics from the current chat session.")
+			description: responses.length
+				? localize('backboardUsageMetrics.descriptionWithResponse', "Session totals from response usage and live output tokens.")
 				: localize('backboardUsageMetrics.descriptionNoResponse', "Send a message to populate response metrics."),
 			rows: [
 				{ label: localize('backboardUsageMetrics.model', "Model"), value: metadata?.name ?? selectedModel?.identifier ?? localize('backboardUsageMetrics.unknown', "Unknown") },
 				{ label: localize('backboardUsageMetrics.provider', "Provider"), value: metadata?.vendor ?? localize('backboardUsageMetrics.unknown', "Unknown") },
 				{ label: localize('backboardUsageMetrics.family', "Family"), value: metadata?.family ?? localize('backboardUsageMetrics.unknown', "Unknown") },
-				{ label: localize('backboardUsageMetrics.tokens', "Tokens"), value: typeof totalTokens === 'number' ? this._formatNumber(totalTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
-				{ label: localize('backboardUsageMetrics.promptTokens', "Input"), value: typeof promptTokens === 'number' ? this._formatNumber(promptTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
-				{ label: localize('backboardUsageMetrics.completionTokens', "Output"), value: typeof completionTokens === 'number' ? this._formatNumber(completionTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
-				{ label: localize('backboardUsageMetrics.cost', "Cost"), value: estimatedCost ?? metadata?.pricing ?? metadata?.priceCategory ?? localize('backboardUsageMetrics.pending', "Waiting for usage data") },
+				{ label: localize('backboardUsageMetrics.tokens', "Session Tokens"), value: sessionUsage.hasUsage ? this._formatNumber(sessionUsage.totalTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
+				{ label: localize('backboardUsageMetrics.promptTokens', "Session Input"), value: sessionUsage.hasPromptUsage ? this._formatNumber(sessionUsage.promptTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
+				{ label: localize('backboardUsageMetrics.completionTokens', "Session Output"), value: sessionUsage.hasCompletionUsage ? this._formatNumber(sessionUsage.completionTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
+				{ label: localize('backboardUsageMetrics.latestTokens', "Latest Response"), value: typeof latestTokens === 'number' ? this._formatNumber(latestTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
+				{ label: localize('backboardUsageMetrics.cost', "Session Cost"), value: estimatedSessionCost ?? estimatedCost ?? metadata?.pricing ?? metadata?.priceCategory ?? localize('backboardUsageMetrics.pending', "Waiting for usage data") },
 				{ label: localize('backboardUsageMetrics.speed', "Speed"), value: speed },
 				{ label: localize('backboardUsageMetrics.time', "Time"), value: this._formatElapsed(Date.now() - this._usageMetricsStartedAt) },
-				{ label: localize('backboardUsageMetrics.responses', "Responses"), value: this._formatNumber(items.filter(isResponseVM).length) },
+				{ label: localize('backboardUsageMetrics.responses', "Responses"), value: this._formatNumber(responses.length) },
 			],
+		};
+	}
+
+	public async getBackboardRecentUsageMetrics(): Promise<IBackboardUsageMetrics> {
+		const cached = this._backboardRecentUsageCache;
+		if (cached && Date.now() - cached.fetchedAt < 30_000) {
+			return cached.metrics;
+		}
+
+		this._backboardRecentUsagePromise ??= this._fetchBackboardRecentUsageMetrics()
+			.then(metrics => {
+				this._backboardRecentUsageCache = { fetchedAt: Date.now(), metrics };
+				return metrics;
+			})
+			.catch(error => ({
+				title: localize('backboardRecentUsage.errorTitle', "Recent Usage"),
+				description: localize('backboardRecentUsage.errorDescription', "Could not load Backboard billing activity."),
+				rows: [
+					{ label: localize('backboardRecentUsage.endpoint', "Endpoint"), value: 'GET /billing/usage/recent' },
+					{ label: localize('backboardRecentUsage.error', "Error"), value: error instanceof Error ? error.message : String(error) },
+				],
+			}))
+			.finally(() => {
+				this._backboardRecentUsagePromise = undefined;
+			});
+
+		return this._backboardRecentUsagePromise;
+	}
+
+	private async _fetchBackboardRecentUsageMetrics(): Promise<IBackboardUsageMetrics> {
+		const config = await this._readBackboardUsageConfig();
+		const apiKey = this._backboardConfigApiKey(config);
+		if (!apiKey) {
+			return {
+				title: localize('backboardRecentUsage.noKeyTitle', "Recent Usage"),
+				description: localize('backboardRecentUsage.noKeyDescription', "No Backboard API key was found on this machine."),
+				rows: [
+					{ label: localize('backboardRecentUsage.configPath', "Config"), value: '~/.backboard_ide/config.json' },
+					{ label: localize('backboardRecentUsage.endpoint', "Endpoint"), value: 'GET /billing/usage/recent' },
+				],
+			};
+		}
+
+		const url = new URL(`${this._backboardConfigApiUrl(config)}/billing/usage/recent`);
+		url.searchParams.set('page', '1');
+		url.searchParams.set('page_size', '5');
+
+		const response = await fetch(url.toString(), {
+			method: 'GET',
+			headers: { 'X-API-Key': apiKey },
+		});
+		if (!response.ok) {
+			throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
+		}
+
+		const payload: unknown = await response.json();
+		return this._parseBackboardRecentUsageMetrics(payload);
+	}
+
+	private _parseBackboardRecentUsageMetrics(payload: unknown): IBackboardUsageMetrics {
+		const record = this._isBackboardRecord(payload) ? payload : {};
+		const data = Array.isArray(record.data) ? record.data : Array.isArray(payload) ? payload : [];
+		const events = data
+			.filter(this._isBackboardRecord)
+			.map((event, index) => this._parseBackboardUsageEvent(event, index));
+		const totalCredits = data
+			.filter(this._isBackboardRecord)
+			.map(event => this._numberFromBackboardRecord(event.credits) ?? this._numberFromBackboardRecord(event.credit_amount) ?? this._numberFromBackboardRecord(event.cost) ?? this._numberFromBackboardRecord(event.total_cost) ?? this._numberFromBackboardRecord(event.amount))
+			.filter((value): value is number => typeof value === 'number')
+			.reduce((sum, value) => sum + value, 0);
+		const pagination = this._isBackboardRecord(record.pagination) ? record.pagination : undefined;
+		const page = this._numberFromBackboardRecord(pagination?.page) ?? this._numberFromBackboardRecord(pagination?.current_page);
+		const total = this._numberFromBackboardRecord(pagination?.total) ?? this._numberFromBackboardRecord(pagination?.total_items) ?? this._numberFromBackboardRecord(pagination?.count);
+
+		return {
+			title: localize('backboardRecentUsage.title', "Recent Usage"),
+			description: localize('backboardRecentUsage.description', "Live billing activity from Backboard."),
+			rows: [
+				{ label: localize('backboardRecentUsage.endpoint', "Endpoint"), value: 'GET /billing/usage/recent' },
+				{ label: localize('backboardRecentUsage.events', "Events"), value: this._formatNumber(events.length) },
+				...(totalCredits > 0 ? [{ label: localize('backboardRecentUsage.credits', "Credits"), value: this._formatCredits(totalCredits) }] : []),
+				...(typeof page === 'number' ? [{ label: localize('backboardRecentUsage.page', "Page"), value: this._formatNumber(page) }] : []),
+				...(typeof total === 'number' ? [{ label: localize('backboardRecentUsage.total', "Total"), value: this._formatNumber(total) }] : []),
+			],
+			events,
+		};
+	}
+
+	private _parseBackboardUsageEvent(event: Record<string, unknown>, index: number): IBackboardUsageEventMetric {
+		const model = this._stringFromBackboardRecord(event.model) ?? this._stringFromBackboardRecord(event.model_name) ?? this._stringFromBackboardRecord(event.modelName) ?? this._stringFromBackboardRecord(event.name);
+		const provider = this._stringFromBackboardRecord(event.provider) ?? this._stringFromBackboardRecord(event.vendor);
+		const createdAt = this._stringFromBackboardRecord(event.created_at) ?? this._stringFromBackboardRecord(event.createdAt) ?? this._stringFromBackboardRecord(event.timestamp) ?? this._stringFromBackboardRecord(event.time);
+		const creditType = this._stringFromBackboardRecord(event.credit_type) ?? this._stringFromBackboardRecord(event.creditType) ?? this._stringFromBackboardRecord(event.type) ?? this._stringFromBackboardRecord(event.event_type);
+		const inputTokens = this._numberFromBackboardRecord(event.input_tokens) ?? this._numberFromBackboardRecord(event.prompt_tokens);
+		const outputTokens = this._numberFromBackboardRecord(event.output_tokens) ?? this._numberFromBackboardRecord(event.completion_tokens);
+		const totalTokens = this._numberFromBackboardRecord(event.total_tokens)
+			?? (typeof inputTokens === 'number' || typeof outputTokens === 'number' ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined);
+		const credits = this._numberFromBackboardRecord(event.credits) ?? this._numberFromBackboardRecord(event.credit_amount) ?? this._numberFromBackboardRecord(event.cost) ?? this._numberFromBackboardRecord(event.total_cost) ?? this._numberFromBackboardRecord(event.amount);
+		const status = this._stringFromBackboardRecord(event.status);
+		const thread = this._stringFromBackboardRecord(event.thread_id) ?? this._stringFromBackboardRecord(event.threadId);
+
+		return {
+			title: model ?? creditType ?? localize('backboardRecentUsage.eventTitle', "Usage Event {0}", index + 1),
+			subtitle: [provider, creditType, createdAt ? this._formatBackboardUsageDate(createdAt) : undefined].filter(isDefined).join(' · '),
+			rows: [
+				...(typeof credits === 'number' ? [{ label: localize('backboardRecentUsage.eventCredits', "Credits"), value: this._formatCredits(credits) }] : []),
+				...(typeof inputTokens === 'number' ? [{ label: localize('backboardRecentUsage.eventInput', "Input"), value: this._formatNumber(inputTokens) }] : []),
+				...(typeof outputTokens === 'number' ? [{ label: localize('backboardRecentUsage.eventOutput', "Output"), value: this._formatNumber(outputTokens) }] : []),
+				...(typeof totalTokens === 'number' ? [{ label: localize('backboardRecentUsage.eventTotalTokens', "Total"), value: this._formatNumber(totalTokens) }] : []),
+				...(status ? [{ label: localize('backboardRecentUsage.eventStatus', "Status"), value: status }] : []),
+				...(thread ? [{ label: localize('backboardRecentUsage.eventThread', "Thread"), value: thread }] : []),
+			],
+		};
+	}
+
+	private async _readBackboardUsageConfig(): Promise<Record<string, unknown>> {
+		const resource = URI.joinPath(await this.pathService.userHome({ preferLocal: true }), '.backboard_ide', 'config.json');
+		try {
+			const parsed: unknown = JSON.parse((await this.fileService.readFile(resource)).value.toString());
+			return this._isBackboardRecord(parsed) ? parsed : {};
+		} catch (error) {
+			if (toFileOperationResult(error) === FileOperationResult.FILE_NOT_FOUND || error instanceof SyntaxError) {
+				return {};
+			}
+			throw error;
+		}
+	}
+
+	private _backboardConfigApiUrl(config: Record<string, unknown>): string {
+		const configured = this._stringFromBackboardRecord(config.api_url) ?? this._stringFromBackboardRecord(config.apiUrl) ?? this.configurationService.getValue<string>('backboard.apiUrl');
+		return (configured || 'https://app.backboard.io/api').replace(/\/+$/, '');
+	}
+
+	private _backboardConfigApiKey(config: Record<string, unknown>): string | undefined {
+		const apiKey = this._stringFromBackboardRecord(config.api_key) ?? this._stringFromBackboardRecord(config.apiKey);
+		if (apiKey) {
+			return apiKey;
+		}
+		const env = this._normalizeBackboardEnv(config.env);
+		const envKeys = this._isBackboardRecord(config.env_keys) ? config.env_keys : {};
+		return this._stringFromBackboardRecord(envKeys[env]);
+	}
+
+	private _normalizeBackboardEnv(value: unknown): string {
+		const env = this._stringFromBackboardRecord(value);
+		return (env || 'prod').trim().toLowerCase();
+	}
+
+	private _formatBackboardUsageDate(value: string): string {
+		const date = new Date(value);
+		return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+	}
+
+	private _formatCredits(value: number): string {
+		return value < 0.01 ? '<0.01 credits' : `${value.toFixed(2)} credits`;
+	}
+
+	private _stringFromBackboardRecord(value: unknown): string | undefined {
+		return typeof value === 'string' ? value.trim() || undefined : undefined;
+	}
+
+	private _numberFromBackboardRecord(value: unknown): number | undefined {
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			return value;
+		}
+		if (typeof value === 'string') {
+			const parsed = Number(value);
+			return Number.isFinite(parsed) ? parsed : undefined;
+		}
+		return undefined;
+	}
+
+	private _isBackboardRecord(value: unknown): value is Record<string, unknown> {
+		return typeof value === 'object' && value !== null && !Array.isArray(value);
+	}
+
+	private _getSessionUsageMetrics(responses: readonly IChatResponseViewModel[]): { promptTokens: number; completionTokens: number; totalTokens: number; hasPromptUsage: boolean; hasCompletionUsage: boolean; hasUsage: boolean } {
+		let promptTokens = 0;
+		let completionTokens = 0;
+		let hasPromptUsage = false;
+		let hasCompletionUsage = false;
+
+		for (const response of responses) {
+			const usage = response.usageObs.get();
+			if (typeof usage?.promptTokens === 'number') {
+				promptTokens += usage.promptTokens;
+				hasPromptUsage = true;
+			}
+
+			if (typeof usage?.completionTokens === 'number') {
+				completionTokens += usage.completionTokens;
+				hasCompletionUsage = true;
+				continue;
+			}
+
+			const liveCompletionTokens = response.completionTokenCountObs.get();
+			if (typeof liveCompletionTokens === 'number') {
+				completionTokens += liveCompletionTokens;
+				hasCompletionUsage = true;
+			}
+		}
+
+		return {
+			promptTokens,
+			completionTokens,
+			totalTokens: promptTokens + completionTokens,
+			hasPromptUsage,
+			hasCompletionUsage,
+			hasUsage: hasPromptUsage || hasCompletionUsage,
 		};
 	}
 
@@ -1214,10 +1440,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		if (typeof inputCost !== 'number' || typeof outputCost !== 'number') {
 			return undefined;
 		}
-		const cost = ((promptTokens * inputCost) + (completionTokens * outputCost)) / 1_000_000;
-		return cost < 0.01
-			? localize('backboardUsageMetrics.costTiny', "<$0.01")
-			: `$${cost.toFixed(2)}`;
+		const credits = ((promptTokens * inputCost) + (completionTokens * outputCost)) / 1_000_000;
+		return credits < 0.01
+			? localize('backboardUsageMetrics.costTiny', "<0.01 credits")
+			: localize('backboardUsageMetrics.costCredits', "{0} credits", credits.toFixed(2));
 	}
 
 	private _formatNumber(value: number): string {
@@ -2733,9 +2959,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			]);
 		}
 		this.container = elements.root;
-		this.chatInputOverlay = dom.$('.chat-input-overlay');
 		container.append(this.container);
-		this.container.append(this.chatInputOverlay);
 		this.container.classList.toggle('compact', this.options.renderStyle === 'compact');
 
 		// Create a scoped context key service for option group visibility expressions
@@ -2747,6 +2971,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const inputContainer = elements.inputContainer; // The chat editor, attachments, and toolbars
 		this.inputContainer = inputContainer;
 		const editorContainer = elements.editorContainer;
+		this.chatInputOverlay = editorContainer.appendChild(dom.$('.chat-input-overlay'));
 		this.attachmentsContainer = elements.attachmentsContainer;
 		this.attachedContextContainer = elements.attachedContextContainer;
 		const toolbarsContainer = elements.inputToolbars;

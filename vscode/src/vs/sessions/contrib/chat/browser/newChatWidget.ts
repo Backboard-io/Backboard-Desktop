@@ -15,6 +15,7 @@ import { isWeb } from '../../../../base/common/platform.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
@@ -41,6 +42,7 @@ import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBa
 // #region --- New Chat Widget ---
 
 const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 180;
+const NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT = 260;
 
 export class NewChatWidget extends Disposable {
 
@@ -76,6 +78,7 @@ export class NewChatWidget extends Disposable {
 		@IAgentHostFilterService private readonly agentHostFilterService: IAgentHostFilterService,
 		@ISessionsProvidersService private readonly sessionsProvidersService: ISessionsProvidersService,
 		@IChatService private readonly chatService: IChatService,
+		@IDialogService private readonly dialogService: IDialogService,
 	) {
 		super();
 		// On web (vscode.dev / insiders.vscode.dev), use {@link WebWorkspacePicker}
@@ -208,7 +211,7 @@ export class NewChatWidget extends Disposable {
 		this._renderMiddleSection(chatWidgetContent);
 		this._widget.render(chatWidgetContent);
 		this._widget.setVisible(true);
-		this._widget.setInputPartMaxHeightOverride(NEW_CHAT_COMPOSER_LAYOUT_HEIGHT);
+		this._widget.setInputPartMaxHeightOverride(NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT);
 		this._makeComposerEasyToFocus();
 		this.layout(NEW_CHAT_COMPOSER_LAYOUT_HEIGHT, chatWidgetContent.clientWidth);
 
@@ -520,6 +523,12 @@ export class NewChatWidget extends Disposable {
 				session = this._session.get();
 			}
 			if (!session) {
+				await this.dialogService.confirm({
+					type: 'warning',
+					title: localize('newChatChooseWorkspaceTitle', "Choose a Workspace"),
+					message: localize('newChatChooseWorkspaceBeforeSending', "Choose a workspace before sending a message."),
+					primaryButton: localize({ key: 'newChatChooseWorkspaceOk', comment: ['&& denotes a mnemonic'] }, "&&OK"),
+				});
 				this._workspacePicker.showPicker();
 				return true;
 			}
@@ -529,7 +538,7 @@ export class NewChatWidget extends Disposable {
 			provider?.setModel(session.sessionId, input.currentLanguageModel);
 		}
 		const modeKind = input.currentModeKind;
-		const sent = await this._send({
+		const sendOptions: ISendRequestOptions = {
 			query,
 			attachedContext: input.getAttachedAndImplicitContext().asArray(),
 			userSelectedModelId: input.currentLanguageModel,
@@ -540,9 +549,11 @@ export class NewChatWidget extends Disposable {
 				enabledTools: modeKind === ChatModeKind.Agent ? input.selectedToolsModel.userSelectedTools.get() : undefined,
 				enabledSubAgents: modeKind === ChatModeKind.Agent ? input.currentModeObs.get().agents?.get() : undefined,
 			},
-		});
-		if (sent) {
-			input.acceptInput(true);
+		};
+		await input.acceptInput(true, true);
+		const sent = await this._send(sendOptions);
+		if (!sent) {
+			this._widget.setInput(query);
 		}
 		return true;
 	}

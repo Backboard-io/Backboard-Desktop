@@ -140,7 +140,7 @@
 	border-right: #000 2px;
 	font-weight: bold;
 	white-space: pre;
-	font-family: monospace;
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .test-renderer .suite-title {
@@ -173,7 +173,7 @@
 }
 
 .request-container .title {
-	font-family: Arial, "Segoe UI";
+	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	font-size: 1em;
 	font-weight: bold;
 }
@@ -206,14 +206,14 @@
 }
 
 .step-title {
-	font-family: Arial, "Segoe UI";
+	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	font-size: 1.1em;
 	font-weight: bold;
 	margin-top: 5px;
 }
 
 .error-comparison {
-	font-family: Arial, 'Segoe UI';
+	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	margin-left: 30px;
 	margin-top: 10px;
 	margin-bottom: 10px;
@@ -267,7 +267,7 @@
 
 /*
 .step-markdown {
-	font-family: Arial;
+	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	width: 400px;
 	margin-left: 30px
 }

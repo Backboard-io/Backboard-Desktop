@@ -65,6 +65,10 @@ const defaultChat = {
 	chatExtensionId: product.defaultChatAgent?.chatExtensionId ?? '',
 };
 
+function isBackboardDefaultChatAgent(): boolean {
+	return product.defaultChatAgent?.provider?.default?.id === 'backboard';
+}
+
 const SIGN_IN_TITLE_BAR_ACTION_ID = 'workbench.action.chat.signInIndicator';
 
 export class ChatSetupContribution extends Disposable implements IWorkbenchContribution {
@@ -94,7 +98,9 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 
 		const controller = new Lazy(() => this._register(this.instantiationService.createInstance(ChatSetupController, context, requests)));
 
-		this.registerSetupAgents(context, controller);
+		if (!isBackboardDefaultChatAgent()) {
+			this.registerSetupAgents(context, controller);
+		}
 		this.registerGrowthSession(chatEntitlementService);
 		this.registerActions(context, requests, controller);
 		this.registerSignInTitleBarEntry(actionViewItemService);
@@ -665,6 +671,11 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 	}
 
 	private async checkExtensionInstallation(context: ChatEntitlementContext): Promise<void> {
+		if (isBackboardDefaultChatAgent() || !defaultChat.chatExtensionId) {
+			context.update({ installed: true, disabled: false, untrusted: false, disabledInWorkspace: false });
+			context.update({ completed: true });
+			return;
+		}
 
 		// When developing extensions, await registration and then check
 		if (this.environmentService.isExtensionDevelopment) {

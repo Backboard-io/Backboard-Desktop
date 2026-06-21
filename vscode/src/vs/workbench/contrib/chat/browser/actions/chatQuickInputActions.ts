@@ -71,7 +71,6 @@ class QuickChatGlobalAction extends Action2 {
 		super({
 			id: ASK_QUICK_QUESTION_ACTION_ID,
 			title: localize2('quickChat', 'Open Quick Chat'),
-			precondition: ChatContextKeys.enabled,
 			icon: BackboardLogoIcon,
 			f1: false,
 			category: CHAT_CATEGORY,

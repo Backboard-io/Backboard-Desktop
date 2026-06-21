@@ -21,7 +21,7 @@
 
 .monaco-select-box-dropdown-container > .select-box-details-pane > .select-box-description-markdown code {
 	line-height: 15px; /** For some reason, this is needed, otherwise <code> will take up 20px height */
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 

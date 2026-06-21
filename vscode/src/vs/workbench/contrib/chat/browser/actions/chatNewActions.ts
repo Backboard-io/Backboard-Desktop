@@ -18,14 +18,13 @@ import { ChatContextKeyExprs, ChatContextKeys } from '../../common/actions/chatC
 import { IChatEditingSession } from '../../common/editing/chatEditingService.js';
 import { IChatService } from '../../common/chatService/chatService.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from '../../common/constants.js';
-import { ChatViewId, IChatWidgetService } from '../chat.js';
+import { ChatViewId, IChatWidget, IChatWidgetService } from '../chat.js';
 import { EditingSessionAction, EditingSessionActionContext, getEditingSessionContext } from '../chatEditing/chatEditingActions.js';
 import { ACTION_ID_NEW_CHAT, ACTION_ID_NEW_EDIT_SESSION, CHAT_CATEGORY, clearChatSessionPreservingType, handleCurrentEditingSession } from './chatActions.js';
 import { clearChatEditor } from './chatClear.js';
-import { AgentSessionProviders, AgentSessionsViewerOrientation } from '../agentSessions/agentSessions.js';
+import { AgentSessionProviders, AgentSessionsViewerOrientation, BackboardLogoIcon } from '../agentSessions/agentSessions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IChatSessionsService } from '../../common/chatSessionsService.js';
-import { BackboardLogoIcon } from '../agentSessions/agentSessions.js';
 
 export interface INewEditSessionActionContext {
 
@@ -84,7 +83,6 @@ export function registerNewChatActions() {
 				title: localize2('chat.newChat.label', "New Chat"),
 				icon: Codicon.plus,
 				f1: false,
-				precondition: ChatContextKeys.enabled,
 			});
 		}
 		async run(accessor: ServicesAccessor, ...args: unknown[]) {
@@ -99,7 +97,6 @@ export function registerNewChatActions() {
 				title: localize2('chat.newEdits.label', "New Chat"),
 				category: CHAT_CATEGORY,
 				icon: Codicon.plus,
-				precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat)),
 				f1: true,
 				menu: [
 					{
@@ -154,7 +151,6 @@ export function registerNewChatActions() {
 					title: localize2('chat.newEdits.label', "New Chat"),
 					category: CHAT_CATEGORY,
 					icon: variant.icon,
-					precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat)),
 					f1: false,
 					menu: [{
 						id: MenuId.ChatNewMenu,
@@ -182,7 +178,6 @@ export function registerNewChatActions() {
 				title: localize2('chat.newLocalChat.label', "New Local Chat"),
 				category: CHAT_CATEGORY,
 				icon: Codicon.plus,
-				precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat)),
 				f1: false,
 			});
 		}
@@ -212,7 +207,6 @@ export function registerNewChatActions() {
 			id: ACTION_ID_NEW_CHAT,
 			title: localize2('chat.newEdits.label', "New Chat"),
 		},
-		when: ChatContextKeys.enabled,
 		group: 'b_new',
 		order: -1,
 	});
@@ -318,13 +312,14 @@ async function runNewChatAction(
 	const viewsService = accessor.get(IViewsService);
 	const configurationService = accessor.get(IConfigurationService);
 	const chatSessionsService = accessor.get(IChatSessionsService);
+	const chatWidgetService = accessor.get(IChatWidgetService);
+	const dialogService = accessor.get(IDialogService);
 
-	const { editingSession, chatWidget: widget } = context ?? {};
+	const editingSession = context?.editingSession;
+	const widget = context?.chatWidget ?? await resolveChatWidgetForNewChat(chatWidgetService);
 	if (!widget) {
 		return;
 	}
-
-	const dialogService = accessor.get(IDialogService);
 
 	const model = widget.viewModel?.model;
 	if (model && !(await handleCurrentEditingSession(model, undefined, dialogService))) {
@@ -358,4 +353,19 @@ async function runNewChatAction(
 			widget.acceptInput(executeCommandContext.inputValue);
 		}
 	}
+}
+
+async function resolveChatWidgetForNewChat(chatWidgetService: IChatWidgetService): Promise<IChatWidget | undefined> {
+	const lastFocusedWidget = chatWidgetService.lastFocusedWidget;
+	if (lastFocusedWidget?.viewModel) {
+		return lastFocusedWidget;
+	}
+
+	const chatWidgets = chatWidgetService.getWidgetsByLocations(ChatAgentLocation.Chat);
+	const lastChatWidget = chatWidgets[chatWidgets.length - 1];
+	if (lastChatWidget?.viewModel) {
+		return lastChatWidget;
+	}
+
+	return chatWidgetService.revealWidget();
 }

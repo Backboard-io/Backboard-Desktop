@@ -825,7 +825,7 @@
 			}
 
 			.output-error-details {
-				font-family: var(--monaco-monospace-font);
+				font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 				font-size: var(--vscode-chat-font-size-body-xs);
 			}
 		}
@@ -889,7 +889,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 	.monaco-tokenized-source,
 	code {
-		font-family: var(--monaco-monospace-font);
+		font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 		font-size: var(--vscode-chat-font-size-body-xs);
 		color: var(--vscode-textPreformat-foreground);
 		background-color: var(--vscode-textPreformat-background);
@@ -1207,14 +1207,57 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	display: none;
 }
 
+.interactive-session .chat-input-status-container .backboard-usage-status-action .action-label,
+.interactive-session .chat-input-status-container .backboard-usage-status-control {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	border: 1px solid color-mix(in srgb, var(--vscode-contrastBorder, transparent) 50%, transparent);
+	border-radius: 5px;
+	color: var(--vscode-descriptionForeground);
+	background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 42%, transparent);
+	opacity: 0.92;
+	box-sizing: border-box;
+	position: relative;
+}
+
+.interactive-session .chat-input-status-container .backboard-usage-status-action .action-label::after,
+.interactive-session .chat-input-status-container .backboard-usage-status-control::after {
+	content: "";
+	position: absolute;
+	right: 3px;
+	bottom: 3px;
+	width: 4px;
+	height: 4px;
+	border-radius: 50%;
+	background: var(--vscode-focusBorder);
+	box-shadow: 0 0 0 1px var(--vscode-editor-background);
+}
+
+.interactive-session .chat-input-status-container .backboard-usage-status-action .action-label:hover,
+.interactive-session .chat-input-status-container .backboard-usage-status-control:hover {
+	color: var(--vscode-foreground);
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 62%, transparent);
+	background: color-mix(in srgb, var(--vscode-focusBorder) 16%, var(--vscode-toolbar-hoverBackground));
+	opacity: 1;
+}
+
+.interactive-session .chat-input-status-container .backboard-usage-status-action .action-label:focus-visible,
+.interactive-session .chat-input-status-container .backboard-usage-status-control:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
 /* Hover popup contents shown when hovering an item in the chat-input-status toolbar */
 .chat-input-status-hover.chat-input-status-hover-content {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
-	padding: 8px 10px;
-	min-width: 240px;
-	max-width: 420px;
+	gap: 8px;
+	padding: 10px;
+	min-width: 320px;
+	max-width: 540px;
 }
 
 .chat-input-status-hover .chat-input-status-hover-title {
@@ -1244,7 +1287,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 .chat-input-status-hover .chat-input-status-hover-detail code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11px;
 	background: var(--vscode-textCodeBlock-background, transparent);
 	padding: 1px 4px;
@@ -1296,6 +1339,132 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	display: flex;
 	justify-content: flex-end;
 	margin-top: 4px;
+}
+
+.backboard-usage-metrics-hover {
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: 8px;
+	background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+	box-shadow: 0 8px 24px var(--vscode-widget-shadow, rgb(0 0 0 / 24%));
+}
+
+.backboard-usage-metrics-hover .chat-input-status-hover-title {
+	font-size: 12px;
+	line-height: 16px;
+}
+
+.backboard-usage-metrics-hover .chat-input-status-hover-description {
+	font-size: 11px;
+	line-height: 15px;
+}
+
+.backboard-usage-summary-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+}
+
+.backboard-usage-summary-item {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+	padding: 6px 7px;
+	border: 1px solid color-mix(in srgb, var(--vscode-widget-border) 70%, transparent);
+	border-radius: 5px;
+	background: color-mix(in srgb, var(--vscode-editor-background) 90%, var(--vscode-foreground) 10%);
+}
+
+.backboard-usage-summary-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-descriptionForeground);
+	font-size: 10px;
+	line-height: 12px;
+}
+
+.backboard-usage-summary-value {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-foreground);
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 15px;
+	font-variant-numeric: tabular-nums;
+}
+
+.backboard-usage-events {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	margin-top: 0;
+	max-height: 260px;
+	overflow-y: auto;
+	padding-right: 2px;
+}
+
+.backboard-usage-event {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 6px 7px;
+	border: 1px solid color-mix(in srgb, var(--vscode-widget-border) 82%, transparent);
+	border-radius: 5px;
+	background: color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%);
+}
+
+.backboard-usage-event-header {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.backboard-usage-event-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+}
+
+.backboard-usage-event-subtitle {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.backboard-usage-event-rows {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 3px 8px;
+}
+
+.backboard-usage-event-row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 6px;
+	min-width: 0;
+	font-size: 11px;
+}
+
+.backboard-usage-event-row-label {
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+}
+
+.backboard-usage-event-row-value {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-foreground);
+	font-variant-numeric: tabular-nums;
 }
 
 /* When context usage is inside the toolbars (compact mode), keep the ordering */
@@ -1816,6 +1985,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .chat-editor-container {
 	padding: 0 0 0 4px;
+	position: relative;
 }
 
 /* Enable container query units for placeholder truncation. Scoped to
@@ -1888,6 +2058,9 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	align-items: center;
 	gap: 6px;
 	margin-top: 4px;
+	position: relative;
+	z-index: 102;
+	pointer-events: auto;
 }
 
 /* Secondary toolbar below the input box */
@@ -1896,6 +2069,9 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	align-items: center;
 	gap: 6px;
 	padding: 0 4px;
+	position: relative;
+	z-index: 102;
+	pointer-events: auto;
 }
 
 .interactive-session .chat-secondary-toolbar:empty {
@@ -2728,7 +2904,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 .interactive-session .interactive-input-part .interactive-input-followups .interactive-session-followups code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 11px;
 }
 
@@ -3490,7 +3666,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	padding: 4px 6px;
 	background: var(--vscode-textCodeBlock-background);
 	border-radius: 3px;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 12px;
 	line-height: 1.5;
 	white-space: pre;
@@ -3518,14 +3694,14 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 .chat-element-hover .chat-element-hover-label {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 12px;
 	color: var(--vscode-debugTokenExpression-name);
 	white-space: nowrap;
 }
 
 .chat-element-hover .chat-element-hover-value {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 12px;
 	color: var(--vscode-editor-foreground);
 	word-break: break-all;
@@ -3544,7 +3720,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 .chat-element-hover .chat-element-hover-text {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 12px;
 	color: var(--vscode-editor-foreground);
 	white-space: pre-wrap;

@@ -297,7 +297,7 @@
 }
 
 .debug-pane .debug-watch .monaco-inputbox {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .debug-pane .monaco-inputbox > .ibwrapper {
@@ -321,7 +321,7 @@
 	font-style: italic;
 	text-overflow: ellipsis;
 	overflow: hidden;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-weight: normal;
 }
 .debug-view-content .monaco-tl-contents .highlight {

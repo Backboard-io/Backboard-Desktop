@@ -139,6 +139,17 @@ interface PanelThreadFile {
 	readonly entry?: unknown;
 }
 
+interface OptimusPanelCommand {
+	readonly id: string;
+	readonly type: string;
+	readonly createdAt?: number;
+	readonly prompt?: string;
+	readonly chatId?: string;
+	readonly workspace?: string;
+	readonly provider?: string;
+	readonly options?: unknown;
+}
+
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
 const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases';
@@ -157,6 +168,7 @@ let backboardUpdateInstallInProgress = false;
 let availableBackboardUpdate: UpdateManifest | undefined;
 let backboardUpdateStatusItem: vscode.StatusBarItem | undefined;
 let pendingBackboardOAuth: BackboardOAuthPending | undefined;
+let lastOptimusPanelCommandId: string | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
 	backboardToolOutput = vscode.window.createOutputChannel('Backboard Tools');
@@ -203,6 +215,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(configWatcher.onDidDelete(refreshBackboardState));
 	const panelStateWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardPanelStatePath()), path.basename(backboardPanelStatePath())));
 	const panelThreadsWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(backboardThreadsDir(), '*.json'));
+	const optimusCommandWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(optimusPanelCommandPath()), path.basename(optimusPanelCommandPath())));
 	const refreshPanelHistory = () => {
 		void panelProvider.postPanelStateSnapshot();
 	};
@@ -214,6 +227,13 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(panelThreadsWatcher.onDidCreate(refreshPanelHistory));
 	context.subscriptions.push(panelThreadsWatcher.onDidChange(refreshPanelHistory));
 	context.subscriptions.push(panelThreadsWatcher.onDidDelete(refreshPanelHistory));
+	const handleOptimusCommand = () => {
+		void handleOptimusPanelCommand(panelProvider);
+	};
+	context.subscriptions.push(optimusCommandWatcher);
+	context.subscriptions.push(optimusCommandWatcher.onDidCreate(handleOptimusCommand));
+	context.subscriptions.push(optimusCommandWatcher.onDidChange(handleOptimusCommand));
+	handleOptimusCommand();
 	context.subscriptions.push(vscode.window.registerWebviewViewProvider('backboard.panel', panelProvider, { webviewOptions: { retainContextWhenHidden: true } }));
 	startBackboardUpdateChecks(context);
 }
@@ -1283,8 +1303,74 @@ function backboardThreadsDir(): string {
 	return path.join(os.homedir(), '.backboard_ide', 'threads');
 }
 
+function optimusPanelCommandPath(): string {
+	return path.join(os.homedir(), '.backboard_ide', 'optimus-command.json');
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isOptimusPanelCommand(value: unknown): value is OptimusPanelCommand {
+	return isObjectRecord(value)
+		&& typeof value.id === 'string'
+		&& typeof value.type === 'string'
+		&& (value.createdAt === undefined || typeof value.createdAt === 'number')
+		&& (value.prompt === undefined || typeof value.prompt === 'string')
+		&& (value.chatId === undefined || typeof value.chatId === 'string')
+		&& (value.workspace === undefined || typeof value.workspace === 'string')
+		&& (value.provider === undefined || typeof value.provider === 'string');
+}
+
+async function handleOptimusPanelCommand(panelProvider: BackboardPanelProvider): Promise<void> {
+	let command: OptimusPanelCommand | undefined;
+	try {
+		const parsed: unknown = JSON.parse(await fs.promises.readFile(optimusPanelCommandPath(), 'utf8'));
+		command = isOptimusPanelCommand(parsed) ? parsed : undefined;
+	} catch (error) {
+		if (!isFileNotFoundError(error)) {
+			backboardToolOutput?.appendLine(`[optimus] failed to read command: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		return;
+	}
+	if (!command || command.id === lastOptimusPanelCommandId) {
+		return;
+	}
+	if (typeof command.createdAt === 'number' && Date.now() - command.createdAt > 10 * 60 * 1000) {
+		return;
+	}
+	lastOptimusPanelCommandId = command.id;
+	backboardToolOutput?.appendLine(`[optimus] received ${command.type}`);
+	switch (command.type) {
+		case 'newChat':
+			await openBackboardView();
+			await panelProvider.postUiCommand('newChat', command.workspace);
+			break;
+		case 'showHistory':
+			await openBackboardView();
+			await panelProvider.postUiCommand('showHistory', command.workspace);
+			break;
+		case 'showChat':
+			await openBackboardView();
+			await panelProvider.postUiCommand('showChat', command.workspace);
+			break;
+		case 'openHistoryEntry':
+			await openBackboardView();
+			await panelProvider.openHistoryEntry(command.chatId);
+			break;
+		case 'sendPrompt':
+			await openBackboardView();
+			panelProvider.submitPromptFromOptimus(command.prompt ?? '', asPanelOptions(command.options), command.chatId, command.workspace);
+			break;
+		case 'cancel':
+			panelProvider.cancelActiveRun();
+			break;
+		case 'reviewChanges':
+			await panelProvider.reviewChanges();
+			break;
+		default:
+			backboardToolOutput?.appendLine(`[optimus] ignored unknown command: ${command.type}`);
+	}
 }
 
 function isPanelPersistedState(value: unknown): value is PanelPersistedState {
@@ -1367,8 +1453,10 @@ function readSharedPanelState(workspace?: string): PanelPersistedState | undefin
 	const store = readSharedPanelStateStore();
 	const scoped = workspace ? store.byWorkspace?.[panelStateStorageKey(workspace)] : undefined;
 	const threaded = readSharedPanelThreadsState(workspace);
-	const threadedAnyWorkspace = workspace ? readSharedPanelThreadsState(undefined) : undefined;
-	return newerPanelState(scoped, store.latest, threaded, threadedAnyWorkspace);
+	if (workspace) {
+		return newerPanelState(scoped, threaded);
+	}
+	return newerPanelState(store.latest, threaded);
 }
 
 async function writeSharedPanelState(state: PanelPersistedState): Promise<void> {
@@ -1495,24 +1583,15 @@ function readSharedPanelThreadsState(workspace: string | undefined): PanelPersis
 }
 
 function readSharedPanelThreadEntries(workspace: string | undefined): unknown[] {
-	let fileNames: string[];
-	try {
-		fileNames = fs.readdirSync(backboardThreadsDir());
-	} catch {
-		return [];
-	}
 	const entries: unknown[] = [];
-	for (const fileName of fileNames) {
-		if (!fileName.endsWith('.json')) {
-			continue;
-		}
+	for (const threadPath of listPanelThreadFilesSync()) {
 		try {
-			const parsed: unknown = JSON.parse(fs.readFileSync(path.join(backboardThreadsDir(), fileName), 'utf8'));
+			const parsed: unknown = JSON.parse(fs.readFileSync(threadPath, 'utf8'));
 			if (!isObjectRecord(parsed)) {
 				continue;
 			}
 			const thread = parsed as PanelThreadFile;
-			if (workspace && thread.workspace && thread.workspace !== workspace) {
+			if (workspace && thread.workspace !== workspace) {
 				continue;
 			}
 			const rawEntry = thread.entry;
@@ -1524,6 +1603,28 @@ function readSharedPanelThreadEntries(workspace: string | undefined): unknown[] 
 		}
 	}
 	return entries.sort((left, right) => panelThreadEntryTimestamp(right) - panelThreadEntryTimestamp(left));
+}
+
+function readSharedPanelThreadWorkspace(id: string | undefined): string | undefined {
+	if (!id) {
+		return undefined;
+	}
+	for (const threadPath of listPanelThreadFilesSync()) {
+		try {
+			const parsed: unknown = JSON.parse(fs.readFileSync(threadPath, 'utf8'));
+			if (!isObjectRecord(parsed)) {
+				continue;
+			}
+			const entry = isObjectRecord(parsed.entry) ? parsed.entry : undefined;
+			const entryId = typeof entry?.id === 'string' ? entry.id : undefined;
+			if (entryId === id) {
+				return typeof parsed.workspace === 'string' ? parsed.workspace : undefined;
+			}
+		} catch {
+			// Ignore unreadable snapshots.
+		}
+	}
+	return undefined;
 }
 
 function panelThreadEntryTimestamp(value: unknown): number {
@@ -1541,17 +1642,20 @@ async function writeSharedPanelThreads(state: PanelPersistedState): Promise<void
 	const entries = Array.isArray(state.historyEntries) ? state.historyEntries : [];
 	const threadsDir = backboardThreadsDir();
 	await fs.promises.mkdir(threadsDir, { recursive: true });
+	const workspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined;
 	const currentIds = new Set<string>();
 	for (const entry of entries) {
 		if (!isObjectRecord(entry) || typeof entry.id !== 'string' || !entry.id) {
 			continue;
 		}
 		currentIds.add(entry.id);
-		const threadPath = path.join(threadsDir, `${safePanelThreadFileName(entry.id)}.json`);
+		const threadPath = panelThreadPath(workspace, entry.id);
+		await fs.promises.mkdir(path.dirname(threadPath), { recursive: true });
 		await writeJsonFileAtomic(threadPath, {
 			version: 1,
 			source: 'panel',
-			workspace: typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined,
+			workspace,
+			threadId: entry.id,
 			savedAt: typeof state.savedAt === 'number' ? state.savedAt : Date.now(),
 			entry,
 		});
@@ -1567,17 +1671,7 @@ async function pruneSharedPanelThreads(state: PanelPersistedState, currentIds: S
 	if (!workspace) {
 		return;
 	}
-	let fileNames: string[];
-	try {
-		fileNames = await fs.promises.readdir(backboardThreadsDir());
-	} catch {
-		return;
-	}
-	await Promise.all(fileNames.map(async fileName => {
-		if (!fileName.endsWith('.json')) {
-			return;
-		}
-		const threadPath = path.join(backboardThreadsDir(), fileName);
+	await Promise.all((await listPanelThreadFiles()).map(async threadPath => {
 		try {
 			const parsed: unknown = JSON.parse(await fs.promises.readFile(threadPath, 'utf8'));
 			if (!isObjectRecord(parsed)) {
@@ -1587,11 +1681,67 @@ async function pruneSharedPanelThreads(state: PanelPersistedState, currentIds: S
 			const entryId = typeof entry?.id === 'string' ? entry.id : undefined;
 			if (parsed.source === 'panel' && parsed.workspace === workspace && entryId && !currentIds.has(entryId)) {
 				await fs.promises.unlink(threadPath);
+				await removeEmptyAncestorDirectories(path.dirname(threadPath), backboardThreadsDir());
 			}
 		} catch {
 			// Leave unreadable files alone; they may be from a newer format.
 		}
 	}));
+}
+
+function listPanelThreadFilesSync(): string[] {
+	const root = backboardThreadsDir();
+	const files: string[] = [];
+	try {
+		for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+			const entryPath = path.join(root, entry.name);
+			if (entry.isFile() && entry.name.endsWith('.json')) {
+				files.push(entryPath);
+			} else if (entry.isDirectory()) {
+				for (const threadEntry of fs.readdirSync(entryPath, { withFileTypes: true })) {
+					const threadEntryPath = path.join(entryPath, threadEntry.name);
+					if (threadEntry.isFile() && threadEntry.name.endsWith('.json')) {
+						files.push(threadEntryPath);
+					} else if (threadEntry.isDirectory()) {
+						const threadPath = path.join(threadEntryPath, 'thread.json');
+						if (fs.existsSync(threadPath)) {
+							files.push(threadPath);
+						}
+					}
+				}
+			}
+		}
+	} catch {
+		return [];
+	}
+	return files;
+}
+
+async function listPanelThreadFiles(): Promise<string[]> {
+	return listPanelThreadFilesSync();
+}
+
+async function removeEmptyAncestorDirectories(startDir: string, stopDir: string): Promise<void> {
+	let current = startDir;
+	while (current.startsWith(stopDir) && current !== stopDir) {
+		try {
+			await fs.promises.rmdir(current);
+		} catch {
+			return;
+		}
+		current = path.dirname(current);
+	}
+}
+
+function panelThreadPath(workspace: string | undefined, id: string): string {
+	return path.join(backboardThreadsDir(), safeWorkspaceThreadDirName(workspace), safePanelThreadFileName(id), 'thread.json');
+}
+
+function safeWorkspaceThreadDirName(workspace: string | undefined): string {
+	const normalized = workspace || 'default';
+	const digest = crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 24);
+	const label = safePanelThreadFileName(path.basename(normalized) || 'default').slice(0, 40) || 'default';
+	return `${label}-${digest}`;
 }
 
 function safePanelThreadFileName(id: string): string {
@@ -1926,8 +2076,30 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 	constructor(private readonly bridge: BackboardBridge, private readonly context: vscode.ExtensionContext) {
 	}
 
-	async postUiCommand(command: 'newChat' | 'showHistory' | 'showChat'): Promise<boolean> {
-		return this.view?.webview.postMessage({ type: 'command', command }) ?? false;
+	async postUiCommand(command: 'newChat' | 'showHistory' | 'showChat', workspace?: string): Promise<boolean> {
+		return this.view?.webview.postMessage({ type: 'command', command, workspace }) ?? false;
+	}
+
+	async openHistoryEntry(chatId: string | undefined): Promise<boolean> {
+		if (!chatId) {
+			return this.postUiCommand('showHistory');
+		}
+		return this.view?.webview.postMessage({ type: 'command', command: 'openHistoryEntry', chatId }) ?? false;
+	}
+
+	submitPromptFromOptimus(prompt: string, options: PanelOptions, chatId: string | undefined, workspaceOverride: string | undefined): void {
+		if (!prompt.trim()) {
+			return;
+		}
+		this.runPrompt(prompt, options, chatId, undefined, workspaceOverride);
+	}
+
+	cancelActiveRun(): void {
+		this.runToken?.cancel();
+	}
+
+	async reviewChanges(): Promise<void> {
+		await vscode.commands.executeCommand('workbench.view.scm');
 	}
 
 	refreshState(): void {
@@ -2044,12 +2216,25 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		this.runToken?.cancel();
 		this.runToken = new vscode.CancellationTokenSource();
 		const token = this.runToken.token;
-		const effectiveWorkspace = workspaceOverride?.trim() || workspacePath();
-		const sessionId = `panel:${effectiveWorkspace ?? 'default'}:${chatId || 'default'}`;
+		const actualWorkspace = workspacePath();
+		const requestedWorkspace = workspaceOverride?.trim();
+		if (requestedWorkspace && actualWorkspace && requestedWorkspace !== actualWorkspace) {
+			backboardToolOutput?.appendLine(`[panel] ignored stale workspace override ${requestedWorkspace}; using open workspace ${actualWorkspace}`);
+			await view.webview.postMessage({ type: 'settings', settings: publicSettings(readSettings()), workspace: actualWorkspace });
+		}
+		const effectiveWorkspace = requestedWorkspace && (!actualWorkspace || requestedWorkspace === actualWorkspace)
+			? requestedWorkspace
+			: actualWorkspace;
+		const chatWorkspace = readSharedPanelThreadWorkspace(chatId);
+		const effectiveChatId = chatId && (!chatWorkspace || !effectiveWorkspace || chatWorkspace === effectiveWorkspace) ? chatId : undefined;
+		if (chatId && chatWorkspace && effectiveWorkspace && chatWorkspace !== effectiveWorkspace) {
+			backboardToolOutput?.appendLine(`[panel] ignored stale chat ${chatId} from ${chatWorkspace}; using fresh chat in ${effectiveWorkspace}`);
+		}
+		const sessionId = `panel:${effectiveWorkspace ?? 'default'}:${effectiveChatId || 'default'}`;
 		const sink = this.panelSink(view);
 		const content = prompt.trim() || 'Please transcribe this audio and respond.';
 		const imageGeneration = imageGenerationForPrompt(content, settings.imageGeneration);
-		await view.webview.postMessage({ type: 'runStarted', prompt: content, chatId });
+		await view.webview.postMessage({ type: 'runStarted', prompt: content, chatId: effectiveChatId });
 		await view.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
 		const pendingToolRequests: ToolResultRequest[] = [];
 		const seenToolRequests = new Set<string>();
@@ -2104,11 +2289,11 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				}, token);
 				nextToolRequest = pendingToolRequests.shift();
 			}
-			await view.webview.postMessage({ type: 'runFinished', chatId });
+			await view.webview.postMessage({ type: 'runFinished', chatId: effectiveChatId });
 			await view.webview.postMessage({ type: 'status', text: token.isCancellationRequested ? 'Cancelled.' : 'Done.' });
 		} catch (error) {
 			await view.webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
-			await view.webview.postMessage({ type: 'runFinished', chatId });
+			await view.webview.postMessage({ type: 'runFinished', chatId: effectiveChatId });
 			await handleBackboardError(view.webview, error, this.bridge);
 		}
 	}
@@ -2972,21 +3157,45 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function hasPanelSnapshotContent(state) {
 			return !!state && typeof state === 'object' && (!!state.activeHistoryId || !!state.promptQueue?.length || !!state.historyEntries?.length);
 		}
-		function activeHistoryEntry() {
-			return historyEntries.find(item => item.id === activeHistoryId);
-		}
-		function saveActiveHistory(status) {
-			if (restoringHistory || !activeHistoryId || (!hasConversationContent() && !promptQueue.length && !fileChanges.length)) {
-				return;
+			function activeHistoryEntry() {
+				return historyEntries.find(item => item.id === activeHistoryId);
+			}
+			function historyEntryMatchesWorkspace(entry) {
+				return !entry || !entry.currentWorkspace || !currentWorkspace || entry.currentWorkspace === currentWorkspace;
+			}
+			function detachActiveHistoryIfWorkspaceChanged() {
+				const entry = activeHistoryEntry();
+				if (historyEntryMatchesWorkspace(entry)) {
+					return false;
+				}
+				activeHistoryId = undefined;
+				promptQueue = [];
+				fileChanges = [];
+				latestUsage = undefined;
+				currentAssistantCard = undefined;
+				activeToolRows = [];
+				activeToolGroup = undefined;
+				log.textContent = '';
+				log.appendChild(ensureEmptyState());
+				renderQueue();
+				renderChangeStack();
+				renderCheckpoints();
+				renderRecentTabs();
+				return true;
+			}
+			function saveActiveHistory(status) {
+				if (restoringHistory || !activeHistoryId || (!hasConversationContent() && !promptQueue.length && !fileChanges.length)) {
+					return;
 			}
 			const entry = activeHistoryEntry();
 			if (!entry) {
 				return;
 			}
 			entry.html = log.innerHTML;
-			entry.fileChanges = fileChanges.slice(0);
-			entry.promptQueue = promptQueue.slice(0);
-			entry.updatedAt = Date.now();
+				entry.fileChanges = fileChanges.slice(0);
+				entry.promptQueue = promptQueue.slice(0);
+				entry.currentWorkspace = currentWorkspace;
+				entry.updatedAt = Date.now();
 			if (status) {
 				entry.status = status;
 			}
@@ -3109,14 +3318,19 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			persistPanelState();
 		}
 		function beginHistoryRun(promptText) {
-			const now = Date.now();
-			let entry = activeHistoryEntry();
-			if (!entry) {
-				entry = {
-					id: 'chat-' + now + '-' + Math.random().toString(36).slice(2, 8),
-					title: historyTitle(promptText),
-					prompt: promptText || '',
-					startedAt: now,
+				const now = Date.now();
+				let entry = activeHistoryEntry();
+				if (!historyEntryMatchesWorkspace(entry)) {
+					activeHistoryId = undefined;
+					entry = undefined;
+				}
+				if (!entry) {
+					entry = {
+						id: 'chat-' + now + '-' + Math.random().toString(36).slice(2, 8),
+						title: historyTitle(promptText),
+						prompt: promptText || '',
+						currentWorkspace,
+						startedAt: now,
 					updatedAt: now,
 					status: 'Running',
 					html: '',
@@ -3129,8 +3343,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				entry.prompt = promptText || '';
 				entry.title = entry.title || historyTitle(promptText);
 			}
-			entry.updatedAt = now;
-			entry.status = 'Running';
+				entry.updatedAt = now;
+				entry.currentWorkspace = currentWorkspace;
+				entry.status = 'Running';
 			addCheckpoint(entry, promptText);
 			historyEntries = [entry, ...historyEntries.filter(item => item.id !== entry.id)].slice(0, 40);
 			activeHistoryId = entry.id;
@@ -4287,13 +4502,14 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			log.appendChild(block);
 			scrollConversation(true);
 		}
-		function sendPromptToHost(text, queuedOptions) {
-			const chatId = beginHistoryRun(text);
-			runInProgress = true;
+			function sendPromptToHost(text, queuedOptions) {
+				detachActiveHistoryIfWorkspaceChanged();
+				const chatId = beginHistoryRun(text);
+				runInProgress = true;
 			startRunTimer(Date.now());
 			renderQueue();
-			vscode.postMessage({ type: 'send', chatId, prompt: text, workspace: currentWorkspace, options: queuedOptions || options() });
-		}
+				vscode.postMessage({ type: 'send', chatId, prompt: text, workspace: currentWorkspace, options: queuedOptions || options() });
+			}
 		function drainPromptQueue() {
 			if (runInProgress || !promptQueue.length) {
 				renderQueue();
@@ -5093,18 +5309,32 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					renderHistory();
 				}
 			} else if (message.type === 'settings') {
-				currentWorkspace = typeof message.workspace === 'string' ? message.workspace : currentWorkspace;
+				const nextWorkspace = typeof message.workspace === 'string' ? message.workspace : currentWorkspace;
+				const workspaceChanged = nextWorkspace !== currentWorkspace;
+				currentWorkspace = nextWorkspace;
 				applySettings(message.settings);
+				if (workspaceChanged) {
+					detachActiveHistoryIfWorkspaceChanged();
+				}
 				refreshWorkspaceStatus();
 				persistPanelState();
 			} else if (message.type === 'panelStateSnapshot') {
 				applyPanelStateSnapshot(message.state, false);
 			} else if (message.type === 'command') {
+				if (typeof message.workspace === 'string' && message.workspace && message.workspace !== currentWorkspace) {
+					currentWorkspace = message.workspace;
+					detachActiveHistoryIfWorkspaceChanged();
+					refreshWorkspaceStatus();
+					persistPanelState();
+				}
 				if (message.command === 'newChat') {
 					startNewChat();
 				} else if (message.command === 'showHistory') {
 					setActiveView('history');
 				} else if (message.command === 'showChat') {
+					setActiveView('chat');
+				} else if (message.command === 'openHistoryEntry' && typeof message.chatId === 'string') {
+					restoreHistoryEntry(message.chatId);
 					setActiveView('chat');
 				}
 			} else if (message.type === 'models') {

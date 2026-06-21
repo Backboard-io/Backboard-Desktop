@@ -10,10 +10,14 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { toErrorMessage } from '../../../../base/common/errorMessage.js';
 import { NotificationPriority, Severity } from '../../../../platform/notification/common/notification.js';
 import { Event } from '../../../../base/common/event.js';
+import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
 
 export class NotificationsAlerts extends Disposable {
 
-	constructor(private readonly model: INotificationsModel) {
+	constructor(
+		private readonly model: INotificationsModel,
+		@IAccessibilitySignalService private readonly accessibilitySignalService: IAccessibilitySignalService
+	) {
 		super();
 
 		// Alert initial notifications if any
@@ -33,6 +37,7 @@ export class NotificationsAlerts extends Disposable {
 
 			// ARIA alert for screen readers
 			this.triggerAriaAlert(e.item);
+			this.triggerSound(e.item);
 
 			// Always log errors to console with full details
 			if (e.item.severity === Severity.Error) {
@@ -73,5 +78,13 @@ export class NotificationsAlerts extends Disposable {
 		}
 
 		alert(alertText);
+	}
+
+	private triggerSound(notification: INotificationViewItem): void {
+		if (notification.priority === NotificationPriority.SILENT) {
+			return;
+		}
+
+		this.accessibilitySignalService.playSignal(AccessibilitySignal.notificationReceived, { allowManyInParallel: true });
 	}
 }

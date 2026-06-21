@@ -53,12 +53,19 @@ export interface IChatExecuteActionContext {
 	voice?: IVoiceChatExecuteActionContext;
 }
 
+function resolveChatWidgetFromActionContext(widgetService: IChatWidgetService, context: IChatExecuteActionContext | undefined): IChatWidget | undefined {
+	const chatWidgets = widgetService.getWidgetsByLocations(ChatAgentLocation.Chat);
+	return context?.widget
+		?? widgetService.lastFocusedWidget
+		?? chatWidgets[chatWidgets.length - 1];
+}
+
 abstract class SubmitAction extends Action2 {
 	async run(accessor: ServicesAccessor, ...args: unknown[]) {
 		const context = args[0] as IChatExecuteActionContext | undefined;
 		const telemetryService = accessor.get(ITelemetryService);
 		const widgetService = accessor.get(IChatWidgetService);
-		const widget = context?.widget ?? widgetService.lastFocusedWidget;
+		const widget = resolveChatWidgetFromActionContext(widgetService, context);
 
 		// Check if there's a pending delegation target
 		const pendingDelegationTarget = widget?.input.pendingDelegationTarget;
@@ -423,7 +430,6 @@ export class OpenModelPickerAction extends Action2 {
 				weight: KeybindingWeight.WorkbenchContrib,
 				when: ChatContextKeys.inChatInput
 			},
-			precondition: ChatContextKeys.enabled,
 			menu: {
 				id: MenuId.ChatInput,
 				order: 3,
@@ -451,8 +457,9 @@ export class OpenModelPickerAction extends Action2 {
 	}
 
 	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+		const context = args[0] as IChatExecuteActionContext | undefined;
 		const widgetService = accessor.get(IChatWidgetService);
-		const widget = widgetService.lastFocusedWidget;
+		const widget = resolveChatWidgetFromActionContext(widgetService, context);
 		if (widget) {
 			await widgetService.reveal(widget);
 			widget.input.openModelPicker();
@@ -486,16 +493,12 @@ export class ToggleBackboardComposerMicrophoneAction extends Action2 {
 			category: CHAT_CATEGORY,
 			icon: Codicon.mic,
 			f1: false,
-			precondition: ChatContextKeys.enabled,
 			toggled: ChatContextKeys.backboardMicrophoneRecording,
 			menu: {
 				id: MenuId.ChatInput,
 				order: 5,
 				group: 'navigation',
-				when: ContextKeyExpr.and(
-					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
-					ChatContextKeys.inQuickChat.negate(),
-				)
+				when: ChatContextKeys.inQuickChat.negate()
 			}
 		});
 	}
@@ -509,7 +512,7 @@ export class ToggleBackboardComposerMicrophoneAction extends Action2 {
 		const configurationService = accessor.get(IConfigurationService);
 		const contextKeyService = accessor.get(IContextKeyService);
 		const recordingKey = ChatContextKeys.backboardMicrophoneRecording.bindTo(contextKeyService);
-		const widget = context?.widget ?? widgetService.lastFocusedWidget;
+		const widget = resolveChatWidgetFromActionContext(widgetService, context);
 		if (!widget) {
 			return;
 		}
@@ -572,15 +575,11 @@ export class OpenBackboardComposerOptionsAction extends Action2 {
 			category: CHAT_CATEGORY,
 			icon: Codicon.listFilter,
 			f1: false,
-			precondition: ChatContextKeys.enabled,
 			menu: {
 				id: MenuId.ChatInput,
 				order: 6,
 				group: 'navigation',
-				when: ContextKeyExpr.and(
-					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
-					ChatContextKeys.inQuickChat.negate(),
-				)
+				when: ChatContextKeys.inQuickChat.negate()
 			}
 		});
 	}
@@ -602,15 +601,11 @@ export class BackboardUsageMetricsAction extends Action2 {
 			category: CHAT_CATEGORY,
 			icon: Codicon.dashboard,
 			f1: false,
-			precondition: ChatContextKeys.enabled,
 			menu: {
 				id: MenuId.ChatInputStatus,
 				order: 1,
 				group: 'navigation',
-				when: ContextKeyExpr.and(
-					ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
-					ChatContextKeys.inQuickChat.negate(),
-				)
+				when: ChatContextKeys.inQuickChat.negate()
 			}
 		});
 	}

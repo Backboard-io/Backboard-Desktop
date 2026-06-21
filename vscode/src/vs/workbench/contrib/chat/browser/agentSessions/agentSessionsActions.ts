@@ -144,7 +144,6 @@ export class PickAgentSessionAction extends Action2 {
 			category: AGENT_SESSIONS_CATEGORY,
 			icon: Codicon.history,
 			f1: true,
-			precondition: ChatContextKeys.enabled
 		});
 	}
 
@@ -1083,7 +1082,6 @@ export class ShowAgentSessionsSidebar extends UpdateChatViewWidthAction {
 			id: ShowAgentSessionsSidebar.ID,
 			title: ShowAgentSessionsSidebar.TITLE,
 			precondition: ContextKeyExpr.and(
-				ChatContextKeys.enabled,
 				ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
 			),
 			f1: true,
@@ -1106,7 +1104,6 @@ export class HideAgentSessionsSidebar extends UpdateChatViewWidthAction {
 			id: HideAgentSessionsSidebar.ID,
 			title: HideAgentSessionsSidebar.TITLE,
 			precondition: ContextKeyExpr.and(
-				ChatContextKeys.enabled,
 				ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.SideBySide),
 			),
 			f1: true,

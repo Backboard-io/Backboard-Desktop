@@ -9,7 +9,7 @@
 		display: none;
 		cursor: pointer;
 		flex-shrink: 0;
-		height: 28px;
+		height: 26px;
 		border-bottom: 1px solid var(--vscode-panel-border);
 		background: var(--vscode-sideBar-background, var(--vscode-editor-background));
 
@@ -32,69 +32,70 @@
 			overflow-x: auto;
 			overflow-y: hidden;
 			height: 100%;
-			scrollbar-width: thin;
+			padding-left: 3px;
+			overscroll-behavior-x: contain;
+			scroll-behavior: smooth;
+			scrollbar-width: none;
+		}
+
+		.chat-view-title-tabs::-webkit-scrollbar {
+			display: none;
 		}
 
 		.chat-view-title-tab {
 			display: flex;
 			align-items: center;
 			gap: 4px;
-			height: 100%;
-			width: 104px;
-			min-width: 104px;
-			max-width: 104px;
-			padding: 0 6px;
-			border: 0;
-			border-right: 1px solid var(--vscode-panel-border);
-			border-radius: 0;
+			height: 21px;
+			width: 108px;
+			min-width: 108px;
+			max-width: 108px;
+			padding: 0 4px 0 7px;
+			border: 1px solid transparent;
+			border-bottom: 0;
+			border-radius: 3px 3px 0 0;
 			color: var(--vscode-descriptionForeground);
 			background: transparent;
 			cursor: pointer;
 			font: inherit;
 			box-sizing: border-box;
-			flex: 0 0 104px;
+			flex: 0 0 108px;
 			position: relative;
+		}
+
+		.chat-view-title-tab + .chat-view-title-tab {
+			margin-left: 2px;
 		}
 
 		.chat-view-title-tab:hover {
 			color: var(--vscode-foreground);
-			background: var(--vscode-toolbar-hoverBackground);
+			background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 52%, transparent);
 		}
 
 		.chat-view-title-tab-active {
 			color: var(--vscode-foreground);
-			background: var(--vscode-toolbar-hoverBackground, transparent);
+			border-color: color-mix(in srgb, var(--vscode-panel-border) 70%, transparent);
+			background: color-mix(in srgb, var(--vscode-tab-activeBackground, var(--vscode-toolbar-hoverBackground)) 78%, transparent);
 		}
 
 		.chat-view-title-tab-active::after {
 			content: "";
 			position: absolute;
-			left: 0;
-			right: 0;
+			left: 6px;
+			right: 6px;
 			bottom: 0;
-			height: 2px;
+			height: 1px;
 			background: var(--vscode-focusBorder);
-		}
-
-		.chat-view-title-brand-icon {
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			width: 9px;
-			height: 9px;
-			color: var(--vscode-textLink-foreground, var(--vscode-foreground));
-			font-size: 9px;
-			line-height: 9px;
-			flex: 0 0 auto;
 		}
 
 		.chat-view-title-tab-label {
 			overflow: hidden;
 			white-space: nowrap;
 			text-overflow: ellipsis;
+			min-width: 0;
 			font-size: 11px;
 			font-weight: 500;
-			line-height: 14px;
+			line-height: 12px;
 			letter-spacing: 0;
 		}
 
@@ -105,12 +106,11 @@
 			width: 12px;
 			height: 12px;
 			margin-left: auto;
-			margin-right: -2px;
 			border-radius: 3px;
 			color: var(--vscode-descriptionForeground);
-			font-size: 10px;
+			font-size: 8px;
 			flex: 0 0 auto;
-			opacity: 1;
+			opacity: 0.64;
 		}
 
 		.chat-view-title-tab-close:hover {

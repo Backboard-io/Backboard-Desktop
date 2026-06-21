@@ -217,7 +217,7 @@
 
 .conflict-zone-root pre {
 	display: 'inline';
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .conflict-zone-root .text {

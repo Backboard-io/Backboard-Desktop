@@ -47,10 +47,11 @@ import { registerChatDeveloperActions } from './actions/chatDeveloperActions.js'
 import { registerChatExportZipAction } from './actions/chatExportZip.js';
 import { BackboardCredentialsContribution, registerBackboardSsoActions } from './actions/backboardSsoActions.js';
 import { registerExportAgentTracesDbAction } from './actions/exportAgentTracesDb.js';
-import { BackboardModeSwitcherAction, BackboardModeSwitcherContribution, OpenBackboardWorkspaceWindowAction, ToggleBackboardModeSwitcherTitleBarAction } from './backboardWorkspace/backboardWorkspaceActions.js';
+import { BackboardModeSwitcherAction, BackboardModeSwitcherContribution, ToggleBackboardModeSwitcherTitleBarAction } from './backboardModeSwitcher/backboardModeSwitcherActions.js';
 import { shouldWarnForSessionShutdown } from './chatLifecycle.js';
 import { HoldToVoiceChatInChatViewAction, InlineVoiceChatAction, KeywordActivationContribution, QuickVoiceChatAction, ReadChatResponseAloud, StartVoiceChatAction, StopListeningAction, StopListeningAndSubmitAction, StopReadAloud, StopReadChatItemAloud, VoiceChatInChatViewAction } from './actions/voiceChatActions.js';
-import { OpenWorkspaceInAgentsWindowAction, OpenAgentsWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution } from './agentSessions/agentSessionsActions.js';
+import { OpenWorkspaceInAgentsWindowAction, OpenAgentsWindowAction, OpenOptimusWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution } from './agentSessions/agentSessionsActions.js';
+import { OptimusSharedChatHistoryContribution } from './agentSessions/optimusSharedChatHistory.js';
 import { NativeBuiltinToolsContribution } from './builtInTools/tools.js';
 import { NativePluginGitCommandService } from './pluginGitCommandService.js';
 
@@ -98,6 +99,13 @@ class ChatCommandLineHandler extends Disposable {
 		};
 		ipcRenderer.on('vscode:openChatSession', handleOpenChatSession);
 		this._register({ dispose: () => ipcRenderer.removeListener('vscode:openChatSession', handleOpenChatSession) });
+
+		const handleOpenOptimus = () => {
+			this.commandService.executeCommand(OpenOptimusWindowAction.ID)
+				.catch(err => this.logService.error('vscode:openOptimus failed', err));
+		};
+		ipcRenderer.on('vscode:openOptimus', handleOpenOptimus);
+		this._register({ dispose: () => ipcRenderer.removeListener('vscode:openOptimus', handleOpenOptimus) });
 	}
 
 	private async prompt(args: typeof this.environmentService.args.chat): Promise<void> {
@@ -238,7 +246,7 @@ registerAction2(OpenWorkspaceInAgentsWindowAction);
 registerAction2(BackboardModeSwitcherAction);
 registerAction2(ToggleBackboardModeSwitcherTitleBarAction);
 registerAction2(OpenAgentsWindowAction);
-registerAction2(OpenBackboardWorkspaceWindowAction);
+registerAction2(OpenOptimusWindowAction);
 registerAction2(OpenChatSessionInAgentsWindowAction);
 registerAction2(StartVoiceChatAction);
 
@@ -267,6 +275,7 @@ registerWorkbenchContribution2(ChatLifecycleHandler.ID, ChatLifecycleHandler, Wo
 registerWorkbenchContribution2(BackboardCredentialsContribution.ID, BackboardCredentialsContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostContribution.ID, AgentHostContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostTerminalContribution.ID, AgentHostTerminalContribution, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(OptimusSharedChatHistoryContribution.ID, OptimusSharedChatHistoryContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(BackboardModeSwitcherContribution.ID, BackboardModeSwitcherContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(AgentsHandoffInputTipContribution.ID, AgentsHandoffInputTipContribution, WorkbenchPhase.Eventually);
 

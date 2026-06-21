@@ -8,8 +8,6 @@ import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../../b
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IAction, toAction } from '../../../../../base/common/actions.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { UriComponents } from '../../../../../base/common/uri.js';
-import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId } from '../../../../../platform/actions/common/actions.js';
@@ -19,17 +17,14 @@ import { IContextMenuService } from '../../../../../platform/contextview/browser
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
-import { INativeHostService } from '../../../../../platform/native/common/native.js';
-import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
-import { BACKBOARD_MODE_SWITCHER_COMMAND_ID, ChatConfiguration, OPEN_AGENTS_WINDOW_COMMAND_ID, OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID, OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION } from '../../common/constants.js';
+import { BACKBOARD_MODE_SWITCHER_COMMAND_ID, ChatConfiguration, OPEN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION } from '../../common/constants.js';
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
 const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
-const BACKBOARD_WORKSPACE_EDITOR_ID = 'workbench.editor.backboardWorkspace';
 
 export class BackboardModeSwitcherAction extends Action2 {
 	constructor() {
@@ -37,14 +32,14 @@ export class BackboardModeSwitcherAction extends Action2 {
 			id: BACKBOARD_MODE_SWITCHER_COMMAND_ID,
 			title: localize2('backboardModeSwitcher', "Backboard Mode Switcher"),
 			category: CHAT_CATEGORY,
-			precondition: OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION,
+			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
 			f1: false,
 			menu: [{
 				id: MenuId.TitleBarLeft,
 				group: 'navigation',
 				order: 0,
 				when: ContextKeyExpr.and(
-					OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION,
+					OPEN_AGENTS_WINDOW_PRECONDITION,
 					ContextKeyExpr.notEquals(`config.${ChatConfiguration.TitleBarOpenInAgentsWindowEnabled}`, false),
 				),
 			}],
@@ -59,32 +54,10 @@ export class ToggleBackboardModeSwitcherTitleBarAction extends ToggleTitleBarCon
 		super(
 			ChatConfiguration.TitleBarOpenInAgentsWindowEnabled,
 			localize('toggle.backboardModeSwitcher', 'Backboard Switcher'),
-			localize('toggle.backboardModeSwitcherDescription', "Toggle visibility of the Editor / Agents / Workspace switcher in the title bar"),
+			localize('toggle.backboardModeSwitcherDescription', "Toggle visibility of the Editor / Agents switcher in the title bar"),
 			6,
-			OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION,
+			OPEN_AGENTS_WINDOW_PRECONDITION,
 		);
-	}
-}
-
-export class OpenBackboardWorkspaceWindowAction extends Action2 {
-	constructor() {
-		super({
-			id: OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID,
-			title: localize2('openBackboardWorkspaceWindow', "Open Workspace"),
-			category: CHAT_CATEGORY,
-			precondition: OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION,
-			f1: true,
-		});
-	}
-
-	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents }) {
-		const nativeHostService = accessor.get(INativeHostService);
-		const workspaceContextService = accessor.get(IWorkspaceContextService);
-		const folderUri = args?.folderUri ?? workspaceContextService.getWorkspace().folders[0]?.uri.toJSON();
-		await nativeHostService.openBackboardWorkspaceWindow({
-			folderUri,
-			sessionResource: args?.sessionResource,
-		});
 	}
 }
 
@@ -147,7 +120,6 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		}
 
 		const agentsActive = this.isAgentsActive();
-		const workspaceActive = this.isWorkspaceActive();
 		this.triggerButton.setAttribute('aria-expanded', 'true');
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => this.triggerButton!,
@@ -155,7 +127,7 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 				toAction({
 					id: 'workbench.action.mode.editor',
 					label: localize('backboardModeSwitcher.editor', "Editor"),
-					checked: !agentsActive && !workspaceActive,
+					checked: !agentsActive,
 					run: () => this.openEditor(),
 				}),
 				toAction({
@@ -164,12 +136,6 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 					checked: agentsActive,
 					run: () => this.openAgents(),
 				}),
-				toAction({
-					id: 'workbench.action.mode.workspace',
-					label: localize('backboardModeSwitcher.workspace', "Workspace"),
-					checked: workspaceActive,
-					run: () => this.openWorkspace(),
-				}),
 			],
 			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
 		});
@@ -177,10 +143,6 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 
 	private openAgents(): void {
 		this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID);
-	}
-
-	private openWorkspace(): void {
-		this.commandService.executeCommand(OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID);
 	}
 
 	private openEditor(): void {
@@ -193,18 +155,11 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		return this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID;
 	}
 
-	private isWorkspaceActive(): boolean {
-		return this.editorService.activeEditorPane?.getId() === BACKBOARD_WORKSPACE_EDITOR_ID;
-	}
-
 	private updateState(): void {
 		const agentsActive = this.isAgentsActive();
-		const workspaceActive = this.isWorkspaceActive();
-		this.currentIcon?.classList.toggle('codicon-window', !agentsActive && !workspaceActive);
-		this.currentIcon?.classList.toggle('codicon-robot', agentsActive || workspaceActive);
-		this.currentLabel?.replaceChildren(workspaceActive
-			? localize('backboardModeSwitcher.workspace', "Workspace")
-			: agentsActive
+		this.currentIcon?.classList.toggle('codicon-window', !agentsActive);
+		this.currentIcon?.classList.toggle('codicon-robot', agentsActive);
+		this.currentLabel?.replaceChildren(agentsActive
 			? localize('backboardModeSwitcher.agents', "Agents")
 			: localize('backboardModeSwitcher.editor', "Editor"));
 	}

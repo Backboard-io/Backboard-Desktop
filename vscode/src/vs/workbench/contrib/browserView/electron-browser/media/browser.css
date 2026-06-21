@@ -602,7 +602,7 @@
 			background-color: var(--vscode-textCodeBlock-background);
 			padding: 1px 4px;
 			border-radius: 3px;
-			font-family: var(--monaco-monospace-font);
+			font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 			font-size: 12px;
 		}
 
@@ -830,7 +830,7 @@
 
 	.browser-cert-details-value {
 		word-break: break-all;
-		font-family: var(--monaco-monospace-font);
+		font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	}
 
 	.browser-cert-action {

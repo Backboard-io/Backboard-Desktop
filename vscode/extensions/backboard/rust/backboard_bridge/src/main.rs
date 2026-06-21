@@ -43,6 +43,14 @@ const BACKBOARD_API_REFERENCE_HEADING: &str = "## Backboard API Reference";
 const RAW_TOOL_CALL_BEGIN: &str = "<|tool_call_begin|>";
 const RAW_TOOL_CALL_SEPARATOR: &str = "<|tool_sep|>";
 const RAW_TOOL_CALL_END: &str = "<|tool_call_end|>";
+const DEEPSEEK_TOOL_CALLS_BEGIN: &str = "<｜tool▁calls▁begin｜>";
+const DEEPSEEK_TOOL_CALLS_END: &str = "<｜tool▁calls▁end｜>";
+const DEEPSEEK_TOOL_CALL_BEGIN: &str = "<｜tool▁call▁begin｜>";
+const DEEPSEEK_TOOL_CALL_END: &str = "<｜tool▁call▁end｜>";
+const DEEPSEEK_TOOL_SEPARATOR: &str = "<｜tool▁sep｜>";
+const RAW_TOOL_FUNCTION_PREFIX: &str = "function<|tool_sep|>";
+const DEEPSEEK_TOOL_FUNCTION_PREFIX: &str = "function<｜tool▁sep｜>";
+const MAX_UPSTREAM_IDLE_RECOVERY_ATTEMPTS: usize = 1;
 
 #[derive(Clone)]
 struct BridgeState {
@@ -139,6 +147,24 @@ struct SubmitToolResultParams {
     tool_outputs: Vec<Value>,
     #[serde(default)]
     tools: Option<Vec<Value>>,
+    #[serde(default)]
+    workspace: Option<PathBuf>,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    intensity: Option<String>,
+    #[serde(default)]
+    web_search: Option<String>,
+    #[serde(default)]
+    image_generation: Option<String>,
+    #[serde(default)]
+    memory_mode: Option<String>,
+    #[serde(default)]
+    max_tokens: Option<u32>,
     #[serde(default)]
     config: Option<ConfigParams>,
 }
@@ -391,9 +417,11 @@ async fn collect_models(
         .filter(|provider| !is_featherless_provider(provider))
         .collect::<Vec<_>>();
     let provider_concurrency = provider_names.len().max(1);
-    let provider_results = stream::iter(provider_names.into_iter().map(|provider| async move {
-        client.list_models_by_provider(&provider, None).await
-    }))
+    let provider_results = stream::iter(
+        provider_names
+            .into_iter()
+            .map(|provider| async move { client.list_models_by_provider(&provider, None).await }),
+    )
     .buffer_unordered(provider_concurrency)
     .collect::<Vec<_>>()
     .await;
@@ -825,12 +853,9 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
     } else {
         &[]
     };
-    let tools = params.tools.unwrap_or_else(|| {
-        tool_definitions_for_request(
-            &mode,
-            backboard_image_generation,
-        )
-    });
+    let tools = params
+        .tools
+        .unwrap_or_else(|| tool_definitions_for_request(&mode, backboard_image_generation));
     let content = augment_prompt(&params.content, params.workspace.as_ref(), &mode, &tools);
     emit_trace(
         &state,
@@ -856,7 +881,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         json!({ "message": "Sending to Backboard." }),
     ));
 
-    let send_request = SendMessageRequest {
+    let mut send_request = SendMessageRequest {
         thread_id,
         assistant_id,
         content,
@@ -885,35 +910,70 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         max_tokens: params.max_tokens,
         audio_file,
     };
-    log_backboard_request(&send_request, params.workspace.as_ref(), &mode)?;
-    emit_trace(
-        &state,
-        &request.request_id,
-        Some(&session_id),
-        "post_start",
-        request_started_at,
-        json!({}),
-    );
-    let stream = client.send_message_stream(send_request).await?;
-    emit_trace(
-        &state,
-        &request.request_id,
-        Some(&session_id),
-        "post_stream_open",
-        request_started_at,
-        json!({}),
-    );
+    for attempt in 0..=MAX_UPSTREAM_IDLE_RECOVERY_ATTEMPTS {
+        log_backboard_request(&send_request, params.workspace.as_ref(), &mode)?;
+        emit_trace(
+            &state,
+            &request.request_id,
+            Some(&session_id),
+            "post_start",
+            request_started_at,
+            json!({ "attempt": attempt }),
+        );
+        let stream = client.send_message_stream(send_request.clone()).await?;
+        emit_trace(
+            &state,
+            &request.request_id,
+            Some(&session_id),
+            "post_stream_open",
+            request_started_at,
+            json!({ "attempt": attempt }),
+        );
 
-    consume_stream(
-        state,
-        &request.request_id,
-        &session_id,
-        stream,
-        ignored_tool_call_names,
-        request_started_at,
-        "sendPrompt",
-    )
-    .await
+        match consume_stream(
+            state.clone(),
+            &request.request_id,
+            &session_id,
+            stream,
+            ignored_tool_call_names,
+            request_started_at,
+            "sendPrompt",
+        )
+        .await?
+        {
+            StreamOutcome::Done => return Ok(()),
+            StreamOutcome::UpstreamIdleTimeout { message }
+                if attempt < MAX_UPSTREAM_IDLE_RECOVERY_ATTEMPTS =>
+            {
+                emit_upstream_idle_recovery_progress(&state, &request.request_id, &session_id);
+                send_request.thread_id =
+                    session_thread_id(&state, &session_id).or(send_request.thread_id.clone());
+                send_request.assistant_id =
+                    session_assistant_id(&state, &session_id).or(send_request.assistant_id.clone());
+                let recovery_prompt = upstream_idle_recovery_prompt(&message, "sendPrompt");
+                send_request.content = augment_prompt(
+                    &recovery_prompt,
+                    params.workspace.as_ref(),
+                    &mode,
+                    send_request.tools.as_deref().unwrap_or(&[]),
+                );
+                send_request.voice = None;
+                send_request.audio_file = None;
+                send_request.send_to_llm = Some(true);
+            }
+            StreamOutcome::UpstreamIdleTimeout { message } => {
+                emit_unrecovered_upstream_idle_timeout(
+                    &state,
+                    &request.request_id,
+                    &session_id,
+                    &message,
+                );
+                return Ok(());
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Result<()> {
@@ -932,6 +992,12 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
         .or_else(|| session_run_id(&state, &session_id))
         .context("submitToolResult requires a runId")?;
     let client = client_from_params(params.config.as_ref())?;
+    let ignored_tool_call_names =
+        if backboard_image_generation_enabled(params.image_generation.as_deref()) {
+            BACKBOARD_IMAGE_TOOL_NAMES
+        } else {
+            &[]
+        };
     let tool_outputs = params
         .tool_outputs
         .into_iter()
@@ -951,15 +1017,13 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
         request_started_at,
         json!({ "threadId": thread_id.clone(), "runId": run_id.clone() }),
     );
+    let tools = params.tools;
+    let submit_request = SubmitToolOutputsRequest {
+        tool_outputs,
+        tools: tools.clone(),
+    };
     let stream = match client
-        .submit_tool_outputs_stream(
-            &thread_id,
-            &run_id,
-            SubmitToolOutputsRequest {
-                tool_outputs,
-                tools: params.tools,
-            },
-        )
+        .submit_tool_outputs_stream(&thread_id, &run_id, submit_request)
         .await
     {
         Ok(stream) => {
@@ -989,13 +1053,93 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
         &request.request_id,
         &session_id,
         stream,
-        &[],
+        ignored_tool_call_names,
         request_started_at,
         "submitToolResult",
     )
     .await
     {
-        Ok(()) => Ok(()),
+        Ok(StreamOutcome::Done) => Ok(()),
+        Ok(StreamOutcome::UpstreamIdleTimeout { message }) => {
+            emit_upstream_idle_recovery_progress(&state, &request.request_id, &session_id);
+            let provider = params
+                .provider
+                .unwrap_or_else(|| DEFAULT_PROVIDER.to_string());
+            let model = params.model.unwrap_or_else(|| DEFAULT_MODEL.to_string());
+            let mode = params.mode.unwrap_or_else(|| "free".to_string());
+            let intensity = params
+                .intensity
+                .unwrap_or_else(|| DEFAULT_INTENSITY.to_string());
+            let (memory, memory_pro) =
+                memory_payload(params.memory_mode.as_deref().unwrap_or("off"));
+            let recovery_prompt = upstream_idle_recovery_prompt(&message, "submitToolResult");
+            let recovery_content = augment_prompt(
+                &recovery_prompt,
+                params.workspace.as_ref(),
+                &mode,
+                tools.as_deref().unwrap_or(&[]),
+            );
+            let recovery_request = SendMessageRequest {
+                thread_id: Some(thread_id.clone()),
+                assistant_id: session_assistant_id(&state, &session_id),
+                content: recovery_content,
+                provider: Some(provider.clone()),
+                model: Some(model.clone()),
+                memory,
+                memory_pro,
+                thinking: thinking_payload(&intensity, &provider, &model),
+                tools: tools.clone(),
+                parallel_tool_calls: Some(false),
+                web_search: params.web_search.unwrap_or_else(|| "off".to_string()),
+                image_generation: params.image_generation.clone(),
+                image_model_provider: params
+                    .image_generation
+                    .as_deref()
+                    .filter(|value| *value == "auto")
+                    .map(|_| DEFAULT_IMAGE_PROVIDER.to_string()),
+                image_model_name: params
+                    .image_generation
+                    .as_deref()
+                    .filter(|value| *value == "auto")
+                    .map(|_| DEFAULT_IMAGE_MODEL.to_string()),
+                voice: None,
+                send_to_llm: Some(true),
+                mcp_calls: None,
+                max_tokens: params.max_tokens,
+                audio_file: None,
+            };
+            emit_trace(
+                &state,
+                &request.request_id,
+                Some(&session_id),
+                "idle_recovery_post_start",
+                request_started_at,
+                json!({ "phase": "submitToolResult" }),
+            );
+            let recovery_stream = client.send_message_stream(recovery_request).await?;
+            match consume_stream(
+                state.clone(),
+                &request.request_id,
+                &session_id,
+                recovery_stream,
+                ignored_tool_call_names,
+                request_started_at,
+                "idleRecovery",
+            )
+            .await?
+            {
+                StreamOutcome::Done => Ok(()),
+                StreamOutcome::UpstreamIdleTimeout { message } => {
+                    emit_unrecovered_upstream_idle_timeout(
+                        &state,
+                        &request.request_id,
+                        &session_id,
+                        &message,
+                    );
+                    Ok(())
+                }
+            }
+        }
         Err(error) if is_duplicate_tool_outputs_error(&error) => {
             finish_tool_outputs_submission(&state, &submission_key, true);
             emit_duplicate_tool_outputs_submitted(&state, &request.request_id, &session_id);
@@ -1072,6 +1216,12 @@ fn is_duplicate_tool_outputs_error(error: &anyhow::Error) -> bool {
     message.contains("Tool outputs for run ID") && message.contains("were already submitted")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StreamOutcome {
+    Done,
+    UpstreamIdleTimeout { message: String },
+}
+
 async fn consume_stream(
     state: BridgeState,
     request_id: &str,
@@ -1080,7 +1230,7 @@ async fn consume_stream(
     ignored_tool_call_names: &[&str],
     request_started_at: Instant,
     phase: &str,
-) -> Result<()> {
+) -> Result<StreamOutcome> {
     let mut streaming_tool_calls = StreamingToolCallAccumulator::default();
     let mut raw_tool_calls = RawTextToolCallAccumulator::default();
     let mut last_chunk: Option<Value> = None;
@@ -1093,7 +1243,7 @@ async fn consume_stream(
                 Some(session_id),
                 json!({ "stopReason": "cancelled" }),
             ));
-            return Ok(());
+            return Ok(StreamOutcome::Done);
         }
         let chunk = chunk?;
         last_chunk = Some(chunk.clone());
@@ -1114,13 +1264,28 @@ async fn consume_stream(
             );
         }
 
-        let saw_streaming_tool_call = streaming_tool_calls.push_chunk(&chunk);
+        let streaming_tool_call_updates = streaming_tool_calls.push_chunk(&chunk);
+        let saw_streaming_tool_call = streaming_tool_call_updates.saw_tool_delta;
+        for update in streaming_tool_call_updates.updates {
+            state.writer.emit(base_event(
+                "toolCallStreaming",
+                request_id,
+                Some(session_id),
+                json!({
+                    "toolCallId": update.id,
+                    "toolName": update.name,
+                    "argumentsChars": update.arguments_chars,
+                    "contentLines": update.content_lines,
+                    "path": update.path,
+                }),
+            ));
+        }
         if tool_call_stream_finished(&chunk)
             && let Some(tool_calls) = streaming_tool_calls.take_tool_calls()
             && let Some(tool_calls) = filter_ignored_tool_calls(tool_calls, ignored_tool_call_names)
         {
             emit_tool_requested_events(&state, request_id, session_id, &chunk, tool_calls);
-            return Ok(());
+            return Ok(StreamOutcome::Done);
         }
         if saw_streaming_tool_call {
             continue;
@@ -1130,7 +1295,7 @@ async fn consume_stream(
             && let Some(tool_calls) = filter_ignored_tool_calls(tool_calls, ignored_tool_call_names)
         {
             emit_tool_requested_events(&state, request_id, session_id, &chunk, tool_calls);
-            return Ok(());
+            return Ok(StreamOutcome::Done);
         }
 
         match chunk_type {
@@ -1165,12 +1330,15 @@ async fn consume_stream(
             "content_streaming" | "stt_text_delta" => {
                 if let Some(text) = chunk_text(&chunk) {
                     let parsed = raw_tool_calls.push_text(&text);
-                    if !parsed.visible_text.is_empty() {
+                    if let Some(visible_text) =
+                        sanitize_visible_assistant_text(&parsed.visible_text)
+                        && !visible_text.is_empty()
+                    {
                         state.writer.emit(base_event(
                             "assistantTextDelta",
                             request_id,
                             Some(session_id),
-                            json!({ "text": parsed.visible_text }),
+                            json!({ "text": visible_text }),
                         ));
                     }
                     if !parsed.tool_calls.is_empty()
@@ -1180,7 +1348,7 @@ async fn consume_stream(
                         emit_tool_requested_events(
                             &state, request_id, session_id, &chunk, tool_calls,
                         );
-                        return Ok(());
+                        return Ok(StreamOutcome::Done);
                     }
                     if raw_tool_calls.is_inside_tool_call() {
                         continue;
@@ -1218,7 +1386,7 @@ async fn consume_stream(
                         filter_ignored_tool_calls(tool_calls, ignored_tool_call_names)
                 {
                     emit_tool_requested_events(&state, request_id, session_id, &chunk, tool_calls);
-                    return Ok(());
+                    return Ok(StreamOutcome::Done);
                 }
                 state.writer.emit(base_event(
                     "usage",
@@ -1232,7 +1400,7 @@ async fn consume_stream(
                     Some(session_id),
                     json!({ "stopReason": "end_turn" }),
                 ));
-                return Ok(());
+                return Ok(StreamOutcome::Done);
             }
             "completed" | "done" => {
                 if let Some(tool_calls) = raw_tool_calls.take_tool_calls()
@@ -1240,7 +1408,7 @@ async fn consume_stream(
                         filter_ignored_tool_calls(tool_calls, ignored_tool_call_names)
                 {
                     emit_tool_requested_events(&state, request_id, session_id, &chunk, tool_calls);
-                    return Ok(());
+                    return Ok(StreamOutcome::Done);
                 }
                 state.writer.emit(base_event(
                     "done",
@@ -1248,7 +1416,7 @@ async fn consume_stream(
                     Some(session_id),
                     json!({ "stopReason": chunk_stop_reason(&chunk).unwrap_or("end_turn") }),
                 ));
-                return Ok(());
+                return Ok(StreamOutcome::Done);
             }
             "run_failed" | "error" => {
                 let message = chunk
@@ -1256,6 +1424,11 @@ async fn consume_stream(
                     .or_else(|| chunk.get("error"))
                     .and_then(Value::as_str)
                     .unwrap_or("Backboard request failed.");
+                if is_upstream_idle_timeout_message(message) {
+                    return Ok(StreamOutcome::UpstreamIdleTimeout {
+                        message: message.to_string(),
+                    });
+                }
                 state.writer.emit(base_event(
                     "error",
                     request_id,
@@ -1268,7 +1441,7 @@ async fn consume_stream(
                     Some(session_id),
                     json!({ "stopReason": "error" }),
                 ));
-                return Ok(());
+                return Ok(StreamOutcome::Done);
             }
             "retry" => {
                 state.writer.emit(base_event(
@@ -1287,7 +1460,7 @@ async fn consume_stream(
     {
         let fallback_chunk = last_chunk.unwrap_or_else(|| json!({}));
         emit_tool_requested_events(&state, request_id, session_id, &fallback_chunk, tool_calls);
-        return Ok(());
+        return Ok(StreamOutcome::Done);
     }
 
     state.writer.emit(base_event(
@@ -1296,7 +1469,7 @@ async fn consume_stream(
         Some(session_id),
         json!({ "stopReason": "end_turn" }),
     ));
-    Ok(())
+    Ok(StreamOutcome::Done)
 }
 
 fn emit_tool_requested_events(
@@ -1326,6 +1499,52 @@ fn emit_tool_requested_events(
         Some(session_id),
         json!({ "stopReason": "requires_tool_result" }),
     ));
+}
+
+fn is_upstream_idle_timeout_message(message: &str) -> bool {
+    message
+        .to_ascii_lowercase()
+        .contains("upstream idle timeout")
+}
+
+fn emit_upstream_idle_recovery_progress(state: &BridgeState, request_id: &str, session_id: &str) {
+    state.writer.emit(base_event(
+        "progress",
+        request_id,
+        Some(session_id),
+        json!({ "message": "Backboard stream went idle; retrying continuation with smaller tool chunks." }),
+    ));
+}
+
+fn emit_unrecovered_upstream_idle_timeout(
+    state: &BridgeState,
+    request_id: &str,
+    session_id: &str,
+    message: &str,
+) {
+    state.writer.emit(base_event(
+        "error",
+        request_id,
+        Some(session_id),
+        json!({ "message": message }),
+    ));
+    state.writer.emit(base_event(
+        "done",
+        request_id,
+        Some(session_id),
+        json!({ "stopReason": "error" }),
+    ));
+}
+
+fn upstream_idle_recovery_prompt(message: &str, phase: &str) -> String {
+    format!(
+        "Continue the current IDE task after a recoverable Backboard stream idle in {phase}. \
+The previous request failed with: {message}. \
+Do not repeat completed tool calls or rewrite files that were already written successfully. \
+Emit the next needed tool call immediately. \
+For generated files larger than about 3000 characters, write only a small first chunk with write_file/create_file and continue with append_file chunks of about 2000-3000 characters. \
+Do not silently generate a whole large file before calling a tool."
+    )
 }
 
 fn cancel_request(state: &BridgeState, request: &BridgeRequest) {
@@ -1452,10 +1671,19 @@ fn log_backboard_request(
     );
     eprintln!("  bridgeCwd: {cwd}");
     eprintln!("  mode: {mode}");
-    eprintln!("  provider: {}", request.provider.as_deref().unwrap_or("<default>"));
-    eprintln!("  model: {}", request.model.as_deref().unwrap_or("<default>"));
+    eprintln!(
+        "  provider: {}",
+        request.provider.as_deref().unwrap_or("<default>")
+    );
+    eprintln!(
+        "  model: {}",
+        request.model.as_deref().unwrap_or("<default>")
+    );
     eprintln!("  contentChars: {}", request.content.chars().count());
-    eprintln!("  toolCount: {}", request.tools.as_ref().map(Vec::len).unwrap_or(0));
+    eprintln!(
+        "  toolCount: {}",
+        request.tools.as_ref().map(Vec::len).unwrap_or(0)
+    );
     if std::env::var("BACKBOARD_BRIDGE_VERBOSE_REQUESTS")
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
@@ -1475,7 +1703,12 @@ fn chrono_like_timestamp() -> String {
     format!("unix_ms={}", now.as_millis())
 }
 
-fn augment_prompt(content: &str, workspace: Option<&PathBuf>, mode: &str, tools: &[Value]) -> String {
+fn augment_prompt(
+    content: &str,
+    workspace: Option<&PathBuf>,
+    mode: &str,
+    tools: &[Value],
+) -> String {
     let workspace = workspace
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "<none supplied by host>".to_string());
@@ -1491,6 +1724,8 @@ fn augment_prompt(content: &str, workspace: Option<&PathBuf>, mode: &str, tools:
 - Available tools for this turn: {available_tools}
 
 Treat relative file, grep, glob, shell, and edit tool paths as relative to the target workspace root unless the user explicitly provides another path.
+The target workspace root is the only current project root. Ignore stale absolute paths from previous chat turns, pasted logs, old tool transcripts, restored sessions, or previous IDE windows unless the user's latest request explicitly repeats that path. If a file is missing, list or search the target workspace instead of trying unrelated absolute paths.
+For generated files larger than about 3000 characters, write a small first chunk with write_file/create_file and then append 2000-3000 character chunks with append_file. Emit each chunk as a tool call as soon as it is ready instead of silently generating the full file first.
 
 ## User Request
 
@@ -1603,6 +1838,7 @@ fn blocked_tools(mode: &str) -> &'static [&'static str] {
             "write_file",
             "create_file",
             "overwrite_file",
+            "append_file",
             "edit",
             "edit_file",
             "search_replace",
@@ -1635,9 +1871,10 @@ fn all_tool_definitions() -> Vec<Value> {
         json!({"type":"function","function":{"name":"run_terminal_cmd","description":"Execute a shell command and render output in an IDE terminal.","parameters":{"type":"object","properties":{"command":{"type":"string"},"cmd":{"type":"string"},"description":{"type":"string"},"timeout":{"type":"integer"},"timeout_ms":{"type":"integer"},"working_directory":{"type":"string"},"cwd":{"type":"string"},"is_background":{"type":"boolean"}},"required":["command"]}}}),
         json!({"type":"function","function":{"name":"read_file","description":"Read a text file from the workspace. Supports offset and limit line ranges.","parameters":{"type":"object","properties":{"path":{"type":"string"},"target_file":{"type":"string"},"file_path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}}}),
         json!({"type":"function","function":{"name":"write","description":"Write a complete file in the workspace. Prefer edit for existing files.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"}}}}}),
-        json!({"type":"function","function":{"name":"write_file","description":"Write a complete file in the workspace. Alias for write.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
-        json!({"type":"function","function":{"name":"create_file","description":"Create a file in the workspace, creating parent directories when the host supports it. Alias for write_file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
-        json!({"type":"function","function":{"name":"overwrite_file","description":"Overwrite a complete file in the workspace. Alias for write_file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"write_file","description":"Write a complete file in the workspace. Alias for write. For generated files above about 3000 chars, write only the first chunk and continue with append_file chunks.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"create_file","description":"Create a file in the workspace, creating parent directories when the host supports it. Alias for write_file. For generated files above about 3000 chars, create the first chunk and continue with append_file chunks.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"overwrite_file","description":"Overwrite a complete file in the workspace. Alias for write_file. For generated files above about 3000 chars, write only the first chunk and continue with append_file chunks.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"append_file","description":"Append text to a workspace file. Use this for generated-file chunks of about 2000-3000 chars so the runtime sees frequent tool activity instead of one huge silent generation.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"edit","description":"Perform exact string replacement in a file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"edit_file","description":"Perform exact string replacement in a file. Alias for edit.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"old_string":{"type":"string"},"oldString":{"type":"string"},"new_string":{"type":"string"},"newString":{"type":"string"},"replace_all":{"type":"boolean"},"replaceAll":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"search_replace","description":"Search and replace text in a file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}}}}}),
@@ -1650,9 +1887,7 @@ fn all_tool_definitions() -> Vec<Value> {
         json!({"type":"function","function":{"name":"web_search","description":"Search the web for current information. Returns summarized results and URLs when available.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}),
         json!({"type":"function","function":{"name":"web_fetch","description":"Fetch URL content as readable text.","parameters":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}}}),
         json!({"type":"function","function":{"name":"generate_image","description":"Request image generation through Backboard media generation. Use when the user explicitly asks to create, generate, draw, render, or make an image.","parameters":{"type":"object","properties":{"prompt":{"type":"string"},"description":{"type":"string"},"size":{"type":"string"},"style":{"type":"string"}},"required":["prompt"]}}}),
-        json!({"type":"function","function":{"name":"todo_write","description":"Update the agent todo list.","parameters":{"type":"object","properties":{"merge":{"type":"boolean"},"todos":{"type":"array","items":{"type":"object"}}}}}}),
         json!({"type":"function","function":{"name":"read_lints","description":"Read diagnostics for the workspace or run explicit check commands.","parameters":{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"command":{"type":"string"},"cmd":{"type":"string"},"commands":{"type":"array","items":{"type":"string"}},"working_directory":{"type":"string"},"cwd":{"type":"string"},"timeout":{"type":"integer"}}}}}),
-        json!({"type":"function","function":{"name":"task","description":"Run a focused read/search sub-task with local workspace tools.","parameters":{"type":"object","properties":{"prompt":{"type":"string"},"description":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"enter_plan_mode","description":"Enter read-only plan mode. Only use when the user explicitly requests planning.","parameters":{"type":"object","properties":{"reason":{"type":"string"}},"required":["reason"]}}}),
         json!({"type":"function","function":{"name":"exit_plan_mode","description":"Exit plan mode and present an implementation plan for user approval.","parameters":{"type":"object","properties":{"plan":{"type":"string"}},"required":["plan"]}}}),
         json!({"type":"function","function":{"name":"persistence_decide","description":"Persistence-gate decision tool.","parameters":{"type":"object","properties":{"action":{"type":"string","enum":["continue","done"]},"reason":{"type":"string"},"focus":{"type":"string"}},"required":["action","reason"]}}}),
@@ -2016,6 +2251,13 @@ struct RawTextToolCallResult {
     tool_calls: Vec<Value>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RawTextToolMarkerKind {
+    CallBegin,
+    FunctionPrefix,
+    Wrapper,
+}
+
 impl RawTextToolCallAccumulator {
     fn push_text(&mut self, text: &str) -> RawTextToolCallResult {
         self.buffer.push_str(text);
@@ -2025,8 +2267,10 @@ impl RawTextToolCallAccumulator {
         loop {
             match self.state {
                 RawTextToolCallState::Text => {
-                    let Some(begin_index) = self.buffer.find(RAW_TOOL_CALL_BEGIN) else {
-                        let hold_len = partial_marker_suffix_len(&self.buffer, RAW_TOOL_CALL_BEGIN);
+                    let Some((begin_index, marker, marker_kind)) =
+                        find_raw_tool_start_marker(&self.buffer)
+                    else {
+                        let hold_len = raw_tool_partial_marker_suffix_len(&self.buffer);
                         let visible_len = self.buffer.len().saturating_sub(hold_len);
                         if visible_len > 0 {
                             visible_text.push_str(&self.buffer[..visible_len]);
@@ -2035,15 +2279,21 @@ impl RawTextToolCallAccumulator {
                         break;
                     };
                     visible_text.push_str(&self.buffer[..begin_index]);
-                    let remove_to = begin_index + RAW_TOOL_CALL_BEGIN.len();
+                    let remove_to = begin_index + marker.len();
                     self.buffer.replace_range(..remove_to, "");
-                    self.state = RawTextToolCallState::Header;
+                    self.state = match marker_kind {
+                        RawTextToolMarkerKind::CallBegin => RawTextToolCallState::Header,
+                        RawTextToolMarkerKind::FunctionPrefix => RawTextToolCallState::Arguments,
+                        RawTextToolMarkerKind::Wrapper => RawTextToolCallState::Text,
+                    };
                 }
                 RawTextToolCallState::Header => {
-                    let Some(separator_index) = self.buffer.find(RAW_TOOL_CALL_SEPARATOR) else {
+                    let Some((separator_index, separator)) =
+                        find_first_marker(&self.buffer, raw_tool_separator_markers())
+                    else {
                         break;
                     };
-                    let remove_to = separator_index + RAW_TOOL_CALL_SEPARATOR.len();
+                    let remove_to = separator_index + separator.len();
                     self.buffer.replace_range(..remove_to, "");
                     self.state = RawTextToolCallState::Arguments;
                 }
@@ -2051,10 +2301,30 @@ impl RawTextToolCallAccumulator {
                     if self.name.is_none() && !self.extract_tool_name() {
                         break;
                     }
-                    if let Some(end_index) = self.buffer.find(RAW_TOOL_CALL_END) {
+                    if let Some((end_index, end_marker)) =
+                        find_first_marker(&self.buffer, raw_tool_end_markers())
+                    {
                         self.arguments.push_str(&self.buffer[..end_index]);
-                        let remove_to = end_index + RAW_TOOL_CALL_END.len();
+                        let remove_to = end_index + end_marker.len();
                         self.buffer.replace_range(..remove_to, "");
+                        if let Some(tool_call) = self.finish_current_call() {
+                            tool_calls.push(tool_call);
+                        }
+                        self.state = RawTextToolCallState::Text;
+                        continue;
+                    }
+                    if let Some(fence_end_index) = fenced_json_tool_argument_end(&self.buffer) {
+                        self.arguments.push_str(&self.buffer[..fence_end_index]);
+                        self.buffer.replace_range(..fence_end_index, "");
+                        if let Some(tool_call) = self.finish_current_call() {
+                            tool_calls.push(tool_call);
+                        }
+                        self.state = RawTextToolCallState::Text;
+                        continue;
+                    }
+                    if let Some((next_index, _, _)) = find_raw_tool_start_marker(&self.buffer) {
+                        self.arguments.push_str(&self.buffer[..next_index]);
+                        self.buffer.replace_range(..next_index, "");
                         if let Some(tool_call) = self.finish_current_call() {
                             tool_calls.push(tool_call);
                         }
@@ -2135,6 +2405,68 @@ impl RawTextToolCallAccumulator {
     }
 }
 
+fn raw_tool_start_markers() -> &'static [(&'static str, RawTextToolMarkerKind)] {
+    &[
+        (RAW_TOOL_CALL_BEGIN, RawTextToolMarkerKind::CallBegin),
+        (DEEPSEEK_TOOL_CALL_BEGIN, RawTextToolMarkerKind::CallBegin),
+        (
+            RAW_TOOL_FUNCTION_PREFIX,
+            RawTextToolMarkerKind::FunctionPrefix,
+        ),
+        (
+            DEEPSEEK_TOOL_FUNCTION_PREFIX,
+            RawTextToolMarkerKind::FunctionPrefix,
+        ),
+        (DEEPSEEK_TOOL_CALLS_BEGIN, RawTextToolMarkerKind::Wrapper),
+        (DEEPSEEK_TOOL_CALLS_END, RawTextToolMarkerKind::Wrapper),
+    ]
+}
+
+fn raw_tool_separator_markers() -> &'static [&'static str] {
+    &[RAW_TOOL_CALL_SEPARATOR, DEEPSEEK_TOOL_SEPARATOR]
+}
+
+fn raw_tool_end_markers() -> &'static [&'static str] {
+    &[RAW_TOOL_CALL_END, DEEPSEEK_TOOL_CALL_END]
+}
+
+fn find_raw_tool_start_marker(
+    buffer: &str,
+) -> Option<(usize, &'static str, RawTextToolMarkerKind)> {
+    raw_tool_start_markers()
+        .iter()
+        .filter_map(|(marker, kind)| buffer.find(marker).map(|index| (index, *marker, *kind)))
+        .min_by_key(|(index, _, _)| *index)
+}
+
+fn find_first_marker(
+    buffer: &str,
+    markers: &'static [&'static str],
+) -> Option<(usize, &'static str)> {
+    markers
+        .iter()
+        .filter_map(|marker| buffer.find(marker).map(|index| (index, *marker)))
+        .min_by_key(|(index, _)| *index)
+}
+
+fn raw_tool_partial_marker_suffix_len(buffer: &str) -> usize {
+    raw_tool_start_markers()
+        .iter()
+        .map(|(marker, _)| partial_marker_suffix_len(buffer, marker))
+        .max()
+        .unwrap_or(0)
+}
+
+fn fenced_json_tool_argument_end(buffer: &str) -> Option<usize> {
+    let trimmed_start = buffer.trim_start();
+    let leading_whitespace_len = buffer.len().saturating_sub(trimmed_start.len());
+    let fenced = trimmed_start.strip_prefix("```")?;
+    let first_line_len = fenced.find('\n')?;
+    let body_start = leading_whitespace_len + "```".len() + first_line_len + 1;
+    let closing_relative = buffer[body_start..].find("\n```")?;
+    Some(body_start + closing_relative + "\n```".len())
+}
+
 fn normalize_raw_tool_arguments(raw: &str) -> String {
     let trimmed = raw.trim();
     let Some(without_opening_fence) = trimmed.strip_prefix("```") else {
@@ -2152,8 +2484,54 @@ fn normalize_raw_tool_arguments(raw: &str) -> String {
         .to_string()
 }
 
+fn sanitize_visible_assistant_text(text: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+
+    let mut run_start: Option<usize> = None;
+    let mut run_len = 0usize;
+    for (index, ch) in text.char_indices() {
+        if ch == '\\' {
+            if run_start.is_none() {
+                run_start = Some(index);
+            }
+            run_len += 1;
+            if run_len >= 64 {
+                let prefix = &text[..run_start.unwrap_or(index)];
+                return if prefix.is_empty() {
+                    None
+                } else {
+                    Some(prefix.to_string())
+                };
+            }
+        } else {
+            run_start = None;
+            run_len = 0;
+        }
+    }
+
+    if looks_like_escaped_tool_garbage(text) {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
+fn looks_like_escaped_tool_garbage(text: &str) -> bool {
+    let total = text.chars().count();
+    if total < 80 {
+        return false;
+    }
+    let backslashes = text.chars().filter(|ch| *ch == '\\').count();
+    backslashes * 100 >= total * 80
+}
+
 fn partial_marker_suffix_len(text: &str, marker: &str) -> usize {
-    (1..marker.len())
+    marker
+        .char_indices()
+        .map(|(index, _)| index)
+        .filter(|index| *index > 0)
         .rev()
         .find(|len| text.ends_with(&marker[..*len]))
         .unwrap_or(0)
@@ -2165,6 +2543,20 @@ struct StreamingToolCallAccumulator {
 }
 
 #[derive(Default)]
+struct StreamingToolCallPushResult {
+    saw_tool_delta: bool,
+    updates: Vec<StreamingToolCallUpdate>,
+}
+
+struct StreamingToolCallUpdate {
+    id: String,
+    name: String,
+    arguments_chars: usize,
+    content_lines: Option<usize>,
+    path: Option<String>,
+}
+
+#[derive(Default)]
 struct StreamingToolCall {
     id: Option<String>,
     call_type: Option<String>,
@@ -2173,8 +2565,8 @@ struct StreamingToolCall {
 }
 
 impl StreamingToolCallAccumulator {
-    fn push_chunk(&mut self, chunk: &Value) -> bool {
-        let mut found = false;
+    fn push_chunk(&mut self, chunk: &Value) -> StreamingToolCallPushResult {
+        let mut result = StreamingToolCallPushResult::default();
         for root in [Some(chunk), chunk.get("data"), chunk.get("chunk")] {
             let Some(choices) = root
                 .and_then(|value| value.get("choices"))
@@ -2190,7 +2582,7 @@ impl StreamingToolCallAccumulator {
                 else {
                     continue;
                 };
-                found = true;
+                result.saw_tool_delta = true;
                 for (fallback_index, call) in calls.iter().enumerate() {
                     let index = call
                         .get("index")
@@ -2225,10 +2617,19 @@ impl StreamingToolCallAccumulator {
                             entry.arguments.push_str(&arguments.to_string());
                         }
                     }
+                    if let (Some(id), Some(name)) = (entry.id.as_ref(), entry.name.as_ref()) {
+                        result.updates.push(StreamingToolCallUpdate {
+                            id: id.clone(),
+                            name: name.clone(),
+                            arguments_chars: entry.arguments.chars().count(),
+                            content_lines: extract_streaming_tool_content_lines(&entry.arguments),
+                            path: extract_streaming_tool_path(&entry.arguments),
+                        });
+                    }
                 }
             }
         }
-        found
+        result
     }
 
     fn take_tool_calls(&mut self) -> Option<Vec<Value>> {
@@ -2250,6 +2651,95 @@ impl StreamingToolCallAccumulator {
         }
         Some(calls)
     }
+}
+
+fn extract_streaming_tool_path(arguments: &str) -> Option<String> {
+    for key in ["path", "file_path", "filePath", "target_file", "targetFile"] {
+        if let Some(value) = extract_json_string_field(arguments, key) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn extract_streaming_tool_content_lines(arguments: &str) -> Option<usize> {
+    for key in [
+        "content",
+        "file_content",
+        "fileContent",
+        "new_content",
+        "newContent",
+        "replacement",
+        "new_string",
+        "newString",
+        "text",
+    ] {
+        if let Some(lines) = count_json_string_field_lines(arguments, key) {
+            return Some(lines);
+        }
+    }
+    None
+}
+
+fn count_json_string_field_lines(arguments: &str, key: &str) -> Option<usize> {
+    let key_pattern = format!("\"{key}\"");
+    let key_index = arguments.find(&key_pattern)?;
+    let after_key = &arguments[key_index + key_pattern.len()..];
+    let colon_index = after_key.find(':')?;
+    let after_colon = after_key[colon_index + 1..].trim_start();
+    let raw = after_colon.strip_prefix('"')?;
+    let mut saw_content = false;
+    let mut lines = 1;
+    let mut escaping = false;
+    for ch in raw.chars() {
+        if escaping {
+            saw_content = true;
+            if ch == 'n' {
+                lines += 1;
+            }
+            escaping = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaping = true,
+            '"' => break,
+            '\n' => {
+                saw_content = true;
+                lines += 1;
+            }
+            '\r' => {
+                saw_content = true;
+            }
+            _ => {
+                saw_content = true;
+            }
+        }
+    }
+    Some(if saw_content { lines } else { 0 })
+}
+
+fn extract_json_string_field(arguments: &str, key: &str) -> Option<String> {
+    let key_pattern = format!("\"{key}\"");
+    let key_index = arguments.find(&key_pattern)?;
+    let after_key = &arguments[key_index + key_pattern.len()..];
+    let colon_index = after_key.find(':')?;
+    let after_colon = after_key[colon_index + 1..].trim_start();
+    let raw = after_colon.strip_prefix('"')?;
+    let mut value = String::new();
+    let mut escaping = false;
+    for ch in raw.chars() {
+        if escaping {
+            value.push(ch);
+            escaping = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaping = true,
+            '"' => return Some(value),
+            _ => value.push(ch),
+        }
+    }
+    None
 }
 
 fn tool_call_stream_finished(chunk: &Value) -> bool {
@@ -2497,9 +2987,10 @@ mod tests {
         RawTextToolCallAccumulator, StreamingToolCallAccumulator, add_visible_models,
         augment_prompt, filter_ignored_tool_calls, is_duplicate_tool_outputs_error,
         is_featherless_provider, model_is_visible, normalize_tool_output,
-        thinking_payload, tool_call_stream_finished, tool_calls_required_by_chunk,
-        tool_definitions, tool_definitions_for_request, tool_outputs_submission_key,
-        try_begin_tool_outputs_submission, validate_web_fetch_url, voice_payload,
+        sanitize_visible_assistant_text, thinking_payload, tool_call_stream_finished,
+        tool_calls_required_by_chunk, tool_definitions, tool_definitions_for_request,
+        tool_outputs_submission_key, try_begin_tool_outputs_submission, validate_web_fetch_url,
+        voice_payload,
     };
 
     #[test]
@@ -2548,9 +3039,12 @@ mod tests {
         assert!(prompt.contains("Use the host's native function/tool-call channel"));
         assert!(prompt.contains("Do not print tool-call JSON"));
         assert!(prompt.contains("Call at most one tool in a single assistant turn"));
+        assert!(prompt.contains("When the user explicitly asks to spawn, launch, run, delegate to, or use one or more subagents"));
         assert!(prompt.contains("## Runtime Context"));
         assert!(prompt.contains("Target workspace root: /tmp/example-workspace"));
         assert!(prompt.contains("Available tools for this turn:"));
+        assert!(prompt.contains("Ignore stale absolute paths from previous chat turns"));
+        assert!(prompt.contains("append 2000-3000 character chunks with append_file"));
         assert!(prompt.contains("read_file"));
         assert!(prompt.contains("write_file"));
         assert!(!prompt.contains("## Backboard API Reference"));
@@ -2566,7 +3060,12 @@ mod tests {
         let workspace = PathBuf::from("/tmp/example-workspace");
         let tools = tool_definitions_for_request("free", false);
         let normal = augment_prompt("make the UI better", Some(&workspace), "free", &tools);
-        let api = augment_prompt("walk me through the Backboard SSO OAuth endpoints", Some(&workspace), "free", &tools);
+        let api = augment_prompt(
+            "walk me through the Backboard SSO OAuth endpoints",
+            Some(&workspace),
+            "free",
+            &tools,
+        );
 
         assert!(!normal.contains("## Backboard API Reference"));
         assert!(!api.contains("## Backboard API Reference"));
@@ -2593,6 +3092,7 @@ mod tests {
                 "write_file",
                 "create_file",
                 "overwrite_file",
+                "append_file",
                 "edit",
                 "edit_file",
                 "search_replace",
@@ -2605,9 +3105,7 @@ mod tests {
                 "web_search",
                 "web_fetch",
                 "generate_image",
-                "todo_write",
                 "read_lints",
-                "task",
                 "enter_plan_mode",
                 "exit_plan_mode",
                 "persistence_decide",
@@ -2901,16 +3399,52 @@ mod tests {
         );
 
         assert!(result.visible_text.is_empty());
-        assert!(result.tool_calls.is_empty());
-
-        let calls = accumulator.take_tool_calls().unwrap();
-
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0]["function"]["name"], "glob");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["function"]["name"], "glob");
         assert_eq!(
-            calls[0]["function"]["arguments"],
+            result.tool_calls[0]["function"]["arguments"],
             "{\"pattern\":\"src/**/*.ts\"}"
         );
+        assert!(!accumulator.is_inside_tool_call());
+    }
+
+    #[test]
+    fn raw_text_tool_call_extracts_deepseek_bare_function_prefixes() {
+        let mut accumulator = RawTextToolCallAccumulator::default();
+        let result = accumulator.push_text(
+            "Let me create the files:\nfunction<｜tool▁sep｜>create_file\n```json\n{\"path\":\"mario-game/index.html\",\"content\":\"<html></html>\"}\n```\nfunction<｜tool▁sep｜>create_file\n```json\n{\"path\":\"mario-game/game.js\",\"content\":\"console.log('ok')\"}\n```\nDone.",
+        );
+
+        assert_eq!(result.visible_text, "Let me create the files:\n\n\nDone.");
+        assert_eq!(result.tool_calls.len(), 2);
+        assert_eq!(result.tool_calls[0]["function"]["name"], "create_file");
+        assert_eq!(
+            result.tool_calls[0]["function"]["arguments"],
+            "{\"path\":\"mario-game/index.html\",\"content\":\"<html></html>\"}"
+        );
+        assert_eq!(result.tool_calls[1]["function"]["name"], "create_file");
+        assert_eq!(
+            result.tool_calls[1]["function"]["arguments"],
+            "{\"path\":\"mario-game/game.js\",\"content\":\"console.log('ok')\"}"
+        );
+        assert!(!accumulator.is_inside_tool_call());
+    }
+
+    #[test]
+    fn raw_text_tool_call_extracts_deepseek_wrapped_call() {
+        let mut accumulator = RawTextToolCallAccumulator::default();
+        let result = accumulator.push_text(
+            "<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>read_file\n```json\n{\"path\":\"package.json\"}\n```<｜tool▁call▁end｜><｜tool▁calls▁end｜>",
+        );
+
+        assert!(result.visible_text.is_empty());
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["function"]["name"], "read_file");
+        assert_eq!(
+            result.tool_calls[0]["function"]["arguments"],
+            "{\"path\":\"package.json\"}"
+        );
+        assert!(!accumulator.is_inside_tool_call());
     }
 
     #[test]
@@ -2930,9 +3464,27 @@ mod tests {
     }
 
     #[test]
+    fn visible_text_sanitizer_drops_giant_backslash_run() {
+        let text = format!("Let me create the initial files:\n{}", "\\".repeat(256));
+        assert_eq!(
+            sanitize_visible_assistant_text(&text).as_deref(),
+            Some("Let me create the initial files:\n")
+        );
+    }
+
+    #[test]
+    fn visible_text_sanitizer_keeps_normal_backslashes() {
+        assert_eq!(
+            sanitize_visible_assistant_text(r#"Use C:\Users\test\project as the folder."#)
+                .as_deref(),
+            Some(r#"Use C:\Users\test\project as the folder."#)
+        );
+    }
+
+    #[test]
     fn openai_streaming_tool_call_deltas_are_accumulated() {
         let mut accumulator = StreamingToolCallAccumulator::default();
-        assert!(accumulator.push_chunk(&json!({
+        let first = accumulator.push_chunk(&json!({
             "choices": [{
                 "delta": {
                     "tool_calls": [{
@@ -2946,8 +3498,15 @@ mod tests {
                     }]
                 }
             }]
-        })));
-        assert!(accumulator.push_chunk(&json!({
+        }));
+        assert!(first.saw_tool_delta);
+        assert_eq!(first.updates.len(), 1);
+        assert_eq!(first.updates[0].id, "call_1");
+        assert_eq!(first.updates[0].name, "read_file");
+        assert!(first.updates[0].path.is_none());
+        assert!(first.updates[0].content_lines.is_none());
+
+        let second = accumulator.push_chunk(&json!({
             "choices": [{
                 "delta": {
                     "tool_calls": [{
@@ -2958,7 +3517,11 @@ mod tests {
                     }]
                 }
             }]
-        })));
+        }));
+        assert!(second.saw_tool_delta);
+        assert_eq!(second.updates.len(), 1);
+        assert_eq!(second.updates[0].path.as_deref(), Some("README.md"));
+        assert!(second.updates[0].content_lines.is_none());
         assert!(tool_call_stream_finished(&json!({
             "choices": [{ "finish_reason": "tool_calls" }]
         })));
@@ -2970,5 +3533,45 @@ mod tests {
             calls[0]["function"]["arguments"],
             "{\"path\":\"README.md\"}"
         );
+    }
+
+    #[test]
+    fn openai_streaming_tool_call_reports_content_line_count() {
+        let mut accumulator = StreamingToolCallAccumulator::default();
+        let first = accumulator.push_chunk(&json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "write_file",
+                            "arguments": "{\"path\":\"game.js\",\"content\":\"const a = 1;\\n"
+                        }
+                    }]
+                }
+            }]
+        }));
+        assert!(first.saw_tool_delta);
+        assert_eq!(first.updates.len(), 1);
+        assert_eq!(first.updates[0].path.as_deref(), Some("game.js"));
+        assert_eq!(first.updates[0].content_lines, Some(2));
+
+        let second = accumulator.push_chunk(&json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "function": {
+                            "arguments": "const b = 2;\\nconst c = 3;\"}"
+                        }
+                    }]
+                }
+            }]
+        }));
+        assert!(second.saw_tool_delta);
+        assert_eq!(second.updates.len(), 1);
+        assert_eq!(second.updates[0].content_lines, Some(3));
     }
 }

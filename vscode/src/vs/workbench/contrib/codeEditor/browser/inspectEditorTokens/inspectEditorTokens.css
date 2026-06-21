@@ -23,7 +23,7 @@
 }
 
 .tiw-token {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .tiw-metadata-separator {
@@ -42,7 +42,7 @@
 }
 
 .tiw-metadata-value {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	word-break: break-word;
 }
 
@@ -75,5 +75,5 @@
 }
 
 .tiw-theme-selector {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }

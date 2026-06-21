@@ -155,7 +155,7 @@
 	top: 44px;
 	left: 0;
 	right: 0;
-	font-family: var(--vscode-editor-font-family);
+	font-family: var(--vscode-editor-font-family, "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace);
 	font-size: 12px;
 	line-height: 18px;
 	overflow-x: auto;

@@ -53,6 +53,7 @@ export interface IWindowCreationOptions {
 	readonly extensionDevelopmentPath?: string[];
 	readonly isExtensionTestHost?: boolean;
 	readonly isSessionsWindow?: boolean;
+	readonly isOptimusWindow?: boolean;
 }
 
 interface ITouchBarSegment extends electron.SegmentedControlSegment {
@@ -708,7 +709,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				additionalArguments: [`--vscode-window-config=${this.configObjectUrl.resource.toString()}`],
 				v8CacheOptions: this.environmentMainService.useCodeCache ? 'bypassHeatCheck' : 'none'
 			};
-			if (config.isSessionsWindow) {
+			if (config.isSessionsWindow || config.isOptimusWindow) {
 				webPreferences.backgroundThrottling = false; // keep agents window responsive when in background
 			}
 
@@ -1210,6 +1211,8 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		let windowUrl: string;
 		if (process.env.VSCODE_DEV && process.env.VSCODE_DEV_SERVER_URL) {
 			windowUrl = process.env.VSCODE_DEV_SERVER_URL; // support URL override for development
+		} else if (configuration.isOptimusWindow) {
+			windowUrl = FileAccess.asBrowserUri(`vs/optimus/electron-browser/optimus${this.environmentMainService.isBuilt ? '' : '-dev'}.html`).toString(true);
 		} else if (configuration.isSessionsWindow) {
 			windowUrl = FileAccess.asBrowserUri(`vs/sessions/electron-browser/sessions${this.environmentMainService.isBuilt ? '' : '-dev'}.html`).toString(true);
 		} else {

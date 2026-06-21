@@ -34,6 +34,12 @@ Then read the Zed workspace mapping when implementing the new agents/editor page
 docs/BACKBOARD_AGENT_WORKSPACE_FROM_ZED.md
 ```
 
+Then read the right-panel tabs/history map when working on chat tabs, session history, or the history button:
+
+```text
+docs/RIGHT_PANEL_TABS_AND_HISTORY.md
+```
+
 Use the other docs for deeper context:
 
 ```text
@@ -106,6 +112,22 @@ It maps Zed's Agent Workspace into VS Code:
 - Worktrees and apply flows should come after one normal thread works.
 
 This is the main doc for the next UI/workspace implementation.
+
+### `RIGHT_PANEL_TABS_AND_HISTORY.md`
+
+Use this when changing the Backboard right-panel tab strip, history button, or session history modal.
+
+It maps:
+
+- `ChatViewTitleControl`
+- tab rendering and close behavior
+- `workbench.action.chat.history`
+- `AgentSessionsHistoryModal`
+- `AgentSessionsControl`
+- `IAgentSessionsService`
+- `openSession(...)`
+
+It also includes copy-paste code snippets for the tab click path, close path, history button registration, and modal session open path.
 
 ### `TOOL_CALLS_AND_API.md`
 

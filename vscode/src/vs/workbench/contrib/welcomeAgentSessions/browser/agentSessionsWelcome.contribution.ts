@@ -24,7 +24,6 @@ import { Action2, registerAction2 } from '../../../../platform/actions/common/ac
 import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
 import { IChatEntitlementService } from '../../../services/chat/common/chatEntitlementService.js';
-import './workspacePage.js';
 
 // Registration priority
 const agentSessionsWelcomeInputTypeId = 'workbench.editors.agentSessionsWelcomeInput';

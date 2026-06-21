@@ -7,6 +7,7 @@ import './media/chatViewTitleControl.css';
 import { addDisposableListener, EventType, h } from '../../../../../../base/browser/dom.js';
 import { renderAsPlaintext } from '../../../../../../base/browser/markdownRenderer.js';
 import { Gesture, EventType as TouchEventType } from '../../../../../../base/browser/touch.js';
+import { Delayer } from '../../../../../../base/common/async.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
@@ -33,9 +34,11 @@ export class ChatViewTitleControl extends Disposable {
 
 	private static readonly DEFAULT_TITLE = localize('chat', "Backboard");
 	private static readonly PICK_AGENT_SESSION_ACTION_ID = 'workbench.action.chat.pickAgentSession';
+	private static readonly MAX_HISTORY_TABS = 40;
 
 	private readonly _onDidChangeHeight = this._register(new Emitter<void>());
 	readonly onDidChangeHeight = this._onDidChangeHeight.event;
+	private readonly refreshHistoryTabsDelayer = this._register(new Delayer<void>(250));
 
 	private title: string | undefined = undefined;
 
@@ -64,6 +67,7 @@ export class ChatViewTitleControl extends Disposable {
 
 		this.render(this.container);
 		this._register(this.agentSessionsService.model.onDidChangeSessions(() => this.updateTabs(this.getResolvedTitle())));
+		this.refreshHistoryTabs();
 
 		this.registerActions();
 	}
@@ -103,6 +107,15 @@ export class ChatViewTitleControl extends Disposable {
 			]),
 		]);
 		this.tabsContainer = elements.tabsContainer;
+		this._register(addDisposableListener(this.tabsContainer, EventType.MOUSE_WHEEL, e => {
+			if (!this.tabsContainer || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) {
+				return;
+			}
+
+			this.tabsContainer.scrollLeft += e.deltaY;
+			e.preventDefault();
+			e.stopPropagation();
+		}, { passive: false }));
 
 		// Toolbar on the left
 		this.navigationToolbar = this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, elements.navigationToolbar, MenuId.ChatViewSessionTitleNavigationToolbar, {
@@ -149,6 +162,7 @@ export class ChatViewTitleControl extends Disposable {
 		});
 
 		this.doUpdate();
+		this.refreshHistoryTabs();
 	}
 
 	private doUpdate(): void {
@@ -200,33 +214,80 @@ export class ChatViewTitleControl extends Disposable {
 		return true;
 	}
 
+	private refreshHistoryTabs(): void {
+		void this.refreshHistoryTabsDelayer.trigger(async () => {
+			await this.agentSessionsService.model.resolve(undefined);
+			this.updateTabs(this.getResolvedTitle());
+		}).catch(() => undefined);
+	}
+
 	private updateTabs(currentTitle: string): void {
 		if (!this.tabsContainer) {
 			return;
 		}
 
 		this.tabDisposables.clear();
+		const previousScrollLeft = this.tabsContainer.scrollLeft;
 		this.tabsContainer.replaceChildren();
 
 		const currentSessionResource = this.model?.sessionResource;
-		this.addTab({
-			label: currentTitle,
-			active: true,
-			isCurrent: true,
-		});
+		let didRenderCurrentSession = false;
 
-		const sessions = this.agentSessionsService.model.sessions
-			.filter(session => !session.isArchived())
-			.filter(session => !currentSessionResource || !isEqual(session.resource, currentSessionResource))
-			.filter(session => !this.closedSessionTabs.has(session.resource.toString()));
+		const sessions = this.getHistoryTabSessions(currentSessionResource);
 
 		for (const session of sessions) {
+			const isCurrentSession = !!currentSessionResource && isEqual(session.resource, currentSessionResource);
+			didRenderCurrentSession ||= isCurrentSession;
+
 			this.addTab({
-				label: session.label,
-				active: false,
+				label: isCurrentSession ? currentTitle : session.label,
+				active: isCurrentSession,
+				isCurrent: isCurrentSession,
 				session,
 			});
 		}
+
+		if (!didRenderCurrentSession) {
+			this.addTab({
+				label: currentTitle,
+				active: true,
+				isCurrent: true,
+			});
+		}
+
+		this.tabsContainer.scrollLeft = previousScrollLeft;
+	}
+
+	private getHistoryTabSessions(currentSessionResource: IChatModel['sessionResource'] | undefined): IAgentSession[] {
+		const sortedSessions = this.agentSessionsService.model.sessions
+			.filter(session => !session.isArchived())
+			.filter(session => {
+				const isCurrentSession = !!currentSessionResource && isEqual(session.resource, currentSessionResource);
+				return isCurrentSession || !this.closedSessionTabs.has(session.resource.toString());
+			})
+			.sort((a, b) => this.getHistoryTabTime(b) - this.getHistoryTabTime(a) || a.label.localeCompare(b.label));
+
+		const visibleSessions = sortedSessions.slice(0, ChatViewTitleControl.MAX_HISTORY_TABS);
+		if (!currentSessionResource || visibleSessions.some(session => isEqual(session.resource, currentSessionResource))) {
+			return visibleSessions;
+		}
+
+		const currentSession = sortedSessions.find(session => isEqual(session.resource, currentSessionResource));
+		if (!currentSession) {
+			return visibleSessions;
+		}
+
+		if (visibleSessions.length < ChatViewTitleControl.MAX_HISTORY_TABS) {
+			visibleSessions.push(currentSession);
+		} else {
+			visibleSessions[visibleSessions.length - 1] = currentSession;
+		}
+
+		return visibleSessions;
+	}
+
+	private getHistoryTabTime(session: IAgentSession): number {
+		return session.timing.lastRequestEnded ?? session.timing.lastRequestStarted ?? session.timing.created;
 	}
 
 	private addTab(options: { label: string; active: boolean; isCurrent?: boolean; session?: IAgentSession }): void {
@@ -236,7 +297,6 @@ export class ChatViewTitleControl extends Disposable {
 
 		const label = options.label.trim() || ChatViewTitleControl.DEFAULT_TITLE;
 		const tabElements = h('div.chat-view-title-tab@root', { role: 'button', tabIndex: 0, title: label }, [
-			h('span.codicon.codicon-info.chat-view-title-brand-icon'),
 			h('span.chat-view-title-tab-label@label'),
 			h('span.codicon.codicon-close.chat-view-title-tab-close@close', { role: 'button', title: localize('chat.closeSessionTab', "Close Tab"), ariaLabel: localize('chat.closeSessionTab', "Close Tab") }),
 		]);

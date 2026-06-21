@@ -556,7 +556,7 @@
 }
 
 .ai-customization-list-item .item-description.is-filename {
-	font-family: var(--vscode-editor-font-family);
+	font-family: var(--vscode-editor-font-family, "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace);
 	font-size: var(--vscode-agents-fontSize-label3);
 	opacity: 0.7;
 }
@@ -1285,7 +1285,7 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .ai-customization-management-editor .editor-save-indicator {
@@ -1389,7 +1389,7 @@
 	font-size: 12px;
 	font-weight: 600;
 	color: var(--vscode-foreground);
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .ai-customization-management-editor .editor-preview-row-help {
@@ -1430,7 +1430,7 @@
 }
 
 .ai-customization-management-editor .editor-preview-row-value.multiline {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: 12px;
 }
 

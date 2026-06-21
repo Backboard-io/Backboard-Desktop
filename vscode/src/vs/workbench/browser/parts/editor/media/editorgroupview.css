@@ -163,7 +163,7 @@
 	height: 100%;
 	padding: clamp(32px, 8vh, 96px) 40px 32px;
 	color: var(--vscode-editor-foreground);
-	font-family: var(--vscode-editor-font-family, var(--vscode-font-family, monospace));
+	font-family: var(--vscode-editor-font-family, "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace);
 	text-align: left;
 }
 

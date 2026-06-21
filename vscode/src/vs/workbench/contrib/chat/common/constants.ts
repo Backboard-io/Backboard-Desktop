@@ -325,15 +325,7 @@ export const MANAGE_CHAT_COMMAND_ID = 'workbench.action.chat.manage';
 export const BACKBOARD_MODE_SWITCHER_COMMAND_ID = 'workbench.action.backboardModeSwitcher';
 export const OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openWorkspaceInAgentsWindow';
 export const OPEN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openAgentsWindow';
-export const OPEN_BACKBOARD_WORKSPACE_WINDOW_COMMAND_ID = 'workbench.action.openBackboardWorkspaceWindow';
 export const OPEN_AGENTS_WINDOW_PRECONDITION = ContextKeyExpr.and(
-	ChatEntitlementContextKeys.Setup.hidden.negate(),
-	ChatEntitlementContextKeys.Setup.disabledInWorkspace.negate(),
-	IsSessionsWindowContext.negate(),
-	ContextKeyExpr.has(`config.${ChatConfiguration.AgentEnabled}`),
-	IsAuxiliaryWindowContext.negate()
-);
-export const OPEN_BACKBOARD_WORKSPACE_WINDOW_PRECONDITION = ContextKeyExpr.and(
 	ChatEntitlementContextKeys.Setup.hidden.negate(),
 	ChatEntitlementContextKeys.Setup.disabledInWorkspace.negate(),
 	IsSessionsWindowContext.negate(),

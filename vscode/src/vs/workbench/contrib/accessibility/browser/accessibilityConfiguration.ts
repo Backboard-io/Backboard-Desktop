@@ -87,7 +87,7 @@ export const accessibilityConfigurationNodeBase = Object.freeze<IConfigurationNo
 export const soundFeatureBase: IConfigurationPropertySchema = {
 	'type': 'string',
 	'enum': ['auto', 'on', 'off'],
-	'default': 'auto',
+	'default': 'off',
 	'enumDescriptions': [
 		localize('sound.enabled.auto', "Enable sound when a screen reader is attached."),
 		localize('sound.enabled.on', "Enable sound."),
@@ -101,7 +101,7 @@ const signalFeatureBase: IConfigurationPropertySchema = {
 	'tags': ['accessibility'],
 	additionalProperties: false,
 	default: {
-		sound: 'auto',
+		sound: 'off',
 		announcement: 'auto'
 	}
 };
@@ -122,7 +122,7 @@ const defaultNoAnnouncement: IConfigurationPropertySchema = {
 	'tags': ['accessibility'],
 	additionalProperties: false,
 	'default': {
-		'sound': 'auto',
+		'sound': 'off',
 	}
 };
 
@@ -585,7 +585,7 @@ const configuration: IConfigurationNode = {
 			...signalFeatureBase,
 			'description': localize('accessibility.signals.progress', "Plays a signal - sound (audio cue) and/or announcement (alert) - on loop while progress is occurring."),
 			'default': {
-				'sound': 'auto',
+				'sound': 'off',
 				'announcement': 'off'
 			},
 			'properties': {
@@ -602,6 +602,10 @@ const configuration: IConfigurationNode = {
 		'accessibility.signals.chatRequestSent': {
 			...signalFeatureBase,
 			'description': localize('accessibility.signals.chatRequestSent', "Plays a signal - sound (audio cue) and/or announcement (alert) - when a chat request is made."),
+			'default': {
+				'sound': 'on',
+				'announcement': 'auto'
+			},
 			'properties': {
 				'sound': {
 					'description': localize('accessibility.signals.chatRequestSent.sound', "Plays a sound when a chat request is made."),
@@ -616,10 +620,31 @@ const configuration: IConfigurationNode = {
 		'accessibility.signals.chatResponseReceived': {
 			...defaultNoAnnouncement,
 			'description': localize('accessibility.signals.chatResponseReceived', "Plays a sound / audio cue when the response has been received."),
+			'default': {
+				'sound': 'on',
+			},
 			'properties': {
 				'sound': {
 					'description': localize('accessibility.signals.chatResponseReceived.sound', "Plays a sound on when the response has been received."),
 					...soundFeatureBase
+				},
+			}
+		},
+		'accessibility.signals.notificationReceived': {
+			...signalFeatureBase,
+			'description': localize('accessibility.signals.notificationReceived', "Plays a signal - sound (audio cue) and/or announcement (alert) - when a notification is received."),
+			'default': {
+				'sound': 'on',
+				'announcement': 'auto'
+			},
+			'properties': {
+				'sound': {
+					'description': localize('accessibility.signals.notificationReceived.sound', "Plays a sound when a notification is received."),
+					...soundFeatureBase
+				},
+				'announcement': {
+					'description': localize('accessibility.signals.notificationReceived.announcement', "Announces when a notification is received."),
+					...announcementFeatureBase
 				},
 			}
 		},
@@ -653,7 +678,7 @@ const configuration: IConfigurationNode = {
 				},
 			},
 			'default': {
-				'sound': 'on'
+				'sound': 'off'
 			}
 		},
 		'accessibility.signals.voiceRecordingStopped': {
@@ -797,7 +822,7 @@ const configuration: IConfigurationNode = {
 				},
 			},
 			default: {
-				'sound': 'auto',
+				'sound': 'off',
 				'announcement': 'auto'
 			},
 			tags: ['accessibility']

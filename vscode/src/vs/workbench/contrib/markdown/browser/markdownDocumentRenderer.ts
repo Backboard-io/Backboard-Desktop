@@ -92,7 +92,7 @@ blockquote {
 }
 
 code {
-	font-family: var(--vscode-editor-font-family);
+	font-family: var(--vscode-editor-font-family, "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace);
 }
 
 pre {
@@ -102,7 +102,7 @@ pre {
 }
 
 pre code {
-	font-family: var(--vscode-editor-font-family);
+	font-family: var(--vscode-editor-font-family, "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace);
 	font-weight: var(--vscode-editor-font-weight);
 	font-size: var(--vscode-editor-font-size);
 	line-height: 1.5;

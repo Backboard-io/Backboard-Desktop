@@ -109,7 +109,7 @@
 }
 
 .comments-panel .comments-panel-container .tree-container .comment-thread-container .comment-snippet-container .text code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .comments-panel .comments-panel-container .tree-container .monaco-icon-label {

@@ -30,7 +30,7 @@
 
 .monaco-editor .zone-widget .zone-widget-container.exception-widget .description,
 .monaco-editor .zone-widget .zone-widget-container.exception-widget .stack-trace {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .monaco-editor .zone-widget .zone-widget-container.exception-widget .stack-trace {

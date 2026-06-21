@@ -92,7 +92,7 @@
 	font-size: 13px;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	white-space: pre;
 }
 

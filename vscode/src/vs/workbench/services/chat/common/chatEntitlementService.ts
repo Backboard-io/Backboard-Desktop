@@ -274,6 +274,10 @@ interface IChatQuotasAccessor {
 
 const CHAT_ALLOW_ANONYMOUS_CONFIGURATION_KEY = 'chat.allowAnonymousAccess';
 
+function isBackboardDefaultChatAgent(): boolean {
+	return product.defaultChatAgent?.provider?.default?.id === 'backboard';
+}
+
 function isAnonymous(configurationService: IConfigurationService, entitlement: ChatEntitlement, sentiment: IChatSentiment): boolean {
 	if (configurationService.getValue(CHAT_ALLOW_ANONYMOUS_CONFIGURATION_KEY) !== true) {
 		return false; // only enabled behind an experimental setting
@@ -1325,6 +1329,23 @@ export class ChatEntitlementContext extends Disposable {
 			sku: undefined,
 			copilotTrackingId: undefined
 		};
+		if (isBackboardDefaultChatAgent()) {
+			this._state = {
+				...this._state,
+				entitlement: ChatEntitlement.Business,
+				organisations: ['backboard'],
+				sku: 'backboard',
+				copilotTrackingId: undefined,
+				installed: true,
+				disabled: false,
+				untrusted: false,
+				disabledInWorkspace: false,
+				completed: true,
+				registered: true,
+				hidden: false,
+				later: false,
+			};
+		}
 
 		const migrated = this.storageService.getBoolean(ChatEntitlementContext.CHAT_ENTITLEMENT_CONTEXT_MIGRATED_STORAGE_KEY, StorageScope.PROFILE) === true;
 		if (!migrated) {

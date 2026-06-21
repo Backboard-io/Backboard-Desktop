@@ -416,12 +416,14 @@ export function getResource(sourceFile: string): Resource {
 		return { name: resource, project: workbenchProject };
 	} else if (/^vs\/workbench/.test(sourceFile)) {
 		return { name: 'vs/workbench', project: workbenchProject };
-	} else if (/^vs\/sessions\/contrib/.test(sourceFile)) {
-		resource = sourceFile.split('/', 4).join('/');
-		return { name: resource, project: sessionsProject };
-	} else if (/^vs\/sessions/.test(sourceFile)) {
-		return { name: 'vs/sessions', project: sessionsProject };
-	}
+		} else if (/^vs\/sessions\/contrib/.test(sourceFile)) {
+			resource = sourceFile.split('/', 4).join('/');
+			return { name: resource, project: sessionsProject };
+		} else if (/^vs\/sessions/.test(sourceFile)) {
+			return { name: 'vs/sessions', project: sessionsProject };
+		} else if (/^vs\/optimus/.test(sourceFile)) {
+			return { name: 'vs/optimus', project: sessionsProject };
+		}
 
 	throw new Error(`Could not identify the XLF bundle for ${sourceFile}`);
 }

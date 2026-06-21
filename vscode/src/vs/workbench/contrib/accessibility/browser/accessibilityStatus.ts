@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Disposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
 import { Event } from '../../../../base/common/event.js';
 import Severity from '../../../../base/common/severity.js';
 import { localize } from '../../../../nls.js';
@@ -12,7 +12,6 @@ import { CommandsRegistry } from '../../../../platform/commands/common/commands.
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { INotificationHandle, INotificationService, NotificationPriority } from '../../../../platform/notification/common/notification.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
-import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 
 export class AccessibilityStatus extends Disposable implements IWorkbenchContribution {
@@ -21,20 +20,16 @@ export class AccessibilityStatus extends Disposable implements IWorkbenchContrib
 
 	private screenReaderNotification: INotificationHandle | null = null;
 	private promptedScreenReader: boolean = false;
-	private readonly screenReaderModeElement = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
 
 	constructor(
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
-		@IStatusbarService private readonly statusbarService: IStatusbarService,
 		@IOpenerService private readonly openerService: IOpenerService,
 	) {
 		super();
 
 		this._register(CommandsRegistry.registerCommand({ id: 'showEditorScreenReaderNotification', handler: () => this.showScreenReaderNotification() }));
-
-		this.updateScreenReaderModeElement(this.accessibilityService.isScreenReaderOptimized());
 
 		this.registerListeners();
 	}
@@ -78,23 +73,6 @@ export class AccessibilityStatus extends Disposable implements IWorkbenchContrib
 
 		Event.once(this.screenReaderNotification.onDidClose)(() => this.screenReaderNotification = null);
 	}
-	private updateScreenReaderModeElement(visible: boolean): void {
-		if (visible) {
-			if (!this.screenReaderModeElement.value) {
-				const text = localize('screenReaderDetected', "Screen Reader Optimized");
-				this.screenReaderModeElement.value = this.statusbarService.addEntry({
-					name: localize('status.editor.screenReaderMode', "Screen Reader Mode"),
-					text,
-					ariaLabel: text,
-					command: 'showEditorScreenReaderNotification',
-					kind: 'prominent',
-					showInAllWindows: true
-				}, 'status.editor.screenReaderMode', StatusbarAlignment.RIGHT, 100.6);
-			}
-		} else {
-			this.screenReaderModeElement.clear();
-		}
-	}
 
 	private onScreenReaderModeChange(): void {
 
@@ -113,6 +91,5 @@ export class AccessibilityStatus extends Disposable implements IWorkbenchContrib
 		if (this.screenReaderNotification) {
 			this.screenReaderNotification.close();
 		}
-		this.updateScreenReaderModeElement(this.accessibilityService.isScreenReaderOptimized());
 	}
 }

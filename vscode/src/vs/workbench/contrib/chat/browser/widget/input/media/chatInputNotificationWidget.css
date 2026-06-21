@@ -107,7 +107,7 @@
 }
 
 .chat-input-notification .chat-input-notification-title-markdown code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: var(--vscode-agents-fontSize-body2);
 	padding: 0 3px;
 	border-radius: 3px;

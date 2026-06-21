@@ -104,8 +104,8 @@ export class TestNativeHostService implements INativeHostService {
 	}
 
 	async openAgentsWindow(_options?: { folderUri?: UriComponents; sessionResource?: UriComponents }): Promise<void> { }
+	async openOptimusWindow(): Promise<void> { }
 
-	async openBackboardWorkspaceWindow(_options?: { folderUri?: UriComponents; sessionResource?: UriComponents }): Promise<void> { }
 
 	async toggleFullScreen(): Promise<void> { }
 	async isMaximized(): Promise<boolean> { return true; }

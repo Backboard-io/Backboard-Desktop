@@ -110,7 +110,7 @@
 				overscroll-behavior-x: none;
 				background-color: transparent;
 				color: var(--vscode-editor-foreground);
-				font-family: var(--vscode-font-family);
+				font-family: var(--vscode-font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
 				font-weight: var(--vscode-font-weight);
 				font-size: var(--vscode-font-size);
 				margin: 0;
@@ -143,7 +143,7 @@
 			}
 
 			code {
-				font-family: var(--monaco-monospace-font);
+				font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 				color: var(--vscode-textPreformat-foreground);
 				background-color: var(--vscode-textPreformat-background);
 				padding: 1px 3px;

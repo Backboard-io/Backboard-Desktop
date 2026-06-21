@@ -134,7 +134,7 @@ body.issue-reporter-body  {
 .issue-reporter-body .mac.web:lang(zh-Hant),
 .issue-reporter-body .mac.web:lang(ja),
 .issue-reporter-body .mac.web:lang(ko) {
-	font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .issue-reporter-body .windows.web,
@@ -142,7 +142,7 @@ body.issue-reporter-body  {
 .issue-reporter-body .windows.web:lang(zh-Hant),
 .issue-reporter-body .windows.web:lang(ja),
 .issue-reporter-body .windows.web:lang(ko) {
-	font-family: "Segoe WPC", "Segoe UI", sans-serif;
+	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .issue-reporter-body .linux.web,
@@ -150,7 +150,7 @@ body.issue-reporter-body  {
 .issue-reporter-body .linux.web:lang(zh-Hant),
 .issue-reporter-body .linux.web:lang(ja),
 .issue-reporter-body .linux.web:lang(ko) {
-	font-family: system-ui, "Ubuntu", "Droid Sans", sans-serif;
+	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .issue-reporter-body .monaco-workbench {

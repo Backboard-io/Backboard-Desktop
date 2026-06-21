@@ -372,7 +372,7 @@
 }
 
 .monaco-workbench .inline-chat-terminated-card .markdown-message code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: var(--vscode-chat-font-size-body-xs);
 	color: var(--vscode-textPreformat-foreground);
 	background-color: var(--vscode-textPreformat-background);

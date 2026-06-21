@@ -229,7 +229,7 @@
 }
 
 .agent-feedback-widget-text .rendered-markdown code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: var(--vscode-agents-fontSize-label3);
 	padding: 1px 4px;
 	border-radius: var(--vscode-cornerRadius-small);
@@ -268,7 +268,7 @@
 	border-radius: var(--vscode-cornerRadius-small);
 	overflow-x: auto;
 	white-space: pre-wrap;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: var(--vscode-agents-fontSize-label3);
 	line-height: 1.45;
 	background: var(--vscode-editorWidget-background);
@@ -335,7 +335,7 @@
 }
 
 .agent-feedback-widget-reply-text .rendered-markdown code {
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	font-size: var(--vscode-agents-fontSize-label3);
 	padding: 2px 4px;
 	border-radius: var(--vscode-cornerRadius-small);

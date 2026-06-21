@@ -28,7 +28,8 @@ export const workbenchDesktop = [
 	createModuleDescription('vs/platform/agentHost/node/diffWorkerMain'),
 	createModuleDescription('vs/workbench/api/node/extensionHostProcess'),
 	createModuleDescription('vs/workbench/workbench.desktop.main'),
-	createModuleDescription('vs/sessions/sessions.desktop.main')
+	createModuleDescription('vs/sessions/sessions.desktop.main'),
+	createModuleDescription('vs/optimus/optimus.desktop.main')
 ];
 
 export const workbenchWeb = createModuleDescription('vs/workbench/workbench.web.main.internal');
@@ -48,6 +49,7 @@ export const code = [
 	createModuleDescription('vs/code/electron-utility/sharedProcess/sharedProcessMain'),
 	createModuleDescription('vs/code/electron-browser/workbench/workbench'),
 	createModuleDescription('vs/sessions/electron-browser/sessions'),
+	createModuleDescription('vs/optimus/electron-browser/optimus'),
 ];
 
 export const codeWeb = createModuleDescription('vs/code/browser/workbench/workbench');

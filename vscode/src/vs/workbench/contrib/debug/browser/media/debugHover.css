@@ -70,7 +70,7 @@
 .monaco-editor .debug-hover-widget > .monaco-scrollable-element > .value {
 	color: rgba(108, 108, 108, 0.8);
 	overflow: auto;
-	font-family: var(--monaco-monospace-font);
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	max-height: 500px;
 	padding: 4px 5px;
 	white-space: pre-wrap;

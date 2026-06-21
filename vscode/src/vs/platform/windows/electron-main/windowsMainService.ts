@@ -83,6 +83,7 @@ interface IOpenBrowserWindowOptions {
 	readonly emptyWindowBackupInfo?: IEmptyWindowBackupInfo;
 	readonly forceProfile?: string;
 	readonly forceTempProfile?: boolean;
+	readonly optimusWindow?: boolean;
 }
 
 interface IPathResolveOptions {
@@ -309,15 +310,18 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		return windows;
 	}
 
-	async openBackboardWorkspaceWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI): Promise<ICodeWindow[]> {
-		this.logService.trace('windowsManager#openBackboardWorkspaceWindow');
+	async openOptimusWindow(openConfig: IOpenConfiguration): Promise<ICodeWindow[]> {
+		this.logService.trace('windowsManager#openOptimusWindow');
 
-		const windows = await this.open(await this.ensureBackboardWorkspaceWindow(openConfig));
-		if (windows.length > 0) {
-			windows[0].sendWhenReady('vscode:openBackboardWorkspace', CancellationToken.None, folderUri?.toJSON(), sessionResource?.toJSON());
-		}
-
-		return windows;
+		return this.open({
+			...openConfig,
+			urisToOpen: undefined,
+			noRecentEntry: true,
+			forceEmpty: true,
+			forceNewWindow: true,
+			forceReuseWindow: false,
+			optimusWindow: true
+		});
 	}
 
 	private async ensureAgentsWindow(openConfig: IOpenConfiguration): Promise<IOpenConfiguration> {
@@ -339,35 +343,6 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 
 		return {
 			urisToOpen: [{ workspaceUri: agentSessionsWorkspaceUri }],
-			userEnv: openConfig.userEnv,
-			cli: openConfig.cli,
-			noRecentEntry: true,
-			context: openConfig.context,
-			contextWindowId: reuseWindowId ?? openConfig.contextWindowId,
-			initialStartup: openConfig.initialStartup,
-			forceNewWindow: !openConfig.forceReuseWindow,
-			forceReuseWindow: openConfig.forceReuseWindow,
-		};
-	}
-
-	private async ensureBackboardWorkspaceWindow(openConfig: IOpenConfiguration): Promise<IOpenConfiguration> {
-		const workspaceUri = this.environmentMainService.agentSessionsWorkspace;
-		if (!workspaceUri) {
-			throw new Error('Backboard workspace host is not configured');
-		}
-
-		const workspaceExists = await this.fileService.exists(workspaceUri);
-		if (!workspaceExists) {
-			const emptyWorkspaceContent = JSON.stringify({ folders: [] }, null, '\t');
-			await this.fileService.writeFile(workspaceUri, VSBuffer.fromString(emptyWorkspaceContent));
-		}
-
-		const reuseWindowId = openConfig.forceReuseWindow
-			? openConfig.contextWindowId ?? this.getFocusedWindow()?.id ?? this.getLastActiveWindow()?.id
-			: undefined;
-
-		return {
-			urisToOpen: [{ workspaceUri }],
 			userEnv: openConfig.userEnv,
 			cli: openConfig.cli,
 			noRecentEntry: true,
@@ -842,7 +817,8 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			windowToUse: resolved.windowToUse,
 			emptyWindowBackupInfo,
 			forceProfile: openConfig.forceProfile,
-			forceTempProfile: openConfig.forceTempProfile
+			forceTempProfile: openConfig.forceTempProfile,
+			optimusWindow: openConfig.optimusWindow
 		});
 	}
 
@@ -1566,7 +1542,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 
 		let window: ICodeWindow | undefined;
 		if (!options.forceNewWindow && !options.forceNewTabbedWindow) {
-			window = options.windowToUse || (lastActiveWindow?.config?.isSessionsWindow ? undefined : lastActiveWindow);
+			window = options.windowToUse || (lastActiveWindow?.config?.isSessionsWindow || lastActiveWindow?.config?.isOptimusWindow ? undefined : lastActiveWindow);
 			if (window) {
 				window.focus();
 			}
@@ -1644,6 +1620,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			cssModules: this.cssDevelopmentService.isEnabled ? await this.cssDevelopmentService.getCssModules() : undefined,
 
 			isSessionsWindow: isWorkspaceIdentifier(options.workspace) && isEqual(options.workspace.configPath, this.environmentMainService.agentSessionsWorkspace),
+			isOptimusWindow: options.optimusWindow,
 		};
 
 		// New window
@@ -1656,7 +1633,8 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 				state,
 				extensionDevelopmentPath: configuration.extensionDevelopmentPath,
 				isExtensionTestHost: !!configuration.extensionTestsPath,
-				isSessionsWindow: configuration.isSessionsWindow
+				isSessionsWindow: configuration.isSessionsWindow,
+				isOptimusWindow: configuration.isOptimusWindow
 			});
 			mark('code/didCreateCodeWindow');
 

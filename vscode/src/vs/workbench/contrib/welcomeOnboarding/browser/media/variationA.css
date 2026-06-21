@@ -309,7 +309,7 @@
 	justify-content: center;
 	gap: 18px;
 	overflow: hidden;
-	font-family: var(--vscode-editor-font-family, var(--vscode-font-family, monospace));
+	font-family: var(--vscode-editor-font-family, "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace);
 	text-align: center;
 }
 
@@ -1062,7 +1062,7 @@
 	padding: 0 11px;
 	box-sizing: border-box;
 	color: var(--vscode-input-foreground);
-	font-family: var(--vscode-editor-font-family, var(--vscode-font-family, monospace));
+	font-family: var(--vscode-editor-font-family, "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace);
 	font-size: 13px;
 	background: var(--vscode-input-background);
 	border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.25)));

@@ -325,7 +325,7 @@ function generateHTML(analysis: RunAnalysis, outputPath: string, includeRetries:
 		}
 
 		body {
-			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+			font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 			margin: 0;
 			padding: 20px;
 			background: #f5f5f5;

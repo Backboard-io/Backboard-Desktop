@@ -153,7 +153,7 @@
 }
 
 .xterm .xterm-accessibility-tree {
-	font-family: monospace;
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	user-select: text;
 	white-space: pre;
 }

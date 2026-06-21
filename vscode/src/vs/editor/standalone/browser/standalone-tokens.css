@@ -6,7 +6,7 @@
 
 /* Default standalone editor fonts */
 .monaco-editor {
-	font-family: monospace;
+	font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	--monaco-monospace-font: monospace;
 }
 
