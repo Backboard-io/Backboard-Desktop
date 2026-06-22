@@ -196,8 +196,9 @@ export class JarvisApp extends Disposable {
 		modeSelect.setAttribute('aria-label', modeSelect.title);
 		modeSelect.appendChild(modeOption('editor', localize('jarvis.mode.editor', "Editor")));
 		modeSelect.appendChild(modeOption('agents', localize('jarvis.mode.agents', "Agents")));
-		modeSelect.appendChild(modeOption('optimus', localize('jarvis.mode.optimus', "Optimus")));
-		modeSelect.appendChild(modeOption('jarvis', localize('jarvis.mode.jarvis', "Jarvis")));
+		const currentModeOption = modeOption('jarvis', localize('jarvis.mode.jarvis', "Jarvis"));
+		currentModeOption.hidden = true;
+		modeSelect.appendChild(currentModeOption);
 		modeSelect.value = 'jarvis';
 		modeSelect.addEventListener('change', () => {
 			const value = modeSelect.value;
@@ -205,10 +206,6 @@ export class JarvisApp extends Disposable {
 				this.bridge.openEditor().catch(error => this.updateStatus(errorMessage(error)));
 			} else if (value === 'agents') {
 				this.bridge.openAgents().catch(error => this.updateStatus(errorMessage(error)));
-			} else if (value === 'optimus') {
-				this.bridge.openOptimus().catch(error => this.updateStatus(errorMessage(error)));
-			} else {
-				this.bridge.openJarvis().catch(error => this.updateStatus(errorMessage(error)));
 			}
 			modeSelect.value = 'jarvis';
 		});

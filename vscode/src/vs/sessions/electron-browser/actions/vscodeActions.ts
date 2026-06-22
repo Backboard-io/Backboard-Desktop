@@ -154,7 +154,7 @@ export class OpenInVSCodeWidgetContribution extends Disposable implements IWorkb
 	) {
 		super();
 		this._register(actionViewItemService.register(Menus.TitleBarLeftLayout, OpenSessionInVSCodeAction.ID, (action, options) => {
-			return instantiationService.createInstance(OpenInVSCodeTitleBarWidget, action, options, OpenVSCodeWindowAction.ID, OpenOptimusWindowAction.ID, OpenJarvisWindowAction.ID);
+			return instantiationService.createInstance(OpenInVSCodeTitleBarWidget, action, options, OpenVSCodeWindowAction.ID);
 		}, undefined));
 	}
 }

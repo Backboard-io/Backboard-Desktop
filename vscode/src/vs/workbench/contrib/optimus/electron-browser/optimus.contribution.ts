@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { localize } from '../../../../nls.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { ipcRenderer } from '../../../../base/parts/sandbox/electron-browser/globals.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
@@ -12,6 +14,7 @@ import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer } from '../
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IEditorResolverService, RegisteredEditorPriority } from '../../../services/editor/common/editorResolverService.js';
+import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { OptimusEditor } from './optimusEditor.js';
 import { OptimusEditorInput } from './optimusEditorInput.js';
 
@@ -69,3 +72,21 @@ class OptimusEditorResolverContribution implements IWorkbenchContribution {
 }
 
 registerWorkbenchContribution2(OptimusEditorResolverContribution.ID, OptimusEditorResolverContribution, WorkbenchPhase.BlockStartup);
+
+class OptimusEditorOpenContribution extends Disposable implements IWorkbenchContribution {
+
+	static readonly ID = 'workbench.contrib.optimusEditorOpen';
+
+	constructor(
+		@IEditorService private readonly editorService: IEditorService
+	) {
+		super();
+		const handleOpenOptimusEditor = () => {
+			this.editorService.openEditor(OptimusEditorInput.instance, { pinned: true, revealIfOpened: true }).catch(console.error);
+		};
+		ipcRenderer.on('vscode:openOptimusEditor', handleOpenOptimusEditor);
+		this._register({ dispose: () => ipcRenderer.removeListener('vscode:openOptimusEditor', handleOpenOptimusEditor) });
+	}
+}
+
+registerWorkbenchContribution2(OptimusEditorOpenContribution.ID, OptimusEditorOpenContribution, WorkbenchPhase.AfterRestored);

@@ -471,7 +471,11 @@ interface IBackboardConfigJson {
 	readonly env?: unknown;
 	readonly api_url?: unknown;
 	readonly api_key?: unknown;
+	readonly apiKey?: unknown;
+	readonly backboard_api_key?: unknown;
+	readonly personal_api_key?: unknown;
 	readonly env_keys?: unknown;
+	readonly oauth?: unknown;
 }
 
 interface IBackboardComposerMicState {
@@ -625,9 +629,9 @@ async function transcribeBackboardComposerAudio(
 ): Promise<void> {
 	notificationService.info(localize('interactive.backboardMicrophone.transcribing', "Transcribing with Backboard..."));
 	const config = await readBackboardComposerConfig(fileService, pathService);
-	const apiKey = backboardComposerApiKey(config);
-	if (!apiKey) {
-		throw new Error(localize('interactive.backboardMicrophone.noApiKey', "No Backboard API key found in ~/.backboard_ide/config.json."));
+	const authHeaders = backboardComposerAuthHeaders(config);
+	if (!authHeaders) {
+		throw new Error(localize('interactive.backboardMicrophone.noCredentials', "No Backboard API key or OAuth token found in ~/.backboard_ide/config.json."));
 	}
 
 	const blob = new Blob(state.chunks, { type: mimeType });
@@ -646,7 +650,7 @@ async function transcribeBackboardComposerAudio(
 
 	const response = await fetch(`${backboardComposerApiUrl(config, configurationService)}/threads/messages`, {
 		method: 'POST',
-		headers: { 'X-API-Key': apiKey },
+		headers: authHeaders,
 		body: form,
 	});
 	if (!response.ok) {
@@ -683,14 +687,31 @@ function backboardComposerApiUrl(config: IBackboardConfigJson, configurationServ
 	return (configured || 'https://app.backboard.io/api').replace(/\/+$/, '');
 }
 
+function backboardComposerAuthHeaders(config: IBackboardConfigJson): Record<string, string> | undefined {
+	const apiKey = backboardComposerApiKey(config);
+	if (apiKey) {
+		return { 'X-API-Key': apiKey };
+	}
+	const accessToken = backboardComposerAccessToken(config);
+	return accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
+}
+
 function backboardComposerApiKey(config: IBackboardConfigJson): string | undefined {
-	const apiKey = stringFromBackboardRecord(config.api_key);
+	const apiKey = stringFromBackboardRecord(config.api_key)
+		?? stringFromBackboardRecord(config.apiKey)
+		?? stringFromBackboardRecord(config.backboard_api_key)
+		?? stringFromBackboardRecord(config.personal_api_key);
 	if (apiKey) {
 		return apiKey;
 	}
 	const env = normalizeBackboardComposerEnv(config.env);
 	const envKeys = isBackboardRecord(config.env_keys) ? config.env_keys : {};
 	return stringFromBackboardRecord(envKeys[env]);
+}
+
+function backboardComposerAccessToken(config: IBackboardConfigJson): string | undefined {
+	const oauth = isBackboardRecord(config.oauth) ? config.oauth : undefined;
+	return stringFromBackboardRecord(oauth?.access_token);
 }
 
 function normalizeBackboardComposerEnv(value: unknown): string {

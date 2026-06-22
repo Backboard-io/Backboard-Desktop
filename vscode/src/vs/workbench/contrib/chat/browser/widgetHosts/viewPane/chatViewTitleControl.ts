@@ -54,6 +54,7 @@ export class ChatViewTitleControl extends Disposable {
 	private tabsContainer: HTMLElement | undefined;
 	private tabDisposables = this._register(new DisposableStore());
 	private readonly closedSessionTabs = new Set<string>();
+	private lastRenderedCurrentSessionResource: string | undefined;
 
 	private lastKnownHeight = 0;
 
@@ -231,59 +232,42 @@ export class ChatViewTitleControl extends Disposable {
 		this.tabsContainer.replaceChildren();
 
 		const currentSessionResource = this.model?.sessionResource;
-		let didRenderCurrentSession = false;
+		const currentSessionResourceKey = currentSessionResource?.toString();
+		const shouldRevealCurrentTab = this.lastRenderedCurrentSessionResource !== currentSessionResourceKey;
+		this.lastRenderedCurrentSessionResource = currentSessionResourceKey;
+
+		const currentSession = currentSessionResource
+			? this.agentSessionsService.model.sessions.find(session => isEqual(session.resource, currentSessionResource))
+			: undefined;
+		this.addTab({
+			label: currentTitle,
+			active: true,
+			isCurrent: true,
+			session: currentSession,
+		});
 
 		const sessions = this.getHistoryTabSessions(currentSessionResource);
 
 		for (const session of sessions) {
-			const isCurrentSession = !!currentSessionResource && isEqual(session.resource, currentSessionResource);
-			didRenderCurrentSession ||= isCurrentSession;
-
 			this.addTab({
-				label: isCurrentSession ? currentTitle : session.label,
-				active: isCurrentSession,
-				isCurrent: isCurrentSession,
+				label: session.label,
+				active: false,
 				session,
 			});
 		}
 
-		if (!didRenderCurrentSession) {
-			this.addTab({
-				label: currentTitle,
-				active: true,
-				isCurrent: true,
-			});
-		}
-
-		this.tabsContainer.scrollLeft = previousScrollLeft;
+		this.tabsContainer.scrollLeft = shouldRevealCurrentTab ? 0 : previousScrollLeft;
 	}
 
 	private getHistoryTabSessions(currentSessionResource: IChatModel['sessionResource'] | undefined): IAgentSession[] {
-		const sortedSessions = this.agentSessionsService.model.sessions
+		return this.agentSessionsService.model.sessions
 			.filter(session => !session.isArchived())
 			.filter(session => {
 				const isCurrentSession = !!currentSessionResource && isEqual(session.resource, currentSessionResource);
-				return isCurrentSession || !this.closedSessionTabs.has(session.resource.toString());
+				return !isCurrentSession && !this.closedSessionTabs.has(session.resource.toString());
 			})
-			.sort((a, b) => this.getHistoryTabTime(b) - this.getHistoryTabTime(a) || a.label.localeCompare(b.label));
-
-		const visibleSessions = sortedSessions.slice(0, ChatViewTitleControl.MAX_HISTORY_TABS);
-		if (!currentSessionResource || visibleSessions.some(session => isEqual(session.resource, currentSessionResource))) {
-			return visibleSessions;
-		}
-
-		const currentSession = sortedSessions.find(session => isEqual(session.resource, currentSessionResource));
-		if (!currentSession) {
-			return visibleSessions;
-		}
-
-		if (visibleSessions.length < ChatViewTitleControl.MAX_HISTORY_TABS) {
-			visibleSessions.push(currentSession);
-		} else {
-			visibleSessions[visibleSessions.length - 1] = currentSession;
-		}
-
-		return visibleSessions;
+			.sort((a, b) => this.getHistoryTabTime(b) - this.getHistoryTabTime(a) || a.label.localeCompare(b.label))
+			.slice(0, ChatViewTitleControl.MAX_HISTORY_TABS - 1);
 	}
 
 	private getHistoryTabTime(session: IAgentSession): number {

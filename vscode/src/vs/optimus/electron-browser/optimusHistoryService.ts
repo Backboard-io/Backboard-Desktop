@@ -53,6 +53,10 @@ export class ElectronOptimusNavigationProvider implements IOptimusNavigationProv
 		await switchWindowKind('optimus');
 	}
 
+	async openOptimusWorkbench(): Promise<void> {
+		await switchWindowKind('optimusWorkbench');
+	}
+
 	async openJarvis(): Promise<void> {
 		await switchWindowKind('jarvis');
 	}
@@ -68,7 +72,7 @@ async function sendBackboardPanelCommand(command: Record<string, unknown>): Prom
 	}
 }
 
-async function switchWindowKind(target: 'editor' | 'agents' | 'optimus' | 'jarvis'): Promise<void> {
+async function switchWindowKind(target: 'editor' | 'agents' | 'optimus' | 'optimusWorkbench' | 'jarvis'): Promise<void> {
 	const result = await ipcRenderer.invoke('vscode:optimusSwitchWindowKind', target) as { readonly accepted?: boolean; readonly error?: string } | undefined;
 	if (!result?.accepted) {
 		throw new Error(result?.error ?? `Could not switch to ${target}.`);

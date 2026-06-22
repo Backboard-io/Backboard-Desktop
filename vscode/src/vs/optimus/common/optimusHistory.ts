@@ -17,6 +17,7 @@ export interface IOptimusNavigationProvider {
 	openEditor(): Promise<void>;
 	openAgents(): Promise<void>;
 	openOptimus(): Promise<void>;
+	openOptimusWorkbench(): Promise<void>;
 	openJarvis(): Promise<void>;
 }
 

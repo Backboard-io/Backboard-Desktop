@@ -1250,11 +1250,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	private async _fetchBackboardRecentUsageMetrics(): Promise<IBackboardUsageMetrics> {
 		const config = await this._readBackboardUsageConfig();
-		const apiKey = this._backboardConfigApiKey(config);
-		if (!apiKey) {
+		const authHeaders = this._backboardConfigAuthHeaders(config);
+		if (!authHeaders) {
 			return {
-				title: localize('backboardRecentUsage.noKeyTitle', "Recent Usage"),
-				description: localize('backboardRecentUsage.noKeyDescription', "No Backboard API key was found on this machine."),
+				title: localize('backboardRecentUsage.noCredentialsTitle', "Recent Usage"),
+				description: localize('backboardRecentUsage.noCredentialsDescription', "No Backboard API key or OAuth token was found on this machine."),
 				rows: [
 					{ label: localize('backboardRecentUsage.configPath', "Config"), value: '~/.backboard_ide/config.json' },
 					{ label: localize('backboardRecentUsage.endpoint', "Endpoint"), value: 'GET /billing/usage/recent' },
@@ -1268,7 +1268,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		const response = await fetch(url.toString(), {
 			method: 'GET',
-			headers: { 'X-API-Key': apiKey },
+			headers: authHeaders,
 		});
 		if (!response.ok) {
 			throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
@@ -1352,14 +1352,31 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		return (configured || 'https://app.backboard.io/api').replace(/\/+$/, '');
 	}
 
+	private _backboardConfigAuthHeaders(config: Record<string, unknown>): Record<string, string> | undefined {
+		const apiKey = this._backboardConfigApiKey(config);
+		if (apiKey) {
+			return { 'X-API-Key': apiKey };
+		}
+		const accessToken = this._backboardConfigAccessToken(config);
+		return accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
+	}
+
 	private _backboardConfigApiKey(config: Record<string, unknown>): string | undefined {
-		const apiKey = this._stringFromBackboardRecord(config.api_key) ?? this._stringFromBackboardRecord(config.apiKey);
+		const apiKey = this._stringFromBackboardRecord(config.api_key)
+			?? this._stringFromBackboardRecord(config.apiKey)
+			?? this._stringFromBackboardRecord(config.backboard_api_key)
+			?? this._stringFromBackboardRecord(config.personal_api_key);
 		if (apiKey) {
 			return apiKey;
 		}
 		const env = this._normalizeBackboardEnv(config.env);
 		const envKeys = this._isBackboardRecord(config.env_keys) ? config.env_keys : {};
 		return this._stringFromBackboardRecord(envKeys[env]);
+	}
+
+	private _backboardConfigAccessToken(config: Record<string, unknown>): string | undefined {
+		const oauth = this._isBackboardRecord(config.oauth) ? config.oauth : undefined;
+		return this._stringFromBackboardRecord(oauth?.access_token);
 	}
 
 	private _normalizeBackboardEnv(value: unknown): string {

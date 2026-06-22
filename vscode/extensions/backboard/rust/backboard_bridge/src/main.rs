@@ -1380,6 +1380,15 @@ async fn consume_stream(
                     if raw_tool_calls.is_inside_tool_call() {
                         continue;
                     }
+                    if assistant_message_finished(&chunk) {
+                        state.writer.emit(base_event(
+                            "done",
+                            request_id,
+                            Some(session_id),
+                            json!({ "stopReason": chunk_stop_reason(&chunk).unwrap_or("end_turn") }),
+                        ));
+                        return Ok(StreamOutcome::Done);
+                    }
                     continue;
                 }
             }
@@ -1429,7 +1438,8 @@ async fn consume_stream(
                 ));
                 return Ok(StreamOutcome::Done);
             }
-            "completed" | "done" => {
+            "message_completed" | "message_complete" | "message_done" | "content_done"
+            | "content_finished" | "response_completed" | "completed" | "done" => {
                 if let Some(tool_calls) = raw_tool_calls.take_tool_calls()
                     && let Some(tool_calls) =
                         filter_ignored_tool_calls(tool_calls, ignored_tool_call_names)
@@ -2861,6 +2871,23 @@ fn tool_call_stream_finished(chunk: &Value) -> bool {
     false
 }
 
+fn assistant_message_finished(chunk: &Value) -> bool {
+    matches!(
+        chunk_stop_reason(chunk),
+        Some("end_turn" | "stop" | "complete" | "completed" | "done")
+    ) || matches!(
+        chunk.get("type").and_then(Value::as_str),
+        Some(
+            "message_completed"
+                | "message_complete"
+                | "message_done"
+                | "content_done"
+                | "content_finished"
+                | "response_completed"
+        )
+    )
+}
+
 fn run_id_from_chunk(chunk: &Value) -> Option<String> {
     for pointer in [
         "/run_id",
@@ -3078,12 +3105,13 @@ mod tests {
     use super::{
         BACKBOARD_IMAGE_TOOL_NAMES, BACKBOARD_SYSTEM_PROMPT, BridgeState, EventWriter,
         RawTextToolCallAccumulator, StreamingToolCallAccumulator, add_visible_models,
-        augment_prompt, filter_ignored_tool_calls, is_duplicate_tool_outputs_error,
-        is_featherless_provider, is_stale_tool_outputs_error, is_stale_tool_outputs_message,
-        model_is_visible, normalize_tool_output, sanitize_visible_assistant_text, thinking_payload,
-        tool_call_stream_finished, tool_calls_required_by_chunk, tool_definitions,
-        tool_definitions_for_request, tool_outputs_submission_key,
-        try_begin_tool_outputs_submission, validate_web_fetch_url, voice_payload,
+        assistant_message_finished, augment_prompt, filter_ignored_tool_calls,
+        is_duplicate_tool_outputs_error, is_featherless_provider, is_stale_tool_outputs_error,
+        is_stale_tool_outputs_message, model_is_visible, normalize_tool_output,
+        sanitize_visible_assistant_text, thinking_payload, tool_call_stream_finished,
+        tool_calls_required_by_chunk, tool_definitions, tool_definitions_for_request,
+        tool_outputs_submission_key, try_begin_tool_outputs_submission, validate_web_fetch_url,
+        voice_payload,
     };
 
     #[test]
@@ -3718,5 +3746,27 @@ mod tests {
         assert!(second.saw_tool_delta);
         assert_eq!(second.updates.len(), 1);
         assert_eq!(second.updates[0].content_lines, Some(3));
+    }
+
+    #[test]
+    fn assistant_message_terminal_chunks_are_detected() {
+        assert!(assistant_message_finished(&json!({
+            "type": "content_streaming",
+            "content": "Done.",
+            "stop_reason": "end_turn"
+        })));
+        assert!(assistant_message_finished(&json!({
+            "type": "message_completed"
+        })));
+        assert!(assistant_message_finished(&json!({
+            "type": "response_completed"
+        })));
+        assert!(!assistant_message_finished(&json!({
+            "type": "content_streaming",
+            "content": "Still writing"
+        })));
+        assert!(!assistant_message_finished(&json!({
+            "choices": [{ "finish_reason": "tool_calls" }]
+        })));
     }
 }

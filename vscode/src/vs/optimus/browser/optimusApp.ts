@@ -153,8 +153,9 @@ export class OptimusApp extends Disposable {
 		select.setAttribute('aria-label', select.title);
 		select.appendChild(modeOption('editor', localize('optimus.mode.editor', "Editor")));
 		select.appendChild(modeOption('agents', localize('optimus.mode.agents', "Agents")));
-		select.appendChild(modeOption('optimus', localize('optimus.mode.optimus', "Optimus")));
-		select.appendChild(modeOption('jarvis', localize('optimus.mode.jarvis', "Jarvis")));
+		const currentModeOption = modeOption('optimus', localize('optimus.mode.optimus', "Optimus"));
+		currentModeOption.hidden = true;
+		select.appendChild(currentModeOption);
 		select.value = 'optimus';
 		select.addEventListener('change', () => {
 			const value = select.value;
@@ -162,10 +163,6 @@ export class OptimusApp extends Disposable {
 				this.navigationProvider?.openEditor().catch(console.error);
 			} else if (value === 'agents') {
 				this.navigationProvider?.openAgents().catch(console.error);
-			} else if (value === 'optimus') {
-				this.navigationProvider?.openOptimus().catch(console.error);
-			} else {
-				this.navigationProvider?.openJarvis().catch(console.error);
 			}
 			select.value = 'optimus';
 		});
@@ -208,6 +205,16 @@ export class OptimusApp extends Disposable {
 			this.renderRuns();
 		});
 
+		const openWorkbench = document.createElement('button');
+		openWorkbench.type = 'button';
+		openWorkbench.className = 'optimus-header-button optimus-workbench-button';
+		openWorkbench.textContent = localize('optimus.openWorkbench', "Workbench");
+		openWorkbench.title = localize('optimus.openWorkbench.title', "Switch Optimus to the editor workbench");
+		openWorkbench.setAttribute('aria-label', openWorkbench.title);
+		openWorkbench.addEventListener('click', () => {
+			this.navigationProvider?.openOptimusWorkbench().catch(console.error);
+		});
+
 		const newAgent = document.createElement('button');
 		newAgent.type = 'button';
 		newAgent.className = 'optimus-header-button optimus-new-agent-button';
@@ -234,6 +241,7 @@ export class OptimusApp extends Disposable {
 		openPanel.addEventListener('click', () => this.openBackboardPanel());
 
 		this.headerActions.appendChild(workspaceSelect);
+		this.headerActions.appendChild(openWorkbench);
 		this.headerActions.appendChild(newAgent);
 		this.headerActions.appendChild(count);
 		this.headerActions.appendChild(openPanel);

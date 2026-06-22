@@ -121,9 +121,9 @@ export class SessionsLayoutPolicy extends Disposable {
 				return { sidebar: false, auxiliaryBar: false, panel: false, sessions: true, editor: false };
 			case 'tablet':
 			case 'desktop':
-				// Tablet and desktop share the standard multi-part workbench defaults.
+				// Tablet and desktop share the integrated right-column defaults.
 				// A dedicated tablet layout has not been designed yet.
-				return { sidebar: true, auxiliaryBar: true, panel: false, sessions: true, editor: false };
+				return { sidebar: true, auxiliaryBar: true, panel: false, sessions: true, editor: true };
 		}
 	}
 

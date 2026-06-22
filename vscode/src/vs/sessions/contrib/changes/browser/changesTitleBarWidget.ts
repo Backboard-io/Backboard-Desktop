@@ -5,7 +5,6 @@
 
 import './media/changesTitleBarWidget.css';
 
-import { mainWindow } from '../../../../base/browser/window.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { localize, localize2 } from '../../../../nls.js';
@@ -16,7 +15,6 @@ import { IWorkbenchContribution } from '../../../../workbench/common/contributio
 import { IsAuxiliaryWindowContext, AuxiliaryBarVisibleContext } from '../../../../workbench/common/contextkeys.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { IPaneCompositePartService } from '../../../../workbench/services/panecomposite/browser/panecomposite.js';
-import { IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { ViewContainerLocation } from '../../../../workbench/common/views.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
@@ -26,8 +24,10 @@ import { logChangesViewToggle } from '../../../common/sessionsTelemetry.js';
 import { CHANGES_VIEW_CONTAINER_ID } from '../common/changes.js';
 
 const TOGGLE_CHANGES_VIEW_ID = 'workbench.action.agentSessions.toggleChangesView';
+const OPEN_CHANGES_VIEW_ID = 'workbench.action.agentSessions.openChangesInRightPanel';
 const TOGGLE_SECONDARY_SIDEBAR_TOOLTIP = localize('toggleSecondarySidebarTooltip', "Toggle Secondary Side Bar Visibility");
 
+const changesButtonIcon = registerIcon('agent-right-panel-changes', Codicon.gitCompare, localize('agentRightPanelChangesIcon', "Icon for opening the session changes view."));
 const secondarySidebarToggleClosedIcon = registerIcon('agent-secondary-sidebar-toggle-closed', Codicon.layoutSidebarRightOff, localize('agentSecondarySidebarToggleClosedIcon', "Icon for the sessions secondary sidebar when closed."));
 const secondarySidebarToggleOpenIcon = registerIcon('agent-secondary-sidebar-toggle-open', Codicon.layoutSidebarRight, localize('agentSecondarySidebarToggleOpenIcon', "Icon for the sessions secondary sidebar when open."));
 
@@ -59,6 +59,18 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 			order: 11, // After Open in VS Code (7), Run Script (8), and Open Terminal (10)
 			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
 		}));
+
+		this._register(MenuRegistry.appendMenuItem(Menus.AuxiliaryBarTitle, {
+			command: {
+				id: OPEN_CHANGES_VIEW_ID,
+				title: localize2('openChangesInRightPanel', "Changes"),
+				tooltip: localize('openChangesInRightPanelTooltip', "Show Changes"),
+				icon: changesButtonIcon,
+			},
+			group: 'navigation',
+			order: 0,
+			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
+		}));
 	}
 }
 
@@ -83,27 +95,40 @@ registerAction2(class extends Action2 {
 	run(accessor: ServicesAccessor): void {
 		const layoutService = accessor.get(IWorkbenchLayoutService);
 		const paneCompositeService = accessor.get(IPaneCompositePartService);
-		const editorGroupService = accessor.get(IEditorGroupsService);
 		const telemetryService = accessor.get(ITelemetryService);
 
 		const isVisible = !layoutService.isVisible(Parts.AUXILIARYBAR_PART);
 
 		if (isVisible) {
-			// Editor part
-			const hasEditors = editorGroupService.groups.some(group => !group.isEmpty);
-			if (hasEditors && !layoutService.isVisible(Parts.EDITOR_PART, mainWindow)) {
-				layoutService.setPartHidden(false, Parts.EDITOR_PART);
-			}
-
-			// Auxiliary bar part
 			layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
 			paneCompositeService.openPaneComposite(CHANGES_VIEW_CONTAINER_ID, ViewContainerLocation.AuxiliaryBar);
 		} else {
-			// hiding must happen in opposite order than showing
 			layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
-			layoutService.setPartHidden(true, Parts.EDITOR_PART);
 		}
 
 		logChangesViewToggle(telemetryService, isVisible);
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: OPEN_CHANGES_VIEW_ID,
+			title: localize2('openChangesInRightPanel', "Changes"),
+			tooltip: localize('openChangesInRightPanelTooltip', "Show Changes"),
+			icon: changesButtonIcon,
+			precondition: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
+		});
+	}
+
+	run(accessor: ServicesAccessor): void {
+		const layoutService = accessor.get(IWorkbenchLayoutService);
+		const paneCompositeService = accessor.get(IPaneCompositePartService);
+
+		if (!layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
+			layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
+		}
+
+		paneCompositeService.openPaneComposite(CHANGES_VIEW_CONTAINER_ID, ViewContainerLocation.AuxiliaryBar);
 	}
 });

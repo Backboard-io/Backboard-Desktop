@@ -78,6 +78,9 @@ import { ISessionsService } from '../services/sessions/browser/sessionsService.j
 import { ISessionsPartService } from '../services/sessions/browser/sessionsPartService.js';
 import { ISessionsSetUpService } from './sessionsSetUpService.js';
 
+const SESSIONS_FILES_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.filesContainer';
+const SESSIONS_BROWSER_VIEW_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.browserContainer';
+
 //#region Workbench Options
 
 export interface IWorkbenchOptions {
@@ -101,7 +104,9 @@ enum LayoutClasses {
 	SHELL_GRADIENT_BACKGROUND = 'shell-gradient-background',
 	FULLSCREEN = 'fullscreen',
 	MAXIMIZED = 'maximized',
-	PHONE_LAYOUT = 'phone-layout'
+	PHONE_LAYOUT = 'phone-layout',
+	AUXILIARY_FILES_ACTIVE = 'sessions-auxiliary-files-active',
+	AUXILIARY_BROWSER_ACTIVE = 'sessions-auxiliary-browser-active'
 }
 
 //#endregion
@@ -305,6 +310,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	private _editorMaximized = false;
 	private _editorLastNonMaximizedVisibility: IPartVisibilityState | undefined;
 	private _restoreAttachedEditorMaximizedOnShow = false;
+	private _restoreEditorOnAuxiliaryBarShow = false;
 	private _editorPartAutoVisibilitySuppressionCount = 0;
 	private _hasAppliedInitialEditorSplit = false;
 
@@ -725,7 +731,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.partVisibility.sessions = visibilityDefaults.sessions;
 		const savedPartVisibility = this._loadPartVisibility(storageService);
 		this.partVisibility.auxiliaryBar = savedPartVisibility.auxiliaryBar ?? visibilityDefaults.auxiliaryBar;
-		this.partVisibility.editor = this.partVisibility.auxiliaryBar ? (savedPartVisibility.editor ?? visibilityDefaults.editor) : false;
+		this.partVisibility.editor = this.partVisibility.auxiliaryBar ? visibilityDefaults.editor : false;
 		this.partVisibility.sidebar = savedPartVisibility.sidebar ?? visibilityDefaults.sidebar;
 
 		// Load saved grid part sizes — these will be consumed when building the
@@ -1014,6 +1020,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		// Register layout listeners
 		this.registerLayoutListeners();
+		this.registerAuxiliaryEmptyStateListeners();
 
 		// Editor opens should only affect the main editor part when
 		// they actually target one of the main editor groups. Modal
@@ -1088,6 +1095,26 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const onWindowResize = () => this.layout();
 		mainWindow.addEventListener('resize', onWindowResize);
 		this._register({ dispose: () => mainWindow.removeEventListener('resize', onWindowResize) });
+	}
+
+	private registerAuxiliaryEmptyStateListeners(): void {
+		const updateActiveAuxiliaryMode = () => {
+			const activeAuxiliaryId = this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)?.getId();
+			this.mainContainer.classList.toggle(LayoutClasses.AUXILIARY_FILES_ACTIVE, activeAuxiliaryId === SESSIONS_FILES_CONTAINER_ID);
+			this.mainContainer.classList.toggle(LayoutClasses.AUXILIARY_BROWSER_ACTIVE, activeAuxiliaryId === SESSIONS_BROWSER_VIEW_CONTAINER_ID);
+		};
+
+		this._register(this.paneCompositeService.onDidPaneCompositeOpen(e => {
+			if (e.viewContainerLocation === ViewContainerLocation.AuxiliaryBar) {
+				updateActiveAuxiliaryMode();
+			}
+		}));
+		this._register(this.paneCompositeService.onDidPaneCompositeClose(e => {
+			if (e.viewContainerLocation === ViewContainerLocation.AuxiliaryBar) {
+				updateActiveAuxiliaryMode();
+			}
+		}));
+		updateActiveAuxiliaryMode();
 	}
 
 	private updateFullscreenClass(): void {
@@ -1243,15 +1270,19 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		const contentHeight = Math.max(0, height - titleBarHeight);
 		const topRightHeight = Math.max(0, contentHeight - panelSize);
-		const minimumFeatureHeight = Math.min(240, topRightHeight);
-		const maximumEditorHeight = Math.max(300, Math.min(topRightHeight - minimumFeatureHeight, Math.floor(topRightHeight * 0.42)));
-		const defaultEditorHeight = Math.min(maximumEditorHeight, Math.max(300, Math.floor(topRightHeight * 0.32)));
+		const minimumFeatureHeight = Math.min(180, Math.floor(topRightHeight * 0.4));
+		const maximumFeatureHeight = Math.max(minimumFeatureHeight, Math.min(360, Math.floor(topRightHeight * 0.45)));
+		const defaultFeatureHeight = Math.min(maximumFeatureHeight, Math.max(minimumFeatureHeight, Math.floor(topRightHeight * 0.28)));
+		const minimumEditorHeight = Math.min(300, Math.max(0, topRightHeight - minimumFeatureHeight));
+		const minimumEditorWithFeatureHeight = Math.max(minimumEditorHeight, topRightHeight - maximumFeatureHeight);
+		const maximumEditorWithFeatureHeight = Math.max(minimumEditorWithFeatureHeight, topRightHeight - minimumFeatureHeight);
+		const defaultEditorHeight = Math.max(minimumEditorWithFeatureHeight, topRightHeight - defaultFeatureHeight);
 		const savedEditorHeight = this._savedPartSizes.editor;
 		const editorSize = this.partVisibility.editor
-			? Math.min(maximumEditorHeight, Math.max(300, savedEditorHeight ?? defaultEditorHeight))
+			? Math.min(maximumEditorWithFeatureHeight, Math.max(minimumEditorWithFeatureHeight, savedEditorHeight ?? defaultEditorHeight))
 			: defaultEditorHeight;
 		const auxiliaryBarSize = this.partVisibility.editor
-			? Math.max(minimumFeatureHeight, topRightHeight - editorSize)
+			? Math.max(minimumFeatureHeight, Math.min(maximumFeatureHeight, topRightHeight - editorSize))
 			: topRightHeight;
 
 		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
@@ -1671,6 +1702,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		if (hidden) {
 			this._restoreAttachedEditorMaximizedOnShow = false;
+			this._restoreEditorOnAuxiliaryBarShow = this.partVisibility.editor;
 			if (this.partVisibility.editor) {
 				this.setEditorHidden(true);
 			}
@@ -1696,6 +1728,14 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 				this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.AuxiliaryBar)?.id;
 			if (paneCompositeToOpen) {
 				this.paneCompositeService.openPaneComposite(paneCompositeToOpen, ViewContainerLocation.AuxiliaryBar);
+			}
+		}
+
+		if (!hidden) {
+			const shouldRestoreEditor = this._restoreEditorOnAuxiliaryBarShow || this.layoutPolicy.getPartVisibilityDefaults().editor;
+			this._restoreEditorOnAuxiliaryBarShow = false;
+			if (shouldRestoreEditor && !this.partVisibility.editor) {
+				this.setEditorHidden(false);
 			}
 		}
 
@@ -1739,9 +1779,11 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	private _applyEditorSplitSize(): void {
 		const currentEditorSize = this.workbenchGrid.getViewSize(this.editorPartView);
 		const sessionsSize = this.workbenchGrid.getViewSize(this.sessionsPartView);
-		const minimumFeatureHeight = Math.min(240, sessionsSize.height);
-		const maximumEditorHeight = Math.max(300, Math.min(sessionsSize.height - minimumFeatureHeight, Math.floor(sessionsSize.height * 0.42)));
-		const targetEditorHeight = Math.min(maximumEditorHeight, Math.max(300, Math.floor(sessionsSize.height * 0.32)));
+		const minimumFeatureHeight = Math.min(180, Math.floor(sessionsSize.height * 0.4));
+		const maximumFeatureHeight = Math.max(minimumFeatureHeight, Math.min(360, Math.floor(sessionsSize.height * 0.45)));
+		const defaultFeatureHeight = Math.min(maximumFeatureHeight, Math.max(minimumFeatureHeight, Math.floor(sessionsSize.height * 0.28)));
+		const maximumEditorHeight = Math.max(0, sessionsSize.height - minimumFeatureHeight);
+		const targetEditorHeight = Math.min(maximumEditorHeight, Math.max(300, sessionsSize.height - defaultFeatureHeight));
 		this.workbenchGrid.resizeView(this.editorPartView, {
 			width: currentEditorSize.width,
 			height: targetEditorHeight

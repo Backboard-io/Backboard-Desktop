@@ -198,6 +198,10 @@ div.chat-welcome-view.backboard-welcome-view {
 	padding: 16px 20px;
 	box-sizing: border-box;
 
+	& > .chat-welcome-view-icon:empty {
+		display: none;
+	}
+
 	& > .chat-welcome-view-icon.large-icon {
 		min-width: 72px;
 		min-height: 72px;

@@ -694,6 +694,15 @@ export class CodeApplication extends Disposable {
 				return { accepted: true };
 			}
 
+			if (target === 'optimusWorkbench') {
+				const [workbenchWindow] = await windowsMainService.openEmptyWindow({
+					context: OpenContext.API,
+					contextWindowId: window.id
+				}, { forceReuseWindow: true });
+				(workbenchWindow ?? windowsMainService.getLastActiveWindow() ?? window).sendWhenReady('vscode:openOptimusEditor', CancellationToken.None);
+				return { accepted: true };
+			}
+
 			if (target === 'jarvis') {
 				await windowsMainService.openJarvisWindow({
 					context: OpenContext.API,

@@ -90,11 +90,6 @@ export class OpenOptimusWindowAction extends Action2 {
 			title: localize2('openOptimusWindow', "Open Optimus"),
 			category: localize2('optimus', "Optimus"),
 			f1: true,
-			menu: [{
-				id: MenuId.MenubarFileMenu,
-				group: '1_new',
-				order: 4,
-			}]
 		});
 	}
 
@@ -113,11 +108,6 @@ export class OpenJarvisWindowAction extends Action2 {
 			title: localize2('openJarvisWindow', "Open Jarvis"),
 			category: localize2('jarvis', "Jarvis"),
 			f1: true,
-			menu: [{
-				id: MenuId.MenubarFileMenu,
-				group: '1_new',
-				order: 5,
-			}]
 		});
 	}
 

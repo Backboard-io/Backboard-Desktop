@@ -3,13 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { append, clearNode, h } from '../../../../base/browser/dom.js';
+import { $, append, clearNode, h } from '../../../../base/browser/dom.js';
+import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
+import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { MenuId } from '../../../../platform/actions/common/actions.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../platform/actions/browser/toolbar.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
+import { localize } from '../../../../nls.js';
 
 export class EditorGroupWatermark extends Disposable {
 
@@ -80,8 +83,26 @@ export class EditorGroupWatermark extends Disposable {
 		clearNode(this.shortcuts);
 		this.transientDisposables.clear();
 
+		this.renderSessionsEmptyState();
+
 		if (!this.enabled) {
 			return;
 		}
+	}
+
+	private renderSessionsEmptyState(): void {
+		const emptyState = append(this.shortcuts, $('.sessions-editor-empty-state'));
+		const icon = append(emptyState, $('.sessions-editor-empty-state-icon'));
+		const fileIcon = icon.appendChild(renderIcon(Codicon.file));
+		fileIcon.classList.add('sessions-editor-empty-state-file-icon');
+		const browserIcon = icon.appendChild(renderIcon(Codicon.globe));
+		browserIcon.classList.add('sessions-editor-empty-state-browser-icon');
+
+		const title = append(emptyState, $('.sessions-editor-empty-state-title'));
+		title.setAttribute('data-files-text', localize('sessionsEditorEmptyFilesTitle', "Choose a file to see code"));
+		title.setAttribute('data-browser-text', localize('sessionsEditorEmptyBrowserTitle', "No artifact yet"));
+
+		const message = append(emptyState, $('.sessions-editor-empty-state-message'));
+		message.setAttribute('data-browser-text', localize('sessionsEditorEmptyBrowserMessage', "Have Backboard generate something and the output will appear here."));
 	}
 }

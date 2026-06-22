@@ -279,6 +279,11 @@ const desktopResourcePatterns = [
 	// Webview pre scripts
 	'vs/workbench/contrib/webview/browser/pre/*.js',
 
+	// Backboard standalone window media
+	'vs/optimus/browser/media/optimus.css',
+	'vs/jarvis/browser/media/jarvis.css',
+	'vs/jarvis/browser/media/jarvis-background.mp4',
+
 	// Shell scripts
 	'vs/base/node/*.sh',
 	'vs/workbench/contrib/terminal/common/scripts/*.sh',

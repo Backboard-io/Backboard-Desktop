@@ -25,8 +25,6 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		action: IAction,
 		options: IBaseActionViewItemOptions | undefined,
 		private readonly keybindingCommandId: string,
-		private readonly optimusCommandId: string | undefined,
-		private readonly jarvisCommandId: string | undefined,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
@@ -67,22 +65,6 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 					run: () => this.commandService.executeCommand(OPEN_BACKBOARD_AGENTS_COMMAND_ID),
 				}),
 			];
-			const optimusCommandId = this.optimusCommandId;
-			if (optimusCommandId) {
-				actions.push(toAction({
-					id: 'agents.action.mode.optimus',
-					label: localize('openInVSCodeSwitcher.optimus', "Optimus"),
-					run: () => this.commandService.executeCommand(optimusCommandId),
-				}));
-			}
-			const jarvisCommandId = this.jarvisCommandId;
-			if (jarvisCommandId) {
-				actions.push(toAction({
-					id: 'agents.action.mode.jarvis',
-					label: localize('openInVSCodeSwitcher.jarvis', "Jarvis"),
-					run: () => this.commandService.executeCommand(jarvisCommandId),
-				}));
-			}
 
 			triggerButton.setAttribute('aria-expanded', 'true');
 			this.contextMenuService.showContextMenu({
