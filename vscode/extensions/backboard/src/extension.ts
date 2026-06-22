@@ -2272,6 +2272,12 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		const seenToolRequests = new Set<string>();
 		try {
 			let currentToolRequest: ToolResultRequest | undefined;
+			const submitTools = trimBackboardToolsForRequest(
+				await this.bridge.listTools(settings.mode, token).catch(() => undefined),
+				content,
+				settings.webSearch,
+				imageGeneration
+			);
 			await this.bridge.send('sendPrompt', sessionId, {
 				content,
 				workspace: effectiveWorkspace,
@@ -2284,6 +2290,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				voiceMode,
 				audioFile: audio,
 				mcpCalls: mcpCallsPayload(settings),
+				tools: submitTools,
 				config: settings.config
 			}, event => {
 				const toolRequest = renderBridgeEvent(event, sink, currentToolRequest);
@@ -2293,7 +2300,6 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				}
 			}, token);
 
-			const submitTools = await this.bridge.listTools(settings.mode, token).catch(() => undefined);
 			let nextToolRequest = pendingToolRequests.shift();
 			while (nextToolRequest && !token.isCancellationRequested) {
 				const toolOutputs = await executeToolCalls(this.bridge, nextToolRequest.toolCalls, settings.mode, sink, token);
@@ -5767,7 +5773,19 @@ class BackboardBridge implements vscode.Disposable {
 			params: redactSensitiveValues(params)
 		};
 		this.output.appendLine(`[${new Date().toISOString()}] Backboard Studio -> Backboard bridge`);
-		this.output.appendLine(JSON.stringify(payload, undefined, '\t'));
+		if (backboardVerboseBridgeLogging()) {
+			this.output.appendLine(JSON.stringify(payload, undefined, '\t'));
+		} else {
+			this.output.appendLine(JSON.stringify({
+				requestId,
+				command,
+				sessionId,
+				workspaceRoot: payload.workspaceRoot,
+				configuredWorkspaceRoot: payload.configuredWorkspaceRoot,
+				processCwd: payload.processCwd,
+				params: bridgeRequestSummary(params),
+			}));
+		}
 	}
 
 	private handleLine(line: string): void {
@@ -5795,9 +5813,8 @@ class BackboardBridge implements vscode.Disposable {
 function bridgeInactivityTimeoutMs(command: string): number {
 	switch (command) {
 		case 'submitToolResult':
-			return 120_000;
 		case 'sendPrompt':
-			return 120_000;
+			return 0;
 		case 'listModels':
 			return 30_000;
 		default:
@@ -5806,34 +5823,48 @@ function bridgeInactivityTimeoutMs(command: string): number {
 }
 
 async function executeToolCalls(bridge: BackboardBridge, toolCalls: unknown[], mode: string, response: ResponseSink, token: vscode.CancellationToken): Promise<unknown[]> {
+	if (toolCalls.length > 1 && toolCalls.every(rawCall => {
+		const call = parseToolCall(rawCall);
+		return (mode === 'free' || isReadOnlyTool(call.name)) && isParallelSafeTool(call.name);
+	})) {
+		const calls = toolCalls.map(parseToolCall);
+		return Promise.all(calls.map(call => executeOneToolCall(bridge, call, mode, response, token)));
+	}
 	const outputs: unknown[] = [];
 	for (const rawCall of toolCalls) {
 		if (token.isCancellationRequested) {
 			break;
 		}
 		const call = parseToolCall(rawCall);
-		const allowed = await approveTool(call.name, call.args, mode);
-		if (!allowed) {
-			logToolDiagnostic('denied', call);
-			response.event?.('toolFinished', { status: 'denied', key: call.id, name: call.name, args: call.args });
-			outputs.push(toolOutput(call.id, { success: false, content: 'User denied this tool call.' }));
-			continue;
-		}
-		try {
-			logToolDiagnostic('started', call);
-			response.event?.('toolFinished', { status: 'started', key: call.id, name: call.name, args: call.args });
-			const result = await executeTool(bridge, call.name, call.args, response, token, call.id);
-			logToolDiagnostic('finished', call, result);
-			response.event?.('toolFinished', { status: 'finished', key: call.id, name: call.name, args: call.args, output: result });
-			outputs.push(toolOutput(call.id, { success: true, content: result }));
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			logToolDiagnostic('failed', call, undefined, error);
-			response.event?.('toolFinished', { status: 'failed', key: call.id, name: call.name, args: call.args, error: message });
-			outputs.push(toolOutput(call.id, { success: false, content: message }));
-		}
+		outputs.push(await executeOneToolCall(bridge, call, mode, response, token));
 	}
 	return outputs;
+}
+
+async function executeOneToolCall(bridge: BackboardBridge, call: { id: string; name: string; args: Record<string, unknown> }, mode: string, response: ResponseSink, token: vscode.CancellationToken): Promise<unknown> {
+	const allowed = await approveTool(call.name, call.args, mode);
+	if (!allowed) {
+		logToolDiagnostic('denied', call);
+		response.event?.('toolFinished', { status: 'denied', key: call.id, name: call.name, args: call.args });
+		return toolOutput(call.id, { success: false, content: 'User denied this tool call.' });
+	}
+	try {
+		logToolDiagnostic('started', call);
+		response.event?.('toolFinished', { status: 'started', key: call.id, name: call.name, args: call.args });
+		const result = await executeTool(bridge, call.name, call.args, response, token, call.id);
+		logToolDiagnostic('finished', call, result);
+		response.event?.('toolFinished', { status: 'finished', key: call.id, name: call.name, args: call.args, output: result });
+		return toolOutput(call.id, { success: true, content: result });
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		logToolDiagnostic('failed', call, undefined, error);
+		response.event?.('toolFinished', { status: 'failed', key: call.id, name: call.name, args: call.args, error: message });
+		return toolOutput(call.id, { success: false, content: message });
+	}
+}
+
+function isParallelSafeTool(name: string): boolean {
+	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search'].includes(name);
 }
 
 function logToolDiagnostic(status: string, call: { id: string; name: string; args: Record<string, unknown> }, output?: unknown, error?: unknown): void {
@@ -5859,6 +5890,28 @@ function safeDiagnosticJson(value: unknown): string {
 	} catch {
 		return String(value);
 	}
+}
+
+function backboardVerboseBridgeLogging(): boolean {
+	const value = process.env.BACKBOARD_BRIDGE_VERBOSE_REQUESTS || process.env.BACKBOARD_PANEL_VERBOSE_REQUESTS;
+	return value === '1' || value?.toLowerCase() === 'true';
+}
+
+function bridgeRequestSummary(params: unknown): unknown {
+	if (!isObjectRecord(params)) {
+		return typeof params;
+	}
+	return {
+		keys: Object.keys(params),
+		provider: stringValueFromRecord(params.provider),
+		model: stringValueFromRecord(params.model),
+		mode: stringValueFromRecord(params.mode),
+		contentChars: typeof params.content === 'string' ? params.content.length : undefined,
+		toolCount: Array.isArray(params.tools) ? params.tools.length : undefined,
+		toolOutputCount: Array.isArray(params.toolOutputs) ? params.toolOutputs.length : undefined,
+		hasAudio: Boolean(params.audioFile),
+		hasConfig: Boolean(params.config),
+	};
 }
 
 async function approveTool(name: string, args: Record<string, unknown>, mode: string): Promise<boolean> {
@@ -6061,7 +6114,6 @@ async function readLints(args: Record<string, unknown>, token: vscode.Cancellati
 
 const BACKBOARD_PANEL_LARGE_WRITE_PROGRESS_CHARS = 8_000;
 const BACKBOARD_PANEL_LARGE_WRITE_CHUNK_CHARS = 4_000;
-const BACKBOARD_PANEL_MAX_WRITE_TOOL_CONTENT_CHARS = 6_000;
 
 function panelLargeWriteChunkCount(content: string): number {
 	return Math.max(1, Math.ceil(content.length / BACKBOARD_PANEL_LARGE_WRITE_CHUNK_CHARS));
@@ -6091,19 +6143,18 @@ async function writeWorkspaceTextInChunks(uri: vscode.Uri, content: string, appe
 	return chunks;
 }
 
-async function writeFileTool(toolName: string, args: Record<string, unknown>, response: ResponseSink): Promise<string> {
+async function writeFileTool(_toolName: string, args: Record<string, unknown>, response: ResponseSink): Promise<string> {
 	const uri = resolveWorkspaceUri(filePathArg(args));
 	const content = stringArg(args, 'content', 'contents', 'new_text', 'newText');
 	const relative = vscode.workspace.asRelativePath(uri);
-	assertPanelWriteToolContentSize(toolName, relative, content);
 	await vscode.workspace.fs.createDirectory(parentUri(uri));
 	if (content.length > BACKBOARD_PANEL_LARGE_WRITE_PROGRESS_CHARS) {
 		const before = await tryReadFile(uri);
 		const beforeText = before ? Buffer.from(before).toString('utf8') : undefined;
-		const chunks = await writeWorkspaceTextInChunks(uri, content, false, response, 'Writing');
+		await writeWorkspaceTextInChunks(uri, content, false, response, 'Writing');
 		await vscode.workspace.saveAll(false);
 		response.event?.('fileChange', summarizeFileChange(uri, beforeText, content));
-		return `Wrote ${relative} (${content.length} chars in ${chunks} chunks)`;
+		return `Wrote ${relative} (${content.length} chars)`;
 	}
 	const edit = new vscode.WorkspaceEdit();
 	let before: string | undefined;
@@ -6128,16 +6179,15 @@ async function appendFileTool(args: Record<string, unknown>, response: ResponseS
 	const uri = resolveWorkspaceUri(filePathArg(args));
 	const content = stringArg(args, 'content', 'contents', 'new_text', 'newText');
 	const relative = vscode.workspace.asRelativePath(uri);
-	assertPanelWriteToolContentSize('append_file', relative, content);
 	await vscode.workspace.fs.createDirectory(parentUri(uri));
 	const before = await tryReadFile(uri);
 	const beforeText = before ? Buffer.from(before).toString('utf8') : '';
 	const afterText = `${beforeText}${content}`;
 	if (content.length > BACKBOARD_PANEL_LARGE_WRITE_PROGRESS_CHARS) {
-		const chunks = await writeWorkspaceTextInChunks(uri, content, true, response, 'Appending');
+		await writeWorkspaceTextInChunks(uri, content, true, response, 'Appending');
 		await vscode.workspace.saveAll(false);
 		response.event?.('fileChange', summarizeFileChange(uri, beforeText || undefined, afterText));
-		return `Appended ${content.length} chars to ${relative} in ${chunks} chunks`;
+		return `Appended ${content.length} chars to ${relative}`;
 	}
 	try {
 		const document = await vscode.workspace.openTextDocument(uri);
@@ -6154,13 +6204,6 @@ async function appendFileTool(args: Record<string, unknown>, response: ResponseS
 		response.event?.('fileChange', summarizeFileChange(uri, beforeText || undefined, afterText));
 		return `Appended ${content.length} chars to ${relative}`;
 	}
-}
-
-function assertPanelWriteToolContentSize(toolName: string, relative: string, content: string): void {
-	if (content.length <= BACKBOARD_PANEL_MAX_WRITE_TOOL_CONTENT_CHARS) {
-		return;
-	}
-	throw new Error(`${toolName} for ${relative} is too large (${content.length} chars). Split generated files into chunks: call write_file/create_file with the first chunk under ${BACKBOARD_PANEL_MAX_WRITE_TOOL_CONTENT_CHARS} chars, then append_file with each remaining chunk under ${BACKBOARD_PANEL_MAX_WRITE_TOOL_CONTENT_CHARS} chars.`);
 }
 
 async function editFileTool(args: Record<string, unknown>, response: ResponseSink): Promise<string> {
@@ -6452,6 +6495,52 @@ function toolOutput(toolCallId: string, output: unknown): unknown {
 
 function isReadOnlyTool(name: string): boolean {
 	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search', 'web_search', 'web_fetch'].includes(name);
+}
+
+function trimBackboardToolsForRequest(tools: unknown[] | undefined, prompt: string, webSearch: string, imageGeneration: string): unknown[] | undefined {
+	if (!tools?.length) {
+		return tools;
+	}
+	const trimmed = tools.filter(tool => {
+		const name = backboardFunctionToolName(tool);
+		if (!name) {
+			return true;
+		}
+		if (name === 'computer' || name === 'sleep' || name === 'persistence_decide') {
+			return false;
+		}
+		if (name === 'enter_plan_mode' || name === 'exit_plan_mode') {
+			return promptMentionsPlan(prompt);
+		}
+		if (name === 'generate_image' || name === 'image_generate') {
+			return imageGeneration === 'auto' || promptMentionsImage(prompt);
+		}
+		if (name === 'web_search' || name === 'web_fetch') {
+			return webSearch !== 'off' || promptNeedsWeb(prompt);
+		}
+		return true;
+	});
+	return trimmed.length ? trimmed : tools;
+}
+
+function backboardFunctionToolName(tool: unknown): string | undefined {
+	if (!isObjectRecord(tool)) {
+		return undefined;
+	}
+	const fn = isObjectRecord(tool.function) ? tool.function : undefined;
+	return stringValueFromRecord(fn?.name) || stringValueFromRecord(tool.name);
+}
+
+function promptMentionsPlan(prompt: string): boolean {
+	return /\b(plan|planning|roadmap|steps|strategy)\b/i.test(prompt);
+}
+
+function promptMentionsImage(prompt: string): boolean {
+	return /\b(image|picture|photo|draw|drawing|illustration|logo|icon|sprite|visual|render)\b/i.test(prompt);
+}
+
+function promptNeedsWeb(prompt: string): boolean {
+	return /https?:\/\//i.test(prompt) || /\b(web|website|url|online|internet|latest|current|today|docs)\b/i.test(prompt);
 }
 
 function readSettings(): {

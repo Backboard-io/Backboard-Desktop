@@ -554,6 +554,11 @@ export class AgentHostChatInputPicker extends Disposable {
 		}
 	}
 
+	getCurrentLabel(): string | undefined {
+		const ctx = this._readContext();
+		return ctx ? this._labelFor(ctx.schema, ctx.value) : undefined;
+	}
+
 	private async _getItems(schema: SessionConfigPropertySchema, query?: string): Promise<readonly IConfigPickerItem[]> {
 		if (schema.type === 'boolean') {
 			return [

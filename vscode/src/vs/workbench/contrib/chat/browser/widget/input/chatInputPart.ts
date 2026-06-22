@@ -4800,62 +4800,30 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 	}
 
 	private getActions(): IActionWidgetDropdownAction[] {
-		const actions: IActionWidgetDropdownAction[] = [
-			{
-				id: 'backboardComposerOptions.permissions',
-				label: localize('backboardComposerOptions.permissions', "Permissions"),
-				class: undefined,
-				tooltip: localize('backboardComposerOptions.permissionsTooltip', "Change permission settings"),
-				icon: Codicon.shield,
-				enabled: true,
-				run: () => this.openNestedPicker(() => this.inputPart.openPermissionPicker()),
-			},
-			{
-				id: 'backboardComposerOptions.session',
-				label: localize('backboardComposerOptions.session', "Session Options"),
-				class: undefined,
-				tooltip: localize('backboardComposerOptions.sessionTooltip', "Change session options"),
-				icon: Codicon.database,
-				enabled: true,
-				run: () => this.openNestedPicker(() => this.inputPart.openChatSessionPicker()),
-			},
-			{
-				id: 'backboardComposerOptions.autoApprove',
-				label: localize('backboardComposerOptions.autoApprove', "Auto-Approve"),
-				class: undefined,
-				tooltip: localize('backboardComposerOptions.autoApproveTooltip', "Change auto-approve behavior"),
-				icon: Codicon.warning,
-				enabled: true,
-				run: () => this.openNestedPicker(() => this.inputPart.openAgentHostAutoApprovePicker()),
-			},
-			{
-				id: 'backboardComposerOptions.approvals',
-				label: localize('backboardComposerOptions.approvals', "Approvals"),
-				class: undefined,
-				tooltip: localize('backboardComposerOptions.approvalsTooltip', "Change approval behavior"),
-				icon: Codicon.shield,
-				enabled: true,
-				run: () => this.openNestedPicker(() => this.inputPart.openAgentHostPermissionModePicker()),
-			},
-			{
-				id: 'backboardComposerOptions.folder',
-				label: localize('backboardComposerOptions.folder', "Folder"),
-				class: undefined,
-				tooltip: localize('backboardComposerOptions.folderTooltip', "Change working folder"),
-				icon: Codicon.folder,
-				enabled: true,
-				run: () => this.openNestedPicker(() => this.inputPart.openAgentHostFolderPicker()),
-			},
-		];
+		const actions: IActionWidgetDropdownAction[] = [];
 		for (const option of this.inputPart.getBackboardGenericConfigOptions()) {
+			const label = option.valueLabel
+				? localize('backboardComposerOptions.genericWithValue', "{0}: {1}", option.label, option.valueLabel)
+				: option.label;
 			actions.push({
 				id: `backboardComposerOptions.generic.${option.id}`,
-				label: option.label,
+				label,
 				class: undefined,
-				tooltip: option.description ?? option.label,
+				tooltip: option.description ?? label,
 				icon: this.getGenericOptionIcon(option.id),
 				enabled: true,
 				run: () => this.openNestedPicker(() => option.show(this.inputPart.getBackboardOptionsAnchor())),
+			});
+		}
+		if (!actions.length) {
+			actions.push({
+				id: 'backboardComposerOptions.empty',
+				label: localize('backboardComposerOptions.empty', "No Backboard options"),
+				class: undefined,
+				tooltip: localize('backboardComposerOptions.emptyTooltip', "No configurable Backboard options are available for this session."),
+				icon: Codicon.info,
+				enabled: false,
+				run: () => undefined,
 			});
 		}
 		return actions;

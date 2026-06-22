@@ -25,6 +25,7 @@ import { toAgentHostBackendSessionUri } from './agentHostSessionUri.js';
 export interface IAgentHostGenericConfigOption {
 	readonly id: string;
 	readonly label: string;
+	readonly valueLabel?: string;
 	readonly description?: string;
 	show(anchor?: HTMLElement): void;
 }
@@ -107,6 +108,7 @@ export class AgentHostGenericConfigChips extends Disposable {
 			options.push({
 				id: property,
 				label: schema.title || property,
+				valueLabel: chip.getCurrentLabel(),
 				description: schema.description,
 				show: (anchor?: HTMLElement) => chip.show(anchor),
 			});

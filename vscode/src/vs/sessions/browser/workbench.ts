@@ -290,7 +290,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	private readonly partVisibility: IPartVisibilityState = {
 		sidebar: true,
 		auxiliaryBar: true,
-		editor: true,
+		editor: false,
 		panel: false,
 		sessions: true
 	};
@@ -724,8 +724,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.partVisibility.panel = visibilityDefaults.panel;
 		this.partVisibility.sessions = visibilityDefaults.sessions;
 		const savedPartVisibility = this._loadPartVisibility(storageService);
-		this.partVisibility.editor = visibilityDefaults.editor;
-		this.partVisibility.auxiliaryBar = visibilityDefaults.auxiliaryBar;
+		this.partVisibility.auxiliaryBar = savedPartVisibility.auxiliaryBar ?? visibilityDefaults.auxiliaryBar;
+		this.partVisibility.editor = this.partVisibility.auxiliaryBar ? (savedPartVisibility.editor ?? visibilityDefaults.editor) : false;
 		this.partVisibility.sidebar = savedPartVisibility.sidebar ?? visibilityDefaults.sidebar;
 
 		// Load saved grid part sizes — these will be consumed when building the
@@ -1029,6 +1029,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 				return;
 			}
 
+			if (!this.partVisibility.auxiliaryBar) {
+				this.setAuxiliaryBarHidden(false);
+			}
+
 			if (!this.partVisibility.editor) {
 				this.setEditorHidden(false);
 				this.restoreAttachedEditorMaximizedState();
@@ -1041,11 +1045,12 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		// Update part visibility based on final viewport classification
 		const visDefaults = this.layoutPolicy.getPartVisibilityDefaults();
-		this.partVisibility.sidebar = visDefaults.sidebar;
-		this.partVisibility.auxiliaryBar = visDefaults.auxiliaryBar;
+		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
+		this.partVisibility.sidebar = isPhone ? visDefaults.sidebar : this.partVisibility.sidebar;
+		this.partVisibility.auxiliaryBar = isPhone ? visDefaults.auxiliaryBar : this.partVisibility.auxiliaryBar;
 		this.partVisibility.panel = visDefaults.panel;
 		this.partVisibility.sessions = visDefaults.sessions;
-		this.partVisibility.editor = visDefaults.editor;
+		this.partVisibility.editor = isPhone ? visDefaults.editor : this.partVisibility.editor;
 	}
 
 	suppressEditorPartAutoVisibility(): IDisposable {
@@ -1660,16 +1665,15 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	}
 
 	private setAuxiliaryBarHidden(hidden: boolean): void {
-		if (hidden && this.layoutPolicy.viewportClass.get() !== 'phone') {
-			hidden = false;
-		}
-
 		if (this.partVisibility.auxiliaryBar === !hidden) {
 			return;
 		}
 
 		if (hidden) {
 			this._restoreAttachedEditorMaximizedOnShow = false;
+			if (this.partVisibility.editor) {
+				this.setEditorHidden(true);
+			}
 		}
 
 		this.partVisibility.auxiliaryBar = !hidden;
@@ -1699,10 +1703,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	}
 
 	private setEditorHidden(hidden: boolean): void {
-		if (hidden && this.layoutPolicy.viewportClass.get() !== 'phone') {
-			hidden = false;
-		}
-
 		if (this.partVisibility.editor === !hidden) {
 			return;
 		}

@@ -34,7 +34,6 @@ const DEFAULT_TTS_FORMAT: &str = "mp3";
 const DEFAULT_STT_PROVIDER: &str = "openai";
 const DEFAULT_STT_MODEL: &str = "gpt-4o-mini-transcribe";
 const DEFAULT_STT_LANGUAGE: &str = "en";
-const LOCAL_CONTINUATION_IDLE_TIMEOUT_SECS: u64 = 25;
 const WEB_FETCH_TIMEOUT_SECS: u64 = 15;
 const WEB_FETCH_MAX_BYTES: usize = 1_000_000;
 const WEB_FETCH_PREVIEW_CHARS: usize = 12_000;
@@ -844,9 +843,9 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
     } else {
         &[]
     };
-    let tools = params
-        .tools
-        .unwrap_or_else(|| tool_definitions_for_request(&mode, backboard_image_generation));
+    let tools = params.tools.unwrap_or_else(|| {
+        tool_definitions_for_request(&mode, backboard_image_generation, &params.content)
+    });
     let content = augment_prompt(&params.content, params.workspace.as_ref(), &mode, &tools);
     emit_trace(
         &state,
@@ -880,7 +879,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         memory: Some("off".to_string()),
         thinking: thinking_payload(&intensity, &provider, &model),
         tools: Some(tools),
-        parallel_tool_calls: Some(false),
+        parallel_tool_calls: Some(true),
         web_search: params.web_search.unwrap_or_else(|| "off".to_string()),
         image_generation: params.image_generation.clone(),
         image_model_provider: params
@@ -1080,7 +1079,7 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
                 memory: Some("off".to_string()),
                 thinking: thinking_payload(&intensity, &provider, &model),
                 tools: tools.clone(),
-                parallel_tool_calls: Some(false),
+                parallel_tool_calls: Some(true),
                 web_search: params.web_search.unwrap_or_else(|| "off".to_string()),
                 image_generation: params.image_generation.clone(),
                 image_model_provider: params
@@ -1255,20 +1254,7 @@ async fn consume_stream(
     let mut last_chunk: Option<Value> = None;
     let mut saw_first_chunk = false;
     loop {
-        let next_chunk = match stream_idle_timeout(phase, saw_first_chunk) {
-            Some(duration) => match tokio::time::timeout(duration, stream.next()).await {
-                Ok(chunk) => chunk,
-                Err(_) => {
-                    return Ok(StreamOutcome::UpstreamIdleTimeout {
-                        message: format!(
-                            "Local IDE stream idle timeout exceeded in {phase}: no text or tool-call chunk arrived for {}s after the stream opened.",
-                            duration.as_secs()
-                        ),
-                    });
-                }
-            },
-            None => stream.next().await,
-        };
+        let next_chunk = stream.next().await;
         let Some(chunk) = next_chunk else {
             break;
         };
@@ -1338,11 +1324,16 @@ async fn consume_stream(
             "run_started" => {
                 let run_id = run_id_from_chunk(&chunk);
                 set_session_run_id(&state, session_id, run_id);
+                let message = match phase {
+                    "idleRecovery" => "Reconnected to model after idle recovery.",
+                    "submitToolResult" => "Connected to model continuation.",
+                    _ => "Connected to model.",
+                };
                 state.writer.emit(base_event(
                     "progress",
                     request_id,
                     Some(session_id),
-                    json!({ "message": "Connected to model." }),
+                    json!({ "message": message }),
                 ));
             }
             "reasoning_started" => {
@@ -1512,18 +1503,6 @@ async fn consume_stream(
     Ok(StreamOutcome::Done)
 }
 
-fn stream_idle_timeout(phase: &str, saw_first_chunk: bool) -> Option<Duration> {
-    if !saw_first_chunk {
-        return None;
-    }
-    match phase {
-        "submitToolResult" | "idleRecovery" => {
-            Some(Duration::from_secs(LOCAL_CONTINUATION_IDLE_TIMEOUT_SECS))
-        }
-        _ => None,
-    }
-}
-
 fn emit_tool_requested_events(
     state: &BridgeState,
     request_id: &str,
@@ -1564,7 +1543,7 @@ fn emit_upstream_idle_recovery_progress(state: &BridgeState, request_id: &str, s
         "progress",
         request_id,
         Some(session_id),
-        json!({ "message": "Backboard stream went idle; retrying continuation with smaller tool chunks." }),
+        json!({ "message": "Model stream went idle; reconnecting to Backboard." }),
     ));
 }
 
@@ -1594,9 +1573,7 @@ fn upstream_idle_recovery_prompt(message: &str, phase: &str) -> String {
 The previous request failed with: {message}. \
 Do not repeat completed tool calls or rewrite files that were already written successfully. \
 Emit the next needed tool call immediately. \
-For generated files larger than about 3000 characters, write only a small first chunk with write_file/create_file and continue with append_file chunks of about 2000-3000 characters. \
-Never put more than about 6000 characters in one write_file, create_file, overwrite_file, or append_file content argument. \
-Do not silently generate a whole large file before calling a tool."
+When creating or replacing a file, send the complete intended file contents in a single write_file, create_file, or overwrite_file tool call."
     )
 }
 
@@ -1767,10 +1744,13 @@ fn augment_prompt(
         .unwrap_or_else(|| "<none supplied by host>".to_string());
     let available_tools = tool_names_for_prompt(tools);
     let system_prompt = system_prompt_for_request(content);
+    let http_endpoints = if should_include_http_endpoint_reference(content) {
+        format!("\n\n{BACKBOARD_HTTP_ENDPOINT_REFERENCE}")
+    } else {
+        String::new()
+    };
     format!(
-        r#"{system_prompt}
-
-{http_endpoints}
+        r#"{system_prompt}{http_endpoints}
 
 ## Runtime Context
 
@@ -1780,13 +1760,13 @@ fn augment_prompt(
 
 Treat relative file, grep, glob, shell, and edit tool paths as relative to the target workspace root unless the user explicitly provides another path.
 The target workspace root is the only current project root. Ignore stale absolute paths from previous chat turns, pasted logs, old tool transcripts, restored sessions, or previous IDE windows unless the user's latest request explicitly repeats that path. If a file is missing, list or search the target workspace instead of trying unrelated absolute paths.
-For generated files larger than about 3000 characters, write a small first chunk with write_file/create_file and then append 2000-3000 character chunks with append_file. Emit each chunk as a tool call as soon as it is ready instead of silently generating the full file first. Never put more than about 6000 characters in one write_file, create_file, overwrite_file, or append_file content argument.
+When creating or replacing a file, send the complete intended file contents in a single write_file, create_file, or overwrite_file tool call. The host handles large-file disk writes internally.
 
 ## User Request
 
 {content}"#,
         system_prompt = system_prompt,
-        http_endpoints = BACKBOARD_HTTP_ENDPOINT_REFERENCE,
+        http_endpoints = http_endpoints,
         workspace = workspace,
         mode = mode,
         available_tools = available_tools,
@@ -1800,6 +1780,60 @@ fn system_prompt_for_request(content: &str) -> &str {
         .split_once(BACKBOARD_API_REFERENCE_HEADING)
         .map(|(prompt, _)| prompt.trim())
         .unwrap_or_else(|| BACKBOARD_SYSTEM_PROMPT.trim())
+}
+
+fn should_include_http_endpoint_reference(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    has_word(&lower, "api")
+        || has_word(&lower, "endpoint")
+        || has_word(&lower, "endpoints")
+        || has_word(&lower, "http")
+        || has_word(&lower, "rest")
+        || has_word(&lower, "oauth")
+        || has_word(&lower, "sso")
+        || has_word(&lower, "billing")
+}
+
+fn prompt_mentions_plan(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    ["plan", "planning", "roadmap", "steps", "strategy"]
+        .iter()
+        .any(|word| has_word(&lower, word))
+}
+
+fn prompt_mentions_image(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    [
+        "image",
+        "picture",
+        "photo",
+        "draw",
+        "drawing",
+        "illustration",
+        "logo",
+        "icon",
+        "sprite",
+        "visual",
+        "render",
+    ]
+    .iter()
+    .any(|word| has_word(&lower, word))
+}
+
+fn prompt_needs_web(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    lower.contains("http://")
+        || lower.contains("https://")
+        || [
+            "web", "website", "url", "online", "internet", "latest", "current", "today", "docs",
+        ]
+        .iter()
+        .any(|word| has_word(&lower, word))
+}
+
+fn has_word(text: &str, word: &str) -> bool {
+    text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+        .any(|part| part == word)
 }
 
 fn tool_names_for_prompt(tools: &[Value]) -> String {
@@ -1846,22 +1880,36 @@ fn backboard_image_generation_enabled(image_generation: Option<&str>) -> bool {
     image_generation.is_some_and(|value| value.eq_ignore_ascii_case("auto"))
 }
 
-fn tool_definitions_for_request(mode: &str, backboard_image_generation: bool) -> Vec<Value> {
+fn tool_definitions_for_request(
+    mode: &str,
+    backboard_image_generation: bool,
+    content: &str,
+) -> Vec<Value> {
     tool_definitions(mode)
         .into_iter()
         .filter(|tool| {
+            let name = tool.pointer("/function/name").and_then(Value::as_str);
             if !backboard_image_generation {
-                return true;
+                return name.is_none_or(|name| should_keep_tool_for_request(name, content));
             }
-            tool.pointer("/function/name")
-                .and_then(Value::as_str)
-                .is_none_or(|name| {
-                    !BACKBOARD_IMAGE_TOOL_NAMES
-                        .iter()
-                        .any(|blocked| name.eq_ignore_ascii_case(blocked))
-                })
+            name.is_none_or(|name| {
+                !BACKBOARD_IMAGE_TOOL_NAMES
+                    .iter()
+                    .any(|blocked| name.eq_ignore_ascii_case(blocked))
+                    && should_keep_tool_for_request(name, content)
+            })
         })
         .collect()
+}
+
+fn should_keep_tool_for_request(name: &str, content: &str) -> bool {
+    match name {
+        "computer" | "sleep" | "persistence_decide" => false,
+        "enter_plan_mode" | "exit_plan_mode" => prompt_mentions_plan(content),
+        "generate_image" | "image_generate" => prompt_mentions_image(content),
+        "web_search" | "web_fetch" => prompt_needs_web(content),
+        _ => true,
+    }
 }
 
 fn tool_definitions(mode: &str) -> Vec<Value> {
@@ -1915,11 +1963,11 @@ fn all_tool_definitions() -> Vec<Value> {
         json!({"type":"function","function":{"name":"bash","description":"Execute a shell command. Do not use for file operations; use read_file, edit, write, grep, or glob instead.","parameters":{"type":"object","properties":{"command":{"type":"string"},"cmd":{"type":"string"},"description":{"type":"string"},"timeout":{"type":"integer"},"timeout_ms":{"type":"integer"},"working_directory":{"type":"string"},"cwd":{"type":"string"},"is_background":{"type":"boolean"}},"required":["command"]}}}),
         json!({"type":"function","function":{"name":"run_terminal_cmd","description":"Execute a shell command and render output in an IDE terminal.","parameters":{"type":"object","properties":{"command":{"type":"string"},"cmd":{"type":"string"},"description":{"type":"string"},"timeout":{"type":"integer"},"timeout_ms":{"type":"integer"},"working_directory":{"type":"string"},"cwd":{"type":"string"},"is_background":{"type":"boolean"}},"required":["command"]}}}),
         json!({"type":"function","function":{"name":"read_file","description":"Read a text file from the workspace. Supports offset and limit line ranges.","parameters":{"type":"object","properties":{"path":{"type":"string"},"target_file":{"type":"string"},"file_path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}}}),
-        json!({"type":"function","function":{"name":"write","description":"Write a complete file in the workspace. Prefer edit for existing files. For generated files above about 3000 chars, write only the first chunk and continue with append_file chunks. Keep content under about 6000 chars per call.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"content":{"type":"string","maxLength":6000},"contents":{"type":"string","maxLength":6000}}}}}),
-        json!({"type":"function","function":{"name":"write_file","description":"Write a complete file in the workspace. Alias for write. For generated files above about 3000 chars, write only the first chunk and continue with append_file chunks. Keep content under about 6000 chars per call.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string","maxLength":6000},"contents":{"type":"string","maxLength":6000},"new_text":{"type":"string","maxLength":6000},"newText":{"type":"string","maxLength":6000}}}}}),
-        json!({"type":"function","function":{"name":"create_file","description":"Create a file in the workspace, creating parent directories when the host supports it. Alias for write_file. For generated files above about 3000 chars, create the first chunk and continue with append_file chunks. Keep content under about 6000 chars per call.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string","maxLength":6000},"contents":{"type":"string","maxLength":6000},"new_text":{"type":"string","maxLength":6000},"newText":{"type":"string","maxLength":6000}}}}}),
-        json!({"type":"function","function":{"name":"overwrite_file","description":"Overwrite a complete file in the workspace. Alias for write_file. For generated files above about 3000 chars, write only the first chunk and continue with append_file chunks. Keep content under about 6000 chars per call.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string","maxLength":6000},"contents":{"type":"string","maxLength":6000},"new_text":{"type":"string","maxLength":6000},"newText":{"type":"string","maxLength":6000}}}}}),
-        json!({"type":"function","function":{"name":"append_file","description":"Append text to a workspace file. Use this for generated-file chunks of about 2000-3000 chars so the runtime sees frequent tool activity instead of one huge silent generation. Keep content under about 6000 chars per call.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string","maxLength":6000},"contents":{"type":"string","maxLength":6000},"new_text":{"type":"string","maxLength":6000},"newText":{"type":"string","maxLength":6000}}}}}),
+        json!({"type":"function","function":{"name":"write","description":"Write a complete file in the workspace. Prefer edit for existing files. Send the complete intended file contents in one call; the host handles large-file disk writes internally.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"write_file","description":"Write a complete file in the workspace. Alias for write. Send the complete intended file contents in one call; the host handles large-file disk writes internally.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"create_file","description":"Create a file in the workspace, creating parent directories when the host supports it. Alias for write_file. Send the complete intended file contents in one call; the host handles large-file disk writes internally.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"overwrite_file","description":"Overwrite a complete file in the workspace. Alias for write_file. Send the complete intended file contents in one call; the host handles large-file disk writes internally.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
+        json!({"type":"function","function":{"name":"append_file","description":"Append text to the end of a workspace file. Use write_file, create_file, or overwrite_file when replacing a complete file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"content":{"type":"string"},"contents":{"type":"string"},"new_text":{"type":"string"},"newText":{"type":"string"}}}}}),
         json!({"type":"function","function":{"name":"edit","description":"Perform exact string replacement in a file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"edit_file","description":"Perform exact string replacement in a file. Alias for edit.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"filePath":{"type":"string"},"target_file":{"type":"string"},"targetFile":{"type":"string"},"old_string":{"type":"string"},"oldString":{"type":"string"},"new_string":{"type":"string"},"newString":{"type":"string"},"replace_all":{"type":"boolean"},"replaceAll":{"type":"boolean"}}}}}),
         json!({"type":"function","function":{"name":"search_replace","description":"Search and replace text in a file.","parameters":{"type":"object","properties":{"path":{"type":"string"},"file_path":{"type":"string"},"target_file":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}}}}}),
@@ -3077,34 +3125,22 @@ mod tests {
     #[test]
     fn augmented_prompt_uses_backboard_runtime_system_prompt() {
         let workspace = PathBuf::from("/tmp/example-workspace");
-        let tools = tool_definitions_for_request("free", false);
+        let tools = tool_definitions_for_request("free", false, "make the UI better");
         let prompt = augment_prompt("make the UI better", Some(&workspace), "free", &tools);
 
         assert!(prompt.contains("# Backboard Runtime System Prompt"));
         assert!(prompt.contains("Use the host's native function/tool-call channel"));
         assert!(prompt.contains("Do not print tool-call JSON"));
-        assert!(prompt.contains("Call at most one tool in a single assistant turn"));
+        assert!(prompt.contains("You may request multiple safe read-only discovery tools"));
         assert!(prompt.contains("When the user explicitly asks to spawn, launch, run, delegate to, or use one or more subagents"));
         assert!(prompt.contains("## Runtime Context"));
         assert!(prompt.contains("Target workspace root: /tmp/example-workspace"));
         assert!(prompt.contains("Available tools for this turn:"));
         assert!(prompt.contains("Ignore stale absolute paths from previous chat turns"));
-        assert!(prompt.contains("append 2000-3000 character chunks with append_file"));
+        assert!(prompt.contains("send the complete intended file contents in a single write_file"));
         assert!(prompt.contains("read_file"));
         assert!(prompt.contains("write_file"));
-        assert!(prompt.contains("## Backboard HTTP Endpoints"));
-        assert!(prompt.contains("Backboard has real HTTP/REST endpoints"));
-        assert!(prompt.contains("POST /threads/messages"));
-        assert!(prompt.contains("POST /threads/tool-outputs"));
-        assert!(prompt.contains("submit-tool-outputs?stream=true"));
-        assert!(
-            prompt.contains("wss://app.backboard.io/api/threads/messages?api_key=YOUR_API_KEY")
-        );
-        assert!(prompt.contains("GET /models"));
-        assert!(prompt.contains("provider`, `type`, `skip`, and `limit"));
-        assert!(prompt.contains("GET /billing/usage/recent"));
-        assert!(prompt.contains("page_size"));
-        assert!(prompt.contains("GET /oauth/authorize"));
+        assert!(!prompt.contains("## Backboard HTTP Endpoints"));
         assert!(!prompt.contains("## Backboard API Reference"));
         assert!(prompt.contains("## User Request"));
         assert!(prompt.contains("make the UI better"));
@@ -3114,9 +3150,10 @@ mod tests {
     }
 
     #[test]
-    fn augmented_prompt_never_inlines_backboard_api_reference() {
+    fn augmented_prompt_conditionally_inlines_http_endpoint_reference() {
         let workspace = PathBuf::from("/tmp/example-workspace");
-        let tools = tool_definitions_for_request("free", false);
+        let tools =
+            tool_definitions_for_request("free", false, "what are the Backboard endpoints?");
         let normal = augment_prompt("make the UI better", Some(&workspace), "free", &tools);
         let api = augment_prompt(
             "walk me through the Backboard SSO OAuth endpoints",
@@ -3127,7 +3164,7 @@ mod tests {
 
         assert!(!normal.contains("## Backboard API Reference"));
         assert!(!api.contains("## Backboard API Reference"));
-        assert!(normal.contains("## Backboard HTTP Endpoints"));
+        assert!(!normal.contains("## Backboard HTTP Endpoints"));
         assert!(api.contains("## Backboard HTTP Endpoints"));
         assert!(api.contains("POST /threads/messages"));
     }
@@ -3179,7 +3216,7 @@ mod tests {
     }
 
     #[test]
-    fn write_tools_advertise_content_max_length() {
+    fn write_tools_do_not_advertise_content_max_length() {
         for tool in tool_definitions("free") {
             let Some(name) = tool.pointer("/function/name").and_then(Value::as_str) else {
                 continue;
@@ -3201,10 +3238,9 @@ mod tests {
                 .expect("write tool has properties");
             for field in ["content", "contents", "new_text", "newText"] {
                 if let Some(schema) = properties.get(field) {
-                    assert_eq!(
-                        schema.get("maxLength").and_then(Value::as_u64),
-                        Some(6000),
-                        "{name}.{field} should advertise maxLength"
+                    assert!(
+                        schema.get("maxLength").is_none(),
+                        "{name}.{field} should not advertise maxLength"
                     );
                 }
             }
@@ -3213,7 +3249,7 @@ mod tests {
 
     #[test]
     fn backboard_image_generation_omits_local_image_tool_from_request_tools() {
-        let names = tool_definitions_for_request("free", true)
+        let names = tool_definitions_for_request("free", true, "generate an image")
             .into_iter()
             .filter_map(|tool| {
                 tool.pointer("/function/name")

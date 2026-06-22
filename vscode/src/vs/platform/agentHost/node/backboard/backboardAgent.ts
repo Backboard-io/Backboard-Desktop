@@ -232,6 +232,7 @@ interface BackboardResponseState {
 	didCreateStatusPart?: boolean;
 	streamingToolCalls?: Set<string>;
 	lastProgressMessage?: string;
+	lastHeartbeatProgressAt?: number;
 	pendingText: string;
 	assistantText: string;
 	toolOutputs: StoredToolOutput[];
@@ -265,6 +266,13 @@ interface BackboardToolDisplay {
 	readonly failedMessage: string;
 	readonly skippedMessage: string;
 	readonly toolKind: string;
+}
+
+interface PreparedBackboardToolCall {
+	readonly call: ParsedToolCall;
+	readonly toolInput: string;
+	readonly clientTool?: ToolDefinition;
+	readonly display: BackboardToolDisplay;
 }
 
 export interface BackboardTurnSettings {
@@ -391,7 +399,12 @@ export class BackboardAgent extends Disposable implements IAgent {
 				clearInterval(heartbeatHandle);
 			}
 			heartbeatHandle = setInterval(() => {
-				this._logService.info(`[Backboard latency] ${phase} elapsedMs=${Date.now() - turnStartedAt}`);
+				const elapsedMs = Date.now() - turnStartedAt;
+				this._logService.info(`[Backboard latency] ${phase} elapsedMs=${elapsedMs}`);
+				if (elapsedMs >= 15000 && (!responseState.lastHeartbeatProgressAt || elapsedMs - responseState.lastHeartbeatProgressAt >= 30000)) {
+					responseState.lastHeartbeatProgressAt = elapsedMs;
+					this._appendBackboardProgress(session, effectiveTurnId, responseState, localize('backboard.progress.heartbeat.visible', "{0} ({1} elapsed).", phase, formatBackboardElapsed(elapsedMs)));
+				}
 			}, 5000);
 		};
 		const clearHeartbeat = (): void => {
@@ -402,7 +415,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 		};
 
 			try {
-				await writeSharedBackboardThread(session, prompt, '', undefined, responseState, this._logService, 'running');
+				void writeSharedBackboardThread(session, prompt, '', undefined, responseState, this._logService, 'running');
 				const settings = this._turnSettings(session);
 				this._logService.info(`[Backboard latency] turn_start session=${session.sessionId} provider=${settings.provider} model=${settings.model} mode=${settings.mode} intensity=${settings.intensity} web=${settings.webSearch}`);
 				this._logService.info(`[Backboard workspace] session=${session.sessionId} workingDirectory=${session.workingDirectory?.fsPath ?? '(missing)'}`);
@@ -420,7 +433,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				const submitToolsPromise = this._bridge.listTools(settings.mode, settings.config)
 					.then(tools => mergeBackboardTools(tools, session.clientTools, settings.mode))
 					.catch(() => mergeBackboardTools(undefined, session.clientTools, settings.mode));
-				const submitTools = await submitToolsPromise;
+				const submitTools = trimBackboardToolsForRequest(await submitToolsPromise, prompt, settings.webSearch, settings.imageGeneration);
 				this._logService.info(`[Backboard latency] list_tools_done elapsedMs=${Date.now() - listToolsStartedAt} totalElapsedMs=${Date.now() - turnStartedAt} toolCount=${submitTools?.length ?? 0}`);
 				this._logService.info(`[Backboard progress] Sending prompt to Backboard with ${submitTools?.length ?? 0} tools.`);
 				setHeartbeat(localize('backboard.progress.heartbeat.response', "Waiting for Backboard response"));
@@ -492,7 +505,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				clearHeartbeat();
 				this._flushAssistantText(session, effectiveTurnId, partId, responseState);
 				session.currentRequestId = undefined;
-				await writeSharedBackboardThread(session, prompt, responseState.assistantText, failedMessage, responseState, this._logService, failedMessage ? 'error' : 'complete');
+				void writeSharedBackboardThread(session, prompt, responseState.assistantText, failedMessage, responseState, this._logService, failedMessage ? 'error' : 'complete');
 				this._fire(session.sessionUri, { type: ActionType.ChatTurnComplete, turnId: effectiveTurnId });
 			}
 	}
@@ -798,7 +811,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 		}
 		responseState.lastProgressMessage = normalized;
 		this._logService.info(`[Backboard progress] ${normalized}`);
-		if (responseState.didCreateStatusPart) {
+		if (responseState.didCreateStatusPart && !isBackboardImportantProgress(normalized)) {
 			return;
 		}
 		responseState.didCreateStatusPart = true;
@@ -807,7 +820,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 			turnId,
 			part: {
 				kind: ResponsePartKind.SystemNotification,
-				content: localize('backboard.progress.notification', "Backboard: {0}", normalized),
+				content: localize('backboard.progress.notification', "Backboard: {0}", truncateBackboardProgressForChat(normalized)),
 			},
 		});
 	}
@@ -831,33 +844,55 @@ export class BackboardAgent extends Disposable implements IAgent {
 	}
 
 	private async _executeToolCalls(session: BackboardSession, turnId: string, toolCalls: readonly unknown[], mode: string, responseState: BackboardResponseState): Promise<unknown[]> {
+		const preparedCalls = toolCalls.map(rawCall => this._prepareToolCall(session, rawCall));
+		if (preparedCalls.length > 1 && preparedCalls.every(prepared => this._canExecuteToolCallInParallel(prepared, mode))) {
+			this._logService.info(`[Backboard latency] running_parallel_read_tools count=${preparedCalls.length}`);
+			return Promise.all(preparedCalls.map(prepared => this._executePreparedToolCall(session, turnId, prepared, mode, responseState)));
+		}
 		const outputs: unknown[] = [];
-		for (const rawCall of toolCalls) {
-			let call = parseToolCall(rawCall);
-			const preparedClientCall = prepareClientToolCall(session, call);
-			call = preparedClientCall.call;
-			const toolInput = toolInputPreview(call);
-			const clientTool = preparedClientCall.clientTool;
-			const display = backboardToolDisplay(call, clientTool);
-			this._appendBackboardProgress(session, turnId, responseState, localize('backboard.progress.toolStart', "Starting {0}.", display.displayName));
-			const alreadyStreaming = responseState.streamingToolCalls?.has(call.id) ?? false;
-			if (!alreadyStreaming) {
-				this._fire(session.sessionUri, {
-					type: ActionType.ChatToolCallStart,
-					turnId,
-					toolCallId: call.id,
-					toolName: call.name,
-					displayName: display.displayName,
-					...(clientTool && session.toolsClientId ? { contributor: { kind: ToolCallContributorKind.Client, clientId: session.toolsClientId } } : {}),
-					_meta: { toolKind: display.toolKind, source: clientTool ? 'client-fallback' : 'backboard' },
-				});
-				this._fire(session.sessionUri, {
-					type: ActionType.ChatToolCallDelta,
-					turnId,
-					toolCallId: call.id,
-					content: toolInput,
-				});
-			}
+		for (const prepared of preparedCalls) {
+			outputs.push(await this._executePreparedToolCall(session, turnId, prepared, mode, responseState));
+		}
+		return outputs;
+	}
+
+	private _prepareToolCall(session: BackboardSession, rawCall: unknown): PreparedBackboardToolCall {
+		let call = parseToolCall(rawCall);
+		const preparedClientCall = prepareClientToolCall(session, call);
+		call = preparedClientCall.call;
+		const toolInput = toolInputPreview(call);
+		const clientTool = preparedClientCall.clientTool;
+		const display = backboardToolDisplay(call, clientTool);
+		return { call, toolInput, clientTool, display };
+	}
+
+	private _canExecuteToolCallInParallel(prepared: PreparedBackboardToolCall, mode: string): boolean {
+		return !prepared.clientTool
+			&& (mode === 'free' || isReadOnlyTool(prepared.call.name))
+			&& isParallelSafeBackboardTool(prepared.call.name);
+	}
+
+	private async _executePreparedToolCall(session: BackboardSession, turnId: string, prepared: PreparedBackboardToolCall, mode: string, responseState: BackboardResponseState): Promise<unknown> {
+		const { call, toolInput, clientTool, display } = prepared;
+		this._appendBackboardProgress(session, turnId, responseState, localize('backboard.progress.toolStart', "Starting {0}.", display.displayName));
+		const alreadyStreaming = responseState.streamingToolCalls?.has(call.id) ?? false;
+		if (!alreadyStreaming) {
+			this._fire(session.sessionUri, {
+				type: ActionType.ChatToolCallStart,
+				turnId,
+				toolCallId: call.id,
+				toolName: call.name,
+				displayName: display.displayName,
+				...(clientTool && session.toolsClientId ? { contributor: { kind: ToolCallContributorKind.Client, clientId: session.toolsClientId } } : {}),
+				_meta: { toolKind: display.toolKind, source: clientTool ? 'client-fallback' : 'backboard' },
+			});
+			this._fire(session.sessionUri, {
+				type: ActionType.ChatToolCallDelta,
+				turnId,
+				toolCallId: call.id,
+				content: toolInput,
+			});
+		}
 
 			if (clientTool) {
 				this._fire(session.sessionUri, {
@@ -884,15 +919,14 @@ export class BackboardAgent extends Disposable implements IAgent {
 						},
 					});
 					responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: false, output: message });
-					outputs.push(toolOutput(call.id, { success: false, content: message }));
-					continue;
+					return toolOutput(call.id, { success: false, content: message });
 				}
 				try {
 					const result = await session.pendingClientToolCalls.register(call.id);
 					const output = toolCallResultOutput(result);
 					this._appendBackboardProgress(session, turnId, responseState, result.success ? localize('backboard.progress.clientToolComplete', "{0} finished.", display.displayName) : localize('backboard.progress.clientToolFailed', "{0} returned an error.", display.displayName));
 					responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: result.success, output });
-					outputs.push(toolOutput(call.id, { success: result.success, content: output }));
+					return toolOutput(call.id, { success: result.success, content: output });
 				} catch (error) {
 					const message = error instanceof CancellationError ? localize('backboard.tool.cancelled', "{0} was cancelled.", display.displayName) : (error instanceof Error ? error.message : String(error));
 					this._fire(session.sessionUri, {
@@ -907,9 +941,8 @@ export class BackboardAgent extends Disposable implements IAgent {
 						},
 					});
 					responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: false, output: message });
-					outputs.push(toolOutput(call.id, { success: false, content: message }));
+					return toolOutput(call.id, { success: false, content: message });
 				}
-				continue;
 			}
 
 			const allowed = mode === 'free' || isReadOnlyTool(call.name);
@@ -938,8 +971,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 					},
 				});
 				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: false, output: message });
-				outputs.push(toolOutput(call.id, { success: false, content: message }));
-				continue;
+				return toolOutput(call.id, { success: false, content: message });
 			}
 
 			const reportContent = createToolContentReporter((content: string) => this._fire(session.sessionUri, {
@@ -963,7 +995,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 					},
 				});
 				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: true, output: result ?? '' });
-				outputs.push(toolOutput(call.id, { success: true, content: result }));
+				return toolOutput(call.id, { success: true, content: result });
 			} catch (error) {
 				reportContent.flush();
 				const message = error instanceof Error ? error.message : String(error);
@@ -980,11 +1012,9 @@ export class BackboardAgent extends Disposable implements IAgent {
 					},
 				});
 				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: false, output: message });
-				outputs.push(toolOutput(call.id, { success: false, content: message }));
+				return toolOutput(call.id, { success: false, content: message });
 			}
 		}
-		return outputs;
-	}
 
 	private _refreshModels(deferNetwork = false): void {
 		const cachedModels = this._readCachedModels();
@@ -1254,6 +1284,28 @@ function panelEntryStatus(entry: BackboardPanelHistoryEntry): SessionStatus {
 		return SessionStatus.Error;
 	}
 	return SessionStatus.Idle;
+}
+
+function isBackboardImportantProgress(message: string): boolean {
+	return /\b(idle|reconnect|reconnected|continuation|submitting|posting|waiting|still running|still loading|failed|error|too large)\b/i.test(message);
+}
+
+function formatBackboardElapsed(elapsedMs: number): string {
+	const totalSeconds = Math.max(0, Math.round(elapsedMs / 1000));
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	if (!minutes) {
+		return `${seconds}s`;
+	}
+	return `${minutes}m ${seconds}s`;
+}
+
+function truncateBackboardProgressForChat(message: string): string {
+	const maxLength = 360;
+	if (message.length <= maxLength) {
+		return message;
+	}
+	return `${message.slice(0, maxLength - 3)}...`;
 }
 
 function assistantTextFromPanelHtml(html: string | undefined): string {
@@ -2348,6 +2400,44 @@ function mergeBackboardTools(bridgeTools: unknown[] | undefined, clientTools: re
 	return merged.length ? merged : undefined;
 }
 
+function trimBackboardToolsForRequest(tools: unknown[] | undefined, prompt: string, webSearch: string, imageGeneration: string): unknown[] | undefined {
+	if (!tools?.length) {
+		return tools;
+	}
+	const trimmed = tools.filter(tool => {
+		const name = backboardFunctionToolName(tool);
+		if (!name) {
+			return true;
+		}
+		if (name === 'computer' || name === 'sleep' || name === 'persistence_decide') {
+			return false;
+		}
+		if (name === 'enter_plan_mode' || name === 'exit_plan_mode') {
+			return promptMentionsPlan(prompt);
+		}
+		if (name === 'generate_image' || name === 'image_generate') {
+			return imageGeneration === 'auto' || promptMentionsImage(prompt);
+		}
+		if (name === 'web_search' || name === 'web_fetch') {
+			return webSearch !== 'off' || promptNeedsWeb(prompt);
+		}
+		return true;
+	});
+	return trimmed.length ? trimmed : tools;
+}
+
+function promptMentionsPlan(prompt: string): boolean {
+	return /\b(plan|planning|roadmap|steps|strategy)\b/i.test(prompt);
+}
+
+function promptMentionsImage(prompt: string): boolean {
+	return /\b(image|picture|photo|draw|drawing|illustration|logo|icon|sprite|visual|render)\b/i.test(prompt);
+}
+
+function promptNeedsWeb(prompt: string): boolean {
+	return /https?:\/\//i.test(prompt) || /\b(web|website|url|online|internet|latest|current|today|docs)\b/i.test(prompt);
+}
+
 function backboardFunctionToolName(tool: unknown): string | undefined {
 	if (!isObjectRecord(tool)) {
 		return undefined;
@@ -2606,7 +2696,6 @@ async function codebaseSearchTool(rootPath: string | undefined, args: Record<str
 
 const BACKBOARD_LARGE_WRITE_PROGRESS_CHARS = 8_000;
 const BACKBOARD_LARGE_WRITE_CHUNK_CHARS = 4_000;
-const BACKBOARD_MAX_WRITE_TOOL_CONTENT_CHARS = 6_000;
 
 function largeWriteChunkCount(content: string): number {
 	return Math.max(1, Math.ceil(content.length / BACKBOARD_LARGE_WRITE_CHUNK_CHARS));
@@ -2631,13 +2720,12 @@ async function writeFileTool(rootPath: string | undefined, toolName: string, arg
 	const file = resolveWorkspacePath(rootPath, filePathArg(args));
 	const content = stringArg(args, 'content', 'contents', 'new_text', 'newText');
 	const relative = relativePath(workspaceRoot(rootPath), file);
-	assertWriteToolContentSize(toolName, relative, content);
 	await fs.promises.mkdir(path.dirname(file), { recursive: true });
 	if (content.length > BACKBOARD_LARGE_WRITE_PROGRESS_CHARS) {
 		reportContent?.(`Writing ${relative}: 0/${content.length} chars`);
-		const chunks = await writeStringInChunks(file, content, false, (written, total) => reportContent?.(`Writing ${relative}: ${written}/${total} chars`));
-		reportContent?.(`Wrote ${relative}: ${content.length} chars in ${chunks} chunks`);
-		return `Wrote ${relative} (${content.length} chars in ${chunks} chunks)`;
+		await writeStringInChunks(file, content, false, (written, total) => reportContent?.(`Writing ${relative}: ${written}/${total} chars`));
+		reportContent?.(`Wrote ${relative}: ${content.length} chars`);
+		return `Wrote ${relative} (${content.length} chars)`;
 	}
 	await fs.promises.writeFile(file, content, 'utf8');
 	return `Wrote ${relative}`;
@@ -2647,23 +2735,15 @@ async function appendFileTool(rootPath: string | undefined, args: Record<string,
 	const file = resolveWorkspacePath(rootPath, filePathArg(args));
 	const content = stringArg(args, 'content', 'contents', 'new_text', 'newText');
 	const relative = relativePath(workspaceRoot(rootPath), file);
-	assertWriteToolContentSize('append_file', relative, content);
 	await fs.promises.mkdir(path.dirname(file), { recursive: true });
 	if (content.length > BACKBOARD_LARGE_WRITE_PROGRESS_CHARS) {
 		reportContent?.(`Appending ${relative}: 0/${content.length} chars`);
-		const chunks = await writeStringInChunks(file, content, true, (written, total) => reportContent?.(`Appending ${relative}: ${written}/${total} chars`));
-		reportContent?.(`Appended ${content.length} chars to ${relative} in ${chunks} chunks`);
-		return `Appended ${content.length} chars to ${relative} in ${chunks} chunks`;
+		await writeStringInChunks(file, content, true, (written, total) => reportContent?.(`Appending ${relative}: ${written}/${total} chars`));
+		reportContent?.(`Appended ${content.length} chars to ${relative}`);
+		return `Appended ${content.length} chars to ${relative}`;
 	}
 	await fs.promises.appendFile(file, content, 'utf8');
 	return `Appended ${content.length} chars to ${relative}`;
-}
-
-function assertWriteToolContentSize(toolName: string, relative: string, content: string): void {
-	if (content.length <= BACKBOARD_MAX_WRITE_TOOL_CONTENT_CHARS) {
-		return;
-	}
-	throw new Error(`${toolName} for ${relative} is too large (${content.length} chars). Split generated files into chunks: call write_file/create_file with the first chunk under ${BACKBOARD_MAX_WRITE_TOOL_CONTENT_CHARS} chars, then append_file with each remaining chunk under ${BACKBOARD_MAX_WRITE_TOOL_CONTENT_CHARS} chars.`);
 }
 
 async function editFileTool(rootPath: string | undefined, args: Record<string, unknown>): Promise<string> {
@@ -3059,6 +3139,10 @@ function stringValueFromRecord(value: unknown): string | undefined {
 
 function isReadOnlyTool(name: string): boolean {
 	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search', 'web_search', 'web_fetch'].includes(name);
+}
+
+function isParallelSafeBackboardTool(name: string): boolean {
+	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search'].includes(name);
 }
 
 function rawDisplayToolName(name: string): string {
