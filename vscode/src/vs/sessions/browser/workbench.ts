@@ -1100,8 +1100,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	private registerAuxiliaryEmptyStateListeners(): void {
 		const updateActiveAuxiliaryMode = () => {
 			const activeAuxiliaryId = this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)?.getId();
-			this.mainContainer.classList.toggle(LayoutClasses.AUXILIARY_FILES_ACTIVE, activeAuxiliaryId === SESSIONS_FILES_CONTAINER_ID);
-			this.mainContainer.classList.toggle(LayoutClasses.AUXILIARY_BROWSER_ACTIVE, activeAuxiliaryId === SESSIONS_BROWSER_VIEW_CONTAINER_ID);
+			const filesActive = activeAuxiliaryId === SESSIONS_FILES_CONTAINER_ID;
+			const browserActive = activeAuxiliaryId === SESSIONS_BROWSER_VIEW_CONTAINER_ID;
+			this.mainContainer.classList.toggle(LayoutClasses.AUXILIARY_FILES_ACTIVE, filesActive);
+			this.mainContainer.classList.toggle(LayoutClasses.AUXILIARY_BROWSER_ACTIVE, browserActive);
 		};
 
 		this._register(this.paneCompositeService.onDidPaneCompositeOpen(e => {

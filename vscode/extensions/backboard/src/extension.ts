@@ -5463,12 +5463,25 @@ class BackboardBridge implements vscode.Disposable {
 
 	restart(): void {
 		this.pendingModelRefresh = undefined;
-		if (!this.child || this.child.killed) {
+		this.pendingToolRefreshes.clear();
+		const child = this.child;
+		this.child = undefined;
+		if (!child || child.killed) {
 			this.pending.clear();
 			return;
 		}
 		this.output.appendLine(`[${new Date().toISOString()}] Restarting Backboard bridge after credential change`);
-		this.child.kill();
+		for (const pending of this.pending.values()) {
+			pending.reject(new Error('Backboard bridge restarted after credential change.'));
+		}
+		this.pending.clear();
+		child.kill();
+		const forceKillTimer = setTimeout(() => {
+			if (child.exitCode === null && child.signalCode === null) {
+				child.kill('SIGKILL');
+			}
+		}, 2000);
+		forceKillTimer.unref();
 	}
 
 	refreshModels(): void {
@@ -5706,29 +5719,34 @@ class BackboardBridge implements vscode.Disposable {
 		this.output.appendLine(`  cwd: ${cwd}`);
 		this.output.appendLine(`  workspaceRoot: ${workspacePath() ?? '<none>'}`);
 		this.output.appendLine(`  configuredWorkspaceRoot: ${configuredWorkspaceRoot() ?? '<none>'}`);
-		this.child = cp.spawn(bridgePath, [], {
+		const child = cp.spawn(bridgePath, [], {
 			cwd,
 			stdio: ['pipe', 'pipe', 'pipe']
 		});
-		readline.createInterface({ input: this.child.stdout }).on('line', line => this.handleLine(line));
-		this.child.stderr.on('data', chunk => this.output.append(chunk.toString()));
-		this.child.on('error', error => {
+		this.child = child;
+		readline.createInterface({ input: child.stdout }).on('line', line => this.handleLine(line));
+		child.stderr.on('data', chunk => this.output.append(chunk.toString()));
+		child.on('error', error => {
 			this.output.appendLine(`Bridge process error: ${error.message}`);
 			for (const pending of this.pending.values()) {
 				pending.reject(error);
 			}
 			this.pending.clear();
-			this.child = undefined;
+			if (this.child === child) {
+				this.child = undefined;
+			}
 		});
-		this.child.on('exit', (code, signal) => {
+		child.on('exit', (code, signal) => {
 			this.output.appendLine(`Bridge exited code=${code ?? 'null'} signal=${signal ?? 'null'}`);
 			for (const pending of this.pending.values()) {
 				pending.reject(new Error('Backboard bridge exited.'));
 			}
 			this.pending.clear();
-			this.child = undefined;
+			if (this.child === child) {
+				this.child = undefined;
+			}
 		});
-		return this.child;
+		return child;
 	}
 
 	private resolveBridgePath(): string {

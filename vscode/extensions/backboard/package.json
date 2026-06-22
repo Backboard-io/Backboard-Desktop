@@ -47,6 +47,10 @@
         "title": "Backboard: Set API Key"
       },
       {
+        "command": "backboard.extension.signIn",
+        "title": "Backboard: Sign In"
+      },
+      {
         "command": "backboard.copyOAuthRedirectUri",
         "title": "Backboard: Copy OAuth Redirect URI"
       },
