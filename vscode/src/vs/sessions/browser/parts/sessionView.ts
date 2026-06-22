@@ -4,15 +4,20 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/sessionView.css';
-import { $, size } from '../../../base/browser/dom.js';
+import { $, addDisposableListener, EventType, size } from '../../../base/browser/dom.js';
 import { ISerializableView, IViewSize } from '../../../base/browser/ui/grid/grid.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { URI } from '../../../base/common/uri.js';
+import { ICommandService } from '../../../platform/commands/common/commands.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../platform/instantiation/common/serviceCollection.js';
 import { IContextKey, IContextKeyService } from '../../../platform/contextkey/common/contextkey.js';
+import { FileOperationResult, IFileService, toFileOperationResult } from '../../../platform/files/common/files.js';
+import { ILogService } from '../../../platform/log/common/log.js';
+import product from '../../../platform/product/common/product.js';
 import { asCssVariable } from '../../../platform/theme/common/colorUtils.js';
+import { IPathService } from '../../../workbench/services/path/common/pathService.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
 import { IChatViewFactory } from '../../services/chatView/browser/chatViewFactory.js';
 import { AbstractChatView, ChatViewKind, IChatViewOptions } from './chatView.js';
@@ -23,6 +28,7 @@ import { autorun, observableValue } from '../../../base/common/observable.js';
 import { SessionIsArchivedContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsReadContext, SessionIsStickyContext, SessionSupportsMultipleChatsContext, ChatSessionProviderIdContext, ChatSessionTypeContext, SessionHasChangesContext } from '../../common/contextkeys.js';
 import { activeSessionViewBackground, activeSessionViewForeground, inactiveSessionViewBackground, inactiveSessionViewForeground } from '../../common/theme.js';
 import { SessionStatus } from '../../services/sessions/common/session.js';
+import { localize } from '../../../nls.js';
 
 /**
  * Options passed to {@link SessionView.openSession}. Extends the chat view
@@ -63,6 +69,9 @@ export class SessionView extends Disposable implements ISerializableView {
 	private readonly _floatingToolbar: SessionViewFloatingToolbar;
 	private readonly _centeredContentContainer: HTMLElement;
 	private readonly _contentContainer: HTMLElement;
+	private readonly _backboardAuthEnabledKey: IContextKey<boolean>;
+	private readonly _backboardSignedInKey: IContextKey<boolean>;
+	private _backboardAuthGateOverlay: HTMLElement | undefined;
 
 	private readonly _currentView = this._register(new MutableDisposable<AbstractChatView>());
 	private _lastLayout: { readonly width: number; readonly height: number; readonly top: number; readonly left: number } | undefined;
@@ -90,6 +99,10 @@ export class SessionView extends Disposable implements ISerializableView {
 		@IChatViewFactory private readonly chatViewFactory: IChatViewFactory,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
+		@ICommandService private readonly commandService: ICommandService,
+		@IFileService private readonly fileService: IFileService,
+		@IPathService private readonly pathService: IPathService,
+		@ILogService private readonly logService: ILogService,
 	) {
 		super();
 
@@ -105,6 +118,8 @@ export class SessionView extends Disposable implements ISerializableView {
 		this._chatSessionProviderIdKey = ChatSessionProviderIdContext.bindTo(scopedContextKeyService);
 		this._chatSessionTypeKey = ChatSessionTypeContext.bindTo(scopedContextKeyService);
 		this._sessionHasChangesKey = SessionHasChangesContext.bindTo(scopedContextKeyService);
+		this._backboardAuthEnabledKey = contextKeyService.createKey('backboard.authGateEnabled', contextKeyService.getContextKeyValue<boolean>('backboard.authGateEnabled') === true);
+		this._backboardSignedInKey = contextKeyService.createKey('backboard.signedIn', contextKeyService.getContextKeyValue<boolean>('backboard.signedIn') === true);
 
 		// Scoped service exposing this view's session so toolbars and contributed
 		// action view items (e.g. the changes diff stats in the header) can read it.
@@ -138,6 +153,11 @@ export class SessionView extends Disposable implements ISerializableView {
 
 		this._floatingToolbar = this._register(scopedInstantiationService.createInstance(SessionViewFloatingToolbar));
 		this.element.appendChild(this._floatingToolbar.element);
+		this._createBackboardAuthGate();
+		this._updateBackboardAuthGate();
+		this._refreshBackboardAuthGateFromConfig().catch(error => {
+			this.logService.error(`[Backboard] Failed to refresh agents middle panel auth gate: ${error instanceof Error ? error.message : String(error)}`);
+		});
 
 		this._applyActiveSessionStyles();
 
@@ -146,6 +166,11 @@ export class SessionView extends Disposable implements ISerializableView {
 		this._register(this._header.onDidChangeHeight(() => this._layoutChildren()));
 		this._register(this._compositeBar.onDidChangeVisibility(() => this._layoutChildren()));
 		this._register(this._compositeBar.onDidChangeHeight(() => this._layoutChildren()));
+		this._register(contextKeyService.onDidChangeContext(event => {
+			if (event.affectsSome(backboardAuthGateContextKeys)) {
+				this._updateBackboardAuthGate();
+			}
+		}));
 	}
 
 	openSession(session: IActiveSession | undefined, options: ISessionViewOptions): void {
@@ -334,4 +359,154 @@ export class SessionView extends Disposable implements ISerializableView {
 		this.element.style.setProperty('--part-background', background);
 		this.element.style.setProperty('--part-foreground', foreground);
 	}
+
+	private _isBackboardAuthRequired(): boolean {
+		return this._backboardAuthEnabledKey.get() === true && this._backboardSignedInKey.get() !== true;
+	}
+
+	private _createBackboardAuthGate(): void {
+		if (this._backboardAuthGateOverlay) {
+			return;
+		}
+
+		const overlay = $('.backboard-auth-gate-overlay.backboard-auth-gate-session-view');
+		overlay.setAttribute('role', 'dialog');
+		overlay.setAttribute('aria-label', localize('backboard.auth.sessionView.aria', "Sign in to Backboard"));
+
+		const card = $('.backboard-auth-gate-card');
+		overlay.appendChild(card);
+
+		const logo = $('span.backboard-auth-gate-logo.codicon.codicon-backboard-logo');
+		logo.setAttribute('aria-hidden', 'true');
+		card.appendChild(logo);
+
+		const title = $('h3.backboard-auth-gate-title');
+		title.textContent = localize('backboard.auth.sessionView.title', "Sign in to Backboard");
+		card.appendChild(title);
+
+		const description = $('p.backboard-auth-gate-description');
+		description.textContent = localize('backboard.auth.sessionView.description', "To use the Agents page, sign in with Backboard SSO.");
+		card.appendChild(description);
+
+		const button = $<HTMLButtonElement>('button.backboard-auth-gate-button');
+		button.type = 'button';
+		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
+		this._register(addDisposableListener(button, EventType.CLICK, () => {
+			this._signInAndRefreshBackboardAuthGate().catch(error => {
+				this.logService.error(`[Backboard] Failed to refresh agents middle panel auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
+			});
+		}));
+		card.appendChild(button);
+
+		this.element.appendChild(overlay);
+		this._backboardAuthGateOverlay = overlay;
+	}
+
+	private async _signInAndRefreshBackboardAuthGate(): Promise<void> {
+		await this.commandService.executeCommand('backboard.signIn');
+		await this._refreshBackboardAuthGateFromConfig();
+	}
+
+	private _updateBackboardAuthGate(): void {
+		const gated = this._isBackboardAuthRequired();
+		this.element.classList.toggle('backboard-auth-gate-active', gated);
+		if (this._backboardAuthGateOverlay) {
+			this._backboardAuthGateOverlay.style.display = gated ? '' : 'none';
+		}
+	}
+
+	private async _refreshBackboardAuthGateFromConfig(): Promise<void> {
+		if (!isBackboardProduct()) {
+			this._backboardAuthEnabledKey.set(false);
+			this._backboardSignedInKey.set(true);
+			this._updateBackboardAuthGate();
+			return;
+		}
+
+		this._backboardAuthEnabledKey.set(true);
+		this._backboardSignedInKey.set(await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService)));
+		this._updateBackboardAuthGate();
+	}
+	}
+
+const backboardAuthGateContextKeys = new Set(['backboard.authGateEnabled', 'backboard.signedIn']);
+
+interface BackboardConfigJson {
+	readonly [key: string]: unknown;
+	readonly env?: string;
+	readonly api_key?: string;
+	readonly env_keys?: Record<string, string>;
+}
+
+function isBackboardProduct(): boolean {
+	return product.defaultChatAgent?.provider?.default?.id === 'backboard';
+}
+
+async function backboardConfigResource(pathService: IPathService): Promise<URI> {
+	return URI.joinPath(await pathService.userHome({ preferLocal: true }), '.backboard_ide', 'config.json');
+}
+
+async function hasBackboardCredentials(fileService: IFileService, configResource: URI): Promise<boolean> {
+	const config = await readBackboardConfigJson(fileService, configResource);
+	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
+}
+
+async function readBackboardConfigJson(fileService: IFileService, configResource: URI): Promise<BackboardConfigJson> {
+	try {
+		const parsed: unknown = JSON.parse((await fileService.readFile(configResource)).value.toString());
+		return isObjectRecord(parsed) ? parsed : {};
+	} catch (error) {
+		if (toFileOperationResult(error) === FileOperationResult.FILE_NOT_FOUND || error instanceof SyntaxError) {
+			return {};
+		}
+		throw error;
+	}
+}
+
+function backboardConfigApiKey(config: BackboardConfigJson): string | undefined {
+	const apiKey = stringValueFromRecord(config.api_key);
+	if (apiKey) {
+		return apiKey;
+	}
+	const env = normalizeBackboardEnv(config.env);
+	return stringValueFromRecord(backboardConfigEnvKeys(config)[env]);
+}
+
+function backboardConfigAccessToken(config: BackboardConfigJson): string | undefined {
+	const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
+	return stringValueFromRecord(oauth?.access_token);
+}
+
+function backboardConfigEnvKeys(config: BackboardConfigJson): Record<string, string> {
+	const envKeys = config.env_keys;
+	if (!isObjectRecord(envKeys)) {
+		return {};
+	}
+	const result: Record<string, string> = {};
+	for (const [env, apiKey] of Object.entries(envKeys)) {
+		if (typeof apiKey === 'string') {
+			result[normalizeBackboardEnv(env)] = apiKey;
+		}
+	}
+	return result;
+}
+
+function normalizeBackboardEnv(env: string | undefined): string {
+	switch ((env || 'prod').trim().toLowerCase()) {
+		case '':
+		case 'production':
+			return 'prod';
+		case 'development':
+			return 'dev';
+		default:
+			return (env || 'prod').trim().toLowerCase();
+	}
+}
+
+function stringValueFromRecord(value: unknown): string | undefined {
+	return typeof value === 'string' ? value.trim() || undefined : undefined;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

@@ -5,17 +5,37 @@
 
 /* ===== Modern action label styling for sessions auxiliary bar ===== */
 
+.agent-sessions-workbench .monaco-grid-view .part.auxiliarybar {
+	background: var(--vscode-agentsPanel-background, var(--vscode-sideBar-background));
+	border: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, transparent))) 72%, transparent);
+	border-right: none;
+	border-radius: 8px 0 0 8px;
+	box-sizing: border-box;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench.nomaineditorarea .monaco-grid-view .part.auxiliarybar {
+	border-right: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, transparent))) 72%, transparent);
+	border-radius: 8px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .content {
+	background: var(--vscode-agentsPanel-background, var(--vscode-sideBar-background));
+}
+
 /* Base label: lowercase text + heavier weight + pill padding */
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) .action-label {
 	text-transform: capitalize;
 	font-weight: var(--vscode-agents-fontWeight-semiBold);
-	border-radius: var(--vscode-cornerRadius-small);
-	padding: 0px 8px;
-	font-size: var(--vscode-agents-fontSize-label1);
-	line-height: 22px;
+	border-radius: 6px;
+	padding: 0 10px;
+	font-size: 13px;
+	line-height: 28px;
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item {
+	display: flex;
+	align-items: center;
 	padding-left: 0;
 	padding-right: 0;
 }
@@ -26,9 +46,20 @@
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title {
-	padding-left: 4px;
-	padding-right: 2px;
-	background-color: var(--vscode-agentsPanel-background);
+	min-height: 48px;
+	padding-left: 14px;
+	padding-right: 10px;
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-background, var(--vscode-sideBar-background)) 94%, var(--vscode-editor-background));
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, transparent))) 48%, transparent);
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title .title-actions .action-item {
+	margin-right: 2px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title .action-label.codicon {
+	border-radius: 6px;
 }
 
 /* Hide the underline indicator for non-focused items, but keep it for keyboard focus */
@@ -41,8 +72,8 @@
 
 /* Active/checked state: background container instead of underline */
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked {
-	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 5%, transparent) !important;
-	border-radius: var(--vscode-cornerRadius-small);
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 10%, transparent) !important;
+	border-radius: 6px;
 }
 
 /* Override base workbench monaco editor background in auxiliary bar content */

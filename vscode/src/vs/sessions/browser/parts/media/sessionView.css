@@ -20,6 +20,84 @@
 	box-sizing: border-box;
 }
 
+.session-view {
+	position: relative;
+}
+
+.session-view.backboard-auth-gate-active > :not(.backboard-auth-gate-overlay) {
+	filter: blur(4px);
+	opacity: 0.48;
+	pointer-events: none;
+	user-select: none;
+}
+
+.session-view .backboard-auth-gate-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 50;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 22px;
+	box-sizing: border-box;
+	background: color-mix(in srgb, var(--session-view-background) 38%, transparent);
+}
+
+.session-view .backboard-auth-gate-card {
+	width: min(300px, 100%);
+	display: grid;
+	justify-items: center;
+	gap: 12px;
+	padding: 22px 18px;
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--session-view-background) 94%, var(--vscode-editor-background));
+	box-shadow: 0 18px 48px color-mix(in srgb, var(--vscode-widget-shadow) 80%, transparent);
+	text-align: center;
+}
+
+.session-view .backboard-auth-gate-logo.codicon.codicon-backboard-logo {
+	width: 52px;
+	height: 52px;
+	color: color-mix(in srgb, var(--session-view-foreground) 62%, var(--vscode-button-background));
+	font-size: 52px;
+}
+
+.session-view .backboard-auth-gate-title {
+	margin: 0;
+	color: var(--session-view-foreground);
+	font-size: 15px;
+	font-weight: 650;
+	line-height: 20px;
+}
+
+.session-view .backboard-auth-gate-description {
+	max-width: 240px;
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	line-height: 17px;
+}
+
+.session-view .backboard-auth-gate-button {
+	min-height: 30px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 12px;
+	border: 0;
+	border-radius: 5px;
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.session-view .backboard-auth-gate-button:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
 /* Transitions apply to both active and inactive states so controls fade
  * smoothly in either direction. Only declared when the user has not requested
  * reduced motion so we never need to unset them. */

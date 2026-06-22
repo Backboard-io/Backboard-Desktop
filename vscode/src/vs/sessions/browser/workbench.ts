@@ -1255,12 +1255,13 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// Calculate right section width — when sidebar is hidden it takes no space
 		const effectiveSideBarWidth = this.partVisibility.sidebar ? sideBarSize : 0;
 		const rightSectionWidth = Math.max(0, width - effectiveSideBarWidth);
-		const preferredRightWorkColumnWidth = this._savedPartSizes.auxiliaryBar !== undefined
-			? this._savedPartSizes.auxiliaryBar
-			: this._savedPartSizes.sessions !== undefined
-				? rightSectionWidth - this._savedPartSizes.sessions
-				: sizes.auxiliaryBarSize;
-		const rightWorkColumnWidth = Math.min(rightSectionWidth, Math.max(300, preferredRightWorkColumnWidth));
+		const preferredRightWorkColumnWidth = this._savedPartSizes.sessions !== undefined
+			? rightSectionWidth - this._savedPartSizes.sessions
+			: Math.max(sizes.auxiliaryBarSize, Math.floor(rightSectionWidth * 0.56));
+		const minimumRightWorkColumnWidth = (this.partVisibility.auxiliaryBar && this.partVisibility.editor)
+			? Math.min(rightSectionWidth, Math.max(420, rightSectionWidth < 900 ? Math.floor(rightSectionWidth * 0.72) : Math.max(560, Math.floor(rightSectionWidth * 0.48))))
+			: 300;
+		const rightWorkColumnWidth = Math.min(rightSectionWidth, Math.max(minimumRightWorkColumnWidth, preferredRightWorkColumnWidth));
 		const effectiveRightWorkColumnWidth = (this.partVisibility.auxiliaryBar || this.partVisibility.editor) ? rightWorkColumnWidth : 0;
 		// Prefer the saved chat bar width so the user's preferred chat bar size
 		// is preserved across reloads. Fall back to the remainder of the right
@@ -1272,20 +1273,21 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		const contentHeight = Math.max(0, height - titleBarHeight);
 		const topRightHeight = Math.max(0, contentHeight - panelSize);
-		const minimumFeatureHeight = Math.min(180, Math.floor(topRightHeight * 0.4));
-		const maximumFeatureHeight = Math.max(minimumFeatureHeight, Math.min(360, Math.floor(topRightHeight * 0.45)));
-		const defaultFeatureHeight = Math.min(maximumFeatureHeight, Math.max(minimumFeatureHeight, Math.floor(topRightHeight * 0.28)));
-		const minimumEditorHeight = Math.min(300, Math.max(0, topRightHeight - minimumFeatureHeight));
-		const minimumEditorWithFeatureHeight = Math.max(minimumEditorHeight, topRightHeight - maximumFeatureHeight);
-		const maximumEditorWithFeatureHeight = Math.max(minimumEditorWithFeatureHeight, topRightHeight - minimumFeatureHeight);
-		const defaultEditorHeight = Math.max(minimumEditorWithFeatureHeight, topRightHeight - defaultFeatureHeight);
-		const savedEditorHeight = this._savedPartSizes.editor;
+		const minimumAuxiliaryBarWidth = this.partVisibility.editor
+			? Math.min(280, Math.max(180, Math.floor(rightWorkColumnWidth * 0.36)))
+			: rightWorkColumnWidth;
+		const maximumAuxiliaryBarWidth = this.partVisibility.editor
+			? Math.max(minimumAuxiliaryBarWidth, Math.min(380, Math.floor(rightWorkColumnWidth * 0.48)))
+			: rightWorkColumnWidth;
+		const defaultAuxiliaryBarWidth = this.partVisibility.editor
+			? Math.min(maximumAuxiliaryBarWidth, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.38)))
+			: rightWorkColumnWidth;
+		const auxiliaryBarSize = this.partVisibility.auxiliaryBar
+			? Math.min(maximumAuxiliaryBarWidth, Math.max(minimumAuxiliaryBarWidth, this._savedPartSizes.auxiliaryBar ?? defaultAuxiliaryBarWidth))
+			: 0;
 		const editorSize = this.partVisibility.editor
-			? Math.min(maximumEditorWithFeatureHeight, Math.max(minimumEditorWithFeatureHeight, savedEditorHeight ?? defaultEditorHeight))
-			: defaultEditorHeight;
-		const auxiliaryBarSize = this.partVisibility.editor
-			? Math.max(minimumFeatureHeight, Math.min(maximumFeatureHeight, topRightHeight - editorSize))
-			: topRightHeight;
+			? Math.max(0, rightWorkColumnWidth - (this.partVisibility.auxiliaryBar ? auxiliaryBarSize : 0))
+			: 0;
 
 		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
 
@@ -1331,18 +1333,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			visible: this.partVisibility.panel
 		};
 
-		// Right work column: Auxiliary Bar | Editor (vertical)
-		const rightWorkColumn: ISerializedNode = {
-			type: 'branch',
-			data: [auxiliaryBarNode, editorNode],
-			size: rightWorkColumnWidth,
-			visible: this.partVisibility.auxiliaryBar || this.partVisibility.editor
-		};
-
-		// Top right section: Chat Bar | Right work column (horizontal)
+		// Top right section: Chat Bar | Files/Browser | Editor (horizontal)
 		const topRightSection: ISerializedNode = {
 			type: 'branch',
-			data: [sessionsNode, rightWorkColumn],
+			data: [sessionsNode, auxiliaryBarNode, editorNode],
 			size: topRightHeight
 		};
 
@@ -1775,20 +1769,27 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	}
 
 	/**
-	 * Sizes the editor part as the lower pane inside the right work column
-	 * the first time it is revealed. Width is owned by the right work column.
+	 * Sizes the editor part as the right pane next to the auxiliary bar
+	 * the first time it is revealed.
 	*/
 	private _applyEditorSplitSize(): void {
 		const currentEditorSize = this.workbenchGrid.getViewSize(this.editorPartView);
-		const sessionsSize = this.workbenchGrid.getViewSize(this.sessionsPartView);
-		const minimumFeatureHeight = Math.min(180, Math.floor(sessionsSize.height * 0.4));
-		const maximumFeatureHeight = Math.max(minimumFeatureHeight, Math.min(360, Math.floor(sessionsSize.height * 0.45)));
-		const defaultFeatureHeight = Math.min(maximumFeatureHeight, Math.max(minimumFeatureHeight, Math.floor(sessionsSize.height * 0.28)));
-		const maximumEditorHeight = Math.max(0, sessionsSize.height - minimumFeatureHeight);
-		const targetEditorHeight = Math.min(maximumEditorHeight, Math.max(300, sessionsSize.height - defaultFeatureHeight));
+		const auxiliaryBarSize = this.workbenchGrid.getViewSize(this.auxiliaryBarPartView);
+		const rightWorkColumnWidth = currentEditorSize.width + (this.partVisibility.auxiliaryBar ? auxiliaryBarSize.width : 0);
+		const minimumAuxiliaryBarWidth = Math.min(280, Math.max(180, Math.floor(rightWorkColumnWidth * 0.36)));
+		const targetAuxiliaryBarWidth = this.partVisibility.auxiliaryBar
+			? Math.min(380, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.38)))
+			: 0;
+		const targetEditorWidth = Math.max(0, rightWorkColumnWidth - targetAuxiliaryBarWidth);
+		if (this.partVisibility.auxiliaryBar) {
+			this.workbenchGrid.resizeView(this.auxiliaryBarPartView, {
+				width: targetAuxiliaryBarWidth,
+				height: auxiliaryBarSize.height
+			});
+		}
 		this.workbenchGrid.resizeView(this.editorPartView, {
-			width: currentEditorSize.width,
-			height: targetEditorHeight
+			width: targetEditorWidth,
+			height: currentEditorSize.height
 		});
 	}
 
@@ -1927,11 +1928,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	getMaximumEditorDimensions(_container: HTMLElement): IDimension {
 		// Return the available space for editor (excluding other parts)
 		const sidebarWidth = this.partVisibility.sidebar ? this.workbenchGrid.getViewSize(this.sideBarPartView).width : 0;
-		const rightWorkColumnWidth = this.partVisibility.auxiliaryBar
-			? this.workbenchGrid.getViewSize(this.auxiliaryBarPartView).width
-			: this.partVisibility.editor
-				? this.workbenchGrid.getViewSize(this.editorPartView).width
-				: 0;
+		const rightWorkColumnWidth =
+			(this.partVisibility.auxiliaryBar ? this.workbenchGrid.getViewSize(this.auxiliaryBarPartView).width : 0) +
+			(this.partVisibility.editor ? this.workbenchGrid.getViewSize(this.editorPartView).width : 0);
 		const panelHeight = this.partVisibility.panel ? this.workbenchGrid.getViewSize(this.panelPartView).height : 0;
 		const titleBarHeight = this.workbenchGrid.getViewSize(this.titleBarPartView).height;
 

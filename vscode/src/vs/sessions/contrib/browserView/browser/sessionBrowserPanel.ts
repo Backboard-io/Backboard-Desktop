@@ -68,7 +68,7 @@ export class SessionsBrowserViewPane extends ViewPane {
 		urlIcon.appendChild(renderIcon(Codicon.globe));
 		this._input = dom.append(urlRow, $('input.sessions-browser-url-input')) as HTMLInputElement;
 		this._input.type = 'text';
-		this._input.placeholder = localize('sessions.browser.urlPlaceholder', "Paste a URL or type a port");
+		this._input.placeholder = localize('sessions.browser.urlPlaceholder', "URL or localhost port");
 		this._input.setAttribute('aria-label', localize('sessions.browser.urlAriaLabel', "Browser URL"));
 
 		const openButton = dom.append(urlRow, $('button.sessions-browser-open-button')) as HTMLButtonElement;
@@ -82,6 +82,19 @@ export class SessionsBrowserViewPane extends ViewPane {
 				e.preventDefault();
 				this._openFromInput();
 			}
+		}));
+		this._domStore.add(dom.addDisposableListener(this._input, dom.EventType.FOCUS, () => {
+			this._input?.select();
+		}));
+		this._domStore.add(dom.addDisposableListener(this._input, dom.EventType.PASTE, (e: ClipboardEvent) => {
+			const pastedText = e.clipboardData?.getData('text');
+			const normalizedUrl = this._normalizeUrl(pastedText ?? '');
+			if (!normalizedUrl) {
+				return;
+			}
+
+			e.preventDefault();
+			this._input!.value = normalizedUrl;
 		}));
 		this._domStore.add(dom.addDisposableListener(openButton, dom.EventType.CLICK, () => this._openFromInput()));
 
@@ -115,7 +128,7 @@ export class SessionsBrowserViewPane extends ViewPane {
 	}
 
 	private _normalizeUrl(value: string): string | undefined {
-		const trimmed = value.trim();
+		const trimmed = this._extractUrlCandidate(value);
 		if (!trimmed) {
 			return undefined;
 		}
@@ -125,10 +138,35 @@ export class SessionsBrowserViewPane extends ViewPane {
 		if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::|\/|$)/i.test(trimmed)) {
 			return `http://${trimmed}`;
 		}
-		if (/^\d{2,5}$/.test(trimmed)) {
-			return `http://localhost:${trimmed}`;
+		const portOnlyMatch = /^:?(?<port>\d{2,5})(?<path>\/.*)?$/.exec(trimmed);
+		if (portOnlyMatch?.groups) {
+			return `http://localhost:${portOnlyMatch.groups.port}${portOnlyMatch.groups.path ?? ''}`;
 		}
 		return `https://${trimmed}`;
+	}
+
+	private _extractUrlCandidate(value: string): string | undefined {
+		const trimmed = value.trim();
+		if (!trimmed) {
+			return undefined;
+		}
+
+		const explicitUrlMatch = /[a-zA-Z][a-zA-Z\d+\-.]*:\/\/[^\s"'<>]+/.exec(trimmed);
+		if (explicitUrlMatch) {
+			return explicitUrlMatch[0];
+		}
+
+		const localhostMatch = /(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d{2,5})?(?:\/[^\s"'<>]*)?/i.exec(trimmed);
+		if (localhostMatch) {
+			return localhostMatch[0];
+		}
+
+		const portMatch = /(?:^|\s):?(?<port>\d{2,5})(?<path>\/[^\s"'<>]*)?(?:\s|$)/.exec(trimmed);
+		if (portMatch?.groups) {
+			return `${portMatch.groups.port}${portMatch.groups.path ?? ''}`;
+		}
+
+		return trimmed.replace(/^[<("'`]+|[>)"'`,.]+$/g, '');
 	}
 
 	private _renderBrowserList(): void {

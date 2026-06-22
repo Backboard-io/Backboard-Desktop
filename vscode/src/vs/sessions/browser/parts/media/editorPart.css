@@ -11,15 +11,32 @@
 .agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part) {
 	margin: 0 0 0 0;
 	background: var(--vscode-editor-background);
-	border: none;
-	border-top: 1px solid var(--vscode-agentsPanel-border, var(--vscode-sideBar-border));
-	border-radius: 0;
+	border: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, transparent))) 72%, transparent);
+	border-radius: 0 8px 8px 0;
 	box-sizing: border-box;
 	overflow: hidden;
 }
 
+.agent-sessions-workbench:not(.noauxiliarybar) .monaco-grid-view .part.editor:not(.modal-editor-part) {
+	border-left-color: color-mix(in srgb, var(--vscode-agentsPanel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, transparent))) 56%, transparent);
+}
+
+.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .part.editor:not(.modal-editor-part) {
+	border-radius: 8px;
+}
+
 .agent-sessions-workbench.nosidebar.nosessionspart .monaco-grid-view .part.editor:not(.modal-editor-part) {
 	margin-left: 10px;
+}
+
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) > .content,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title {
+	background: var(--vscode-editor-background);
+}
+
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title {
+	border-bottom-color: color-mix(in srgb, var(--vscode-agentsPanel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, transparent))) 44%, transparent);
 }
 
 .agent-sessions-workbench .part.editor > .content .editor-group-container.empty > .editor-group-watermark-wrapper > .editor-group-watermark {
@@ -58,13 +75,13 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	margin-bottom: 12px;
-	color: color-mix(in srgb, var(--vscode-descriptionForeground) 64%, transparent);
+	margin-bottom: 10px;
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 70%, transparent);
 }
 
 .agent-sessions-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .sessions-editor-empty-state-icon .codicon {
 	display: none;
-	font-size: 28px;
+	font-size: 26px;
 }
 
 .agent-sessions-workbench.sessions-auxiliary-files-active .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .sessions-editor-empty-state-file-icon,
@@ -74,7 +91,7 @@
 
 .agent-sessions-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .sessions-editor-empty-state-title {
 	color: var(--vscode-editor-foreground);
-	font-size: 14px;
+	font-size: 13px;
 	font-weight: 700;
 	line-height: 1.25;
 	letter-spacing: 0;
@@ -91,9 +108,9 @@
 .agent-sessions-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .sessions-editor-empty-state-message {
 	display: none;
 	max-width: 280px;
-	margin-top: 8px;
+	margin-top: 7px;
 	color: var(--vscode-descriptionForeground);
-	font-size: 13px;
+	font-size: 12px;
 	font-weight: 500;
 	line-height: 1.35;
 	letter-spacing: 0;
