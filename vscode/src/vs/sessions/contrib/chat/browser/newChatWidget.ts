@@ -15,7 +15,7 @@ import { isWeb } from '../../../../base/common/platform.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
-import { IDialogService, IFileDialogService, type IPromptButton } from '../../../../platform/dialogs/common/dialogs.js';
+import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
@@ -45,7 +45,7 @@ import { IPathService } from '../../../../workbench/services/path/common/pathSer
 
 const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 180;
 const NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT = 260;
-type FirstSendWorkspaceChoice = 'selectDirectory' | 'desktop' | undefined;
+type FirstSendWorkspaceChoice = 'selectFolder' | 'createFolder' | undefined;
 
 export class NewChatWidget extends Disposable {
 
@@ -529,7 +529,7 @@ export class NewChatWidget extends Disposable {
 				session = this._session.get();
 			}
 			if (!session) {
-				const selectedFolder = await this._promptForFirstSendWorkspace(query);
+				const selectedFolder = await this._promptForFirstSendWorkspace();
 				if (!selectedFolder || !await this._selectWorkspaceForFirstSend(selectedFolder)) {
 					this._widget.setInput(query);
 					this._widget.focusInput();
@@ -572,46 +572,90 @@ export class NewChatWidget extends Disposable {
 		return true;
 	}
 
-	private async _promptForFirstSendWorkspace(query: string): Promise<URI | undefined> {
-		const buttons: IPromptButton<FirstSendWorkspaceChoice>[] = [
-			{
-				label: localize('newChatSelectDirectoryCancelButton', "Cancel"),
-				run: () => undefined,
-			},
-		];
-		if (!isWeb) {
-			buttons.push({
-				label: localize('newChatWorkInDesktopButton', "Work in Desktop"),
-				run: () => 'desktop',
-			});
-		}
-		buttons.push({
-			label: localize('newChatSelectDirectoryButton', "Select Directory..."),
-			run: () => 'selectDirectory',
-		});
-
-		const { result } = await this.dialogService.prompt<FirstSendWorkspaceChoice>({
-			type: 'question',
-			title: localize('newChatSelectDirectoryTitle', "Select a Directory"),
-			message: localize('newChatSelectDirectoryMessage', "Select a directory for Backboard to work in."),
-			detail: localize('newChatSelectDirectoryDetail', "Backboard needs a folder before it can read files, run commands, or make changes."),
-			buttons,
-		});
-
-		switch (result) {
-			case 'selectDirectory':
+	private async _promptForFirstSendWorkspace(): Promise<URI | undefined> {
+		const choice = await this._showFirstSendWorkspaceModal();
+		switch (choice) {
+			case 'selectFolder':
 				return this._pickWorkspaceFolderForFirstSend();
-			case 'desktop':
-				return this._createDesktopWorkspaceFolder(query);
+			case 'createFolder':
+				return this._createDesktopWorkspaceFolder();
 			default:
 				return undefined;
 		}
 	}
 
+	private _showFirstSendWorkspaceModal(): Promise<FirstSendWorkspaceChoice> {
+		const host = this._chatWidgetContent;
+		if (!host) {
+			return Promise.resolve(undefined);
+		}
+
+		return new Promise(resolve => {
+			const store = new DisposableStore();
+			const overlay = dom.append(host, dom.$('.new-chat-folder-modal-overlay'));
+			const modal = dom.append(overlay, dom.$('.new-chat-folder-modal'));
+			modal.tabIndex = -1;
+			modal.setAttribute('role', 'dialog');
+			modal.setAttribute('aria-modal', 'true');
+
+			const closeButton = dom.append(modal, dom.$('button.new-chat-folder-modal-close')) as HTMLButtonElement;
+			closeButton.type = 'button';
+			closeButton.setAttribute('aria-label', localize('newChatFolderModalClose', "Close"));
+			closeButton.appendChild(renderIcon(Codicon.close));
+
+			const title = dom.append(modal, dom.$('h2.new-chat-folder-modal-title'));
+			title.textContent = localize('newChatSelectDirectoryTitle', "Where should Backboard work?");
+
+			const message = dom.append(modal, dom.$('p.new-chat-folder-modal-message'));
+			message.textContent = localize('newChatSelectDirectoryMessage', "Backboard needs a place on your computer to store the files it creates and edits for this project.");
+
+			const detail = dom.append(modal, dom.$('p.new-chat-folder-modal-detail'));
+			detail.textContent = localize('newChatSelectDirectoryDetail', "Don't have one? We can create one for you!");
+
+			const actions = dom.append(modal, dom.$('.new-chat-folder-modal-actions'));
+			const selectButton = dom.append(actions, dom.$('button.new-chat-folder-modal-button.secondary')) as HTMLButtonElement;
+			selectButton.type = 'button';
+			selectButton.textContent = localize('newChatSelectDirectoryButton', "Select a folder");
+
+			let createButton: HTMLButtonElement | undefined;
+			if (!isWeb) {
+				createButton = dom.append(actions, dom.$('button.new-chat-folder-modal-button.primary')) as HTMLButtonElement;
+				createButton.type = 'button';
+				createButton.textContent = localize('newChatWorkInDesktopButton', "Create a folder");
+			}
+
+			let settled = false;
+			const finish = (choice: FirstSendWorkspaceChoice) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				store.dispose();
+				overlay.remove();
+				resolve(choice);
+			};
+
+			store.add(dom.addDisposableListener(closeButton, dom.EventType.CLICK, () => finish(undefined)));
+			store.add(dom.addDisposableListener(selectButton, dom.EventType.CLICK, () => finish('selectFolder')));
+			if (createButton) {
+				store.add(dom.addDisposableListener(createButton, dom.EventType.CLICK, () => finish('createFolder')));
+			}
+			store.add(dom.addDisposableListener(overlay.ownerDocument, dom.EventType.KEY_DOWN, (event: KeyboardEvent) => {
+				if (event.key === 'Escape') {
+					event.preventDefault();
+					event.stopPropagation();
+					finish(undefined);
+				}
+			}));
+
+			setTimeout(() => (createButton ?? selectButton).focus(), 0);
+		});
+	}
+
 	private async _pickWorkspaceFolderForFirstSend(): Promise<URI | undefined> {
 		const result = await this.fileDialogService.showOpenDialog({
-			title: localize('newChatSelectDirectoryDialogTitle', "Select a Directory for Backboard"),
-			openLabel: localize('newChatSelectDirectoryOpenLabel', "Use Directory"),
+			title: localize('newChatSelectDirectoryDialogTitle', "Choose a Folder for Backboard"),
+			openLabel: localize('newChatSelectDirectoryOpenLabel', "Choose Folder"),
 			canSelectFolders: true,
 			canSelectFiles: false,
 			canSelectMany: false,
@@ -619,25 +663,123 @@ export class NewChatWidget extends Disposable {
 		return result?.[0];
 	}
 
-	private async _createDesktopWorkspaceFolder(query: string): Promise<URI | undefined> {
+	private async _createDesktopWorkspaceFolder(): Promise<URI | undefined> {
+		const folderName = await this._promptForDesktopWorkspaceFolderName();
+		if (!folderName) {
+			return undefined;
+		}
+
 		try {
 			const home = await this.pathService.userHome({ preferLocal: true });
 			const desktop = URI.joinPath(home, 'Desktop');
-			const folderUri = await this._getAvailableDesktopWorkspaceFolder(desktop, query);
+			const folderUri = await this._getAvailableDesktopWorkspaceFolder(desktop, folderName);
 			await this.fileService.createFolder(folderUri);
 			return folderUri;
 		} catch (error) {
 			this.logService.error('[NewChatWidget] Failed to create Desktop workspace folder', error);
 			await this.dialogService.error(
-				localize('newChatCreateDesktopWorkspaceFailed', "Backboard could not create a folder on Desktop."),
-				localize('newChatCreateDesktopWorkspaceFailedDetail', "Select a directory manually and try again.")
+				localize('newChatCreateDesktopWorkspaceFailed', "Backboard could not create a new folder on Desktop."),
+				localize('newChatCreateDesktopWorkspaceFailedDetail', "Choose a folder instead and try again.")
 			);
 			return undefined;
 		}
 	}
 
-	private async _getAvailableDesktopWorkspaceFolder(desktop: URI, query: string): Promise<URI> {
-		const baseName = this._getDesktopWorkspaceBaseName(query);
+	private async _promptForDesktopWorkspaceFolderName(): Promise<string | undefined> {
+		return this._showFolderNameModal();
+	}
+
+	private _showFolderNameModal(): Promise<string | undefined> {
+		const host = this._chatWidgetContent;
+		if (!host) {
+			return Promise.resolve(undefined);
+		}
+
+		return new Promise(resolve => {
+			const store = new DisposableStore();
+			const overlay = dom.append(host, dom.$('.new-chat-folder-modal-overlay'));
+			const modal = dom.append(overlay, dom.$('.new-chat-folder-modal'));
+			modal.tabIndex = -1;
+			modal.setAttribute('role', 'dialog');
+			modal.setAttribute('aria-modal', 'true');
+
+			const closeButton = dom.append(modal, dom.$('button.new-chat-folder-modal-close')) as HTMLButtonElement;
+			closeButton.type = 'button';
+			closeButton.setAttribute('aria-label', localize('newChatFolderModalClose', "Close"));
+			closeButton.appendChild(renderIcon(Codicon.close));
+
+			const title = dom.append(modal, dom.$('h2.new-chat-folder-modal-title'));
+			title.textContent = localize('newChatCreateFolderTitle', "Name this project folder");
+
+			const message = dom.append(modal, dom.$('p.new-chat-folder-modal-message'));
+			message.textContent = localize('newChatCreateFolderMessage', "Backboard will create this folder on your Desktop.");
+
+			const field = dom.append(modal, dom.$('.new-chat-folder-modal-field'));
+			const label = dom.append(field, dom.$('label.new-chat-folder-modal-label')) as HTMLLabelElement;
+			const inputId = `new-chat-folder-name-${Date.now()}`;
+			label.htmlFor = inputId;
+			label.textContent = localize('newChatCreateFolderLabel', "Folder name");
+			const input = dom.append(field, dom.$('input.new-chat-folder-modal-input')) as HTMLInputElement;
+			input.id = inputId;
+			input.type = 'text';
+			input.autocomplete = 'off';
+			input.spellcheck = false;
+			input.placeholder = localize('newChatCreateFolderPlaceholder', "My project");
+			const error = dom.append(field, dom.$('.new-chat-folder-modal-error'));
+			error.setAttribute('aria-live', 'polite');
+
+			const actions = dom.append(modal, dom.$('.new-chat-folder-modal-actions'));
+			const createButton = dom.append(actions, dom.$('button.new-chat-folder-modal-button.primary')) as HTMLButtonElement;
+			createButton.type = 'button';
+			createButton.textContent = localize('newChatCreateFolderButton', "Create folder");
+
+			let settled = false;
+			const finish = (folderName: string | undefined) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				store.dispose();
+				overlay.remove();
+				resolve(folderName);
+			};
+			const submit = () => {
+				const folderName = this._sanitizeDesktopWorkspaceFolderName(input.value);
+				if (!folderName) {
+					error.textContent = localize('newChatCreateFolderInvalidName', "Enter a folder name.");
+					input.focus();
+					return;
+				}
+				finish(folderName);
+			};
+
+			store.add(dom.addDisposableListener(closeButton, dom.EventType.CLICK, () => finish(undefined)));
+			store.add(dom.addDisposableListener(createButton, dom.EventType.CLICK, submit));
+			store.add(dom.addDisposableListener(input, dom.EventType.KEY_DOWN, (event: KeyboardEvent) => {
+				if (event.key === 'Enter') {
+					event.preventDefault();
+					event.stopPropagation();
+					submit();
+				}
+			}));
+			store.add(dom.addDisposableListener(overlay.ownerDocument, dom.EventType.KEY_DOWN, (event: KeyboardEvent) => {
+				if (event.key === 'Escape') {
+					event.preventDefault();
+					event.stopPropagation();
+					finish(undefined);
+				}
+			}));
+			store.add(dom.addDisposableListener(input, 'input', () => {
+				if (error.textContent) {
+					error.textContent = '';
+				}
+			}));
+
+			setTimeout(() => input.focus(), 0);
+		});
+	}
+
+	private async _getAvailableDesktopWorkspaceFolder(desktop: URI, baseName: string): Promise<URI> {
 		for (let index = 1; index <= 100; index++) {
 			const name = index === 1 ? baseName : `${baseName} ${index}`;
 			const candidate = URI.joinPath(desktop, name);
@@ -648,15 +790,12 @@ export class NewChatWidget extends Disposable {
 		return URI.joinPath(desktop, `${baseName} ${Date.now()}`);
 	}
 
-	private _getDesktopWorkspaceBaseName(query: string): string {
-		const words = query
-			.replace(/[^a-zA-Z0-9]+/g, ' ')
+	private _sanitizeDesktopWorkspaceFolderName(name: string): string {
+		return name
+			.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, ' ')
+			.replace(/\s+/g, ' ')
 			.trim()
-			.split(/\s+/)
-			.filter(Boolean)
-			.slice(0, 4);
-		const suffix = words.map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
-		return suffix ? `Backboard ${suffix}` : 'Backboard Project';
+			.replace(/[. ]+$/g, '');
 	}
 
 	private async _selectWorkspaceForFirstSend(folderUri: URI): Promise<boolean> {
