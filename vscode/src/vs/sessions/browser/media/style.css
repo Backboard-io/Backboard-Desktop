@@ -147,6 +147,17 @@
  * space and the Part classes subtract only their borders from internal layout.
  */
 
+.agent-sessions-workbench:not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) > .monaco-grid-branch-node > .monaco-split-view2.horizontal > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sessionspart)::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 30;
+	pointer-events: none;
+	border: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
+	border-radius: 0;
+	box-sizing: border-box;
+}
+
 .agent-sessions-workbench.shell-gradient-background .part.titlebar,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar,
 .agent-sessions-workbench.shell-gradient-background .part.titlebar > .content,
@@ -412,8 +423,12 @@
 	--tabs-border-bottom-color: transparent !important;
 	align-items: center;
 	height: 38px !important;
-	padding: 4px 8px;
+	padding: 4px 24px 4px 8px !important;
 	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .part.editor > .content .editor-group-container > .title .editor-actions {
+	padding-right: 0 !important;
 }
 
 .agent-sessions-workbench .part.editor .tabs-container > .tab.active {
@@ -477,6 +492,11 @@
 	border-left: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent)) !important;
 }
 
+.agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part),
+.agent-sessions-workbench .monaco-grid-view .part.auxiliarybar {
+	border-left: none !important;
+}
+
 .agent-sessions-workbench .part.sessionspart > .title,
 .agent-sessions-workbench .part.editor .title.tabs,
 .agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
@@ -530,7 +550,7 @@
 .agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
 	height: 38px;
 	min-height: 38px;
-	padding: 0 8px 0 6px;
+	padding: 0 14px 0 6px;
 	box-sizing: border-box;
 	background-color: var(--vscode-editor-background) !important;
 	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
@@ -631,6 +651,15 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-navbar {
+	padding-right: 16px;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-item:has(.action-label.codicon-chevron-right),
+.agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-item:has(.action-label.codicon-arrow-right) {
+	display: none !important;
 }
 
 .agent-sessions-workbench .part.panel {

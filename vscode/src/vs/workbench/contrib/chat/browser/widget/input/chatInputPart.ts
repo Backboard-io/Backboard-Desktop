@@ -4853,6 +4853,8 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 
 	private getGenericOptionIcon(property: string): ThemeIcon {
 		switch (property) {
+			case 'mode':
+				return Codicon.shield;
 			case 'intensity':
 			case 'reasoning':
 			case 'reasoningIntensity':

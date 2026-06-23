@@ -160,13 +160,7 @@ class PushEditorRightAction extends Action2 {
 			id: PushEditorRightAction.ID,
 			title: localize2('pushEditorRight', "Push Editor Right"),
 			icon: Codicon.chevronRight,
-			f1: false,
-			menu: {
-				id: MenuId.EditorTitleLayout,
-				group: 'navigation',
-				order: 99.5,
-				when: ContextKeyExpr.and(editorLeftRightWhen, AuxiliaryBarVisibleContext)
-			}
+			f1: false
 		});
 	}
 

@@ -7,8 +7,10 @@ import * as dom from '../../../../../../base/browser/dom.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { Disposable, DisposableMap, IDisposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../../base/common/uri.js';
+import { localize } from '../../../../../../nls.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
+import { SessionConfigKey } from '../../../../../../platform/agentHost/common/sessionConfigKeys.js';
 import type { ResolveSessionConfigResult, SessionConfigPropertySchema } from '../../../../../../platform/agentHost/common/state/protocol/commands.js';
 import type { SessionState } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
@@ -33,6 +35,25 @@ export interface IAgentHostGenericConfigOption {
 interface IAgentHostGenericConfigChipEntry extends IDisposable {
 	readonly chip: AgentHostChatInputPicker;
 	readonly slot: HTMLElement;
+}
+
+function isBackboardApprovalMode(property: string, schema: SessionConfigPropertySchema): boolean {
+	return property === SessionConfigKey.Mode
+		&& schema.enum?.includes('default') === true
+		&& schema.enum?.includes('manual') === true
+		&& schema.enum?.includes('fullAccess') === true
+		&& schema.default === 'default';
+}
+
+function isVisibleGenericConfigProperty(property: string, schema: SessionConfigPropertySchema): boolean {
+	return !isClaimedByDedicatedPicker(property, schema) || isBackboardApprovalMode(property, schema);
+}
+
+function getVisibleGenericConfigLabel(property: string, schema: SessionConfigPropertySchema): string {
+	if (isBackboardApprovalMode(property, schema)) {
+		return localize('backboard.config.approvals.title', "Approvals");
+	}
+	return schema.title || property;
 }
 
 /**
@@ -98,7 +119,7 @@ export class AgentHostGenericConfigChips extends Disposable {
 
 		const options: IAgentHostGenericConfigOption[] = [];
 		for (const [property, schema] of entries) {
-			if (isClaimedByDedicatedPicker(property, schema)) {
+			if (!isVisibleGenericConfigProperty(property, schema)) {
 				continue;
 			}
 			const chip = this._chips.get(property)?.chip;
@@ -107,7 +128,7 @@ export class AgentHostGenericConfigChips extends Disposable {
 			}
 			options.push({
 				id: property,
-				label: schema.title || property,
+				label: getVisibleGenericConfigLabel(property, schema),
 				valueLabel: chip.getCurrentLabel(),
 				description: schema.description,
 				show: (anchor?: HTMLElement) => chip.show(anchor),
@@ -213,7 +234,7 @@ export class AgentHostGenericConfigChips extends Disposable {
 		const desired = new Set<string>();
 		if (entries) {
 			for (const [property, schema] of entries) {
-				if (isClaimedByDedicatedPicker(property, schema)) {
+				if (!isVisibleGenericConfigProperty(property, schema)) {
 					continue;
 				}
 				desired.add(property);

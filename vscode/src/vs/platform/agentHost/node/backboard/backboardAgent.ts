@@ -27,7 +27,7 @@ import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
-import { getToolOutputText, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallContributorKind, ToolResultContentType, TurnState, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
+import { getToolOutputText, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 
@@ -55,6 +55,9 @@ const SANDBOX_PROVIDER_ORDER = new Map<string, number>([
 const BACKBOARD_INTENSITY_CONFIG_KEY = 'intensity';
 const BACKBOARD_WEB_SEARCH_CONFIG_KEY = 'webSearch';
 const BACKBOARD_IMAGE_CONFIG_KEY = 'imageGeneration';
+const BACKBOARD_ACCESS_DEFAULT = 'default';
+const BACKBOARD_ACCESS_MANUAL = 'manual';
+const BACKBOARD_ACCESS_FULL = 'fullAccess';
 const IGNORED_DIRECTORIES = new Set(['.git', 'node_modules', 'out', 'dist', 'target', '.next', '.turbo']);
 const BACKBOARD_TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -175,6 +178,7 @@ interface BackboardSession {
 	clientTools?: readonly ToolDefinition[];
 	toolsClientId?: string;
 	readonly pendingClientToolCalls: PendingRequestRegistry<ToolCallResult>;
+	readonly pendingToolApprovals: PendingRequestRegistry<boolean>;
 	currentRequestId?: string;
 	disposed: boolean;
 }
@@ -278,6 +282,7 @@ interface PreparedBackboardToolCall {
 export interface BackboardTurnSettings {
 	readonly provider: string;
 	readonly model: string;
+	readonly accessMode: string;
 	readonly mode: string;
 	readonly intensity: string;
 	readonly webSearch: string;
@@ -346,6 +351,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				title: restoredEntry.title,
 				materialized: true,
 				pendingClientToolCalls: new PendingRequestRegistry<ToolCallResult>(),
+				pendingToolApprovals: new PendingRequestRegistry<boolean>(),
 				disposed: false,
 			};
 			this._sessions.set(sessionId, session);
@@ -367,6 +373,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 			config: normalizeBackboardConfig(config.config),
 			materialized: false,
 			pendingClientToolCalls: new PendingRequestRegistry<ToolCallResult>(),
+			pendingToolApprovals: new PendingRequestRegistry<boolean>(),
 			disposed: false,
 		};
 		this._sessions.set(sessionId, session);
@@ -417,7 +424,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 			try {
 				void writeSharedBackboardThread(session, prompt, '', undefined, responseState, this._logService, 'running');
 				const settings = this._turnSettings(session);
-				this._logService.info(`[Backboard latency] turn_start session=${session.sessionId} provider=${settings.provider} model=${settings.model} mode=${settings.mode} intensity=${settings.intensity} web=${settings.webSearch}`);
+				this._logService.info(`[Backboard latency] turn_start session=${session.sessionId} provider=${settings.provider} model=${settings.model} accessMode=${settings.accessMode} mode=${settings.mode} intensity=${settings.intensity} web=${settings.webSearch}`);
 				this._logService.info(`[Backboard workspace] session=${session.sessionId} workingDirectory=${session.workingDirectory?.fsPath ?? '(missing)'}`);
 				this._appendBackboardProgress(session, effectiveTurnId, responseState, localize('backboard.progress.status', "Streaming Backboard response. Tool calls and file writes appear below."));
 				if (session.workingDirectory) {
@@ -431,9 +438,10 @@ export class BackboardAgent extends Disposable implements IAgent {
 				this._logService.info('[Backboard progress] Loading Backboard tools.');
 				setHeartbeat(localize('backboard.progress.heartbeat.tools', "Still loading Backboard tools"));
 				const submitToolsPromise = this._bridge.listTools(settings.mode, settings.config)
-					.then(tools => mergeBackboardTools(tools, session.clientTools, settings.mode))
-					.catch(() => mergeBackboardTools(undefined, session.clientTools, settings.mode));
-				const submitTools = trimBackboardToolsForRequest(await submitToolsPromise, prompt, settings.webSearch, settings.imageGeneration);
+					.then(tools => mergeBackboardTools(tools, session.clientTools))
+					.catch(() => mergeBackboardTools(undefined, session.clientTools));
+				const mergedTools = await submitToolsPromise;
+				const submitTools = trimBackboardToolsForRequest(mergedTools, prompt, settings.webSearch, settings.imageGeneration);
 				this._logService.info(`[Backboard latency] list_tools_done elapsedMs=${Date.now() - listToolsStartedAt} totalElapsedMs=${Date.now() - turnStartedAt} toolCount=${submitTools?.length ?? 0}`);
 				this._logService.info(`[Backboard progress] Sending prompt to Backboard with ${submitTools?.length ?? 0} tools.`);
 				setHeartbeat(localize('backboard.progress.heartbeat.response', "Waiting for Backboard response"));
@@ -461,26 +469,28 @@ export class BackboardAgent extends Disposable implements IAgent {
 					const toolExecutionStartedAt = Date.now();
 					this._logService.info(`[Backboard progress] Running ${nextToolRequest.toolCalls.length} Backboard tool call(s).`);
 					setHeartbeat(localize('backboard.progress.heartbeat.localTools', "Still running Backboard tools"));
-					const toolOutputs = await this._executeToolCalls(session, effectiveTurnId, nextToolRequest.toolCalls, settings.mode, responseState);
+					const toolOutputs = await this._executeToolCalls(session, effectiveTurnId, nextToolRequest.toolCalls, responseState);
 					clearHeartbeat();
 					this._logService.info(`[Backboard latency] local_tools_done elapsedMs=${Date.now() - toolExecutionStartedAt} totalElapsedMs=${Date.now() - turnStartedAt} toolCount=${nextToolRequest.toolCalls.length}`);
 					const continuationToolRequests: ToolResultRequest[] = [];
 					const submitToolStartedAt = Date.now();
 					this._logService.info(`[Backboard progress] Submitting ${toolOutputs.length} Backboard tool result(s).`);
 					setHeartbeat(localize('backboard.progress.heartbeat.submitTools', "Still submitting Backboard tool results"));
+					const continuationSettings = this._turnSettings(session);
+					const continuationTools = trimBackboardToolsForRequest(mergedTools, prompt, continuationSettings.webSearch, continuationSettings.imageGeneration);
 					const continuation = this._bridge.send('submitToolResult', bridgeSessionId, {
 						threadId: nextToolRequest.threadId,
 						runId: nextToolRequest.runId,
 						toolOutputs,
-						tools: submitTools,
+						tools: continuationTools,
 						workspace: session.workingDirectory?.fsPath,
-						provider: settings.provider,
-						model: settings.model,
-						mode: settings.mode,
-						intensity: settings.intensity,
-						webSearch: settings.webSearch,
-						imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
-						config: settings.config,
+						provider: continuationSettings.provider,
+						model: continuationSettings.model,
+						mode: continuationSettings.mode,
+						intensity: continuationSettings.intensity,
+						webSearch: continuationSettings.webSearch,
+						imageGeneration: continuationSettings.imageGeneration === 'auto' ? 'auto' : undefined,
+						config: continuationSettings.config,
 					}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, continuationToolRequests, seenToolRequests, event));
 					session.currentRequestId = continuation.requestId;
 					await continuation.promise;
@@ -524,6 +534,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 		if (session) {
 			session.disposed = true;
 			session.pendingClientToolCalls.rejectAll(new CancellationError());
+			session.pendingToolApprovals.rejectAll(new CancellationError());
 		}
 		this._sessions.delete(sessionId);
 	}
@@ -534,13 +545,20 @@ export class BackboardAgent extends Disposable implements IAgent {
 			this._bridge.cancel(sandboxBridgeSessionId(session), session.currentRequestId);
 		}
 		session.pendingClientToolCalls.rejectAll(new CancellationError());
+		session.pendingToolApprovals.rejectAll(new CancellationError());
 	}
 
 	async changeModel(sessionUri: URI, model: ModelSelection): Promise<void> {
 		(await this._session(sessionUri)).model = normalizeBackboardModelSelection(model);
 	}
 
-	respondToPermissionRequest(_requestId: string, _approved: boolean): void {
+	respondToPermissionRequest(requestId: string, approved: boolean): void {
+		for (const session of this._sessions.values()) {
+			if (session.pendingToolApprovals.respond(requestId, approved)) {
+				return;
+			}
+		}
+		this._logService.warn(`[Backboard] No pending tool approval found for ${requestId}`);
 	}
 
 	respondToUserInputRequest(_requestId: string, _response: SessionInputResponseKind, _answers?: Record<string, SessionInputAnswer>): void {
@@ -664,6 +682,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 			title: restoredEntry?.title,
 			materialized: !!restoredEntry,
 			pendingClientToolCalls: new PendingRequestRegistry<ToolCallResult>(),
+			pendingToolApprovals: new PendingRequestRegistry<boolean>(),
 			disposed: false,
 		};
 	}
@@ -843,15 +862,18 @@ export class BackboardAgent extends Disposable implements IAgent {
 		});
 	}
 
-	private async _executeToolCalls(session: BackboardSession, turnId: string, toolCalls: readonly unknown[], mode: string, responseState: BackboardResponseState): Promise<unknown[]> {
+	private async _executeToolCalls(session: BackboardSession, turnId: string, toolCalls: readonly unknown[], responseState: BackboardResponseState): Promise<unknown[]> {
 		const preparedCalls = toolCalls.map(rawCall => this._prepareToolCall(session, rawCall));
-		if (preparedCalls.length > 1 && preparedCalls.every(prepared => this._canExecuteToolCallInParallel(prepared, mode))) {
-			this._logService.info(`[Backboard latency] running_parallel_read_tools count=${preparedCalls.length}`);
-			return Promise.all(preparedCalls.map(prepared => this._executePreparedToolCall(session, turnId, prepared, mode, responseState)));
+		const accessMode = this._turnSettings(session).accessMode;
+		if (preparedCalls.length > 1 && preparedCalls.every(prepared => this._canExecuteToolCallInParallel(prepared, accessMode))) {
+			this._logService.info(`[Backboard latency] running_parallel_read_tools count=${preparedCalls.length} accessMode=${accessMode}`);
+			return Promise.all(preparedCalls.map(prepared => this._executePreparedToolCall(session, turnId, prepared, accessMode, responseState)));
 		}
 		const outputs: unknown[] = [];
 		for (const prepared of preparedCalls) {
-			outputs.push(await this._executePreparedToolCall(session, turnId, prepared, mode, responseState));
+			const currentAccessMode = this._turnSettings(session).accessMode;
+			this._logService.info(`[Backboard progress] Running ${prepared.display.displayName} with accessMode=${currentAccessMode}.`);
+			outputs.push(await this._executePreparedToolCall(session, turnId, prepared, currentAccessMode, responseState));
 		}
 		return outputs;
 	}
@@ -866,13 +888,44 @@ export class BackboardAgent extends Disposable implements IAgent {
 		return { call, toolInput, clientTool, display };
 	}
 
-	private _canExecuteToolCallInParallel(prepared: PreparedBackboardToolCall, mode: string): boolean {
+	private _canExecuteToolCallInParallel(prepared: PreparedBackboardToolCall, accessMode: string): boolean {
 		return !prepared.clientTool
-			&& (mode === 'free' || isReadOnlyTool(prepared.call.name))
+			&& accessMode !== BACKBOARD_ACCESS_MANUAL
 			&& isParallelSafeBackboardTool(prepared.call.name);
 	}
 
-	private async _executePreparedToolCall(session: BackboardSession, turnId: string, prepared: PreparedBackboardToolCall, mode: string, responseState: BackboardResponseState): Promise<unknown> {
+	private async _awaitManualToolApproval(session: BackboardSession, requestId: string, fire: () => void): Promise<{ readonly approved: boolean; readonly confirmed: ToolCallConfirmationReason }> {
+		const approval = session.pendingToolApprovals.registerAndFire(requestId, fire);
+		let confirmed = ToolCallConfirmationReason.UserAction;
+		let handle: ReturnType<typeof setInterval> | undefined;
+		const stopWatching = (): void => {
+			if (handle) {
+				clearInterval(handle);
+				handle = undefined;
+			}
+		};
+		const approveIfModeChanged = (): void => {
+			if (session.disposed) {
+				stopWatching();
+				return;
+			}
+			const accessMode = this._turnSettings(session).accessMode;
+			if (accessMode !== BACKBOARD_ACCESS_MANUAL && session.pendingToolApprovals.respond(requestId, true)) {
+				confirmed = ToolCallConfirmationReason.Setting;
+				this._logService.info(`[Backboard progress] Approved pending tool request ${requestId} after accessMode changed to ${accessMode}.`);
+				stopWatching();
+			}
+		};
+		handle = setInterval(approveIfModeChanged, 250);
+		approveIfModeChanged();
+		try {
+			return { approved: await approval, confirmed };
+		} finally {
+			stopWatching();
+		}
+	}
+
+	private async _executePreparedToolCall(session: BackboardSession, turnId: string, prepared: PreparedBackboardToolCall, accessMode: string, responseState: BackboardResponseState): Promise<unknown> {
 		const { call, toolInput, clientTool, display } = prepared;
 		this._appendBackboardProgress(session, turnId, responseState, localize('backboard.progress.toolStart', "Starting {0}.", display.displayName));
 		const alreadyStreaming = responseState.streamingToolCalls?.has(call.id) ?? false;
@@ -894,78 +947,54 @@ export class BackboardAgent extends Disposable implements IAgent {
 			});
 		}
 
-			if (clientTool) {
-				this._fire(session.sessionUri, {
-					type: ActionType.ChatToolCallReady,
-					turnId,
-					toolCallId: call.id,
-					invocationMessage: display.invocationMessage,
-					toolInput,
-					confirmed: ToolCallConfirmationReason.NotNeeded,
-					_meta: { toolKind: display.toolKind, source: 'client-fallback' },
+		if (clientTool) {
+			let confirmed = ToolCallConfirmationReason.NotNeeded;
+			if (accessMode === BACKBOARD_ACCESS_MANUAL) {
+				const decision = await this._awaitManualToolApproval(session, call.id, () => {
+					this._onDidSessionProgress.fire({
+						kind: 'pending_confirmation',
+						session: session.sessionUri,
+						permissionKind: 'custom-tool',
+						state: {
+							status: ToolCallStatus.PendingConfirmation,
+							toolCallId: call.id,
+							toolName: call.name,
+							displayName: display.displayName,
+							invocationMessage: display.invocationMessage,
+							toolInput,
+							confirmationTitle: localize('backboard.tool.confirmationTitle', "Allow Backboard to use {0}?", display.displayName),
+							...(session.toolsClientId ? { contributor: { kind: ToolCallContributorKind.Client, clientId: session.toolsClientId } } : {}),
+							_meta: { toolKind: display.toolKind, source: 'client-fallback' },
+						},
+					});
 				});
-				responseState.streamingToolCalls?.delete(call.id);
-				if (!session.toolsClientId) {
-					const message = localize('backboard.tool.clientMissing', "No active Backboard client is connected to run {0}.", display.displayName);
-					this._fire(session.sessionUri, {
-						type: ActionType.ChatToolCallComplete,
-						turnId,
-						toolCallId: call.id,
-						result: {
-							success: false,
-							pastTenseMessage: display.failedMessage,
-							content: [{ type: ToolResultContentType.Text, text: message }],
-							error: { message },
-						},
-					});
+				if (!decision.approved) {
+					responseState.streamingToolCalls?.delete(call.id);
+					const message = localize('backboard.tool.denied', "Backboard tool call was not approved.");
 					responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: false, output: message });
 					return toolOutput(call.id, { success: false, content: message });
 				}
-				try {
-					const result = await session.pendingClientToolCalls.register(call.id);
-					const output = toolCallResultOutput(result);
-					this._appendBackboardProgress(session, turnId, responseState, result.success ? localize('backboard.progress.clientToolComplete', "{0} finished.", display.displayName) : localize('backboard.progress.clientToolFailed', "{0} returned an error.", display.displayName));
-					responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: result.success, output });
-					return toolOutput(call.id, { success: result.success, content: output });
-				} catch (error) {
-					const message = error instanceof CancellationError ? localize('backboard.tool.cancelled', "{0} was cancelled.", display.displayName) : (error instanceof Error ? error.message : String(error));
-					this._fire(session.sessionUri, {
-						type: ActionType.ChatToolCallComplete,
-						turnId,
-						toolCallId: call.id,
-						result: {
-							success: false,
-							pastTenseMessage: display.failedMessage,
-							content: [{ type: ToolResultContentType.Text, text: message }],
-							error: { message },
-						},
-					});
-					responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: false, output: message });
-					return toolOutput(call.id, { success: false, content: message });
-				}
+				confirmed = decision.confirmed;
 			}
-
-			const allowed = mode === 'free' || isReadOnlyTool(call.name);
 			this._fire(session.sessionUri, {
 				type: ActionType.ChatToolCallReady,
 				turnId,
 				toolCallId: call.id,
 				invocationMessage: display.invocationMessage,
 				toolInput,
-				confirmed: allowed ? ToolCallConfirmationReason.NotNeeded : undefined,
-				_meta: { toolKind: display.toolKind, source: 'backboard' },
+				confirmed,
+				_meta: { toolKind: display.toolKind, source: 'client-fallback' },
 			});
 			responseState.streamingToolCalls?.delete(call.id);
-
-			if (!allowed) {
-				const message = localize('backboard.tool.requiresApproval', "Backboard tool call requires approval. Switch this Sandbox session to Full Access to allow write tools automatically.");
+			if (!session.toolsClientId) {
+				const message = localize('backboard.tool.clientMissing', "No active Backboard client is connected to run {0}.", display.displayName);
 				this._fire(session.sessionUri, {
 					type: ActionType.ChatToolCallComplete,
 					turnId,
 					toolCallId: call.id,
 					result: {
 						success: false,
-						pastTenseMessage: display.skippedMessage,
+						pastTenseMessage: display.failedMessage,
 						content: [{ type: ToolResultContentType.Text, text: message }],
 						error: { message },
 					},
@@ -973,33 +1002,14 @@ export class BackboardAgent extends Disposable implements IAgent {
 				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: false, output: message });
 				return toolOutput(call.id, { success: false, content: message });
 			}
-
-			const reportContent = createToolContentReporter((content: string) => this._fire(session.sessionUri, {
-				type: ActionType.ChatToolCallContentChanged,
-				turnId,
-				toolCallId: call.id,
-				content: [{ type: ToolResultContentType.Text, text: content }],
-			}));
 			try {
-				const result = await executeBackboardTool(this._bridge, session.workingDirectory?.fsPath, call, reportContent.report);
-				reportContent.flush();
-				this._appendBackboardProgress(session, turnId, responseState, localize('backboard.progress.toolComplete', "{0} finished.", display.displayName));
-				this._fire(session.sessionUri, {
-					type: ActionType.ChatToolCallComplete,
-					turnId,
-					toolCallId: call.id,
-					result: {
-						success: true,
-						pastTenseMessage: display.completedMessage,
-						content: result ? [{ type: ToolResultContentType.Text, text: result }] : undefined,
-					},
-				});
-				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: true, output: result ?? '' });
-				return toolOutput(call.id, { success: true, content: result });
+				const result = await session.pendingClientToolCalls.register(call.id);
+				const output = toolCallResultOutput(result);
+				this._appendBackboardProgress(session, turnId, responseState, result.success ? localize('backboard.progress.clientToolComplete', "{0} finished.", display.displayName) : localize('backboard.progress.clientToolFailed', "{0} returned an error.", display.displayName));
+				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: result.success, output });
+				return toolOutput(call.id, { success: result.success, content: output });
 			} catch (error) {
-				reportContent.flush();
-				const message = error instanceof Error ? error.message : String(error);
-				this._appendBackboardProgress(session, turnId, responseState, localize('backboard.progress.toolFailed', "{0} failed: {1}", display.displayName, message));
+				const message = error instanceof CancellationError ? localize('backboard.tool.cancelled', "{0} was cancelled.", display.displayName) : (error instanceof Error ? error.message : String(error));
 				this._fire(session.sessionUri, {
 					type: ActionType.ChatToolCallComplete,
 					turnId,
@@ -1015,6 +1025,86 @@ export class BackboardAgent extends Disposable implements IAgent {
 				return toolOutput(call.id, { success: false, content: message });
 			}
 		}
+
+		let confirmed = ToolCallConfirmationReason.NotNeeded;
+		if (accessMode === BACKBOARD_ACCESS_MANUAL) {
+			const decision = await this._awaitManualToolApproval(session, call.id, () => {
+				this._onDidSessionProgress.fire({
+					kind: 'pending_confirmation',
+					session: session.sessionUri,
+					permissionKind: isReadOnlyTool(call.name) ? 'read' : 'write',
+					state: {
+						status: ToolCallStatus.PendingConfirmation,
+						toolCallId: call.id,
+						toolName: call.name,
+						displayName: display.displayName,
+						invocationMessage: display.invocationMessage,
+						toolInput,
+						confirmationTitle: localize('backboard.tool.confirmationTitle', "Allow Backboard to use {0}?", display.displayName),
+						_meta: { toolKind: display.toolKind, source: 'backboard' },
+					},
+				});
+			});
+			if (!decision.approved) {
+				responseState.streamingToolCalls?.delete(call.id);
+				const message = localize('backboard.tool.denied', "Backboard tool call was not approved.");
+				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: false, output: message });
+				return toolOutput(call.id, { success: false, content: message });
+			}
+			confirmed = decision.confirmed;
+		}
+		this._fire(session.sessionUri, {
+			type: ActionType.ChatToolCallReady,
+			turnId,
+			toolCallId: call.id,
+			invocationMessage: display.invocationMessage,
+			toolInput,
+			confirmed,
+			_meta: { toolKind: display.toolKind, source: 'backboard' },
+		});
+		responseState.streamingToolCalls?.delete(call.id);
+
+		const reportContent = createToolContentReporter((content: string) => this._fire(session.sessionUri, {
+			type: ActionType.ChatToolCallContentChanged,
+			turnId,
+			toolCallId: call.id,
+			content: [{ type: ToolResultContentType.Text, text: content }],
+		}));
+		try {
+			const result = await executeBackboardTool(this._bridge, session.workingDirectory?.fsPath, call, reportContent.report);
+			reportContent.flush();
+			this._appendBackboardProgress(session, turnId, responseState, localize('backboard.progress.toolComplete', "{0} finished.", display.displayName));
+			this._fire(session.sessionUri, {
+				type: ActionType.ChatToolCallComplete,
+				turnId,
+				toolCallId: call.id,
+				result: {
+					success: true,
+					pastTenseMessage: display.completedMessage,
+					content: result ? [{ type: ToolResultContentType.Text, text: result }] : undefined,
+				},
+			});
+			responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: true, output: result ?? '' });
+			return toolOutput(call.id, { success: true, content: result });
+		} catch (error) {
+			reportContent.flush();
+			const message = error instanceof Error ? error.message : String(error);
+			this._appendBackboardProgress(session, turnId, responseState, localize('backboard.progress.toolFailed', "{0} failed: {1}", display.displayName, message));
+			this._fire(session.sessionUri, {
+				type: ActionType.ChatToolCallComplete,
+				turnId,
+				toolCallId: call.id,
+				result: {
+					success: false,
+					pastTenseMessage: display.failedMessage,
+					content: [{ type: ToolResultContentType.Text, text: message }],
+					error: { message },
+				},
+			});
+			responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: false, output: message });
+			return toolOutput(call.id, { success: false, content: message });
+		}
+	}
 
 	private _refreshModels(deferNetwork = false): void {
 		const cachedModels = this._readCachedModels();
@@ -2074,21 +2164,19 @@ function resolveBackboardSessionConfig(rawConfig: Record<string, unknown> | unde
 				properties: {
 					[SessionConfigKey.Mode]: {
 						type: 'string',
-						title: localize('backboard.config.mode.title', "Mode"),
-						description: localize('backboard.config.mode.description', "Controls how Backboard uses tools and applies changes."),
-						default: 'free',
-						enum: ['agent', 'ask', 'manual', 'free'],
+						title: localize('backboard.config.approvals.title', "Approvals"),
+						description: localize('backboard.config.approvals.description', "Controls when Backboard can use tools without additional approval."),
+						default: BACKBOARD_ACCESS_DEFAULT,
+						enum: [BACKBOARD_ACCESS_DEFAULT, BACKBOARD_ACCESS_MANUAL, BACKBOARD_ACCESS_FULL],
 						enumLabels: [
-							localize('backboard.config.mode.agent', "Agent"),
-							localize('backboard.config.mode.ask', "Ask"),
+							localize('backboard.config.mode.default', "Default"),
 							localize('backboard.config.mode.manual', "Manual"),
 							localize('backboard.config.mode.free', "Full Access"),
 						],
 						enumDescriptions: [
-							localize('backboard.config.mode.agent.description', "Use Backboard's normal agent workflow."),
-							localize('backboard.config.mode.ask.description', "Prefer answers before changes."),
-							localize('backboard.config.mode.manual.description', "Require manual approval for write tools."),
-							localize('backboard.config.mode.free.description', "Allow tool calls without additional approval."),
+							localize('backboard.config.mode.default.description', "Allow Backboard tool calls without extra approval."),
+							localize('backboard.config.mode.manual.description', "Ask before each tool call."),
+							localize('backboard.config.mode.free.description', "Allow tools, web search when available, and external capabilities without extra approval."),
 						],
 						sessionMutable: true,
 					},
@@ -2152,25 +2240,30 @@ export function createBackboardTurnSettings(
 ): BackboardTurnSettings {
 	const values = normalizeBackboardConfig(storedConfig, sessionConfig);
 	const parsedModel = parseModelSelection(model) ?? parseModelSelection({ id: DEFAULT_MODEL_ID })!;
+	const accessMode = stringConfigValue(values, SessionConfigKey.Mode, BACKBOARD_ACCESS_DEFAULT);
 	return {
 		provider: parsedModel.provider,
 		model: parsedModel.model,
-		mode: bridgeModeFromConfig(values),
+		accessMode,
+		mode: bridgeModeFromAccessMode(accessMode),
 		intensity: stringConfigValue(values, BACKBOARD_INTENSITY_CONFIG_KEY, 'fast'),
-		webSearch: stringConfigValue(values, BACKBOARD_WEB_SEARCH_CONFIG_KEY, 'off'),
+		webSearch: effectiveBackboardWebSearch(values, accessMode),
 		imageGeneration: stringConfigValue(values, BACKBOARD_IMAGE_CONFIG_KEY, 'off'),
 		config: bridgeConfig(),
 	};
 }
 
 function normalizeBackboardMode(value: unknown): string {
-	if (value === 'interactive') {
-		return 'agent';
+	if (value === 'interactive' || value === 'agent') {
+		return BACKBOARD_ACCESS_DEFAULT;
 	}
-	if (value === 'plan') {
-		return 'manual';
+	if (value === 'plan' || value === 'ask') {
+		return BACKBOARD_ACCESS_MANUAL;
 	}
-	return oneOf(value, ['agent', 'ask', 'manual', 'free'], 'free');
+	if (value === 'free') {
+		return BACKBOARD_ACCESS_FULL;
+	}
+	return oneOf(value, [BACKBOARD_ACCESS_DEFAULT, BACKBOARD_ACCESS_MANUAL, BACKBOARD_ACCESS_FULL], BACKBOARD_ACCESS_DEFAULT);
 }
 
 function normalizeWebSearchMode(value: unknown): string {
@@ -2189,8 +2282,15 @@ function stringConfigValue(config: Record<string, unknown>, key: string, fallbac
 	return typeof value === 'string' && value ? value : fallback;
 }
 
-function bridgeModeFromConfig(config: Record<string, unknown>): string {
-	return stringConfigValue(config, SessionConfigKey.Mode, 'free');
+function bridgeModeFromAccessMode(accessMode: string): string {
+	return accessMode === BACKBOARD_ACCESS_MANUAL ? 'manual' : 'free';
+}
+
+function effectiveBackboardWebSearch(config: Record<string, unknown>, accessMode: string): string {
+	if (accessMode === BACKBOARD_ACCESS_FULL) {
+		return 'Auto';
+	}
+	return stringConfigValue(config, BACKBOARD_WEB_SEARCH_CONFIG_KEY, 'off');
 }
 
 function backboardToolCacheKey(mode: string, config: Record<string, unknown>): string {
@@ -2377,7 +2477,7 @@ const backboardAllowedClientToolNames = new Set([
 	'runSubagent',
 ]);
 
-function mergeBackboardTools(bridgeTools: unknown[] | undefined, clientTools: readonly ToolDefinition[] | undefined, mode: string): unknown[] | undefined {
+function mergeBackboardTools(bridgeTools: unknown[] | undefined, clientTools: readonly ToolDefinition[] | undefined): unknown[] | undefined {
 	const merged: unknown[] = [];
 	const names = new Set<string>();
 	for (const tool of bridgeTools ?? []) {
@@ -2389,9 +2489,6 @@ function mergeBackboardTools(bridgeTools: unknown[] | undefined, clientTools: re
 	}
 	for (const tool of clientTools ?? []) {
 		if (!backboardAllowedClientToolNames.has(tool.name) || names.has(tool.name)) {
-			continue;
-		}
-		if (isRunSubagentToolName(tool.name) && (mode === 'ask' || mode === 'manual')) {
 			continue;
 		}
 		names.add(tool.name);

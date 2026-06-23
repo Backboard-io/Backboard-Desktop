@@ -1474,6 +1474,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .interactive-session .chat-input-toolbars > .chat-execute-toolbar {
 	order: 2;
+	flex: 0 0 auto;
 }
 
 .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:has(> .action-label.codicon-arrow-up) {
@@ -2203,7 +2204,9 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	order: 0;
 	overflow: hidden;
 	min-width: 0px;
-	width: 100%;
+	flex: 1 1 auto;
+	width: auto;
+	max-width: 100%;
 	color: var(--vscode-icon-foreground);
 
 	.monaco-action-bar .action-item .codicon {

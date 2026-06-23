@@ -128,6 +128,13 @@ function isSelectedValue(currentValue: unknown | undefined, itemValue: string): 
 	return itemValue === currentValue;
 }
 
+function normalizeConfigValueForSchema(schema: SessionConfigPropertySchema, value: unknown | undefined): unknown | undefined {
+	if (schema.enum && typeof value === 'string' && !schema.enum.includes(value)) {
+		return schema.default;
+	}
+	return value;
+}
+
 function renderPickerTrigger(slot: HTMLElement, disabled: boolean, disposables: DisposableStore, onOpen: () => void): HTMLElement {
 	const trigger = dom.append(slot, disabled ? dom.$('span.action-label') : dom.$('a.action-label'));
 	if (disabled) {
@@ -460,7 +467,7 @@ export class AgentHostChatInputPicker extends Disposable {
 			const value = overlay?.values?.[this._property]
 				?? state.config?.values?.[this._property]
 				?? schema.default;
-			return { backendSession: this._subRef.value.backendSession, schema, value };
+			return { backendSession: this._subRef.value.backendSession, schema, value: normalizeConfigValueForSchema(schema, value) };
 		}
 
 		if (this._initialResolved && this._initialResolved.sessionResource.toString() === sessionResource.toString()) {
@@ -473,7 +480,7 @@ export class AgentHostChatInputPicker extends Disposable {
 				return undefined;
 			}
 			const value = this._initialResolved.result.values?.[this._property] ?? schema.default;
-			return { backendSession, schema, value };
+			return { backendSession, schema, value: normalizeConfigValueForSchema(schema, value) };
 		}
 
 		return undefined;

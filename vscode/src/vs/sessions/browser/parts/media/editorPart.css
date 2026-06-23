@@ -127,7 +127,17 @@
 /* Editor Layout Actions Toolbar */
 
 .agent-sessions-workbench .part.editor > .content .editor-group-container > .title .editor-actions {
-	padding-right: 0;
+	padding-right: 0 !important;
+}
+
+.agent-sessions-workbench .part.editor > .content .editor-group-container > .title > .tabs-and-actions-container {
+	padding-right: 24px !important;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .part.editor > .content .editor-group-container > .title .editor-actions .action-item:has(.action-label.codicon-chevron-right),
+.agent-sessions-workbench .part.editor > .content .editor-group-container > .title .editor-actions .action-item:has(.action-label.codicon-arrow-right) {
+	display: none !important;
 }
 
 .agent-sessions-workbench .part.editor > .content .editor-group-container > .title .editor-actions-separator {
