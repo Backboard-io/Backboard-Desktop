@@ -1224,9 +1224,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	 * - Sidebar (left, spans full height from top to bottom)
 	 * - Right section (vertical):
 	 *   - Titlebar (top of right section)
-	 *   - Top right (horizontal): Chat Bar | Right work column
-	 *     - Right work column (vertical): Auxiliary Bar | Editor
-	 *   - Panel (below chat and right work column)
+	 *   - Top right (horizontal): Chat Bar | Right workbench
+	 *     - Right workbench: Changes/Files/Browser | Editor
+	 *   - Panel (below chat and right workbench)
 	 */
 	private createGridDescriptor(): ISerializedGrid {
 		const { width, height } = this._mainContainerDimension;
@@ -1333,7 +1333,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			visible: this.partVisibility.panel
 		};
 
-		// Top right section: Chat Bar | Files/Browser | Editor (horizontal)
+		// Top right section: Chat Bar | Right workbench (Files/Browser/Changes + Editor)
 		const topRightSection: ISerializedNode = {
 			type: 'branch',
 			data: [sessionsNode, auxiliaryBarNode, editorNode],

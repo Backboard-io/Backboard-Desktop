@@ -9,11 +9,11 @@
  * agents window. Components that need a different shape (e.g. circular avatars
  * or the workspace profile icon) override this with higher-specificity rules. */
 .agent-sessions-workbench .monaco-action-bar .action-label {
-	border-radius: var(--vscode-cornerRadius-small);
+	border-radius: 0 !important;
 }
 
 .agent-sessions-workbench .monaco-dropdown-with-default {
-	border-radius: var(--vscode-cornerRadius-small);
+	border-radius: 0 !important;
 }
 
 /* ---- Sidebar & Auxiliary Bar Card Appearance ---- */
@@ -76,6 +76,11 @@
 	display: none;
 }
 
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background,
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background::before {
+	background: var(--vscode-editor-background) !important;
+}
+
 .monaco-workbench.agent-sessions-workbench > .notifications-center {
 	right: 15px;
 	bottom: 15px;
@@ -112,10 +117,29 @@
 	bottom: auto;
 }
 
+.monaco-workbench.agent-sessions-workbench > .notifications-center,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notifications-list-container,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notification-toast-container > .notification-toast,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notification-toast-container > .notification-toast .monaco-scrollable-element,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notification-toast-container > .notification-toast .monaco-list:not(.element-focused):focus::before,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notification-toast-container > .notification-toast .monaco-list-row,
+.monaco-workbench.agent-sessions-workbench .notifications-list-container .notification-list-item,
+.monaco-workbench.agent-sessions-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container > .monaco-button,
+.monaco-workbench.agent-sessions-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container .monaco-button,
+.monaco-workbench.agent-sessions-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container .monaco-text-button {
+	border-radius: 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notifications-list-container,
+.monaco-workbench.agent-sessions-workbench .notifications-list-container .notification-list-item {
+	background-color: var(--vscode-notifications-background, var(--vscode-editorWidget-background)) !important;
+}
+
 .agent-sessions-workbench.shell-gradient-background > .monaco-grid-view {
 	position: relative;
 	z-index: 1;
-	background: transparent;
+	background: var(--vscode-editor-background) !important;
 }
 
 /**
@@ -134,14 +158,30 @@
 	background: transparent !important;
 }
 
+.agent-sessions-workbench .monaco-grid-view .split-view-view,
+.agent-sessions-workbench .part.sessionspart,
+.agent-sessions-workbench .part.sessionspart > .title,
+.agent-sessions-workbench .part.sessionspart > .content,
+.agent-sessions-workbench .part.editor,
+.agent-sessions-workbench .part.auxiliarybar,
+.agent-sessions-workbench .part.auxiliarybar > .title,
+.agent-sessions-workbench .part.auxiliarybar > .content,
+.agent-sessions-workbench .part.auxiliarybar .pane-composite-part,
+.agent-sessions-workbench .part.auxiliarybar .composite,
+.agent-sessions-workbench .part.auxiliarybar .composite.title,
+.agent-sessions-workbench .part.auxiliarybar .pane,
+.agent-sessions-workbench .part.auxiliarybar .pane-body {
+	border-radius: 0 !important;
+}
+
 .agent-sessions-workbench .part.sidebar.mobile-overlay-sidebar {
 	background: var(--vscode-agents-background) !important;
 }
 
 .agent-sessions-workbench .part.sessionspart {
 	margin: 0;
-	background: var(--part-background);
-	border: 1px solid var(--part-border-color, transparent);
+	background: var(--vscode-editor-background) !important;
+	border: none !important;
 	border-radius: 0;
 	box-sizing: border-box;
 }
@@ -164,7 +204,7 @@
 	 * container and also receive `agent-sessions-workbench` via `trackAttributes`.
 	 */
 	margin: 0;
-	background: var(--vscode-agentsPanel-background);
+	background: var(--vscode-editor-background) !important;
 	border: none;
 	border-radius: 0;
 	box-sizing: border-box;
@@ -184,6 +224,37 @@
 	box-shadow: none;
 }
 
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+	background: var(--vscode-editor-background) !important;
+	border-radius: 0 !important;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
+	border: none !important;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
+}
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)) {
+	border: none !important;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
+}
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+	border: none !important;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
+}
+
+.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)) {
+	border-right: none !important;
+}
+
+.agent-sessions-workbench.nomaineditorarea .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+	border-left: none !important;
+}
+
 .agent-sessions-workbench .part.editor .multiDiffEntry {
 	padding: 0 8px;
 	box-sizing: border-box;
@@ -199,13 +270,13 @@
 	content: '';
 	position: absolute;
 	inset: 0;
-	background: var(--vscode-agentsPanel-background);
+	background: var(--vscode-editor-background);
 	z-index: -1;
 	pointer-events: none;
 }
 
 .agent-sessions-workbench .part.editor .multiDiffEntry .header-content {
-	border-radius: var(--vscode-cornerRadius-medium);
+	border-radius: 0;
 	border: none;
 	background: var(--vscode-sideBarSectionHeader-background);
 	margin: 0;
@@ -244,7 +315,7 @@
 }
 
 .agent-sessions-workbench .part.editor .multiDiffEntry .collapse-button a {
-	border-radius: var(--vscode-cornerRadius-small);
+	border-radius: 0;
 }
 
 .agent-sessions-workbench .part.editor .multiDiffEntry .editorParent {
@@ -256,16 +327,14 @@
 	overflow: hidden;
 }
 
-/* The hidden-lines bar is split into two halves (original / modified) sitting
- * side by side. Round only the outer corners so the pair forms a single pill. */
 .agent-sessions-workbench .part.editor .editor.original .diff-hidden-lines .center {
-	border-top-left-radius: var(--vscode-cornerRadius-medium);
-	border-bottom-left-radius: var(--vscode-cornerRadius-medium);
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
 }
 
 .agent-sessions-workbench .part.editor .editor.modified .diff-hidden-lines .center {
-	border-top-right-radius: var(--vscode-cornerRadius-medium);
-	border-bottom-right-radius: var(--vscode-cornerRadius-medium);
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
 }
 
 .agent-sessions-workbench .part.editor .multiDiffEntry .header-content .status {
@@ -292,7 +361,11 @@
 }
 
 .agent-sessions-workbench .part.editor .title.tabs {
-	background-color: transparent !important;
+	min-height: 38px !important;
+	height: 38px !important;
+	background-color: var(--vscode-editor-background) !important;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	box-sizing: border-box;
 	--editor-group-tab-height: 26px !important;
 }
 
@@ -300,7 +373,7 @@
 .agent-sessions-workbench .part.editor .tabs-container > .tab {
 	background-color: transparent !important;
 	border-right: none !important;
-	border-radius: var(--vscode-cornerRadius-small);
+	border-radius: 0 !important;
 	font-size: var(--vscode-agents-fontSize-label1);
 	font-weight: var(--vscode-agents-fontWeight-semiBold);
 	box-shadow: none !important;
@@ -338,7 +411,9 @@
 .agent-sessions-workbench .part.editor .tabs-and-actions-container {
 	--tabs-border-bottom-color: transparent !important;
 	align-items: center;
-	padding: 4px;
+	height: 38px !important;
+	padding: 4px 8px;
+	box-sizing: border-box;
 }
 
 .agent-sessions-workbench .part.editor .tabs-container > .tab.active {
@@ -354,14 +429,68 @@
 	margin-left: 0;
 }
 
+.agent-sessions-workbench .part.sessionspart > .title {
+	min-height: 38px !important;
+	height: 38px !important;
+	padding: 0 8px;
+	background-color: var(--vscode-editor-background) !important;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .part.sessionspart > .title > *,
+.agent-sessions-workbench .part.editor .title.tabs > *,
+.agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar > * {
+	background-color: transparent !important;
+}
+
+.agent-sessions-workbench .part.sessionspart > .content {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+	border: none !important;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
+	background: var(--vscode-editor-background) !important;
+}
+
+.agent-sessions-workbench .part.sessionspart > .title,
+.agent-sessions-workbench .part.editor .title.tabs,
+.agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
+	min-height: 38px !important;
+	height: 38px !important;
+	background-color: var(--vscode-editor-background) !important;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+	border-top: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent)) !important;
+}
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+	border-left: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent)) !important;
+}
+
+.agent-sessions-workbench .part.sessionspart > .title,
+.agent-sessions-workbench .part.editor .title.tabs,
+.agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
+	border-bottom: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 14%, transparent)) !important;
+}
+
 .agent-sessions-workbench .part.auxiliarybar {
 	/*
 	 * The TS `layout()` mirrors these zero margins so the inner area is sized
 	 * correctly while the auxiliary bar stays flush against adjacent parts.
-	 */
+	*/
 	margin: 0;
 	padding-left: 0;
-	background: var(--part-background);
+	background: var(--vscode-editor-background) !important;
 	border: none;
 	border-radius: 0;
 	box-sizing: border-box;
@@ -379,8 +508,129 @@
 	margin-bottom: 0;
 }
 
+.agent-sessions-workbench .part.auxiliarybar > .title,
+.agent-sessions-workbench .part.auxiliarybar > .content,
 .agent-sessions-workbench .part.auxiliarybar > .content .pane-body {
-	background-color: var(--vscode-agentsPanel-background);
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .pane-composite-part,
+.agent-sessions-workbench .part.auxiliarybar .composite,
+.agent-sessions-workbench .part.auxiliarybar .pane,
+.agent-sessions-workbench .part.auxiliarybar .pane-body,
+.agent-sessions-workbench .part.auxiliarybar .monaco-list,
+.agent-sessions-workbench .part.auxiliarybar .monaco-list-rows,
+.agent-sessions-workbench .part.auxiliarybar .monaco-tree,
+.agent-sessions-workbench .part.auxiliarybar .monaco-tree-rows,
+.agent-sessions-workbench .part.auxiliarybar .monaco-scrollable-element {
+	background-color: var(--vscode-editor-background) !important;
+	border-radius: 0 !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
+	height: 38px;
+	min-height: 38px;
+	padding: 0 8px 0 6px;
+	box-sizing: border-box;
+	background-color: var(--vscode-editor-background) !important;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
+	border-radius: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container {
+	min-width: 0;
+	flex: 1 1 auto;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar {
+	line-height: 22px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .actions-container,
+.agent-sessions-workbench .part.auxiliarybar > .title > .title-actions .monaco-action-bar .actions-container {
+	gap: 2px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item {
+	display: flex;
+	align-items: center;
+	height: 28px;
+	padding: 0 8px;
+	border-radius: 0;
+	background: transparent !important;
+	position: relative;
+	text-transform: none;
+	font-size: 13px;
+	font-weight: var(--vscode-agents-fontWeight-medium, 500);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked {
+	background: transparent !important;
+	border-radius: 0 !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.checked):hover {
+	background: transparent !important;
+	border-radius: 0 !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .action-label {
+	display: inline-flex;
+	align-items: center;
+	height: 26px;
+	padding: 0;
+	border-radius: 0;
+	background: transparent !important;
+	outline: none !important;
+	color: color-mix(in srgb, var(--vscode-foreground) 68%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked .action-label {
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked::after {
+	content: '';
+	position: absolute;
+	left: 8px;
+	right: 8px;
+	bottom: 0;
+	height: 2px;
+	background: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:has(.action-label[aria-label^="Changes"]) {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .active-item-indicator {
+	display: none;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions {
+	flex: 0 0 auto;
+	padding-left: 6px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item {
+	width: 28px;
+	height: 28px;
+	margin-right: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item:has(.action-label.codicon-collapse-all),
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item:has(.action-label[aria-label^="Collapse Folders in Explorer"]) {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item .action-label {
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border-radius: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .agent-sessions-workbench .part.panel {
@@ -434,7 +684,7 @@
 .monaco-workbench.vs.agent-sessions-workbench .part.sessionspart,
 .monaco-workbench.vs.agent-sessions-workbench .part.auxiliarybar,
 .monaco-workbench.vs.agent-sessions-workbench .part.panel {
-	border-color: var(--vscode-editorWidget-border, var(--vscode-widget-border, transparent));
+	border-color: transparent !important;
 }
 
 /* ---- Chat Layout ---- */

@@ -7,29 +7,29 @@
 	display: flex;
 	flex-direction: column;
 	height: 100%;
-	padding: 12px 14px 14px;
+	padding: 14px 16px 16px;
 	box-sizing: border-box;
-	gap: 10px;
-	color: var(--vscode-agentsPanel-foreground, var(--vscode-foreground));
-	background: var(--vscode-agentsPanel-background, var(--vscode-sideBar-background));
+	gap: 12px;
+	color: var(--vscode-foreground);
+	background: var(--vscode-editor-background);
 }
 
 .sessions-browser-url-row {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	min-height: 36px;
-	padding: 4px;
+	gap: 10px;
+	min-height: 42px;
+	padding: 5px;
 	box-sizing: border-box;
-	border: 1px solid color-mix(in srgb, var(--vscode-input-border, var(--vscode-widget-border, transparent)) 72%, transparent);
-	border-radius: 7px;
-	background: color-mix(in srgb, var(--vscode-input-background) 78%, var(--vscode-agentsPanel-background, var(--vscode-sideBar-background)));
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	border-radius: 0;
+	background: color-mix(in srgb, var(--vscode-input-background) 88%, var(--vscode-editor-background));
 	box-shadow: none;
 	transition: border-color 80ms ease, background-color 80ms ease;
 }
 
 .sessions-browser-url-row:focus-within {
-	border-color: color-mix(in srgb, var(--vscode-focusBorder) 62%, transparent);
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 70%, transparent);
 	background: var(--vscode-input-background);
 }
 
@@ -37,17 +37,17 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	flex: 0 0 20px;
-	width: 20px;
-	height: 20px;
-	margin-left: 3px;
-	color: color-mix(in srgb, var(--vscode-descriptionForeground) 84%, transparent);
+	flex: 0 0 24px;
+	width: 24px;
+	height: 24px;
+	margin-left: 2px;
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 90%, transparent);
 }
 
 .sessions-browser-url-input {
 	flex: 1;
 	min-width: 0;
-	height: 24px;
+	height: 30px;
 	padding: 2px 0;
 	box-sizing: border-box;
 	border: none;
@@ -55,7 +55,8 @@
 	color: var(--vscode-input-foreground);
 	background: transparent;
 	font-family: inherit;
-	font-size: var(--vscode-agents-fontSize-label1, 12px);
+	font-size: var(--vscode-agents-fontSize-label1, 13px);
+	font-weight: var(--vscode-agents-fontWeight-medium, 500);
 	outline: none;
 }
 
@@ -67,21 +68,24 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	flex: 0 0 28px;
-	width: 28px;
-	height: 28px;
+	flex: 0 0 32px;
+	width: 32px;
+	height: 32px;
 	padding: 0;
 	border: none;
-	border-radius: 6px;
+	border-radius: 0;
 	color: var(--vscode-button-foreground);
-	background: color-mix(in srgb, var(--vscode-button-background) 88%, transparent);
+	background: var(--vscode-button-background);
 	cursor: pointer;
-	transition: background-color 80ms ease, transform 80ms ease;
+	transition: background-color 80ms ease;
+}
+
+.sessions-browser-open-button .codicon {
+	font-size: 17px;
 }
 
 .sessions-browser-open-button:hover {
 	background: var(--vscode-button-hoverBackground);
-	transform: translateX(1px);
 }
 
 .sessions-browser-open-button:focus-visible {
@@ -89,23 +93,56 @@
 	outline-offset: 1px;
 }
 
+.sessions-browser-quick-row {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 6px;
+}
+
+.sessions-browser-quick-button {
+	min-width: 0;
+	min-height: 28px;
+	padding: 0 6px;
+	box-sizing: border-box;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent);
+	border-radius: 0;
+	color: var(--vscode-descriptionForeground);
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	font-family: inherit;
+	font-size: var(--vscode-agents-fontSize-label2, 11px);
+	font-weight: var(--vscode-agents-fontWeight-medium, 500);
+	cursor: pointer;
+}
+
+.sessions-browser-quick-button:hover {
+	color: var(--vscode-foreground);
+	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+}
+
+.sessions-browser-quick-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
 .sessions-browser-list {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 6px;
 	min-height: 0;
 	overflow: auto;
+	padding-top: 2px;
 }
 
 .sessions-browser-item {
 	display: grid;
-	grid-template-columns: 16px minmax(0, 1fr);
-	gap: 8px;
+	grid-template-columns: 20px minmax(0, 1fr);
+	gap: 10px;
 	align-items: center;
 	width: 100%;
-	padding: 8px;
-	border: 1px solid transparent;
-	border-radius: 7px;
+	padding: 9px 10px;
+	border: none;
+	border-left: 2px solid transparent;
+	border-radius: 0;
 	color: var(--vscode-foreground);
 	background: transparent;
 	text-align: left;
@@ -114,8 +151,8 @@
 
 .sessions-browser-item:hover,
 .sessions-browser-item:focus-visible {
-	border-color: var(--vscode-widget-border, transparent);
-	background: color-mix(in srgb, var(--vscode-list-hoverBackground) 78%, transparent);
+	border-left-color: color-mix(in srgb, var(--vscode-button-background) 84%, transparent);
+	background: color-mix(in srgb, var(--vscode-list-hoverBackground) 72%, transparent);
 }
 
 .sessions-browser-item:focus-visible {
@@ -124,6 +161,9 @@
 }
 
 .sessions-browser-item-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	color: var(--vscode-descriptionForeground);
 }
 
@@ -155,39 +195,39 @@
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	justify-content: center;
+	justify-content: flex-start;
 	flex: 1;
 	min-height: 120px;
-	padding: 24px;
+	padding: 54px 18px 0;
 	text-align: center;
-	gap: 8px;
+	gap: 10px;
 }
 
 .sessions-browser-empty-icon {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 28px;
-	height: 28px;
+	width: 34px;
+	height: 34px;
 	border: none;
 	border-radius: 0;
 	color: var(--vscode-descriptionForeground);
-	background: transparent;
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
 }
 
 .sessions-browser-empty-icon .codicon {
-	font-size: 24px;
+	font-size: 21px;
 }
 
 .sessions-browser-empty-title {
 	color: var(--vscode-foreground);
-	font-size: var(--vscode-agents-fontSize-label1, 12px);
+	font-size: var(--vscode-agents-fontSize-label1, 13px);
 	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
 }
 
 .sessions-browser-empty-message {
 	max-width: 260px;
 	color: var(--vscode-descriptionForeground);
-	font-size: var(--vscode-agents-fontSize-label2, 11px);
+	font-size: var(--vscode-agents-fontSize-label2, 12px);
 	line-height: 1.4;
 }

@@ -5,6 +5,8 @@
 
 import './media/sidebarpart.css';
 import './sidebarActions.js';
+import { $, addDisposableListener, append, EventType, prepend } from '../../../../base/browser/dom.js';
+import { Codicon } from '../../../../base/common/codicons.js';
 import { ActivityBarPosition, IWorkbenchLayoutService, LayoutSettings, Parts, Position as SideBarPosition } from '../../../services/layout/browser/layoutService.js';
 import { SidebarFocusContext, ActiveViewletContext } from '../../../common/contextkeys.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
@@ -30,10 +32,11 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { Action2, IMenuService, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { Separator } from '../../../../base/common/actions.js';
 import { ToggleActivityBarVisibilityActionId } from '../../actions/layoutActions.js';
-import { localize2 } from '../../../../nls.js';
+import { localize, localize2 } from '../../../../nls.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { VisibleViewContainersTracker } from '../visibleViewContainersTracker.js';
 import { Extensions } from '../../panecomposite.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 
 export class SidebarPart extends AbstractPaneCompositePart {
 
@@ -82,6 +85,7 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IExtensionService extensionService: IExtensionService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IMenuService menuService: IMenuService,
 	) {
 		super(
@@ -126,6 +130,33 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		}));
 
 		this.registerActions();
+	}
+
+	protected override createTitleArea(parent: HTMLElement): HTMLElement | undefined {
+		const titleArea = super.createTitleArea(parent);
+		if (!titleArea) {
+			return undefined;
+		}
+
+		const navigation = prepend(titleArea, $('.sidebar-activity-navigation'));
+		const entries: readonly { label: string; icon: string; command: string }[] = [
+			{ label: localize('sidebarActivityExplorer', "Explorer"), icon: Codicon.folderOpened.id, command: 'workbench.view.explorer' },
+			{ label: localize('sidebarActivitySearch', "Search"), icon: Codicon.searchSparkle.id, command: 'workbench.view.search' },
+			{ label: localize('sidebarActivitySourceControl', "Source Control"), icon: Codicon.gitPullRequest.id, command: 'workbench.view.scm' },
+			{ label: localize('sidebarActivityExtensions', "Extensions"), icon: Codicon.package.id, command: 'workbench.view.extensions' },
+		];
+
+		for (const entry of entries) {
+			const button = append(navigation, $('button.sidebar-activity-navigation-button')) as HTMLButtonElement;
+			button.type = 'button';
+			button.title = entry.label;
+			button.setAttribute('aria-label', entry.label);
+			const icon = append(button, $(`span.codicon.codicon-${entry.icon}`));
+			icon.setAttribute('aria-hidden', 'true');
+			this._register(addDisposableListener(button, EventType.CLICK, () => this.commandService.executeCommand(entry.command)));
+		}
+
+		return titleArea;
 	}
 
 	private onDidChangeAutoHideViewContainers(e: { before: number; after: number }): void {

@@ -77,6 +77,16 @@ export class SessionsBrowserViewPane extends ViewPane {
 		openButton.setAttribute('aria-label', localize('sessions.browser.open', "Open Browser"));
 		openButton.appendChild(renderIcon(Codicon.arrowRight));
 
+		const quickRow = dom.append(this._body, $('.sessions-browser-quick-row'));
+		for (const port of ['3000', '5173', '8000', '8080']) {
+			const portButton = dom.append(quickRow, $('button.sessions-browser-quick-button')) as HTMLButtonElement;
+			portButton.type = 'button';
+			portButton.textContent = `:${port}`;
+			portButton.title = localize('sessions.browser.openPort', "Open localhost:{0}", port);
+			portButton.setAttribute('aria-label', localize('sessions.browser.openPort', "Open localhost:{0}", port));
+			this._domStore.add(dom.addDisposableListener(portButton, dom.EventType.CLICK, () => this._openUrl(`http://localhost:${port}`)));
+		}
+
 		this._domStore.add(dom.addDisposableListener(this._input, dom.EventType.KEY_DOWN, e => {
 			if (e.key === 'Enter') {
 				e.preventDefault();
@@ -116,7 +126,14 @@ export class SessionsBrowserViewPane extends ViewPane {
 			return;
 		}
 
-		this._input!.value = url;
+		await this._openUrl(url);
+	}
+
+	private async _openUrl(url: string): Promise<void> {
+		if (this._input) {
+			this._input.value = url;
+		}
+
 		await this._editorService.openEditor({
 			resource: BrowserViewUri.forId(generateUuid()),
 			options: {

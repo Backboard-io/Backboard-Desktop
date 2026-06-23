@@ -20,6 +20,44 @@
 	background-color: var(--vscode-sideBarTitle-background);
 }
 
+.monaco-workbench .part.sidebar > .title > .sidebar-activity-navigation {
+	display: flex;
+	align-items: center;
+	flex: 0 0 auto;
+	height: 100%;
+	padding: 0 4px;
+	gap: 2px;
+	box-sizing: border-box;
+}
+
+.monaco-workbench .part.sidebar > .title > .sidebar-activity-navigation > .sidebar-activity-navigation-button {
+	all: unset;
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 34px;
+	height: 100%;
+	color: var(--vscode-activityBar-inactiveForeground);
+	cursor: pointer;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .part.sidebar > .title > .sidebar-activity-navigation > .sidebar-activity-navigation-button:hover,
+.monaco-workbench .part.sidebar > .title > .sidebar-activity-navigation > .sidebar-activity-navigation-button:focus-visible {
+	color: var(--vscode-activityBar-foreground);
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .part.sidebar > .title > .sidebar-activity-navigation > .sidebar-activity-navigation-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.monaco-workbench .part.sidebar > .title > .sidebar-activity-navigation > .sidebar-activity-navigation-button > .codicon {
+	font-size: 22px;
+}
+
 .monaco-workbench .part.sidebar > .title > .title-label h2 {
 	text-transform: uppercase;
 }

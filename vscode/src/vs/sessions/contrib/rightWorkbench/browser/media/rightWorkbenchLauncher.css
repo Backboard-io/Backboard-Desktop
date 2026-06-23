@@ -1,0 +1,86 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.sessions-right-workbench-launcher {
+	height: 100%;
+	box-sizing: border-box;
+	color: var(--vscode-agentsPanel-foreground, var(--vscode-foreground));
+	background: var(--vscode-agentsPanel-background, var(--vscode-sideBar-background));
+	overflow: hidden;
+}
+
+.sessions-right-workbench-launcher-shell {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	padding: 24px 18px;
+	box-sizing: border-box;
+}
+
+.sessions-right-workbench-launcher-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: min(100%, 560px);
+}
+
+.sessions-right-workbench-launcher-row {
+	display: grid;
+	grid-template-columns: 22px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 14px;
+	width: 100%;
+	min-height: 48px;
+	padding: 0 14px 0 16px;
+	box-sizing: border-box;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	color: var(--vscode-foreground);
+	background: color-mix(in srgb, var(--vscode-sideBar-background) 82%, var(--vscode-editor-background));
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-launcher-row:hover {
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 32%, transparent);
+	background: color-mix(in srgb, var(--vscode-list-hoverBackground) 72%, var(--vscode-sideBar-background));
+}
+
+.sessions-right-workbench-launcher-row:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.sessions-right-workbench-launcher-row .codicon {
+	font-size: 18px;
+	color: color-mix(in srgb, var(--vscode-foreground) 84%, transparent);
+}
+
+.sessions-right-workbench-launcher-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--vscode-agents-fontSize-body, 15px);
+	font-weight: var(--vscode-agents-fontWeight-regular, 400);
+}
+
+.sessions-right-workbench-launcher-shortcut {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 38px;
+	height: 22px;
+	padding: 0 8px;
+	box-sizing: border-box;
+	border-radius: 999px;
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 92%, transparent);
+	background: color-mix(in srgb, var(--vscode-editor-background) 86%, transparent);
+	font-size: var(--vscode-agents-fontSize-label2, 11px);
+	font-weight: var(--vscode-agents-fontWeight-medium, 500);
+	white-space: nowrap;
+}
