@@ -7,6 +7,7 @@ import { $, addDisposableListener, append, clearNode, EventType, getActiveWindow
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
@@ -19,6 +20,9 @@ import { IClipboardService } from '../../../../platform/clipboard/common/clipboa
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { Severity, INotificationService } from '../../../../platform/notification/common/notification.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { EXTENSION_IDENTIFIER_REGEX, EXTENSION_INSTALL_SKIP_PUBLISHER_TRUST_CONTEXT, EXTENSION_INSTALL_SKIP_WALKTHROUGH_CONTEXT, IExtensionGalleryService, IExtensionIdentifier, IExtensionManagementService } from '../../../../platform/extensionManagement/common/extensionManagement.js';
+import { areSameExtensions } from '../../../../platform/extensionManagement/common/extensionManagementUtil.js';
+import { ExtensionType } from '../../../../platform/extensions/common/extensions.js';
 import { IFileService, FileOperationResult, toFileOperationResult } from '../../../../platform/files/common/files.js';
 import product from '../../../../platform/product/common/product.js';
 import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
@@ -76,6 +80,7 @@ interface ISettingsImportSource {
 	readonly description: string;
 	readonly icon: string;
 	readonly userDataHome: URI;
+	readonly extensionsHome: URI;
 }
 
 interface ISettingsImportResult {
@@ -83,11 +88,40 @@ interface ISettingsImportResult {
 	readonly missing: string[];
 }
 
+interface ISettingsImportSelection {
+	readonly settings: boolean;
+	readonly keybindings: boolean;
+	readonly extensions: boolean;
+}
+
+interface ISettingsImportExtension {
+	readonly identifier: IExtensionIdentifier;
+	readonly preRelease?: boolean;
+}
+
+interface ISettingsImportSelector {
+	readonly container: HTMLElement;
+	readonly sourceLabel: HTMLElement;
+	readonly importButton: HTMLButtonElement;
+	readonly settings: HTMLInputElement;
+	readonly keybindings: HTMLInputElement;
+	readonly extensions: HTMLInputElement;
+	source: ISettingsImportSource | undefined;
+}
+
 const BACKBOARD_SIGN_IN_URL = 'https://app.backboard.io/signup';
 const BACKBOARD_API_KEYS_URL = 'https://app.backboard.io/dashboard/api-keys';
 const BACKBOARD_API_KEY_PATTERN = /^espr_[A-Za-z0-9_-]{43}$/;
 const LOCAL_AGENT_HOST_PROVIDER_ID = 'local-agent-host';
 const SOURCE_SETTINGS_RESOURCE_NAMES = ['settings.json', 'keybindings.json'] as const;
+const DEFAULT_SETTINGS_IMPORT_SELECTION: ISettingsImportSelection = {
+	settings: true,
+	keybindings: true,
+	extensions: true,
+};
+const SETTINGS_IMPORT_EXTENSION_ID_REPLACEMENTS = new Map<string, string>([
+	['anysphere.remote-ssh', 'ms-vscode-remote.remote-ssh'],
+]);
 const BACKBOARD_WELCOME_SPLASH_ICONS = [
 	'ai_open_ai.svg',
 	'ai_open_ai_compat.svg',
@@ -194,6 +228,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
 		@IUserDataProfileService private readonly userDataProfileService: IUserDataProfileService,
+		@IExtensionManagementService private readonly extensionManagementService: IExtensionManagementService,
+		@IExtensionGalleryService private readonly extensionGalleryService: IExtensionGalleryService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
 	) {
 		super();
@@ -925,11 +961,16 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		wrapper.setAttribute('aria-label', getOnboardingStepTitle(OnboardingStepId.ImportSettings));
 
 		const title = append(wrapper, $('h1.onboarding-backboard-import-heading'));
-		title.textContent = localize('onboarding.backboard.import.heading', "Import Settings");
+		title.textContent = localize('onboarding.backboard.import.heading', "Import from Your Editor");
 
 		const options = append(wrapper, $('.onboarding-backboard-import-options'));
-		for (const source of this._getSettingsImportSources()) {
-			this._createImportOption(options, source);
+		const sourceOptions = this._getSettingsImportSources().map(source => ({
+			source,
+			button: this._createImportOption(options, source),
+		}));
+		const selector = this._createImportSelector(wrapper);
+		for (const { source, button } of sourceOptions) {
+			this._registerImportOption(button, options, source, selector);
 		}
 
 		const skipButton = this._registerStepFocusable(append(wrapper, $<HTMLButtonElement>('button.onboarding-backboard-import-skip')));
@@ -941,12 +982,13 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}));
 	}
 
-	private _createImportOption(parent: HTMLElement, source: ISettingsImportSource): void {
+	private _createImportOption(parent: HTMLElement, source: ISettingsImportSource): HTMLButtonElement {
 		const button = this._registerStepFocusable(append(parent, $<HTMLButtonElement>('button.onboarding-backboard-import-option')));
 		button.type = 'button';
 		button.dataset.id = source.id;
 		button.title = source.description;
-		button.setAttribute('aria-label', localize('onboarding.backboard.import.option.aria', "Import settings from {0}. {1}", source.label, source.description));
+		button.setAttribute('aria-expanded', 'false');
+		button.setAttribute('aria-label', localize('onboarding.backboard.import.option.aria', "Choose what to import from {0}. {1}", source.label, source.description));
 
 		const img = append(button, $<HTMLImageElement>('img.onboarding-backboard-import-option-icon'));
 		img.alt = '';
@@ -956,9 +998,97 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const label = append(button, $('span.onboarding-backboard-import-option-label'));
 		label.textContent = source.label;
 
+		return button;
+	}
+
+	private _registerImportOption(button: HTMLButtonElement, parent: HTMLElement, source: ISettingsImportSource, selector: ISettingsImportSelector): void {
+		button.setAttribute('aria-controls', selector.container.id);
 		this.stepDisposables.add(addDisposableListener(button, EventType.CLICK, () => {
-			void this._importSettingsFromSource(source, button);
+			for (const option of Array.from(parent.querySelectorAll<HTMLButtonElement>('.onboarding-backboard-import-option'))) {
+				const isSelected = option === button;
+				option.classList.toggle('selected', isSelected);
+				option.setAttribute('aria-expanded', isSelected ? 'true' : 'false');
+			}
+			selector.source = source;
+			selector.sourceLabel.textContent = localize('onboarding.backboard.import.selector.source', "Import from {0}", source.label);
+			selector.container.hidden = false;
+			selector.container.classList.add('visible');
+			selector.importButton.focus();
 		}));
+	}
+
+	private _createImportSelector(parent: HTMLElement): ISettingsImportSelector {
+		const container = append(parent, $('.onboarding-backboard-import-selector'));
+		container.id = `onboarding-backboard-import-selector-${Date.now().toString(36)}`;
+		container.hidden = true;
+
+		const sourceLabel = append(container, $('div.onboarding-backboard-import-selector-source'));
+		sourceLabel.textContent = localize('onboarding.backboard.import.selector.source.empty', "Select What to Import");
+
+		const heading = append(container, $('div.onboarding-backboard-import-selector-heading'));
+		heading.textContent = localize('onboarding.backboard.import.selector.heading', "Select What to Import");
+
+		const choices = append(container, $('div.onboarding-backboard-import-selector-choices'));
+		const settings = this._createImportCheckbox(choices, 'settings', localize('onboarding.backboard.import.selector.settings', "Settings"), localize('onboarding.backboard.import.selector.settings.description', "Includes snippets"));
+		const keybindings = this._createImportCheckbox(choices, 'keybindings', localize('onboarding.backboard.import.selector.keybindings', "Keyboard Shortcuts"));
+		const extensions = this._createImportCheckbox(choices, 'extensions', localize('onboarding.backboard.import.selector.extensions', "Extensions"));
+
+		const importButton = this._registerStepFocusable(append(container, $<HTMLButtonElement>('button.onboarding-backboard-import-confirm')));
+		importButton.type = 'button';
+		importButton.textContent = localize('onboarding.backboard.import.confirm', "Import");
+
+		const selector: ISettingsImportSelector = {
+			container,
+			sourceLabel,
+			importButton,
+			settings,
+			keybindings,
+			extensions,
+			source: undefined,
+		};
+
+		const updateImportButton = () => {
+			importButton.disabled = !this._getImportSelection(selector).settings && !this._getImportSelection(selector).keybindings && !this._getImportSelection(selector).extensions;
+		};
+		for (const checkbox of [settings, keybindings, extensions]) {
+			this.stepDisposables.add(addDisposableListener(checkbox, EventType.CHANGE, updateImportButton));
+		}
+		updateImportButton();
+
+		this.stepDisposables.add(addDisposableListener(importButton, EventType.CLICK, () => {
+			if (!selector.source) {
+				return;
+			}
+			void this._importSettingsFromSource(selector.source, importButton, this._getImportSelection(selector));
+		}));
+
+		return selector;
+	}
+
+	private _createImportCheckbox(parent: HTMLElement, id: string, label: string, description?: string): HTMLInputElement {
+		const wrapper = append(parent, $('label.onboarding-backboard-import-selector-choice'));
+		const checkbox = this._registerStepFocusable(append(wrapper, $<HTMLInputElement>('input.onboarding-backboard-import-selector-checkbox')));
+		checkbox.type = 'checkbox';
+		checkbox.checked = true;
+		checkbox.dataset.importItem = id;
+
+		const copy = append(wrapper, $('span.onboarding-backboard-import-selector-choice-copy'));
+		const labelEl = append(copy, $('span.onboarding-backboard-import-selector-choice-label'));
+		labelEl.textContent = label;
+		if (description) {
+			const descriptionEl = append(copy, $('span.onboarding-backboard-import-selector-choice-description'));
+			descriptionEl.textContent = description;
+		}
+
+		return checkbox;
+	}
+
+	private _getImportSelection(selector: ISettingsImportSelector): ISettingsImportSelection {
+		return {
+			settings: selector.settings.checked,
+			keybindings: selector.keybindings.checked,
+			extensions: selector.extensions.checked,
+		};
 	}
 
 	private _getSettingsImportSources(): readonly ISettingsImportSource[] {
@@ -966,16 +1096,18 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			{
 				id: 'vscode',
 				label: localize('onboarding.backboard.import.vscode', "Visual Studio Code"),
-				description: localize('onboarding.backboard.import.vscode.description', "Bring settings, keyboard shortcuts, and snippets."),
+				description: localize('onboarding.backboard.import.vscode.description', "Bring settings, keyboard shortcuts, snippets, and extensions."),
 				icon: 'onboarding-vscode.png',
 				userDataHome: this._getExternalUserDataHome('Code'),
+				extensionsHome: this._getExternalExtensionsHome('.vscode'),
 			},
 			{
 				id: 'cursor',
 				label: localize('onboarding.backboard.import.cursor', "Cursor"),
-				description: localize('onboarding.backboard.import.cursor.description', "Bring settings, keyboard shortcuts, and snippets."),
+				description: localize('onboarding.backboard.import.cursor.description', "Bring settings, keyboard shortcuts, snippets, and extensions."),
 				icon: 'onboarding-cursor.png',
 				userDataHome: this._getExternalUserDataHome('Cursor'),
+				extensionsHome: this._getExternalExtensionsHome('.cursor'),
 			},
 		];
 	}
@@ -994,7 +1126,11 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		return URI.joinPath(home, '.config', applicationDataFolderName, 'User');
 	}
 
-	private async _importSettingsFromSource(source: ISettingsImportSource, button: HTMLButtonElement): Promise<void> {
+	private _getExternalExtensionsHome(folderName: string): URI {
+		return URI.joinPath(this.pathService.userHome({ preferLocal: true }), folderName, 'extensions');
+	}
+
+	private async _importSettingsFromSource(source: ISettingsImportSource, button: HTMLButtonElement, selection: ISettingsImportSelection = DEFAULT_SETTINGS_IMPORT_SELECTION): Promise<void> {
 		if (button.disabled) {
 			return;
 		}
@@ -1002,17 +1138,17 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		button.disabled = true;
 		button.classList.add('importing');
 		button.setAttribute('aria-busy', 'true');
-		this._logAction('importSettings', undefined, source.id);
+		this._logAction('importSettings', undefined, `${source.id}:${this._settingsImportSelectionArgument(selection)}`);
 
 		try {
-			const result = await this._copySettingsFromSource(source);
+			const result = await this._copySettingsFromSource(source, selection);
 			if (!result.imported.length) {
 				this.notificationService.notify({
 					severity: Severity.Warning,
-					message: localize('onboarding.backboard.import.noneFound', "No {0} settings were found to import.", source.label),
+					message: localize('onboarding.backboard.import.noneFound', "No selected {0} items were found to import.", source.label),
 					source: source.userDataHome.fsPath,
 				});
-				this.accessibilityService.alert(localize('onboarding.backboard.import.noneFound.alert', "No {0} settings were found to import.", source.label));
+				this.accessibilityService.alert(localize('onboarding.backboard.import.noneFound.alert', "No selected {0} items were found to import.", source.label));
 				return;
 			}
 
@@ -1020,12 +1156,12 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				severity: Severity.Info,
 				message: localize('onboarding.backboard.import.complete', "Imported {0}: {1}.", source.label, result.imported.join(', ')),
 			});
-			this.accessibilityService.alert(localize('onboarding.backboard.import.complete.alert', "{0} settings imported", source.label));
+			this.accessibilityService.alert(localize('onboarding.backboard.import.complete.alert', "Imported from {0}", source.label));
 			this._nextStep();
 		} catch (error) {
 			this.notificationService.notify({
 				severity: Severity.Error,
-				message: localize('onboarding.backboard.import.failed', "Could not import {0} settings.", source.label),
+				message: localize('onboarding.backboard.import.failed', "Could not import from {0}.", source.label),
 				source: error instanceof Error ? error.message : undefined,
 			});
 		} finally {
@@ -1035,46 +1171,244 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 	}
 
-	private async _copySettingsFromSource(source: ISettingsImportSource): Promise<ISettingsImportResult> {
+	private _settingsImportSelectionArgument(selection: ISettingsImportSelection): string {
+		const selected: string[] = [];
+		if (selection.settings) {
+			selected.push('settings');
+		}
+		if (selection.keybindings) {
+			selected.push('keybindings');
+		}
+		if (selection.extensions) {
+			selected.push('extensions');
+		}
+		return selected.join(',');
+	}
+
+	private async _copySettingsFromSource(source: ISettingsImportSource, selection: ISettingsImportSelection): Promise<ISettingsImportResult> {
 		const profile = this.userDataProfileService.currentProfile;
 		const imported: string[] = [];
 		const missing: string[] = [];
 
 		await this._tryCreateFolder(profile.location);
 
-		const resourceTargets = [
-			{
-				sourceName: SOURCE_SETTINGS_RESOURCE_NAMES[0],
-				target: profile.settingsResource,
-				label: localize('onboarding.backboard.import.resource.settings', "Settings"),
-			},
-			{
-				sourceName: SOURCE_SETTINGS_RESOURCE_NAMES[1],
-				target: profile.keybindingsResource,
-				label: localize('onboarding.backboard.import.resource.keybindings', "Keyboard Shortcuts"),
-			},
-		];
-
-		for (const resource of resourceTargets) {
-			const sourceResource = URI.joinPath(source.userDataHome, resource.sourceName);
-			const contents = await this._tryReadFile(sourceResource);
-			if (contents === undefined) {
-				missing.push(resource.label);
-				continue;
+		if (selection.settings) {
+			const settingsImported = await this._copySettingsResource(source, SOURCE_SETTINGS_RESOURCE_NAMES[0], profile.settingsResource);
+			const snippetCount = await this._copySnippets(URI.joinPath(source.userDataHome, 'snippets'), profile.snippetsHome);
+			if (settingsImported || snippetCount > 0) {
+				imported.push(localize('onboarding.backboard.import.resource.settings', "Settings"));
+				if (snippetCount > 0) {
+					imported.push(localize('onboarding.backboard.import.resource.snippets', "Snippets"));
+				}
+			} else {
+				missing.push(localize('onboarding.backboard.import.resource.settings', "Settings"));
 			}
-
-			await this.fileService.writeFile(resource.target, VSBuffer.fromString(contents));
-			imported.push(resource.label);
 		}
 
-		const snippetCount = await this._copySnippets(URI.joinPath(source.userDataHome, 'snippets'), profile.snippetsHome);
-		if (snippetCount > 0) {
-			imported.push(localize('onboarding.backboard.import.resource.snippets', "Snippets"));
-		} else {
-			missing.push(localize('onboarding.backboard.import.resource.snippets', "Snippets"));
+		if (selection.keybindings) {
+			if (await this._copySettingsResource(source, SOURCE_SETTINGS_RESOURCE_NAMES[1], profile.keybindingsResource)) {
+				imported.push(localize('onboarding.backboard.import.resource.keybindings', "Keyboard Shortcuts"));
+			} else {
+				missing.push(localize('onboarding.backboard.import.resource.keybindings', "Keyboard Shortcuts"));
+			}
+		}
+
+		if (selection.extensions && await this._importExtensionsFromSource(source) > 0) {
+			imported.push(localize('onboarding.backboard.import.resource.extensions', "Extensions"));
+		} else if (selection.extensions) {
+			missing.push(localize('onboarding.backboard.import.resource.extensions', "Extensions"));
 		}
 
 		return { imported, missing };
+	}
+
+	private async _copySettingsResource(source: ISettingsImportSource, sourceName: string, target: URI): Promise<boolean> {
+		const contents = await this._tryReadFile(URI.joinPath(source.userDataHome, sourceName));
+		if (contents === undefined) {
+			return false;
+		}
+
+		await this.fileService.writeFile(target, VSBuffer.fromString(contents));
+		return true;
+	}
+
+	private async _importExtensionsFromSource(source: ISettingsImportSource): Promise<number> {
+		if (!this.extensionGalleryService.isEnabled()) {
+			return 0;
+		}
+
+		const sourceExtensions = await this._readExtensionsFromSource(source.extensionsHome);
+		if (!sourceExtensions.length) {
+			return 0;
+		}
+
+		const profile = this.userDataProfileService.currentProfile;
+		const installedExtensions = await this.extensionManagementService.getInstalled(ExtensionType.User, profile.extensionsResource);
+		const extensionsToInstall = sourceExtensions.filter(sourceExtension =>
+			!installedExtensions.some(installedExtension => areSameExtensions(installedExtension.identifier, sourceExtension.identifier)));
+		if (!extensionsToInstall.length) {
+			return 0;
+		}
+
+		try {
+			const targetPlatform = await this.extensionManagementService.getTargetPlatform();
+			const galleryExtensions = await this.extensionGalleryService.getExtensions(
+				extensionsToInstall.map(sourceExtension => ({ ...sourceExtension.identifier, preRelease: sourceExtension.preRelease })),
+				{ targetPlatform, compatible: true },
+				CancellationToken.None
+			);
+			let installedCount = 0;
+			for (const sourceExtension of extensionsToInstall) {
+				const galleryExtension = galleryExtensions.find(extension => areSameExtensions(extension.identifier, sourceExtension.identifier));
+				if (!galleryExtension || await this.extensionManagementService.canInstall(galleryExtension) !== true) {
+					continue;
+				}
+
+				try {
+					await this.extensionManagementService.installFromGallery(galleryExtension, {
+						isMachineScoped: false,
+						donotIncludePackAndDependencies: true,
+						installPreReleaseVersion: sourceExtension.preRelease,
+						profileLocation: profile.extensionsResource,
+						context: {
+							[EXTENSION_INSTALL_SKIP_WALKTHROUGH_CONTEXT]: true,
+							[EXTENSION_INSTALL_SKIP_PUBLISHER_TRUST_CONTEXT]: true,
+						},
+					});
+					installedCount++;
+				} catch {
+					// Keep onboarding moving if a source extension is unavailable or fails to install.
+				}
+			}
+			return installedCount;
+		} catch {
+			return 0;
+		}
+	}
+
+	private async _readExtensionsFromSource(extensionsHome: URI): Promise<ISettingsImportExtension[]> {
+		const extensionsJson = await this._tryReadFile(URI.joinPath(extensionsHome, 'extensions.json'));
+		if (extensionsJson !== undefined) {
+			const extensions = this._parseExtensionsJson(extensionsJson);
+			if (extensions.length) {
+				return extensions;
+			}
+		}
+
+		return this._readExtensionsFromFolders(extensionsHome);
+	}
+
+	private _parseExtensionsJson(contents: string): ISettingsImportExtension[] {
+		let rawExtensions: unknown;
+		try {
+			rawExtensions = JSON.parse(contents);
+		} catch {
+			return [];
+		}
+		if (!Array.isArray(rawExtensions)) {
+			return [];
+		}
+
+		const extensions = new Map<string, ISettingsImportExtension>();
+		for (const rawExtension of rawExtensions) {
+			if (!isObjectRecord(rawExtension) || rawExtension.isBuiltin === true) {
+				continue;
+			}
+
+			const identifier = this._getExtensionIdentifier(rawExtension);
+			if (!identifier) {
+				continue;
+			}
+
+			const metadata = isObjectRecord(rawExtension.metadata) ? rawExtension.metadata : undefined;
+			extensions.set(identifier.id.toLowerCase(), {
+				identifier,
+				preRelease: rawExtension.preRelease === true || metadata?.isPreReleaseVersion === true || metadata?.preRelease === true,
+			});
+		}
+
+		return [...extensions.values()];
+	}
+
+	private async _readExtensionsFromFolders(extensionsHome: URI): Promise<ISettingsImportExtension[]> {
+		const extensionsStat = await this._tryResolve(extensionsHome);
+		if (!extensionsStat?.isDirectory) {
+			return [];
+		}
+
+		const extensions = new Map<string, ISettingsImportExtension>();
+		for (const child of extensionsStat.children ?? []) {
+			if (!child.isDirectory) {
+				continue;
+			}
+
+			const manifestContents = await this._tryReadFile(URI.joinPath(child.resource, 'package.json'));
+			if (manifestContents === undefined) {
+				continue;
+			}
+
+			const extension = this._parseExtensionManifest(manifestContents);
+			if (extension) {
+				extensions.set(extension.identifier.id.toLowerCase(), extension);
+			}
+		}
+
+		return [...extensions.values()];
+	}
+
+	private _parseExtensionManifest(contents: string): ISettingsImportExtension | undefined {
+		let manifest: unknown;
+		try {
+			manifest = JSON.parse(contents);
+		} catch {
+			return undefined;
+		}
+		if (!isObjectRecord(manifest)) {
+			return undefined;
+		}
+
+		const publisher = typeof manifest.publisher === 'string' ? manifest.publisher : undefined;
+		const name = typeof manifest.name === 'string' ? manifest.name : undefined;
+		if (!publisher || !name) {
+			return undefined;
+		}
+
+		const identifier = this._createExtensionIdentifier(`${publisher}.${name}`);
+		if (!identifier) {
+			return undefined;
+		}
+
+		const metadata = isObjectRecord(manifest.__metadata) ? manifest.__metadata : undefined;
+		return {
+			identifier,
+			preRelease: metadata?.isPreReleaseVersion === true || metadata?.preRelease === true,
+		};
+	}
+
+	private _getExtensionIdentifier(rawExtension: Record<string, unknown>): IExtensionIdentifier | undefined {
+		const identifier = rawExtension.identifier;
+		if (isObjectRecord(identifier) && typeof identifier.id === 'string') {
+			return this._createExtensionIdentifier(identifier.id, typeof identifier.uuid === 'string' ? identifier.uuid : undefined);
+		}
+		if (typeof identifier === 'string') {
+			return this._createExtensionIdentifier(identifier);
+		}
+		if (typeof rawExtension.id === 'string') {
+			return this._createExtensionIdentifier(rawExtension.id);
+		}
+		return undefined;
+	}
+
+	private _createExtensionIdentifier(id: string, uuid?: string): IExtensionIdentifier | undefined {
+		const normalizedId = id.trim();
+		if (!EXTENSION_IDENTIFIER_REGEX.test(normalizedId)) {
+			return undefined;
+		}
+		const replacementId = SETTINGS_IMPORT_EXTENSION_ID_REPLACEMENTS.get(normalizedId.toLowerCase());
+		if (replacementId) {
+			return { id: replacementId };
+		}
+		return uuid ? { id: normalizedId, uuid } : { id: normalizedId };
 	}
 
 	private async _copySnippets(sourceSnippetsHome: URI, targetSnippetsHome: URI): Promise<number> {
