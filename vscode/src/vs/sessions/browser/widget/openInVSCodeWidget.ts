@@ -14,11 +14,8 @@ import { IKeybindingService } from '../../../platform/keybinding/common/keybindi
 import { IContextMenuService } from '../../../platform/contextview/browser/contextView.js';
 import { ICommandService } from '../../../platform/commands/common/commands.js';
 
-const OPEN_BACKBOARD_AGENTS_COMMAND_ID = 'backboard.agents.open';
-const OPEN_BACKBOARD_ADVANCED_COMMAND_ID = 'workbench.action.openOptimusWindow';
-
 /**
- * Renders a stable Editor / Agents titlebar switcher in the sessions workbench.
+ * Renders a stable mode titlebar switcher in the sessions workbench.
  */
 export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 
@@ -26,6 +23,7 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		action: IAction,
 		options: IBaseActionViewItemOptions | undefined,
 		private readonly keybindingCommandId: string,
+		private readonly workspaceCommandId: string | undefined,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
@@ -39,7 +37,7 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 
 		container.classList.add('open-in-vscode-titlebar-widget');
 
-		const hoverText = this.keybindingService.appendKeybinding(localize('openInVSCodeHover', "Switch to Editor"), this.keybindingCommandId);
+		const hoverText = this.keybindingService.appendKeybinding(localize('openInVSCodeHover', "Switch Backboard mode"), this.keybindingCommandId);
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 
@@ -53,24 +51,29 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		chevron.setAttribute('aria-hidden', 'true');
 
 		const showMenu = () => {
+			const workspaceCommandId = this.workspaceCommandId;
 			const actions = [
 				toAction({
 					id: 'agents.action.mode.editor',
 					label: localize('openInVSCodeSwitcher.editor', "Editor"),
 					run: () => this.action.run(),
 				}),
-				toAction({
-					id: 'agents.action.mode.agents',
-					label: localize('openInVSCodeSwitcher.agents', "Simple"),
-					checked: true,
-					run: () => this.commandService.executeCommand(OPEN_BACKBOARD_AGENTS_COMMAND_ID),
-				}),
-				toAction({
-					id: 'agents.action.mode.advanced',
-					label: localize('openInVSCodeSwitcher.advanced', "Advanced"),
-					run: () => this.commandService.executeCommand(OPEN_BACKBOARD_ADVANCED_COMMAND_ID),
-				}),
 			];
+
+			if (workspaceCommandId) {
+				actions.push(toAction({
+					id: 'agents.action.mode.workspace',
+					label: localize('openInVSCodeSwitcher.workspace', "Workspace"),
+					run: () => this.commandService.executeCommand(workspaceCommandId),
+				}));
+			}
+
+			actions.push(toAction({
+					id: 'agents.action.mode.agents',
+					label: localize('openInVSCodeSwitcher.agents', "Agents"),
+					checked: true,
+					run: () => undefined,
+				}));
 
 			triggerButton.setAttribute('aria-expanded', 'true');
 			this.contextMenuService.showContextMenu({
@@ -81,7 +84,7 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		};
 
 		currentIcon.className = 'open-in-vscode-titlebar-widget-icon codicon codicon-window';
-		currentLabel.textContent = localize('openInVSCodeSwitcher.agents', "Simple");
+		currentLabel.textContent = localize('openInVSCodeSwitcher.agents', "Agents");
 
 		this._register(addDisposableListener(triggerButton, EventType.CLICK, event => {
 			EventHelper.stop(event, true);

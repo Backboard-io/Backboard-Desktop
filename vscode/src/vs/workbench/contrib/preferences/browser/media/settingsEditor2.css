@@ -1583,8 +1583,8 @@
 
 .settings-sidebar-header > .search-container:focus-within > .suggest-input-container,
 .settings-sidebar-header > .search-container > .suggest-input-container.synthetic-focus {
-	border-color: var(--backboard-settings-focus-border) !important;
-	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
+	border-color: var(--backboard-settings-input-border) !important;
+	box-shadow: none !important;
 }
 
 .settings-sidebar-header > .search-container input {
@@ -1733,6 +1733,16 @@
 	outline-color: var(--backboard-settings-focus-border) !important;
 	border-color: var(--backboard-settings-focus-border) !important;
 	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
+}
+
+.settings-sidebar-header > .search-container .monaco-inputbox.synthetic-focus,
+.settings-sidebar-header > .search-container .monaco-inputbox:focus-within,
+.settings-sidebar-header > .search-container > .suggest-input-container.synthetic-focus,
+.settings-sidebar-header > .search-container:focus-within > .suggest-input-container,
+.settings-sidebar-header > .search-container input:focus {
+	outline: none !important;
+	border-color: var(--backboard-settings-input-border) !important;
+	box-shadow: none !important;
 }
 
 .settings-account-name::after {

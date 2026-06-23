@@ -28,6 +28,48 @@ import { IInstantiationService } from '../../../platform/instantiation/common/in
 import { Disposable } from '../../../base/common/lifecycle.js';
 import { resolveRemoteAuthority } from '../../browser/openInVSCodeUtils.js';
 import { INativeHostService } from '../../../platform/native/common/native.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../platform/storage/common/storage.js';
+import { BACKBOARD_WORKSPACE_OPEN_ON_STARTUP_STORAGE_KEY } from '../../../workbench/contrib/chat/electron-browser/backboardWorkspace/backboardWorkspaceConstants.js';
+
+const OPEN_WORKSPACE_IN_VSCODE_ACTION_ID = 'agents.openWorkspaceInVSCode';
+
+function getFolderUriToOpen(sessionsService: ISessionsService, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService): URI | undefined {
+	const activeSession = sessionsService.activeSession.get();
+	if (!activeSession) {
+		return undefined;
+	}
+
+	const workspace = activeSession.workspace.get();
+	const rawFolderUri = workspace?.folders[0]?.workingDirectory;
+	if (!rawFolderUri) {
+		return undefined;
+	}
+
+	if (rawFolderUri.scheme !== AGENT_HOST_SCHEME) {
+		return rawFolderUri;
+	}
+
+	const remoteAuthority = resolveRemoteAuthority(activeSession.providerId, sessionsProvidersService, remoteAgentHostService);
+	if (!remoteAuthority) {
+		return rawFolderUri;
+	}
+
+	const agentHostUri = fromAgentHostUri(rawFolderUri);
+	return agentHostUri.with({ authority: remoteAuthority, scheme: Schemas.vscodeRemote });
+}
+
+async function openEditorWindowForActiveSession(accessor: ServicesAccessor): Promise<void> {
+	const sessionsService = accessor.get(ISessionsService);
+	const sessionsProvidersService = accessor.get(ISessionsProvidersService);
+	const remoteAgentHostService = accessor.get(IRemoteAgentHostService);
+	const nativeHostService = accessor.get(INativeHostService);
+
+	const folderUri = getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService);
+	if (!folderUri) {
+		return nativeHostService.openWindow({ forceReuseWindow: true });
+	}
+	return nativeHostService.openWindow([{ folderUri }], { forceReuseWindow: true });
+}
 
 export class OpenSessionInVSCodeAction extends Action2 {
 	static readonly ID = 'agents.openSessionInVSCode';
@@ -51,41 +93,25 @@ export class OpenSessionInVSCodeAction extends Action2 {
 		const telemetryService = accessor.get(ITelemetryService);
 		logSessionsInteraction(telemetryService, 'openInVSCode');
 
-		const sessionsService = accessor.get(ISessionsService);
-		const sessionsProvidersService = accessor.get(ISessionsProvidersService);
-		const remoteAgentHostService = accessor.get(IRemoteAgentHostService);
-		const nativeHostService = accessor.get(INativeHostService);
+		return openEditorWindowForActiveSession(accessor);
+	}
+}
 
-		const folderUri = this.getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService);
-		if (!folderUri) {
-			return nativeHostService.openWindow({ forceReuseWindow: true });
-		}
-		return nativeHostService.openWindow([{ folderUri }], { forceReuseWindow: true });
+export class OpenWorkspaceInVSCodeAction extends Action2 {
+	static readonly ID = OPEN_WORKSPACE_IN_VSCODE_ACTION_ID;
+
+	constructor() {
+		super({
+			id: OpenWorkspaceInVSCodeAction.ID,
+			title: localize2('openWorkspaceInVSCode', 'Open Workspace'),
+			icon: Codicon.layout,
+			precondition: IsAuxiliaryWindowContext.toNegated(),
+		});
 	}
 
-	private getFolderUriToOpen(sessionsService: ISessionsService, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService): URI | undefined {
-		const activeSession = sessionsService.activeSession.get();
-		if (!activeSession) {
-			return undefined;
-		}
-
-		const workspace = activeSession.workspace.get();
-		const rawFolderUri = workspace?.folders[0]?.workingDirectory;
-		if (!rawFolderUri) {
-			return undefined;
-		}
-
-		if (rawFolderUri.scheme !== AGENT_HOST_SCHEME) {
-			return rawFolderUri;
-		}
-
-		const remoteAuthority = resolveRemoteAuthority(activeSession.providerId, sessionsProvidersService, remoteAgentHostService);
-		if (!remoteAuthority) {
-			return rawFolderUri;
-		}
-
-		const agentHostUri = fromAgentHostUri(rawFolderUri);
-		return agentHostUri.with({ authority: remoteAuthority, scheme: Schemas.vscodeRemote });
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		accessor.get(IStorageService).store(BACKBOARD_WORKSPACE_OPEN_ON_STARTUP_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
+		await openEditorWindowForActiveSession(accessor);
 	}
 }
 
@@ -137,7 +163,7 @@ export class OpenInVSCodeWidgetContribution extends Disposable implements IWorkb
 	) {
 		super();
 		this._register(actionViewItemService.register(Menus.TitleBarLeftLayout, OpenSessionInVSCodeAction.ID, (action, options) => {
-			return instantiationService.createInstance(OpenInVSCodeTitleBarWidget, action, options, OpenVSCodeWindowAction.ID);
+			return instantiationService.createInstance(OpenInVSCodeTitleBarWidget, action, options, OpenVSCodeWindowAction.ID, OpenWorkspaceInVSCodeAction.ID);
 		}, undefined));
 	}
 }

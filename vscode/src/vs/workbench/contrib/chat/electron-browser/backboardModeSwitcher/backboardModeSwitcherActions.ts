@@ -22,9 +22,10 @@ import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
 import { BACKBOARD_MODE_SWITCHER_COMMAND_ID, ChatConfiguration, OPEN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION } from '../../common/constants.js';
+import { OPEN_BACKBOARD_WORKSPACE_COMMAND_ID } from '../backboardWorkspace/backboardWorkspaceConstants.js';
+import { IBackboardWorkspaceService } from '../backboardWorkspace/backboardWorkspaceService.js';
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
-const OPEN_ADVANCED_WINDOW_COMMAND_ID = 'workbench.action.openOptimusWindow';
 const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
 
 export class BackboardModeSwitcherAction extends Action2 {
@@ -67,7 +68,6 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 	private triggerButton: HTMLButtonElement | undefined;
 	private currentIcon: HTMLElement | undefined;
 	private currentLabel: HTMLElement | undefined;
-	private preserveFocusOnMenuHide = false;
 
 	constructor(
 		action: IAction,
@@ -76,6 +76,7 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IEditorService private readonly editorService: IEditorService,
+		@IBackboardWorkspaceService private readonly workspaceService: IBackboardWorkspaceService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 	) {
 		super(undefined, action, options);
@@ -101,10 +102,11 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 
 		this._register(addDisposableListener(this.triggerButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
-			this.showMenu(false);
+			this.showMenu();
 		}));
 		this._register(addDisposableListener(this.triggerButton, EventType.KEY_DOWN, e => this.handleKeyDown(e)));
 		this._register(this.editorService.onDidActiveEditorChange(() => this.updateState()));
+		this._register(this.workspaceService.onDidChangeVisibility(() => this.updateState()));
 
 		this.updateState();
 	}
@@ -112,17 +114,17 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 	private handleKeyDown(event: KeyboardEvent): void {
 		if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
 			EventHelper.stop(event, true);
-			this.showMenu(true);
+			this.showMenu();
 		}
 	}
 
-	private showMenu(preserveFocusOnHide: boolean): void {
+	private showMenu(): void {
 		if (!this.triggerButton) {
 			return;
 		}
 
 		const agentsActive = this.isAgentsActive();
-		this.preserveFocusOnMenuHide = preserveFocusOnHide;
+		const workspaceActive = this.isWorkspaceActive();
 		this.triggerButton.setAttribute('aria-expanded', 'true');
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => this.triggerButton!,
@@ -130,68 +132,66 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 				toAction({
 					id: 'workbench.action.mode.editor',
 					label: localize('backboardModeSwitcher.editor', "Editor"),
-					checked: !agentsActive,
+					checked: !agentsActive && !workspaceActive,
 					run: () => this.openEditor(),
 				}),
 				toAction({
+					id: 'workbench.action.mode.workspace',
+					label: localize('backboardModeSwitcher.workspace', "Workspace"),
+					checked: workspaceActive,
+					run: () => this.openWorkspace(),
+				}),
+				toAction({
 					id: 'workbench.action.mode.agents',
-					label: localize('backboardModeSwitcher.agents', "Simple"),
+					label: localize('backboardModeSwitcher.agents', "Agents"),
 					checked: agentsActive,
 					run: () => this.openAgents(),
 				}),
-				toAction({
-					id: 'workbench.action.mode.advanced',
-					label: localize('backboardModeSwitcher.advanced', "Advanced"),
-					run: () => this.openAdvanced(),
-				}),
 			],
-			onHide: () => {
-				this.triggerButton?.setAttribute('aria-expanded', 'false');
-				if (!this.preserveFocusOnMenuHide) {
-					this.clearPointerFocus();
-				}
-				this.preserveFocusOnMenuHide = false;
-			},
+			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
 		});
 	}
 
 	private openAgents(): void {
-		this.clearPointerFocus();
-		this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID);
+		this.workspaceService.hide();
+		void this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID);
 	}
 
-	private openAdvanced(): void {
-		this.clearPointerFocus();
-		this.commandService.executeCommand(OPEN_ADVANCED_WINDOW_COMMAND_ID);
+	private openWorkspace(): void {
+		void this.commandService.executeCommand(OPEN_BACKBOARD_WORKSPACE_COMMAND_ID);
 	}
 
 	private openEditor(): void {
-		this.clearPointerFocus();
-		if (this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID) {
-			this.commandService.executeCommand(CLOSE_ACTIVE_EDITOR_COMMAND_ID);
-		}
-	}
-
-	private clearPointerFocus(): void {
-		if (this.preserveFocusOnMenuHide) {
+		if (this.isWorkspaceActive()) {
+			this.workspaceService.hide();
 			return;
 		}
 
-		this.triggerButton?.blur();
-		this.element?.classList.remove('active', 'focused');
+		if (this.isAgentsActive()) {
+			void this.commandService.executeCommand(CLOSE_ACTIVE_EDITOR_COMMAND_ID);
+		}
 	}
 
 	private isAgentsActive(): boolean {
 		return this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID;
 	}
 
+	private isWorkspaceActive(): boolean {
+		return this.workspaceService.visible;
+	}
+
 	private updateState(): void {
 		const agentsActive = this.isAgentsActive();
-		this.currentIcon?.classList.toggle('codicon-window', !agentsActive);
+		const workspaceActive = this.isWorkspaceActive();
+		this.currentIcon?.classList.toggle('codicon-window', !agentsActive && !workspaceActive);
+		this.currentIcon?.classList.toggle('codicon-layout', workspaceActive);
 		this.currentIcon?.classList.toggle('codicon-robot', agentsActive);
-		this.currentLabel?.replaceChildren(agentsActive
-			? localize('backboardModeSwitcher.agents', "Simple")
-			: localize('backboardModeSwitcher.editor', "Editor"));
+		const label = workspaceActive
+			? localize('backboardModeSwitcher.workspace', "Workspace")
+			: agentsActive
+				? localize('backboardModeSwitcher.agents', "Agents")
+				: localize('backboardModeSwitcher.editor', "Editor");
+		this.currentLabel?.replaceChildren(label);
 	}
 }
 
