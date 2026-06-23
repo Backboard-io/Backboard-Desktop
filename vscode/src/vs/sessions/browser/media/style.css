@@ -528,9 +528,9 @@
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
-	height: 38px;
-	min-height: 38px;
-	padding: 0 8px 0 6px;
+	height: 34px;
+	min-height: 34px;
+	padding: 0 6px 0 4px;
 	box-sizing: border-box;
 	background-color: var(--vscode-editor-background) !important;
 	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
@@ -540,22 +540,24 @@
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container {
 	min-width: 0;
 	flex: 1 1 auto;
+	overflow: hidden;
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar {
 	line-height: 22px;
+	min-width: 0;
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .actions-container,
 .agent-sessions-workbench .part.auxiliarybar > .title > .title-actions .monaco-action-bar .actions-container {
-	gap: 2px;
+	gap: 0;
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item {
 	display: flex;
 	align-items: center;
-	height: 28px;
-	padding: 0 8px;
+	height: 26px;
+	padding: 0 4px;
 	border-radius: 0;
 	background: transparent !important;
 	position: relative;
@@ -579,6 +581,9 @@
 	align-items: center;
 	height: 26px;
 	padding: 0;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
 	border-radius: 0;
 	background: transparent !important;
 	outline: none !important;
@@ -609,12 +614,12 @@
 
 .agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions {
 	flex: 0 0 auto;
-	padding-left: 6px;
+	padding-left: 2px;
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item {
-	width: 28px;
-	height: 28px;
+	width: 24px;
+	height: 26px;
 	margin-right: 0;
 }
 
@@ -624,8 +629,8 @@
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item .action-label {
-	width: 28px;
-	height: 28px;
+	width: 24px;
+	height: 26px;
 	padding: 0;
 	border-radius: 0;
 	display: flex;

@@ -289,7 +289,26 @@ export class BrowserViewFrameInspector extends Disposable {
 			throw new Error(`Element not found: ${elementId}`);
 		}
 
-		return this.extractNodeData({ objectId: result.objectId });
+		const data = await this.extractNodeData({ objectId: result.objectId });
+		return { ...data, elementId };
+	}
+
+	async setElementOuterHTML(elementId: string, outerHTML: string): Promise<void> {
+		const { exceptionDetails } = await this.connection.sendCommand('Runtime.evaluate', {
+			expression: `(() => {
+				const element = window.__vscode_helpers?.getElement(${JSON.stringify(elementId)});
+				if (!element) {
+					throw new Error('Element not found.');
+				}
+				element.outerHTML = ${JSON.stringify(outerHTML)};
+			})()`,
+			awaitPromise: true,
+			uniqueContextId: this._uniqueContextId,
+		}) as { exceptionDetails?: unknown };
+
+		if (exceptionDetails) {
+			throw new Error('Failed to edit element HTML.');
+		}
 	}
 
 	/**

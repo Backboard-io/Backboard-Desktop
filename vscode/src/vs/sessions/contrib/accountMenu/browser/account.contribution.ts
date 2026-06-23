@@ -28,6 +28,7 @@ import { Codicon } from '../../../../base/common/codicons.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { registerUpdateTitleBarMenuPlacement } from '../../../../workbench/contrib/update/browser/updateTitleBarEntry.js';
+import { BrowserEditorInput } from '../../../../workbench/contrib/browserView/common/browserEditorInput.js';
 import { ChatEntitlement, ChatEntitlementService, IChatEntitlementService } from '../../../../workbench/services/chat/common/chatEntitlementService.js';
 import { ChatStatusDashboard, IChatStatusDashboardOptions } from '../../../../workbench/contrib/chat/browser/chatStatus/chatStatusDashboard.js';
 import { HoverPosition } from '../../../../base/browser/ui/hover/hoverWidget.js';
@@ -40,6 +41,7 @@ import { IAuthenticationUsageService } from '../../../../workbench/services/auth
 import { IAuthenticationService } from '../../../../workbench/services/authentication/common/authentication.js';
 import { IChatDashboardService } from '../../../browser/chatDashboardService.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 
 // --- Account Menu Items --- //
 const AccountMenu = Menus.AccountMenu;
@@ -175,6 +177,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 		@IHoverService private readonly hoverService: IHoverService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IChatEntitlementService private readonly chatEntitlementService: ChatEntitlementService,
+		@IEditorService private readonly editorService: IEditorService,
 	) {
 		super(undefined, action, options);
 		this.lastState = getAccountTitleBarState({
@@ -190,6 +193,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 		this._register(this.chatEntitlementService.onDidChangeSentiment(() => this.renderState()));
 		this._register(this.chatEntitlementService.onDidChangeQuotaExceeded(() => this.renderState()));
 		this._register(this.chatEntitlementService.onDidChangeQuotaRemaining(() => this.renderState()));
+		this._register(this.editorService.onDidActiveEditorChange(() => this.updateBrowserVisibility()));
 		this.refreshAccount();
 	}
 
@@ -213,6 +217,7 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 		this.labelElement = append(container, $('span.sessions-account-titlebar-widget-label'));
 		this.badgeElement = append(container, $('span.sessions-account-titlebar-widget-badge'));
 
+		this.updateBrowserVisibility();
 		this.renderState();
 	}
 
@@ -297,6 +302,22 @@ class TitleBarAccountWidget extends BaseActionViewItem {
 		this.badgeElement.classList.toggle('dot-badge-warning', shouldShowDotBadge && state.dotBadge === 'warning');
 		this.badgeElement.classList.toggle('dot-badge-error', shouldShowDotBadge && state.dotBadge === 'error');
 		this.badgeElement.style.display = shouldShowDotBadge ? '' : 'none';
+	}
+
+	private updateBrowserVisibility(): void {
+		if (!this.container) {
+			return;
+		}
+
+		const isBrowserEditorActive =
+			this.editorService.activeEditor instanceof BrowserEditorInput ||
+			this.editorService.activeEditorPane?.input instanceof BrowserEditorInput;
+		this.container.style.display = isBrowserEditorActive ? 'none' : '';
+		this.container.setAttribute('aria-hidden', isBrowserEditorActive ? 'true' : 'false');
+		if (isBrowserEditorActive && this.isMenuVisible) {
+			this.hoverService.hideHover(true);
+			this.clickPanelDisposable.clear();
+		}
 	}
 
 	private getAvatarAltText(hasLoadedAvatar: boolean): string {

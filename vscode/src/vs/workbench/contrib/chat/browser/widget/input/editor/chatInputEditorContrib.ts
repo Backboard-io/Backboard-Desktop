@@ -16,7 +16,6 @@ import { IDecorationOptions } from '../../../../../../../editor/common/editorCom
 import { TrackedRangeStickiness } from '../../../../../../../editor/common/model.js';
 import { ILabelService } from '../../../../../../../platform/label/common/label.js';
 import { inputPlaceholderForeground } from '../../../../../../../platform/theme/common/colorRegistry.js';
-import { IThemeService } from '../../../../../../../platform/theme/common/themeService.js';
 import { IChatAgentCommand, IChatAgentData, IChatAgentService } from '../../../../common/participants/chatAgents.js';
 import { localize } from '../../../../../../../nls.js';
 import { chatSlashCommandBackground, chatSlashCommandForeground } from '../../../../common/widget/chatColors.js';
@@ -85,7 +84,6 @@ class InputEditorDecorations extends Disposable {
 	constructor(
 		private readonly widget: IChatWidget,
 		@ICodeEditorService private readonly codeEditorService: ICodeEditorService,
-		@IThemeService private readonly themeService: IThemeService,
 		@IChatAgentService private readonly chatAgentService: IChatAgentService,
 		@ILabelService private readonly labelService: ILabelService,
 		@ICustomizationHarnessService private readonly customizationHarnessService: ICustomizationHarnessService,
@@ -192,10 +190,8 @@ class InputEditorDecorations extends Disposable {
 		}));
 	}
 
-	private getPlaceholderColor(): string | undefined {
-		const theme = this.themeService.getColorTheme();
-		const transparentForeground = theme.getColor(inputPlaceholderForeground);
-		return transparentForeground?.toString();
+	private getPlaceholderColor() {
+		return themeColorFromId(inputPlaceholderForeground);
 	}
 
 	private triggerInputEditorDecorationsUpdate(): void {
