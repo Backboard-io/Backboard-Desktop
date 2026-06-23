@@ -802,6 +802,13 @@
 	border-color: var(--vscode-agentsChatInput-border) !important;
 }
 
+.monaco-workbench.agent-sessions-workbench .interactive-session .chat-input-container.working,
+.monaco-workbench .agent-sessions-workbench .interactive-session .chat-input-container.working {
+	/* The disabled input overlay shown during an active run inherits the shared
+		chat input's working state. Keep it clipped to the Agents composer frame. */
+	overflow: hidden;
+}
+
 /* Dim the focus border while the comet is animating so the bright focus
 	ring doesn't visually fight with the spinning gradient. */
 .agent-sessions-workbench .interactive-session .chat-input-container.working.focused {

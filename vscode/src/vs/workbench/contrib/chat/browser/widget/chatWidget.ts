@@ -2517,14 +2517,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			}
 		}
 
-		while (!this._viewModel && !this._store.isDisposed) {
-			await Event.toPromise(this.onDidChangeViewModel, this._store);
-		}
-
-		if (!this.viewModel) {
-			return;
-		}
-
 		// Check if a custom submit handler wants to handle this submission
 		if (this.viewOptions.submitHandler) {
 			const inputValue = !query ? this.getInput() : query.query;
@@ -2532,6 +2524,14 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			if (handled) {
 				return;
 			}
+		}
+
+		while (!this._viewModel && !this._store.isDisposed) {
+			await Event.toPromise(this.onDidChangeViewModel, this._store);
+		}
+
+		if (!this.viewModel) {
+			return;
 		}
 
 		this._onDidAcceptInput.fire();

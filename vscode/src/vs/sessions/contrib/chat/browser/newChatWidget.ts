@@ -15,7 +15,8 @@ import { isWeb } from '../../../../base/common/platform.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
-import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+import { IDialogService, IFileDialogService, type IPromptButton } from '../../../../platform/dialogs/common/dialogs.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
@@ -38,11 +39,13 @@ import { IChatModelReference, IChatService } from '../../../../workbench/contrib
 import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/chat/common/constants.js';
 import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../../workbench/common/theme.js';
 import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBackground } from '../../../common/theme.js';
+import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
 
 // #region --- New Chat Widget ---
 
 const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 180;
 const NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT = 260;
+type FirstSendWorkspaceChoice = 'selectDirectory' | 'desktop' | undefined;
 
 export class NewChatWidget extends Disposable {
 
@@ -79,6 +82,9 @@ export class NewChatWidget extends Disposable {
 		@ISessionsProvidersService private readonly sessionsProvidersService: ISessionsProvidersService,
 		@IChatService private readonly chatService: IChatService,
 		@IDialogService private readonly dialogService: IDialogService,
+		@IFileDialogService private readonly fileDialogService: IFileDialogService,
+		@IFileService private readonly fileService: IFileService,
+		@IPathService private readonly pathService: IPathService,
 	) {
 		super();
 		// On web (vscode.dev / insiders.vscode.dev), use {@link WebWorkspacePicker}
@@ -523,14 +529,22 @@ export class NewChatWidget extends Disposable {
 				session = this._session.get();
 			}
 			if (!session) {
-				await this.dialogService.confirm({
-					type: 'warning',
-					title: localize('newChatChooseWorkspaceTitle', "Choose a Workspace"),
-					message: localize('newChatChooseWorkspaceBeforeSending', "Choose a workspace before sending a message."),
-					primaryButton: localize({ key: 'newChatChooseWorkspaceOk', comment: ['&& denotes a mnemonic'] }, "&&OK"),
-				});
-				this._workspacePicker.showPicker();
-				return true;
+				const selectedFolder = await this._promptForFirstSendWorkspace(query);
+				if (!selectedFolder || !await this._selectWorkspaceForFirstSend(selectedFolder)) {
+					this._widget.setInput(query);
+					this._widget.focusInput();
+					return true;
+				}
+				session = this._session.get();
+				if (!session) {
+					this._widget.setInput(query);
+					this._widget.focusInput();
+					await this.dialogService.error(
+						localize('newChatWorkspaceUnavailable', "Backboard could not start a session in that directory."),
+						localize('newChatWorkspaceUnavailableDetail', "Choose a different directory and try again.")
+					);
+					return true;
+				}
 			}
 		}
 		const provider = this.sessionsProvidersService.getProvider(session.providerId);
@@ -556,6 +570,99 @@ export class NewChatWidget extends Disposable {
 			this._widget.setInput(query);
 		}
 		return true;
+	}
+
+	private async _promptForFirstSendWorkspace(query: string): Promise<URI | undefined> {
+		const buttons: IPromptButton<FirstSendWorkspaceChoice>[] = [
+			{
+				label: localize('newChatSelectDirectoryCancelButton', "Cancel"),
+				run: () => undefined,
+			},
+		];
+		if (!isWeb) {
+			buttons.push({
+				label: localize('newChatWorkInDesktopButton', "Work in Desktop"),
+				run: () => 'desktop',
+			});
+		}
+		buttons.push({
+			label: localize('newChatSelectDirectoryButton', "Select Directory..."),
+			run: () => 'selectDirectory',
+		});
+
+		const { result } = await this.dialogService.prompt<FirstSendWorkspaceChoice>({
+			type: 'question',
+			title: localize('newChatSelectDirectoryTitle', "Select a Directory"),
+			message: localize('newChatSelectDirectoryMessage', "Select a directory for Backboard to work in."),
+			detail: localize('newChatSelectDirectoryDetail', "Backboard needs a folder before it can read files, run commands, or make changes."),
+			buttons,
+		});
+
+		switch (result) {
+			case 'selectDirectory':
+				return this._pickWorkspaceFolderForFirstSend();
+			case 'desktop':
+				return this._createDesktopWorkspaceFolder(query);
+			default:
+				return undefined;
+		}
+	}
+
+	private async _pickWorkspaceFolderForFirstSend(): Promise<URI | undefined> {
+		const result = await this.fileDialogService.showOpenDialog({
+			title: localize('newChatSelectDirectoryDialogTitle', "Select a Directory for Backboard"),
+			openLabel: localize('newChatSelectDirectoryOpenLabel', "Use Directory"),
+			canSelectFolders: true,
+			canSelectFiles: false,
+			canSelectMany: false,
+		});
+		return result?.[0];
+	}
+
+	private async _createDesktopWorkspaceFolder(query: string): Promise<URI | undefined> {
+		try {
+			const home = await this.pathService.userHome({ preferLocal: true });
+			const desktop = URI.joinPath(home, 'Desktop');
+			const folderUri = await this._getAvailableDesktopWorkspaceFolder(desktop, query);
+			await this.fileService.createFolder(folderUri);
+			return folderUri;
+		} catch (error) {
+			this.logService.error('[NewChatWidget] Failed to create Desktop workspace folder', error);
+			await this.dialogService.error(
+				localize('newChatCreateDesktopWorkspaceFailed', "Backboard could not create a folder on Desktop."),
+				localize('newChatCreateDesktopWorkspaceFailedDetail', "Select a directory manually and try again.")
+			);
+			return undefined;
+		}
+	}
+
+	private async _getAvailableDesktopWorkspaceFolder(desktop: URI, query: string): Promise<URI> {
+		const baseName = this._getDesktopWorkspaceBaseName(query);
+		for (let index = 1; index <= 100; index++) {
+			const name = index === 1 ? baseName : `${baseName} ${index}`;
+			const candidate = URI.joinPath(desktop, name);
+			if (!await this.fileService.exists(candidate)) {
+				return candidate;
+			}
+		}
+		return URI.joinPath(desktop, `${baseName} ${Date.now()}`);
+	}
+
+	private _getDesktopWorkspaceBaseName(query: string): string {
+		const words = query
+			.replace(/[^a-zA-Z0-9]+/g, ' ')
+			.trim()
+			.split(/\s+/)
+			.filter(Boolean)
+			.slice(0, 4);
+		const suffix = words.map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+		return suffix ? `Backboard ${suffix}` : 'Backboard Project';
+	}
+
+	private async _selectWorkspaceForFirstSend(folderUri: URI): Promise<boolean> {
+		this._workspacePicker.setSelectedWorkspace(folderUri, { fireEvent: false });
+		await this._onWorkspaceSelected(folderUri);
+		return !!this._session.get();
 	}
 
 	private async _requestFolderTrust(folderUri: URI): Promise<boolean> {
