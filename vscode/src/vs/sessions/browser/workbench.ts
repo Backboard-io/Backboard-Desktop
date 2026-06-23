@@ -1274,13 +1274,13 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const contentHeight = Math.max(0, height - titleBarHeight);
 		const topRightHeight = Math.max(0, contentHeight - panelSize);
 		const minimumAuxiliaryBarWidth = this.partVisibility.editor
-			? Math.min(280, Math.max(180, Math.floor(rightWorkColumnWidth * 0.36)))
+			? Math.min(180, Math.max(120, Math.floor(rightWorkColumnWidth * 0.22)))
 			: rightWorkColumnWidth;
 		const maximumAuxiliaryBarWidth = this.partVisibility.editor
-			? Math.max(minimumAuxiliaryBarWidth, Math.min(380, Math.floor(rightWorkColumnWidth * 0.48)))
+			? Math.max(minimumAuxiliaryBarWidth, Math.min(260, Math.floor(rightWorkColumnWidth * 0.32)))
 			: rightWorkColumnWidth;
 		const defaultAuxiliaryBarWidth = this.partVisibility.editor
-			? Math.min(maximumAuxiliaryBarWidth, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.38)))
+			? Math.min(maximumAuxiliaryBarWidth, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.24)))
 			: rightWorkColumnWidth;
 		const auxiliaryBarSize = this.partVisibility.auxiliaryBar
 			? Math.min(maximumAuxiliaryBarWidth, Math.max(minimumAuxiliaryBarWidth, this._savedPartSizes.auxiliaryBar ?? defaultAuxiliaryBarWidth))
@@ -1776,9 +1776,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const currentEditorSize = this.workbenchGrid.getViewSize(this.editorPartView);
 		const auxiliaryBarSize = this.workbenchGrid.getViewSize(this.auxiliaryBarPartView);
 		const rightWorkColumnWidth = currentEditorSize.width + (this.partVisibility.auxiliaryBar ? auxiliaryBarSize.width : 0);
-		const minimumAuxiliaryBarWidth = Math.min(280, Math.max(180, Math.floor(rightWorkColumnWidth * 0.36)));
+		const minimumAuxiliaryBarWidth = Math.min(180, Math.max(120, Math.floor(rightWorkColumnWidth * 0.22)));
 		const targetAuxiliaryBarWidth = this.partVisibility.auxiliaryBar
-			? Math.min(380, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.38)))
+			? Math.min(260, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.24)))
 			: 0;
 		const targetEditorWidth = Math.max(0, rightWorkColumnWidth - targetAuxiliaryBarWidth);
 		if (this.partVisibility.auxiliaryBar) {

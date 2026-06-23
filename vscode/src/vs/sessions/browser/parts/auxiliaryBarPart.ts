@@ -56,7 +56,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	// Action ID for run script - defined here to avoid layering issues
 	private static readonly RUN_SCRIPT_ACTION_ID = 'workbench.action.agentSessions.runScript';
 	private static readonly RUN_SCRIPT_DROPDOWN_MENU_ID = MenuId.for('AgentSessionsRunScriptDropdown');
-	private static readonly DEFAULT_MINIMUM_WIDTH = 270;
+	private static readonly DEFAULT_MINIMUM_WIDTH = 120;
 
 	// Run script dropdown management
 	private readonly _runScriptDropdown = this._register(new MutableDisposable<DropdownWithPrimaryActionViewItem>());
@@ -90,7 +90,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 			return undefined;
 		}
 
-		return Math.max(width, 340);
+		return Math.max(width, 220);
 	}
 
 	readonly priority = LayoutPriority.Low;

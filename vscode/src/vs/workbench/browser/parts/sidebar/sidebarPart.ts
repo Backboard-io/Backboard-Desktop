@@ -5,7 +5,7 @@
 
 import './media/sidebarpart.css';
 import './sidebarActions.js';
-import { $, addDisposableListener, append, EventType, prepend } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, EventType } from '../../../../base/browser/dom.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { ActivityBarPosition, IWorkbenchLayoutService, LayoutSettings, Parts, Position as SideBarPosition } from '../../../services/layout/browser/layoutService.js';
 import { SidebarFocusContext, ActiveViewletContext } from '../../../common/contextkeys.js';
@@ -132,13 +132,11 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		this.registerActions();
 	}
 
-	protected override createTitleArea(parent: HTMLElement): HTMLElement | undefined {
-		const titleArea = super.createTitleArea(parent);
-		if (!titleArea) {
-			return undefined;
-		}
+	override create(parent: HTMLElement): void {
+		super.create(parent);
 
-		const navigation = prepend(titleArea, $('.sidebar-activity-navigation'));
+		const navigation = $('.sidebar-activity-navigation-header');
+		this.setHeaderArea(navigation);
 		const entries: readonly { label: string; icon: string; command: string }[] = [
 			{ label: localize('sidebarActivityExplorer', "Explorer"), icon: Codicon.folderOpened.id, command: 'workbench.view.explorer' },
 			{ label: localize('sidebarActivitySearch', "Search"), icon: Codicon.searchSparkle.id, command: 'workbench.view.search' },
@@ -155,8 +153,6 @@ export class SidebarPart extends AbstractPaneCompositePart {
 			icon.setAttribute('aria-hidden', 'true');
 			this._register(addDisposableListener(button, EventType.CLICK, () => this.commandService.executeCommand(entry.command)));
 		}
-
-		return titleArea;
 	}
 
 	private onDidChangeAutoHideViewContainers(e: { before: number; after: number }): void {

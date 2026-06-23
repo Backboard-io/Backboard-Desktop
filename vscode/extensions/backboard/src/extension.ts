@@ -2656,7 +2656,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.composerCard:hover { border-color: color-mix(in srgb, var(--bb-border) 60%, var(--bb-primary) 20%); box-shadow: 0 2px 8px color-mix(in srgb, var(--bb-shadow) 60%, transparent); }
 		.composerCard:focus-within { border-color: color-mix(in srgb, var(--bb-primary) 62%, var(--bb-border)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--bb-primary) 14%, transparent), 0 2px 8px color-mix(in srgb, var(--bb-shadow) 50%, transparent); }
 		textarea { width: 100%; min-height: 44px; max-height: 132px; box-sizing: border-box; resize: vertical; padding: 0; border: 0; outline: 0; line-height: 20px; background: transparent; color: var(--bb-text); font-family: var(--vscode-editor-font-family, "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace); font-size: 13px; }
-		textarea::placeholder { color: var(--bb-muted); }
+		textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--bb-muted)); }
 		.composerRule { display: none; }
 		.composerBar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 24px; padding: 0; overflow: hidden; }
 		.barLeft, .barRight { display: flex; align-items: center; min-width: 0; }
@@ -2673,7 +2673,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		.stopButton.visible { display: inline-grid; }
 		.stopButton:hover { color: var(--vscode-errorForeground, var(--bb-danger)); background: color-mix(in srgb, var(--bb-danger) 12%, transparent); border-radius: 4px; }
 		.featureButton.active { color: var(--bb-primary); }
-		.usageFeatureButton.hasUsage { color: var(--bb-text); }
 		.composerCard.recording { border-color: var(--bb-danger); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bb-danger) 32%, transparent); }
 		.sendButton.ready { color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); box-shadow: 0 1px 3px color-mix(in srgb, var(--bb-primary) 28%, transparent); transition: background .15s ease, box-shadow .15s ease; }
 		.sendButton.ready:hover { background: var(--vscode-button-hoverBackground, color-mix(in srgb, var(--bb-primary) 86%, var(--bb-text))); box-shadow: 0 2px 6px color-mix(in srgb, var(--bb-primary) 36%, transparent); }
@@ -2835,7 +2834,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 							<div class="barRight">
 								<button id="webBtn" class="iconButton featureButton" type="button" title="Web search" aria-label="Web search"><span class="codicon codicon-globe"></span></button>
 								<button id="imageBtn" class="iconButton featureButton" type="button" title="Image output" aria-label="Image output"><span class="codicon codicon-device-camera-video"></span></button>
-								<button id="usageBtn" class="iconButton featureButton usageFeatureButton" type="button" title="Usage details" aria-label="Usage details"><span class="codicon codicon-pulse"></span></button>
 								<button id="voiceBtn" class="iconButton" type="button" title="Start speech-to-text" aria-label="Start speech-to-text"><span class="codicon codicon-mic"></span></button>
 								<button id="stopBtn" class="iconButton stopButton" type="button" title="Stop generation" aria-label="Stop generation"><span class="codicon codicon-debug-stop"></span></button>
 								<button id="sendBtn" class="iconButton sendButton" type="submit" title="Send" aria-label="Send" disabled><span class="codicon codicon-send"></span></button>
@@ -2887,7 +2885,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			model: document.getElementById('modelBtn'),
 			web: document.getElementById('webBtn'),
 			image: document.getElementById('imageBtn'),
-			usage: document.getElementById('usageBtn'),
 			voice: document.getElementById('voiceBtn'),
 			stop: document.getElementById('stopBtn'),
 			send: document.getElementById('sendBtn')
@@ -3564,10 +3561,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			setActive(buttons.model, activePopover === 'model');
 			setActive(buttons.web, activePopover === 'web' || hasWeb);
 			setActive(buttons.image, activePopover === 'image' || hasImage);
-			setActive(buttons.usage, activePopover === 'usage');
-			buttons.usage.classList.toggle('hasUsage', !!latestUsage);
-			buttons.usage.title = latestUsage ? 'Usage: ' + latestUsage.summary : 'Usage details';
-			buttons.usage.setAttribute('aria-label', buttons.usage.title);
 			setActive(buttons.voice, voiceRecording);
 			buttons.stop.classList.toggle('visible', runInProgress);
 			buttons.stop.disabled = !runInProgress || stopRequested;
@@ -3929,8 +3922,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				reasoning: ['Mode and Reasoning', renderReasoningPopover],
 				web: ['Web', renderWebPopover],
 				image: ['Image', renderImagePopover],
-				voice: ['Voice', renderVoicePopover],
-				usage: ['Usage', renderUsagePopover]
+				voice: ['Voice', renderVoicePopover]
 			};
 			const renderer = renderers[name] || renderers.model;
 			popover.dataset.kind = name;
@@ -4082,12 +4074,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		buttons.model.addEventListener('click', event => openPopover('model', event.currentTarget));
 		buttons.web.addEventListener('click', event => openPopover('web', event.currentTarget));
 		buttons.image.addEventListener('click', event => openPopover('image', event.currentTarget));
-		buttons.usage.addEventListener('click', event => {
-			requestUsageSnapshot();
-			openPopover('usage', event.currentTarget);
-		});
-		buttons.usage.addEventListener('mouseenter', event => openPopover('usage', event.currentTarget));
-		buttons.usage.addEventListener('focus', event => openPopover('usage', event.currentTarget));
 		buttons.voice.addEventListener('click', toggleVoiceCapture);
 		buttons.stop.addEventListener('click', () => {
 			if (!runInProgress) {

@@ -604,13 +604,7 @@ export class BackboardUsageMetricsAction extends Action2 {
 			tooltip: localize('interactive.backboardUsageMetrics.tooltip', "Show model, token, cost, and speed metrics"),
 			category: CHAT_CATEGORY,
 			icon: Codicon.dashboard,
-			f1: false,
-			menu: {
-				id: MenuId.ChatInputStatus,
-				order: 1,
-				group: 'navigation',
-				when: ChatContextKeys.inQuickChat.negate()
-			}
+			f1: false
 		});
 	}
 
