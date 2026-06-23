@@ -15,17 +15,21 @@ import { InMemoryFileSystemProvider } from '../../../../../platform/files/common
 import { Severity } from '../../../../../platform/notification/common/notification.js';
 import type { IUserDataProfile } from '../../../../../platform/userDataProfile/common/userDataProfile.js';
 import type { IUserDataProfileService } from '../../../../services/userDataProfile/common/userDataProfile.js';
+import { IExtensionGalleryService, IExtensionInfo, IExtensionManagementService, IGalleryExtension, ILocalExtension, InstallOptions } from '../../../../../platform/extensionManagement/common/extensionManagement.js';
+import { TargetPlatform } from '../../../../../platform/extensions/common/extensions.js';
 import { NullLogService } from '../../../../../platform/log/common/log.js';
 import { OnboardingVariationA } from '../../browser/onboardingVariationA.js';
 
 type ImportHarnessObject = {
 	fileService: IFileService;
 	userDataProfileService: IUserDataProfileService;
+	extensionManagementService: IExtensionManagementService;
+	extensionGalleryService: IExtensionGalleryService;
 	notificationService: { notify(notification: { severity: Severity; message: string; source?: string }): void };
 	accessibilityService: { alert(message: string): void };
 	_logAction(action: string, stepOverride?: unknown, argument?: string): void;
 	_nextStep(): void;
-	_importSettingsFromSource(source: unknown, button: HTMLButtonElement): Promise<void>;
+	_importSettingsFromSource(source: unknown, button: HTMLButtonElement, selection?: { settings: boolean; keybindings: boolean; extensions: boolean }): Promise<void>;
 };
 
 suite('Backboard onboarding settings import', () => {
@@ -33,6 +37,7 @@ suite('Backboard onboarding settings import', () => {
 
 	let fileService: FileService;
 	let sourceUserDataHome: URI;
+	let sourceExtensionsHome: URI;
 	let profile: IUserDataProfile;
 
 	setup(async () => {
@@ -40,6 +45,7 @@ suite('Backboard onboarding settings import', () => {
 		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
 
 		sourceUserDataHome = URI.from({ scheme: Schemas.inMemory, path: '/External/Code/User' });
+		sourceExtensionsHome = URI.from({ scheme: Schemas.inMemory, path: '/External/.vscode/extensions' });
 		const profileLocation = URI.from({ scheme: Schemas.inMemory, path: '/Backboard/User' });
 		profile = {
 			id: 'default',
@@ -64,10 +70,28 @@ suite('Backboard onboarding settings import', () => {
 		const testObject = Object.create(OnboardingVariationA.prototype) as ImportHarnessObject;
 
 		const notifications: Array<{ severity: Severity; message: string; source?: string }> = [];
+		const installedExtensions: Array<{ extension: IGalleryExtension; options: InstallOptions | undefined }> = [];
 		let advanced = false;
 
 		testObject.fileService = fileService;
 		testObject.userDataProfileService = { currentProfile: profile } as Partial<IUserDataProfileService> as IUserDataProfileService;
+		testObject.extensionGalleryService = {
+			isEnabled: () => true,
+			getExtensions: async (extensionInfos: ReadonlyArray<IExtensionInfo>) => extensionInfos.map(extensionInfo => ({
+				type: 'gallery',
+				identifier: { id: extensionInfo.id, uuid: extensionInfo.uuid ?? `${extensionInfo.id}-uuid` },
+				version: '1.0.0',
+			} as Partial<IGalleryExtension> as IGalleryExtension)),
+		} as Partial<IExtensionGalleryService> as IExtensionGalleryService;
+		testObject.extensionManagementService = {
+			getInstalled: async () => [],
+			getTargetPlatform: async () => TargetPlatform.UNIVERSAL,
+			canInstall: async () => true,
+			installFromGallery: async (extension: IGalleryExtension, options?: InstallOptions) => {
+				installedExtensions.push({ extension, options });
+				return { identifier: extension.identifier } as Partial<ILocalExtension> as ILocalExtension;
+			},
+		} as Partial<IExtensionManagementService> as IExtensionManagementService;
 		testObject.notificationService = { notify: (notification: { severity: Severity; message: string; source?: string }) => notifications.push(notification) };
 		testObject.accessibilityService = { alert: () => undefined };
 		testObject._logAction = () => undefined;
@@ -76,6 +100,7 @@ suite('Backboard onboarding settings import', () => {
 		return {
 			testObject,
 			notifications,
+			installedExtensions,
 			get advanced() { return advanced; },
 		};
 	}
@@ -87,6 +112,7 @@ suite('Backboard onboarding settings import', () => {
 			description: 'Import test source',
 			icon: 'onboarding-vscode.png',
 			userDataHome: sourceUserDataHome,
+			extensionsHome: sourceExtensionsHome,
 		};
 	}
 
@@ -126,6 +152,116 @@ suite('Backboard onboarding settings import', () => {
 		assert.ok(harness.notifications[0].message.includes('Settings'));
 		assert.ok(harness.notifications[0].message.includes('Keyboard Shortcuts'));
 		assert.ok(harness.notifications[0].message.includes('Snippets'));
+		assert.strictEqual(harness.installedExtensions.length, 0);
+	});
+
+	test('imports only the selected settings buckets from the selected source', async () => {
+		const settings = '{ "editor.fontSize": 17 }\n';
+		const keybindings = '[{ "key": "cmd+k cmd+i", "command": "editor.action.showHover" }]\n';
+
+		await fileService.createFolder(sourceUserDataHome);
+		await fileService.writeFile(joinPath(sourceUserDataHome, 'settings.json'), VSBuffer.fromString(settings));
+		await fileService.writeFile(joinPath(sourceUserDataHome, 'keybindings.json'), VSBuffer.fromString(keybindings));
+
+		const harness = createImportHarness();
+		const button = document.createElement('button');
+
+		await harness.testObject._importSettingsFromSource(source(), button, { settings: false, keybindings: true, extensions: false });
+
+		assert.strictEqual(harness.advanced, true, JSON.stringify(harness.notifications));
+		assert.strictEqual(await fileService.exists(profile.settingsResource), false);
+		assert.strictEqual(await read(profile.keybindingsResource), keybindings);
+		assert.strictEqual(harness.installedExtensions.length, 0);
+		assert.strictEqual(harness.notifications.length, 1);
+		assert.strictEqual(harness.notifications[0].severity, Severity.Info);
+		assert.ok(!harness.notifications[0].message.includes('Settings'));
+		assert.ok(harness.notifications[0].message.includes('Keyboard Shortcuts'));
+		assert.ok(!harness.notifications[0].message.includes('Extensions'));
+	});
+
+	test('imports selected extensions from the selected source when marketplace install is available', async () => {
+		await fileService.createFolder(sourceExtensionsHome);
+		await fileService.writeFile(joinPath(sourceExtensionsHome, 'extensions.json'), VSBuffer.fromString(JSON.stringify([
+			{
+				identifier: { id: 'Example.Theme', uuid: 'theme-uuid' },
+				metadata: { isPreReleaseVersion: true },
+			},
+			{
+				identifier: { id: 'anysphere.remote-ssh', uuid: 'cursor-remote-ssh-uuid' },
+			},
+			{
+				identifier: { id: 'anthropic.claude-code' },
+			},
+			{
+				identifier: { id: 'publisher.extension' },
+				isBuiltin: true,
+			},
+		])));
+
+		const harness = createImportHarness();
+		const button = document.createElement('button');
+
+		await harness.testObject._importSettingsFromSource(source(), button, { settings: false, keybindings: false, extensions: true });
+
+		assert.deepStrictEqual(harness.installedExtensions.map(({ extension, options }) => ({
+			id: extension.identifier.id,
+			profileLocation: options?.profileLocation?.toString(),
+			installPreReleaseVersion: options?.installPreReleaseVersion,
+			skipWalkthrough: options?.context?.skipWalkthrough,
+			skipPublisherTrust: options?.context?.skipPublisherTrust,
+		})), [
+			{
+				id: 'Example.Theme',
+				profileLocation: profile.extensionsResource.toString(),
+				installPreReleaseVersion: true,
+				skipWalkthrough: true,
+				skipPublisherTrust: true,
+			},
+			{
+				id: 'ms-vscode-remote.remote-ssh',
+				profileLocation: profile.extensionsResource.toString(),
+				installPreReleaseVersion: undefined,
+				skipWalkthrough: true,
+				skipPublisherTrust: true,
+			},
+			{
+				id: 'anthropic.claude-code',
+				profileLocation: profile.extensionsResource.toString(),
+				installPreReleaseVersion: undefined,
+				skipWalkthrough: true,
+				skipPublisherTrust: true,
+			},
+		]);
+		assert.strictEqual(harness.advanced, true, JSON.stringify(harness.notifications));
+		assert.strictEqual(harness.notifications.length, 1);
+		assert.strictEqual(harness.notifications[0].severity, Severity.Info);
+		assert.ok(harness.notifications[0].message.includes('Extensions'));
+	});
+
+	test('falls back to scanning extension folders when source metadata is missing', async () => {
+		await fileService.createFolder(joinPath(sourceExtensionsHome, 'sample.extension-1.0.0'));
+		await fileService.writeFile(joinPath(sourceExtensionsHome, 'sample.extension-1.0.0', 'package.json'), VSBuffer.fromString(JSON.stringify({
+			publisher: 'sample',
+			name: 'extension',
+			__metadata: { preRelease: true },
+		})));
+
+		const harness = createImportHarness();
+		const button = document.createElement('button');
+
+		await harness.testObject._importSettingsFromSource(source(), button, { settings: false, keybindings: false, extensions: true });
+
+		assert.deepStrictEqual(harness.installedExtensions.map(({ extension, options }) => ({
+			id: extension.identifier.id,
+			installPreReleaseVersion: options?.installPreReleaseVersion,
+		})), [
+			{
+				id: 'sample.extension',
+				installPreReleaseVersion: true,
+			},
+		]);
+		assert.strictEqual(harness.advanced, true, JSON.stringify(harness.notifications));
+		assert.ok(harness.notifications[0].message.includes('Extensions'));
 	});
 
 	test('warns and stays on the import step when the selected source has nothing to import', async () => {
@@ -143,6 +279,6 @@ suite('Backboard onboarding settings import', () => {
 		assert.strictEqual(await fileService.exists(profile.snippetsHome), false);
 		assert.strictEqual(harness.notifications.length, 1);
 		assert.strictEqual(harness.notifications[0].severity, Severity.Warning);
-		assert.ok(harness.notifications[0].message.includes('No Cursor settings were found'));
+		assert.ok(harness.notifications[0].message.includes('No selected Cursor items were found'));
 	});
 });
