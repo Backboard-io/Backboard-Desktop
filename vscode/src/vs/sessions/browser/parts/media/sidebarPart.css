@@ -4,8 +4,20 @@
  *--------------------------------------------------------------------------------------------*/
 
 /* Hide traffic light spacer in fullscreen (traffic lights are not shown) */
-.monaco-workbench.fullscreen .part.sidebar .window-controls-container {
+.monaco-workbench.fullscreen .part.sidebar .mac-window-controls-spacer {
 	display: none;
+}
+
+.agent-sessions-workbench.mac .part.sidebar .mac-window-controls-spacer {
+	-webkit-app-region: drag;
+	background: transparent;
+	border: 0;
+	box-shadow: none;
+	outline: 0;
+	overflow: hidden;
+	pointer-events: none;
+	visibility: hidden;
+	width: 70px;
 }
 
 /* Make the sidebar title area draggable to move the window */

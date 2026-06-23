@@ -32,10 +32,9 @@ import { Separator } from '../../../base/common/actions.js';
 import { IHoverService } from '../../../platform/hover/browser/hover.js';
 import { Extensions } from '../../../workbench/browser/panecomposite.js';
 import { Menus } from '../menus.js';
-import { $, append, getWindowId, prepend } from '../../../base/browser/dom.js';
+import { $, append, getWindow, getWindowId, prepend } from '../../../base/browser/dom.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../platform/actions/browser/toolbar.js';
 import { isFullscreen, onDidChangeFullscreen } from '../../../base/browser/browser.js';
-import { mainWindow } from '../../../base/browser/window.js';
 import { IConfigurationService } from '../../../platform/configuration/common/configuration.js';
 import { hasNativeTitlebar, getTitleBarStyle } from '../../../platform/window/common/window.js';
 import { isMacintosh, isNative, isWeb } from '../../../base/common/platform.js';
@@ -158,8 +157,7 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		// overlay the top-left corner. Add a fixed-width spacer inside the
 		// title area to push content horizontally past the traffic lights.
 		if (titleArea && isMacintosh && isNative && !hasNativeTitlebar(this.configurationService, getTitleBarStyle(this.configurationService))) {
-			const spacer = $('div.window-controls-container');
-			spacer.style.width = '70px';
+			const spacer = $('div.mac-window-controls-spacer');
 			spacer.style.height = '100%';
 			spacer.style.flexShrink = '0';
 			spacer.style.order = '-1'; // match global-actions-left order so DOM order is respected
@@ -167,11 +165,14 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 			// Hide spacer in fullscreen (traffic lights are not shown)
 			const updateSpacerVisibility = () => {
-				spacer.style.display = isFullscreen(mainWindow) ? 'none' : '';
+				const targetWindow = getWindow(titleArea);
+				const fullscreen = isFullscreen(targetWindow);
+				spacer.style.display = fullscreen ? 'none' : '';
+				spacer.style.width = fullscreen ? '0' : '70px';
 			};
 			updateSpacerVisibility();
 			this._register(onDidChangeFullscreen(windowId => {
-				if (windowId === getWindowId(mainWindow)) {
+				if (windowId === getWindowId(getWindow(titleArea))) {
 					updateSpacerVisibility();
 				}
 			}));

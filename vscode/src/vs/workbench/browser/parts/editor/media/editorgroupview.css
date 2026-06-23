@@ -154,6 +154,37 @@
 	width: 100%;
 }
 
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-editor-empty-state {
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	min-height: 180px;
+	padding: 24px;
+	text-align: center;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-editor-empty-state-title {
+	margin: 0;
+	color: var(--vscode-editor-foreground);
+	font-size: 15px;
+	font-weight: 600;
+	line-height: 20px;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-editor-empty-state-message {
+	max-width: 360px;
+	margin: 8px 0 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	font-weight: 400;
+	line-height: 16px;
+	letter-spacing: 0;
+}
+
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-page {
 	box-sizing: border-box;
 	display: flex;

@@ -13,6 +13,14 @@
 	white-space: nowrap;
 }
 
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.backboard-mode-titlebar-widget.active,
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.backboard-mode-titlebar-widget.focused,
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.backboard-mode-titlebar-widget:focus,
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.backboard-mode-titlebar-widget:focus-visible {
+	background: transparent !important;
+	outline: none !important;
+}
+
 .monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger {
 	all: unset;
 	box-sizing: border-box;
@@ -33,9 +41,17 @@
 	background-color: var(--vscode-toolbar-hoverBackground);
 }
 
+.monaco-workbench .backboard-mode-titlebar-widget.active > .backboard-mode-titlebar-widget-trigger,
+.monaco-workbench .backboard-mode-titlebar-widget.focused > .backboard-mode-titlebar-widget-trigger,
+.monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger:focus,
+.monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger:active {
+	background: transparent !important;
+	outline: none !important;
+	box-shadow: none !important;
+}
+
 .monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger:focus-visible {
-	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: -1px;
+	outline: none;
 }
 
 .monaco-workbench .backboard-mode-titlebar-widget-icon {

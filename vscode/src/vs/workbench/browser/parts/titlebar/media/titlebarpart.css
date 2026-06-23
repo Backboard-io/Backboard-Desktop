@@ -411,6 +411,10 @@
 	margin-left: 72px;
 }
 
+.monaco-workbench.mac:not(.web).fullscreen .part.titlebar > .titlebar-container > .titlebar-left > .titlebar-left-toolbar-container {
+	margin-left: 4px;
+}
+
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .titlebar-left-toolbar-container.has-no-actions {
 	display: none;
 }

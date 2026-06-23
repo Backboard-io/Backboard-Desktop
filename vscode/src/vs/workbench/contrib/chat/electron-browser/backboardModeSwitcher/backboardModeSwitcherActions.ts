@@ -66,6 +66,7 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 	private triggerButton: HTMLButtonElement | undefined;
 	private currentIcon: HTMLElement | undefined;
 	private currentLabel: HTMLElement | undefined;
+	private preserveFocusOnMenuHide = false;
 
 	constructor(
 		action: IAction,
@@ -99,7 +100,7 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 
 		this._register(addDisposableListener(this.triggerButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
-			this.showMenu();
+			this.showMenu(false);
 		}));
 		this._register(addDisposableListener(this.triggerButton, EventType.KEY_DOWN, e => this.handleKeyDown(e)));
 		this._register(this.editorService.onDidActiveEditorChange(() => this.updateState()));
@@ -110,16 +111,17 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 	private handleKeyDown(event: KeyboardEvent): void {
 		if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
 			EventHelper.stop(event, true);
-			this.showMenu();
+			this.showMenu(true);
 		}
 	}
 
-	private showMenu(): void {
+	private showMenu(preserveFocusOnHide: boolean): void {
 		if (!this.triggerButton) {
 			return;
 		}
 
 		const agentsActive = this.isAgentsActive();
+		this.preserveFocusOnMenuHide = preserveFocusOnHide;
 		this.triggerButton.setAttribute('aria-expanded', 'true');
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => this.triggerButton!,
@@ -137,18 +139,35 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 					run: () => this.openAgents(),
 				}),
 			],
-			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
+			onHide: () => {
+				this.triggerButton?.setAttribute('aria-expanded', 'false');
+				if (!this.preserveFocusOnMenuHide) {
+					this.clearPointerFocus();
+				}
+				this.preserveFocusOnMenuHide = false;
+			},
 		});
 	}
 
 	private openAgents(): void {
+		this.clearPointerFocus();
 		this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID);
 	}
 
 	private openEditor(): void {
+		this.clearPointerFocus();
 		if (this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID) {
 			this.commandService.executeCommand(CLOSE_ACTIVE_EDITOR_COMMAND_ID);
 		}
+	}
+
+	private clearPointerFocus(): void {
+		if (this.preserveFocusOnMenuHide) {
+			return;
+		}
+
+		this.triggerButton?.blur();
+		this.element?.classList.remove('active', 'focused');
 	}
 
 	private isAgentsActive(): boolean {

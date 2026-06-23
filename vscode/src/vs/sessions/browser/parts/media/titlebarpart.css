@@ -155,9 +155,18 @@
 	box-shadow: none;
 }
 
-/* macOS native: the spacer uses window-controls-container but should not block dragging */
-.agent-sessions-workbench.mac .part.titlebar .window-controls-container {
+/* macOS native: invisible traffic-light spacer, hidden in fullscreen by TS/CSS. */
+.agent-sessions-workbench.mac .part.titlebar .mac-window-controls-spacer {
 	-webkit-app-region: drag;
+	background: transparent;
+	border: 0;
+	box-shadow: none;
+	outline: 0;
+	overflow: hidden;
+	pointer-events: none;
+	visibility: hidden;
+	width: 70px;
+	height: 100%;
 }
 
 /* ---- Phone Layout: Minimal Titlebar ---- */
@@ -174,7 +183,7 @@
 }
 
 /* Hide the window controls spacer on phone (no native traffic lights on mobile) */
-.agent-sessions-workbench.phone-layout .part.titlebar > .sessions-titlebar-container > .titlebar-left > .window-controls-container {
+.agent-sessions-workbench.phone-layout .part.titlebar > .sessions-titlebar-container > .titlebar-left > .mac-window-controls-spacer {
 	display: none !important;
 }
 

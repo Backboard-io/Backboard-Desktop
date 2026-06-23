@@ -161,19 +161,20 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 			if (isMacintosh && isNative && primaryWindowControlsLocation === 'left') {
 				// macOS native: traffic lights are rendered by the OS at the top-left corner.
 				// Add a fixed-width spacer to push content past the traffic lights.
-				const spacer = append(this.leftContent, $('div.window-controls-container'));
+				const spacer = append(this.leftContent, $('div.mac-window-controls-spacer'));
 
 				// Hide spacer in fullscreen (traffic lights are not shown)
 				const updateSpacerVisibility = () => {
-					const fullscreen = isFullscreen(mainWindow);
+					const targetWindow = getWindow(parent);
+					const fullscreen = isFullscreen(targetWindow);
 					spacer.style.display = fullscreen ? 'none' : '';
 					this.leftSpacerWidth = fullscreen ? 0 : 70;
+					spacer.style.width = `${this.leftSpacerWidth}px`;
 				};
 				updateSpacerVisibility();
-				spacer.style.width = `${this.leftSpacerWidth}px`;
 				spacer.style.flexShrink = '0';
 				this._register(onDidChangeFullscreen(windowId => {
-					if (windowId === getWindowId(mainWindow)) {
+					if (windowId === getWindowId(getWindow(parent))) {
 						updateSpacerVisibility();
 					}
 				}));
