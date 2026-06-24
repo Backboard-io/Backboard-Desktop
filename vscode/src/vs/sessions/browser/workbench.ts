@@ -729,10 +729,11 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.partVisibility.auxiliaryBar = visibilityDefaults.auxiliaryBar;
 		this.partVisibility.panel = visibilityDefaults.panel;
 		this.partVisibility.sessions = visibilityDefaults.sessions;
-		const savedPartVisibility = this._loadPartVisibility(storageService);
-		this.partVisibility.auxiliaryBar = savedPartVisibility.auxiliaryBar ?? visibilityDefaults.auxiliaryBar;
+		// Load once to clear corrupt persisted data, but always start desktop/tablet with both side panels visible.
+		void this._loadPartVisibility(storageService);
+		this.partVisibility.auxiliaryBar = visibilityDefaults.auxiliaryBar;
 		this.partVisibility.editor = this.partVisibility.auxiliaryBar ? visibilityDefaults.editor : false;
-		this.partVisibility.sidebar = savedPartVisibility.sidebar ?? visibilityDefaults.sidebar;
+		this.partVisibility.sidebar = visibilityDefaults.sidebar;
 
 		// Load saved grid part sizes — these will be consumed when building the
 		// grid descriptor so editor/sidebar/auxbar/panel restore to their previous

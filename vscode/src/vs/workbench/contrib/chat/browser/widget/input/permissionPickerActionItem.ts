@@ -52,6 +52,30 @@ function sanitizeIdSegment(value: string): string {
 	return value.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
+function getExtensionPermissionPresentation(item: IChatSessionProviderOptionItem): { label: string; detail: string | undefined } {
+	const normalizedName = item.name.trim().toLowerCase();
+	const normalizedId = item.id.trim().toLowerCase();
+	if (normalizedName === 'default' || normalizedId === 'default') {
+		return {
+			label: localize('permissions.ext.default.label', "Default"),
+			detail: localize('permissions.ext.default.detail', "Ask for approval only for actions that could be risky."),
+		};
+	}
+	if (normalizedName === 'manual' || normalizedId === 'manual') {
+		return {
+			label: localize('permissions.ext.askApproval.label', "Ask for Approval"),
+			detail: localize('permissions.ext.askApproval.detail', "Always ask before editing files or using the internet."),
+		};
+	}
+	if (normalizedName === 'full access' || normalizedId === 'full-access' || normalizedId === 'full_access') {
+		return {
+			label: localize('permissions.ext.fullAccess.label', "Full Access"),
+			detail: localize('permissions.ext.fullAccess.detail', "Unrestricted access to the internet and all computer files."),
+		};
+	}
+	return { label: item.name, detail: item.description };
+}
+
 export class PermissionPickerActionItem extends ChatInputPickerActionViewItem {
 
 	private readonly _onDidDispose = this._register(new Emitter<void>());
@@ -84,23 +108,26 @@ export class PermissionPickerActionItem extends ChatInputPickerActionViewItem {
 				if (ext && ext.items.length > 0) {
 					const sessionTypeSeg = sanitizeIdSegment(ext.sessionType);
 					const groupSeg = sanitizeIdSegment(ext.groupId);
-					return ext.items.map(item => ({
-						...action,
-						id: `chat.permissions.ext.${sessionTypeSeg}.${groupSeg}.${sanitizeIdSegment(item.id)}`,
-						label: item.name,
-						detail: item.description,
-						icon: item.icon,
-						checked: ext.selectedId === item.id,
-						enabled: !item.locked,
-						tooltip: item.locked ? localize('permissions.ext.locked', "This option is locked") : '',
-						hover: item.description ? { content: item.description } : undefined,
-						run: async () => {
-							delegate.setExtensionPermission?.(ext.groupId, item);
-							if (this.element) {
-								this.renderLabel(this.element);
-							}
-						},
-					} satisfies IActionWidgetDropdownAction));
+					return ext.items.map(item => {
+						const presentation = getExtensionPermissionPresentation(item);
+						return {
+							...action,
+							id: `chat.permissions.ext.${sessionTypeSeg}.${groupSeg}.${sanitizeIdSegment(item.id)}`,
+							label: presentation.label,
+							detail: presentation.detail,
+							icon: item.icon,
+							checked: ext.selectedId === item.id,
+							enabled: !item.locked,
+							tooltip: item.locked ? localize('permissions.ext.locked', "This option is locked") : '',
+							hover: presentation.detail ? { content: presentation.detail } : undefined,
+							run: async () => {
+								delegate.setExtensionPermission?.(ext.groupId, item);
+								if (this.element) {
+									this.renderLabel(this.element);
+								}
+							},
+						} satisfies IActionWidgetDropdownAction;
+					});
 				}
 				const currentLevel = delegate.currentPermissionLevel.get();
 				const policyRestricted = isAutoApprovePolicyRestricted();
@@ -209,9 +236,10 @@ export class PermissionPickerActionItem extends ChatInputPickerActionViewItem {
 			const selected = ext.items.find(i => i.id === ext.selectedId)
 				?? ext.items.find(i => i.default)
 				?? ext.items[0];
+			const presentation = getExtensionPermissionPresentation(selected);
 			icon = selected.icon ?? Codicon.lock;
-			label = selected.name;
-			tooltip = selected.description ?? selected.name;
+			label = presentation.label;
+			tooltip = presentation.detail ?? presentation.label;
 		} else {
 			switch (level) {
 				case ChatPermissionLevel.Autopilot:
