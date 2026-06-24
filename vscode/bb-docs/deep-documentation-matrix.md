@@ -9,7 +9,7 @@ This matrix counts the concrete source and documentation surface for every featu
 | [agent-sessions-window](agent-sessions-window/README.md) | 4 | 845 | 17 |
 | [agents-editor-right-aux-backboard-copilot](agents-editor-right-aux-backboard-copilot/README.md) | 27 | 27 | 19 |
 | [ai-chat-inline-assistance](ai-chat-inline-assistance/README.md) | 12 | 617 | 17 |
-| [backboard-agent-bridge](backboard-agent-bridge/README.md) | 2 | 283 | 17 |
+| [backboard-agent-bridge](backboard-agent-bridge/README.md) | 2 | 283 | 18 |
 | [backboard-changes](backboard-changes/README.md) | 5 | 887 | 21 |
 | [built-in-language-support](built-in-language-support/README.md) | 54 | 677 | 17 |
 | [comments-review](comments-review/README.md) | 1 | 36 | 17 |

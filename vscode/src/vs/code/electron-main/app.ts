@@ -595,8 +595,9 @@ export class CodeApplication extends Disposable {
 		});
 
 		validatedIpcMain.handle('vscode:optimusBackboardHistory', async () => readOptimusBackboardHistory());
+		validatedIpcMain.handle('vscode:optimusBackboardLiveState', async () => readOptimusBackboardLiveState());
 		validatedIpcMain.handle('vscode:optimusBackboardWorkspaces', async () => readOptimusBackboardWorkspaces());
-		validatedIpcMain.handle('vscode:optimusBackboardCommand', async (_event, command: unknown) => writeOptimusBackboardCommand(command, this.windowsMainService));
+		validatedIpcMain.handle('vscode:optimusBackboardCommand', async (_event, command: unknown) => writeOptimusBackboardCommand(command));
 		validatedIpcMain.handle('vscode:optimusSharedChatHistorySnapshot', async (_event, snapshot: unknown) => writeOptimusSharedChatHistorySnapshot(snapshot));
 		validatedIpcMain.handle('vscode:optimusDevHotRefreshState', async () => readOptimusDevHotRefreshState(this.environmentMainService.appRoot));
 		validatedIpcMain.handle('vscode:jarvisVoiceTranscribe', async (_event, request: unknown) => transcribeJarvisVoice(request));
@@ -691,15 +692,6 @@ export class CodeApplication extends Disposable {
 						cli: this.environmentMainService.args
 					});
 				}
-				return { accepted: true };
-			}
-
-			if (target === 'optimusWorkbench') {
-				const [workbenchWindow] = await windowsMainService.openEmptyWindow({
-					context: OpenContext.API,
-					contextWindowId: window.id
-				}, { forceReuseWindow: true });
-				(workbenchWindow ?? windowsMainService.getLastActiveWindow() ?? window).sendWhenReady('vscode:openOptimusEditor', CancellationToken.None);
 				return { accepted: true };
 			}
 
@@ -1916,6 +1908,7 @@ export class CodeApplication extends Disposable {
 
 interface IOptimusBackboardHistoryEntry {
 	readonly id: string;
+	readonly source: 'backboard-panel' | 'backboard-thread' | 'shared-chat' | 'optimus-live';
 	readonly title?: string;
 	readonly prompt?: string;
 	readonly status?: string;
@@ -1943,6 +1936,19 @@ interface IOptimusBackboardWorkspaceEntry {
 	readonly path?: string;
 	readonly chatCount: number;
 	readonly lastActiveAt?: number;
+}
+
+interface IOptimusBackboardLiveState {
+	readonly id: string;
+	readonly chatId?: string;
+	readonly prompt?: string;
+	readonly status?: string;
+	readonly running?: boolean;
+	readonly startedAt?: number;
+	readonly updatedAt?: number;
+	readonly currentWorkspace?: string;
+	readonly messages: readonly IOptimusBackboardHistoryMessage[];
+	readonly fileChanges?: readonly IOptimusBackboardFileChange[];
 }
 
 interface IOptimusBackboardPanelCommand {
@@ -2477,7 +2483,7 @@ function ensureJarvisOwnerCleanup(sender: WebContents): void {
 	});
 }
 
-function writeOptimusBackboardCommand(value: unknown, windowsMainService: IWindowsMainService | undefined): { readonly accepted: boolean; readonly id?: string; readonly error?: string } {
+function writeOptimusBackboardCommand(value: unknown): { readonly accepted: boolean; readonly id?: string; readonly error?: string } {
 	if (!isOptimusObjectRecord(value) || typeof value.type !== 'string') {
 		return { accepted: false, error: 'Invalid Optimus Backboard command.' };
 	}
@@ -2492,9 +2498,6 @@ function writeOptimusBackboardCommand(value: unknown, windowsMainService: IWindo
 		newChat: value.newChat === true,
 		options: value.options
 	};
-	if (command.type === 'openHistoryEntry' && command.chatId && isOptimusWorkbenchSessionId(command.chatId)) {
-		(windowsMainService?.getLastActiveWindow() ?? windowsMainService?.getWindows().at(0))?.sendWhenReady('vscode:openChatSession', CancellationToken.None, command.chatId);
-	}
 	const commandPath = nodeJoin(homedir(), '.backboard_ide', 'optimus-command.json');
 	const tempPath = `${commandPath}.${process.pid}.${Date.now()}.tmp`;
 	try {
@@ -2514,7 +2517,7 @@ function writeOptimusSharedChatHistorySnapshot(value: unknown): { readonly accep
 	const snapshot = {
 		version: 1,
 		updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : Date.now(),
-		entries: value.entries.map(entry => normalizeOptimusHistoryEntry(entry, undefined)).filter(entry => !!entry),
+		entries: value.entries.map(entry => normalizeOptimusHistoryEntry(entry, undefined, 'shared-chat')).filter(entry => !!entry),
 	};
 	const snapshotPath = nodeJoin(homedir(), '.backboard_ide', 'optimus-shared-chat-history.json');
 	const tempPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
@@ -2571,9 +2574,44 @@ function collectOptimusDevHotRefreshVersions(dir: string, versions: string[]): v
 function readOptimusBackboardHistory(): IOptimusBackboardHistoryEntry[] {
 	const entries = new Map<string, IOptimusBackboardHistoryEntry>();
 	for (const entry of [...readOptimusPanelStateEntries(), ...readOptimusThreadEntries(), ...readOptimusSharedChatHistoryEntries()]) {
+		if (!isOptimusBackboardOwnedHistoryEntry(entry)) {
+			continue;
+		}
 		entries.set(entry.id, entry);
 	}
 	return [...entries.values()].sort((left, right) => optimusHistoryTimestamp(right) - optimusHistoryTimestamp(left));
+}
+
+function readOptimusBackboardLiveState(): IOptimusBackboardLiveState | undefined {
+	const livePath = nodeJoin(homedir(), '.backboard_ide', 'optimus-live-state.json');
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(livePath, 'utf8'));
+		if (!isOptimusObjectRecord(parsed)) {
+			return undefined;
+		}
+		const updatedAt = typeof parsed.updatedAt === 'number' ? parsed.updatedAt : undefined;
+		if (updatedAt && Date.now() - updatedAt > 10 * 60 * 1000) {
+			return undefined;
+		}
+		const id = stringValueFromOptimusRecord(parsed.id) ?? stringValueFromOptimusRecord(parsed.chatId);
+		if (!id) {
+			return undefined;
+		}
+		return {
+			id,
+			chatId: stringValueFromOptimusRecord(parsed.chatId),
+			prompt: stringValueFromOptimusRecord(parsed.prompt),
+			status: stringValueFromOptimusRecord(parsed.status),
+			running: parsed.running === true,
+			startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : undefined,
+			updatedAt,
+			currentWorkspace: stringValueFromOptimusRecord(parsed.currentWorkspace),
+			messages: normalizeOptimusHistoryMessages(parsed.messages, stringValueFromOptimusRecord(parsed.prompt), undefined, undefined),
+			fileChanges: normalizeOptimusFileChanges(parsed.fileChanges),
+		};
+	} catch {
+		return undefined;
+	}
 }
 
 function readOptimusBackboardWorkspaces(): IOptimusBackboardWorkspaceEntry[] {
@@ -2614,7 +2652,7 @@ function readOptimusPanelStateEntries(): IOptimusBackboardHistoryEntry[] {
 		for (const state of states) {
 			const workspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined;
 			for (const rawEntry of Array.isArray(state.historyEntries) ? state.historyEntries : []) {
-				const entry = normalizeOptimusHistoryEntry(rawEntry, workspace);
+				const entry = normalizeOptimusHistoryEntry(rawEntry, workspace, 'backboard-panel');
 				if (entry) {
 					entries.push(entry);
 				}
@@ -2635,7 +2673,7 @@ function readOptimusSharedChatHistoryEntries(): IOptimusBackboardHistoryEntry[] 
 			return entries;
 		}
 		for (const rawEntry of parsed.entries) {
-			const entry = normalizeOptimusHistoryEntry(rawEntry, undefined);
+			const entry = normalizeOptimusHistoryEntry(rawEntry, undefined, 'shared-chat');
 			if (entry) {
 				entries.push(entry);
 			}
@@ -2655,7 +2693,7 @@ function readOptimusThreadEntries(): IOptimusBackboardHistoryEntry[] {
 				continue;
 			}
 			const workspace = typeof parsed.workspace === 'string' ? parsed.workspace : undefined;
-			const entry = normalizeOptimusHistoryEntry(parsed.entry, workspace);
+			const entry = normalizeOptimusHistoryEntry(parsed.entry, workspace, 'backboard-thread');
 			if (entry) {
 				entries.push(entry);
 			}
@@ -2692,16 +2730,7 @@ function listOptimusThreadFiles(root: string): string[] {
 	return files;
 }
 
-function isOptimusWorkbenchSessionId(id: string): boolean {
-	try {
-		const uri = URI.parse(id);
-		return !!uri.scheme && !!uri.path;
-	} catch {
-		return false;
-	}
-}
-
-function normalizeOptimusHistoryEntry(value: unknown, fallbackWorkspace: string | undefined): IOptimusBackboardHistoryEntry | undefined {
+function normalizeOptimusHistoryEntry(value: unknown, fallbackWorkspace: string | undefined, source: IOptimusBackboardHistoryEntry['source']): IOptimusBackboardHistoryEntry | undefined {
 	if (!isOptimusObjectRecord(value) || typeof value.id !== 'string' || !value.id) {
 		return undefined;
 	}
@@ -2711,6 +2740,7 @@ function normalizeOptimusHistoryEntry(value: unknown, fallbackWorkspace: string 
 	const messages = normalizeOptimusHistoryMessages(value.messages, prompt, outputText, html);
 	return {
 		id: value.id,
+		source,
 		title: typeof value.title === 'string' ? value.title : undefined,
 		prompt,
 		status: typeof value.status === 'string' ? value.status : undefined,
@@ -2720,6 +2750,10 @@ function normalizeOptimusHistoryEntry(value: unknown, fallbackWorkspace: string 
 		messages,
 		fileChanges: normalizeOptimusFileChanges(value.fileChanges),
 	};
+}
+
+function isOptimusBackboardOwnedHistoryEntry(entry: IOptimusBackboardHistoryEntry): boolean {
+	return entry.source === 'backboard-panel' || entry.source === 'backboard-thread';
 }
 
 function normalizeOptimusHistoryMessages(rawMessages: unknown, prompt: string | undefined, outputText: string | undefined, html: string | undefined): IOptimusBackboardHistoryMessage[] {

@@ -253,13 +253,6 @@ export class NewChatWidget extends Disposable {
 		this._register(dom.addDisposableListener(inputContainer, dom.EventType.CLICK, focusInput));
 	}
 
-	private _renderSimpleHeader(container: HTMLElement): void {
-		const header = dom.append(container, dom.$('.new-chat-simple-header'));
-		dom.append(header, dom.$('.new-chat-simple-header-spacer'));
-		const more = dom.append(header, dom.$('span.new-chat-simple-header-more'));
-		more.appendChild(renderIcon(Codicon.more));
-	}
-
 	private _renderComposerWorkspaceRow(container: HTMLElement): HTMLElement {
 		const row = dom.append(container, dom.$('.new-chat-composer-workspace-row'));
 		const pickerSlot = dom.append(row, dom.$('.new-session-workspace-picker-container'));

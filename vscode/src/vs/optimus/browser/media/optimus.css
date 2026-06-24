@@ -223,14 +223,6 @@ body.optimus-standalone .optimus-root,
 	line-height: 24px;
 }
 
-.optimus-workbench-button {
-	flex: 0 0 auto;
-	max-width: 96px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
 .optimus-workspace-select {
 	max-width: 180px;
 	height: 28px;
@@ -260,12 +252,387 @@ body.optimus-standalone .optimus-root,
 .optimus-content {
 	--optimus-panel-below-height: clamp(128px, 38vh, 280px);
 	display: grid;
-	grid-template-columns: minmax(0, 1fr);
+	grid-template-columns: minmax(0, 1fr) minmax(340px, var(--optimus-sidebar-width, 460px));
 	grid-template-rows: minmax(0, 1fr);
 	width: 100%;
 	height: 100%;
 	min-width: 0;
 	min-height: 0;
+}
+
+.optimus-sidebar {
+	--optimus-chat-list-background: var(--vscode-chat-list-background, var(--optimus-surface));
+	--optimus-chat-request-border: var(--vscode-chat-requestBorder, var(--optimus-border-subtle));
+	--optimus-chat-input-background: var(--vscode-input-background, var(--optimus-card-soft));
+	--optimus-chat-working-border: var(--vscode-chat-inputWorkingBorderColor1, var(--optimus-focus));
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr) auto;
+	min-width: 0;
+	min-height: 0;
+	border-left: 1px solid var(--optimus-border-subtle);
+	background: var(--optimus-chat-list-background);
+	color: var(--optimus-text);
+	overflow: hidden;
+}
+
+.optimus-sidebar-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	min-height: 42px;
+	padding: 7px 10px;
+	border-bottom: 1px solid var(--optimus-border-subtle);
+	background: var(--vscode-sideBar-background, var(--optimus-chat-list-background));
+}
+
+.optimus-sidebar-title {
+	min-width: 0;
+}
+
+.optimus-sidebar-title h2,
+.optimus-sidebar-title p {
+	margin: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-sidebar-title h2 {
+	font-size: 12.5px;
+	font-weight: 650;
+}
+
+.optimus-sidebar-title p {
+	margin-top: 2px;
+	color: var(--optimus-muted);
+	font-size: 11.5px;
+}
+
+.optimus-sidebar-actions,
+.optimus-sidebar-controls {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 0 0 auto;
+}
+
+.optimus-sidebar-icon-button {
+	width: 26px;
+	height: 26px;
+	display: inline-grid;
+	place-items: center;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-size: 15px;
+	line-height: 18px;
+}
+
+.optimus-sidebar-icon-button:hover,
+.optimus-sidebar-icon-button:focus {
+	background: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--optimus-text) 8%, transparent));
+	color: var(--optimus-text);
+	outline: none;
+}
+
+.optimus-sidebar-body {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	min-height: 0;
+	padding: 0;
+	overflow: auto;
+}
+
+.optimus-sidebar-empty,
+.optimus-sidebar-status,
+.optimus-sidebar-error {
+	margin: 8px 10px;
+	padding: 8px 9px;
+	border: 1px solid var(--optimus-border-subtle);
+	border-radius: 5px;
+	color: var(--optimus-muted);
+	background: color-mix(in srgb, var(--optimus-card) 82%, transparent);
+	font-size: 12px;
+	line-height: 17px;
+}
+
+.optimus-sidebar-status {
+	color: var(--optimus-text);
+	border-color: color-mix(in srgb, var(--optimus-focus) 28%, var(--optimus-border));
+	background: color-mix(in srgb, var(--optimus-focus) 10%, var(--optimus-card));
+}
+
+.optimus-sidebar-error {
+	color: var(--optimus-danger);
+	border-color: color-mix(in srgb, var(--optimus-danger) 38%, var(--optimus-border));
+	background: color-mix(in srgb, var(--optimus-danger) 10%, var(--optimus-card));
+}
+
+.optimus-sidebar-message {
+	display: grid;
+	gap: 7px;
+	min-width: 0;
+	padding: 12px 14px 13px;
+	border: 0;
+	border-bottom: 1px solid color-mix(in srgb, var(--optimus-border-subtle) 72%, transparent);
+	border-radius: 0;
+	background: transparent;
+	cursor: default;
+	user-select: text;
+}
+
+.optimus-sidebar-message.user {
+	background: color-mix(in srgb, var(--optimus-chat-input-background) 52%, transparent);
+}
+
+.optimus-sidebar-message.error {
+	border-left: 3px solid color-mix(in srgb, var(--optimus-danger) 64%, var(--optimus-border));
+	background: color-mix(in srgb, var(--optimus-danger) 8%, transparent);
+}
+
+.optimus-sidebar-message-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	min-width: 0;
+}
+
+.optimus-sidebar-message-identity {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
+}
+
+.optimus-sidebar-message-avatar {
+	display: inline-grid;
+	place-items: center;
+	flex: 0 0 auto;
+	width: 20px;
+	height: 20px;
+	border: 1px solid var(--optimus-chat-request-border);
+	border-radius: 4px;
+	background: var(--vscode-chat-avatarBackground, var(--optimus-card));
+	color: var(--vscode-chat-avatarForeground, var(--optimus-text));
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 1;
+}
+
+.optimus-sidebar-message-role {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--optimus-text);
+	font-size: 13px;
+	font-weight: 600;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-sidebar-message-content {
+	color: var(--optimus-text);
+	font-size: 13px;
+	line-height: 18.5px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.optimus-sidebar-composer {
+	--optimus-chat-input-anim-angle: 135deg;
+	display: grid;
+	gap: 0;
+	position: relative;
+	margin: 8px;
+	padding: 0 6px 6px;
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 6px;
+	background: var(--optimus-chat-input-background);
+	cursor: text;
+	transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.optimus-sidebar-composer::before,
+.optimus-sidebar-composer::after {
+	content: '';
+	position: absolute;
+	inset: -1px;
+	border-radius: inherit;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 220ms ease;
+}
+
+.optimus-sidebar-composer::before {
+	z-index: 2;
+	padding: 1px;
+	background: conic-gradient(from var(--optimus-chat-input-anim-angle),
+		transparent 0deg,
+		color-mix(in srgb, var(--optimus-chat-working-border) 90%, transparent) 20deg,
+		var(--optimus-chat-working-border) 30deg,
+		color-mix(in srgb, var(--optimus-chat-working-border) 60%, transparent) 50deg,
+		transparent 90deg,
+		transparent 360deg);
+	-webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+	mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+}
+
+.optimus-sidebar-composer::after {
+	z-index: 1;
+	padding: 2px;
+	filter: blur(1.5px);
+	background: conic-gradient(from var(--optimus-chat-input-anim-angle),
+		transparent 0deg,
+		color-mix(in srgb, var(--optimus-chat-working-border) 60%, transparent) 25deg,
+		color-mix(in srgb, var(--optimus-chat-working-border) 35%, transparent) 50deg,
+		transparent 90deg,
+		transparent 360deg);
+	-webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+	mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+}
+
+@property --optimus-chat-input-anim-angle {
+	syntax: '<angle>';
+	inherits: false;
+	initial-value: 135deg;
+}
+
+.optimus-sidebar-composer.focused {
+	border-color: var(--optimus-focus);
+}
+
+.optimus-sidebar-composer.working {
+	overflow: visible;
+}
+
+.optimus-sidebar-composer.working::before,
+.optimus-sidebar-composer.working::after {
+	opacity: 1;
+	animation: optimus-chat-input-working-border-spin 4s linear infinite;
+}
+
+@keyframes optimus-chat-input-working-border-spin {
+	from {
+		--optimus-chat-input-anim-angle: 135deg;
+	}
+
+	to {
+		--optimus-chat-input-anim-angle: 495deg;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.optimus-sidebar-composer.working::before,
+	.optimus-sidebar-composer.working::after {
+		animation: none;
+	}
+}
+
+.optimus-sidebar-input {
+	position: relative;
+	z-index: 3;
+	width: 100%;
+	min-height: 68px;
+	max-height: 148px;
+	padding: 9px 2px 7px;
+	resize: none;
+	border: 0;
+	border-radius: 0;
+	outline: none;
+	background: transparent;
+	color: var(--optimus-text);
+	font-family: var(--vscode-editor-font-family, inherit);
+	font-size: 13px;
+	line-height: 18px;
+}
+
+.optimus-sidebar-input:focus {
+	outline: none;
+}
+
+.optimus-sidebar-input::placeholder {
+	color: var(--optimus-muted);
+}
+
+.optimus-sidebar-composer-bar {
+	position: relative;
+	z-index: 3;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	min-height: 28px;
+	padding: 0;
+	border: 0;
+	border-top: 1px solid color-mix(in srgb, var(--optimus-chat-request-border) 70%, transparent);
+	background: transparent;
+}
+
+.optimus-sidebar-context {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--optimus-muted);
+	font-size: 11.5px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-sidebar-send-button,
+.optimus-sidebar-secondary-button {
+	height: 24px;
+	padding: 0 10px;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	font-size: 12px;
+}
+
+.optimus-sidebar-send-button {
+	background: var(--optimus-button-bg);
+	color: var(--optimus-button-fg);
+}
+
+.optimus-sidebar-send-button:hover,
+.optimus-sidebar-send-button:focus {
+	background: var(--optimus-button-hover);
+	outline: none;
+}
+
+.optimus-sidebar-send-button:disabled {
+	background: color-mix(in srgb, var(--optimus-muted) 20%, transparent);
+	color: var(--vscode-disabledForeground, var(--optimus-muted));
+	cursor: default;
+}
+
+.optimus-sidebar-secondary-button {
+	background: transparent;
+	color: var(--optimus-muted);
+	border-color: var(--optimus-border-subtle);
+}
+
+.optimus-sidebar-secondary-button:hover,
+.optimus-sidebar-secondary-button:focus {
+	background: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--optimus-text) 8%, transparent));
+	color: var(--optimus-text);
+	outline: none;
+}
+
+@media (max-width: 900px) {
+	.optimus-content {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: minmax(0, 1fr) minmax(240px, 42vh);
+	}
+
+	.optimus-sidebar {
+		border-left: 0;
+		border-top: 1px solid var(--optimus-border-subtle);
+	}
 }
 
 .optimus-content.panel-closed {
@@ -3279,10 +3646,6 @@ body.optimus-standalone {
 	.optimus-workspace-select {
 		min-width: 104px;
 		max-width: 128px;
-	}
-
-	.optimus-workbench-button {
-		max-width: 32px;
 	}
 
 	.optimus-agent-count {

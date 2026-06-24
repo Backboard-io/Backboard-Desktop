@@ -4,13 +4,18 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { ipcRenderer } from '../../base/parts/sandbox/electron-browser/globals.js';
-import { IOptimusHistoryEntry, IOptimusHistoryProvider, IOptimusNavigationProvider, IOptimusWorkspaceEntry } from '../common/optimusHistory.js';
+import { IOptimusHistoryEntry, IOptimusHistoryProvider, IOptimusLiveState, IOptimusNavigationProvider, IOptimusWorkspaceEntry } from '../common/optimusHistory.js';
 
 export class ElectronOptimusHistoryProvider implements IOptimusHistoryProvider {
 
 	async listBackboardHistory(): Promise<readonly IOptimusHistoryEntry[]> {
 		const result = await ipcRenderer.invoke('vscode:optimusBackboardHistory');
 		return Array.isArray(result) ? result.filter(isOptimusHistoryEntry) : [];
+	}
+
+	async readBackboardLiveState(): Promise<IOptimusLiveState | undefined> {
+		const result = await ipcRenderer.invoke('vscode:optimusBackboardLiveState');
+		return isOptimusLiveState(result) ? result : undefined;
 	}
 
 	async listBackboardWorkspaces(): Promise<readonly IOptimusWorkspaceEntry[]> {
@@ -37,6 +42,10 @@ export class ElectronOptimusHistoryProvider implements IOptimusHistoryProvider {
 	async sendBackboardPrompt(prompt: string, chatId?: string, workspace?: string): Promise<void> {
 		await sendBackboardPanelCommand({ type: 'sendPrompt', prompt, chatId, workspace, newChat: !chatId });
 	}
+
+	async cancelBackboardPrompt(): Promise<void> {
+		await sendBackboardPanelCommand({ type: 'cancel' });
+	}
 }
 
 export class ElectronOptimusNavigationProvider implements IOptimusNavigationProvider {
@@ -51,10 +60,6 @@ export class ElectronOptimusNavigationProvider implements IOptimusNavigationProv
 
 	async openOptimus(): Promise<void> {
 		await switchWindowKind('optimus');
-	}
-
-	async openOptimusWorkbench(): Promise<void> {
-		await switchWindowKind('optimusWorkbench');
 	}
 
 	async openJarvis(): Promise<void> {
@@ -72,7 +77,7 @@ async function sendBackboardPanelCommand(command: Record<string, unknown>): Prom
 	}
 }
 
-async function switchWindowKind(target: 'editor' | 'agents' | 'optimus' | 'optimusWorkbench' | 'jarvis'): Promise<void> {
+async function switchWindowKind(target: 'editor' | 'agents' | 'optimus' | 'jarvis'): Promise<void> {
 	const result = await ipcRenderer.invoke('vscode:optimusSwitchWindowKind', target) as { readonly accepted?: boolean; readonly error?: string } | undefined;
 	if (!result?.accepted) {
 		throw new Error(result?.error ?? `Could not switch to ${target}.`);
@@ -80,6 +85,14 @@ async function switchWindowKind(target: 'editor' | 'agents' | 'optimus' | 'optim
 }
 
 function isOptimusHistoryEntry(value: unknown): value is IOptimusHistoryEntry {
+	return typeof value === 'object'
+		&& value !== null
+		&& !Array.isArray(value)
+		&& typeof (value as { id?: unknown }).id === 'string'
+		&& Array.isArray((value as { messages?: unknown }).messages);
+}
+
+function isOptimusLiveState(value: unknown): value is IOptimusLiveState {
 	return typeof value === 'object'
 		&& value !== null
 		&& !Array.isArray(value)

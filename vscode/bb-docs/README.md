@@ -20,10 +20,10 @@ In this repository, "endpoint" does not mean HTTP only. Most VS Code features ar
 The current `bb-docs` audit covers:
 
 - 29 feature folders.
-- 525 Markdown files.
-- 2,548 fenced code blocks.
-- 991 ASCII `text` diagrams/blocks.
-- 19,200 full absolute path mentions.
+- 526 Markdown files.
+- 2,587 fenced code blocks.
+- 998 ASCII `text` diagrams/blocks.
+- 19,235 full absolute path mentions.
 - 0 broken Markdown links.
 - 0 unresolved absolute path mentions.
 - 0 unfinished-marker hits in the final scan.

@@ -6,7 +6,7 @@
 import { localize } from '../../nls.js';
 import { Disposable, toDisposable } from '../../base/common/lifecycle.js';
 import { IOptimusRun, OptimusActivityState, OptimusProvider, OptimusRunStatus } from '../common/optimusTypes.js';
-import { IOptimusHistoryEntry, IOptimusHistoryProvider, IOptimusNavigationProvider, IOptimusWorkspaceEntry } from '../common/optimusHistory.js';
+import { IOptimusHistoryEntry, IOptimusHistoryProvider, IOptimusLiveState, IOptimusNavigationProvider, IOptimusWorkspaceEntry } from '../common/optimusHistory.js';
 import { OptimusRunStore } from './optimusRunStore.js';
 
 interface IOptimusStarterTask {
@@ -27,14 +27,24 @@ export class OptimusApp extends Disposable {
 
 	private content!: HTMLElement;
 	private cardGrid!: HTMLElement;
+	private sidebar!: HTMLElement;
 	private headerActions!: HTMLElement;
 	private selectedStarter: IOptimusStarterTask | undefined;
 	private readonly runSlots = new Map<string, number>();
 	private historyEntries: readonly IOptimusHistoryEntry[] = [];
+	private liveHistoryEntry: IOptimusHistoryEntry | undefined;
+	private liveStateRunning = false;
 	private workspaces: readonly IOptimusWorkspaceEntry[] = [];
 	private selectedWorkspace: string | undefined;
 	private selectedHistory: IOptimusHistoryEntry | undefined;
+	private draftPrompt = '';
+	private pendingPrompt: string | undefined;
+	private sidebarStatus: string | undefined;
+	private sidebarError: string | undefined;
+	private isSendingPrompt = false;
 	private pendingLayoutUpdate: number | undefined;
+	private pendingHistoryPoll: number | undefined;
+	private historyPollsRemaining = 0;
 
 	constructor(
 		private readonly container: HTMLElement,
@@ -44,6 +54,7 @@ export class OptimusApp extends Disposable {
 	) {
 		super();
 		this._register(this.store.onDidChange(() => this.renderRuns()));
+		this._register(toDisposable(() => this.stopHistoryPolling()));
 	}
 
 	start(): void {
@@ -74,7 +85,12 @@ export class OptimusApp extends Disposable {
 		this.cardGrid = document.createElement('section');
 		this.cardGrid.className = 'optimus-grid';
 
+		this.sidebar = document.createElement('aside');
+		this.sidebar.className = 'optimus-sidebar';
+		this.sidebar.setAttribute('aria-label', localize('optimus.sidebar.label', "Backboard agent"));
+
 		this.content.appendChild(this.cardGrid);
+		this.content.appendChild(this.sidebar);
 		shell.appendChild(header);
 		shell.appendChild(this.content);
 		this.installResponsiveLayout();
@@ -100,6 +116,7 @@ export class OptimusApp extends Disposable {
 			observer.observe(this.container);
 			observer.observe(this.content);
 			observer.observe(this.cardGrid);
+			observer.observe(this.sidebar);
 			this._register(toDisposable(() => observer.disconnect()));
 		}
 		ownerWindow?.addEventListener('resize', scheduleLayoutUpdate);
@@ -205,16 +222,6 @@ export class OptimusApp extends Disposable {
 			this.renderRuns();
 		});
 
-		const openWorkbench = document.createElement('button');
-		openWorkbench.type = 'button';
-		openWorkbench.className = 'optimus-header-button optimus-workbench-button';
-		openWorkbench.textContent = localize('optimus.openWorkbench', "Workbench");
-		openWorkbench.title = localize('optimus.openWorkbench.title', "Switch Optimus to the editor workbench");
-		openWorkbench.setAttribute('aria-label', openWorkbench.title);
-		openWorkbench.addEventListener('click', () => {
-			this.navigationProvider?.openOptimusWorkbench().catch(console.error);
-		});
-
 		const newAgent = document.createElement('button');
 		newAgent.type = 'button';
 		newAgent.className = 'optimus-header-button optimus-new-agent-button';
@@ -227,7 +234,7 @@ export class OptimusApp extends Disposable {
 
 		const count = document.createElement('span');
 		count.className = 'optimus-agent-count';
-		const runCount = this.store.runs.length;
+		const runCount = this.filteredHistoryEntries().length || this.store.runs.length;
 		count.textContent = runCount === 1
 			? localize('optimus.agentCount.one', "1 agent")
 			: localize('optimus.agentCount.many', "{0} agents", runCount);
@@ -241,7 +248,6 @@ export class OptimusApp extends Disposable {
 		openPanel.addEventListener('click', () => this.openBackboardPanel());
 
 		this.headerActions.appendChild(workspaceSelect);
-		this.headerActions.appendChild(openWorkbench);
 		this.headerActions.appendChild(newAgent);
 		this.headerActions.appendChild(count);
 		this.headerActions.appendChild(openPanel);
@@ -437,9 +443,11 @@ export class OptimusApp extends Disposable {
 		this.selectedStarter = starter;
 		this.selectedHistory = undefined;
 		this.store.selectRun(undefined);
+		this.sidebarStatus = undefined;
+		this.sidebarError = undefined;
 		this.renderHeaderActions();
 		this.renderRuns();
-		this.historyProvider?.openBackboardNewChat?.(this.selectedWorkspace).catch(console.error);
+		this.focusSidebarComposer();
 	}
 
 	private renderRuns(): void {
@@ -447,6 +455,7 @@ export class OptimusApp extends Disposable {
 		this.updateResponsiveLayout();
 		this.cardGrid.replaceChildren();
 		this.cardGrid.appendChild(this.renderTaskBoard());
+		this.renderSidebar();
 	}
 
 	private slottedRuns(): Map<number, IOptimusRun> {
@@ -472,7 +481,16 @@ export class OptimusApp extends Disposable {
 	}
 
 	private promptTileEntries(): readonly IOptimusHistoryEntry[] {
-		return [...this.filteredHistoryEntries()]
+		const entries = [...this.filteredHistoryEntries()];
+		if (this.liveHistoryEntry && isBackboardOwnedHistoryEntry(this.liveHistoryEntry) && this.historyMatchesSelectedWorkspace(this.liveHistoryEntry)) {
+			const existingIndex = entries.findIndex(entry => entry.id === this.liveHistoryEntry?.id);
+			if (existingIndex >= 0) {
+				entries[existingIndex] = this.liveHistoryEntry;
+			} else {
+				entries.unshift(this.liveHistoryEntry);
+			}
+		}
+		return entries
 			.sort((first, second) => (second.updatedAt ?? second.startedAt ?? 0) - (first.updatedAt ?? first.startedAt ?? 0));
 	}
 
@@ -619,13 +637,64 @@ export class OptimusApp extends Disposable {
 		}
 		try {
 			this.historyEntries = await this.historyProvider.listBackboardHistory();
-			if (this.selectedHistory && !this.historyEntries.some(entry => entry.id === this.selectedHistory?.id)) {
+			await this.refreshLiveState();
+			const selectedHistory = this.selectedHistory
+				? this.historyEntries.find(entry => entry.id === this.selectedHistory?.id) ?? (this.liveHistoryEntry?.id === this.selectedHistory.id ? this.liveHistoryEntry : undefined)
+				: undefined;
+			if (selectedHistory) {
+				this.selectedHistory = selectedHistory;
+				if (this.pendingPrompt && historyEntryMatchesPrompt(selectedHistory, this.pendingPrompt) && !this.liveStateRunning) {
+					this.pendingPrompt = undefined;
+					this.isSendingPrompt = false;
+					this.sidebarStatus = localize('optimus.sidebar.historyUpdated', "Backboard response updated.");
+				}
+			} else if (this.pendingPrompt) {
+				const pendingPrompt = this.pendingPrompt;
+				const pendingHistory = this.historyEntries.find(entry => historyEntryMatchesPrompt(entry, pendingPrompt))
+					?? (this.liveHistoryEntry && historyEntryMatchesPrompt(this.liveHistoryEntry, pendingPrompt) ? this.liveHistoryEntry : undefined);
+				if (pendingHistory) {
+					this.selectedStarter = undefined;
+					this.selectedHistory = pendingHistory;
+					if (!this.liveStateRunning) {
+						this.pendingPrompt = undefined;
+						this.isSendingPrompt = false;
+						this.sidebarStatus = localize('optimus.sidebar.historyUpdated', "Backboard response updated.");
+					}
+				}
+			} else if (this.selectedHistory) {
 				this.selectedHistory = undefined;
 			}
 		} catch (error) {
 			console.error(error);
 		} finally {
 			this.renderRuns();
+		}
+	}
+
+	private async refreshLiveState(): Promise<void> {
+		const liveState = await this.historyProvider?.readBackboardLiveState?.();
+		if (!liveState || isStaleLiveState(liveState)) {
+			if (!this.isSendingPrompt) {
+				this.liveHistoryEntry = undefined;
+				this.liveStateRunning = false;
+			}
+			return;
+		}
+		const liveEntry = liveStateToHistoryEntry(liveState);
+		this.liveHistoryEntry = liveEntry;
+		this.liveStateRunning = liveState.running === true;
+		if (this.pendingPrompt && historyEntryMatchesPrompt(liveEntry, this.pendingPrompt)) {
+			this.selectedStarter = undefined;
+			this.selectedHistory = liveEntry;
+			this.isSendingPrompt = liveState.running === true;
+			this.sidebarStatus = liveState.status ?? (liveState.running ? localize('optimus.sidebar.streaming', "Backboard is streaming.") : localize('optimus.sidebar.historyUpdated', "Backboard response updated."));
+			if (!liveState.running && liveEntry.messages.some(message => sidebarRoleClass(message.role) === 'assistant')) {
+				this.pendingPrompt = undefined;
+			}
+		} else if (this.selectedHistory?.id === liveEntry.id || (!this.selectedHistory && liveState.running)) {
+			this.selectedHistory = liveEntry;
+			this.sidebarStatus = liveState.status;
+			this.isSendingPrompt = liveState.running === true;
 		}
 	}
 
@@ -641,8 +710,10 @@ export class OptimusApp extends Disposable {
 		this.selectedStarter = undefined;
 		this.selectedHistory = entry;
 		this.store.selectRun(undefined);
+		this.sidebarStatus = undefined;
+		this.sidebarError = undefined;
 		this.renderHeaderActions();
-		this.historyProvider?.openBackboardHistoryEntry?.(entry.id).catch(console.error);
+		this.renderRuns();
 	}
 
 	private openBackboardPanel(): void {
@@ -650,13 +721,384 @@ export class OptimusApp extends Disposable {
 	}
 
 	private filteredHistoryEntries(): readonly IOptimusHistoryEntry[] {
+		const entries = this.historyEntries.filter(isBackboardOwnedHistoryEntry);
 		return this.selectedWorkspace
-			? this.historyEntries.filter(entry => this.historyMatchesSelectedWorkspace(entry))
-			: this.historyEntries;
+			? entries.filter(entry => this.historyMatchesSelectedWorkspace(entry))
+			: entries;
 	}
 
 	private historyMatchesSelectedWorkspace(entry: IOptimusHistoryEntry): boolean {
 		return !this.selectedWorkspace || (entry.currentWorkspace || 'default') === this.selectedWorkspace;
+	}
+
+	private renderSidebar(): void {
+		if (!this.sidebar) {
+			return;
+		}
+
+		this.sidebar.classList.toggle('working', this.isSendingPrompt);
+		this.sidebar.replaceChildren();
+
+		const header = document.createElement('header');
+		header.className = 'optimus-sidebar-header';
+
+		const titleBlock = document.createElement('div');
+		titleBlock.className = 'optimus-sidebar-title';
+
+		const title = document.createElement('h2');
+		title.textContent = localize('optimus.sidebar.title', "Backboard");
+		const subtitle = document.createElement('p');
+		subtitle.textContent = this.selectedHistory
+			? promptTileTitle(this.selectedHistory)
+			: localize('optimus.sidebar.newChat', "New Optimus agent");
+
+		titleBlock.append(title, subtitle);
+		header.appendChild(titleBlock);
+
+		const actions = document.createElement('div');
+		actions.className = 'optimus-sidebar-actions';
+		const refresh = document.createElement('button');
+		refresh.type = 'button';
+		refresh.className = 'optimus-sidebar-icon-button';
+		refresh.textContent = '⟳';
+		refresh.title = localize('optimus.sidebar.refresh', "Refresh");
+		refresh.setAttribute('aria-label', refresh.title);
+		refresh.addEventListener('click', () => this.refreshHistory().catch(console.error));
+		actions.appendChild(refresh);
+
+		const newChat = document.createElement('button');
+		newChat.type = 'button';
+		newChat.className = 'optimus-sidebar-icon-button';
+		newChat.textContent = '+';
+		newChat.title = localize('optimus.sidebar.newAgent', "New Agent");
+		newChat.setAttribute('aria-label', newChat.title);
+		newChat.addEventListener('click', () => this.startDraftTask(this.nextOpenSlot()));
+		actions.appendChild(newChat);
+		header.appendChild(actions);
+
+		const body = document.createElement('div');
+		body.className = 'optimus-sidebar-body';
+		body.setAttribute('role', 'log');
+		body.setAttribute('aria-live', this.isSendingPrompt ? 'polite' : 'off');
+		const messages = this.selectedHistory?.messages ?? [];
+		const selectedContainsPendingPrompt = !!this.pendingPrompt && messages.some(message => message.role === 'user' && normalizeHistoryText(message.content) === normalizeHistoryText(this.pendingPrompt));
+		if (messages.length) {
+			for (const message of messages) {
+				body.appendChild(this.renderSidebarMessage(message.role, message.content));
+			}
+			if (this.pendingPrompt && !selectedContainsPendingPrompt) {
+				body.appendChild(this.renderSidebarMessage('user', this.pendingPrompt));
+				body.appendChild(this.renderSidebarStatus(localize('optimus.sidebar.waitingForHistory', "Waiting for Backboard history to update.")));
+			}
+		} else if (this.pendingPrompt) {
+			body.appendChild(this.renderSidebarMessage('user', this.pendingPrompt));
+			body.appendChild(this.renderSidebarStatus(localize('optimus.sidebar.waitingForHistory', "Waiting for Backboard history to update.")));
+		} else {
+			const empty = document.createElement('div');
+			empty.className = 'optimus-sidebar-empty';
+			empty.textContent = localize('optimus.sidebar.empty', "Start a prompt or select a tile.");
+			body.appendChild(empty);
+		}
+
+		if (this.sidebarStatus) {
+			body.appendChild(this.renderSidebarStatus(this.sidebarStatus));
+		}
+		if (this.sidebarError) {
+			const error = document.createElement('div');
+			error.className = 'optimus-sidebar-error';
+			error.textContent = this.sidebarError;
+			body.appendChild(error);
+		}
+
+		const form = document.createElement('form');
+		form.className = `optimus-sidebar-composer${this.isSendingPrompt ? ' working' : ''}`;
+		form.addEventListener('submit', event => {
+			event.preventDefault();
+			this.sendSidebarPrompt().catch(console.error);
+		});
+
+		let sendButton: HTMLButtonElement | undefined;
+		const updateSendButton = () => {
+			if (sendButton) {
+				sendButton.disabled = this.isSendingPrompt || !this.draftPrompt.trim() || !this.historyProvider?.sendBackboardPrompt;
+			}
+		};
+
+		const textarea = document.createElement('textarea');
+		textarea.className = 'optimus-sidebar-input';
+		textarea.rows = 3;
+		textarea.value = this.draftPrompt;
+		textarea.placeholder = this.selectedHistory
+			? localize('optimus.sidebar.followupPlaceholder', "Message this Backboard agent")
+			: localize('optimus.sidebar.placeholder', "Ask Backboard to work on something");
+		textarea.addEventListener('input', () => {
+			this.draftPrompt = textarea.value;
+			updateSendButton();
+		});
+		textarea.addEventListener('focus', () => form.classList.add('focused'));
+		textarea.addEventListener('blur', () => form.classList.remove('focused'));
+		textarea.addEventListener('keydown', event => {
+			if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+				event.preventDefault();
+				this.sendSidebarPrompt().catch(console.error);
+			}
+		});
+
+		const composerBar = document.createElement('div');
+		composerBar.className = 'optimus-sidebar-composer-bar';
+
+		const context = document.createElement('span');
+		context.className = 'optimus-sidebar-context';
+		context.textContent = this.selectedWorkspace
+			? workspaceLabel(this.selectedWorkspace)
+			: localize('optimus.sidebar.allWorkspaces', "All workspaces");
+
+		const controls = document.createElement('div');
+		controls.className = 'optimus-sidebar-controls';
+		if (this.isSendingPrompt) {
+			const cancel = document.createElement('button');
+			cancel.type = 'button';
+			cancel.className = 'optimus-sidebar-secondary-button';
+			cancel.textContent = localize('optimus.sidebar.cancel', "Cancel");
+			cancel.addEventListener('click', () => this.cancelSidebarPrompt().catch(console.error));
+			controls.appendChild(cancel);
+		}
+
+		const send = document.createElement('button');
+		sendButton = send;
+		send.type = 'submit';
+		send.className = 'optimus-sidebar-send-button';
+		send.textContent = localize('optimus.sidebar.send', "Send");
+		updateSendButton();
+		controls.appendChild(send);
+
+		composerBar.append(context, controls);
+		form.append(textarea, composerBar);
+
+		this.sidebar.append(header, body, form);
+		this.scrollSidebarToBottom(body);
+	}
+
+	private renderSidebarMessage(role: string, content: string): HTMLElement {
+		const message = document.createElement('article');
+		message.className = `optimus-sidebar-message ${sidebarRoleClass(role)}`;
+
+		const header = document.createElement('header');
+		header.className = 'optimus-sidebar-message-header';
+
+		const identity = document.createElement('div');
+		identity.className = 'optimus-sidebar-message-identity';
+
+		const avatar = document.createElement('span');
+		avatar.className = 'optimus-sidebar-message-avatar';
+		avatar.textContent = sidebarRoleAvatar(role);
+
+		const label = document.createElement('span');
+		label.className = 'optimus-sidebar-message-role';
+		label.textContent = sidebarRoleLabel(role);
+
+		identity.append(avatar, label);
+		header.appendChild(identity);
+
+		const text = document.createElement('div');
+		text.className = 'optimus-sidebar-message-content';
+		text.textContent = content;
+
+		message.append(header, text);
+		return message;
+	}
+
+	private renderSidebarStatus(text: string): HTMLElement {
+		const status = document.createElement('div');
+		status.className = 'optimus-sidebar-status';
+		status.textContent = text;
+		return status;
+	}
+
+	private async sendSidebarPrompt(): Promise<void> {
+		const prompt = this.draftPrompt.trim();
+		if (!prompt || !this.historyProvider?.sendBackboardPrompt) {
+			return;
+		}
+
+		const chatId = this.selectedHistory?.id;
+		this.draftPrompt = '';
+		this.pendingPrompt = prompt;
+		const optimisticEntry = createPendingHistoryEntry(prompt, chatId, this.selectedWorkspace);
+		this.liveHistoryEntry = optimisticEntry;
+		this.liveStateRunning = true;
+		this.selectedHistory = optimisticEntry;
+		this.sidebarStatus = localize('optimus.sidebar.sending', "Sending to Backboard.");
+		this.sidebarError = undefined;
+		this.isSendingPrompt = true;
+		this.renderRuns();
+
+		try {
+			await this.historyProvider.sendBackboardPrompt(prompt, chatId, this.selectedWorkspace);
+			this.sidebarStatus = localize('optimus.sidebar.waiting', "Waiting for Backboard response.");
+			this.startHistoryPolling(prompt);
+			await this.refreshHistory();
+		} catch (error) {
+			this.isSendingPrompt = false;
+			this.sidebarStatus = undefined;
+			this.sidebarError = error instanceof Error ? error.message : String(error);
+			this.renderSidebar();
+		}
+	}
+
+	private async cancelSidebarPrompt(): Promise<void> {
+		if (!this.historyProvider?.cancelBackboardPrompt) {
+			return;
+		}
+		try {
+			await this.historyProvider.cancelBackboardPrompt();
+			this.isSendingPrompt = false;
+			this.sidebarStatus = localize('optimus.sidebar.cancelled', "Cancelled.");
+			this.stopHistoryPolling();
+			this.renderSidebar();
+		} catch (error) {
+			this.sidebarError = error instanceof Error ? error.message : String(error);
+			this.renderSidebar();
+		}
+	}
+
+	private startHistoryPolling(prompt: string): void {
+		this.pendingPrompt = prompt;
+		this.historyPollsRemaining = 120;
+		this.scheduleHistoryPoll(300);
+	}
+
+	private scheduleHistoryPoll(delay: number): void {
+		this.stopHistoryPolling();
+		if (this.historyPollsRemaining <= 0) {
+			this.isSendingPrompt = false;
+			this.sidebarStatus = localize('optimus.sidebar.refreshStopped', "Backboard is still running. Use refresh or select the tile when it appears.");
+			this.renderSidebar();
+			return;
+		}
+
+		const ownerWindow = this.container.ownerDocument.defaultView;
+		this.pendingHistoryPoll = ownerWindow?.setTimeout(() => {
+			this.pendingHistoryPoll = undefined;
+			this.historyPollsRemaining--;
+			this.refreshHistory().finally(() => {
+				if (this.pendingPrompt && this.historyPollsRemaining > 0) {
+					this.scheduleHistoryPoll(500);
+				}
+			}).catch(console.error);
+		}, delay);
+	}
+
+	private stopHistoryPolling(): void {
+		if (this.pendingHistoryPoll === undefined) {
+			return;
+		}
+		this.container.ownerDocument.defaultView?.clearTimeout(this.pendingHistoryPoll);
+		this.pendingHistoryPoll = undefined;
+	}
+
+	private focusSidebarComposer(): void {
+		const ownerWindow = this.container.ownerDocument.defaultView;
+		ownerWindow?.requestAnimationFrame(() => {
+			this.sidebar.querySelector<HTMLTextAreaElement>('.optimus-sidebar-input')?.focus();
+		});
+	}
+
+	private scrollSidebarToBottom(body: HTMLElement): void {
+		this.container.ownerDocument.defaultView?.requestAnimationFrame(() => {
+			body.scrollTop = body.scrollHeight;
+		});
+	}
+}
+
+function historyEntryMatchesPrompt(entry: IOptimusHistoryEntry, prompt: string): boolean {
+	const normalizedPrompt = normalizeHistoryText(prompt);
+	return normalizeHistoryText(entry.prompt) === normalizedPrompt
+		|| entry.messages.some(message => message.role === 'user' && normalizeHistoryText(message.content) === normalizedPrompt);
+}
+
+function isBackboardOwnedHistoryEntry(entry: IOptimusHistoryEntry): boolean {
+	return entry.source === undefined || entry.source === 'backboard-panel' || entry.source === 'backboard-thread' || entry.source === 'optimus-live';
+}
+
+function createPendingHistoryEntry(prompt: string, chatId: string | undefined, workspace: string | undefined): IOptimusHistoryEntry {
+	const now = Date.now();
+	return {
+		id: chatId ?? `optimus-pending-${now}`,
+		source: 'optimus-live',
+		title: promptTileTitle({ id: 'pending', messages: [], fileChanges: [], prompt }),
+		prompt,
+		status: 'Running',
+		startedAt: now,
+		updatedAt: now,
+		currentWorkspace: workspace,
+		messages: [{ role: 'user', content: prompt }],
+		fileChanges: [],
+	};
+}
+
+function liveStateToHistoryEntry(state: IOptimusLiveState): IOptimusHistoryEntry {
+	return {
+		id: state.chatId ?? state.id,
+		source: 'optimus-live',
+		title: state.prompt ? promptTileTitle({ id: state.id, messages: [], fileChanges: [], prompt: state.prompt }) : undefined,
+		prompt: state.prompt,
+		status: state.running ? 'Running' : state.status,
+		startedAt: state.startedAt,
+		updatedAt: state.updatedAt,
+		currentWorkspace: state.currentWorkspace,
+		messages: state.messages,
+		fileChanges: state.fileChanges ?? [],
+	};
+}
+
+function isStaleLiveState(state: IOptimusLiveState): boolean {
+	return typeof state.updatedAt === 'number' && Date.now() - state.updatedAt > 10 * 60 * 1000;
+}
+
+function normalizeHistoryText(text: string | undefined): string {
+	return text?.replace(/\s+/g, ' ').trim().toLowerCase() ?? '';
+}
+
+function sidebarRoleClass(role: string): string {
+	const normalizedRole = role.toLowerCase();
+	if (normalizedRole === 'assistant' || normalizedRole === 'agent') {
+		return 'assistant';
+	}
+	if (normalizedRole === 'user') {
+		return 'user';
+	}
+	if (normalizedRole === 'error') {
+		return 'error';
+	}
+	return 'system';
+}
+
+function sidebarRoleLabel(role: string): string {
+	switch (sidebarRoleClass(role)) {
+		case 'assistant':
+			return localize('optimus.sidebar.role.assistant', "Backboard");
+		case 'user':
+			return localize('optimus.sidebar.role.user', "You");
+		case 'error':
+			return localize('optimus.sidebar.role.error', "Error");
+		case 'system':
+		default:
+			return localize('optimus.sidebar.role.system', "System");
+	}
+}
+
+function sidebarRoleAvatar(role: string): string {
+	switch (sidebarRoleClass(role)) {
+		case 'assistant':
+			return 'B';
+		case 'user':
+			return 'U';
+		case 'error':
+			return '!';
+		case 'system':
+		default:
+			return 'i';
 	}
 }
 

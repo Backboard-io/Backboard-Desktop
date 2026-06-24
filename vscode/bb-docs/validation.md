@@ -22,15 +22,15 @@ The latest local audit from the repository root returned:
 
 ```text
 featureDirs: 29
-markdownFiles: 525
+markdownFiles: 526
 requiredSubfolderReadmesAndDetailFilesMissingOrSmall: 0
-codeBlocks: 2548
-textBlocks: 991
-shellBlocks: 280
-tsBlocks: 1109
+codeBlocks: 2587
+textBlocks: 998
+shellBlocks: 281
+tsBlocks: 1119
 diffBlocks: 13
-absolutePathMentions: 19200
-uniqueAbsolutePaths: 3747
+absolutePathMentions: 19235
+uniqueAbsolutePaths: 3752
 badAbsolutePaths: 0
 brokenMarkdownLinks: 0
 tripleApostropheFenceLines: 0

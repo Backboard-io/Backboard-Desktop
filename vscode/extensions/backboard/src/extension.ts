@@ -138,6 +138,20 @@ interface PanelThreadFile {
 	readonly entry?: unknown;
 }
 
+interface OptimusLiveState {
+	readonly version: 1;
+	readonly id: string;
+	readonly chatId?: string;
+	readonly prompt?: string;
+	readonly status?: string;
+	readonly running?: boolean;
+	readonly startedAt?: number;
+	readonly updatedAt: number;
+	readonly currentWorkspace?: string;
+	readonly messages: readonly { readonly role: string; readonly content: string }[];
+	readonly fileChanges?: readonly FileChangePayload[];
+}
+
 interface OptimusPanelCommand {
 	readonly id: string;
 	readonly type: string;
@@ -169,6 +183,8 @@ let availableBackboardUpdate: UpdateManifest | undefined;
 let backboardUpdateStatusItem: vscode.StatusBarItem | undefined;
 let pendingBackboardOAuth: BackboardOAuthPending | undefined;
 let lastOptimusPanelCommandId: string | undefined;
+let pendingOptimusLiveState: OptimusLiveState | undefined;
+let pendingOptimusLiveStateTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
 	backboardToolOutput = vscode.window.createOutputChannel('Backboard Tools');
@@ -1307,6 +1323,10 @@ function optimusPanelCommandPath(): string {
 	return path.join(os.homedir(), '.backboard_ide', 'optimus-command.json');
 }
 
+function optimusLiveStatePath(): string {
+	return path.join(os.homedir(), '.backboard_ide', 'optimus-live-state.json');
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -1763,6 +1783,40 @@ async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<vo
 	await fs.promises.rename(tempPath, filePath);
 }
 
+function scheduleOptimusLiveStateWrite(state: OptimusLiveState, immediate = false): void {
+	pendingOptimusLiveState = state;
+	if (immediate) {
+		flushOptimusLiveStateWrite();
+		return;
+	}
+	if (pendingOptimusLiveStateTimer) {
+		return;
+	}
+	pendingOptimusLiveStateTimer = setTimeout(flushOptimusLiveStateWrite, 120);
+}
+
+function flushOptimusLiveStateWrite(): void {
+	if (pendingOptimusLiveStateTimer) {
+		clearTimeout(pendingOptimusLiveStateTimer);
+		pendingOptimusLiveStateTimer = undefined;
+	}
+	const state = pendingOptimusLiveState;
+	if (!state) {
+		return;
+	}
+	pendingOptimusLiveState = undefined;
+	void (async () => {
+		const statePath = optimusLiveStatePath();
+		await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
+		await writeJsonFileAtomic(statePath, state);
+		if (process.platform !== 'win32') {
+			await fs.promises.chmod(statePath, 0o600);
+		}
+	})().catch(error => {
+		backboardToolOutput?.appendLine(`[optimus] failed to write live state: ${error instanceof Error ? error.message : String(error)}`);
+	});
+}
+
 function scriptJson(value: unknown): string {
 	return JSON.stringify(value ?? null)
 		.replace(/</g, '\\u003c')
@@ -1982,12 +2036,13 @@ async function clearBackboardConfigApiKey(): Promise<void> {
 	const env = normalizeBackboardEnv(stringValueFromRecord(config.env) || currentBackboardEnv());
 	const envKeys = backboardConfigEnvKeys(config);
 	delete envKeys[env];
-	const nextConfig = {
+	const nextConfig: Record<string, unknown> = {
 		...config,
 		env,
 		env_keys: envKeys
 	};
 	delete nextConfig.api_key;
+	delete nextConfig.oauth;
 	await writeBackboardConfigJson(nextConfig);
 }
 
@@ -2262,11 +2317,38 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		if (chatId && chatWorkspace && effectiveWorkspace && chatWorkspace !== effectiveWorkspace) {
 			backboardToolOutput?.appendLine(`[panel] ignored stale chat ${chatId} from ${chatWorkspace}; using fresh chat in ${effectiveWorkspace}`);
 		}
+		const liveChatId = effectiveChatId ?? `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const sessionId = `panel:${effectiveWorkspace ?? 'default'}:${effectiveChatId || 'default'}`;
 		const sink = this.panelSink(view);
 		const content = prompt.trim() || 'Please transcribe this audio and respond.';
 		const imageGeneration = imageGenerationForPrompt(content, settings.imageGeneration);
-		await view.webview.postMessage({ type: 'runStarted', prompt: content, chatId: effectiveChatId });
+		const liveStartedAt = Date.now();
+		const liveMessages: { role: string; content: string }[] = [{ role: 'user', content }];
+		const appendLiveAssistantText = (text: string) => {
+			const last = liveMessages[liveMessages.length - 1];
+			if (last?.role === 'assistant') {
+				liveMessages[liveMessages.length - 1] = { role: 'assistant', content: `${last.content}${text}` };
+			} else {
+				liveMessages.push({ role: 'assistant', content: text });
+			}
+		};
+		const writeLiveState = (status: string, running: boolean, immediate = false) => {
+			scheduleOptimusLiveStateWrite({
+				version: 1,
+				id: liveChatId,
+				chatId: liveChatId,
+				prompt: content,
+				status,
+				running,
+				startedAt: liveStartedAt,
+				updatedAt: Date.now(),
+				currentWorkspace: effectiveWorkspace,
+				messages: liveMessages,
+				fileChanges: [],
+			}, immediate);
+		};
+		writeLiveState('Sending to Backboard.', true, true);
+		await view.webview.postMessage({ type: 'runStarted', prompt: content, chatId: liveChatId });
 		await view.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
 		const pendingToolRequests: ToolResultRequest[] = [];
 		const seenToolRequests = new Set<string>();
@@ -2293,6 +2375,19 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				tools: submitTools,
 				config: settings.config
 			}, event => {
+				if (event.type === 'assistantTextDelta') {
+					const text = typeof event.text === 'string' ? event.text : '';
+					if (text) {
+						appendLiveAssistantText(text);
+						writeLiveState('Streaming from Backboard.', true);
+					}
+				} else if (event.type === 'progress' && typeof event.message === 'string') {
+					writeLiveState(event.message, true);
+				} else if (event.type === 'error') {
+					const message = event.message ?? 'Backboard request failed.';
+					liveMessages.push({ role: 'error', content: message });
+					writeLiveState(message, false);
+				}
 				const toolRequest = renderBridgeEvent(event, sink, currentToolRequest);
 				if (toolRequest && toolRequest !== currentToolRequest) {
 					currentToolRequest = toolRequest;
@@ -2318,6 +2413,19 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 					tools: submitTools,
 					config: settings.config
 				}, event => {
+					if (event.type === 'assistantTextDelta') {
+						const text = typeof event.text === 'string' ? event.text : '';
+						if (text) {
+							appendLiveAssistantText(text);
+							writeLiveState('Streaming from Backboard.', true);
+						}
+					} else if (event.type === 'progress' && typeof event.message === 'string') {
+						writeLiveState(event.message, true);
+					} else if (event.type === 'error') {
+						const message = event.message ?? 'Backboard request failed.';
+						liveMessages.push({ role: 'error', content: message });
+						writeLiveState(message, false);
+					}
 					const followupToolRequest = renderBridgeEvent(event, sink, currentContinuationToolRequest);
 					if (followupToolRequest && followupToolRequest !== currentContinuationToolRequest) {
 						currentContinuationToolRequest = followupToolRequest;
@@ -2326,11 +2434,15 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				}, token);
 				nextToolRequest = pendingToolRequests.shift();
 			}
-			await view.webview.postMessage({ type: 'runFinished', chatId: effectiveChatId });
+			await view.webview.postMessage({ type: 'runFinished', chatId: liveChatId });
 			await view.webview.postMessage({ type: 'status', text: token.isCancellationRequested ? 'Cancelled.' : 'Done.' });
+			writeLiveState(token.isCancellationRequested ? 'Cancelled.' : 'Done.', false, true);
 		} catch (error) {
-			await view.webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
-			await view.webview.postMessage({ type: 'runFinished', chatId: effectiveChatId });
+			const message = error instanceof Error ? error.message : String(error);
+			liveMessages.push({ role: 'error', content: message });
+			writeLiveState(message, false, true);
+			await view.webview.postMessage({ type: 'append', role: 'error', text: message });
+			await view.webview.postMessage({ type: 'runFinished', chatId: liveChatId });
 			await handleBackboardError(view.webview, error, this.bridge);
 		}
 	}
@@ -3342,7 +3454,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			persistPanelState();
 		}
-		function beginHistoryRun(promptText) {
+		function beginHistoryRun(promptText, suggestedId) {
 				const now = Date.now();
 				let entry = activeHistoryEntry();
 				if (!historyEntryMatchesWorkspace(entry)) {
@@ -3351,7 +3463,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				}
 				if (!entry) {
 					entry = {
-						id: 'chat-' + now + '-' + Math.random().toString(36).slice(2, 8),
+						id: typeof suggestedId === 'string' && suggestedId ? suggestedId : 'chat-' + now + '-' + Math.random().toString(36).slice(2, 8),
 						title: historyTitle(promptText),
 						prompt: promptText || '',
 						currentWorkspace,
@@ -5281,7 +5393,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					activeHistoryId = message.chatId;
 				}
 				if (!activeHistoryEntry()) {
-					beginHistoryRun(message.prompt || '');
+					beginHistoryRun(message.prompt || '', message.chatId);
 				}
 				runInProgress = true;
 				stopRequested = false;
