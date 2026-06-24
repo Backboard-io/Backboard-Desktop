@@ -11,7 +11,7 @@ bb-docs
 |-- deep-documentation-matrix.md
 |-- ascii-architecture-atlas.md
 |
-L-- feature folders x 28
+L-- feature folders x 29
     |-- README.md
     |-- ui       x 4 markdown files including README
     |-- ux       x 4 markdown files including README
@@ -63,6 +63,7 @@ user gesture
 - `files-workspaces-explorer` -> `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/files-workspaces-explorer`
 - `markdown-preview-docs` -> `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/markdown-preview-docs`
 - `mcp-tools-customizations` -> `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/mcp-tools-customizations`
+- `modern-ide-system-blueprint` -> `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint`
 - `notebooks-interactive` -> `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/notebooks-interactive`
 - `performance-telemetry-diagnostics` -> `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/performance-telemetry-diagnostics`
 - `problems-output-logs` -> `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/problems-output-logs`

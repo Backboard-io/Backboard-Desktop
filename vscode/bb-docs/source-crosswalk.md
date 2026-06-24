@@ -2,6 +2,12 @@
 
 This file maps source directories and built-in extensions to the `bb-docs` feature folders. It is meant to make the documentation coverage auditable.
 
+## System Blueprint Artifacts
+
+| Feature folder | Artifact paths |
+|---|---|
+| `modern-ide-system-blueprint` | `bb-docs/modern-ide-system-blueprint/README.md`; `bb-docs/modern-ide-system-blueprint/blueprint/*.md` |
+
 ## Workbench Contrib Directories
 
 | Feature folder | Primary `src/vs/workbench/contrib` directories |

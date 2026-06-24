@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { localize, localize2 } from '../../../../../nls.js';
-import { $, append } from '../../../../../base/browser/dom.js';
+import { $ } from '../../../../../base/browser/dom.js';
 import { Event } from '../../../../../base/common/event.js';
 import { IContextKey, IContextKeyService, ContextKeyExpr, RawContextKey } from '../../../../../platform/contextkey/common/contextkey.js';
 import { Action2, registerAction2, MenuId, MenuRegistry } from '../../../../../platform/actions/common/actions.js';
@@ -115,7 +115,6 @@ type IntegratedBrowserAddScreenshotToChatAddedClassification = {
 export class BrowserEditorChatIntegration extends BrowserEditorContribution {
 	private readonly _elementSelectionActiveContext: IContextKey<boolean>;
 	private readonly _areaSelectionActiveContext: IContextKey<boolean>;
-	private _pendingElementSelectionHandler: ((data: IElementData, model: IBrowserViewModel) => Promise<void>) | undefined;
 
 	// Share with Agent
 	private readonly _shareButtonContainer: HTMLElement;
@@ -180,12 +179,6 @@ export class BrowserEditorChatIntegration extends BrowserEditorContribution {
 		}));
 		store.add(model.onDidSelectElement(async data => {
 			try {
-				const handler = this._pendingElementSelectionHandler;
-				if (handler) {
-					this._pendingElementSelectionHandler = undefined;
-					await handler(data, model);
-					return;
-				}
 				await this._attachElementDataToChat(data, model);
 			} catch (error) {
 				this.logService.error('BrowserEditor.addElementToChat: Failed to attach element', error);
@@ -391,127 +384,6 @@ export class BrowserEditorChatIntegration extends BrowserEditorContribution {
 
 		this.telemetryService.publicLog2<IntegratedBrowserAddElementToChatAddedEvent, IntegratedBrowserAddElementToChatAddedClassification>('integratedBrowser.addElementToChat.added', {
 			attachImages
-		});
-	}
-
-	async editElementHTML(): Promise<void> {
-		const model = this.editor.model;
-		if (!model) {
-			return;
-		}
-
-		if (model.isElementSelectionActive) {
-			void model.toggleElementSelection(false);
-			return;
-		}
-
-		this._pendingElementSelectionHandler = async data => {
-			if (!data.elementId) {
-				await this.dialogService.error(localize('browser.editElementHTML.noElementId', "The selected element cannot be edited."));
-				return;
-			}
-
-			const editedHTML = await this._showEditElementHTMLDialog(data.outerHTML);
-			if (editedHTML === undefined || editedHTML === data.outerHTML) {
-				return;
-			}
-
-			await model.setElementOuterHTML(data.elementId, editedHTML);
-			this.editor.ensureBrowserFocus();
-		};
-
-		this.editor.ensureBrowserFocus();
-		void model.toggleElementSelection(true);
-	}
-
-	private _showEditElementHTMLDialog(initialHTML: string): Promise<string | undefined> {
-		return new Promise(resolve => {
-			const store = new DisposableStore();
-			const overlay = append(document.body, $('.browser-edit-html-modal-overlay'));
-			overlay.style.cssText = [
-				'position: fixed',
-				'inset: 0',
-				'z-index: 100000',
-				'display: flex',
-				'align-items: center',
-				'justify-content: center',
-				'background: rgba(0, 0, 0, 0.35)'
-			].join(';');
-
-			const modal = append(overlay, $('.browser-edit-html-modal'));
-			modal.style.cssText = [
-				'width: min(920px, calc(100vw - 64px))',
-				'height: min(680px, calc(100vh - 64px))',
-				'display: flex',
-				'flex-direction: column',
-				'gap: 12px',
-				'padding: 16px',
-				'border-radius: 8px',
-				'box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45)',
-				'background: var(--vscode-editor-background)',
-				'color: var(--vscode-editor-foreground)',
-				'border: 1px solid var(--vscode-widget-border)'
-			].join(';');
-
-			const title = append(modal, $('div.browser-edit-html-modal-title'));
-			title.textContent = localize('browser.editElementHTML.title', "Edit Element HTML");
-			title.style.cssText = 'font-size: 14px; font-weight: 600;';
-
-			const textarea = append(modal, $('textarea.browser-edit-html-modal-textarea')) as HTMLTextAreaElement;
-			textarea.value = initialHTML;
-			textarea.spellcheck = false;
-			textarea.style.cssText = [
-				'flex: 1',
-				'resize: none',
-				'font-family: var(--vscode-editor-font-family)',
-				'font-size: var(--vscode-editor-font-size)',
-				'line-height: 1.45',
-				'padding: 10px',
-				'border-radius: 4px',
-				'border: 1px solid var(--vscode-input-border)',
-				'background: var(--vscode-input-background)',
-				'color: var(--vscode-input-foreground)',
-				'outline-color: var(--vscode-focusBorder)'
-			].join(';');
-
-			const actions = append(modal, $('div.browser-edit-html-modal-actions'));
-			actions.style.cssText = 'display: flex; justify-content: flex-end; gap: 8px;';
-
-			const cancelButton = append(actions, $('button.browser-edit-html-modal-cancel')) as HTMLButtonElement;
-			cancelButton.type = 'button';
-			cancelButton.textContent = localize('browser.editElementHTML.cancel', "Cancel");
-
-			const applyButton = append(actions, $('button.browser-edit-html-modal-apply')) as HTMLButtonElement;
-			applyButton.type = 'button';
-			applyButton.textContent = localize('browser.editElementHTML.apply', "Apply");
-
-			const finish = (value: string | undefined) => {
-				store.dispose();
-				overlay.remove();
-				resolve(value);
-			};
-
-			const onCancel = () => finish(undefined);
-			const onApply = () => finish(textarea.value);
-			cancelButton.addEventListener('click', onCancel);
-			applyButton.addEventListener('click', onApply);
-			textarea.addEventListener('keydown', e => {
-				if (e.key === 'Escape') {
-					e.preventDefault();
-					e.stopPropagation();
-					onCancel();
-				} else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-					e.preventDefault();
-					e.stopPropagation();
-					onApply();
-				}
-			});
-			store.add({ dispose: () => cancelButton.removeEventListener('click', onCancel) });
-			store.add({ dispose: () => applyButton.removeEventListener('click', onApply) });
-			store.add({ dispose: () => overlay.remove() });
-
-			textarea.focus();
-			textarea.select();
 		});
 	}
 
@@ -738,33 +610,6 @@ class AddElementToChatAction extends Action2 {
 	}
 }
 
-class EditElementHTMLAction extends Action2 {
-	static readonly ID = BrowserViewCommandId.EditElementHTML;
-
-	constructor() {
-		super({
-			id: EditElementHTMLAction.ID,
-			title: localize2('browser.editElementHTMLAction', 'Edit Element HTML'),
-			category: BrowserCategory,
-			icon: Codicon.edit,
-			f1: true,
-			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL),
-			toggled: CONTEXT_BROWSER_ELEMENT_SELECTION_ACTIVE,
-			menu: {
-				id: MenuId.BrowserActionsToolbar,
-				group: BrowserActionGroup.Tools,
-				order: 0.6
-			}
-		});
-	}
-
-	async run(accessor: ServicesAccessor, browserEditor = accessor.get(IEditorService).activeEditorPane): Promise<void> {
-		if (browserEditor instanceof BrowserEditor) {
-			await browserEditor.getContribution(BrowserEditorChatIntegration)?.editElementHTML();
-		}
-	}
-}
-
 class AddConsoleLogsToChatAction extends Action2 {
 	static readonly ID = BrowserViewCommandId.AddConsoleLogsToChat;
 
@@ -879,7 +724,6 @@ class AddFullPageScreenshotToChatAction extends Action2 {
 }
 
 registerAction2(AddElementToChatAction);
-registerAction2(EditElementHTMLAction);
 registerAction2(AddConsoleLogsToChatAction);
 registerAction2(AddScreenshotToChatAction);
 registerAction2(AddAreaScreenshotToChatAction);

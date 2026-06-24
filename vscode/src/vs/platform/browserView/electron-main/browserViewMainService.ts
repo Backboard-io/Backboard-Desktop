@@ -321,10 +321,6 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
 		return this._getBrowserView(id).getConsoleLogs();
 	}
 
-	async setElementOuterHTML(id: string, elementId: string, outerHTML: string): Promise<void> {
-		return this._getBrowserView(id).inspector.setElementOuterHTML(elementId, outerHTML);
-	}
-
 	async toggleElementSelection(id: string, enabled?: boolean): Promise<void> {
 		return this._getBrowserView(id).inspector.toggleElementSelection(enabled);
 	}

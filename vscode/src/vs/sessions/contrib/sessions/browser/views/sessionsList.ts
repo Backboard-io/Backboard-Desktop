@@ -125,7 +125,7 @@ const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000;
 //#region Tree Delegate
 
 class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
-	private static readonly ITEM_HEIGHT = 38;
+	private static readonly ITEM_HEIGHT = 26;
 	/**
 	 * Phone layout uses a taller row so the inline action toolbar can
 	 * meet the 44px minimum touch target without overflowing. Sized to
@@ -134,8 +134,8 @@ class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
 	 * `sessionsList.css`.
 	 */
 	private static readonly ITEM_HEIGHT_PHONE = 56;
-	private static readonly SECTION_HEIGHT = 26;
-	private static readonly SHOW_MORE_HEIGHT = 26;
+	private static readonly SECTION_HEIGHT = 30;
+	private static readonly SHOW_MORE_HEIGHT = 24;
 
 	constructor(
 		private readonly _approvalModel: AgentSessionApprovalModel | undefined,
@@ -595,6 +595,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 
 interface ISessionSectionTemplate {
 	readonly container: HTMLElement;
+	readonly folderIcon: HTMLElement;
 	readonly label: HTMLElement;
 	readonly count: HTMLElement;
 	readonly toolbar: MenuWorkbenchToolBar;
@@ -619,6 +620,8 @@ class SessionSectionRenderer implements ITreeRenderer<SessionListItem, FuzzyScor
 		const disposables = new DisposableStore();
 
 		container.classList.add('session-section');
+		const folderIcon = DOM.append(container, $('span.session-section-folder-icon'));
+		folderIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.folder));
 		const label = DOM.append(container, $('span.session-section-label'));
 		const count = DOM.append(container, $('span.session-section-count'));
 		const toolbarContainer = DOM.append(container, $('.session-section-toolbar'));
@@ -631,7 +634,7 @@ class SessionSectionRenderer implements ITreeRenderer<SessionListItem, FuzzyScor
 			menuOptions: { shouldForwardArgs: true },
 		}));
 
-		return { container, label, count, toolbar, chevron, contextKeyService, disposables };
+		return { container, folderIcon, label, count, toolbar, chevron, contextKeyService, disposables };
 	}
 
 	renderElement(node: ITreeNode<SessionListItem, FuzzyScore>, _index: number, template: ISessionSectionTemplate): void {

@@ -13,6 +13,7 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IsAuxiliaryWindowContext, IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
@@ -42,8 +43,8 @@ import { IsPhoneLayoutContext } from '../../../../common/contextkeys.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
-const GROUPING_STORAGE_KEY = 'sessionsViewPane.grouping.v2';
-const SORTING_STORAGE_KEY = 'sessionsViewPane.sorting';
+const GROUPING_STORAGE_KEY = 'sessionsViewPane.grouping.v3';
+const SORTING_STORAGE_KEY = 'sessionsViewPane.sorting.v2';
 
 /**
  * Place the given session in the sessions grid to the right of the last
@@ -62,8 +63,8 @@ export async function openSessionToTheSide(sessionsService: ISessionsService, se
 
 export const SessionsViewFilterSubMenu = new MenuId('SessionsViewPaneFilterSubMenu');
 export const SessionsViewFilterOptionsSubMenu = new MenuId('SessionsViewPaneFilterOptionsSubMenu');
-export const SessionsViewGroupingContext = new RawContextKey<string>('sessionsViewPane.grouping', SessionsGrouping.Date);
-export const SessionsViewSortingContext = new RawContextKey<string>('sessionsViewPane.sorting', SessionsSorting.Created);
+export const SessionsViewGroupingContext = new RawContextKey<string>('sessionsViewPane.grouping', SessionsGrouping.Workspace);
+export const SessionsViewSortingContext = new RawContextKey<string>('sessionsViewPane.sorting', SessionsSorting.Updated);
 export const IsWorkspaceGroupCappedContext = new RawContextKey<boolean>('sessionsViewPane.workspaceGroupCapped', true);
 
 export class SessionsView extends ViewPane {
@@ -74,11 +75,15 @@ export class SessionsView extends ViewPane {
 	private headerRow: HTMLElement | undefined;
 	private headerLabel: HTMLElement | undefined;
 	private headerActions: HTMLElement | undefined;
-	private groupingToggleLabel: HTMLElement | undefined;
+	private searchButton: HTMLButtonElement | undefined;
+	private primaryActions: HTMLElement | undefined;
+	private workspacesHeader: HTMLElement | undefined;
+	private filterButton: HTMLButtonElement | undefined;
+	private filterPopover: HTMLElement | undefined;
 	private isFindWidgetOpen = false;
 	sessionsControl: SessionsList | undefined;
-	private currentGrouping: SessionsGrouping = SessionsGrouping.Date;
-	private currentSorting: SessionsSorting = SessionsSorting.Created;
+	private currentGrouping: SessionsGrouping = SessionsGrouping.Workspace;
+	private currentSorting: SessionsSorting = SessionsSorting.Updated;
 	private groupingContextKey: IContextKey | undefined;
 	private sortingContextKey: IContextKey | undefined;
 	private workspaceGroupCappedContextKey: IContextKey<boolean> | undefined;
@@ -93,6 +98,7 @@ export class SessionsView extends ViewPane {
 		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IOpenerService openerService: IOpenerService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IThemeService themeService: IThemeService,
 		@IHoverService hoverService: IHoverService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
@@ -157,8 +163,9 @@ export class SessionsView extends ViewPane {
 		// Sessions content container
 		const sessionsContent = DOM.append(sessionsSection, $('.agent-sessions-content'));
 
-		// Header row: "Sessions" label (left) + compact "New" button (right)
+		// Header row: brand label (left) + compact collapse button (right)
 		const headerRow = this.headerRow = DOM.append(sessionsContent, $('.agent-sessions-header-row'));
+		headerRow.classList.add('agent-sessions-header-hidden');
 		const headerLabel = this.headerLabel = DOM.append(headerRow, $('.agent-sessions-header-label'));
 
 		const headerActions = this.headerActions = DOM.append(headerRow, $('.agent-sessions-header-actions'));
@@ -169,14 +176,43 @@ export class SessionsView extends ViewPane {
 		// widget mounts inside it.
 		const phoneLayout = isPhoneLayout(this.layoutService);
 		if (!phoneLayout) {
-			headerLabel.textContent = localize('sessionsHeader', "Sessions");
+			headerLabel.textContent = localize('backboardBrand', "Backboard");
 
-			this.createSidebarAction(headerActions, Codicon.edit, localize('newChat', "New chat"), () => {
+			const collapseButton = DOM.append(headerActions, $('button.agent-sessions-collapse-button')) as HTMLButtonElement;
+			collapseButton.type = 'button';
+			const collapseLabel = localize('collapseSidebar', "Collapse sidebar");
+			collapseButton.title = collapseLabel;
+			collapseButton.setAttribute('aria-label', collapseLabel);
+			collapseButton.appendChild(renderIcon(Codicon.layoutSidebarLeftOff));
+			this._register(DOM.addDisposableListener(collapseButton, DOM.EventType.CLICK, e => {
+				e.preventDefault();
+				this.layoutService.setPartHidden(true, Parts.SIDEBAR_PART);
+			}));
+
+			this.searchButton = DOM.append(sessionsContent, $('button.agent-sessions-search-button')) as HTMLButtonElement;
+			this.searchButton.type = 'button';
+			const searchLabel = localize('searchWorkspaces', "Search workspaces");
+			this.searchButton.title = searchLabel;
+			this.searchButton.setAttribute('aria-label', searchLabel);
+			DOM.append(this.searchButton, $('span.agent-sessions-search-icon')).appendChild(renderIcon(Codicon.search));
+			DOM.append(this.searchButton, $('span.agent-sessions-search-label', undefined, searchLabel));
+			this._register(DOM.addDisposableListener(this.searchButton, DOM.EventType.CLICK, e => {
+				e.preventDefault();
+				this.openFind();
+			}));
+
+			const primaryActions = this.primaryActions = DOM.append(sessionsContent, $('.agent-sessions-primary-actions'));
+			this.createSidebarAction(primaryActions, Codicon.edit, localize('newChat', "New chat"), () => {
 				logSessionsInteraction(this.telemetryService, 'newSession');
 				this.sessionsService.openNewSession({ forceNew: true });
 			});
-			this.createSidebarAction(headerActions, Codicon.search, localize('search', "Search"), () => this.openFind());
-			this.createGroupingToggle(headerActions);
+			this.createSidebarAction(primaryActions, Codicon.extensions, localize('marketplace', "Marketplace"), () => {
+				this.commandService.executeCommand('workbench.view.extensions').catch(onUnexpectedError);
+			});
+
+			const workspacesHeader = this.workspacesHeader = DOM.append(sessionsContent, $('.agent-sessions-workspaces-header'));
+			DOM.append(workspacesHeader, $('span.agent-sessions-workspaces-title', undefined, localize('workspacesHeader', "Workspaces")));
+			this.createWorkspaceFilterButton(workspacesHeader);
 		} else {
 			headerRow.classList.add('phone-layout-empty');
 		}
@@ -318,22 +354,28 @@ export class SessionsView extends ViewPane {
 		}));
 	}
 
-	private createGroupingToggle(container: HTMLElement): void {
-		const button = DOM.append(container, $('button.agent-sessions-sidebar-action.agent-sessions-grouping-action')) as HTMLButtonElement;
+	private createWorkspaceFilterButton(container: HTMLElement): void {
+		const button = this.filterButton = DOM.append(container, $('button.agent-sessions-filter-button')) as HTMLButtonElement;
 		button.type = 'button';
-		const iconElement = DOM.append(button, $('span.agent-sessions-sidebar-action-icon'));
-		iconElement.appendChild(renderIcon(Codicon.filter));
-		this.groupingToggleLabel = DOM.append(button, $('span.agent-sessions-sidebar-action-label'));
-		DOM.append(button, $('span.agent-sessions-grouping-action-chevron')).appendChild(renderIcon(Codicon.chevronDown));
+		button.setAttribute('aria-haspopup', 'menu');
+		button.setAttribute('aria-expanded', 'false');
+		button.appendChild(renderIcon(Codicon.filter));
 		this._register(DOM.addDisposableListener(button, DOM.EventType.CLICK, e => {
 			e.preventDefault();
-			this.setGrouping(this.currentGrouping === SessionsGrouping.Date ? SessionsGrouping.Workspace : SessionsGrouping.Date);
+			this.toggleFilterPopover();
 		}));
+		this._register(DOM.addDisposableListener(button.ownerDocument, DOM.EventType.POINTER_DOWN, e => {
+			const target = e.target as Node | null;
+			if (!target || !this.filterPopover || this.filterPopover.contains(target) || button.contains(target)) {
+				return;
+			}
+			this.closeFilterPopover();
+		}, true));
 		this.updateGroupingToggleState();
 	}
 
 	private updateGroupingToggleState(): void {
-		if (!this.groupingToggleLabel) {
+		if (!this.filterButton) {
 			return;
 		}
 
@@ -341,10 +383,51 @@ export class SessionsView extends ViewPane {
 		const label = groupedByTime
 			? localize('groupedByTime', "Group by Time")
 			: localize('groupedByWorkspace', "Group by Workspace");
-		this.groupingToggleLabel.textContent = label;
-		const button = this.groupingToggleLabel.closest('button');
-		button?.setAttribute('title', label);
-		button?.setAttribute('aria-label', label);
+		this.filterButton.setAttribute('title', label);
+		this.filterButton.setAttribute('aria-label', label);
+	}
+
+	private toggleFilterPopover(): void {
+		if (this.filterPopover) {
+			this.closeFilterPopover();
+			return;
+		}
+
+		if (!this.workspacesHeader || !this.filterButton) {
+			return;
+		}
+
+		const popover = this.filterPopover = DOM.append(this.workspacesHeader, $('.agent-sessions-filter-popover'));
+		popover.setAttribute('role', 'menu');
+		this.filterButton.setAttribute('aria-expanded', 'true');
+
+		this.createFilterPopoverRow(popover, localize('groupBy', "Group by"), this.currentGrouping === SessionsGrouping.Workspace ? localize('workspace', "Workspace") : localize('time', "Time"), () => {
+			this.setGrouping(this.currentGrouping === SessionsGrouping.Date ? SessionsGrouping.Workspace : SessionsGrouping.Date);
+			this.closeFilterPopover();
+		});
+		this.createFilterPopoverRow(popover, localize('sortBy', "Sort by"), this.currentSorting === SessionsSorting.Updated ? localize('updated', "Updated") : localize('created', "Created"), () => {
+			this.setSorting(this.currentSorting === SessionsSorting.Created ? SessionsSorting.Updated : SessionsSorting.Created);
+			this.closeFilterPopover();
+		});
+	}
+
+	private createFilterPopoverRow(container: HTMLElement, label: string, value: string, run: () => void): void {
+		const row = DOM.append(container, $('button.agent-sessions-filter-popover-row')) as HTMLButtonElement;
+		row.type = 'button';
+		row.setAttribute('role', 'menuitem');
+		DOM.append(row, $('span.agent-sessions-filter-popover-label', undefined, label));
+		DOM.append(row, $('span.agent-sessions-filter-popover-value', undefined, value));
+		DOM.append(row, $('span.agent-sessions-filter-popover-chevron')).appendChild(renderIcon(Codicon.chevronRight));
+		row.addEventListener(DOM.EventType.CLICK, e => {
+			e.preventDefault();
+			run();
+		});
+	}
+
+	private closeFilterPopover(): void {
+		this.filterPopover?.remove();
+		this.filterPopover = undefined;
+		this.filterButton?.setAttribute('aria-expanded', 'false');
 	}
 
 	focusCustomizations(): void {
@@ -550,13 +633,27 @@ export class SessionsView extends ViewPane {
 		}
 
 		if (this.isFindWidgetOpen) {
+			this.headerRow.classList.remove('agent-sessions-header-hidden');
 			this.headerLabel.style.display = 'none';
 			this.headerActions.style.display = 'none';
+			if (this.searchButton) {
+				this.searchButton.style.display = 'none';
+			}
+			if (this.primaryActions) {
+				this.primaryActions.style.display = 'none';
+			}
 			return;
 		}
 
-		this.headerLabel.style.display = '';
-		this.headerActions.style.display = '';
+		this.headerRow.classList.add('agent-sessions-header-hidden');
+		this.headerLabel.style.display = 'none';
+		this.headerActions.style.display = 'none';
+		if (this.searchButton) {
+			this.searchButton.style.display = '';
+		}
+		if (this.primaryActions) {
+			this.primaryActions.style.display = '';
+		}
 	}
 
 	/**

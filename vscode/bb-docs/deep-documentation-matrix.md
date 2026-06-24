@@ -21,6 +21,7 @@ This matrix counts the concrete source and documentation surface for every featu
 | [files-workspaces-explorer](files-workspaces-explorer/README.md) | 12 | 206 | 17 |
 | [markdown-preview-docs](markdown-preview-docs/README.md) | 5 | 191 | 17 |
 | [mcp-tools-customizations](mcp-tools-customizations/README.md) | 5 | 410 | 17 |
+| [modern-ide-system-blueprint](modern-ide-system-blueprint/README.md) | 15 | 31 | 31 |
 | [notebooks-interactive](notebooks-interactive/README.md) | 3 | 278 | 17 |
 | [performance-telemetry-diagnostics](performance-telemetry-diagnostics/README.md) | 5 | 55 | 17 |
 | [problems-output-logs](problems-output-logs/README.md) | 3 | 34 | 17 |

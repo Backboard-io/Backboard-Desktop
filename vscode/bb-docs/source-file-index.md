@@ -253,6 +253,24 @@ This index lists the primary source paths resolved from the crosswalk plus curre
 - `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/src/vs/workbench/contrib/mcp`
 - `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/src/vs/workbench/services/mcp`
 
+## Modern Ide System Blueprint
+
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/README.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/00-system-map.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/01-runtime-client-server.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/02-editor-core.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/03-files-workspaces.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/04-language-intelligence.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/05-rendering-ui.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/06-extensions-marketplace.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/07-terminal-search-debug.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/08-state-storage-config.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/09-input-command-keybindings.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/10-performance-concurrency.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/11-security-failure-devex.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/12-dataflows-and-sequences.md`
+- `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/bb-docs/modern-ide-system-blueprint/blueprint/13-reconstruction-plan.md`
+
 ## Notebooks Interactive
 
 - `/Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/src/vs/workbench/contrib/interactive`

@@ -38,7 +38,7 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 
 		container.classList.add('open-in-vscode-titlebar-widget');
 
-		const hoverText = this.keybindingService.appendKeybinding(localize('openInVSCodeHover', "Switch to Editor"), this.keybindingCommandId);
+		const hoverText = this.keybindingService.appendKeybinding(localize('openInVSCodeHover', "Switch to Advanced"), this.keybindingCommandId);
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 
@@ -55,12 +55,12 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 			const actions = [
 				toAction({
 					id: 'agents.action.mode.editor',
-					label: localize('openInVSCodeSwitcher.editor', "Editor"),
+					label: localize('openInVSCodeSwitcher.editor', "Advanced"),
 					run: () => this.action.run(),
 				}),
 				toAction({
 					id: 'agents.action.mode.agents',
-					label: localize('openInVSCodeSwitcher.agents', "Agents"),
+					label: localize('openInVSCodeSwitcher.agents', "Simple"),
 					checked: true,
 					run: () => this.commandService.executeCommand(OPEN_BACKBOARD_AGENTS_COMMAND_ID),
 				}),
@@ -75,7 +75,7 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		};
 
 		currentIcon.className = 'open-in-vscode-titlebar-widget-icon codicon codicon-window';
-		currentLabel.textContent = localize('openInVSCodeSwitcher.agents', "Agents");
+		currentLabel.textContent = localize('openInVSCodeSwitcher.agents', "Simple");
 
 		this._register(addDisposableListener(triggerButton, EventType.CLICK, event => {
 			EventHelper.stop(event, true);

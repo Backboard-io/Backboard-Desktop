@@ -21,16 +21,16 @@ Use this checklist when reviewing or updating `bb-docs`.
 The latest local audit from the repository root returned:
 
 ```text
-featureDirs: 28
-markdownFiles: 494
+featureDirs: 29
+markdownFiles: 525
 requiredSubfolderReadmesAndDetailFilesMissingOrSmall: 0
-codeBlocks: 2469
-textBlocks: 960
-shellBlocks: 279
-tsBlocks: 1062
+codeBlocks: 2548
+textBlocks: 991
+shellBlocks: 280
+tsBlocks: 1109
 diffBlocks: 13
-absolutePathMentions: 19149
-uniqueAbsolutePaths: 3729
+absolutePathMentions: 19200
+uniqueAbsolutePaths: 3747
 badAbsolutePaths: 0
 brokenMarkdownLinks: 0
 tripleApostropheFenceLines: 0

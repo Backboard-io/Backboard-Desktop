@@ -10,9 +10,9 @@ import { CancellationTokenSource } from '../../../../base/common/cancellation.js
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
-import { derivedObservableWithCache, IObservable } from '../../../../base/common/observable.js';
+import { autorun, derivedObservableWithCache, IObservable } from '../../../../base/common/observable.js';
 import { isWeb } from '../../../../base/common/platform.js';
-import { isEqual } from '../../../../base/common/resources.js';
+import { basename, isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
@@ -22,7 +22,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { localize } from '../../../../nls.js';
 import { IActiveSession, ISendRequestOptions, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
-import { IChat, ISession } from '../../../services/sessions/common/session.js';
+import { IChat, ISession, ISessionWorkspace } from '../../../services/sessions/common/session.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { IWorkspaceTrustRequestService } from '../../../../platform/workspace/common/workspaceTrust.js';
 import { WorkspacePicker } from './sessionWorkspacePicker.js';
@@ -56,6 +56,8 @@ export class NewChatWidget extends Disposable {
 	private readonly _loadCts = this._register(new MutableDisposable<CancellationTokenSource>());
 	private _currentChatResource: URI | undefined;
 	private _chatWidgetContent: HTMLElement | undefined;
+	private _composerStackElement: HTMLElement | undefined;
+	private _gitStatusElement: HTMLElement | undefined;
 
 	/** Recreates the draft once a better/late-registering provider can serve the folder (see {@link _createNewSession}). */
 	private readonly _pendingPreferredUpgrade = new MutableDisposable<IDisposable>();
@@ -203,7 +205,12 @@ export class NewChatWidget extends Disposable {
 		const chatWidgetContent = dom.append(chatWidgetContainer, dom.$('.new-chat-widget-content'));
 		this._chatWidgetContent = chatWidgetContent;
 
-		const workspacePickerContainer = this._renderSimpleHeader(chatWidgetContent);
+		this._renderMiddleSection(chatWidgetContent);
+		const composerStack = dom.append(chatWidgetContent, dom.$('.new-chat-composer-stack'));
+		this._composerStackElement = composerStack;
+		const workspacePickerContainer = this._renderComposerWorkspaceRow(composerStack);
+		this._widget.render(composerStack);
+		this._renderComposerSuggestions(composerStack);
 		// On web (vscode.dev / insiders.vscode.dev) the workspace picker is
 		// scoped to the currently selected agent host. When no hosts are
 		// known there is nothing for the user to pick, so swap the picker
@@ -214,8 +221,6 @@ export class NewChatWidget extends Disposable {
 			? this._renderEmptyStateGate(workspacePickerContainer, chatWidgetContent)
 			: this._renderWorkspacePicker(workspacePickerContainer));
 
-		this._renderMiddleSection(chatWidgetContent);
-		this._widget.render(chatWidgetContent);
 		this._widget.setVisible(true);
 		this._widget.setInputPartMaxHeightOverride(NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT);
 		this._makeComposerEasyToFocus();
@@ -248,13 +253,57 @@ export class NewChatWidget extends Disposable {
 		this._register(dom.addDisposableListener(inputContainer, dom.EventType.CLICK, focusInput));
 	}
 
-	private _renderSimpleHeader(container: HTMLElement): HTMLElement {
+	private _renderSimpleHeader(container: HTMLElement): void {
 		const header = dom.append(container, dom.$('.new-chat-simple-header'));
-		const pickerSlot = dom.append(header, dom.$('.new-session-workspace-picker-container'));
 		dom.append(header, dom.$('.new-chat-simple-header-spacer'));
 		const more = dom.append(header, dom.$('span.new-chat-simple-header-more'));
 		more.appendChild(renderIcon(Codicon.more));
+	}
+
+	private _renderComposerWorkspaceRow(container: HTMLElement): HTMLElement {
+		const row = dom.append(container, dom.$('.new-chat-composer-workspace-row'));
+		const pickerSlot = dom.append(row, dom.$('.new-session-workspace-picker-container'));
+		this._gitStatusElement = dom.append(row, dom.$('.new-chat-git-status'));
+		this._register(this._renderGitStatus());
 		return pickerSlot;
+	}
+
+	private _renderGitStatus(): IDisposable {
+		const store = new DisposableStore();
+		store.add(autorun(reader => this._updateGitStatus(this._session.read(reader)?.workspace.read(reader) ?? this._workspacePicker.selectedResolved?.workspace)));
+		store.add(this._workspacePicker.onDidSelectWorkspace(() => {
+			this._updateGitStatus(this._session.get()?.workspace.get() ?? this._workspacePicker.selectedResolved?.workspace);
+		}));
+		return store;
+	}
+
+	private _updateGitStatus(workspace: ISessionWorkspace | undefined): void {
+		const element = this._gitStatusElement;
+		if (!element) {
+			return;
+		}
+
+		const folder = workspace?.folders[0];
+		const gitRepository = folder?.gitRepository;
+		const repoName = gitRepository?.uri ? basename(gitRepository.uri) : (folder?.name ?? workspace?.label);
+		const branchName = gitRepository?.branchName?.trim();
+		const displayBranchName = branchName || localize('newChatGitStatus.defaultBranch', "main");
+
+		dom.clearNode(element);
+		element.classList.toggle('empty', !repoName);
+		if (!repoName) {
+			return;
+		}
+
+		const branchChip = dom.append(element, dom.$('span.new-chat-git-status-item.branch'));
+		dom.append(branchChip, renderIcon(Codicon.gitBranch));
+		const branchLabel = dom.append(branchChip, dom.$('span.sessions-chat-dropdown-label'));
+		branchLabel.textContent = displayBranchName;
+		branchChip.classList.remove('pending');
+
+		const title = localize('newChatGitStatus.titleWithBranch', "Repository: {0}, Branch: {1}", repoName, displayBranchName);
+		element.title = title;
+		element.setAttribute('aria-label', title);
 	}
 
 	private _renderMiddleSection(container: HTMLElement): void {
@@ -269,7 +318,10 @@ export class NewChatWidget extends Disposable {
 		const descriptionLineTwo = dom.append(description, dom.$('p'));
 		descriptionLineTwo.textContent = localize('newChatMiddleDescriptionTwo', "Pick a workspace, then describe the next step.");
 
-		const suggestionsContainer = dom.append(middle, dom.$('.new-chat-middle-suggestions'));
+	}
+
+	private _renderComposerSuggestions(container: HTMLElement): void {
+		const suggestionsContainer = dom.append(container, dom.$('.new-chat-middle-suggestions'));
 		const suggestions = [
 			localize('newChatSuggestionLandingPage', "Build a feature"),
 			localize('newChatSuggestionPricingSection', "Fix a bug"),
@@ -819,7 +871,7 @@ export class NewChatWidget extends Disposable {
 	}
 
 	layout(_height: number, _width: number): void {
-		const width = this._chatWidgetContent?.clientWidth || _width;
+		const width = this._composerStackElement?.clientWidth || this._chatWidgetContent?.clientWidth || _width;
 		this._widget.layout(NEW_CHAT_COMPOSER_LAYOUT_HEIGHT, width);
 	}
 

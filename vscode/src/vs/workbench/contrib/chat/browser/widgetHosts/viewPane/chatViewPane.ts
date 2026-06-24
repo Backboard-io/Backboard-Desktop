@@ -6,7 +6,6 @@
 import './media/chatViewPane.css';
 import { $, addDisposableListener, append, EventHelper, EventType, getWindow, setVisibility } from '../../../../../../base/browser/dom.js';
 import { StandardMouseEvent } from '../../../../../../base/browser/mouseEvent.js';
-import { Button } from '../../../../../../base/browser/ui/button/button.js';
 import { Orientation, Sash } from '../../../../../../base/browser/ui/sash/sash.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { Event } from '../../../../../../base/common/event.js';
@@ -32,7 +31,6 @@ import { INotificationService } from '../../../../../../platform/notification/co
 import { IOpenerService } from '../../../../../../platform/opener/common/opener.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
-import { defaultButtonStyles } from '../../../../../../platform/theme/browser/defaultStyles.js';
 import { editorBackground } from '../../../../../../platform/theme/common/colorRegistry.js';
 import { ChatViewTitleControl } from './chatViewTitleControl.js';
 import { IThemeService } from '../../../../../../platform/theme/common/themeService.js';
@@ -63,6 +61,8 @@ import { ChatViewId } from '../../chat.js';
 import { IActivityService, ProgressBadge } from '../../../../../services/activity/common/activity.js';
 import { disposableTimeout } from '../../../../../../base/common/async.js';
 import { AgentSessionsFilter, AgentSessionsGrouping } from '../../agentSessions/agentSessionsFilter.js';
+import { Codicon } from '../../../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { IAgentSessionsService } from '../../agentSessions/agentSessionsService.js';
 import { HoverPosition } from '../../../../../../base/browser/ui/hover/hoverWidget.js';
 import { IAgentSession } from '../../agentSessions/agentSessionsModel.js';
@@ -553,9 +553,9 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 
 	//#region Sessions Control
 
-	private static readonly SESSIONS_SIDEBAR_MIN_WIDTH = 200;
+	private static readonly SESSIONS_SIDEBAR_MIN_WIDTH = 260;
 	private static readonly SESSIONS_SIDEBAR_SNAP_THRESHOLD = this.SESSIONS_SIDEBAR_MIN_WIDTH / 2; // snap to hide when dragged below half of minimum width
-	private static readonly SESSIONS_SIDEBAR_DEFAULT_WIDTH = 300;
+	private static readonly SESSIONS_SIDEBAR_DEFAULT_WIDTH = 360;
 	private static readonly CHAT_WIDGET_DEFAULT_WIDTH = 300;
 	private static readonly SESSIONS_SIDEBAR_VIEW_MIN_WIDTH = this.CHAT_WIDGET_DEFAULT_WIDTH + this.SESSIONS_SIDEBAR_DEFAULT_WIDTH;
 
@@ -580,15 +580,24 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 
 	private createSessionsControl(parent: HTMLElement): AgentSessionsControl {
 		const sessionsContainer = this.sessionsContainer = parent.appendChild($('.agent-sessions-container'));
+		sessionsContainer.classList.add('backboard-side-chat-sessions');
 
-		// Sessions Title
+		// Sessions title: Backboard brand + collapse affordance, matching the side-chat design.
 		const sessionsTitleContainer = this.sessionsTitleContainer = append(sessionsContainer, $('.agent-sessions-title-container'));
 		const sessionsTitle = this.sessionsTitle = append(sessionsTitleContainer, $('span.agent-sessions-title'));
-		sessionsTitle.textContent = localize('sessions', "Sessions");
+		sessionsTitle.textContent = localize('backboardSideChatTitle', "Backboard");
 		this._register(addDisposableListener(sessionsTitle, EventType.CLICK, () => {
 			this.sessionsControl?.scrollToTop();
 			this.sessionsControl?.focus();
 		}));
+		const collapseButton = append(sessionsTitleContainer, $('button.agent-sessions-collapse-button')) as HTMLButtonElement;
+		collapseButton.type = 'button';
+		const collapseLabel = localize('hideBackboardSideChat', "Hide Backboard sidebar");
+		collapseButton.title = collapseLabel;
+		collapseButton.setAttribute('aria-label', collapseLabel);
+		const collapseIcon = append(collapseButton, $('span.agent-sessions-collapse-icon'));
+		collapseIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.layoutSidebarLeftOff));
+		this._register(addDisposableListener(collapseButton, EventType.CLICK, () => this.commandService.executeCommand('agentSessions.hideAgentSessionsSidebar')));
 
 		// Sessions Toolbar
 		const sessionsToolbarContainer = append(sessionsTitleContainer, $('.agent-sessions-toolbar'));
@@ -599,17 +608,51 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		// Sessions Filter
 		const sessionsFilter = this._register(this.instantiationService.createInstance(AgentSessionsFilter, {
 			filterMenuId: MenuId.AgentSessionsViewerFilterSubMenu,
-			groupResults: () => this.sessionsViewerOrientation === AgentSessionsViewerOrientation.Stacked ? AgentSessionsGrouping.Capped : AgentSessionsGrouping.Date
+			groupResults: () => this.sessionsViewerOrientation === AgentSessionsViewerOrientation.Stacked ? AgentSessionsGrouping.Capped : AgentSessionsGrouping.Repository
 		}));
 		this._register(Event.runAndSubscribe(sessionsFilter.onDidChange, () => {
 			sessionsToolbarContainer.classList.toggle('filtered', !sessionsFilter.isDefault());
 		}));
 
-		// New Session Button
-		const newSessionButtonContainer = this.sessionsNewButtonContainer = append(sessionsContainer, $('.agent-sessions-new-button-container'));
-		const newSessionButton = this._register(new Button(newSessionButtonContainer, { ...defaultButtonStyles, secondary: true }));
-		newSessionButton.label = localize('newSession', "New Session");
-		this._register(newSessionButton.onDidClick(() => this.commandService.executeCommand(ACTION_ID_NEW_CHAT)));
+		const searchButton = append(sessionsContainer, $('button.agent-sessions-search-button')) as HTMLButtonElement;
+		searchButton.type = 'button';
+		const searchLabel = localize('searchWorkspaces', "Search workspaces");
+		searchButton.title = searchLabel;
+		searchButton.setAttribute('aria-label', searchLabel);
+		const searchIcon = append(searchButton, $('span.agent-sessions-search-icon'));
+		searchIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.search));
+		append(searchButton, $('span.agent-sessions-search-label', undefined, searchLabel));
+		this._register(addDisposableListener(searchButton, EventType.CLICK, () => {
+			this.sessionsControl?.openFind();
+		}));
+
+		const primaryActions = append(sessionsContainer, $('.agent-sessions-primary-actions'));
+		const newChatAction = append(primaryActions, $('button.agent-sessions-action-row.agent-sessions-new-chat-row')) as HTMLButtonElement;
+		newChatAction.type = 'button';
+		const newChatLabel = localize('newChat', "New Chat");
+		newChatAction.title = newChatLabel;
+		newChatAction.setAttribute('aria-label', newChatLabel);
+		const newChatIcon = append(newChatAction, $('span.agent-sessions-action-icon'));
+		newChatIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.edit));
+		append(newChatAction, $('span.agent-sessions-action-label', undefined, newChatLabel));
+		this._register(addDisposableListener(newChatAction, EventType.CLICK, () => this.commandService.executeCommand(ACTION_ID_NEW_CHAT)));
+
+		const marketplaceAction = append(primaryActions, $('button.agent-sessions-action-row.agent-sessions-marketplace-row')) as HTMLButtonElement;
+		marketplaceAction.type = 'button';
+		const marketplaceLabel = localize('marketplace', "Marketplace");
+		marketplaceAction.title = marketplaceLabel;
+		marketplaceAction.setAttribute('aria-label', marketplaceLabel);
+		const marketplaceIcon = append(marketplaceAction, $('span.agent-sessions-action-icon'));
+		marketplaceIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.extensions));
+		append(marketplaceAction, $('span.agent-sessions-action-label', undefined, marketplaceLabel));
+		this._register(addDisposableListener(marketplaceAction, EventType.CLICK, () => this.commandService.executeCommand('workbench.view.extensions')));
+
+		const workspacesHeader = append(sessionsContainer, $('.agent-sessions-workspaces-header'));
+		append(workspacesHeader, $('span.agent-sessions-workspaces-title', undefined, localize('workspacesHeader', "Workspaces")));
+		workspacesHeader.appendChild(sessionsToolbarContainer);
+
+		// Legacy button slot kept for orientation-specific CSS and extensions that query it.
+		this.sessionsNewButtonContainer = append(sessionsContainer, $('.agent-sessions-new-button-container'));
 
 		// Sessions Control
 		this.sessionsControlContainer = append(sessionsContainer, $('.agent-sessions-control-container'));
@@ -617,6 +660,10 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 			source: 'chatViewPane',
 			filter: sessionsFilter,
 			overrideStyles: this.getLocationBasedColors().listOverrideStyles,
+			compactRows: true,
+			compactShowMore: true,
+			hideSectionCount: true,
+			hideSessionBadge: true,
 			getHoverPosition: () => this.getSessionHoverPosition(),
 			trackActiveEditorSession: () => {
 				return !this._widget || this._widget.isEmpty(); // only track and reveal if chat widget is empty

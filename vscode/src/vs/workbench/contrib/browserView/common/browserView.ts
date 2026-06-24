@@ -377,7 +377,6 @@ export interface IBrowserViewModel extends IDisposable {
 	zoomOut(): Promise<void>;
 	resetZoom(): Promise<void>;
 	getConsoleLogs(): Promise<string>;
-	setElementOuterHTML(elementId: string, outerHTML: string): Promise<void>;
 	toggleElementSelection(enabled?: boolean): Promise<void>;
 	toggleAreaSelection(enabled?: boolean): Promise<void>;
 	setDevice(device: IBrowserDeviceProfile | undefined): Promise<void>;
@@ -786,10 +785,6 @@ export class BrowserViewModel extends Disposable implements IBrowserViewModel {
 
 	async getConsoleLogs(): Promise<string> {
 		return this.browserViewService.getConsoleLogs(this.id);
-	}
-
-	async setElementOuterHTML(elementId: string, outerHTML: string): Promise<void> {
-		return this.browserViewService.setElementOuterHTML(this.id, elementId, outerHTML);
 	}
 
 	async toggleElementSelection(enabled?: boolean): Promise<void> {

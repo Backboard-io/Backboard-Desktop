@@ -19,11 +19,11 @@ In this repository, "endpoint" does not mean HTTP only. Most VS Code features ar
 
 The current `bb-docs` audit covers:
 
-- 28 feature folders.
-- 494 Markdown files.
-- 2,469 fenced code blocks.
-- 960 ASCII `text` diagrams/blocks.
-- 19,149 full absolute path mentions.
+- 29 feature folders.
+- 525 Markdown files.
+- 2,548 fenced code blocks.
+- 991 ASCII `text` diagrams/blocks.
+- 19,200 full absolute path mentions.
 - 0 broken Markdown links.
 - 0 unresolved absolute path mentions.
 - 0 unfinished-marker hits in the final scan.
@@ -57,6 +57,7 @@ Additional root indexes:
 | `files-workspaces-explorer` | Explorer/files, openers, workspaces, workspace trust-adjacent workspace flows, file services, and URI-backed editors. |
 | `markdown-preview-docs` | Markdown preview, Mermaid, Markdown math, prompt/instruction markdown support, and markdown custom editors/renderers. |
 | `mcp-tools-customizations` | MCP servers, MCP config files, AI customization editor, prompts/skills/agents/hooks, tools, and custom model/tool surfaces. |
+| `modern-ide-system-blueprint` | Production-grade greenfield IDE system blueprint covering architecture, editor core, files, language intelligence, rendering, extensions, terminal/search/debug, state, input, performance, security, developer experience, and failure recovery. |
 | `notebooks-interactive` | Notebook editor, interactive window, IPYNB serializer, REPL notebooks, renderers, and notebook chat/tooling. |
 | `performance-telemetry-diagnostics` | Process explorer, performance contribution, telemetry, edit telemetry, issue diagnostics, logs used for diagnosis, and policy/export diagnostics. |
 | `problems-output-logs` | Problems/markers, output channels, logs views, task/problem matchers, and diagnostic presentation. |
@@ -79,6 +80,7 @@ Primary source inventory came from:
 - `src/vs/sessions/*` for the Agents Window.
 - `extensions/*/package.json` and selected extension source folders for built-in extension contributions.
 - `extensions/backboard/*` and `extensions/copilot/*` for Backboard-specific AI/chat/bridge behavior.
+- `bb-docs/modern-ide-system-blueprint/*` for the greenfield system reconstruction blueprint.
 
 See `source-crosswalk.md` for the source-directory to documentation-folder mapping.
 

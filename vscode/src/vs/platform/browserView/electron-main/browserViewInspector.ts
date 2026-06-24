@@ -299,19 +299,6 @@ export class BrowserViewInspector extends Disposable {
 		}
 	}
 
-	async setElementOuterHTML(elementId: string, outerHTML: string): Promise<void> {
-		for (const inspector of this._registry.inspectors) {
-			try {
-				await inspector.setElementOuterHTML(elementId, outerHTML);
-				return;
-			} catch {
-				// Element ids are frame-local. Try the next frame.
-			}
-		}
-
-		throw new Error(`Element not found: ${elementId}`);
-	}
-
 	/**
 	 * Toggle drag-to-select area picking on the top frame only.
 	 * The picker reports the literal user-drawn rectangle (or `undefined` on cancellation)

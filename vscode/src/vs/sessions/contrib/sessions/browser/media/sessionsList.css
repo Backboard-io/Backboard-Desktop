@@ -16,9 +16,17 @@
 	--sessions-row-icon-fg: color-mix(in srgb, var(--vscode-focusBorder) 48%, var(--vscode-descriptionForeground));
 
 	.monaco-list-row:has(.session-item) {
-		border-radius: 10px;
-		margin: 0 12px;
-		width: calc(100% - 24px);
+		border-radius: 7px;
+		margin: 0;
+		width: 100%;
+		overflow: hidden;
+	}
+
+	.monaco-list-row:has(.session-section),
+	.monaco-list-row:has(.session-show-more-folders) {
+		border-radius: 7px;
+		margin: 0;
+		width: 100%;
 		overflow: hidden;
 	}
 
@@ -68,7 +76,8 @@
 
 	.monaco-list-row .session-title-toolbar {
 		position: relative;
-		height: 16px;
+		height: 18px;
+		flex: 0 0 auto;
 		display: none;
 
 		.monaco-toolbar {
@@ -120,9 +129,10 @@
 .session-item {
 	display: flex;
 	flex-direction: row;
+	align-items: center;
 	height: 100%;
 	box-sizing: border-box;
-	padding: 6px 10px 6px 14px;
+	padding: 0 4px 0 28px;
 	border-radius: inherit;
 
 	&.archived {
@@ -131,7 +141,7 @@
 
 	&.sticky {
 		border-left: 2px solid var(--vscode-focusBorder);
-		padding-left: 4px;
+		padding-left: 26px;
 	}
 
 	.session-main,
@@ -142,7 +152,7 @@
 	}
 
 	.session-icon {
-		display: flex;
+		display: none;
 		align-items: flex-start;
 		line-height: 18px;
 		color: var(--sessions-row-icon-fg);
@@ -177,7 +187,7 @@
 	}
 
 	.session-main {
-		padding-left: 8px;
+		padding-left: 0;
 		max-width: 100%;
 		display: flex;
 		align-items: center;
@@ -197,10 +207,11 @@
 	}
 
 	.session-details-row {
-		flex: 1 1 auto;
-		min-width: 36px;
+		flex: 0 1 auto;
+		min-width: 0;
+		max-width: 46%;
 		gap: 4px;
-		font-size: var(--vscode-agents-fontSize-label2, 11px);
+		font-size: 11px;
 		line-height: 16px;
 		max-height: 16px;
 		overflow: hidden;
@@ -269,11 +280,11 @@
 	}
 
 	.session-title {
-		flex: 0 1 auto;
-		min-width: 42px;
-		max-width: 58%;
-		font-size: var(--vscode-agents-fontSize-body1, 13px);
-		font-weight: 500;
+		flex: 1 1 auto;
+		min-width: 0;
+		max-width: none;
+		font-size: 12px;
+		font-weight: var(--vscode-agents-fontWeight-regular, 400);
 		letter-spacing: 0;
 	}
 
@@ -286,12 +297,13 @@
 	&.unread .session-title,
 	&.needs-input .session-title {
 		color: var(--sessions-row-attention-fg);
-		font-weight: 560;
+		font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
 	}
 
 	.session-time {
 		display: flex;
 		align-items: center;
+		flex: 0 0 auto;
 		font-variant-numeric: tabular-nums;
 		white-space: nowrap;
 	}
@@ -355,7 +367,7 @@
 	padding: 0 10px;
 	font-size: var(--vscode-agents-fontSize-label2, 11px);
 	color: color-mix(in srgb, var(--vscode-descriptionForeground) 78%, transparent);
-	min-height: 26px;
+	min-height: 24px;
 	cursor: pointer;
 
 	.session-show-more-label {
@@ -399,11 +411,24 @@
 .session-section {
 	display: flex;
 	align-items: center;
-	font-size: var(--vscode-agents-fontSize-label2, 11px);
-	font-weight: 560;
-	color: color-mix(in srgb, var(--vscode-descriptionForeground) 74%, transparent);
-	padding: 2px 12px 0;
+	gap: 8px;
+	height: 100%;
+	box-sizing: border-box;
+	font-size: 13px;
+	font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	padding: 0 4px 0 0;
 	letter-spacing: 0;
+
+	.session-section-folder-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		flex: 0 0 16px;
+		color: color-mix(in srgb, var(--vscode-icon-foreground) 78%, transparent);
+	}
 
 	.session-section-label {
 		flex: 1 1 auto;
@@ -459,14 +484,14 @@
 
 .sessions-list-control {
 
-	/* Workspace headers and folder toggles use label color changes instead of row background fills for hover/focus/selection. */
+	/* Workspace headers now behave like compact sidebar rows. */
 	.monaco-list-row:has(.session-section):hover,
 	.monaco-list-row:has(.session-show-more-folders):hover,
 	.monaco-list-row.focused:has(.session-section),
 	.monaco-list-row.focused:has(.session-show-more-folders),
 	.monaco-list-row.selected:has(.session-section),
 	.monaco-list-row.selected:has(.session-show-more-folders) {
-		background: transparent !important;
+		background: var(--sessions-row-hover-bg) !important;
 	}
 
 .monaco-list-row:hover .session-section .session-section-label,

@@ -38,7 +38,6 @@ export enum BrowserViewCommandId {
 
 	// Chat actions
 	AddElementToChat = `${commandPrefix}.addElementToChat`,
-	EditElementHTML = `${commandPrefix}.editElementHTML`,
 	AddConsoleLogsToChat = `${commandPrefix}.addConsoleLogsToChat`,
 	AddScreenshotToChat = `${commandPrefix}.addScreenshotToChat`,
 	AddAreaScreenshotToChat = `${commandPrefix}.addAreaScreenshotToChat`,
@@ -66,7 +65,6 @@ export interface IElementAncestor {
 }
 
 export interface IElementData {
-	readonly elementId?: string;
 	readonly url?: string;
 	readonly outerHTML: string;
 	readonly computedStyle: string;
@@ -568,16 +566,6 @@ export interface IBrowserViewService {
 	 * @returns The captured console logs as a single string
 	 */
 	getConsoleLogs(id: string): Promise<string>;
-
-	/**
-	 * Replace a preload-tracked element's live DOM with the provided outerHTML.
-	 * This mutates the current page only and does not write source files.
-	 *
-	 * @param id The browser view identifier
-	 * @param elementId The element id returned by an element selection.
-	 * @param outerHTML Replacement outerHTML.
-	 */
-	setElementOuterHTML(id: string, elementId: string, outerHTML: string): Promise<void>;
 
 	/**
 	 * Toggle element selection mode in a browser view.

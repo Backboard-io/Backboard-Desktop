@@ -4,33 +4,25 @@
  *--------------------------------------------------------------------------------------------*/
 
 .agent-sessions-viewpane {
+	--agent-sidebar-bg: var(--vscode-editor-background, #121314);
+	--agent-sidebar-raised-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 7%, var(--agent-sidebar-bg));
+	--agent-sidebar-hover-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 6%, transparent);
+	--agent-sidebar-active-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 9%, transparent);
+	--agent-sidebar-border: var(--vscode-sideBar-border, #2f2f2f);
+	--agent-sidebar-primary: var(--vscode-sideBar-foreground, #f2f2f2);
+	--agent-sidebar-secondary: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 84%, transparent);
+	--agent-sidebar-muted: var(--vscode-descriptionForeground, #939393);
+	background: var(--agent-sidebar-bg);
 
 	.agent-sessions-container {
 		display: flex;
 		flex-direction: column;
 		height: 100%;
 		overflow: hidden;
-	}
-
-	/* Section headers - more prominent than time-based groupings */
-	.agent-sessions-header {
-		font-size: var(--vscode-agents-fontSize-body2);
-		font-weight: var(--vscode-agents-fontWeight-semiBold);
-		text-transform: uppercase;
-		color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground));
-		padding: 6px 20px 6px 12px;
-		letter-spacing: 0.05em;
-	}
-
-	.agent-sessions-chevron {
-		flex-shrink: 0;
-		opacity: 0;
-		transition: opacity 0.1s ease-in-out;
-	}
-
-	.agent-sessions-header:hover .agent-sessions-chevron,
-	.agent-sessions-header:focus .agent-sessions-chevron {
-		opacity: 0.7;
+		box-sizing: border-box;
+		padding: 18px 16px;
+		background: var(--agent-sidebar-bg);
+		color: var(--agent-sidebar-primary);
 	}
 
 	/* Sessions section - fills remaining space above customizations */
@@ -40,26 +32,7 @@
 		flex: 1;
 		overflow: hidden;
 		min-height: 0;
-		margin-bottom: 6px;
-	}
-
-	.agent-sessions-header {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-		padding-top: 10px;
-		padding-right: 12px;
-		-webkit-user-select: none;
-		user-select: none;
-	}
-
-	.agent-sessions-header .agent-sessions-header-toolbar {
-		margin-left: auto;
-	}
-
-	.agent-sessions-header:focus {
-		outline: 1px solid var(--vscode-focusBorder);
-		outline-offset: -1px;
+		margin: 0;
 	}
 
 	.agent-sessions-content {
@@ -67,50 +40,148 @@
 		flex-direction: column;
 		flex: 1;
 		overflow: hidden;
+		gap: 14px;
+		min-width: 0;
 	}
 
 	.agent-sessions-content.collapsed {
 		display: none;
 	}
 
-	/* Header row: label + action buttons */
+	/* Header row: brand + collapse button */
 	.agent-sessions-header-row {
 		display: flex;
-		flex-direction: column;
-		align-items: stretch;
-		padding: 8px 12px 6px;
-		min-height: auto;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		min-height: 32px;
+		padding: 0;
 		box-sizing: border-box;
 		-webkit-user-select: none;
 		user-select: none;
 	}
 
-	.agent-sessions-header-label {
+	.agent-sessions-header-row.agent-sessions-header-hidden {
 		display: none;
+	}
+
+	.agent-sessions-header-label {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--agent-sidebar-primary);
+		font-size: 14px;
+		font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+		line-height: 20px;
 	}
 
 	.agent-sessions-header-actions {
 		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 4px;
+		margin-left: 0;
+		flex-shrink: 0;
+	}
+
+	.agent-sessions-collapse-button,
+	.agent-sessions-filter-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		flex: 0 0 28px;
+		padding: 0;
+		border: none;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--agent-sidebar-secondary);
+		cursor: pointer;
+	}
+
+	.agent-sessions-collapse-button:hover,
+	.agent-sessions-collapse-button:focus-visible,
+	.agent-sessions-filter-button:hover,
+	.agent-sessions-filter-button:focus-visible,
+	.agent-sessions-filter-button[aria-expanded="true"] {
+		background: var(--agent-sidebar-hover-bg);
+		color: var(--agent-sidebar-primary);
+	}
+
+	.agent-sessions-collapse-button:focus-visible,
+	.agent-sessions-filter-button:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: -1px;
+	}
+
+	.agent-sessions-search-button {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		height: 32px;
+		padding: 0 12px;
+		box-sizing: border-box;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		background: var(--agent-sidebar-raised-bg);
+		color: var(--agent-sidebar-muted);
+		font-family: inherit;
+		font-size: 13px;
+		line-height: 18px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.agent-sessions-search-button:hover,
+	.agent-sessions-search-button:focus-visible {
+		border-color: color-mix(in srgb, var(--vscode-focusBorder) 55%, transparent);
+		color: var(--agent-sidebar-secondary);
+	}
+
+	.agent-sessions-search-button:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: 2px;
+	}
+
+	.agent-sessions-search-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		flex: 0 0 16px;
+	}
+
+	.agent-sessions-search-label {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.agent-sessions-primary-actions {
+		display: flex;
 		flex-direction: column;
 		align-items: stretch;
 		gap: 2px;
-		margin-left: 0;
-		flex-shrink: 0;
 	}
 
 	.agent-sessions-sidebar-action {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 10px;
 		width: 100%;
-		height: 26px;
-		padding: 0 4px;
+		height: 28px;
+		padding: 0 6px 0 0;
 		border: none;
-		border-radius: 8px;
+		border-radius: 7px;
 		background: transparent;
-		color: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 72%, transparent);
+		color: var(--agent-sidebar-secondary);
 		font-family: inherit;
-		font-size: var(--vscode-agents-fontSize-body1, 13px);
+		font-size: 13px;
 		font-weight: 500;
 		line-height: 18px;
 		text-align: left;
@@ -119,8 +190,8 @@
 
 	.agent-sessions-sidebar-action:hover,
 	.agent-sessions-sidebar-action:focus-visible {
-		background: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 4%, transparent);
-		color: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 84%, transparent);
+		background: var(--agent-sidebar-hover-bg);
+		color: var(--agent-sidebar-primary);
 	}
 
 	.agent-sessions-sidebar-action:focus-visible {
@@ -135,11 +206,11 @@
 		width: 16px;
 		height: 16px;
 		flex: 0 0 16px;
-		color: color-mix(in srgb, var(--vscode-icon-foreground) 68%, transparent);
+		color: color-mix(in srgb, var(--vscode-icon-foreground) 74%, transparent);
 	}
 
 	.agent-sessions-sidebar-action-icon .codicon {
-		font-size: var(--vscode-codiconFontSize-compact, 12px);
+		font-size: 16px;
 	}
 
 	.agent-sessions-sidebar-action-label {
@@ -148,23 +219,97 @@
 		white-space: nowrap;
 	}
 
-	.agent-sessions-grouping-action {
-		margin-top: 4px;
+	.agent-sessions-workspaces-header {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		height: 32px;
+		flex: 0 0 32px;
+		margin-top: 2px;
 	}
 
-	.agent-sessions-grouping-action-chevron {
+	.agent-sessions-workspaces-title {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--agent-sidebar-primary);
+		font-size: 14px;
+		font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+		line-height: 20px;
+	}
+
+	.agent-sessions-filter-popover {
+		position: absolute;
+		top: 36px;
+		right: 0;
+		z-index: 50;
+		display: flex;
+		flex-direction: column;
+		width: min(248px, calc(100vw - 48px));
+		padding: 4px;
+		box-sizing: border-box;
+		border: 1px solid var(--agent-sidebar-border);
+		border-radius: 8px;
+		background: var(--agent-sidebar-raised-bg);
+		box-shadow: 0 8px 8px rgb(0 0 0 / 22%);
+	}
+
+	.agent-sessions-filter-popover-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		height: 32px;
+		padding: 0 8px 0 10px;
+		box-sizing: border-box;
+		border: none;
+		border-radius: 4px;
+		background: transparent;
+		color: var(--agent-sidebar-secondary);
+		font-family: inherit;
+		font-size: var(--vscode-agents-fontSize-label1, 12px);
+		line-height: 18px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.agent-sessions-filter-popover-row:first-child,
+	.agent-sessions-filter-popover-row:hover,
+	.agent-sessions-filter-popover-row:focus-visible {
+		background: var(--agent-sidebar-active-bg);
+	}
+
+	.agent-sessions-filter-popover-row:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: -1px;
+	}
+
+	.agent-sessions-filter-popover-label {
+		flex: 0 0 auto;
+		color: var(--agent-sidebar-secondary);
+	}
+
+	.agent-sessions-filter-popover-value {
+		min-width: 0;
+		flex: 1 1 auto;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--agent-sidebar-primary);
+		text-align: right;
+	}
+
+	.agent-sessions-filter-popover-chevron {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 		width: 14px;
 		height: 14px;
 		flex: 0 0 14px;
-		margin-left: auto;
-		color: color-mix(in srgb, var(--vscode-icon-foreground) 58%, transparent);
-	}
-
-	.agent-sessions-grouping-action-chevron .codicon {
-		font-size: 11px;
+		color: var(--agent-sidebar-muted);
 	}
 
 	/* Inline search input — replaces label + actions when active */
@@ -195,8 +340,10 @@
 	.agent-sessions-find-widget-container > .monaco-tree-type-filter .monaco-tree-type-filter-input > .monaco-findInput > .monaco-inputbox {
 		display: flex;
 		align-items: center;
-		min-height: 24px;
+		min-height: 32px;
 		box-sizing: border-box;
+		border-radius: 10px;
+		background: var(--agent-sidebar-raised-bg);
 	}
 
 	.agent-sessions-find-widget-container > .monaco-tree-type-filter .monaco-tree-type-filter-input > .monaco-findInput > .controls {
@@ -216,18 +363,20 @@
 	.agent-sessions-control-container {
 		flex: 1;
 		overflow: hidden;
+		min-height: 0;
+		margin-top: -8px;
 	}
 }
 
 .agent-sessions-workbench.shell-gradient-background .agent-sessions-viewpane {
-	background: transparent !important;
+	background: var(--vscode-editor-background, #121314) !important;
 }
 
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .pane-body,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-scrollable-element,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-list,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-list-rows {
-	background: transparent !important;
+	background: var(--vscode-editor-background, #121314) !important;
 }
 
 /* Sessions-app-specific overrides for the agent sessions viewer.

@@ -128,13 +128,13 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 			getActions: () => [
 				toAction({
 					id: 'workbench.action.mode.editor',
-					label: localize('backboardModeSwitcher.editor', "Editor"),
+					label: localize('backboardModeSwitcher.editor', "Advanced"),
 					checked: !agentsActive,
 					run: () => this.openEditor(),
 				}),
 				toAction({
 					id: 'workbench.action.mode.agents',
-					label: localize('backboardModeSwitcher.agents', "Agents"),
+					label: localize('backboardModeSwitcher.agents', "Simple"),
 					checked: agentsActive,
 					run: () => this.openAgents(),
 				}),
@@ -179,8 +179,8 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		this.currentIcon?.classList.toggle('codicon-window', !agentsActive);
 		this.currentIcon?.classList.toggle('codicon-robot', agentsActive);
 		this.currentLabel?.replaceChildren(agentsActive
-			? localize('backboardModeSwitcher.agents', "Agents")
-			: localize('backboardModeSwitcher.editor', "Editor"));
+			? localize('backboardModeSwitcher.agents', "Simple")
+			: localize('backboardModeSwitcher.editor', "Advanced"));
 	}
 }
 
