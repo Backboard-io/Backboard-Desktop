@@ -4,10 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { promises as fs } from 'fs';
-import { Terminal, TerminalLocation, TerminalOptions, TerminalProfile, ThemeIcon, Uri, ViewColumn, window, workspace } from 'vscode';
+import { Terminal, TerminalLocation, TerminalOptions, ThemeIcon, Uri, ViewColumn, window } from 'vscode';
 import { IAuthenticationService } from '../../../platform/authentication/common/authentication';
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
-import { IEnvService } from '../../../platform/env/common/envService';
 import { IVSCodeExtensionContext } from '../../../platform/extContext/common/extensionContext';
 import { ILogService } from '../../../platform/log/common/logService';
 import { deriveCopilotCliOTelEnv } from '../../../platform/otel/common/agentOTelEnv';
@@ -20,16 +19,13 @@ import { disposableTimeout } from '../../../util/vs/base/common/async';
 import { Disposable, DisposableStore } from '../../../util/vs/base/common/lifecycle';
 import * as path from '../../../util/vs/base/common/path';
 import { windowsToGitBashPath } from '../../../util/vs/workbench/contrib/terminalContrib/suggest/browser/terminalGitBashHelpers';
-import { PythonTerminalService } from './copilotCLIPythonTerminalService';
 import { CopilotCLITerminalLinkProvider, SessionDirResolver } from './copilotCLITerminalLinkProvider';
 
 //@ts-ignore
 import powershellScript from './copilotCLIShim.ps1';
 
 const COPILOT_CLI_SHIM_JS = 'copilotCLIShim.js';
-const COPILOT_CLI_COMMAND = 'copilot';
-const COPILOT_ICON = new ThemeIcon('copilot');
-
+const COPILOT_CLI_COMMAND = 'backboard';
 export type TerminalOpenLocation = 'panel' | 'editor' | 'editorBeside';
 
 export interface ICopilotCLITerminalIntegration extends Disposable {
@@ -45,15 +41,6 @@ export interface ICopilotCLITerminalIntegration extends Disposable {
 	setSessionDirResolver(resolver: SessionDirResolver): void;
 }
 
-type IShellInfo = {
-	shell: 'zsh' | 'bash' | 'pwsh' | 'powershell' | 'cmd' | 'fish';
-	shellPath: string;
-	shellArgs: string[];
-	iconPath?: ThemeIcon;
-	copilotCommand: string;
-	exitCommand: string | undefined;
-};
-
 export const ICopilotCLITerminalIntegration = createServiceIdentifier<ICopilotCLITerminalIntegration>('ICopilotCLITerminalIntegration');
 
 export class CopilotCLITerminalIntegration extends Disposable implements ICopilotCLITerminalIntegration {
@@ -67,13 +54,11 @@ export class CopilotCLITerminalIntegration extends Disposable implements ICopilo
 	 */
 	private posixShellScriptPath: string | undefined;
 	private powershellScriptPath: string | undefined;
-	private readonly pythonTerminalService: PythonTerminalService;
 	private readonly _linkProvider: CopilotCLITerminalLinkProvider | undefined;
 	constructor(
 		@IVSCodeExtensionContext private readonly context: IVSCodeExtensionContext,
 		@IAuthenticationService private readonly _authenticationService: IAuthenticationService,
 		@ITerminalService private readonly terminalService: ITerminalService,
-		@IEnvService private readonly envService: IEnvService,
 		@ILogService logService: ILogService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
 		@IConfigurationService configurationService: IConfigurationService,
@@ -81,7 +66,6 @@ export class CopilotCLITerminalIntegration extends Disposable implements ICopilo
 		@IOTelService private readonly _otelService: IOTelService,
 	) {
 		super();
-		this.pythonTerminalService = new PythonTerminalService(logService);
 		if (configurationService.getConfig(ConfigKey.Advanced.CLITerminalLinks)) {
 			this._linkProvider = new CopilotCLITerminalLinkProvider(logService, workspaceService);
 			this._register(window.registerTerminalLinkProvider(this._linkProvider));
@@ -132,28 +116,6 @@ ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${path.join(storageLocation, COPIL
 			await fs.chmod(this.shellScriptPath, 0o750);
 		}
 
-		const provideTerminalProfile = async () => {
-			const shellInfo = await this.getShellInfo([]);
-			const options = await getCommonTerminalOptions('GitHub Copilot CLI', this._authenticationService, this._otelService, 'panel');
-			this.sendTerminalOpenTelemetry('new', shellInfo?.shell ?? 'unknown', 'newFromTerminalProfile', 'panel');
-			if (!shellInfo) {
-				// Create a profile with the user's default shell as a fallback.
-				return new TerminalProfile({
-					...options,
-					titleTemplate: '${sequence}',
-					iconPath: COPILOT_ICON,
-				});
-			}
-			return new TerminalProfile({
-				...options,
-				titleTemplate: '${sequence}',
-				shellPath: shellInfo.shellPath,
-				shellArgs: shellInfo.shellArgs,
-				iconPath: shellInfo.iconPath,
-			});
-		};
-		this._register(window.registerTerminalProfileProvider('copilot-cli', { provideTerminalProfile }));
-
 	}
 
 	public setTerminalSessionDir(terminal: Terminal, sessionDir: Uri): void {
@@ -169,56 +131,16 @@ ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${path.join(storageLocation, COPIL
 		// If cliArgs are provided (e.g. --resume), we are resuming a session; otherwise it's a new session.
 		const sessionType = cliArgs.length > 0 ? 'resume' : 'new';
 
-		// Generate another set of shell args, but with --clear to clear the terminal before running the command.
-		// We'd like to hide all of the custom shell commands we send to the terminal from the user.
-		cliArgs.unshift('--clear');
-
-		let [shellPathAndArgs] = await Promise.all([
-			this.getShellInfo(cliArgs),
-			this.initialization
-		]);
+		await this.initialization;
 
 		const options = await getCommonTerminalOptions(name, this._authenticationService, this._otelService, location);
 		options.cwd = cwd;
-		if (shellPathAndArgs) {
-			options.iconPath = shellPathAndArgs.iconPath ?? options.iconPath;
-		}
 
-		if (shellPathAndArgs && (shellPathAndArgs.shell !== 'powershell' && shellPathAndArgs.shell !== 'pwsh')) {
-			const terminal = await this.pythonTerminalService.createTerminal(options);
-			if (terminal) {
-				this._register(terminal);
-				this._linkProvider?.registerTerminal(terminal);
-				const command = this.buildCommandForPythonTerminal(shellPathAndArgs?.copilotCommand, cliArgs, shellPathAndArgs);
-				await this.sendCommandToTerminal(terminal, command, true, shellPathAndArgs);
-				this.sendTerminalOpenTelemetry(sessionType, shellPathAndArgs.shell, 'pythonTerminal', location);
-				return terminal;
-			}
-		}
-
-		if (!shellPathAndArgs) {
-			const terminal = this._register(this.terminalService.createTerminal(options));
-			this._linkProvider?.registerTerminal(terminal);
-			cliArgs.shift(); // Remove --clear as we can't run it without a shell integration
-			const command = this.buildCommandForTerminal(terminal, COPILOT_CLI_COMMAND, cliArgs);
-			await this.sendCommandToTerminal(terminal, command, false, shellPathAndArgs);
-			this.sendTerminalOpenTelemetry(sessionType, 'unknown', 'fallbackTerminal', location);
-			return terminal;
-		}
-
-		cliArgs.shift(); // Remove --clear as we are creating a new terminal with our own args.
-		shellPathAndArgs = await this.getShellInfo(cliArgs);
-		if (shellPathAndArgs) {
-			options.shellPath = shellPathAndArgs.shellPath;
-			options.shellArgs = shellPathAndArgs.shellArgs;
-			const terminal = this._register(this.terminalService.createTerminal(options));
-			this._linkProvider?.registerTerminal(terminal);
-			terminal.show();
-			this.sendTerminalOpenTelemetry(sessionType, shellPathAndArgs.shell, 'shellArgsTerminal', location);
-			return terminal;
-		}
-
-		return undefined;
+		const terminal = this._register(this.terminalService.createTerminal(options));
+		this._linkProvider?.registerTerminal(terminal);
+		await this.sendCommandToTerminal(terminal, quoteArgsForShell(COPILOT_CLI_COMMAND, cliArgs));
+		this.sendTerminalOpenTelemetry(sessionType, 'default', 'regularTerminal', location);
+		return terminal;
 	}
 
 	private sendTerminalOpenTelemetry(sessionType: string, shell: string, terminalCreationMethod: string, location: TerminalOpenLocation): void {
@@ -240,27 +162,7 @@ ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${path.join(storageLocation, COPIL
 		});
 	}
 
-	private buildCommandForPythonTerminal(copilotCommand: string, cliArgs: string[], shellInfo: IShellInfo) {
-		let commandPrefix = '';
-		if (shellInfo.shell === 'zsh' || shellInfo.shell === 'bash' || shellInfo.shell === 'fish') {
-			// Starting with empty space to hide from terminal history
-			commandPrefix = ' ';
-		}
-		if (shellInfo.shell === 'powershell' || shellInfo.shell === 'pwsh') {
-			// Run powershell script
-			commandPrefix = '& ';
-		}
-
-		const exitCommand = shellInfo.exitCommand || '';
-
-		return `${commandPrefix}${quoteArgsForShell(copilotCommand, [])} ${cliArgs.join(' ')} ${exitCommand}`;
-	}
-
-	private buildCommandForTerminal(terminal: Terminal, copilotCommand: string, cliArgs: string[]) {
-		return `${quoteArgsForShell(copilotCommand, [])} ${cliArgs.join(' ')}`;
-	}
-
-	private async sendCommandToTerminal(terminal: Terminal, command: string, waitForPythonActivation: boolean, shellInfo: IShellInfo | undefined = undefined): Promise<void> {
+	private async sendCommandToTerminal(terminal: Terminal, command: string): Promise<void> {
 		// Wait for shell integration to be available
 		const shellIntegrationTimeout = 3000;
 		let shellIntegrationAvailable = terminal.shellIntegration ? true : false;
@@ -283,14 +185,6 @@ ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${path.join(storageLocation, COPIL
 		try {
 			await integrationPromise;
 
-			if (waitForPythonActivation) {
-				// Wait for python extension to send its initialization commands.
-				// Else if we send too early, the copilot command might not get executed properly.
-				// Activating powershell scripts can take longer, so wait a bit more.
-				const delay = (shellInfo?.shell === 'powershell' || shellInfo?.shell === 'pwsh') ? 3000 : 1000;
-				await new Promise<void>(resolve => disposables.add(disposableTimeout(resolve, delay))); // Wait a bit to ensure the terminal is ready
-			}
-
 			if (terminal.shellIntegration) {
 				terminal.shellIntegration.executeCommand(command);
 			} else {
@@ -301,94 +195,6 @@ ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${path.join(storageLocation, COPIL
 		} finally {
 			disposables.dispose();
 		}
-	}
-
-	private async getShellInfo(cliArgs: string[]): Promise<IShellInfo | undefined> {
-		const configPlatform = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux';
-
-		// vscode.env.shell already resolves to the user's configured default terminal profile path.
-		const shellPath = this.envService.shell;
-		const defaultProfileName = workspace.getConfiguration('terminal').get<string | undefined>(`integrated.defaultProfile.${configPlatform}`);
-		let shellArgs: string[] = [];
-		if (defaultProfileName) {
-			const profiles = workspace.getConfiguration('terminal').get<Record<string, { path?: string | string[]; args?: string[] }>>(`integrated.profiles.${configPlatform}`);
-			const profileArgs = profiles?.[defaultProfileName]?.args;
-			shellArgs = Array.isArray(profileArgs) ? profileArgs : [];
-		}
-
-		// Detect shell type from the resolved shell path basename,
-		// matching how getShellIntegrationInjection() does it in terminalEnvironment.ts
-		const shellBasename = process.platform === 'win32'
-			? path.basename(shellPath).toLowerCase()
-			: path.basename(shellPath);
-		const iconPath = COPILOT_ICON;
-
-		if (shellBasename === 'zsh' && this.shellScriptPath) {
-			return {
-				shell: 'zsh',
-				shellPath,
-				shellArgs: [`-ci${shellArgs.includes('-l') ? 'l' : ''}`, quoteArgsForShell(this.shellScriptPath, cliArgs)],
-				iconPath,
-				copilotCommand: this.shellScriptPath,
-				exitCommand: `&& exit`
-			};
-		} else if ((shellBasename === 'bash' || shellBasename === 'bash.exe') && (configPlatform === 'windows' ? this.posixShellScriptPath : this.shellScriptPath)) {
-			// On Windows (Git Bash), use the POSIX shim and reference it by its MSYS path,
-			// since the path lives inside the `-ic` shell-string and is not translated by MSYS.
-			const scriptPath = configPlatform === 'windows' ? this.posixShellScriptPath! : this.shellScriptPath!;
-			const bashScriptPath = configPlatform === 'windows' ? windowsToGitBashPath(scriptPath) : scriptPath;
-			return {
-				shell: 'bash',
-				shellPath,
-				shellArgs: [`-${shellArgs.includes('-l') ? 'l' : ''}ic`, quoteArgsForShell(bashScriptPath, cliArgs)],
-				iconPath,
-				copilotCommand: bashScriptPath,
-				exitCommand: `&& exit`
-			};
-		} else if (shellBasename === 'fish' && this.shellScriptPath) {
-			const fishArgs: string[] = [];
-			if (shellArgs.includes('-l')) {
-				fishArgs.push('-l');
-			}
-			fishArgs.push('-c', quoteArgsForShell(this.shellScriptPath, cliArgs));
-			return {
-				shell: 'fish',
-				shellPath,
-				shellArgs: fishArgs,
-				iconPath,
-				copilotCommand: this.shellScriptPath,
-				exitCommand: `; and exit`
-			};
-		} else if ((shellBasename === 'pwsh' || shellBasename === 'pwsh.exe') && this.powershellScriptPath) {
-			return {
-				shell: 'pwsh',
-				shellPath,
-				shellArgs: ['-File', this.powershellScriptPath, ...cliArgs],
-				iconPath,
-				copilotCommand: this.powershellScriptPath,
-				exitCommand: `&& exit`
-			};
-		} else if ((shellBasename === 'powershell' || shellBasename === 'powershell.exe') && this.powershellScriptPath && configPlatform === 'windows') {
-			return {
-				shell: 'powershell',
-				shellPath,
-				shellArgs: ['-File', this.powershellScriptPath, ...cliArgs],
-				iconPath,
-				copilotCommand: this.powershellScriptPath,
-				exitCommand: `&& exit`
-			};
-		} else if ((shellBasename === 'cmd' || shellBasename === 'cmd.exe') && this.shellScriptPath && configPlatform === 'windows') {
-			return {
-				shell: 'cmd',
-				shellPath,
-				shellArgs: ['/c', this.shellScriptPath, ...cliArgs],
-				iconPath,
-				copilotCommand: this.shellScriptPath,
-				exitCommand: '&& exit'
-			};
-		}
-
-		return undefined;
 	}
 
 }

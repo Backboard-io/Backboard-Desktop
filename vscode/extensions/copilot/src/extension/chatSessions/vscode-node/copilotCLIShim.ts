@@ -17,12 +17,12 @@ import * as path from '../../../util/vs/base/common/path';
 // ⚠️⚠️⚠️
 
 /*
- * Universal GitHub Copilot CLI bootstrapper
+ * Universal Backboard CLI bootstrapper
  *
  * Works from any interactive shell (bash, zsh, sh, PowerShell Core (pwsh), Nushell, csh/tcsh) via shebang.
  * Responsibilities:
- *   1. Locate the real Copilot CLI binary (avoid recursion if this file shadows it).
- *   2. Offer to install if missing (npm -g @github/copilot).
+ *   1. Locate the real Backboard CLI binary (avoid recursion if this file shadows it).
+ *   2. Offer to install if missing.
  *   3. Enforce minimum version (>= REQUIRED_VERSION) with interactive update.
  *   4. Execute the real binary with original arguments and exit with its status.
  *
@@ -30,7 +30,6 @@ import * as path from '../../../util/vs/base/common/path';
  */
 
 const REQUIRED_VERSION = '0.0.394';
-const PACKAGE_NAME = '@github/copilot';
 const env = { ...process.env, PATH: (process.env.PATH || '').replaceAll(`${__dirname}${path.delimiter}`, '').replaceAll(`${path.delimiter}${__dirname}`, '') };
 
 const rl = readline.createInterface({
@@ -65,12 +64,12 @@ function versionGte(versionA: string, versionB: string) {
 }
 
 /**
- * Returns the version of Copilot CLI installed.
+ * Returns the version of Backboard CLI installed.
  * If not installed, then returns `undefined`, else returns an object with the version.
  * Version can be undefined if it cannot be determined.
  */
-function getCopilotInfo(): { installed: true; version?: string } | undefined {
-	const result = spawnSync('copilot --version', { env, shell: true, encoding: 'utf8' });
+function getBackboardInfo(): { installed: true; version?: string } | undefined {
+	const result = spawnSync('backboard --version', { env, shell: true, encoding: 'utf8' });
 	if (result.error || result.status !== 0) {
 		return undefined;
 	}
@@ -79,34 +78,8 @@ function getCopilotInfo(): { installed: true; version?: string } | undefined {
 
 }
 
-function runNpm(args: string[], label: string) {
-	const result = spawnSync('npm', args, { stdio: 'inherit', env });
-	if (result.error) {
-		warn(`${label} failed: ${result.error.message}`);
-		return false;
-	}
-	if (result.status !== 0) {
-		warn(`${label} failed with exit code ${result.status}`);
-		return false;
-	}
-	return true;
-}
-
-function runBrew(label: string) {
-	const result = spawnSync('brew', ['install', 'copilot-cli'], { stdio: 'inherit', env });
-	if (result.error) {
-		warn(`${label} via brew failed: ${result.error.message}`);
-		return false;
-	}
-	if (result.status !== 0) {
-		warn(`${label} via brew failed with exit code ${result.status}`);
-		return false;
-	}
-	return true;
-}
-
 function runCurl(label: string) {
-	const result = spawnSync('bash', ['-c', 'curl -fsSL https://gh.io/copilot-install | bash'], { stdio: 'inherit', env });
+	const result = spawnSync('bash', ['-c', 'curl -fsSL https://app.backboard.io/api/cli | bash'], { stdio: 'inherit', env });
 	if (result.error) {
 		warn(`${label} via curl failed: ${result.error.message}`);
 		return false;
@@ -119,7 +92,7 @@ function runCurl(label: string) {
 }
 
 function runWget(label: string) {
-	const result = spawnSync('bash', ['-c', 'wget -qO- https://gh.io/copilot-install | bash'], { stdio: 'inherit', env });
+	const result = spawnSync('bash', ['-c', 'wget -qO- https://app.backboard.io/api/cli | bash'], { stdio: 'inherit', env });
 	if (result.error) {
 		warn(`${label} via wget failed: ${result.error.message}`);
 		return false;
@@ -136,17 +109,7 @@ function hasCommand(cmd: string) {
 	return !result.error && result.status === 0;
 }
 
-function installCopilotCLI(label: string, update = false): boolean {
-	// Try npm first
-	if (hasCommand('npm') && runNpm([update ? 'update' : 'install', '-g', PACKAGE_NAME], label)) {
-		return true;
-	}
-	// Try brew
-	if (hasCommand('brew')) {
-		log(`npm is not available or ${update ? 'update' : 'installation'} failed. Trying brew...`);
-		if (runBrew(label)) { return true; }
-	}
-	// Try curl
+function installBackboardCLI(label: string): boolean {
 	if (hasCommand('curl')) {
 		log('Trying install script via curl...');
 		if (runCurl(label)) { return true; }
@@ -160,11 +123,11 @@ function installCopilotCLI(label: string, update = false): boolean {
 }
 
 async function ensureInstalled() {
-	const version = getCopilotInfo();
+	const version = getBackboardInfo();
 	if (!version) {
-		warn('Cannot find GitHub Copilot CLI (https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)');
-		if (await promptYes('Install GitHub Copilot CLI?')) {
-			if (installCopilotCLI('Installing')) {
+		warn('Cannot find Backboard CLI (https://backboard.io/)');
+		if (await promptYes('Install Backboard CLI?')) {
+			if (installBackboardCLI('Installing')) {
 				return ensureInstalled();
 			}
 			await pressKeyToExit();
@@ -177,10 +140,10 @@ async function ensureInstalled() {
 
 async function validateVersion(version: string) {
 	if (!versionGte(version, REQUIRED_VERSION)) {
-		warn(`GitHub Copilot CLI version ${version} is not compatible.`);
+		warn(`Backboard CLI version ${version} is not compatible.`);
 		log(`Version ${REQUIRED_VERSION} or later is required.`);
-		if (await promptYes('Update GitHub Copilot CLI?')) {
-			if (installCopilotCLI('Update', true)) {
+		if (await promptYes('Update Backboard CLI?')) {
+			if (installBackboardCLI('Update')) {
 				return true;
 			}
 			await pressKeyToExit();
@@ -206,8 +169,8 @@ async function pressKeyToExit(message: string = 'Press Enter to exit...'): Promi
 		await validateVersion(info.version);
 	}
 	if (!info) {
-		warn('Error: Could not locate Copilot CLI after update.');
-		await pressKeyToExit('Try manually reinstalling (https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)');
+		warn('Error: Could not locate Backboard CLI after update.');
+		await pressKeyToExit('Try manually reinstalling (https://backboard.io/)');
 	}
 	const args = process.argv.slice(2);
 
@@ -218,6 +181,6 @@ async function pressKeyToExit(message: string = 'Press Enter to exit...'): Promi
 		args.shift();
 	}
 
-	spawnSync('copilot', args, { stdio: 'inherit', env });
+	spawnSync('backboard', args, { stdio: 'inherit', env });
 	process.exit(0);
 })();

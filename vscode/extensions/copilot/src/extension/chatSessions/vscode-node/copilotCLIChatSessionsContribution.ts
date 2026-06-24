@@ -545,7 +545,7 @@ export class CopilotCLIChatSessionItemProvider extends Disposable implements vsc
 	}
 	public async createCopilotCLITerminal(location: TerminalOpenLocation = 'editor', name?: string, cwd?: string): Promise<void> {
 		// TODO@rebornix should be set by CLI
-		const terminalName = name || process.env.COPILOTCLI_TERMINAL_TITLE || l10n.t('Copilot CLI');
+		const terminalName = name || process.env.COPILOTCLI_TERMINAL_TITLE || l10n.t('backboard');
 		await this.terminalIntegration.openTerminal(terminalName, [], cwd, location);
 	}
 
@@ -2323,14 +2323,14 @@ export function registerCLIChatCommands(
 		}
 	}));
 	disposableStore.add(vscode.commands.registerCommand('github.copilot.cli.newSession', async () => {
-		await copilotcliSessionItemProvider.createCopilotCLITerminal('editor', l10n.t('Copilot CLI'));
+		await copilotcliSessionItemProvider.createCopilotCLITerminal('editor', l10n.t('backboard'));
 	}));
 	disposableStore.add(vscode.commands.registerCommand('github.copilot.cli.newSessionToSide', async () => {
-		await copilotcliSessionItemProvider.createCopilotCLITerminal('editorBeside', l10n.t('Copilot CLI'));
+		await copilotcliSessionItemProvider.createCopilotCLITerminal('editorBeside', l10n.t('backboard'));
 	}));
 	disposableStore.add(vscode.commands.registerCommand(OPEN_IN_COPILOT_CLI_COMMAND_ID, async (sourceControlContext?: unknown) => {
 		const rootUri = getSourceControlRootUri(sourceControlContext);
-		await copilotcliSessionItemProvider.createCopilotCLITerminal('editor', l10n.t('Copilot CLI'), rootUri?.fsPath);
+		await copilotcliSessionItemProvider.createCopilotCLITerminal('editor', l10n.t('backboard'), rootUri?.fsPath);
 	}));
 	disposableStore.add(vscode.commands.registerCommand('github.copilot.cli.sessions.openWorktreeInNewWindow', async (sessionItem?: vscode.ChatSessionItem) => {
 		if (!sessionItem?.resource) {

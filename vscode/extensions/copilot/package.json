@@ -6972,9 +6972,9 @@
     "terminal": {
       "profiles": [
         {
-          "icon": "copilot",
+          "icon": "terminal",
           "id": "copilot-cli",
-          "title": "Backboard CLI",
+          "title": "backboard",
           "titleTemplate": "${sequence}"
         }
       ]
