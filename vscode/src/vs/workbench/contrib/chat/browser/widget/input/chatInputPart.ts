@@ -3178,26 +3178,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		this._register(dom.addStandardDisposableListener(toolbarsContainer, dom.EventType.CLICK, e => this.inputEditor.focus()));
 		this._register(dom.addStandardDisposableListener(this.attachmentsContainer, dom.EventType.CLICK, e => this.inputEditor.focus()));
-		const shorterChatInputActionIds = new Set<string>([
-			OpenModePickerAction.ID,
-			OpenAgentHostModePickerAction.ID,
-			OpenAgentHostAutoApprovePickerAction.ID,
-			OpenAgentHostPermissionModePickerAction.ID,
-			OpenAgentHostFolderPickerAction.ID,
-			ConfigureToolsAction.ID,
-		]);
 		this.inputActionsToolbar = this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, this.options.renderInputToolbarBelowInput ? this.attachmentsContainer : toolbarsContainer, MenuId.ChatInput, {
 			telemetrySource: this.options.menus.telemetrySource,
 			menuOptions: { shouldForwardArgs: true },
 			hiddenItemStrategy: HiddenItemStrategy.NoHide,
 			hoverDelegate,
-			responsiveBehavior: {
-				enabled: true,
-				kind: 'last',
-				minItems: 1,
-				actionMinWidth: 48,
-				getActionMinWidth: action => shorterChatInputActionIds.has(action.id) ? 22 : undefined,
-			},
 			actionViewItemProvider: (action, options) => {
 				// Phone-layout branch: when an agents-window phone presenter
 				// is active, replace the desktop Mode + Model pickers with a
@@ -3235,9 +3220,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				} else if (action.id === OpenBackboardComposerOptionsAction.ID && action instanceof MenuItemAction) {
 					return this.instantiationService.createInstance(BackboardComposerOptionsActionViewItem, action, this, pickerOptions);
 				} else if (action.id === ConfigureToolsAction.ID) {
-					if (this.options.isSessionsWindow) {
-						return new HiddenActionViewItem(action);
-					}
+					return new HiddenActionViewItem(action);
 				} else if (action.id === OpenModePickerAction.ID && action instanceof MenuItemAction) {
 					if (this.options.isSessionsWindow) {
 						return new HiddenActionViewItem(action);
@@ -4882,7 +4865,7 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 
 	protected override renderLabel(element: HTMLElement): IDisposable | null {
 		this.inputPart.setBackboardOptionsAnchor(element);
-		element.classList.add('codicon', 'codicon-list-filter');
+		element.classList.add('codicon', 'codicon-settings-gear');
 		return super.renderLabel(element);
 	}
 

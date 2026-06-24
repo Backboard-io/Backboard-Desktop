@@ -1482,6 +1482,10 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	border-radius: var(--vscode-cornerRadius-circle);
 }
 
+.interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:has(> .action-label.codicon-mic) {
+	position: relative;
+}
+
 .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:has(> .action-label.codicon-arrow-up) > .action-label.codicon-arrow-up {
 	box-sizing: border-box;
 	width: 22px;
@@ -1519,6 +1523,50 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
 .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:focus-visible {
 	background: var(--vscode-button-hoverBackground);
+}
+
+.monaco-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-mic.checked {
+	color: var(--vscode-errorForeground) !important;
+}
+
+.monaco-workbench .interactive-session .chat-input-container:has(.chat-execute-toolbar .action-label.codicon-mic.checked) {
+	overflow: visible;
+}
+
+.monaco-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:has(> .action-label.codicon-mic.checked)::after {
+	content: 'Listening. Click the microphone again to stop.';
+	position: absolute;
+	right: -6px;
+	bottom: calc(100% + 8px);
+	z-index: 1000;
+	box-sizing: border-box;
+	width: min(220px, calc(100cqw - 24px), calc(100vw - 40px));
+	padding: 6px 10px;
+	border: 1px solid var(--vscode-editorWidget-border);
+	border-radius: 6px;
+	background: var(--vscode-editorWidget-background);
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.26);
+	color: var(--vscode-editorWidget-foreground);
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 18px;
+	pointer-events: none;
+	white-space: normal;
+}
+
+.monaco-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:has(> .action-label.codicon-mic.checked)::before {
+	content: '';
+	position: absolute;
+	right: 8px;
+	bottom: calc(100% + 3px);
+	z-index: 1001;
+	width: 8px;
+	height: 8px;
+	border-right: 1px solid var(--vscode-editorWidget-border);
+	border-bottom: 1px solid var(--vscode-editorWidget-border);
+	background: var(--vscode-editorWidget-background);
+	pointer-events: none;
+	transform: rotate(45deg);
 }
 
 .interactive-input-part:has(.chat-editing-session > .chat-editing-session-container) .chat-input-container,
@@ -2064,6 +2112,11 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	pointer-events: auto;
 }
 
+.interactive-session .interactive-input-part {
+	container-name: chat-input-part;
+	container-type: inline-size;
+}
+
 /* Secondary toolbar below the input box */
 .interactive-session .chat-secondary-toolbar {
 	display: flex;
@@ -2275,12 +2328,16 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 /* Split model picker layout */
 .chat-input-picker-item:has(.model-picker-split) {
+	min-width: 0;
+	flex: 0 1 auto;
 	overflow: visible;
 }
 
 .chat-input-picker-item .action-label.model-picker-split {
 	padding: 0 6px;
 	gap: 2px;
+	min-width: 0;
+	max-width: 100%;
 	overflow: visible;
 	height: auto;
 	border-radius: 0;
@@ -2340,13 +2397,15 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .chat-input-picker-item .action-label.model-picker-split .model-picker-name {
 	min-width: 0;
-	flex-shrink: 1;
+	flex: 1 1 auto;
 	overflow: hidden;
 }
 
 .chat-input-picker-item .action-label.model-picker-split .model-picker-name .chat-input-picker-label {
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .chat-input-picker-item .action-label.model-picker-split .model-picker-config {
@@ -2371,6 +2430,28 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .chat-input-picker-item .action-label.model-picker-split.disabled .codicon {
 	color: var(--vscode-disabledForeground);
+}
+
+.interactive-session .chat-input-toolbar .monaco-action-bar .actions-container,
+.interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .actions-container {
+	min-width: 0;
+	flex-wrap: nowrap;
+}
+
+@container chat-input-part (max-width: 280px) {
+	.interactive-session .chat-input-toolbar .chat-input-picker-item .action-label.model-picker-split {
+		padding: 0 4px;
+	}
+
+	.interactive-session .chat-input-toolbar .monaco-action-bar .actions-container > .action-item:has(.codicon-add) .action-label,
+	.interactive-session .chat-input-toolbar .monaco-action-bar .actions-container > .action-item:has(.codicon-settings-gear) .action-label,
+	.interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-mic,
+	.interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up {
+		width: 20px;
+		min-width: 20px;
+		height: 20px;
+		padding: 0;
+	}
 }
 
 .interactive-session .chat-secondary-input-toolbar .chat-sessionPicker-item .action-label {
@@ -2452,10 +2533,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .monaco-workbench .interactive-session .chat-input-toolbars .monaco-action-bar .action-item .codicon,
 .monaco-workbench .interactive-session .chat-input-toolbars .action-label .codicon {
 	color: var(--vscode-icon-foreground) !important;
-}
-
-.monaco-workbench .interactive-session .chat-input-toolbar .monaco-action-bar .action-item.checked .action-label.codicon-mic {
-	color: var(--vscode-errorForeground) !important;
 }
 
 .monaco-workbench .interactive-session .chat-input-toolbars .monaco-action-bar .action-item.disabled .codicon,

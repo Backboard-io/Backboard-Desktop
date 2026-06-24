@@ -187,9 +187,9 @@
 }
 
 .new-chat-composer-workspace-row {
-	width: auto;
+	width: min(90%, 960px, calc(100% - (var(--new-chat-composer-visible-inset) * 2)));
 	max-width: 100%;
-	margin: 0 var(--new-chat-composer-visible-inset) -1px;
+	margin: 0 auto -1px;
 	min-width: 0;
 	box-sizing: border-box;
 	display: grid;
@@ -639,6 +639,10 @@
 	overflow: hidden;
 }
 
+.monaco-workbench .new-chat-composer-stack > .interactive-session .chat-input-container:has(.chat-execute-toolbar .action-label.codicon-mic.checked) {
+	overflow: visible;
+}
+
 .new-chat-composer-stack > .interactive-session .chat-editor-container {
 	display: flex;
 	padding: 0;
@@ -670,6 +674,18 @@
 	width: 100%;
 	position: relative;
 	z-index: 3;
+}
+
+.new-chat-composer-stack > .interactive-session .chat-input-toolbar .monaco-action-bar .actions-container {
+	width: 100%;
+}
+
+.new-chat-composer-stack > .interactive-session .chat-input-toolbars > .chat-execute-toolbar {
+	margin-left: 2px;
+}
+
+.new-chat-composer-stack > .interactive-session .chat-input-toolbar .action-item:has(.codicon-toolbar-more) {
+	display: none;
 }
 
 .new-chat-composer-stack > .interactive-session .chat-input-overlay:not(.disabled) {

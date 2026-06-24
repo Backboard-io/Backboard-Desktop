@@ -499,8 +499,8 @@ export class ToggleBackboardComposerMicrophoneAction extends Action2 {
 			f1: false,
 			toggled: ChatContextKeys.backboardMicrophoneRecording,
 			menu: {
-				id: MenuId.ChatInput,
-				order: 5,
+				id: MenuId.ChatExecute,
+				order: 3.8,
 				group: 'navigation',
 				when: ChatContextKeys.inQuickChat.negate()
 			}
@@ -559,7 +559,6 @@ export class ToggleBackboardComposerMicrophoneAction extends Action2 {
 				});
 			};
 			recorder.start();
-			notificationService.info(localize('interactive.backboardMicrophone.listening', "Listening. Click the microphone again to stop."));
 		} catch (error) {
 			backboardComposerMicState = undefined;
 			recordingKey.set(false);
@@ -577,11 +576,11 @@ export class OpenBackboardComposerOptionsAction extends Action2 {
 			title: localize2('interactive.backboardComposerOptions.label', "Backboard Options"),
 			tooltip: localize('interactive.backboardComposerOptions.tooltip', "Open composer options"),
 			category: CHAT_CATEGORY,
-			icon: Codicon.listFilter,
+			icon: Codicon.settingsGear,
 			f1: false,
 			menu: {
 				id: MenuId.ChatInput,
-				order: 6,
+				order: 3.1,
 				group: 'navigation',
 				when: ChatContextKeys.inQuickChat.negate()
 			}
@@ -621,7 +620,6 @@ async function transcribeBackboardComposerAudio(
 	configurationService: IConfigurationService,
 	notificationService: INotificationService,
 ): Promise<void> {
-	notificationService.info(localize('interactive.backboardMicrophone.transcribing', "Transcribing with Backboard..."));
 	const config = await readBackboardComposerConfig(fileService, pathService);
 	const authHeaders = backboardComposerAuthHeaders(config);
 	if (!authHeaders) {
@@ -631,14 +629,16 @@ async function transcribeBackboardComposerAudio(
 	const blob = new Blob(state.chunks, { type: mimeType });
 	const form = new FormData();
 	form.append('stream', 'false');
-	form.append('content', '');
+	form.append('content', 'Transcribe this audio.');
 	form.append('send_to_llm', 'false');
 	form.append('voice', JSON.stringify({
 		stt: {
 			provider: 'openai',
 			model: 'gpt-4o-mini-transcribe',
 			language: 'en',
-		}
+		},
+		send_to_llm: false,
+		client: 'backboard-composer',
 	}));
 	form.append('audio_file', blob, 'backboard-composer-voice.webm');
 
