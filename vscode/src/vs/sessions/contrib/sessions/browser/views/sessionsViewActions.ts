@@ -309,7 +309,7 @@ registerAction2(class GroupByWorkspaceAction extends Action2 {
 	constructor() {
 		super({
 			id: 'sessionsViewPane.groupByWorkspace',
-			title: localize2('groupByWorkspace', "Group by Workspace"),
+			title: localize2('groupByProject', "Group by Project"),
 			category: SessionsCategories.Sessions,
 			toggled: ContextKeyExpr.equals(SessionsViewGroupingContext.key, SessionsGrouping.Workspace),
 			menu: [{ id: SessionsViewFilterSubMenu, group: '2_group', order: 0 }]

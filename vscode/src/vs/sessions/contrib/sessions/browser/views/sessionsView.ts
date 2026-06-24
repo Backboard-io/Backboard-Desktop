@@ -191,7 +191,7 @@ export class SessionsView extends ViewPane {
 
 			this.searchButton = DOM.append(sessionsContent, $('button.agent-sessions-search-button')) as HTMLButtonElement;
 			this.searchButton.type = 'button';
-			const searchLabel = localize('searchWorkspaces', "Search workspaces");
+			const searchLabel = localize('searchProjects', "Search projects");
 			this.searchButton.title = searchLabel;
 			this.searchButton.setAttribute('aria-label', searchLabel);
 			DOM.append(this.searchButton, $('span.agent-sessions-search-icon')).appendChild(renderIcon(Codicon.search));
@@ -211,7 +211,7 @@ export class SessionsView extends ViewPane {
 			});
 
 			const workspacesHeader = this.workspacesHeader = DOM.append(sessionsContent, $('.agent-sessions-workspaces-header'));
-			DOM.append(workspacesHeader, $('span.agent-sessions-workspaces-title', undefined, localize('workspacesHeader', "Workspaces")));
+			DOM.append(workspacesHeader, $('span.agent-sessions-workspaces-title', undefined, localize('projectsHeader', "Projects")));
 			this.createWorkspaceFilterButton(workspacesHeader);
 		} else {
 			headerRow.classList.add('phone-layout-empty');
@@ -382,7 +382,7 @@ export class SessionsView extends ViewPane {
 		const groupedByTime = this.currentGrouping === SessionsGrouping.Date;
 		const label = groupedByTime
 			? localize('groupedByTime', "Group by Time")
-			: localize('groupedByWorkspace', "Group by Workspace");
+			: localize('groupedByProject', "Group by Project");
 		this.filterButton.setAttribute('title', label);
 		this.filterButton.setAttribute('aria-label', label);
 	}
@@ -401,27 +401,70 @@ export class SessionsView extends ViewPane {
 		popover.setAttribute('role', 'menu');
 		this.filterButton.setAttribute('aria-expanded', 'true');
 
-		this.createFilterPopoverRow(popover, localize('groupBy', "Group by"), this.currentGrouping === SessionsGrouping.Workspace ? localize('workspace', "Workspace") : localize('time', "Time"), () => {
-			this.setGrouping(this.currentGrouping === SessionsGrouping.Date ? SessionsGrouping.Workspace : SessionsGrouping.Date);
-			this.closeFilterPopover();
-		});
-		this.createFilterPopoverRow(popover, localize('sortBy', "Sort by"), this.currentSorting === SessionsSorting.Updated ? localize('updated', "Updated") : localize('created', "Created"), () => {
-			this.setSorting(this.currentSorting === SessionsSorting.Created ? SessionsSorting.Updated : SessionsSorting.Created);
-			this.closeFilterPopover();
-		});
+		this.createFilterPopoverDropdown(
+			popover,
+			localize('groupBy', "Group by"),
+			this.currentGrouping === SessionsGrouping.Workspace ? localize('project', "Project") : localize('time', "Time"),
+			[
+				{
+					label: localize('project', "Project"),
+					selected: this.currentGrouping === SessionsGrouping.Workspace,
+					run: () => this.setGrouping(SessionsGrouping.Workspace),
+				},
+				{
+					label: localize('time', "Time"),
+					selected: this.currentGrouping === SessionsGrouping.Date,
+					run: () => this.setGrouping(SessionsGrouping.Date),
+				},
+			]
+		);
+		this.createFilterPopoverDropdown(
+			popover,
+			localize('sortBy', "Sort by"),
+			this.currentSorting === SessionsSorting.Updated ? localize('updated', "Updated") : localize('created', "Created"),
+			[
+				{
+					label: localize('updated', "Updated"),
+					selected: this.currentSorting === SessionsSorting.Updated,
+					run: () => this.setSorting(SessionsSorting.Updated),
+				},
+				{
+					label: localize('created', "Created"),
+					selected: this.currentSorting === SessionsSorting.Created,
+					run: () => this.setSorting(SessionsSorting.Created),
+				},
+			]
+		);
 	}
 
-	private createFilterPopoverRow(container: HTMLElement, label: string, value: string, run: () => void): void {
-		const row = DOM.append(container, $('button.agent-sessions-filter-popover-row')) as HTMLButtonElement;
-		row.type = 'button';
-		row.setAttribute('role', 'menuitem');
-		DOM.append(row, $('span.agent-sessions-filter-popover-label', undefined, label));
-		DOM.append(row, $('span.agent-sessions-filter-popover-value', undefined, value));
-		DOM.append(row, $('span.agent-sessions-filter-popover-chevron')).appendChild(renderIcon(Codicon.chevronRight));
-		row.addEventListener(DOM.EventType.CLICK, e => {
+	private createFilterPopoverDropdown(container: HTMLElement, label: string, value: string, options: readonly { label: string; selected: boolean; run: () => void }[]): void {
+		const section = DOM.append(container, $('.agent-sessions-filter-popover-section'));
+		const header = DOM.append(section, $('button.agent-sessions-filter-popover-header')) as HTMLButtonElement;
+		const optionsContainer = DOM.append(section, $('.agent-sessions-filter-popover-options'));
+		header.type = 'button';
+		header.setAttribute('aria-expanded', 'true');
+		DOM.append(header, $('span.agent-sessions-filter-popover-label', undefined, label));
+		DOM.append(header, $('span.agent-sessions-filter-popover-value', undefined, value));
+		DOM.append(header, $('span.agent-sessions-filter-popover-chevron')).appendChild(renderIcon(Codicon.chevronDown));
+		header.addEventListener(DOM.EventType.CLICK, e => {
 			e.preventDefault();
-			run();
+			const expanded = header.getAttribute('aria-expanded') !== 'false';
+			header.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+			section.classList.toggle('collapsed', expanded);
 		});
+		for (const option of options) {
+			const row = DOM.append(optionsContainer, $('button.agent-sessions-filter-popover-option')) as HTMLButtonElement;
+			row.type = 'button';
+			row.setAttribute('role', 'menuitemradio');
+			row.setAttribute('aria-checked', String(option.selected));
+			DOM.append(row, $('span.agent-sessions-filter-popover-check')).appendChild(renderIcon(option.selected ? Codicon.check : Codicon.blank));
+			DOM.append(row, $('span.agent-sessions-filter-popover-option-label', undefined, option.label));
+			row.addEventListener(DOM.EventType.CLICK, e => {
+				e.preventDefault();
+				option.run();
+				this.closeFilterPopover();
+			});
+		}
 	}
 
 	private closeFilterPopover(): void {
@@ -682,7 +725,7 @@ export class SessionsView extends ViewPane {
 			},
 			{
 				id: SessionsGrouping.Workspace,
-				label: localize('groupByWorkspace', "Group by Workspace"),
+				label: localize('groupByProject', "Group by Project"),
 				checked: this.currentGrouping === SessionsGrouping.Workspace,
 				group: 'group',
 				groupTitle: groupTitle,
