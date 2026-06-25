@@ -24,6 +24,7 @@ import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
 import { BACKBOARD_MODE_SWITCHER_COMMAND_ID, ChatConfiguration, OPEN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION } from '../../common/constants.js';
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
+const OPEN_ADVANCED_WINDOW_COMMAND_ID = 'workbench.action.openOptimusWindow';
 const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
 
 export class BackboardModeSwitcherAction extends Action2 {
@@ -128,7 +129,7 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 			getActions: () => [
 				toAction({
 					id: 'workbench.action.mode.editor',
-					label: localize('backboardModeSwitcher.editor', "Advanced"),
+					label: localize('backboardModeSwitcher.editor', "Editor"),
 					checked: !agentsActive,
 					run: () => this.openEditor(),
 				}),
@@ -137,6 +138,11 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 					label: localize('backboardModeSwitcher.agents', "Simple"),
 					checked: agentsActive,
 					run: () => this.openAgents(),
+				}),
+				toAction({
+					id: 'workbench.action.mode.advanced',
+					label: localize('backboardModeSwitcher.advanced', "Advanced"),
+					run: () => this.openAdvanced(),
 				}),
 			],
 			onHide: () => {
@@ -152,6 +158,11 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 	private openAgents(): void {
 		this.clearPointerFocus();
 		this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID);
+	}
+
+	private openAdvanced(): void {
+		this.clearPointerFocus();
+		this.commandService.executeCommand(OPEN_ADVANCED_WINDOW_COMMAND_ID);
 	}
 
 	private openEditor(): void {
@@ -180,7 +191,7 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		this.currentIcon?.classList.toggle('codicon-robot', agentsActive);
 		this.currentLabel?.replaceChildren(agentsActive
 			? localize('backboardModeSwitcher.agents', "Simple")
-			: localize('backboardModeSwitcher.editor', "Advanced"));
+			: localize('backboardModeSwitcher.editor', "Editor"));
 	}
 }
 
