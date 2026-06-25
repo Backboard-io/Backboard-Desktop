@@ -86,6 +86,7 @@ export interface IOptimusLiveState {
 	readonly chatId?: string;
 	readonly prompt?: string;
 	readonly status?: string;
+	readonly statusKey?: string;
 	readonly running?: boolean;
 	readonly startedAt?: number;
 	readonly updatedAt?: number;

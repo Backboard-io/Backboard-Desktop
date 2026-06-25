@@ -253,7 +253,7 @@ body.optimus-standalone .optimus-root,
 	--optimus-panel-below-height: clamp(128px, 38vh, 280px);
 	position: relative;
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(340px, var(--optimus-sidebar-width, 460px));
+	grid-template-columns: minmax(0, 1fr) minmax(320px, clamp(360px, 36vw, 480px));
 	grid-template-rows: minmax(0, 1fr);
 	width: 100%;
 	height: 100%;
@@ -310,12 +310,15 @@ body.optimus-standalone .optimus-root,
 	--optimus-bb-secondary: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 82%, transparent);
 	--optimus-bb-active: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 8%, transparent);
 	--optimus-bb-subtle: color-mix(in srgb, var(--optimus-bb-muted) 62%, transparent);
-	--optimus-bb-success: #2f9f5b;
-	--optimus-bb-danger: #d83e64;
+	--optimus-bb-success: var(--vscode-testing-iconPassed, #2f9f5b);
+	--optimus-bb-danger: var(--vscode-errorForeground, #d83e64);
 	--optimus-bb-shadow: color-mix(in srgb, var(--vscode-widget-shadow, #000000) 8%, transparent);
 	display: grid;
 	grid-template-rows: auto minmax(0, 1fr) auto;
+	inline-size: 100%;
 	min-width: 0;
+	min-inline-size: 0;
+	max-inline-size: 100%;
 	min-height: 0;
 	border-left: 1px solid var(--optimus-bb-border);
 	background: var(--optimus-bb-bg);
@@ -758,6 +761,10 @@ body.optimus-standalone .optimus-root,
 
 .optimus-sidebar-input:focus {
 	outline: none;
+}
+
+.optimus-sidebar-input:focus-visible {
+	box-shadow: 0 1px 0 0 var(--optimus-bb-primary);
 }
 
 .optimus-sidebar-input::placeholder {
@@ -4063,17 +4070,6 @@ body.optimus-standalone {
 	display: none;
 }
 
-/* Keep the Optimus chat rail bounded and readable even when long prompts become titles. */
-.optimus-content {
-	grid-template-columns: minmax(0, 1fr) minmax(320px, clamp(360px, 36vw, 480px));
-}
-
-.optimus-sidebar {
-	inline-size: 100%;
-	min-inline-size: 0;
-	max-inline-size: 100%;
-}
-
 .optimus-sidebar-title-row {
 	padding-inline: 14px 10px;
 }
@@ -4126,14 +4122,6 @@ body.optimus-standalone {
 
 .optimus-sidebar-context {
 	flex: 1 1 auto;
-}
-
-.optimus-content.optimus-sidebar-collapsed {
-	grid-template-columns: minmax(0, 1fr);
-}
-
-.optimus-content.optimus-sidebar-collapsed .optimus-sidebar {
-	display: none;
 }
 
 .optimus-sidebar-composer-left {

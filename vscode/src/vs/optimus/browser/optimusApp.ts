@@ -16,6 +16,7 @@ interface IOptimusStarterTask {
 
 type OptimusVoiceMode = 'off' | 'tts';
 type OptimusComposerPopover = 'model' | undefined;
+type OptimusSidebarStatusKey = 'sending' | 'waiting' | 'streaming' | 'history-updated' | 'done' | 'cancelled' | 'progress' | 'tool' | 'voice' | 'media' | 'error';
 
 const starterTasks: readonly IOptimusStarterTask[] = [
 	{ id: 'slot-1', provider: OptimusProvider.Backboard },
@@ -44,6 +45,7 @@ export class OptimusApp extends Disposable {
 	private draftPrompt = '';
 	private pendingPrompt: string | undefined;
 	private sidebarStatus: string | undefined;
+	private sidebarStatusKey: OptimusSidebarStatusKey | undefined;
 	private sidebarError: string | undefined;
 	private isSendingPrompt = false;
 	private sidebarCollapsed = false;
@@ -477,6 +479,7 @@ export class OptimusApp extends Disposable {
 		this.clearRememberedSelectedHistory();
 		this.store.selectRun(undefined);
 		this.sidebarStatus = undefined;
+		this.sidebarStatusKey = undefined;
 		this.sidebarError = undefined;
 		this.renderHeaderActions();
 		this.renderRuns();
@@ -686,6 +689,7 @@ export class OptimusApp extends Disposable {
 					this.isSendingPrompt = false;
 					this.liveStateRunning = false;
 					this.sidebarStatus = localize('optimus.sidebar.historyUpdated', "Backboard response updated.");
+					this.sidebarStatusKey = 'history-updated';
 				}
 			} else if (this.pendingPrompt) {
 				const pendingPrompt = this.pendingPrompt;
@@ -701,6 +705,7 @@ export class OptimusApp extends Disposable {
 						this.isSendingPrompt = false;
 						this.liveStateRunning = false;
 						this.sidebarStatus = localize('optimus.sidebar.historyUpdated', "Backboard response updated.");
+						this.sidebarStatusKey = 'history-updated';
 					}
 				}
 			} else if (!this.selectedStarter) {
@@ -737,6 +742,7 @@ export class OptimusApp extends Disposable {
 			this.rememberSelectedHistory(liveEntry.id);
 			this.isSendingPrompt = liveState.running === true;
 			this.sidebarStatus = liveState.status ?? (liveState.running ? localize('optimus.sidebar.streaming', "Backboard is streaming.") : localize('optimus.sidebar.historyUpdated', "Backboard response updated."));
+			this.sidebarStatusKey = liveStateStatusKey(liveState) ?? (liveState.running ? 'streaming' : 'history-updated');
 			if (!liveState.running && liveEntry.messages.some(message => sidebarRoleClass(message.role) === 'assistant')) {
 				this.pendingPrompt = undefined;
 			}
@@ -744,6 +750,7 @@ export class OptimusApp extends Disposable {
 			this.selectedHistory = liveEntry;
 			this.rememberSelectedHistory(liveEntry.id);
 			this.sidebarStatus = liveState.status;
+			this.sidebarStatusKey = liveStateStatusKey(liveState);
 			this.isSendingPrompt = liveState.running === true;
 		}
 	}
@@ -757,23 +764,30 @@ export class OptimusApp extends Disposable {
 	}
 
 	private async refreshMetadata(): Promise<void> {
-		const metadata = await this.historyProvider?.readBackboardMetadata?.();
-		if (!metadata) {
-			return;
-		}
-		this.backboardSettings = metadata.settings ?? {};
-		this.backboardModels = metadata.models.filter(isVisibleBackboardModel);
-		if (!this.selectedComposerModelKey) {
-			const provider = this.backboardSettings.provider;
-			const model = this.backboardSettings.model;
-			if (provider && model) {
-				this.selectedComposerModelKey = composerModelKey(provider, model);
+		try {
+			const metadata = await this.historyProvider?.readBackboardMetadata?.();
+			if (!metadata) {
+				return;
 			}
+			this.backboardSettings = metadata.settings ?? {};
+			this.backboardModels = metadata.models.filter(isVisibleBackboardModel);
+			if (!this.selectedComposerModelKey) {
+				const provider = this.backboardSettings.provider;
+				const model = this.backboardSettings.model;
+				if (provider && model) {
+					this.selectedComposerModelKey = composerModelKey(provider, model);
+				}
+			}
+			if (!this.readStoredVoiceModeValue() && this.backboardSettings.voiceMode === 'tts') {
+				this.selectedVoiceMode = 'tts';
+			}
+		} catch (error) {
+			this.sidebarError = error instanceof Error
+				? error.message
+				: localize('optimus.sidebar.metadataError', "Backboard model metadata could not be loaded.");
+		} finally {
+			this.renderSidebar();
 		}
-		if (!this.readStoredVoiceModeValue() && this.backboardSettings.voiceMode === 'tts') {
-			this.selectedVoiceMode = 'tts';
-		}
-		this.renderSidebar();
 	}
 
 	private openHistoryEntry(entry: IOptimusHistoryEntry): void {
@@ -782,6 +796,7 @@ export class OptimusApp extends Disposable {
 		this.rememberSelectedHistory(entry.id);
 		this.store.selectRun(undefined);
 		this.sidebarStatus = undefined;
+		this.sidebarStatusKey = undefined;
 		this.sidebarError = undefined;
 		this.renderHeaderActions();
 		this.renderRuns();
@@ -924,7 +939,7 @@ export class OptimusApp extends Disposable {
 			body.appendChild(empty);
 		}
 
-		if (this.sidebarStatus && shouldRenderSidebarStatus(this.sidebarStatus, messages)) {
+		if (this.sidebarStatus && shouldRenderSidebarStatus(this.sidebarStatusKey, messages)) {
 			body.appendChild(this.renderSidebarStatus(this.sidebarStatus));
 		}
 		if (this.sidebarError) {
@@ -1085,13 +1100,22 @@ export class OptimusApp extends Disposable {
 		const text = document.createElement('div');
 		text.className = 'optimus-sidebar-message-content';
 		if (sidebarRoleClass(role) === 'voice') {
-			const urls = audioUrlsFromText(content);
-			if (urls.length) {
-				for (const url of urls) {
-					const audio = document.createElement('audio');
-					audio.controls = true;
-					audio.src = url;
-					text.appendChild(audio);
+			const sources = audioSourcesFromText(content);
+			if (sources.length) {
+				for (const source of sources) {
+					if (source.kind === 'audio') {
+						const audio = document.createElement('audio');
+						audio.controls = true;
+						audio.src = source.url;
+						text.appendChild(audio);
+					} else {
+						const link = document.createElement('a');
+						link.href = source.url;
+						link.target = '_blank';
+						link.rel = 'noreferrer noopener';
+						link.textContent = source.label;
+						text.appendChild(link);
+					}
 				}
 			} else {
 				text.textContent = content;
@@ -1217,6 +1241,7 @@ export class OptimusApp extends Disposable {
 		this.liveStateRunning = true;
 		this.selectedHistory = optimisticEntry;
 		this.sidebarStatus = localize('optimus.sidebar.sending', "Sending to Backboard.");
+		this.sidebarStatusKey = 'sending';
 		this.sidebarError = undefined;
 		this.isSendingPrompt = true;
 		this.renderRuns();
@@ -1224,12 +1249,14 @@ export class OptimusApp extends Disposable {
 		try {
 			await this.historyProvider.sendBackboardPrompt(prompt, chatId, this.selectedWorkspace, this.composerPromptOptions());
 			this.sidebarStatus = localize('optimus.sidebar.waiting', "Waiting for Backboard response.");
+			this.sidebarStatusKey = 'waiting';
 			this.startHistoryPolling(prompt);
 			await this.refreshHistory();
 		} catch (error) {
 			this.isSendingPrompt = false;
 			this.liveStateRunning = false;
 			this.sidebarStatus = undefined;
+			this.sidebarStatusKey = undefined;
 			this.sidebarError = error instanceof Error ? error.message : String(error);
 			this.renderSidebar();
 		}
@@ -1244,6 +1271,7 @@ export class OptimusApp extends Disposable {
 			this.isSendingPrompt = false;
 			this.liveStateRunning = false;
 			this.sidebarStatus = localize('optimus.sidebar.cancelled', "Cancelled.");
+			this.sidebarStatusKey = 'cancelled';
 			this.stopHistoryPolling();
 			this.renderSidebar();
 		} catch (error) {
@@ -1364,6 +1392,7 @@ export class OptimusApp extends Disposable {
 			this.isSendingPrompt = false;
 			this.liveStateRunning = false;
 			this.sidebarStatus = undefined;
+			this.sidebarStatusKey = undefined;
 			this.sidebarError = localize('optimus.sidebar.responseTimedOut', "Backboard did not return a response. Check that the Backboard extension is running, then retry.");
 			this.renderSidebar();
 			return;
@@ -1586,11 +1615,37 @@ function modelPriceLabel(model: IOptimusBackboardModel): string {
 	return '';
 }
 
-function audioUrlsFromText(value: string): string[] {
+interface IOptimusAudioSource {
+	readonly kind: 'audio' | 'link';
+	readonly url: string;
+	readonly label: string;
+}
+
+function audioSourcesFromText(value: string): IOptimusAudioSource[] {
 	return value
 		.split(/\s+/)
 		.map(part => part.trim())
-		.filter(part => /^(?:https?:|data:audio\/)/i.test(part) && /(?:\.(?:mp3|wav|ogg|m4a|webm)(?:\?|$)|^data:audio\/)/i.test(part));
+		.map(audioSourceFromTextPart)
+		.filter((source): source is IOptimusAudioSource => !!source);
+}
+
+function audioSourceFromTextPart(part: string): IOptimusAudioSource | undefined {
+	if (/^data:audio\//i.test(part)) {
+		return { kind: 'audio', url: part, label: localize('optimus.sidebar.audioData', "Play Backboard voice") };
+	}
+	try {
+		const url = new URL(part);
+		if (!['http:', 'https:'].includes(url.protocol) || !/\.(?:mp3|wav|ogg|m4a|webm)(?:\?|$)/i.test(url.pathname + url.search)) {
+			return undefined;
+		}
+		return {
+			kind: 'link',
+			url: url.toString(),
+			label: localize('optimus.sidebar.audioLink', "Open audio from {0}", url.hostname)
+		};
+	} catch {
+		return undefined;
+	}
 }
 
 function isBackboardOwnedHistoryEntry(entry: IOptimusHistoryEntry): boolean {
@@ -1607,21 +1662,44 @@ function lastAssistantMessageIndex(messages: readonly { readonly role: string; r
 	return -1;
 }
 
-function shouldRenderSidebarStatus(status: string, messages: readonly { readonly role: string; readonly content: string }[]): boolean {
+function shouldRenderSidebarStatus(statusKey: OptimusSidebarStatusKey | undefined, messages: readonly { readonly role: string; readonly content: string }[]): boolean {
 	if (lastAssistantMessageIndex(messages) === -1) {
 		return true;
 	}
-	return !isAssistantOutputStatus(status);
+	return !isAssistantOutputStatusKey(statusKey);
 }
 
-function isAssistantOutputStatus(status: string): boolean {
-	return status === localize('optimus.sidebar.sending', "Sending to Backboard.")
-		|| status === localize('optimus.sidebar.waiting', "Waiting for Backboard response.")
-		|| status === localize('optimus.sidebar.streaming', "Backboard is streaming.")
-		|| status === localize('optimus.sidebar.streamingFromBackboard', "Streaming from Backboard.")
-		|| status === localize('optimus.sidebar.historyUpdated', "Backboard response updated.")
-		|| status === 'Done'
-		|| status === localize('optimus.sidebar.done', "Done.");
+function isAssistantOutputStatusKey(statusKey: OptimusSidebarStatusKey | undefined): boolean {
+	return statusKey === 'sending'
+		|| statusKey === 'waiting'
+		|| statusKey === 'streaming'
+		|| statusKey === 'history-updated'
+		|| statusKey === 'voice'
+		|| statusKey === 'media'
+		|| statusKey === 'done';
+}
+
+function liveStateStatusKey(state: IOptimusLiveState): OptimusSidebarStatusKey | undefined {
+	return normalizeSidebarStatusKey(state.statusKey);
+}
+
+function normalizeSidebarStatusKey(value: string | undefined): OptimusSidebarStatusKey | undefined {
+	switch (value) {
+		case 'sending':
+		case 'waiting':
+		case 'streaming':
+		case 'history-updated':
+		case 'done':
+		case 'cancelled':
+		case 'progress':
+		case 'tool':
+		case 'voice':
+		case 'media':
+		case 'error':
+			return value;
+		default:
+			return undefined;
+	}
 }
 
 function createPendingHistoryEntry(prompt: string, chatId: string | undefined, workspace: string | undefined): IOptimusHistoryEntry {

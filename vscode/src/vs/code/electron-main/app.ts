@@ -1944,6 +1944,7 @@ interface IOptimusBackboardLiveState {
 	readonly chatId?: string;
 	readonly prompt?: string;
 	readonly status?: string;
+	readonly statusKey?: string;
 	readonly running?: boolean;
 	readonly startedAt?: number;
 	readonly updatedAt?: number;
@@ -2603,14 +2604,15 @@ function readOptimusBackboardLiveState(): IOptimusBackboardLiveState | undefined
 		const id = stringValueFromOptimusRecord(parsed.id) ?? stringValueFromOptimusRecord(parsed.chatId);
 		if (!id) {
 			return undefined;
-		}
-		return {
-			id,
-			chatId: stringValueFromOptimusRecord(parsed.chatId),
-			prompt: stringValueFromOptimusRecord(parsed.prompt),
-			status: stringValueFromOptimusRecord(parsed.status),
-			running: parsed.running === true,
-			startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : undefined,
+			}
+			return {
+				id,
+				chatId: stringValueFromOptimusRecord(parsed.chatId),
+				prompt: stringValueFromOptimusRecord(parsed.prompt),
+				status: stringValueFromOptimusRecord(parsed.status),
+				statusKey: stringValueFromOptimusRecord(parsed.statusKey),
+				running: parsed.running === true,
+				startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : undefined,
 			updatedAt,
 			currentWorkspace: stringValueFromOptimusRecord(parsed.currentWorkspace),
 			messages: normalizeOptimusHistoryMessages(parsed.messages, stringValueFromOptimusRecord(parsed.prompt), undefined, undefined),

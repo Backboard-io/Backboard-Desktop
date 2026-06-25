@@ -144,6 +144,7 @@ interface OptimusLiveState {
 	readonly chatId?: string;
 	readonly prompt?: string;
 	readonly status?: string;
+	readonly statusKey?: OptimusLiveStatusKey;
 	readonly running?: boolean;
 	readonly startedAt?: number;
 	readonly updatedAt: number;
@@ -151,6 +152,8 @@ interface OptimusLiveState {
 	readonly messages: readonly { readonly role: string; readonly content: string }[];
 	readonly fileChanges?: readonly FileChangePayload[];
 }
+
+type OptimusLiveStatusKey = 'sending' | 'streaming' | 'progress' | 'tool' | 'voice' | 'media' | 'done' | 'cancelled' | 'error';
 
 interface OptimusPanelCommand {
 	readonly id: string;
@@ -2372,13 +2375,14 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				liveMessages.push({ role: 'assistant', content: text });
 			}
 		};
-		const writeLiveState = (status: string, running: boolean, immediate = false) => {
+		const writeLiveState = (status: string, statusKey: OptimusLiveStatusKey, running: boolean, immediate = false) => {
 			scheduleOptimusLiveStateWrite({
 				version: 1,
 				id: liveChatId,
 				chatId: liveChatId,
 				prompt: content,
 				status,
+				statusKey,
 				running,
 				startedAt: liveStartedAt,
 				updatedAt: Date.now(),
@@ -2422,23 +2426,23 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				const text = typeof value === 'string' ? value : value.value;
 				if (text) {
 					appendLiveAssistantText(text);
-					writeLiveState('Streaming from Backboard.', true);
+					writeLiveState('Streaming from Backboard.', 'streaming', true);
 				}
 			},
 			progress: value => {
-				writeLiveState(value, true);
+				writeLiveState(value, 'progress', true);
 			},
 			event: (type, payload) => {
 				if (type === 'toolFinished' && isObjectRecord(payload)) {
 					const name = typeof payload.name === 'string' ? payload.name : 'tool';
 					const statusText = typeof payload.status === 'string' ? payload.status : 'running';
-					writeLiveState(`${name} ${statusText}.`, true);
+					writeLiveState(`${name} ${statusText}.`, 'tool', true);
 				} else if (type === 'voice') {
 					liveMessages.push({ role: 'voice', content: mediaPayloadText(payload) });
-					writeLiveState('Backboard voice ready.', true);
+					writeLiveState('Backboard voice ready.', 'voice', true);
 				} else if (type === 'media') {
 					liveMessages.push({ role: 'assistant', content: mediaPayloadText(payload) });
-					writeLiveState('Backboard media ready.', true);
+					writeLiveState('Backboard media ready.', 'media', true);
 				}
 			}
 		};
@@ -2447,13 +2451,13 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				const message = event.message ?? 'Backboard request failed.';
 				fatalErrorMessage = message;
 				liveMessages.push({ role: 'error', content: message });
-				writeLiveState(message, false);
+				writeLiveState(message, 'error', false);
 				return currentToolRequest;
 			}
 			return renderBridgeEvent(event, sink, currentToolRequest);
 		};
 
-		writeLiveState('Sending to Backboard.', true, true);
+		writeLiveState('Sending to Backboard.', 'sending', true, true);
 		backboardToolOutput?.appendLine(`[optimus] direct send ${liveChatId}`);
 		try {
 			const imageGeneration = imageGenerationForPrompt(content, settings.imageGeneration);
@@ -2496,7 +2500,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 					break;
 				}
 				if (toolOutputs.length !== nextToolRequest.toolCalls.length) {
-					writeLiveState('Stopped before submitting incomplete tool outputs.', false, true);
+					writeLiveState('Stopped before submitting incomplete tool outputs.', 'error', false, true);
 					break;
 				}
 				let currentContinuationToolRequest: ToolResultRequest | undefined;
@@ -2517,12 +2521,12 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			}
 
 			const finalStatus = token.isCancellationRequested ? 'Cancelled' : fatalErrorMessage ? 'Failed' : 'Done';
-			writeLiveState(token.isCancellationRequested ? 'Cancelled.' : fatalErrorMessage ?? 'Done.', false, true);
+			writeLiveState(token.isCancellationRequested ? 'Cancelled.' : fatalErrorMessage ?? 'Done.', token.isCancellationRequested ? 'cancelled' : fatalErrorMessage ? 'error' : 'done', false, true);
 			await saveHistory(finalStatus);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			liveMessages.push({ role: 'error', content: message });
-			writeLiveState(message, false, true);
+			writeLiveState(message, 'error', false, true);
 			await saveHistory('Failed').catch(saveError => {
 				backboardToolOutput?.appendLine(`[optimus] failed to save direct history: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
 			});
@@ -2606,13 +2610,14 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				liveMessages.push({ role: 'assistant', content: text });
 			}
 		};
-		const writeLiveState = (status: string, running: boolean, immediate = false) => {
+		const writeLiveState = (status: string, statusKey: OptimusLiveStatusKey, running: boolean, immediate = false) => {
 			scheduleOptimusLiveStateWrite({
 				version: 1,
 				id: liveChatId,
 				chatId: liveChatId,
 				prompt: content,
 				status,
+				statusKey,
 				running,
 				startedAt: liveStartedAt,
 				updatedAt: Date.now(),
@@ -2621,7 +2626,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				fileChanges: [],
 			}, immediate);
 		};
-		writeLiveState('Sending to Backboard.', true, true);
+		writeLiveState('Sending to Backboard.', 'sending', true, true);
 		await view.webview.postMessage({ type: 'runStarted', prompt: content, chatId: liveChatId });
 		await view.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
 		const pendingToolRequests: ToolResultRequest[] = [];
@@ -2653,14 +2658,14 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 					const text = typeof event.text === 'string' ? event.text : '';
 					if (text) {
 						appendLiveAssistantText(text);
-						writeLiveState('Streaming from Backboard.', true);
+						writeLiveState('Streaming from Backboard.', 'streaming', true);
 					}
 				} else if (event.type === 'progress' && typeof event.message === 'string') {
-					writeLiveState(event.message, true);
+					writeLiveState(event.message, 'progress', true);
 				} else if (event.type === 'error') {
 					const message = event.message ?? 'Backboard request failed.';
 					liveMessages.push({ role: 'error', content: message });
-					writeLiveState(message, false);
+					writeLiveState(message, 'error', false);
 				}
 				const toolRequest = renderBridgeEvent(event, sink, currentToolRequest);
 				if (toolRequest && toolRequest !== currentToolRequest) {
@@ -2691,14 +2696,14 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 						const text = typeof event.text === 'string' ? event.text : '';
 						if (text) {
 							appendLiveAssistantText(text);
-							writeLiveState('Streaming from Backboard.', true);
+							writeLiveState('Streaming from Backboard.', 'streaming', true);
 						}
 					} else if (event.type === 'progress' && typeof event.message === 'string') {
-						writeLiveState(event.message, true);
+						writeLiveState(event.message, 'progress', true);
 					} else if (event.type === 'error') {
 						const message = event.message ?? 'Backboard request failed.';
 						liveMessages.push({ role: 'error', content: message });
-						writeLiveState(message, false);
+						writeLiveState(message, 'error', false);
 					}
 					const followupToolRequest = renderBridgeEvent(event, sink, currentContinuationToolRequest);
 					if (followupToolRequest && followupToolRequest !== currentContinuationToolRequest) {
@@ -2710,11 +2715,11 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			}
 			await view.webview.postMessage({ type: 'runFinished', chatId: liveChatId });
 			await view.webview.postMessage({ type: 'status', text: token.isCancellationRequested ? 'Cancelled.' : 'Done.' });
-			writeLiveState(token.isCancellationRequested ? 'Cancelled.' : 'Done.', false, true);
+			writeLiveState(token.isCancellationRequested ? 'Cancelled.' : 'Done.', token.isCancellationRequested ? 'cancelled' : 'done', false, true);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			liveMessages.push({ role: 'error', content: message });
-			writeLiveState(message, false, true);
+			writeLiveState(message, 'error', false, true);
 			await view.webview.postMessage({ type: 'append', role: 'error', text: message });
 			await view.webview.postMessage({ type: 'runFinished', chatId: liveChatId });
 			await handleBackboardError(view.webview, error, this.bridge);
