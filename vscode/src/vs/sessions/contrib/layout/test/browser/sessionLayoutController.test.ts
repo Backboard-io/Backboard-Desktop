@@ -11,10 +11,12 @@ import { constObservable, ISettableObservable, observableValue } from '../../../
 import { URI } from '../../../../../base/common/uri.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IStorageService, StorageScope, WillSaveStateReason } from '../../../../../platform/storage/common/storage.js';
 import { IWorkspace, IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { IWorkspaceEditingService } from '../../../../../workbench/services/workspaces/common/workspaceEditing.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { IChatService } from '../../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ViewContainerLocation } from '../../../../../workbench/common/views.js';
@@ -28,8 +30,7 @@ import { IActiveSession, ISessionsChangeEvent, ISessionsManagementService } from
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
 import { IChat, ISessionFileChange, ISessionWorkspace, SessionStatus } from '../../../../services/sessions/common/session.js';
 import { LayoutController } from '../../browser/sessionLayoutController.js';
-import { CHANGES_VIEW_ID } from '../../../changes/common/changes.js';
-import { SESSIONS_FILES_CONTAINER_ID } from '../../../files/browser/files.contribution.js';
+import { RightWorkbenchCommandId, SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID } from '../../../rightWorkbench/browser/rightWorkbench.js';
 import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { TestStorageService } from '../../../../../workbench/test/common/workbenchTestServices.js';
 
@@ -110,7 +111,7 @@ suite('LayoutController', () => {
 	let storageService: TestStorageService;
 	let partVisibility: Map<Parts, boolean>;
 	let openedViewContainers: string[];
-	let openedViews: string[];
+	let executedCommands: string[];
 	let setPartHiddenCalls: { hidden: boolean; part: Parts }[];
 	let activePaneCompositeId: string | undefined;
 
@@ -145,10 +146,17 @@ suite('LayoutController', () => {
 			override readonly visibleSessions = constObservable([]);
 		});
 
-		onDidSubmitRequest = store.add(new Emitter<{ chatSessionResource: URI }>());
-		instaService.stub(IChatService, new class extends mock<IChatService>() {
-			override readonly onDidSubmitRequest = onDidSubmitRequest.event;
-		});
+			onDidSubmitRequest = store.add(new Emitter<{ chatSessionResource: URI }>());
+			instaService.stub(IChatService, new class extends mock<IChatService>() {
+				override readonly onDidSubmitRequest = onDidSubmitRequest.event;
+			});
+			executedCommands = [];
+			instaService.stub(ICommandService, new class extends mock<ICommandService>() {
+				override async executeCommand<T = unknown>(commandId: string): Promise<T> {
+					executedCommands.push(commandId);
+					return undefined as T;
+				}
+			});
 
 		partVisibility = new Map<Parts, boolean>([
 			[Parts.AUXILIARYBAR_PART, true],
@@ -173,21 +181,17 @@ suite('LayoutController', () => {
 			}
 			override hasFocus(_part: Parts): boolean { return false; }
 			override readonly onDidChangePartVisibility = onDidChangePartVisibility.event;
-		} as Partial<IWorkbenchLayoutService> as IWorkbenchLayoutService);
+			} as Partial<IWorkbenchLayoutService> as IWorkbenchLayoutService);
 
-		openedViewContainers = [];
-		openedViews = [];
-		instaService.stub(IViewsService, new class extends mock<IViewsService>() {
-			override async openViewContainer(id: string) {
-				openedViewContainers.push(id);
-				return null;
-			}
-			override closeViewContainer() { }
-			override async openView(id: string) {
-				openedViews.push(id);
-				return null;
-			}
-		});
+			openedViewContainers = [];
+			instaService.stub(IViewsService, new class extends mock<IViewsService>() {
+				override async openViewContainer(id: string) {
+					openedViewContainers.push(id);
+					return null;
+				}
+				override closeViewContainer() { }
+				override async openView() { return null; }
+			});
 
 		activePaneCompositeId = undefined;
 		instaService.stub(IPaneCompositePartService, new class extends mock<IPaneCompositePartService>() {
@@ -209,43 +213,66 @@ suite('LayoutController', () => {
 			override deleteWorkingSet() { }
 		});
 
-		instaService.stub(IWorkspaceContextService, new class extends mock<IWorkspaceContextService>() {
-			override readonly onDidChangeWorkspaceFolders = Event.None;
-			override getWorkspace(): IWorkspace { return { id: 'test', folders: (options.workspaceFolders ?? []) as IWorkspace['folders'] }; }
-		});
+			instaService.stub(IWorkspaceContextService, new class extends mock<IWorkspaceContextService>() {
+				override readonly onDidChangeWorkspaceFolders = Event.None;
+				override getWorkspace(): IWorkspace { return { id: 'test', folders: (options.workspaceFolders ?? []) as IWorkspace['folders'] }; }
+			});
+			instaService.stub(IWorkspaceEditingService, new class extends mock<IWorkspaceEditingService>() {
+				override async updateFolders() { }
+			});
 
-		return store.add(instaService.createInstance(LayoutController));
-	}
+			return store.add(instaService.createInstance(LayoutController));
+		}
 
 	teardown(() => store.clear());
 	ensureNoDisposablesAreLeakedInTestSuite();
 
 	// --- Auxiliary bar view state ---
 
-	test('shows files view for session with workspace and no changes', () => {
+	test('shows right workbench launcher for session with workspace and no changes', () => {
 		createLayoutController();
 		const session = makeSession(URI.parse('session:1'));
 		activeSessionObs.set(session, undefined);
 
-		assert.ok(openedViewContainers.includes(SESSIONS_FILES_CONTAINER_ID));
+		assert.ok(openedViewContainers.includes(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID));
+		assert.ok(!executedCommands.includes(RightWorkbenchCommandId.OpenReview));
 	});
 
-	test('shows changes view for session with changes', () => {
-		createLayoutController();
-		const session = makeSession(URI.parse('session:1'), {
-			changes: [makeChange('/file.ts')],
-		});
+		test('shows right workbench launcher for session with changes', () => {
+			createLayoutController();
+			const session = makeSession(URI.parse('session:1'), {
+				changes: [makeChange('/file.ts')],
+			});
 		activeSessionObs.set(session, undefined);
 
-		assert.ok(openedViews.includes(CHANGES_VIEW_ID));
-	});
+			assert.ok(openedViewContainers.includes(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID));
+			assert.ok(!executedCommands.includes(RightWorkbenchCommandId.OpenReview));
+		});
 
-	test('shows files view for untitled session', () => {
+		test('shows right workbench launcher for changed session with saved native container state', () => {
+			createLayoutController({
+				layoutState: [{
+					sessionResource: 'session:1',
+					viewState: { auxiliaryBarVisible: true, auxiliaryBarActiveViewContainerId: 'workbench.scm.branchChanges' },
+				}],
+			});
+			const session = makeSession(URI.parse('session:1'), {
+				changes: [makeChange('/file.ts')],
+			});
+			activeSessionObs.set(session, undefined);
+
+			assert.ok(openedViewContainers.includes(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID));
+			assert.ok(!executedCommands.includes(RightWorkbenchCommandId.OpenReview));
+			assert.ok(!openedViewContainers.includes('workbench.scm.branchChanges'));
+		});
+
+	test('shows right workbench launcher for untitled session', () => {
 		createLayoutController();
 		const session = makeSession(URI.parse('session:1'), { status: SessionStatus.Untitled });
 		activeSessionObs.set(session, undefined);
 
-		assert.ok(openedViewContainers.includes(SESSIONS_FILES_CONTAINER_ID));
+		assert.ok(openedViewContainers.includes(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID));
+		assert.ok(!executedCommands.includes(RightWorkbenchCommandId.OpenReview));
 	});
 
 	test('does not open views when session has no workspace', () => {
@@ -255,8 +282,8 @@ suite('LayoutController', () => {
 		});
 		activeSessionObs.set(session, undefined);
 
-		assert.ok(!openedViewContainers.includes(SESSIONS_FILES_CONTAINER_ID));
-		assert.ok(!openedViews.includes(CHANGES_VIEW_ID));
+		assert.ok(!openedViewContainers.includes(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID));
+		assert.ok(!executedCommands.includes(RightWorkbenchCommandId.OpenReview));
 	});
 
 	test('remembers aux bar hidden state on session switch', () => {
@@ -278,24 +305,45 @@ suite('LayoutController', () => {
 		);
 	});
 
-	test('remembers active view container on session switch', () => {
-		createLayoutController();
-		const session1 = makeSession(URI.parse('session:1'));
-		const session2 = makeSession(URI.parse('session:2'));
+		test('restores right workbench container on session switch', () => {
+			createLayoutController();
+			const session1 = makeSession(URI.parse('session:1'));
+			const session2 = makeSession(URI.parse('session:2'));
 
-		activeSessionObs.set(session1, undefined);
-		activePaneCompositeId = 'some.custom.view';
+			activeSessionObs.set(session1, undefined);
+			activePaneCompositeId = SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID;
 
-		activeSessionObs.set(session2, undefined);
+			activeSessionObs.set(session2, undefined);
 
-		openedViewContainers = [];
-		activeSessionObs.set(session1, undefined);
+			openedViewContainers = [];
+			activeSessionObs.set(session1, undefined);
 
-		assert.ok(
-			openedViewContainers.includes('some.custom.view'),
-			'should restore active view container when returning to session 1'
-		);
-	});
+			assert.ok(
+				openedViewContainers.includes(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID),
+				'should restore the right workbench container when returning to session 1'
+			);
+		});
+
+		test('does not restore saved native auxiliary container on session switch', () => {
+			createLayoutController();
+			const session1 = makeSession(URI.parse('session:1'));
+			const session2 = makeSession(URI.parse('session:2'));
+
+			activeSessionObs.set(session1, undefined);
+			activePaneCompositeId = 'workbench.sessions.auxiliaryBar.filesContainer';
+
+			activeSessionObs.set(session2, undefined);
+
+			openedViewContainers = [];
+			activeSessionObs.set(session1, undefined);
+
+			assert.deepStrictEqual(
+				openedViewContainers,
+				[SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID],
+				'should replace saved native auxiliary containers with the right workbench shell'
+			);
+			assert.ok(!executedCommands.includes(RightWorkbenchCommandId.OpenReview));
+		});
 
 	// --- Editor / auxiliary bar invariant ---
 
@@ -397,13 +445,15 @@ suite('LayoutController', () => {
 		activeSessionObs.set(session2, undefined);
 
 		setPartHiddenCalls = [];
-		openedViews = [];
+		openedViewContainers = [];
+		executedCommands = [];
 		activeSessionObs.set(session1, undefined);
 
 		assert.ok(
-			openedViews.includes(CHANGES_VIEW_ID),
-			'should show changes view since saved state was cleared after turn with new changes'
+			openedViewContainers.includes(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID),
+			'should show right workbench shell since saved state was cleared after turn with new changes'
 		);
+		assert.ok(!executedCommands.includes(RightWorkbenchCommandId.OpenReview));
 		assert.ok(
 			!setPartHiddenCalls.some(c => c.part === Parts.AUXILIARYBAR_PART && c.hidden === true),
 			'aux bar should not be hidden since saved state was cleared'
@@ -458,13 +508,18 @@ suite('LayoutController', () => {
 			override readonly activeSession = activeSession;
 			override readonly visibleSessions = constObservable([]);
 		});
-		instaService.stub(IChatService, new class extends mock<IChatService>() {
-			override readonly onDidSubmitRequest = Event.None;
-		});
-		instaService.stub(IWorkbenchLayoutService, new class extends mock<IWorkbenchLayoutService>() {
-			override isVisible() { return true; }
-			override setPartHidden() { }
-			override hasFocus() { return false; }
+			instaService.stub(IChatService, new class extends mock<IChatService>() {
+				override readonly onDidSubmitRequest = Event.None;
+			});
+			instaService.stub(ICommandService, new class extends mock<ICommandService>() {
+				override async executeCommand<T = unknown>(): Promise<T> {
+					return undefined as T;
+				}
+			});
+			instaService.stub(IWorkbenchLayoutService, new class extends mock<IWorkbenchLayoutService>() {
+				override isVisible() { return true; }
+				override setPartHidden() { }
+				override hasFocus() { return false; }
 			override getSize() { return { width: 0, height: 0 }; }
 			override setSize() { }
 			override readonly onDidChangePartVisibility = Event.None;
@@ -485,12 +540,15 @@ suite('LayoutController', () => {
 			override async applyWorkingSet() { return true; }
 			override deleteWorkingSet() { }
 		});
-		instaService.stub(IWorkspaceContextService, new class extends mock<IWorkspaceContextService>() {
-			override readonly onDidChangeWorkspaceFolders = Event.None;
-			override getWorkspace(): IWorkspace { return { id: 'test', folders: [] }; }
-		});
+			instaService.stub(IWorkspaceContextService, new class extends mock<IWorkspaceContextService>() {
+				override readonly onDidChangeWorkspaceFolders = Event.None;
+				override getWorkspace(): IWorkspace { return { id: 'test', folders: [] }; }
+			});
+			instaService.stub(IWorkspaceEditingService, new class extends mock<IWorkspaceEditingService>() {
+				override async updateFolders() { }
+			});
 
-		const controller = store.add(instaService.createInstance(LayoutController));
+			const controller = store.add(instaService.createInstance(LayoutController));
 
 		assert.strictEqual(
 			tempStorage.get('sessions.workingSets', StorageScope.WORKSPACE),

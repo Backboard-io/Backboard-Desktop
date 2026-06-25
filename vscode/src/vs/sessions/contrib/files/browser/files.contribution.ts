@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../base/common/codicons.js';
-import { localize, localize2 } from '../../../../nls.js';
+import { localize2 } from '../../../../nls.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
@@ -19,7 +19,6 @@ import { ViewPaneContainer } from '../../../../workbench/browser/parts/views/vie
 import { IViewsService } from '../../../../workbench/services/views/common/viewsService.js';
 import { IsSessionsWindowContext, WorkspaceFolderCountContext } from '../../../../workbench/common/contextkeys.js';
 import { SESSIONS_FILES_EMPTY_VIEW_ID, SESSIONS_FILES_VIEW_ID, SessionsExplorerEmptyView, SessionsExplorerView } from './filesView.js';
-import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { ActiveSessionHasGitRepositoryContext, ActiveSessionHasGitSyncActionRunningContext, IsNewChatSessionContext, IsPhoneLayoutContext } from '../../../common/contextkeys.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 
@@ -38,15 +37,8 @@ const filesViewContainer = viewContainerRegistry.registerViewContainer({
 	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [SESSIONS_FILES_CONTAINER_ID, { mergeViewWithContainerWhenSingleView: true }]),
 	storageId: SESSIONS_FILES_CONTAINER_ID,
 	hideIfEmpty: false,
-	openCommandActionDescriptor: {
-		id: SESSIONS_FILES_CONTAINER_ID,
-		title: localize2('explore', "Explorer"),
-		mnemonicTitle: localize({ key: 'miFiles', comment: ['&& denotes a mnemonic'] }, "Fil&&es"),
-		keybindings: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyE },
-		order: 0
-	},
 	windowEnablement: WindowEnablement.Sessions,
-}, ViewContainerLocation.AuxiliaryBar, { isDefault: true });
+}, ViewContainerLocation.AuxiliaryBar);
 
 class RegisterFilesViewContribution implements IWorkbenchContribution {
 

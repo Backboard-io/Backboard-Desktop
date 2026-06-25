@@ -343,6 +343,12 @@ export interface IEditorOptions {
 export interface IModalEditorPartOptions {
 
 	/**
+	 * Optional host element to embed the modal editor into instead of showing it
+	 * as a full-window overlay.
+	 */
+	readonly embeddedHost?: unknown /* HTMLElement */;
+
+	/**
 	 * Whether the modal editor should be maximized.
 	 */
 	readonly maximized?: boolean;

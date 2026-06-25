@@ -9,19 +9,18 @@ import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, MenuRegistry, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { IWorkbenchContribution } from '../../../../workbench/common/contributions.js';
 import { IsAuxiliaryWindowContext, AuxiliaryBarVisibleContext } from '../../../../workbench/common/contextkeys.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
-import { IPaneCompositePartService } from '../../../../workbench/services/panecomposite/browser/panecomposite.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
-import { ViewContainerLocation } from '../../../../workbench/common/views.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 import { Menus } from '../../../browser/menus.js';
 import { SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
 import { logChangesViewToggle } from '../../../common/sessionsTelemetry.js';
-import { CHANGES_VIEW_CONTAINER_ID } from '../common/changes.js';
+import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 
 const TOGGLE_CHANGES_VIEW_ID = 'workbench.action.agentSessions.toggleChangesView';
 const OPEN_CHANGES_VIEW_ID = 'workbench.action.agentSessions.openChangesInRightPanel';
@@ -94,14 +93,13 @@ registerAction2(class extends Action2 {
 
 	run(accessor: ServicesAccessor): void {
 		const layoutService = accessor.get(IWorkbenchLayoutService);
-		const paneCompositeService = accessor.get(IPaneCompositePartService);
+		const commandService = accessor.get(ICommandService);
 		const telemetryService = accessor.get(ITelemetryService);
 
 		const isVisible = !layoutService.isVisible(Parts.AUXILIARYBAR_PART);
 
 		if (isVisible) {
-			layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
-			paneCompositeService.openPaneComposite(CHANGES_VIEW_CONTAINER_ID, ViewContainerLocation.AuxiliaryBar);
+			void commandService.executeCommand(RightWorkbenchCommandId.OpenReview);
 		} else {
 			layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
 		}
@@ -122,13 +120,6 @@ registerAction2(class extends Action2 {
 	}
 
 	run(accessor: ServicesAccessor): void {
-		const layoutService = accessor.get(IWorkbenchLayoutService);
-		const paneCompositeService = accessor.get(IPaneCompositePartService);
-
-		if (!layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
-			layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
-		}
-
-		paneCompositeService.openPaneComposite(CHANGES_VIEW_CONTAINER_ID, ViewContainerLocation.AuxiliaryBar);
+		void accessor.get(ICommandService).executeCommand(RightWorkbenchCommandId.OpenReview);
 	}
 });

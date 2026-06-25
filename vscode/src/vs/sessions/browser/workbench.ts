@@ -1226,7 +1226,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	 * - Right section (vertical):
 	 *   - Titlebar (top of right section)
 	 *   - Top right (horizontal): Chat Bar | Right workbench
-	 *     - Right workbench: Changes/Files/Browser | Editor
+	 *     - Right workbench: Editor | Changes/Files/Browser
 	 *   - Panel (below chat and right workbench)
 	 */
 	private createGridDescriptor(): ISerializedGrid {
@@ -1273,7 +1273,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			: Math.max(0, rightSectionWidth - effectiveRightWorkColumnWidth);
 
 		const contentHeight = Math.max(0, height - titleBarHeight);
-		const topRightHeight = Math.max(0, contentHeight - panelSize);
+		const visiblePanelSize = this.partVisibility.panel ? panelSize : 0;
+		const topRightHeight = Math.max(0, contentHeight - visiblePanelSize);
 		const minimumAuxiliaryBarWidth = this.partVisibility.editor
 			? Math.min(180, Math.max(120, Math.floor(rightWorkColumnWidth * 0.22)))
 			: rightWorkColumnWidth;
@@ -1334,10 +1335,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			visible: this.partVisibility.panel
 		};
 
-		// Top right section: Chat Bar | Right workbench (Files/Browser/Changes + Editor)
+		// Top right section: Chat Bar | Right workbench (Editor + Files/Browser/Changes)
 		const topRightSection: ISerializedNode = {
 			type: 'branch',
-			data: [sessionsNode, auxiliaryBarNode, editorNode],
+			data: [sessionsNode, editorNode, auxiliaryBarNode],
 			size: topRightHeight
 		};
 
@@ -1749,10 +1750,13 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			this.setEditorMaximized(false);
 		}
 
-		this.partVisibility.editor = !hidden;
-		this.mainContainer.classList.toggle(LayoutClasses.MAIN_EDITOR_AREA_HIDDEN, hidden);
-
 		if (this.editorPartView) {
+			const editorSizeBeforeHide = this.workbenchGrid.getViewSize(this.editorPartView);
+			const auxiliaryBarSizeBeforeHide = this.auxiliaryBarPartView ? this.workbenchGrid.getViewSize(this.auxiliaryBarPartView) : undefined;
+
+			this.partVisibility.editor = !hidden;
+			this.mainContainer.classList.toggle(LayoutClasses.MAIN_EDITOR_AREA_HIDDEN, hidden);
+
 			// Size the editor only the first time it is revealed in this workbench
 			// instance. Later show/hide cycles use the grid's cached height so
 			// user resizing is preserved.
@@ -1760,17 +1764,27 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 			this.workbenchGrid.setViewVisible(this.editorPartView, !hidden);
 
+			if (hidden && this.partVisibility.auxiliaryBar && auxiliaryBarSizeBeforeHide) {
+				this.workbenchGrid.resizeView(this.auxiliaryBarPartView, {
+					width: Math.max(auxiliaryBarSizeBeforeHide.width, auxiliaryBarSizeBeforeHide.width + editorSizeBeforeHide.width),
+					height: auxiliaryBarSizeBeforeHide.height
+				});
+			}
+
 			if (shouldApplyInitialEditorSize) {
 				this._hasAppliedInitialEditorSplit = true;
 				this._applyEditorSplitSize();
 			}
+		} else {
+			this.partVisibility.editor = !hidden;
+			this.mainContainer.classList.toggle(LayoutClasses.MAIN_EDITOR_AREA_HIDDEN, hidden);
 		}
 
 		this._savePartVisibility();
 	}
 
 	/**
-	 * Sizes the editor part as the right pane next to the auxiliary bar
+	 * Sizes the editor part as the primary pane next to the auxiliary rail
 	 * the first time it is revealed.
 	*/
 	private _applyEditorSplitSize(): void {

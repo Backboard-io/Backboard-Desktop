@@ -17,7 +17,6 @@ import { IsPhoneLayoutContext } from '../../../common/contextkeys.js';
 import './changesActions.js';
 import './changesViewActions.js';
 import './checksActions.js';
-import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 
 const changesViewIcon = registerIcon('changes-view-icon', Codicon.gitCompare, localize2('changesViewIcon', 'View icon for the Changes view.').value);
@@ -32,17 +31,6 @@ const changesViewContainer = viewContainersRegistry.registerViewContainer({
 	ctorDescriptor: new SyncDescriptor(ChangesViewPaneContainer),
 	storageId: CHANGES_VIEW_CONTAINER_ID,
 	hideIfEmpty: false,
-	openCommandActionDescriptor: {
-		id: CHANGES_VIEW_CONTAINER_ID,
-		mnemonicTitle: localize({ key: 'miChanges', comment: ['&& denotes a mnemonic'] }, "Chan&&ges"),
-		keybindings: {
-			primary: 0,
-			win: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyG },
-			linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyG },
-			mac: { primary: KeyMod.WinCtrl | KeyMod.Shift | KeyCode.KeyG },
-		},
-		order: 1,
-	},
 	windowEnablement: WindowEnablement.Sessions
 }, ViewContainerLocation.AuxiliaryBar);
 

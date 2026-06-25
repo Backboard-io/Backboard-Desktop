@@ -94,6 +94,19 @@ class BrowserNavigationBar extends Disposable {
 		};
 		this._urlBar = this._register(instantiationService.createInstance(BrowserUrlBarWidget, urlBarHost));
 
+		const navContainer = $('.browser-nav-toolbar');
+		const navToolbar = this._register(scopedInstantiationService.createInstance(
+			MenuWorkbenchToolBar,
+			navContainer,
+			MenuId.BrowserNavigationToolbar,
+			{
+				hoverDelegate,
+				toolbarOptions: { primaryGroup: () => true },
+				menuOptions: { shouldForwardArgs: true },
+			}
+		));
+		navToolbar.context = editor;
+
 		const actionsContainer = $('.browser-actions-toolbar');
 		const actionsToolbar = this._register(scopedInstantiationService.createInstance(
 			MenuWorkbenchToolBar,
@@ -122,6 +135,8 @@ class BrowserNavigationBar extends Disposable {
 		));
 		actionsToolbar.context = editor;
 
+		this.element.appendChild(navContainer);
+		this.element.appendChild(this._urlBar.element);
 		this.element.appendChild(actionsContainer);
 	}
 

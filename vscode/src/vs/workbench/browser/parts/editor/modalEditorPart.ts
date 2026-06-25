@@ -154,13 +154,20 @@ export class ModalEditorPart {
 
 	async create(options?: IModalEditorPartOptions): Promise<ICreateModalEditorPartResult> {
 		const disposables = new DisposableStore();
+		const embeddedHost = options?.embeddedHost as HTMLElement | undefined;
+		const modalHost = embeddedHost ?? this.layoutService.mainContainer;
+		const isEmbedded = !!embeddedHost;
 
 		// Modal container
 		const modalElement = $('.monaco-modal-editor-block');
-		this.layoutService.mainContainer.appendChild(modalElement);
+		modalElement.classList.toggle('embedded', isEmbedded);
+		modalHost.appendChild(modalElement);
 		disposables.add(toDisposable(() => modalElement.remove()));
 
 		disposables.add(addDisposableListener(modalElement, EventType.MOUSE_DOWN, e => {
+			if (isEmbedded) {
+				return;
+			}
 			if (e.target === modalElement) {
 				EventHelper.stop(e, true);
 
@@ -629,9 +636,14 @@ export class ModalEditorPart {
 
 		// Compute default (non-custom, non-maximized) modal size
 		const getDefaultSize = (): Dimension => {
-			const containerDimension = this.layoutService.mainContainerDimension;
-			const titleBarOffset = this.layoutService.mainContainerOffset.top;
+			const containerDimension = isEmbedded
+				? new Dimension(modalHost.clientWidth, modalHost.clientHeight)
+				: this.layoutService.mainContainerDimension;
+			const titleBarOffset = isEmbedded ? 0 : this.layoutService.mainContainerOffset.top;
 			const availableHeight = Math.max(containerDimension.height - titleBarOffset, 0);
+			if (isEmbedded) {
+				return new Dimension(containerDimension.width, availableHeight);
+			}
 			const targetWidth = containerDimension.width * 0.8;
 			const targetHeight = availableHeight * 0.8;
 			const width = Math.min(targetWidth, MODAL_MAX_DEFAULT_WIDTH, containerDimension.width);
@@ -647,8 +659,10 @@ export class ModalEditorPart {
 				return; // skip layout during interactive resize
 			}
 
-			const containerDimension = this.layoutService.mainContainerDimension;
-			const titleBarOffset = this.layoutService.mainContainerOffset.top;
+			const containerDimension = isEmbedded
+				? new Dimension(modalHost.clientWidth, modalHost.clientHeight)
+				: this.layoutService.mainContainerDimension;
+			const titleBarOffset = isEmbedded ? 0 : this.layoutService.mainContainerOffset.top;
 			const availableHeight = Math.max(containerDimension.height - titleBarOffset, 0);
 
 			const defaultSize = getDefaultSize();
@@ -656,7 +670,10 @@ export class ModalEditorPart {
 			let width: number;
 			let height: number;
 
-			if (editorPart.maximized) {
+			if (isEmbedded) {
+				width = containerDimension.width;
+				height = availableHeight;
+			} else if (editorPart.maximized) {
 				const verticalPadding = Math.max(titleBarOffset /* keep away from title bar to prevent clipping issues with WCO */, MODAL_MAXIMIZED_PADDING);
 				width = Math.max(containerDimension.width - MODAL_MAXIMIZED_PADDING, 0);
 				height = Math.max(availableHeight - verticalPadding, 0);
@@ -682,11 +699,14 @@ export class ModalEditorPart {
 			resizableElement.layout(height, width);
 
 			// Enable/disable sashes based on maximized state
-			const canResize = !editorPart.maximized;
+			const canResize = !isEmbedded && !editorPart.maximized;
 			resizableElement.enableSashes(canResize, canResize, canResize, canResize);
 
 			// Position: use custom position if available (clamped to bounds), otherwise center
-			if (!editorPart.maximized && editorPart.position) {
+			if (isEmbedded) {
+				resizableElement.domNode.style.left = '0px';
+				resizableElement.domNode.style.top = '0px';
+			} else if (!editorPart.maximized && editorPart.position) {
 				const clampedLeft = Math.max(0, Math.min(editorPart.position.left, containerDimension.width - width));
 				const clampedTop = Math.max(titleBarOffset, Math.min(editorPart.position.top, titleBarOffset + availableHeight - height));
 				resizableElement.domNode.style.left = `${clampedLeft}px`;
@@ -715,8 +735,10 @@ export class ModalEditorPart {
 		}));
 
 		// Dim window controls to match the modal overlay
-		this.hostService.setWindowDimmed(mainWindow, true);
-		disposables.add(toDisposable(() => this.hostService.setWindowDimmed(mainWindow, false)));
+		if (!isEmbedded) {
+			this.hostService.setWindowDimmed(mainWindow, true);
+			disposables.add(toDisposable(() => this.hostService.setWindowDimmed(mainWindow, false)));
+		}
 
 		// Focus
 		editorPart.activeGroup.focus();

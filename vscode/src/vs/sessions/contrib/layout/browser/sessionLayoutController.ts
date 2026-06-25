@@ -27,8 +27,7 @@ import { IAgentWorkbenchLayoutService } from '../../../browser/workbench.js';
 import { IActiveSession, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { SessionStatus } from '../../../services/sessions/common/session.js';
-import { CHANGES_VIEW_ID } from '../../changes/common/changes.js';
-import { SESSIONS_FILES_CONTAINER_ID } from '../../files/browser/files.contribution.js';
+import { SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID } from '../../rightWorkbench/browser/rightWorkbench.js';
 
 interface IPendingTurnState {
 	readonly hadChangesBeforeSend: boolean;
@@ -355,7 +354,7 @@ export class LayoutController extends Disposable {
 		}
 
 		if (isUntitled) {
-			this._viewsService.openViewContainer(SESSIONS_FILES_CONTAINER_ID, false);
+			this._viewsService.openViewContainer(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID, false);
 			return;
 		}
 
@@ -366,17 +365,13 @@ export class LayoutController extends Disposable {
 				this._layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
 				return;
 			}
-			if (savedState.auxiliaryBarActiveViewContainerId) {
+			if (savedState.auxiliaryBarActiveViewContainerId === SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID) {
 				this._viewsService.openViewContainer(savedState.auxiliaryBarActiveViewContainerId, false);
 				return;
 			}
 		}
 
-		if (hasChanges) {
-			this._viewsService.openView(CHANGES_VIEW_ID, false);
-		} else {
-			this._viewsService.openViewContainer(SESSIONS_FILES_CONTAINER_ID, false);
-		}
+		this._viewsService.openViewContainer(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID, false);
 	}
 
 	private _loadState(): void {
