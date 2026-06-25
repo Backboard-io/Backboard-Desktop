@@ -15,7 +15,7 @@ import { IContextMenuService } from '../../../platform/contextview/browser/conte
 import { ICommandService } from '../../../platform/commands/common/commands.js';
 
 const OPEN_BACKBOARD_AGENTS_COMMAND_ID = 'backboard.agents.open';
-const OPEN_BACKBOARD_ADVANCED_COMMAND_ID = 'agents.openOptimusWindow';
+const OPEN_BACKBOARD_ADVANCED_COMMAND_ID = 'workbench.action.openOptimusWindow';
 
 /**
  * Renders a stable Editor / Agents titlebar switcher in the sessions workbench.
