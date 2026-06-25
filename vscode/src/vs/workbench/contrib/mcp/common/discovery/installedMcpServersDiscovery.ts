@@ -26,10 +26,37 @@ interface CollectionState extends IDisposable {
 	serverDefinitions: ISettableObservable<readonly McpServerDefinition[]>;
 }
 
+const unsupportedGalleryOAuthMcpNames = new Set([
+	'ai.exa/exa',
+	'app.linear/linear',
+	'com.atlassian/atlassian-mcp-server',
+	'com.auth0/mcp',
+	'com.cloudflare.mcp/mcp',
+	'com.figma.mcp/mcp',
+	'com.figma/mcp',
+	'com.gitlab/mcp',
+	'com.notion/mcp',
+	'com.railway/mcp',
+	'com.thousandeyes/mcp',
+	'com.vercel/vercel-mcp',
+	'dev.lovable/mcp',
+	'figma/mcp',
+	'io.figma/mcp',
+	'io.github.firebase/firebase-mcp',
+	'io.github.getsentry/sentry-mcp',
+	'io.sentry/mcp',
+	'sentry/mcp',
+]);
+
+function isUnsupportedGalleryOAuthMcpServer(server: IWorkbenchLocalMcpServer): boolean {
+	return unsupportedGalleryOAuthMcpNames.has(server.name.toLowerCase());
+}
+
 export class InstalledMcpServersDiscovery extends Disposable implements IMcpDiscovery {
 
 	readonly fromGallery = true;
 	private readonly collections = this._register(new DisposableMap<string, CollectionState>());
+	private isDisposed = false;
 
 	constructor(
 		@IMcpWorkbenchService private readonly mcpWorkbenchService: IMcpWorkbenchService,
@@ -44,6 +71,11 @@ export class InstalledMcpServersDiscovery extends Disposable implements IMcpDisc
 		const throttler = this._register(new Throttler());
 		this._register(this.mcpWorkbenchService.onChange(() => throttler.queue(() => this.sync())));
 		this.sync();
+	}
+
+	public override dispose(): void {
+		this.isDisposed = true;
+		super.dispose();
 	}
 
 	private async getServerIdMapping(resource: URI, pathToServers: string[]): Promise<Map<string, Location>> {
@@ -65,6 +97,11 @@ export class InstalledMcpServersDiscovery extends Disposable implements IMcpDisc
 			const collections = new Map<string, [IMcpConfigPath | undefined, McpServerDefinition[]]>();
 			const mcpConfigPathInfos = new ResourceMap<Promise<IMcpConfigPath & { locations: Map<string, Location> } | undefined>>();
 			for (const server of this.mcpWorkbenchService.getEnabledLocalMcpServers()) {
+				if (isUnsupportedGalleryOAuthMcpServer(server)) {
+					this.logService.info(`Skipping installed MCP server ${server.name}: unsupported OAuth setup for Backboard`);
+					continue;
+				}
+
 				let mcpConfigPathPromise = mcpConfigPathInfos.get(server.mcpResource);
 				if (!mcpConfigPathPromise) {
 					mcpConfigPathPromise = (async (local: IWorkbenchLocalMcpServer) => {
@@ -77,6 +114,9 @@ export class InstalledMcpServersDiscovery extends Disposable implements IMcpDisc
 
 				const config = server.config;
 				const mcpConfigPath = await mcpConfigPathPromise;
+				if (this.isDisposed) {
+					return;
+				}
 				const collectionId = `mcp.config.${mcpConfigPath ? mcpConfigPath.id : 'unknown'}`;
 
 				let definitions = collections.get(collectionId);
@@ -102,7 +142,7 @@ export class InstalledMcpServersDiscovery extends Disposable implements IMcpDisc
 
 				definitions[1].push({
 					id: `${collectionId}.${server.name}`,
-					label: server.name,
+					label: server.displayName ?? server.name,
 					launch,
 					sandboxEnabled: config.type === 'http' ? undefined : config.sandboxEnabled,
 					cacheNonce: await McpServerLaunch.hash(launch),
@@ -118,6 +158,10 @@ export class InstalledMcpServersDiscovery extends Disposable implements IMcpDisc
 						origin: mcpConfigPath?.locations.get(server.name)
 					}
 				});
+			}
+
+			if (this.isDisposed) {
+				return;
 			}
 
 			for (const [id] of this.collections) {

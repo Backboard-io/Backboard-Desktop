@@ -40,6 +40,7 @@ export interface IWebContentExtractorService {
 export interface ISharedWebContentExtractorService {
 	_serviceBrand: undefined;
 	readImage(uri: URI, token: CancellationToken): Promise<VSBuffer | undefined>;
+	readText(uri: URI, token: CancellationToken): Promise<string | undefined>;
 }
 
 /**
@@ -58,6 +59,10 @@ export class NullWebContentExtractorService implements IWebContentExtractorServi
 export class NullSharedWebContentExtractorService implements ISharedWebContentExtractorService {
 	_serviceBrand: undefined;
 	readImage(_uri: URI, _token: CancellationToken): Promise<VSBuffer | undefined> {
+		throw new Error('Not implemented');
+	}
+
+	readText(_uri: URI, _token: CancellationToken): Promise<string | undefined> {
 		throw new Error('Not implemented');
 	}
 }

@@ -82,7 +82,7 @@ export class AgentHostActiveClientService extends Disposable implements IAgentHo
 		this.clientTools = derived(reader => {
 			const allowlist = new Set(allowlistObs.read(reader));
 			return allToolsObs.read(reader)
-				.filter(t => t.toolReferenceName !== undefined && allowlist.has(t.toolReferenceName))
+				.filter(t => t.toolReferenceName !== undefined && (allowlist.has(t.toolReferenceName) || t.source.type === 'mcp'))
 				.map(toolDataToDefinition);
 		});
 	}

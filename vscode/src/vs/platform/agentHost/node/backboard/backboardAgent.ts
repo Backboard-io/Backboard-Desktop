@@ -2488,13 +2488,17 @@ function mergeBackboardTools(bridgeTools: unknown[] | undefined, clientTools: re
 		merged.push(tool);
 	}
 	for (const tool of clientTools ?? []) {
-		if (!backboardAllowedClientToolNames.has(tool.name) || names.has(tool.name)) {
+		if (!isBackboardClientToolAllowed(tool) || names.has(tool.name)) {
 			continue;
 		}
 		names.add(tool.name);
 		merged.push(toBackboardFunctionTool(tool));
 	}
 	return merged.length ? merged : undefined;
+}
+
+function isBackboardClientToolAllowed(tool: ToolDefinition): boolean {
+	return backboardAllowedClientToolNames.has(tool.name) || tool._meta?.source === 'mcp';
 }
 
 function trimBackboardToolsForRequest(tools: unknown[] | undefined, prompt: string, webSearch: string, imageGeneration: string): unknown[] | undefined {

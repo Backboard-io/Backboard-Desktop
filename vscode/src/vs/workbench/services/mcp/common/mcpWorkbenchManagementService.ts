@@ -460,7 +460,7 @@ class WorkspaceMcpResourceManagementService extends AbstractMcpResourceManagemen
 		try {
 			const packageType = options?.packageType ?? server.configuration.packages?.[0]?.registryType ?? RegistryType.REMOTE;
 
-			const { mcpServerConfiguration, notices } = this.getMcpServerConfigurationFromManifest(server.configuration, packageType);
+			const { mcpServerConfiguration, notices } = this.getMcpServerConfigurationFromManifest(server.configuration, packageType, server.name);
 
 			if (notices.length > 0) {
 				this.logService.warn(`MCP Management Service: Warnings while installing ${server.name}`, notices);

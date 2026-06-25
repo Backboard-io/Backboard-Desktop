@@ -768,6 +768,7 @@ export class McpServer extends Disposable implements IMcpServer {
 						if (cnx && state?.state === McpConnectionState.Kind.Error) {
 							if (!this._isQuietStart) {
 								this.showInteractiveError(cnx, state, this._lastModeDebugged);
+								resolve(state);
 							} else {
 								reject(new UserInteractionRequiredError('start'));
 							}
@@ -828,7 +829,10 @@ export class McpServer extends Disposable implements IMcpServer {
 
 			this._notificationService.prompt(Severity.Error, localize('mcpServerNotFound', 'The command "{0}" needed to run {1} was not found.', cnx.launchDefinition.command, cnx.definition.label), options);
 		} else {
-			this._notificationService.warn(localize('mcpServerError', 'The MCP server {0} could not be started: {1}', cnx.definition.label, error.message));
+			this._notificationService.prompt(Severity.Error, localize('mcpServerError', 'The MCP server {0} could not be started: {1}', cnx.definition.label, error.message), [{
+				label: localize('mcp.command.showOutput', "Show Output"),
+				run: () => this.showOutput(),
+			}]);
 		}
 	}
 

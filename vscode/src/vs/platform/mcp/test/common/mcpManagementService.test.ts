@@ -750,6 +750,32 @@ suite('McpManagementService - getMcpServerConfigurationFromManifest', () => {
 			assert.strictEqual(customInput?.type, McpServerVariableType.PICK);
 			assert.deepStrictEqual(customInput?.options, ['option1', 'option2', 'option3']);
 		});
+
+		test('scopes remote header input variables to installed gallery server name', () => {
+			const manifest: IGalleryMcpServerConfiguration = {
+				remotes: [{
+					url: 'https://api.example.com/mcp',
+					type: TransportType.STREAMABLE_HTTP,
+					headers: [{
+						name: 'Authorization',
+						description: 'API token for authentication',
+						isSecret: true
+					}]
+				}]
+			};
+
+			const result = service.getMcpServerConfigurationFromManifest(manifest, RegistryType.REMOTE, 'com.postman/postman-mcp-server');
+
+			assert.strictEqual(result.mcpServerConfiguration.config.type, McpServerType.REMOTE);
+			if (result.mcpServerConfiguration.config.type === McpServerType.REMOTE) {
+				assert.deepStrictEqual(result.mcpServerConfiguration.config.headers, {
+					'Authorization': '${input:com.postman_postman-mcp-server_Authorization}'
+				});
+			}
+			assert.strictEqual(result.mcpServerConfiguration.inputs?.length, 1);
+			assert.strictEqual(result.mcpServerConfiguration.inputs?.[0].id, 'com.postman_postman-mcp-server_Authorization');
+			assert.strictEqual(result.mcpServerConfiguration.inputs?.[0].password, true);
+		});
 	});
 
 	suite('Variable Interpolation Tests', () => {

@@ -11,6 +11,7 @@ This folder is the feature dossier for `mcp-tools-customizations`. It splits the
 ```text
 mcp-tools-customizations/
 |-- README.md
+|-- marketplace-auth-runtime.md
 |-- ui/
 |   |-- README.md
 |   |-- source-inventory.md
@@ -144,4 +145,3 @@ find 'bb-docs/mcp-tools-customizations' -maxdepth 3 -type f | sort
 rg -n "registerAction2|CommandsRegistry|MenuRegistry|createDecorator|class |interface |package.json|contributes" 'extensions/copilot' 'src/vs/platform/mcp' 'src/vs/workbench/contrib/chat/browser/aiCustomization' 'src/vs/workbench/contrib/mcp' 'src/vs/workbench/services/mcp'
 rg -n "mcp-tools-customizations|Mcp Tools Customizations" bb-docs/mcp-tools-customizations
 ```
-

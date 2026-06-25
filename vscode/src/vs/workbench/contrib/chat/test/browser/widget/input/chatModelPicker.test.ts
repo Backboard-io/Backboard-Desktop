@@ -10,12 +10,18 @@ import { IStringDictionary } from '../../../../../../../base/common/collections.
 import { MarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { ActionListItemKind, IActionListItem } from '../../../../../../../platform/actionWidget/browser/actionList.js';
 import { IActionWidgetDropdownAction } from '../../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
+import { GalleryMcpServerStatus, IGalleryMcpServer } from '../../../../../../../platform/mcp/common/mcpManagement.js';
+import { McpServerType } from '../../../../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { StateType } from '../../../../../../../platform/update/common/update.js';
 import { buildModelPickerItems, getControlModelsForEntitlement, getModelPickerAccessibilityProvider } from '../../../../browser/widget/input/chatModelPicker.js';
+import { buildMcpMarketplaceItems, buildSkillsLibraryItems, createMcpMarketplaceItemsFromCatalog, getHiddenMcpMarketplaceCatalogEntries, IMcpMarketplaceCatalogEntry, mcpItemMatchesInstalledServer, McpMarketplaceModalItem, resolveMcpMarketplaceItems, parseSkillsShHtml, splitSkillsShId } from '../../../../browser/widget/input/skillsLibrary.js';
 import { filterModelsForSession } from '../../../../browser/widget/input/chatModelSelectionLogic.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../../common/constants.js';
 import { ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService, IModelControlEntry, IModelsControlManifest } from '../../../../common/languageModels.js';
+import { PromptsStorage } from '../../../../common/promptSyntax/service/promptsService.js';
 import { ChatEntitlement, IChatEntitlementService } from '../../../../../../services/chat/common/chatEntitlementService.js';
+import { IWorkbenchLocalMcpServer, LocalMcpServerScope } from '../../../../../../services/mcp/common/mcpWorkbenchManagementService.js';
+import { URI } from '../../../../../../../base/common/uri.js';
 
 function createStubEntitlementService(opts?: { entitlement?: ChatEntitlement; isInternal?: boolean; anonymous?: boolean }): IChatEntitlementService {
 	return {
@@ -1129,6 +1135,251 @@ suite('buildModelPickerItems', () => {
 		const action = getActionItems(items).find(item => item.label === 'Claude Sonnet 4.6');
 		assert.ok(action);
 		assert.strictEqual(action.item?.description, '$3.00/M in, $15.00/M out');
+	});
+});
+
+suite('skillsLibrary', () => {
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('parses skills.sh anchors and dedupes by id', () => {
+		const html = `
+			<a href="/github.com/acme/tools/lint">1 Lint 12K</a>
+			<a href="/github.com/acme/tools/lint">1 Lint 12K</a>
+			<a href="/github.com/acme/tools/review"><span>Review</span><span>9</span></a>
+			<a href="/about">About</a>
+		`;
+
+		const items = parseSkillsShHtml(html);
+
+		assert.deepStrictEqual(items.map(item => item.id), [
+			'github.com/acme/tools/lint',
+			'github.com/acme/tools/review',
+		]);
+		assert.strictEqual(items[0].slug, 'lint');
+		assert.strictEqual(items[0].source, 'github.com/acme/tools');
+		assert.strictEqual(items[0].name, 'Lint');
+		assert.strictEqual(items[0].installs, '12K');
+	});
+
+	test('parses skills.sh embedded catalog data and formats installs', () => {
+		const html = `
+			<script>self.__next_f.push([1,"{\\"source\\":\\"vercel-labs/skills\\",\\"skillId\\":\\"find-skills\\",\\"name\\":\\"find-skills\\",\\"installs\\":2192923,\\"weeklyInstalls\\":[1]}"])</script>
+			<script>self.__next_f.push([1,"{\\"source\\":\\"remotion-dev/skills\\",\\"skillId\\":\\"remotion-best-practices\\",\\"name\\":\\"remotion-best-practices\\",\\"installs\\":391364}"])</script>
+			<a href="/vercel-labs/skills/find-skills">find-skills 2.1M</a>
+		`;
+
+		const items = parseSkillsShHtml(html);
+
+		assert.deepStrictEqual(items.map(item => item.id), [
+			'vercel-labs/skills/find-skills',
+			'remotion-dev/skills/remotion-best-practices',
+		]);
+		assert.strictEqual(items[0].installs, '2.2M');
+		assert.strictEqual(items[1].installs, '391.4K');
+	});
+
+	test('splits skills.sh ids into source and slug', () => {
+		assert.deepStrictEqual(splitSkillsShId('github.com/acme/tools/lint'), {
+			source: 'github.com/acme/tools',
+			slug: 'lint',
+		});
+		assert.throws(() => splitSkillsShId('lint'), /Invalid skills\.sh skill id/);
+	});
+
+	test('builds pinned before installed and remote sections', () => {
+		const items = buildSkillsLibraryItems({
+			remote: [
+				{ id: 'github.com/acme/tools/lint', slug: 'lint', name: 'Lint', source: 'github.com/acme/tools', installs: '12K', url: 'https://skills.sh/github.com/acme/tools/lint' },
+				{ id: 'github.com/acme/tools/review', slug: 'review', name: 'Review', source: 'github.com/acme/tools', installs: '9', url: 'https://skills.sh/github.com/acme/tools/review' },
+			],
+			installed: [
+				{ id: 'lint', name: 'lint', description: 'Runs linting', storage: PromptsStorage.local },
+			],
+			favoriteIds: ['github.com/acme/tools/review'],
+		});
+
+		const separators = items.filter(item => item.kind === ActionListItemKind.Separator).map(item => item.label);
+		assert.deepStrictEqual(separators, ['Pinned', 'Installed', 'skills.sh']);
+		assert.strictEqual(items.find(item => item.label === 'Lint' && item.kind === ActionListItemKind.Action)?.disabled, true);
+	});
+
+	test('filters skills by name, source, and installed description', () => {
+		const items = buildSkillsLibraryItems({
+			remote: [
+				{ id: 'github.com/acme/tools/lint', slug: 'lint', name: 'Lint', source: 'github.com/acme/tools', installs: '12K', url: 'https://skills.sh/github.com/acme/tools/lint' },
+				{ id: 'github.com/acme/docs/write', slug: 'write', name: 'Write', source: 'github.com/acme/docs', installs: '3', url: 'https://skills.sh/github.com/acme/docs/write' },
+			],
+			installed: [
+				{ id: 'deploy', name: 'deploy', description: 'Release automation', storage: PromptsStorage.user },
+			],
+			favoriteIds: [],
+		}, { query: 'release' });
+
+		const labels = items.filter(item => item.kind === ActionListItemKind.Action).map(item => item.label);
+		assert.deepStrictEqual(labels, ['deploy']);
+
+		const sourceItems = buildSkillsLibraryItems({
+			remote: [
+				{ id: 'github.com/acme/tools/lint', slug: 'lint', name: 'Lint', source: 'github.com/acme/tools', installs: '12K', url: 'https://skills.sh/github.com/acme/tools/lint' },
+				{ id: 'github.com/acme/docs/write', slug: 'write', name: 'Write', source: 'github.com/acme/docs', installs: '3', url: 'https://skills.sh/github.com/acme/docs/write' },
+			],
+			installed: [],
+			favoriteIds: [],
+		}, { query: 'docs' });
+		assert.deepStrictEqual(sourceItems.filter(item => item.kind === ActionListItemKind.Action).map(item => item.label), ['Write']);
+	});
+
+	function mcpCatalogEntry(id: string, label: string, category: IMcpMarketplaceCatalogEntry['category'], expectedNames: readonly string[], hints: readonly string[], installability: IMcpMarketplaceCatalogEntry['installability'] = 'installable'): IMcpMarketplaceCatalogEntry {
+		return {
+			id,
+			label,
+			category,
+			expectedNames,
+			officialPublisherHints: hints,
+			installability,
+		};
+	}
+
+	function galleryMcp(name: string, overrides: Partial<IGalleryMcpServer> = {}): IGalleryMcpServer {
+		return {
+			name,
+			displayName: overrides.displayName ?? name,
+			description: overrides.description ?? `${name} description`,
+			version: overrides.version ?? '1.0.0',
+			isLatest: overrides.isLatest ?? true,
+			status: overrides.status ?? GalleryMcpServerStatus.Active,
+			configuration: overrides.configuration ?? {},
+			publisher: overrides.publisher ?? 'figma',
+			publisherDisplayName: overrides.publisherDisplayName ?? 'Figma',
+			publisherUrl: overrides.publisherUrl ?? 'https://figma.com',
+			publisherDomain: overrides.publisherDomain ?? { link: 'https://figma.com', verified: true },
+			...overrides,
+		};
+	}
+
+	function installedMcp(name: string, overrides: Partial<IWorkbenchLocalMcpServer> = {}): IWorkbenchLocalMcpServer {
+		return {
+			id: overrides.id ?? name,
+			name,
+			config: overrides.config ?? { type: McpServerType.LOCAL, command: 'node' },
+			mcpResource: overrides.mcpResource ?? URI.file('/tmp/mcp.json'),
+			scope: overrides.scope ?? LocalMcpServerScope.User,
+			source: overrides.source ?? 'gallery',
+			...overrides,
+		};
+	}
+
+	function mcpItemLabel(item: McpMarketplaceModalItem): string {
+		if ('kind' in item && item.kind === 'marketplaceMcp') {
+			return item.label;
+		}
+		if ('kind' in item) {
+			return item.server.name;
+		}
+		return item.name;
+	}
+
+	test('resolves only active latest official registry MCP entries', () => {
+		const catalog = [
+			mcpCatalogEntry('figma', 'Figma', 'communication-design-pm', ['com.figma/mcp'], ['figma.com', 'figma']),
+			mcpCatalogEntry('linear', 'Linear', 'communication-design-pm', ['app.linear/mcp'], ['linear.app', 'linear']),
+			mcpCatalogEntry('missing', 'Missing', 'developer-tools', ['com.missing/mcp'], ['missing']),
+		];
+
+		const items = resolveMcpMarketplaceItems(catalog, [
+			galleryMcp('com.figma/mcp'),
+			galleryMcp('app.linear/mcp', { publisher: 'random-dev', publisherDisplayName: 'Random Dev', publisherUrl: 'https://example.com', publisherDomain: { link: 'https://example.com', verified: true } }),
+			galleryMcp('com.missing/mcp', { isLatest: false }),
+		]);
+
+		assert.deepStrictEqual(items.map(item => item.id), ['figma']);
+		assert.strictEqual(items[0].verified, true);
+	});
+
+	test('keeps non-installable MCP catalog entries tracked but hidden', () => {
+		const catalog = [
+			mcpCatalogEntry('figma', 'Figma', 'communication-design-pm', ['com.figma/mcp'], ['figma']),
+			mcpCatalogEntry('slack-native', 'Slack Native', 'communication-design-pm', ['com.slack/mcp'], ['slack'], 'missing'),
+			mcpCatalogEntry('oauth-only', 'OAuth Only', 'developer-tools', ['com.oauth/mcp'], ['oauth'], 'unsupportedAuth'),
+			mcpCatalogEntry('broken-runtime', 'Broken Runtime', 'developer-tools', ['com.broken/mcp'], ['broken'], 'brokenRuntime'),
+		];
+
+		const items = createMcpMarketplaceItemsFromCatalog(catalog);
+		const hidden = getHiddenMcpMarketplaceCatalogEntries(catalog);
+
+		assert.deepStrictEqual(items.map(item => item.id), ['figma']);
+		assert.deepStrictEqual(hidden.map(item => item.id), ['slack-native', 'oauth-only', 'broken-runtime']);
+	});
+
+	test('excludes OAuth MCP catalog entries even when registry has a matching official server', () => {
+		const catalog = [
+			mcpCatalogEntry('figma', 'Figma', 'communication-design-pm', ['com.figma/mcp'], ['figma'], 'unsupportedAuth'),
+		];
+
+		const items = resolveMcpMarketplaceItems(catalog, [
+			galleryMcp('com.figma/mcp'),
+		]);
+
+		assert.deepStrictEqual(items, []);
+	});
+
+	test('builds MCP items with category, pinned, installed, and search filtering', () => {
+		const figma = resolveMcpMarketplaceItems([
+			mcpCatalogEntry('figma', 'Figma', 'communication-design-pm', ['com.figma/mcp'], ['figma']),
+			mcpCatalogEntry('sentry', 'Sentry', 'observability', ['io.sentry/mcp'], ['sentry']),
+		], [
+			galleryMcp('com.figma/mcp'),
+			galleryMcp('io.sentry/mcp', { publisher: 'sentry', publisherDisplayName: 'Sentry', publisherUrl: 'https://sentry.io', publisherDomain: { link: 'https://sentry.io', verified: true } }),
+		]);
+		const installed = installedMcp('com.figma/mcp', { galleryId: 'com.figma/mcp', displayName: 'Figma', scope: LocalMcpServerScope.Workspace });
+
+		assert.deepStrictEqual(buildMcpMarketplaceItems({
+			items: figma,
+			installed: [installed],
+			favoriteIds: ['sentry'],
+		}, { category: 'communication-design-pm' }).map(mcpItemLabel), ['Figma']);
+
+		assert.deepStrictEqual(buildMcpMarketplaceItems({
+			items: figma,
+			installed: [installed],
+			favoriteIds: ['sentry'],
+		}, { category: 'pinned' }).map(mcpItemLabel), ['Sentry']);
+
+		assert.deepStrictEqual(buildMcpMarketplaceItems({
+			items: figma,
+			installed: [installed],
+			favoriteIds: [],
+		}, { category: 'all' }).map(mcpItemLabel), ['Figma', 'Sentry']);
+
+		assert.deepStrictEqual(buildMcpMarketplaceItems({
+			items: figma,
+			installed: [installed],
+			favoriteIds: [],
+		}, { category: 'installed', query: 'fig' }).map(mcpItemLabel), ['com.figma/mcp']);
+	});
+
+	test('hides recently removed MCPs from installed builder results', () => {
+		const installed = installedMcp('com.figma/mcp');
+		const items = buildMcpMarketplaceItems({
+			items: [],
+			installed: [installed],
+			favoriteIds: [],
+		}, { category: 'installed', recentlyRemovedIds: ['com.figma/mcp'] });
+
+		assert.deepStrictEqual(items, []);
+	});
+
+	test('does not match unrelated MCPs when gallery URLs are absent', () => {
+		const [exa] = resolveMcpMarketplaceItems([
+			mcpCatalogEntry('exa', 'Exa', 'developer-tools', ['ai.exa/exa'], ['exa']),
+		], [
+			galleryMcp('ai.exa/exa', { publisher: 'exa', publisherDisplayName: 'Exa', publisherUrl: 'https://exa.ai', publisherDomain: { link: 'https://exa.ai', verified: true } }),
+		]);
+		const atlassian = installedMcp('atlassian', { galleryId: 'com.atlassian/atlassian-mcp-server', displayName: 'Atlassian' });
+
+		assert.strictEqual(mcpItemMatchesInstalledServer(exa, atlassian), false);
+		assert.strictEqual(mcpItemMatchesInstalledServer(exa, installedMcp('exa', { galleryId: 'ai.exa/exa', displayName: 'Exa' })), true);
 	});
 });
 

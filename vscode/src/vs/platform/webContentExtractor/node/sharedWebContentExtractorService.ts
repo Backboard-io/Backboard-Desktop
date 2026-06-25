@@ -11,6 +11,38 @@ import { ISharedWebContentExtractorService } from '../common/webContentExtractor
 export class SharedWebContentExtractorService implements ISharedWebContentExtractorService {
 	_serviceBrand: undefined;
 
+	async readText(uri: URI, token: CancellationToken): Promise<string | undefined> {
+		if (token.isCancellationRequested) {
+			return undefined;
+		}
+
+		try {
+			const headers: Record<string, string> = {
+				'Accept': 'text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8',
+				'User-Agent': 'Mozilla/5.0'
+			};
+			const skillsShApiToken = this.getSkillsShApiToken(uri);
+			if (skillsShApiToken) {
+				headers.Authorization = `Bearer ${skillsShApiToken}`;
+				headers['x-vercel-oidc-token'] = skillsShApiToken;
+			}
+			const response = await fetch(uri.toString(true), {
+				headers
+			});
+			if (!response.ok) {
+				return undefined;
+			}
+			const contentType = response.headers.get('content-type')?.toLowerCase();
+			if (contentType && !contentType.startsWith('text/') && !contentType.includes('html') && !contentType.includes('xml') && !contentType.includes('json')) {
+				return undefined;
+			}
+			return await response.text();
+		} catch (err) {
+			console.error(err);
+			return undefined;
+		}
+	}
+
 	async readImage(uri: URI, token: CancellationToken): Promise<VSBuffer | undefined> {
 		if (token.isCancellationRequested) {
 			return undefined;
@@ -34,5 +66,13 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 			console.error(err);
 			return undefined;
 		}
+	}
+
+	private getSkillsShApiToken(uri: URI): string | undefined {
+		if (uri.scheme !== 'https' || uri.authority !== 'skills.sh' || !uri.path.startsWith('/api/v1/')) {
+			return undefined;
+		}
+		const token = process.env.VERCEL_OIDC_TOKEN ?? process.env.SKILLS_SH_OIDC_TOKEN;
+		return token?.trim() || undefined;
 	}
 }
