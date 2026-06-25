@@ -1,6 +1,6 @@
 {
-	"nameShort": "Backboard Studio Dev",
-	"nameLong": "Backboard Studio Dev",
+	"nameShort": "Backboard Studio",
+	"nameLong": "Backboard Studio",
 	"applicationName": "backboard-studio-dev",
 	"dataFolderName": ".backboard-studio-dev",
 	"sharedDataFolderName": ".backboard-studio-dev-shared",
@@ -14,15 +14,15 @@
 	"serverApplicationName": "code-server-oss",
 	"serverDataFolderName": ".vscode-server-oss",
 	"tunnelApplicationName": "code-tunnel-oss",
-	"win32DirName": "Backboard Studio Dev",
-	"win32NameVersion": "Backboard Studio Dev",
+	"win32DirName": "Backboard Studio",
+	"win32NameVersion": "Backboard Studio",
 	"win32RegValueName": "BackboardStudioDev",
 	"win32x64AppId": "{{D77B7E06-80BA-4137-BCF4-654B95CCEBC5}",
 	"win32arm64AppId": "{{D1ACE434-89C5-48D1-88D3-E2991DF85475}",
 	"win32x64UserAppId": "{{CC6B787D-37A0-49E8-AE24-8559A032BE0C}",
 	"win32arm64UserAppId": "{{3AEBF0C8-F733-4AD4-BADE-FDB816D53D7B}",
 	"win32AppUserModelId": "Microsoft.CodeOSS",
-	"win32ShellNameShort": "Backboard Studio Dev",
+	"win32ShellNameShort": "Backboard Studio",
 	"win32TunnelServiceMutex": "vscodeoss-tunnelservice",
 	"win32TunnelMutex": "vscodeoss-tunnel",
 	"darwinBundleIdentifier": "io.backboard.studio.dev",
@@ -38,6 +38,15 @@
 	],
 	"agentsTelemetryAppName": "agents",
 	"webviewContentExternalBaseUrlTemplate": "",
+	"mcpGallery": {
+		"serviceUrl": "https://registry.modelcontextprotocol.io",
+		"itemWebUrl": "https://registry.modelcontextprotocol.io/server/{name}",
+		"publisherUrl": "https://registry.modelcontextprotocol.io/publisher/{publisher}",
+		"supportUrl": "https://github.com/modelcontextprotocol/registry/issues",
+		"privacyPolicyUrl": "https://modelcontextprotocol.io/privacy",
+		"termsOfServiceUrl": "https://modelcontextprotocol.io/terms",
+		"reportUrl": "https://github.com/modelcontextprotocol/registry/issues/new"
+	},
 	"builtInExtensions": [
 		{
 			"name": "ms-vscode.js-debug-companion",

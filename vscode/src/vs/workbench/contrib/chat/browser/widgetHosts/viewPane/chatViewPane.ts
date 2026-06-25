@@ -52,6 +52,7 @@ import { ChatAgentLocation, ChatConfiguration, ChatModeKind, getDefaultNewChatSe
 import { AgentSessionsControl } from '../../agentSessions/agentSessionsControl.js';
 import { ACTION_ID_NEW_CHAT } from '../../actions/chatActions.js';
 import { ChatWidget } from '../../widget/chatWidget.js';
+import { SkillsLibraryController } from '../../widget/input/skillsLibrary.js';
 import { ChatViewWelcomeController, IViewWelcomeDelegate } from '../../viewsWelcome/chatViewWelcomeController.js';
 import { IChatViewsWelcomeDescriptor } from '../../viewsWelcome/chatViewsWelcome.js';
 import { IWorkbenchLayoutService, LayoutSettings, Position } from '../../../../../services/layout/browser/layoutService.js';
@@ -645,7 +646,20 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		const marketplaceIcon = append(marketplaceAction, $('span.agent-sessions-action-icon'));
 		marketplaceIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.extensions));
 		append(marketplaceAction, $('span.agent-sessions-action-label', undefined, marketplaceLabel));
-		this._register(addDisposableListener(marketplaceAction, EventType.CLICK, () => this.commandService.executeCommand('workbench.view.extensions')));
+		const openMarketplace = (event?: globalThis.Event): void => {
+			if (event) {
+				EventHelper.stop(event, true);
+			}
+			this.instantiationService.createInstance(SkillsLibraryController).showMarketplace(marketplaceAction);
+		};
+		marketplaceAction.onclick = openMarketplace;
+		this._register(addDisposableListener(marketplaceAction, EventType.MOUSE_DOWN, openMarketplace));
+		this._register(addDisposableListener(marketplaceAction, EventType.CLICK, openMarketplace));
+		this._register(addDisposableListener(marketplaceAction, EventType.KEY_DOWN, e => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				openMarketplace(e);
+			}
+		}));
 
 		const workspacesHeader = append(sessionsContainer, $('.agent-sessions-workspaces-header'));
 		append(workspacesHeader, $('span.agent-sessions-workspaces-title', undefined, localize('workspacesHeader', "Workspaces")));

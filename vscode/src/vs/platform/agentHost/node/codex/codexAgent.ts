@@ -5,6 +5,7 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import * as fs from 'fs';
+import { homedir } from 'os';
 import { CancellationError } from '../../../../base/common/errors.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
@@ -24,9 +25,13 @@ import { ActionType, type SessionAction, type ChatAction } from '../../common/st
 import type { ConfigSchema, ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import { type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type ChatInputAnswer, ChatInputResponseKind, type PolicyState, type ToolCallResult, ToolResultContentType, type Turn } from '../../common/state/sessionState.js';
-import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
+import { IAgentPluginManager, type ISyncedCustomization } from '../../common/agentPluginManager.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
+import { IFileService } from '../../../files/common/files.js';
+import { IMcpServerConfiguration } from '../../../mcp/common/mcpPlatformTypes.js';
+import { parsePlugin } from '../../../agentPlugins/common/pluginParsers.js';
 import { McpCustomizationController } from '../shared/mcpCustomizationController.js';
+import { buildCodexMcpServerConfigEdits } from './codexMcpConfigSync.js';
 import { buildCodexMcpReadResult, codexMcpListToInventory, codexMcpToolsChanged, inventoryToSdkServers, translateCodexMcpStartupState, type ICodexMcpServerEntry } from './codexMcpServers.js';
 import { buildElicitationRequest, cancelledElicitationResponse, declinedElicitationResponse, elicitationResponseFromAnswers } from './codexElicitationMapper.js';
 import type { AhpMcpUiHostCapabilities, Customization } from '../../common/state/protocol/channels-session/state.js';
@@ -544,6 +549,8 @@ export class CodexAgent extends Disposable implements IAgent {
 		@ICodexProxyService private readonly _codexProxyService: ICodexProxyService,
 		@IAgentConfigurationService private readonly _configurationService: IAgentConfigurationService,
 		@IAgentSdkDownloader private readonly _agentSdkDownloader: IAgentSdkDownloader,
+		@IAgentPluginManager private readonly _pluginManager: IAgentPluginManager,
+		@IFileService private readonly _fileService: IFileService,
 		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
@@ -2232,12 +2239,56 @@ export class CodexAgent extends Disposable implements IAgent {
 		sess?.pendingClientToolCalls.respondOrBuffer(toolCallId, result);
 	}
 
-	setClientCustomizations(_session: URI, _clientId: string, _customizations: ClientPluginCustomization[]): Promise<ISyncedCustomization[]> {
-		return Promise.resolve([]);
+	async setClientCustomizations(session: URI, clientId: string, customizations: ClientPluginCustomization[]): Promise<ISyncedCustomization[]> {
+		const sessionId = AgentSession.id(session);
+		const synced = await this._pluginManager.syncCustomizations(clientId, customizations);
+		const mcpServers = await this._extractSyncedMcpServers(synced);
+		await this._publishSyncedMcpServersToCodex(mcpServers).catch(error => {
+			this._logService.warn(`[Codex:${sessionId}] Failed to publish synced MCP servers: ${error instanceof Error ? error.message : String(error)}`);
+		});
+		return synced;
 	}
 
 	setCustomizationEnabled(_uri: string, _enabled: boolean): void {
 		// no-op; customizations not yet wired for codex.
+	}
+
+	private async _extractSyncedMcpServers(synced: readonly ISyncedCustomization[]): Promise<Map<string, IMcpServerConfiguration>> {
+		const result = new Map<string, IMcpServerConfiguration>();
+		for (const item of synced) {
+			if (!item.pluginDir) {
+				continue;
+			}
+			try {
+				const parsed = await parsePlugin(item.pluginDir, this._fileService, undefined, homedir());
+				for (const server of parsed.mcpServers) {
+					result.set(server.name, server.configuration);
+				}
+			} catch (error) {
+				this._logService.warn(`[Codex] Failed to parse synced customization '${item.pluginDir.toString()}': ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		return result;
+	}
+
+	private async _publishSyncedMcpServersToCodex(mcpServers: ReadonlyMap<string, IMcpServerConfiguration>): Promise<void> {
+		const { edits, serverCount } = buildCodexMcpServerConfigEdits(mcpServers);
+		if (edits.length === 0) {
+			return;
+		}
+		const conn = await this._ensureConnection();
+		await conn.client.request<'config/batchWrite'>('config/batchWrite', {
+			edits: [...edits],
+			reloadUserConfig: true,
+		});
+		try {
+			await conn.client.request<'config/mcpServer/reload'>('config/mcpServer/reload', undefined as never);
+			await this._refreshMcpInventory(conn.client);
+		} catch (error) {
+			this._logService.error(`[Codex] Wrote ${serverCount} synced Backboard MCP server(s) to codex config, but reload/inventory refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+			return;
+		}
+		this._logService.info(`[Codex] Published ${serverCount} synced Backboard MCP server(s) to codex config`);
 	}
 
 	// ---- MCP servers -------------------------------------------------------

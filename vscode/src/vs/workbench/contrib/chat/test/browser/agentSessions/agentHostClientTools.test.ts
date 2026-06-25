@@ -94,6 +94,36 @@ suite('AgentHostClientTools', () => {
 						files: { type: 'array', items: { type: 'string' } },
 					},
 				},
+				_meta: { source: 'internal' },
+			});
+		});
+
+		test('preserves MCP source metadata', () => {
+			const tool: IToolData = {
+				id: 'mcp_supabase_list_projects',
+				toolReferenceName: 'supabase_list_projects',
+				displayName: 'List Supabase Projects',
+				modelDescription: 'Lists Supabase projects',
+				source: {
+					type: 'mcp',
+					label: 'Supabase',
+					serverLabel: 'Supabase',
+					instructions: undefined,
+					collectionId: 'mcp.config.usrlocal.com.supabase/mcp',
+					definitionId: 'list_projects',
+				},
+				inputSchema: { type: 'object', properties: {} },
+			};
+
+			const def = toolDataToDefinition(tool);
+
+			assert.deepStrictEqual(def._meta, {
+				source: 'mcp',
+				backboardAgentHostToolSource: 'mcp',
+				mcpLabel: 'Supabase',
+				mcpServerLabel: 'Supabase',
+				mcpCollectionId: 'mcp.config.usrlocal.com.supabase/mcp',
+				mcpDefinitionId: 'list_projects',
 			});
 		});
 
@@ -508,7 +538,7 @@ suite('AgentHostClientTools', () => {
 				connectionAuthority: 'local',
 			}));
 
-			return { handler, connection, toolsService, configValues, onDidChangeConfig };
+			return { handler, connection, toolsService, configValues, onDidChangeConfig, activeClientService };
 		}
 
 		const testRunTestsTool: IToolData = {
@@ -537,6 +567,22 @@ suite('AgentHostClientTools', () => {
 			source: ToolDataSource.Internal,
 		};
 
+		const testMcpTool: IToolData = {
+			id: 'mcp_supabase_list_projects',
+			toolReferenceName: 'supabase_list_projects',
+			displayName: 'List Supabase Projects',
+			modelDescription: 'Lists Supabase projects',
+			source: {
+				type: 'mcp',
+				label: 'Supabase',
+				serverLabel: 'Supabase',
+				instructions: undefined,
+				collectionId: 'mcp.config.usrlocal.com.supabase/mcp',
+				definitionId: 'list_projects',
+			},
+			inputSchema: { type: 'object', properties: {} },
+		};
+
 		test('maps allowlisted tool data to protocol definitions', async () => {
 			const { connection } = createHandlerWithMocks(disposables, [testRunTestsTool, testRunTaskTool, testUnlistedTool]);
 
@@ -553,15 +599,22 @@ suite('AgentHostClientTools', () => {
 		});
 
 		test('filters tool data to entries in configured allowlist', () => {
-			createHandlerWithMocks(disposables, [testRunTestsTool, testRunTaskTool, testUnlistedTool], {
+			const { activeClientService } = createHandlerWithMocks(disposables, [testRunTestsTool, testRunTaskTool, testUnlistedTool], {
 				clientTools: ['runTests'],
 			});
 
-			// Validate the filtering logic: only 'runTests' should match the allowlist.
-			const filteredTools = [testRunTestsTool, testRunTaskTool, testUnlistedTool]
-				.filter(t => t.toolReferenceName !== undefined && ['runTests'].includes(t.toolReferenceName));
-			assert.strictEqual(filteredTools.length, 1);
-			assert.strictEqual(filteredTools[0].toolReferenceName, 'runTests');
+			const filteredTools = activeClientService.clientTools.get();
+			assert.deepStrictEqual(filteredTools.map(tool => tool.name), ['runTests']);
+		});
+
+		test('includes MCP tools even when they are not in the configured allowlist', () => {
+			const { activeClientService } = createHandlerWithMocks(disposables, [testRunTestsTool, testMcpTool, testUnlistedTool], {
+				clientTools: ['runTests'],
+			});
+
+			const filteredTools = activeClientService.clientTools.get();
+			assert.deepStrictEqual(filteredTools.map(tool => tool.name), ['runTests', 'supabase_list_projects']);
+			assert.strictEqual(filteredTools[1]._meta?.source, 'mcp');
 		});
 
 		test('dispatches activeClientToolsChanged when config changes', () => {

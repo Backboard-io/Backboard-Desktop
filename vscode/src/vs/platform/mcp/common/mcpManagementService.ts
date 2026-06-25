@@ -69,13 +69,13 @@ export abstract class AbstractCommonMcpManagementService extends Disposable impl
 		super();
 	}
 
-	getMcpServerConfigurationFromManifest(manifest: IGalleryMcpServerConfiguration, packageType: RegistryType): McpServerConfigurationParseResult {
+	getMcpServerConfigurationFromManifest(manifest: IGalleryMcpServerConfiguration, packageType: RegistryType, inputIdPrefix?: string): McpServerConfigurationParseResult {
 
 		// remote
 		if (packageType === RegistryType.REMOTE && manifest.remotes?.length) {
 			const url = manifest.remotes[0].url;
 			const headers = manifest.remotes[0].headers ?? [];
-			const { inputs, variables } = this.processKeyValueInputs(url.startsWith('https://api.githubcopilot.com/mcp') ? headers.filter(h => h.name.toLowerCase() !== 'authorization') : headers);
+			const { inputs, variables } = this.processKeyValueInputs(url.startsWith('https://api.githubcopilot.com/mcp') ? headers.filter(h => h.name.toLowerCase() !== 'authorization') : headers, inputIdPrefix);
 			return {
 				mcpServerConfiguration: {
 					config: {
@@ -107,14 +107,14 @@ export abstract class AbstractCommonMcpManagementService extends Disposable impl
 		}
 
 		if (serverPackage.runtimeArguments?.length) {
-			const result = this.processArguments(serverPackage.runtimeArguments ?? []);
+			const result = this.processArguments(serverPackage.runtimeArguments ?? [], inputIdPrefix);
 			args.push(...result.args);
 			inputs.push(...result.variables);
 			notices.push(...result.notices);
 		}
 
 		if (serverPackage.environmentVariables?.length) {
-			const { inputs: envInputs, variables: envVariables, notices: envNotices } = this.processKeyValueInputs(serverPackage.environmentVariables ?? []);
+			const { inputs: envInputs, variables: envVariables, notices: envNotices } = this.processKeyValueInputs(serverPackage.environmentVariables ?? [], inputIdPrefix);
 			inputs.push(...envVariables);
 			notices.push(...envNotices);
 			for (const [name, value] of Object.entries(envInputs)) {
@@ -160,7 +160,7 @@ export abstract class AbstractCommonMcpManagementService extends Disposable impl
 		}
 
 		if (serverPackage.packageArguments?.length) {
-			const result = this.processArguments(serverPackage.packageArguments);
+			const result = this.processArguments(serverPackage.packageArguments, inputIdPrefix);
 			args.push(...result.args);
 			inputs.push(...result.variables);
 			notices.push(...result.notices);
@@ -205,7 +205,7 @@ export abstract class AbstractCommonMcpManagementService extends Disposable impl
 		return variables;
 	}
 
-	private processKeyValueInputs(keyValueInputs: ReadonlyArray<IMcpServerKeyValueInput>): { inputs: Record<string, string>; variables: IMcpServerVariable[]; notices: string[] } {
+	private processKeyValueInputs(keyValueInputs: ReadonlyArray<IMcpServerKeyValueInput>, inputIdPrefix?: string): { inputs: Record<string, string>; variables: IMcpServerVariable[]; notices: string[] } {
 		const notices: string[] = [];
 		const inputs: Record<string, string> = {};
 		const variables: IMcpServerVariable[] = [];
@@ -217,20 +217,22 @@ export abstract class AbstractCommonMcpManagementService extends Disposable impl
 			// If explicit variables exist, use them regardless of value
 			if (inputVariables.length) {
 				for (const variable of inputVariables) {
-					value = value.replace(`{${variable.id}}`, `\${input:${variable.id}}`);
+					const inputId = this.getScopedInputId(variable.id, inputIdPrefix);
+					value = value.replace(`{${variable.id}}`, `\${input:${inputId}}`);
 				}
-				variables.push(...inputVariables);
+				variables.push(...inputVariables.map(variable => ({ ...variable, id: this.getScopedInputId(variable.id, inputIdPrefix) })));
 			} else if (!value && (input.description || input.choices || input.default !== undefined)) {
 				// Only create auto-generated input variable if no explicit variables and no value
+				const inputId = this.getScopedInputId(input.name, inputIdPrefix);
 				variables.push({
-					id: input.name,
+					id: inputId,
 					type: input.choices ? McpServerVariableType.PICK : McpServerVariableType.PROMPT,
 					description: input.description ?? '',
 					password: !!input.isSecret,
 					default: input.default,
 					options: input.choices,
 				});
-				value = `\${input:${input.name}}`;
+				value = `\${input:${inputId}}`;
 			}
 
 			inputs[input.name] = value;
@@ -239,7 +241,15 @@ export abstract class AbstractCommonMcpManagementService extends Disposable impl
 		return { inputs, variables, notices };
 	}
 
-	private processArguments(argumentsList: readonly IMcpServerArgument[]): { args: string[]; variables: IMcpServerVariable[]; notices: string[] } {
+	private getScopedInputId(id: string, inputIdPrefix?: string): string {
+		if (!inputIdPrefix) {
+			return id;
+		}
+		const sanitize = (value: string): string => value.replace(/[^a-zA-Z0-9_.-]/g, '_');
+		return `${sanitize(inputIdPrefix)}_${sanitize(id)}`;
+	}
+
+	private processArguments(argumentsList: readonly IMcpServerArgument[], inputIdPrefix?: string): { args: string[]; variables: IMcpServerVariable[]; notices: string[] } {
 		const args: string[] = [];
 		const variables: IMcpServerVariable[] = [];
 		const notices: string[] = [];
@@ -250,22 +260,23 @@ export abstract class AbstractCommonMcpManagementService extends Disposable impl
 				let value = arg.value;
 				if (value) {
 					for (const variable of argVariables) {
-						value = value.replace(`{${variable.id}}`, `\${input:${variable.id}}`);
+						value = value.replace(`{${variable.id}}`, `\${input:${this.getScopedInputId(variable.id, inputIdPrefix)}}`);
 					}
 					args.push(value);
 					if (argVariables.length) {
-						variables.push(...argVariables);
+						variables.push(...argVariables.map(variable => ({ ...variable, id: this.getScopedInputId(variable.id, inputIdPrefix) })));
 					}
 				} else if (arg.valueHint && (arg.description || arg.default !== undefined)) {
 					// Create input variable for positional argument without value
+					const inputId = this.getScopedInputId(arg.valueHint, inputIdPrefix);
 					variables.push({
-						id: arg.valueHint,
+						id: inputId,
 						type: McpServerVariableType.PROMPT,
 						description: arg.description ?? '',
 						password: false,
 						default: arg.default,
 					});
-					args.push(`\${input:${arg.valueHint}}`);
+					args.push(`\${input:${inputId}}`);
 				} else {
 					// Fallback to value_hint as literal
 					args.push(arg.valueHint ?? '');
@@ -279,23 +290,24 @@ export abstract class AbstractCommonMcpManagementService extends Disposable impl
 				if (arg.value) {
 					let value = arg.value;
 					for (const variable of argVariables) {
-						value = value.replace(`{${variable.id}}`, `\${input:${variable.id}}`);
+						value = value.replace(`{${variable.id}}`, `\${input:${this.getScopedInputId(variable.id, inputIdPrefix)}}`);
 					}
 					args.push(value);
 					if (argVariables.length) {
-						variables.push(...argVariables);
+						variables.push(...argVariables.map(variable => ({ ...variable, id: this.getScopedInputId(variable.id, inputIdPrefix) })));
 					}
 				} else if (arg.description || arg.default !== undefined) {
 					// Create input variable for named argument without value
 					const variableId = arg.name.replace(/^--?/, '');
+					const inputId = this.getScopedInputId(variableId, inputIdPrefix);
 					variables.push({
-						id: variableId,
+						id: inputId,
 						type: McpServerVariableType.PROMPT,
 						description: arg.description ?? '',
 						password: false,
 						default: arg.default,
 					});
-					args.push(`\${input:${variableId}}`);
+					args.push(`\${input:${inputId}}`);
 				}
 			}
 		}

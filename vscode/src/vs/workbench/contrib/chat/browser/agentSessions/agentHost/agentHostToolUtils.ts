@@ -10,6 +10,16 @@ import type { IToolData } from '../../../common/tools/languageModelToolsService.
  * Converts an internal {@link IToolData} to a protocol {@link ToolDefinition}.
  */
 export function toolDataToDefinition(tool: IToolData): ToolDefinition {
+	const sourceMeta = tool.source.type === 'mcp'
+		? {
+			source: 'mcp',
+			backboardAgentHostToolSource: 'mcp',
+			mcpLabel: tool.source.label,
+			mcpServerLabel: tool.source.serverLabel,
+			mcpCollectionId: tool.source.collectionId,
+			mcpDefinitionId: tool.source.definitionId,
+		}
+		: { source: tool.source.type };
 	return {
 		name: tool.toolReferenceName ?? tool.id,
 		title: tool.displayName,
@@ -17,5 +27,6 @@ export function toolDataToDefinition(tool: IToolData): ToolDefinition {
 		inputSchema: tool.inputSchema?.type === 'object'
 			? tool.inputSchema as ToolDefinition['inputSchema']
 			: undefined,
+		_meta: sourceMeta,
 	};
 }

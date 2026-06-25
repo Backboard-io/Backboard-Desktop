@@ -27,7 +27,7 @@ import { IQuickInputButton, IQuickInputService, IQuickPickItem } from '../../../
 import { StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceFolderData } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkspaceTrustManagementService, IWorkspaceTrustRequestService } from '../../../../platform/workspace/common/workspaceTrust.js';
-import { IConfigurationResolverService } from '../../../services/configurationResolver/common/configurationResolver.js';
+import { IConfigurationResolverService, VariableError, VariableKind } from '../../../services/configurationResolver/common/configurationResolver.js';
 import { ConfigurationResolverExpression, IResolvedValue } from '../../../services/configurationResolver/common/configurationResolverExpression.js';
 import { AUX_WINDOW_GROUP, IEditorService } from '../../../services/editor/common/editorService.js';
 import { IMcpDevModeDebugging } from './mcpDevMode.js';
@@ -448,6 +448,60 @@ export class McpRegistry extends Disposable implements IMcpRegistry {
 		this._onDidChangeInputs.fire();
 	}
 
+	private async _resolveMissingInputVariables(definition: McpServerDefinition, inputStorage: McpRegistryInputStorage, expr: ConfigurationResolverExpression<unknown>): Promise<boolean> {
+		const replacements = Array.from(expr.unresolved()).filter(replacement => replacement.name === 'input' && replacement.arg);
+		if (!replacements.length) {
+			return false;
+		}
+
+		for (const replacement of replacements) {
+			const inputId = replacement.arg!;
+			const value = await this._promptForMissingInputValue(definition.label, inputId);
+			if (value === undefined) {
+				return false;
+			}
+
+			expr.resolve(replacement, {
+				value,
+				input: {
+					id: inputId,
+					type: 'promptString',
+					description: inputId,
+					password: /(?:api[_-]?key|token|secret|password|auth|credential)/i.test(inputId),
+				}
+			});
+		}
+
+		await this._updateStorageWithExpressionInputs(inputStorage, expr);
+		return true;
+	}
+
+	private async _promptForMissingInputValue(serverLabel: string, inputId: string): Promise<string | undefined> {
+		const disposables = new DisposableStore();
+		const input = disposables.add(this._quickInputService.createInputBox());
+		input.title = localize('mcp.missingInput.title', 'Configure {0}', serverLabel);
+		input.prompt = localize('mcp.missingInput.prompt', 'Enter a value for {0}.', inputId);
+		input.placeholder = inputId;
+		input.password = /(?:api[_-]?key|token|secret|password|auth|credential)/i.test(inputId);
+		input.ignoreFocusOut = true;
+
+		return new Promise<string | undefined>(resolve => {
+			disposables.add(input.onDidAccept(() => {
+				const value = input.value.trim();
+				if (!value) {
+					input.validationMessage = localize('mcp.missingInput.required', 'A value is required.');
+					return;
+				}
+				resolve(value);
+				input.hide();
+			}));
+			disposables.add(input.onDidHide(() => {
+				resolve(undefined);
+			}));
+			input.show();
+		}).finally(() => disposables.dispose());
+	}
+
 	private async _replaceVariablesInLaunch(delegate: IMcpHostDelegate, definition: McpServerDefinition, launch: McpServerLaunch, errorOnUserInteraction?: boolean) {
 		if (!definition.variableReplacement) {
 			return launch;
@@ -476,7 +530,13 @@ export class McpRegistry extends Disposable implements IMcpRegistry {
 			}
 		}
 		// resolve variables requiring user input
-		await this._configurationResolverService.resolveWithInteraction(folder, expr, section, undefined, target);
+		try {
+			await this._configurationResolverService.resolveWithInteraction(folder, expr, section, undefined, target);
+		} catch (e) {
+			if (!(e instanceof VariableError && e.variable === VariableKind.Input && await this._resolveMissingInputVariables(definition, inputStorage, expr))) {
+				throw e;
+			}
+		}
 
 		await this._updateStorageWithExpressionInputs(inputStorage, expr);
 

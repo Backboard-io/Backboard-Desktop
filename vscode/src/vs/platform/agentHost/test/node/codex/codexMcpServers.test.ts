@@ -6,6 +6,8 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { McpServerStatus } from '../../../common/state/protocol/channels-session/state.js';
+import { McpServerType } from '../../../../mcp/common/mcpPlatformTypes.js';
+import { buildCodexMcpServerConfigEdits } from '../../../node/codex/codexMcpConfigSync.js';
 import { buildCodexMcpReadResult, codexMcpListToInventory, codexMcpStatusToEntry, codexMcpToolsChanged, codexToolMapToArray, inventoryToSdkServers, translateCodexMcpStartupState } from '../../../node/codex/codexMcpServers.js';
 import type { McpServerStatus as CodexMcpServerStatus } from '../../../node/codex/protocol/generated/v2/McpServerStatus.js';
 import type { Tool } from '../../../node/codex/protocol/generated/Tool.js';
@@ -88,5 +90,38 @@ suite('codexMcpServers', () => {
 			codexMcpToolsChanged(a, added),
 			codexMcpToolsChanged(undefined, a),
 		], [false, true, true]);
+	});
+
+	test('buildCodexMcpServerConfigEdits upserts dotted server names as object keys', () => {
+		const { edits, serverCount } = buildCodexMcpServerConfigEdits(new Map([
+			['com.postman/postman-mcp-server', {
+				type: McpServerType.REMOTE,
+				url: 'https://mcp.postman.com/mcp',
+				headers: { Authorization: '${input:token}' },
+			}],
+			['local.server', {
+				type: McpServerType.LOCAL,
+				command: 'npx',
+				args: ['@example/server'],
+				env: { PORT: 3000, EMPTY: null },
+			}],
+		]));
+
+		assert.strictEqual(serverCount, 2);
+		assert.deepStrictEqual(edits, [{
+			keyPath: 'mcp_servers',
+			mergeStrategy: 'upsert',
+			value: {
+				'com.postman/postman-mcp-server': {
+					url: 'https://mcp.postman.com/mcp',
+					headers: { Authorization: '${input:token}' },
+				},
+				'local.server': {
+					command: 'npx',
+					args: ['@example/server'],
+					env: { PORT: '3000' },
+				},
+			},
+		}]);
 	});
 });

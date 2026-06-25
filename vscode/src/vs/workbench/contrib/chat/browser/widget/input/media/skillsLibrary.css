@@ -1,0 +1,649 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.skills-library-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 100000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 28px;
+	background: rgba(0, 0, 0, 0.5);
+}
+
+.skills-library-modal {
+	width: min(1280px, calc(100vw - 56px));
+	height: min(780px, calc(100vh - 56px));
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	color: var(--vscode-foreground, #cccccc);
+	background: var(--vscode-editorWidget-background, #1f1f1f);
+	border: 1px solid var(--vscode-widget-border, #454545);
+	border-radius: 10px;
+	box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+.skills-library-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 12px 18px;
+	background: inherit;
+}
+
+.skills-library-title-block {
+	display: none;
+}
+
+.skills-library-title-block h2 {
+	margin: 0;
+	font-size: 24px;
+	font-weight: 500;
+	line-height: 1.3;
+}
+
+.skills-library-title-block p {
+	margin: 10px 0 0;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	font-size: 15px;
+	line-height: 1.4;
+}
+
+.skills-library-close,
+.skills-library-icon-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	color: var(--vscode-icon-foreground, #cccccc);
+	background: transparent;
+	border: 0;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.skills-library-close:hover,
+.skills-library-icon-button:hover {
+	background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+.skills-library-search-row {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-width: 180px;
+	flex: 1;
+	padding: 0;
+}
+
+.skills-library-search-box {
+	min-width: 0;
+	flex: 1;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 32px;
+	padding: 0 11px;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	background: var(--vscode-input-background, #2b2b2b);
+	border: 1px solid transparent;
+	border-radius: 999px;
+}
+
+.skills-library-search-box:focus-within {
+	border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.skills-library-search-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+}
+
+.skills-library-search {
+	min-width: 0;
+	width: 100%;
+	height: 100%;
+	padding: 0;
+	color: var(--vscode-input-foreground, #cccccc);
+	background: transparent;
+	border: 0;
+	outline: none;
+	font-size: 13px;
+}
+
+.skills-library-page-tabs {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 0 0 auto;
+	padding: 0;
+}
+
+.skills-library-page-tab {
+	padding: 5px 12px;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	background: transparent;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.skills-library-page-tab:hover {
+	color: var(--vscode-foreground, #cccccc);
+	background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+.skills-library-page-tab.active {
+	color: var(--vscode-foreground, #ffffff);
+	background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+.skills-library-body {
+	min-height: 0;
+	display: flex;
+	flex: 1;
+	background: inherit;
+	border-top: 1px solid var(--vscode-widget-border, #333333);
+}
+
+.skills-library-sidebar {
+	width: 190px;
+	flex: 0 0 190px;
+	padding: 18px 12px;
+	background: inherit;
+	border-right: 1px solid var(--vscode-widget-border, #454545);
+	overflow-y: auto;
+	scrollbar-color: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4)) transparent;
+	scrollbar-width: thin;
+}
+
+.skills-library-filter {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	margin: 0 0 2px;
+	padding: 8px 6px;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	background: transparent;
+	border: 0;
+	border-radius: 4px;
+	font-size: 13px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.skills-library-filter.gap-before {
+	margin-top: 14px;
+}
+
+.skills-library-filter-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.skills-library-filter:hover {
+	background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.skills-library-filter.active {
+	color: var(--vscode-foreground, #ffffff);
+	background: transparent;
+	font-weight: 600;
+}
+
+.skills-library-filter-count {
+	display: none;
+}
+
+.skills-library-content {
+	min-width: 0;
+	flex: 1;
+	padding: 16px 18px;
+	background: inherit;
+	overflow-y: auto;
+	scrollbar-color: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4)) transparent;
+	scrollbar-width: thin;
+}
+
+.skills-library-sidebar::-webkit-scrollbar,
+.skills-library-content::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+.skills-library-sidebar::-webkit-scrollbar-track,
+.skills-library-content::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.skills-library-sidebar::-webkit-scrollbar-thumb,
+.skills-library-content::-webkit-scrollbar-thumb {
+	background: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4));
+	border: 3px solid transparent;
+	border-radius: 999px;
+	background-clip: padding-box;
+}
+
+.skills-library-sidebar::-webkit-scrollbar-thumb:hover,
+.skills-library-content::-webkit-scrollbar-thumb:hover {
+	background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100, 100, 100, 0.7));
+	background-clip: padding-box;
+}
+
+.skills-library-installed-filters {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 14px;
+}
+
+.skills-library-installed-filter {
+	padding: 5px 10px;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	background: transparent;
+	border: 1px solid var(--vscode-widget-border, #454545);
+	border-radius: 999px;
+	cursor: pointer;
+}
+
+.skills-library-installed-filter:hover {
+	color: var(--vscode-foreground, #cccccc);
+	background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+.skills-library-installed-filter.active {
+	color: var(--vscode-foreground, #ffffff);
+	background: var(--vscode-list-hoverBackground, #252526);
+}
+
+.skills-library-content-centered {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.skills-library-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+	gap: 10px 12px;
+}
+
+.skills-library-card {
+	min-height: 70px;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	grid-template-areas:
+		"header footer"
+		"detail footer"
+		"meta footer";
+	column-gap: 16px;
+	align-items: center;
+	padding: 12px 16px;
+	background: var(--vscode-list-hoverBackground, #252526);
+	border: 1px solid var(--vscode-widget-border, #454545);
+	border-radius: 8px;
+}
+
+.skills-library-card:hover {
+	background: var(--vscode-list-inactiveSelectionBackground, #2f2f2f);
+	border-color: var(--vscode-focusBorder, #5a5a5a);
+}
+
+.skills-library-mcp-card {
+	grid-template-columns: 36px minmax(0, 1fr) auto;
+	grid-template-areas:
+		"logo header footer"
+		"logo detail footer"
+		"logo meta footer";
+}
+
+.skills-library-mcp-logo {
+	grid-area: logo;
+	width: 32px;
+	height: 32px;
+	align-self: start;
+	object-fit: contain;
+	border-radius: 6px;
+}
+
+.skills-library-mcp-logo.fallback {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--vscode-icon-foreground, #cccccc);
+	background: var(--vscode-badge-background, #4d4d4d);
+}
+
+.skills-library-card-header {
+	grid-area: header;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.skills-library-card-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	flex: 0 0 auto;
+}
+
+.skills-library-card-title {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--vscode-foreground, #cccccc);
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.35;
+	white-space: nowrap;
+}
+
+.skills-library-card-title-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.skills-library-card-detail {
+	grid-area: detail;
+	min-width: 0;
+	margin-top: 3px;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	font-size: 12px;
+	line-height: 1.4;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.skills-library-card-meta {
+	grid-area: meta;
+	min-width: 0;
+	margin-top: 2px;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.skills-library-mcp-card .skills-library-card-meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.skills-library-mcp-card .skills-library-card-meta span {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.skills-library-card-footer {
+	grid-area: footer;
+	margin-top: 0;
+	padding-top: 0;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 6px;
+}
+
+.skills-library-primary-button {
+	min-width: 56px;
+	padding: 5px 14px;
+	color: var(--vscode-button-foreground, #ffffff);
+	background: var(--vscode-button-background, #0e639c);
+	border: 0;
+	border-radius: 999px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.skills-library-primary-button:hover:not(:disabled) {
+	background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.skills-library-primary-button:disabled {
+	color: var(--vscode-disabledForeground, rgba(204, 204, 204, 0.5));
+	background: var(--vscode-button-secondaryBackground, #3a3a3a);
+	opacity: 1;
+	cursor: default;
+}
+
+.skills-library-primary-button.installed-toggle {
+	color: var(--vscode-button-secondaryForeground, #cccccc);
+	background: var(--vscode-button-secondaryBackground, #3a3d41);
+}
+
+.skills-library-primary-button.installed-toggle:hover:not(:disabled) {
+	color: var(--vscode-errorForeground, #f48771);
+	background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+.skills-library-install-targets {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.skills-library-pagination {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 12px;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	font-size: 12px;
+}
+
+.skills-library-pagination-controls {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.skills-library-official-table {
+	display: flex;
+	flex-direction: column;
+	min-width: 560px;
+}
+
+.skills-library-official-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 96px 96px;
+	gap: 16px;
+	align-items: center;
+	min-height: 54px;
+	padding: 0 2px;
+	color: var(--vscode-foreground, #cccccc);
+	background: transparent;
+	border: 0;
+	border-bottom: 1px solid var(--vscode-widget-border, #333333);
+	font: inherit;
+	text-align: left;
+}
+
+button.skills-library-official-row {
+	cursor: pointer;
+}
+
+button.skills-library-official-row:hover {
+	background: var(--vscode-list-hoverBackground, #252526);
+}
+
+.skills-library-official-header {
+	min-height: 34px;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0;
+}
+
+.skills-library-official-creator {
+	min-width: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
+}
+
+.skills-library-official-name {
+	min-width: 0;
+	overflow: hidden;
+	font-size: 13px;
+	font-weight: 600;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.skills-library-official-repo {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	font-family: var(--monaco-monospace-font, monospace);
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.skills-library-official-count {
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	font-family: var(--monaco-monospace-font, monospace);
+	text-align: right;
+}
+
+.skills-library-official-owner-heading {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 14px;
+}
+
+.skills-library-official-owner-title {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.skills-library-official-owner-title small {
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	font-size: 11px;
+	font-weight: 400;
+}
+
+.skills-library-secondary-button {
+	padding: 5px 9px;
+	color: var(--vscode-button-secondaryForeground, #cccccc);
+	background: var(--vscode-button-secondaryBackground, #3a3d41);
+	border: 0;
+	border-radius: 999px;
+	cursor: pointer;
+}
+
+.skills-library-secondary-button:hover {
+	background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+.skills-library-secondary-button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.skills-library-secondary-button:hover:disabled {
+	background: var(--vscode-button-secondaryBackground, #3a3d41);
+}
+
+.skills-library-verified {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	flex: 0 0 auto;
+	color: var(--vscode-extensionIcon-verifiedForeground, var(--vscode-textLink-foreground, #4daafc));
+}
+
+.skills-library-installed-badge {
+	width: fit-content;
+	margin-top: auto;
+	padding: 4px 8px;
+	color: var(--vscode-badge-foreground, #ffffff);
+	background: var(--vscode-badge-background, #4d4d4d);
+	border-radius: 4px;
+	font-size: 12px;
+}
+
+.skills-library-status,
+.skills-library-error {
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	font-size: 13px;
+}
+
+.skills-library-error {
+	margin-bottom: 12px;
+	padding: 10px 12px;
+	color: var(--vscode-inputValidation-errorForeground, #f48771);
+	background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+	border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+	border-radius: 4px;
+}
+
+@media (max-width: 700px) {
+	.skills-library-overlay {
+		padding: 16px;
+	}
+
+	.skills-library-modal {
+		width: calc(100vw - 32px);
+		height: calc(100vh - 32px);
+	}
+
+	.skills-library-body {
+		flex-direction: column;
+	}
+
+	.skills-library-sidebar {
+		width: auto;
+		flex: 0 0 auto;
+		display: flex;
+		gap: 6px;
+		overflow-x: auto;
+		border-right: 0;
+		border-bottom: 1px solid var(--vscode-widget-border);
+	}
+
+	.skills-library-filter {
+		width: auto;
+		min-width: 120px;
+		margin-bottom: 0;
+	}
+
+	.skills-library-grid {
+		grid-template-columns: 1fr;
+	}
+}

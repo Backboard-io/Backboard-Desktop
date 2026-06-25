@@ -1404,7 +1404,7 @@ export class ModelPickerWidget extends Disposable {
 		const effortConfig = isUBB ? this._getConfigProperty('navigation') : undefined;
 		const tokensConfig = isUBB ? this._getConfigProperty('tokens') : undefined;
 		if (this._configButton) {
-			if (this._selectedModel && !noModelsAvailable && (effortConfig || tokensConfig)) {
+			if (this._selectedModel && !noModelsAvailable && isUBB) {
 				const labelParts: string[] = [];
 				const ariaParts: string[] = [];
 				if (effortConfig) {
@@ -1423,9 +1423,11 @@ export class ModelPickerWidget extends Disposable {
 					labelParts.push(tokensLabel);
 					ariaParts.push(localize('chat.modelPicker.tokensAriaLabel', "Context Size: {0}", tokensLabel));
 				}
-				dom.reset(this._configButton, dom.$('span.chat-input-picker-label', undefined, labelParts.join(' ')));
+				dom.reset(this._configButton, dom.$('span.chat-input-picker-label', undefined, labelParts.join(' ') || localize('chat.modelPicker.settings', "Settings")));
 				this._configButton.style.display = '';
-				this._configButton.ariaLabel = ariaParts.join(', ');
+				this._configButton.ariaLabel = ariaParts.length
+					? ariaParts.join(', ')
+					: localize('chat.modelPicker.settingsAriaLabel', "Model Settings");
 			} else {
 				this._configButton.style.display = 'none';
 			}
@@ -1560,8 +1562,6 @@ export class ModelPickerWidget extends Disposable {
 			},
 		);
 
-		// Nothing configurable for this model returns an empty list; callers
-		// decide whether to show the popup.
 		return items;
 	}
 
@@ -1619,7 +1619,12 @@ export class ModelPickerWidget extends Disposable {
 				isChecked(element: IActionListItem<IActionWidgetDropdownAction>) {
 					return element.kind === ActionListItemKind.Action ? !!element?.item?.checked : undefined;
 				},
-				getRole: (element: IActionListItem<IActionWidgetDropdownAction>) => element.kind === ActionListItemKind.Action ? 'menuitemradio' as const : 'separator' as const,
+				getRole: (element: IActionListItem<IActionWidgetDropdownAction>) => {
+					if (element.kind !== ActionListItemKind.Action) {
+						return 'separator' as const;
+					}
+					return 'menuitemradio' as const;
+				},
 				getWidgetRole: () => 'menu' as const,
 			},
 			{

@@ -40,6 +40,7 @@ import { MobileSessionFilterChips } from '../../../../browser/parts/mobile/mobil
 import { IMobileSortGroupSheetItem, showMobileSortGroupSheet } from '../../../../browser/parts/mobile/mobileSortGroupSheet.js';
 import { isPhoneLayout } from '../../../../browser/parts/mobile/mobileLayout.js';
 import { IsPhoneLayoutContext } from '../../../../common/contextkeys.js';
+import { SkillsLibraryController } from '../../../../../workbench/contrib/chat/browser/widget/input/skillsLibrary.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
@@ -206,8 +207,8 @@ export class SessionsView extends ViewPane {
 				logSessionsInteraction(this.telemetryService, 'newSession');
 				this.sessionsService.openNewSession({ forceNew: true });
 			});
-			this.createSidebarAction(primaryActions, Codicon.extensions, localize('marketplace', "Marketplace"), () => {
-				this.commandService.executeCommand('workbench.view.extensions').catch(onUnexpectedError);
+			this.createSidebarAction(primaryActions, Codicon.extensions, localize('marketplace', "Marketplace"), anchor => {
+				this.instantiationService.createInstance(SkillsLibraryController).showMarketplace(anchor);
 			});
 
 			const workspacesHeader = this.workspacesHeader = DOM.append(sessionsContent, $('.agent-sessions-workspaces-header'));
@@ -340,7 +341,7 @@ export class SessionsView extends ViewPane {
 		}
 	}
 
-	private createSidebarAction(container: HTMLElement, icon: ThemeIcon, label: string, run: () => void): void {
+	private createSidebarAction(container: HTMLElement, icon: ThemeIcon, label: string, run: (anchor: HTMLElement) => void): void {
 		const button = DOM.append(container, $('button.agent-sessions-sidebar-action')) as HTMLButtonElement;
 		button.type = 'button';
 		button.title = label;
@@ -350,7 +351,7 @@ export class SessionsView extends ViewPane {
 		DOM.append(button, $('span.agent-sessions-sidebar-action-label', undefined, label));
 		this._register(DOM.addDisposableListener(button, DOM.EventType.CLICK, e => {
 			e.preventDefault();
-			run();
+			run(button);
 		}));
 	}
 

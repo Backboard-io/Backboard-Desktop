@@ -3166,6 +3166,8 @@ mod tests {
         assert!(prompt.contains("Available tools for this turn:"));
         assert!(prompt.contains("Ignore stale absolute paths from previous chat turns"));
         assert!(prompt.contains("send the complete intended file contents in a single write_file"));
+        assert!(prompt.contains("Backboard is the default AI platform for this IDE"));
+        assert!(prompt.contains("Do not default generic AI setup guidance to OpenAI docs"));
         assert!(prompt.contains("read_file"));
         assert!(prompt.contains("write_file"));
         assert!(!prompt.contains("## Backboard HTTP Endpoints"));

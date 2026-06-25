@@ -750,6 +750,107 @@ suite('McpManagementService - getMcpServerConfigurationFromManifest', () => {
 			assert.strictEqual(customInput?.type, McpServerVariableType.PICK);
 			assert.deepStrictEqual(customInput?.options, ['option1', 'option2', 'option3']);
 		});
+
+		test('scopes remote header input variables to installed gallery server name', () => {
+			const manifest: IGalleryMcpServerConfiguration = {
+				remotes: [{
+					url: 'https://api.example.com/mcp',
+					type: TransportType.STREAMABLE_HTTP,
+					headers: [{
+						name: 'Authorization',
+						description: 'API token for authentication',
+						isSecret: true
+					}]
+				}]
+			};
+
+			const result = service.getMcpServerConfigurationFromManifest(manifest, RegistryType.REMOTE, 'com.postman/postman-mcp-server');
+
+			assert.strictEqual(result.mcpServerConfiguration.config.type, McpServerType.REMOTE);
+			if (result.mcpServerConfiguration.config.type === McpServerType.REMOTE) {
+				assert.deepStrictEqual(result.mcpServerConfiguration.config.headers, {
+					'Authorization': '${input:com.postman_postman-mcp-server_Authorization}'
+				});
+			}
+			assert.strictEqual(result.mcpServerConfiguration.inputs?.length, 1);
+			assert.strictEqual(result.mcpServerConfiguration.inputs?.[0].id, 'com.postman_postman-mcp-server_Authorization');
+			assert.strictEqual(result.mcpServerConfiguration.inputs?.[0].password, true);
+		});
+
+		test('scopes local stdio argument inputs to installed gallery server name', () => {
+			const manifest: IGalleryMcpServerConfiguration = {
+				packages: [{
+					registryType: RegistryType.NODE,
+					identifier: '@example/server',
+					transport: { type: TransportType.STDIO },
+					version: '1.0.0',
+					runtimeArguments: [{
+						type: 'named',
+						name: '--api-key',
+						value: '{api_key}',
+						isRepeated: false,
+						variables: {
+							api_key: {
+								description: 'API key',
+								isSecret: true,
+							}
+						}
+					}],
+					packageArguments: [{
+						type: 'positional',
+						valueHint: 'project_id',
+						description: 'Project id',
+						isRequired: true,
+						isRepeated: false,
+					}]
+				}]
+			};
+
+			const result = service.getMcpServerConfigurationFromManifest(manifest, RegistryType.NODE, 'com.example/server');
+
+			assert.strictEqual(result.mcpServerConfiguration.config.type, McpServerType.LOCAL);
+			if (result.mcpServerConfiguration.config.type === McpServerType.LOCAL) {
+				assert.deepStrictEqual(result.mcpServerConfiguration.config.args, [
+					'--api-key',
+					'${input:com.example_server_api_key}',
+					'@example/server@1.0.0',
+					'${input:com.example_server_project_id}',
+				]);
+			}
+			assert.deepStrictEqual(result.mcpServerConfiguration.inputs?.map(input => input.id), [
+				'com.example_server_api_key',
+				'com.example_server_project_id',
+			]);
+			assert.strictEqual(result.mcpServerConfiguration.inputs?.[0].password, true);
+		});
+
+		test('keeps local stdio argument inputs unprefixed when no server name is provided', () => {
+			const manifest: IGalleryMcpServerConfiguration = {
+				packages: [{
+					registryType: RegistryType.NODE,
+					identifier: '@example/server',
+					transport: { type: TransportType.STDIO },
+					version: '1.0.0',
+					packageArguments: [{
+						type: 'positional',
+						valueHint: 'project_id',
+						description: 'Project id',
+						isRequired: true,
+						isRepeated: false,
+					}]
+				}]
+			};
+
+			const result = service.getMcpServerConfigurationFromManifest(manifest, RegistryType.NODE);
+
+			if (result.mcpServerConfiguration.config.type === McpServerType.LOCAL) {
+				assert.deepStrictEqual(result.mcpServerConfiguration.config.args, [
+					'@example/server@1.0.0',
+					'${input:project_id}',
+				]);
+			}
+			assert.deepStrictEqual(result.mcpServerConfiguration.inputs?.map(input => input.id), ['project_id']);
+		});
 	});
 
 	suite('Variable Interpolation Tests', () => {

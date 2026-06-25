@@ -38,7 +38,7 @@ export class McpUserResourceManagementService extends CommonMcpUserResourceManag
 					: (manifest.packages?.[0]?.registryType ?? RegistryType.REMOTE)
 			);
 
-			const { mcpServerConfiguration, notices } = this.getMcpServerConfigurationFromManifest(manifest, packageType);
+			const { mcpServerConfiguration, notices } = this.getMcpServerConfigurationFromManifest(manifest, packageType, server.name);
 
 			if (notices.length > 0) {
 				this.logService.warn(`MCP Management Service: Warnings while installing ${server.name}`, notices);
