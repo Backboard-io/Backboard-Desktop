@@ -716,7 +716,7 @@ body.optimus-standalone .optimus-root,
 	background: var(--vscode-agentsChatInput-background, var(--optimus-bb-bg));
 	color: var(--vscode-agentsChatInput-foreground, var(--optimus-bb-text));
 	cursor: text;
-	overflow: hidden;
+	overflow: visible;
 	transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
 }
 
@@ -831,6 +831,12 @@ body.optimus-standalone .optimus-root,
 	font-size: 10px;
 	font-weight: 700;
 	line-height: 13px;
+}
+
+.optimus-sidebar-model-icon .codicon,
+.optimus-sidebar-choice-icon .codicon,
+.optimus-sidebar-provider-switch-icon .codicon {
+	font-size: 12px;
 }
 
 .optimus-sidebar-model-prefix,
@@ -954,6 +960,15 @@ body.optimus-standalone .optimus-root,
 	background: var(--vscode-quickInput-background, var(--vscode-editorWidget-background, var(--optimus-bb-bg)));
 }
 
+.optimus-sidebar-model-filter-bar {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 3px;
+	min-height: 28px;
+	padding: 0;
+}
+
 .optimus-sidebar-model-filter {
 	width: 100%;
 	height: 28px;
@@ -966,6 +981,29 @@ body.optimus-standalone .optimus-root,
 	color: var(--vscode-input-foreground, var(--optimus-bb-text));
 	font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", sans-serif);
 	font-size: 12px;
+}
+
+.optimus-sidebar-model-filter-button {
+	min-width: 40px;
+	height: 22px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	margin-right: 4px;
+	padding: 0 6px;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--optimus-bb-text);
+	font-size: 11.5px;
+	font-weight: 600;
+}
+
+.optimus-sidebar-model-filter-button:hover,
+.optimus-sidebar-model-filter-button.active {
+	border-color: var(--vscode-focusBorder, var(--optimus-bb-border));
+	background: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--optimus-bb-primary) 10%, transparent));
+	color: var(--optimus-bb-text);
 }
 
 .optimus-sidebar-model-filter:focus {
@@ -1067,12 +1105,126 @@ body.optimus-standalone .optimus-root,
 }
 
 .optimus-sidebar-choice-check {
-	width: 18px;
-	flex: 0 0 18px;
+	width: 12px;
+	flex: 0 0 12px;
 	color: var(--vscode-focusBorder, var(--optimus-bb-primary));
-	font-size: 10px;
-	font-weight: 700;
+	font-size: 12px;
 	text-align: right;
+}
+
+.optimus-sidebar-choice-check-spacer {
+	color: transparent;
+}
+
+.optimus-sidebar-popover-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	padding: 4px 8px 5px;
+}
+
+.optimus-sidebar-drawer-button {
+	min-height: 22px;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--vscode-textLink-foreground, var(--optimus-bb-primary));
+	font-size: 11.5px;
+}
+
+.optimus-sidebar-drawer-button:hover,
+.optimus-sidebar-drawer-button:focus {
+	background: transparent;
+	color: var(--vscode-textLink-activeForeground, var(--optimus-bb-text));
+	outline: none;
+}
+
+.optimus-sidebar-provider-switch-list {
+	display: grid;
+	gap: 0;
+	padding: 5px 0 3px;
+}
+
+.optimus-sidebar-provider-switch {
+	width: 100%;
+	min-height: 24px;
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--optimus-bb-text);
+	font-size: 12px;
+	text-align: left;
+}
+
+.optimus-sidebar-provider-switch:hover {
+	background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--optimus-bb-primary) 8%, transparent));
+	color: var(--optimus-bb-text);
+}
+
+.optimus-sidebar-provider-switch-icon {
+	width: 13px;
+	height: 13px;
+	flex: 0 0 auto;
+	display: grid;
+	place-items: center;
+	border-radius: 3px;
+	color: var(--vscode-descriptionForeground, var(--optimus-bb-muted));
+}
+
+.optimus-sidebar-provider-switch-name {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-sidebar-provider-switch-toggle {
+	order: -1;
+	width: 12px;
+	height: 12px;
+	flex: 0 0 auto;
+	display: grid;
+	place-items: center;
+	border: 1px solid var(--optimus-bb-border);
+	border-radius: 2px;
+	background: var(--vscode-input-background, transparent);
+	color: transparent;
+}
+
+.optimus-sidebar-provider-switch.active .optimus-sidebar-provider-switch-toggle {
+	border-color: var(--vscode-focusBorder, var(--optimus-bb-primary));
+	color: var(--vscode-focusBorder, var(--optimus-bb-primary));
+}
+
+.optimus-sidebar-provider-switch-toggle .codicon {
+	font-size: 10px;
+}
+
+.optimus-sidebar-provider-filter-done {
+	min-height: 24px;
+	justify-self: start;
+	margin: 4px 8px 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--vscode-textLink-foreground, var(--optimus-bb-primary));
+	font-size: 11.5px;
+}
+
+.optimus-sidebar-provider-filter-done:hover,
+.optimus-sidebar-provider-filter-done:focus {
+	background: transparent;
+	color: var(--vscode-textLink-activeForeground, var(--optimus-bb-text));
+	outline: none;
 }
 
 .optimus-sidebar-popover-empty {

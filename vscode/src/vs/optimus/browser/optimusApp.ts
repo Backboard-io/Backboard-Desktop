@@ -55,6 +55,8 @@ export class OptimusApp extends Disposable {
 	private selectedVoiceMode: OptimusVoiceMode = 'off';
 	private activeComposerPopover: OptimusComposerPopover;
 	private modelFilter = '';
+	private modelProviderFiltersOpen = false;
+	private readonly disabledModelProviders = new Set<string>();
 	private pendingLayoutUpdate: number | undefined;
 	private pendingHistoryPoll: number | undefined;
 	private historyPollsRemaining = 0;
@@ -486,12 +488,14 @@ export class OptimusApp extends Disposable {
 		this.focusSidebarComposer();
 	}
 
-	private renderRuns(): void {
+	private renderRuns(options: { readonly renderSidebar?: boolean } = {}): void {
 		this.renderHeaderActions();
 		this.updateResponsiveLayout();
 		this.cardGrid.replaceChildren();
 		this.cardGrid.appendChild(this.renderTaskBoard());
-		this.renderSidebar();
+		if (options.renderSidebar !== false) {
+			this.renderSidebar();
+		}
 	}
 
 	private slottedRuns(): Map<number, IOptimusRun> {
@@ -720,7 +724,7 @@ export class OptimusApp extends Disposable {
 		} catch (error) {
 			console.error(error);
 		} finally {
-			this.renderRuns();
+			this.renderRuns({ renderSidebar: !this.activeComposerPopover });
 		}
 	}
 
@@ -763,7 +767,7 @@ export class OptimusApp extends Disposable {
 		this.renderHeaderActions();
 	}
 
-	private async refreshMetadata(): Promise<void> {
+	private async refreshMetadata(options: { readonly renderSidebar?: boolean } = {}): Promise<void> {
 		try {
 			const metadata = await this.historyProvider?.readBackboardMetadata?.();
 			if (!metadata) {
@@ -786,7 +790,9 @@ export class OptimusApp extends Disposable {
 				? error.message
 				: localize('optimus.sidebar.metadataError', "Backboard model metadata could not be loaded.");
 		} finally {
-			this.renderSidebar();
+			if (options.renderSidebar !== false) {
+				this.renderSidebar();
+			}
 		}
 	}
 
@@ -840,7 +846,7 @@ export class OptimusApp extends Disposable {
 		const newChat = document.createElement('button');
 		newChat.type = 'button';
 		newChat.className = 'optimus-sidebar-icon-button';
-		newChat.textContent = '+';
+		newChat.appendChild(codicon('add'));
 		newChat.title = localize('optimus.sidebar.newAgent', "New Agent");
 		newChat.setAttribute('aria-label', newChat.title);
 		newChat.addEventListener('click', () => this.startDraftTask(this.nextOpenSlot()));
@@ -849,7 +855,7 @@ export class OptimusApp extends Disposable {
 		const refresh = document.createElement('button');
 		refresh.type = 'button';
 		refresh.className = 'optimus-sidebar-icon-button';
-		refresh.textContent = '↻';
+		refresh.appendChild(codicon('refresh'));
 		refresh.title = localize('optimus.sidebar.refresh', "Refresh");
 		refresh.setAttribute('aria-label', refresh.title);
 		refresh.addEventListener('click', () => {
@@ -861,7 +867,7 @@ export class OptimusApp extends Disposable {
 		const close = document.createElement('button');
 		close.type = 'button';
 		close.className = 'optimus-sidebar-icon-button';
-		close.textContent = '×';
+		close.appendChild(codicon('close'));
 		close.title = localize('optimus.sidebar.closePanel', "Close Backboard chat");
 		close.setAttribute('aria-label', close.title);
 		close.addEventListener('click', () => this.setSidebarCollapsed(true));
@@ -959,7 +965,9 @@ export class OptimusApp extends Disposable {
 		let sendButton: HTMLButtonElement | undefined;
 		const updateSendButton = () => {
 			if (sendButton) {
-				sendButton.disabled = this.isSendingPrompt || !this.draftPrompt.trim() || !this.historyProvider?.sendBackboardPrompt;
+				const canSend = !this.isSendingPrompt && !!this.draftPrompt.trim() && !!this.historyProvider?.sendBackboardPrompt;
+				sendButton.disabled = !canSend;
+				sendButton.classList.toggle('ready', canSend);
 			}
 		};
 
@@ -996,7 +1004,7 @@ export class OptimusApp extends Disposable {
 		modelButton.setAttribute('aria-label', modelButton.title);
 		const modelIcon = document.createElement('span');
 		modelIcon.className = 'optimus-sidebar-model-icon';
-		modelIcon.textContent = 'M';
+		modelIcon.appendChild(providerCodicon(this.currentComposerModel()?.provider));
 		const modelPrefix = document.createElement('span');
 		modelPrefix.className = 'optimus-sidebar-model-prefix';
 		modelPrefix.textContent = localize('optimus.sidebar.modelPrefix', "Model");
@@ -1004,16 +1012,13 @@ export class OptimusApp extends Disposable {
 		modelValue.className = 'optimus-sidebar-model-value';
 		modelValue.textContent = this.currentComposerModelLabel();
 		const modelChevron = document.createElement('span');
-		modelChevron.className = 'optimus-sidebar-chevron';
-		modelChevron.textContent = 'v';
+		modelChevron.className = 'codicon codicon-chevron-down optimus-sidebar-chevron';
 		modelButton.append(modelIcon, modelPrefix, modelValue, modelChevron);
 		modelButton.addEventListener('click', () => {
 			this.activeComposerPopover = this.activeComposerPopover === 'model' ? undefined : 'model';
 			this.modelFilter = '';
+			this.modelProviderFiltersOpen = false;
 			this.renderSidebar();
-			if (this.activeComposerPopover === 'model') {
-				this.refreshMetadata().catch(console.error);
-			}
 		});
 
 		const context = document.createElement('span');
@@ -1029,7 +1034,7 @@ export class OptimusApp extends Disposable {
 		voice.type = 'button';
 		voice.className = `optimus-sidebar-icon-button optimus-sidebar-voice-button${this.selectedVoiceMode === 'tts' ? ' active' : ''}`;
 		const voiceIcon = document.createElement('span');
-		voiceIcon.className = 'codicon codicon-unmute';
+		voiceIcon.className = this.selectedVoiceMode === 'tts' ? 'codicon codicon-unmute' : 'codicon codicon-mute';
 		voice.appendChild(voiceIcon);
 		voice.title = this.selectedVoiceMode === 'tts'
 			? localize('optimus.sidebar.voiceEnabled', "Backboard voice on")
@@ -1045,8 +1050,8 @@ export class OptimusApp extends Disposable {
 		if (this.isSendingPrompt) {
 			const cancel = document.createElement('button');
 			cancel.type = 'button';
-			cancel.className = 'optimus-sidebar-secondary-button';
-			cancel.textContent = '■';
+			cancel.className = 'optimus-sidebar-icon-button optimus-sidebar-secondary-button';
+			cancel.appendChild(codicon('debug-stop'));
 			cancel.title = localize('optimus.sidebar.cancel', "Cancel");
 			cancel.setAttribute('aria-label', cancel.title);
 			cancel.addEventListener('click', () => this.cancelSidebarPrompt().catch(console.error));
@@ -1056,8 +1061,8 @@ export class OptimusApp extends Disposable {
 		const send = document.createElement('button');
 		sendButton = send;
 		send.type = 'submit';
-		send.className = 'optimus-sidebar-send-button';
-		send.textContent = '↵';
+		send.className = 'optimus-sidebar-icon-button optimus-sidebar-send-button';
+		send.appendChild(codicon('send'));
 		send.title = localize('optimus.sidebar.send', "Send");
 		send.setAttribute('aria-label', send.title);
 		updateSendButton();
@@ -1147,6 +1152,8 @@ export class OptimusApp extends Disposable {
 
 		const filterWrap = document.createElement('div');
 		filterWrap.className = 'optimus-sidebar-model-filter-wrap';
+		const filterBar = document.createElement('div');
+		filterBar.className = 'optimus-sidebar-model-filter-bar';
 		const filter = document.createElement('input');
 		filter.className = 'optimus-sidebar-model-filter';
 		filter.type = 'search';
@@ -1157,11 +1164,29 @@ export class OptimusApp extends Disposable {
 			this.renderSidebar();
 			this.focusModelFilter();
 		});
-		filterWrap.appendChild(filter);
+		const providerFilter = document.createElement('button');
+		providerFilter.type = 'button';
+		providerFilter.className = `optimus-sidebar-model-filter-button${this.modelProviderFiltersOpen ? ' active' : ''}`;
+		providerFilter.textContent = localize('optimus.sidebar.modelProviderFilter', "Filter");
+		providerFilter.title = localize('optimus.sidebar.modelProviderFilterTitle', "Filter by provider");
+		providerFilter.setAttribute('aria-label', providerFilter.title);
+		providerFilter.setAttribute('aria-expanded', this.modelProviderFiltersOpen ? 'true' : 'false');
+		providerFilter.addEventListener('click', () => {
+			this.modelProviderFiltersOpen = !this.modelProviderFiltersOpen;
+			this.renderSidebar();
+		});
+		filterBar.append(filter, providerFilter);
+		filterWrap.appendChild(filterBar);
 		popover.appendChild(filterWrap);
 
 		const body = document.createElement('div');
 		body.className = 'optimus-sidebar-popover-body';
+		if (this.modelProviderFiltersOpen) {
+			this.renderModelProviderFilters(body);
+			popover.appendChild(body);
+			return popover;
+		}
+
 		const models = this.filteredComposerModels();
 		if (!models.length) {
 			const empty = document.createElement('div');
@@ -1184,8 +1209,72 @@ export class OptimusApp extends Disposable {
 				body.appendChild(section);
 			}
 		}
+		const actions = document.createElement('div');
+		actions.className = 'optimus-sidebar-popover-actions';
+		const refreshModels = document.createElement('button');
+		refreshModels.type = 'button';
+		refreshModels.className = 'optimus-sidebar-drawer-button';
+		refreshModels.append(codicon('refresh'), document.createTextNode(localize('optimus.sidebar.refreshModels', "Refresh Models")));
+		refreshModels.addEventListener('click', () => this.refreshMetadata().catch(console.error));
+		actions.appendChild(refreshModels);
+		body.appendChild(actions);
 		popover.appendChild(body);
 		return popover;
+	}
+
+	private renderModelProviderFilters(container: HTMLElement): void {
+		const providers = sortedModelProviders(this.composerModelSource());
+		const providerList = document.createElement('div');
+		providerList.className = 'optimus-sidebar-provider-switch-list';
+
+		const allProviders = document.createElement('button');
+		allProviders.type = 'button';
+		allProviders.className = `optimus-sidebar-provider-switch${this.disabledModelProviders.size === 0 ? ' active' : ''}`;
+		allProviders.setAttribute('aria-pressed', this.disabledModelProviders.size === 0 ? 'true' : 'false');
+		const allName = document.createElement('span');
+		allName.className = 'optimus-sidebar-provider-switch-name';
+		allName.textContent = localize('optimus.sidebar.allProviders', "All providers");
+		allProviders.append(allName, providerSwitchToggle(this.disabledModelProviders.size === 0));
+		allProviders.addEventListener('click', () => {
+			this.disabledModelProviders.clear();
+			this.renderSidebar();
+		});
+		providerList.appendChild(allProviders);
+
+		for (const provider of providers) {
+			const active = !this.disabledModelProviders.has(provider);
+			const row = document.createElement('button');
+			row.type = 'button';
+			row.className = `optimus-sidebar-provider-switch${active ? ' active' : ''}`;
+			row.setAttribute('aria-pressed', active ? 'true' : 'false');
+			const icon = document.createElement('span');
+			icon.className = 'optimus-sidebar-provider-switch-icon';
+			icon.appendChild(providerCodicon(provider));
+			const name = document.createElement('span');
+			name.className = 'optimus-sidebar-provider-switch-name';
+			name.textContent = providerDisplayName(provider);
+			row.append(icon, name, providerSwitchToggle(active));
+			row.addEventListener('click', () => {
+				if (this.disabledModelProviders.has(provider)) {
+					this.disabledModelProviders.delete(provider);
+				} else {
+					this.disabledModelProviders.add(provider);
+				}
+				this.renderSidebar();
+			});
+			providerList.appendChild(row);
+		}
+
+		const done = document.createElement('button');
+		done.type = 'button';
+		done.className = 'optimus-sidebar-provider-filter-done';
+		done.textContent = localize('optimus.sidebar.providerFilterDone', "Done");
+		done.addEventListener('click', () => {
+			this.modelProviderFiltersOpen = false;
+			this.renderSidebar();
+		});
+
+		container.append(providerList, done);
 	}
 
 	private renderModelChoice(model: IOptimusBackboardModel): HTMLElement {
@@ -1203,7 +1292,7 @@ export class OptimusApp extends Disposable {
 
 		const icon = document.createElement('span');
 		icon.className = 'optimus-sidebar-choice-icon';
-		icon.textContent = providerDisplayName(model.provider).slice(0, 1).toUpperCase();
+		icon.appendChild(providerCodicon(model.provider));
 
 		const main = document.createElement('span');
 		main.className = 'optimus-sidebar-choice-main';
@@ -1220,8 +1309,7 @@ export class OptimusApp extends Disposable {
 		price.textContent = modelPriceLabel(model);
 
 		const check = document.createElement('span');
-		check.className = 'optimus-sidebar-choice-check';
-		check.textContent = selected ? 'OK' : '';
+		check.className = selected ? 'codicon codicon-check optimus-sidebar-choice-check' : 'optimus-sidebar-choice-check optimus-sidebar-choice-check-spacer';
 
 		button.append(icon, main, price, check);
 		return button;
@@ -1342,15 +1430,15 @@ export class OptimusApp extends Disposable {
 
 	private composerModelSource(): readonly IOptimusBackboardModel[] {
 		if (this.backboardModels.length) {
-			return this.backboardModels;
+			return supplementalModelSource(this.backboardModels);
 		}
 		const fallback = this.settingsModelFallback();
-		return fallback ? [fallback] : [];
+		return fallback ? supplementalModelSource([fallback]) : supplementalModelSource([]);
 	}
 
 	private filteredComposerModels(): readonly IOptimusBackboardModel[] {
 		const query = this.modelFilter.trim().toLowerCase();
-		const source = this.composerModelSource();
+		const source = this.composerModelSource().filter(model => !this.disabledModelProviders.has(model.provider));
 		if (!query) {
 			return source;
 		}
@@ -1560,12 +1648,21 @@ function composerModelKey(provider: string, model: string): string {
 	return `${provider}:${model}`;
 }
 
+function codicon(name: string): HTMLElement {
+	const icon = document.createElement('span');
+	icon.className = `codicon codicon-${name}`;
+	return icon;
+}
+
 function sortedModelProviders(models: readonly IOptimusBackboardModel[]): string[] {
 	return [...new Set(models.map(model => model.provider))].sort((left, right) => providerDisplayName(left).localeCompare(providerDisplayName(right)));
 }
 
+function providerKey(provider: string | undefined): string {
+	return (provider || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
 function providerDisplayName(provider: string): string {
-	const normalized = provider.toLowerCase().replace(/_/g, '-');
 	const names: Record<string, string> = {
 		'anthropic': 'Anthropic',
 		'aws-bedrock': 'AWS Bedrock',
@@ -1583,11 +1680,58 @@ function providerDisplayName(provider: string): string {
 		'vercel': 'Vercel',
 		'xai': 'xAI'
 	};
-	return names[normalized] ?? provider;
+	return names[providerKey(provider)] ?? provider;
+}
+
+function providerCodicon(provider: string | undefined): HTMLElement {
+	const iconName = (() => {
+		switch (providerKey(provider)) {
+			case 'openai':
+			case 'openai-compatible':
+			case 'openrouter':
+				return 'hubot';
+			case 'anthropic':
+			case 'aws-bedrock':
+			case 'bedrock':
+				return 'server';
+			case 'google':
+			case 'google-ai':
+			case 'gemini':
+				return 'symbol-misc';
+			case 'ollama':
+			case 'lm-studio':
+				return 'desktop-download';
+			default:
+				return 'symbol-misc';
+		}
+	})();
+	return codicon(iconName);
+}
+
+function providerSwitchToggle(active: boolean): HTMLElement {
+	const toggle = document.createElement('span');
+	toggle.className = 'optimus-sidebar-provider-switch-toggle';
+	if (active) {
+		toggle.appendChild(codicon('check'));
+	}
+	return toggle;
+}
+
+function supplementalModelSource(models: readonly IOptimusBackboardModel[]): readonly IOptimusBackboardModel[] {
+	const next = [...models];
+	const supplementalModels: readonly IOptimusBackboardModel[] = [
+		{ provider: 'openrouter', name: 'openai/gpt-5-chat', displayName: 'GPT-5 Chat' }
+	];
+	for (const model of supplementalModels) {
+		if (!next.some(item => providerKey(item.provider) === providerKey(model.provider))) {
+			next.push(model);
+		}
+	}
+	return next;
 }
 
 function isVisibleBackboardModel(model: IOptimusBackboardModel): boolean {
-	const provider = model.provider.toLowerCase().replace(/_/g, '-');
+	const provider = providerKey(model.provider);
 	const modelType = (model.modelType ?? '').toLowerCase();
 	return !['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics'].includes(provider)
 		&& (!modelType || modelType === 'llm');

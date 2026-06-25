@@ -6,6 +6,7 @@
 import './media/rightWorkbenchLauncher.css';
 import { $, addDisposableListener, append, clearNode, EventType } from '../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
+import { Separator, toAction } from '../../../../base/common/actions.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../base/common/observable.js';
@@ -14,6 +15,8 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { localize } from '../../../../nls.js';
+import { BrowserViewCommandId, BrowserViewStorageScope } from '../../../../platform/browserView/common/browserView.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
@@ -30,6 +33,7 @@ import { IEditorPane, IUntypedEditorInput } from '../../../../workbench/common/e
 import { EditorInput } from '../../../../workbench/common/editor/editorInput.js';
 import { BrowserEditorInput } from '../../../../workbench/contrib/browserView/common/browserEditorInput.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../../../workbench/contrib/browserView/common/browserView.js';
+import { BrowserEditor } from '../../../../workbench/contrib/browserView/electron-browser/browserEditor.js';
 import { IViewDescriptorService } from '../../../../workbench/common/views.js';
 import { MODAL_GROUP, PreferredGroup } from '../../../../workbench/services/editor/common/editorService.js';
 import { IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
@@ -41,6 +45,17 @@ import { ChangesViewPane } from '../../changes/browser/changesView.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { SESSIONS_FILES_EMPTY_VIEW_ID, SESSIONS_FILES_VIEW_ID, SessionsExplorerEmptyView, SessionsExplorerView } from '../../files/browser/filesView.js';
 import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry, orderedTabModes } from './rightWorkbench.js';
+
+const enum RightWorkbenchBrowserCommandId {
+	ZoomIn = 'workbench.action.browser.zoomIn',
+	ZoomOut = 'workbench.action.browser.zoomOut',
+	ResetZoom = 'workbench.action.browser.resetZoom',
+	ToggleDeviceEmulation = 'workbench.action.browser.toggleDeviceEmulation',
+	PickDevicePreset = 'workbench.action.browser.pickDevicePreset',
+	SetUserAgent = 'workbench.action.browser.setUserAgent',
+	ToggleMobileEmulation = 'workbench.action.browser.toggleMobileEmulation',
+	ResetEmulation = 'workbench.action.browser.resetEmulation',
+}
 
 export class RightWorkbenchViewPane extends ViewPane {
 
@@ -60,6 +75,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private selectedFile: URI | undefined;
 	private browserUrl: string | undefined;
 	private browserInput: BrowserEditorInput | undefined;
+	private browserEditorPane: BrowserEditor | undefined;
 	private browserUrlInput: HTMLInputElement | undefined;
 	private browserBackButton: HTMLButtonElement | undefined;
 	private browserForwardButton: HTMLButtonElement | undefined;
@@ -67,6 +83,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private readonly browserInputStore = this._register(new DisposableStore());
 	private terminalInstance: ITerminalInstance | undefined;
 	private modePicker: HTMLElement | undefined;
+	private isRightWorkbenchVisible = false;
 
 	constructor(
 		options: IViewPaneOptions,
@@ -87,9 +104,15 @@ export class RightWorkbenchViewPane extends ViewPane {
 		@IOpenerService openerService: IOpenerService,
 		@IThemeService themeService: IThemeService,
 		@IHoverService hoverService: IHoverService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 		this._register(onDidRequestModeEmitter.event(request => { void this.openMode(request); }));
+		this._register(this.layoutService.onDidChangePartVisibility(e => {
+			if ((e.partId === Parts.EDITOR_PART || e.partId === Parts.PANEL_PART) && e.visible) {
+				this.enforceSingleSurfaceLayout();
+			}
+		}));
 	}
 
 	protected override renderBody(container: HTMLElement): void {
@@ -105,6 +128,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	override setVisible(visible: boolean): void {
 		super.setVisible(visible);
+		this.isRightWorkbenchVisible = visible;
 		if (visible) {
 			this.activateSingleSurface();
 		}
@@ -149,6 +173,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
 		this.layoutService.setPartHidden(true, Parts.EDITOR_PART);
 		this.layoutService.setPartHidden(true, Parts.PANEL_PART);
+	}
+
+	private enforceSingleSurfaceLayout(): void {
+		if (!this.root || !this.isRightWorkbenchVisible || !this.layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
+			return;
+		}
+		this.activateSingleSurface();
 	}
 
 	private async openMode(request: RightWorkbenchMode | IRightWorkbenchModeRequest): Promise<void> {
@@ -301,6 +332,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 
 		this.closeModePicker();
+		const restoreBrowserView = this.hideActiveBrowserViewForOverlay();
 		anchor.setAttribute('aria-expanded', 'true');
 
 		const picker = append(root, $('.sessions-right-workbench-mode-picker'));
@@ -330,6 +362,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			}
 		}));
 		this.modePickerStore.add({ dispose: () => anchor.setAttribute('aria-expanded', 'false') });
+		this.modePickerStore.add({ dispose: () => restoreBrowserView?.dispose() });
 	}
 
 	private renderModePickerRow(container: HTMLElement, entry: IRightWorkbenchModeEntry): void {
@@ -352,6 +385,26 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.modePicker?.remove();
 		this.modePicker = undefined;
 		this.modePickerStore.clear();
+	}
+
+	private hideActiveBrowserViewForOverlay(): { dispose(): void } | undefined {
+		if (this.activeMode !== 'browser') {
+			return undefined;
+		}
+		const model = this.browserInput?.model;
+		if (!model) {
+			return undefined;
+		}
+
+		void model.setVisible(false);
+		return {
+			dispose: () => {
+				if (this.activeMode === 'browser' && this.browserInput?.model === model) {
+					void model.setVisible(true);
+					this.layoutEmbeddedEditorPart();
+				}
+			}
+		};
 	}
 
 	private getModeEntries(): readonly IRightWorkbenchModeEntry[] {
@@ -442,10 +495,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 				void this.setBrowserUrl(url.value);
 			}
 		}));
-		this.renderIconButton(nav, Codicon.kebabVertical, localize('rightWorkbench.browserMore', "More Actions"));
+		const browserMoreButton = this.renderIconButton(nav, Codicon.kebabVertical, localize('rightWorkbench.browserMore', "More Actions"));
+		this.domStore.add(addDisposableListener(browserMoreButton, EventType.CLICK, () => this.showBrowserActionsMenu(browserMoreButton)));
 
 		const content = append(container, $('.sessions-right-workbench-browser-content'));
 		this.embeddedEditorHost = append(content, $('.sessions-right-workbench-embedded-editor-host'));
+		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		const currentUrl = this.browserInput?.url ?? this.browserUrl;
 		if (currentUrl) {
 			this.browserUrl = currentUrl;
@@ -744,11 +799,20 @@ export class RightWorkbenchViewPane extends ViewPane {
 		if (!embeddedHost || !activeModalPart) {
 			return;
 		}
+		if (this.activeMode === 'browser') {
+			this.hideOtherBrowserViews();
+		}
 		const modalElement = activeModalPart.modalElement as HTMLElement;
 		if (!modalElement.classList.contains('embedded')) {
 			return;
 		}
 		activeModalPart.updateOptions({ embeddedHost, maximized: true });
+		const width = embeddedHost.clientWidth;
+		const height = embeddedHost.clientHeight;
+		if (width > 0 && height > 0) {
+			const layoutableModalPart = activeModalPart as unknown as { layout(width: number, height: number, top: number, left: number): void };
+			layoutableModalPart.layout(width, height, 0, 0);
+		}
 	}
 
 	private observeElementResize(element: HTMLElement, callback: () => void): void {
@@ -786,11 +850,23 @@ export class RightWorkbenchViewPane extends ViewPane {
 		} else if (this.browserInput.url !== url) {
 			this.browserInput.navigate(url, { source: 'urlInput' });
 		}
-		await this.editorService.openEditor(this.browserInput, {
+		this.hideOtherBrowserViews();
+		const pane = await this.editorService.openEditor(this.browserInput, {
 			pinned: true,
 			modal: { embeddedHost, maximized: true }
 		}, MODAL_GROUP);
+		this.browserEditorPane = pane instanceof BrowserEditor ? pane : undefined;
+		this.hideOtherBrowserViews();
 		this.refreshBrowserControls();
+	}
+
+	private hideOtherBrowserViews(): void {
+		const activeBrowserInput = this.browserInput;
+		for (const input of this.browserViewWorkbenchService.getKnownBrowserViews().values()) {
+			if (input !== activeBrowserInput) {
+				void input.model?.setVisible(false);
+			}
+		}
 	}
 
 	private normalizeBrowserUrl(value: string): string | undefined {
@@ -856,7 +932,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		await this.ensureEmbeddedEditorPart();
 		if (this.terminalInstance) {
 			await this.terminalEditorService.openEditor(this.terminalInstance, {
-			viewColumn: MODAL_GROUP,
+				viewColumn: MODAL_GROUP,
 				modal: { embeddedHost, maximized: true }
 			});
 			return;
@@ -886,6 +962,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private bindBrowserModel(model: IBrowserViewModel): void {
+		if (model.device) {
+			void model.setDevice(undefined);
+		}
 		this.browserInputStore.add(model.onDidNavigate(() => {
 			this.browserUrl = model.url;
 			this.refreshBrowserControls();
@@ -911,5 +990,165 @@ export class RightWorkbenchViewPane extends ViewPane {
 			this.browserRefreshButton.disabled = !model && !url;
 		}
 	}
-}
 
+	private showBrowserActionsMenu(anchor: HTMLElement): void {
+		const hasBrowser = !!this.browserEditorPane;
+		const model = this.browserInput?.model;
+		const hasUrl = !!(model?.url ?? this.browserInput?.url ?? this.browserUrl);
+		const storageScope = model?.storageScope;
+		const restoreBrowserView = this.hideActiveBrowserViewForOverlay();
+		this.contextMenuService.showContextMenu({
+			getAnchor: () => anchor,
+			getActions: () => [
+				toAction({
+					id: BrowserViewCommandId.ShowFind,
+					label: localize('rightWorkbench.browserFindInPage', "Find in Page"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.ShowFind)
+				}),
+				toAction({
+					id: BrowserViewCommandId.AddElementToChat,
+					label: localize('rightWorkbench.browserAddElementToChat', "Add Element to Chat"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.AddElementToChat)
+				}),
+				toAction({
+					id: BrowserViewCommandId.AddConsoleLogsToChat,
+					label: localize('rightWorkbench.browserAddConsoleLogsToChat', "Add Console Logs to Chat"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.AddConsoleLogsToChat)
+				}),
+				toAction({
+					id: BrowserViewCommandId.AddAreaScreenshotToChat,
+					label: localize('rightWorkbench.browserAddAreaScreenshotToChat', "Add Area Screenshot to Chat"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.AddAreaScreenshotToChat)
+				}),
+				toAction({
+					id: BrowserViewCommandId.AddScreenshotToChat,
+					label: localize('rightWorkbench.browserAddScreenshotToChat', "Add Screenshot to Chat"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.AddScreenshotToChat)
+				}),
+				toAction({
+					id: BrowserViewCommandId.AddFullPageScreenshotToChat,
+					label: localize('rightWorkbench.browserAddFullPageScreenshotToChat', "Add Full Page Screenshot to Chat"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.AddFullPageScreenshotToChat)
+				}),
+				new Separator(),
+				toAction({
+					id: RightWorkbenchBrowserCommandId.ToggleDeviceEmulation,
+					label: localize('rightWorkbench.browserDeviceEmulation', "Device Emulation"),
+					enabled: hasBrowser,
+					run: () => this.runBrowserCommand(RightWorkbenchBrowserCommandId.ToggleDeviceEmulation)
+				}),
+				toAction({
+					id: RightWorkbenchBrowserCommandId.PickDevicePreset,
+					label: localize('rightWorkbench.browserPickDevicePreset', "Emulate Device..."),
+					enabled: hasBrowser,
+					run: () => this.runBrowserCommand(RightWorkbenchBrowserCommandId.PickDevicePreset)
+				}),
+				toAction({
+					id: RightWorkbenchBrowserCommandId.SetUserAgent,
+					label: localize('rightWorkbench.browserSetUserAgent', "Emulate User Agent..."),
+					enabled: hasBrowser,
+					run: () => this.runBrowserCommand(RightWorkbenchBrowserCommandId.SetUserAgent)
+				}),
+				toAction({
+					id: RightWorkbenchBrowserCommandId.ToggleMobileEmulation,
+					label: localize('rightWorkbench.browserToggleMobileEmulation', "Toggle Mobile Emulation"),
+					enabled: hasBrowser,
+					run: () => this.runBrowserCommand(RightWorkbenchBrowserCommandId.ToggleMobileEmulation)
+				}),
+				toAction({
+					id: RightWorkbenchBrowserCommandId.ResetEmulation,
+					label: localize('rightWorkbench.browserResetEmulation', "Reset Emulation"),
+					enabled: hasBrowser,
+					run: () => this.runBrowserCommand(RightWorkbenchBrowserCommandId.ResetEmulation)
+				}),
+				new Separator(),
+				toAction({
+					id: BrowserViewCommandId.HardReload,
+					label: localize('rightWorkbench.browserHardReload', "Hard Reload"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.HardReload)
+				}),
+				toAction({
+					id: BrowserViewCommandId.ToggleDevTools,
+					label: localize('rightWorkbench.browserDeveloperTools', "Developer Tools"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.ToggleDevTools)
+				}),
+				toAction({
+					id: RightWorkbenchBrowserCommandId.ZoomIn,
+					label: localize('rightWorkbench.browserZoomIn', "Zoom In"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(RightWorkbenchBrowserCommandId.ZoomIn)
+				}),
+				toAction({
+					id: RightWorkbenchBrowserCommandId.ZoomOut,
+					label: localize('rightWorkbench.browserZoomOut', "Zoom Out"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(RightWorkbenchBrowserCommandId.ZoomOut)
+				}),
+				toAction({
+					id: RightWorkbenchBrowserCommandId.ResetZoom,
+					label: localize('rightWorkbench.browserResetZoom', "Reset Zoom"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(RightWorkbenchBrowserCommandId.ResetZoom)
+				}),
+				new Separator(),
+				toAction({
+					id: BrowserViewCommandId.ShowHistory,
+					label: localize('rightWorkbench.browserHistory', "History"),
+					enabled: hasBrowser && hasUrl && storageScope !== BrowserViewStorageScope.Ephemeral,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.ShowHistory)
+				}),
+				toAction({
+					id: BrowserViewCommandId.ToggleFavorite,
+					label: localize('rightWorkbench.browserToggleFavorite', "Add to Favorites"),
+					enabled: hasBrowser && hasUrl && storageScope !== BrowserViewStorageScope.Ephemeral,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.ToggleFavorite)
+				}),
+				toAction({
+					id: BrowserViewCommandId.OpenExternal,
+					label: localize('rightWorkbench.browserOpenExternal', "Open in External Browser"),
+					enabled: hasBrowser && hasUrl,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.OpenExternal)
+				}),
+				toAction({
+					id: BrowserViewCommandId.OpenSettings,
+					label: localize('rightWorkbench.browserSettings', "Browser Settings"),
+					enabled: true,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.OpenSettings)
+				}),
+				toAction({
+					id: BrowserViewCommandId.ClearEphemeralStorage,
+					label: localize('rightWorkbench.browserClearEphemeralStorage', "Clear Ephemeral Browser Data"),
+					enabled: hasBrowser && storageScope === BrowserViewStorageScope.Ephemeral,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.ClearEphemeralStorage)
+				}),
+				toAction({
+					id: BrowserViewCommandId.ClearWorkspaceStorage,
+					label: localize('rightWorkbench.browserClearWorkspaceStorage', "Clear Workspace Browser Data"),
+					enabled: hasBrowser && storageScope === BrowserViewStorageScope.Workspace,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.ClearWorkspaceStorage)
+				}),
+				toAction({
+					id: BrowserViewCommandId.ClearGlobalStorage,
+					label: localize('rightWorkbench.browserClearGlobalStorage', "Clear Global Browser Data"),
+					enabled: hasBrowser && storageScope === BrowserViewStorageScope.Global,
+					run: () => this.runBrowserCommand(BrowserViewCommandId.ClearGlobalStorage)
+				}),
+			],
+			getMenuClassName: () => 'sessions-right-workbench-browser-actions-menu',
+			onHide: () => restoreBrowserView?.dispose(),
+		});
+	}
+
+	private runBrowserCommand(commandId: string): void {
+		const browserEditor = this.browserEditorPane ?? this.editorService.activeEditorPane;
+		void this.commandService.executeCommand(commandId, browserEditor);
+	}
+}

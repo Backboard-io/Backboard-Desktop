@@ -812,19 +812,42 @@
 .sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-root {
 	width: 100% !important;
 	height: 100% !important;
+	overflow: hidden !important;
 	background: var(--rwb-bg) !important;
 }
 
 .sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container-wrapper {
 	flex: 1 1 auto;
+	position: relative;
 	min-width: 0;
 	min-height: 0;
+	width: 100% !important;
 	height: 100% !important;
+	overflow: hidden !important;
+	contain: strict;
 }
 
 .sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container {
-	max-width: 100%;
-	max-height: 100%;
+	overflow: visible !important;
+	max-width: 100% !important;
+	max-height: 100% !important;
+	border-radius: 0 !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container:not(:has(> .monaco-sash:not(.disabled))) {
+	overflow: hidden !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container::before,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container::after,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-placeholder-screenshot {
+	display: none !important;
+	background-image: none !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-placeholder-contents {
+	overflow: hidden !important;
+	background: transparent !important;
 }
 
 .sessions-right-workbench-embedded-editor-host .monaco-modal-editor-block.embedded,
