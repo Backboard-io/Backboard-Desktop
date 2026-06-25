@@ -158,7 +158,7 @@ export class ElectronOptimusBackboardBridge implements IOptimusChatBridge {
 
 function titleFromTask(task: string): string {
 	const title = task.trim().replace(/\s+/g, ' ').slice(0, 72);
-	return title || 'New Optimus run';
+	return title || 'New Advanced run';
 }
 
 function activity(text: string, state: OptimusActivityState): IOptimusActivityEvent {

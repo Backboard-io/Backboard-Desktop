@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { ipcRenderer } from '../../base/parts/sandbox/electron-browser/globals.js';
-import { IOptimusHistoryEntry, IOptimusHistoryProvider, IOptimusLiveState, IOptimusNavigationProvider, IOptimusWorkspaceEntry } from '../common/optimusHistory.js';
+import { IOptimusBackboardMetadata, IOptimusBackboardModel, IOptimusHistoryEntry, IOptimusHistoryProvider, IOptimusLiveState, IOptimusNavigationProvider, IOptimusPromptOptions, IOptimusWorkspaceEntry } from '../common/optimusHistory.js';
 
 export class ElectronOptimusHistoryProvider implements IOptimusHistoryProvider {
 
@@ -23,24 +23,13 @@ export class ElectronOptimusHistoryProvider implements IOptimusHistoryProvider {
 		return Array.isArray(result) ? result.filter(isOptimusWorkspaceEntry) : [];
 	}
 
-	async openBackboardPanel(): Promise<void> {
-		await sendBackboardPanelCommand({ type: 'showChat' });
+	async readBackboardMetadata(): Promise<IOptimusBackboardMetadata | undefined> {
+		const result = await ipcRenderer.invoke('vscode:optimusBackboardMetadata');
+		return isOptimusBackboardMetadata(result) ? result : undefined;
 	}
 
-	async openBackboardHistory(): Promise<void> {
-		await sendBackboardPanelCommand({ type: 'showHistory' });
-	}
-
-	async openBackboardHistoryEntry(id: string): Promise<void> {
-		await sendBackboardPanelCommand({ type: 'openHistoryEntry', chatId: id });
-	}
-
-	async openBackboardNewChat(workspace?: string): Promise<void> {
-		await sendBackboardPanelCommand({ type: 'newChat', workspace });
-	}
-
-	async sendBackboardPrompt(prompt: string, chatId?: string, workspace?: string): Promise<void> {
-		await sendBackboardPanelCommand({ type: 'sendPrompt', prompt, chatId, workspace, newChat: !chatId });
+	async sendBackboardPrompt(prompt: string, chatId?: string, workspace?: string, options?: IOptimusPromptOptions): Promise<void> {
+		await sendBackboardPanelCommand({ type: 'sendPrompt', prompt, chatId, workspace, options, newChat: !chatId });
 	}
 
 	async cancelBackboardPrompt(): Promise<void> {
@@ -106,4 +95,20 @@ function isOptimusWorkspaceEntry(value: unknown): value is IOptimusWorkspaceEntr
 		&& !Array.isArray(value)
 		&& typeof (value as { id?: unknown }).id === 'string'
 		&& typeof (value as { label?: unknown }).label === 'string';
+}
+
+function isOptimusBackboardMetadata(value: unknown): value is IOptimusBackboardMetadata {
+	return typeof value === 'object'
+		&& value !== null
+		&& !Array.isArray(value)
+		&& Array.isArray((value as { models?: unknown }).models)
+		&& (value as { models: unknown[] }).models.every(isOptimusBackboardModel);
+}
+
+function isOptimusBackboardModel(value: unknown): value is IOptimusBackboardModel {
+	return typeof value === 'object'
+		&& value !== null
+		&& !Array.isArray(value)
+		&& typeof (value as { provider?: unknown }).provider === 'string'
+		&& typeof (value as { name?: unknown }).name === 'string';
 }

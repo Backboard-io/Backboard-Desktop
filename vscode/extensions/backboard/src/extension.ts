@@ -185,6 +185,7 @@ let pendingBackboardOAuth: BackboardOAuthPending | undefined;
 let lastOptimusPanelCommandId: string | undefined;
 let pendingOptimusLiveState: OptimusLiveState | undefined;
 let pendingOptimusLiveStateTimer: ReturnType<typeof setTimeout> | undefined;
+let optimusLiveStateWriteQueue: Promise<void> = Promise.resolve();
 
 export function activate(context: vscode.ExtensionContext): void {
 	backboardToolOutput = vscode.window.createOutputChannel('Backboard Tools');
@@ -220,9 +221,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		await panelProvider.postUiCommand('showHistory');
 	}));
 	void updateBackboardAuthContext();
+	void writeCachedOptimusMetadata(bridge);
 	const configWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardConfigPath()), path.basename(backboardConfigPath())));
 	const refreshBackboardState = () => {
 		void updateBackboardAuthContext();
+		void writeCachedOptimusMetadata(bridge);
 		panelProvider.refreshState();
 	};
 	context.subscriptions.push(configWatcher);
@@ -251,6 +254,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(optimusCommandWatcher.onDidCreate(handleOptimusCommand));
 	context.subscriptions.push(optimusCommandWatcher.onDidChange(handleOptimusCommand));
 	handleOptimusCommand();
+	const optimusCommandPoll = setInterval(handleOptimusCommand, 1000);
+	context.subscriptions.push({ dispose: () => clearInterval(optimusCommandPoll) });
 	startBackboardUpdateChecks(context);
 }
 
@@ -1327,6 +1332,10 @@ function optimusLiveStatePath(): string {
 	return path.join(os.homedir(), '.backboard_ide', 'optimus-live-state.json');
 }
 
+function optimusMetadataPath(): string {
+	return path.join(os.homedir(), '.backboard_ide', 'optimus-metadata.json');
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -1380,13 +1389,7 @@ async function handleOptimusPanelCommand(panelProvider: BackboardPanelProvider):
 			await panelProvider.openHistoryEntry(command.chatId);
 			break;
 		case 'sendPrompt':
-			await openBackboardViewForOptimus(panelProvider);
-			if (command.chatId) {
-				await panelProvider.openHistoryEntry(command.chatId);
-			} else if (command.newChat) {
-				await panelProvider.postUiCommand('newChat', command.workspace);
-			}
-			panelProvider.submitPromptFromOptimus(command.prompt ?? '', asPanelOptions(command.options), command.chatId, command.workspace);
+			panelProvider.submitPromptFromOptimus(command.prompt ?? '', asPanelOptions(command.options), command.chatId, command.workspace, true);
 			break;
 		case 'cancel':
 			panelProvider.cancelActiveRun();
@@ -1584,6 +1587,11 @@ function decodePanelHtmlEntities(text: string): string {
 		.replace(/&gt;/g, '>')
 		.replace(/&quot;/g, '"')
 		.replace(/&#39;/g, "'");
+}
+
+function historyTitleFromPrompt(promptText: string): string {
+	const words = promptText.trim().split(/\s+/).filter(Boolean);
+	return words.slice(0, 8).join(' ') || 'Untitled chat';
 }
 
 function readSharedPanelThreadsState(workspace: string | undefined): PanelPersistedState | undefined {
@@ -1805,16 +1813,42 @@ function flushOptimusLiveStateWrite(): void {
 		return;
 	}
 	pendingOptimusLiveState = undefined;
-	void (async () => {
+	optimusLiveStateWriteQueue = optimusLiveStateWriteQueue.then(async () => {
 		const statePath = optimusLiveStatePath();
 		await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
 		await writeJsonFileAtomic(statePath, state);
 		if (process.platform !== 'win32') {
 			await fs.promises.chmod(statePath, 0o600);
 		}
-	})().catch(error => {
+	}).catch(error => {
 		backboardToolOutput?.appendLine(`[optimus] failed to write live state: ${error instanceof Error ? error.message : String(error)}`);
 	});
+}
+
+async function writeOptimusMetadata(settings: PanelOptions, models: readonly BridgeModel[] | undefined): Promise<void> {
+	const metadataPath = optimusMetadataPath();
+	await fs.promises.mkdir(path.dirname(metadataPath), { recursive: true });
+	await writeJsonFileAtomic(metadataPath, {
+		version: 1,
+		updatedAt: Date.now(),
+		settings,
+		models: (models ?? []).filter(isVisibleBridgeModel)
+	});
+	if (process.platform !== 'win32') {
+		await fs.promises.chmod(metadataPath, 0o600);
+	}
+}
+
+async function writeCachedOptimusMetadata(bridge: BackboardBridge): Promise<void> {
+	try {
+		let models = await bridge.cachedModels();
+		if (!models?.length) {
+			models = await bridge.listModels(new vscode.CancellationTokenSource().token);
+		}
+		await writeOptimusMetadata(publicSettings(readSettings()), models);
+	} catch (error) {
+		backboardToolOutput?.appendLine(`[optimus] failed to write cached metadata: ${error instanceof Error ? error.message : String(error)}`);
+	}
 }
 
 function scriptJson(value: unknown): string {
@@ -2097,6 +2131,41 @@ function renderBridgeEvent(event: BridgeEvent, response: ResponseSink, currentTo
 	}
 }
 
+function mediaPayloadText(payload: unknown): string {
+	const urls: string[] = [];
+	const visit = (value: unknown): void => {
+		if (!value) {
+			return;
+		}
+		if (typeof value === 'string') {
+			if (/^(https?:|data:|blob:)/i.test(value)) {
+				urls.push(value);
+			}
+			return;
+		}
+		if (Array.isArray(value)) {
+			for (const item of value) {
+				visit(item);
+			}
+			return;
+		}
+		if (isObjectRecord(value)) {
+			for (const item of Object.values(value)) {
+				visit(item);
+			}
+		}
+	};
+	visit(payload);
+	if (urls.length) {
+		return urls.join('\n');
+	}
+	try {
+		return JSON.stringify(payload, undefined, 2).slice(0, 2000);
+	} catch {
+		return String(payload);
+	}
+}
+
 function toolResultRequestKey(request: ToolResultRequest): string {
 	const toolCallIds = request.toolCalls.map(toolCallIdentity).join(',');
 	return `${request.threadId ?? ''}:${request.runId ?? ''}:${toolCallIds}`;
@@ -2174,11 +2243,15 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		return this.view?.webview.postMessage({ type: 'command', command: 'openHistoryEntry', chatId }) ?? false;
 	}
 
-	submitPromptFromOptimus(prompt: string, options: PanelOptions, chatId: string | undefined, workspaceOverride: string | undefined): void {
+	submitPromptFromOptimus(prompt: string, options: PanelOptions, chatId: string | undefined, workspaceOverride: string | undefined, forceDirect = false): void {
 		if (!prompt.trim()) {
 			return;
 		}
-		this.runPrompt(prompt, options, chatId, undefined, workspaceOverride);
+		if (this.view && !forceDirect) {
+			this.runPrompt(prompt, options, chatId, undefined, workspaceOverride);
+		} else {
+			void this.runOptimusPromptDirect(prompt, options, chatId, workspaceOverride);
+		}
 	}
 
 	cancelActiveRun(): void {
@@ -2256,6 +2329,206 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
+	private async runOptimusPromptDirect(prompt: string, options: PanelOptions, chatId: string | undefined, workspaceOverride: string | undefined): Promise<void> {
+		const content = prompt.trim();
+		if (!content) {
+			return;
+		}
+		this.runToken?.cancel();
+		this.runToken = new vscode.CancellationTokenSource();
+		const token = this.runToken.token;
+		const settings = resolveTurnSettings(options);
+		const actualWorkspace = workspacePath();
+		const requestedWorkspace = workspaceOverride?.trim();
+		const effectiveWorkspace = requestedWorkspace && (!actualWorkspace || requestedWorkspace === actualWorkspace)
+			? requestedWorkspace
+			: actualWorkspace;
+		const chatWorkspace = readSharedPanelThreadWorkspace(chatId);
+		const effectiveChatId = chatId && (!chatWorkspace || !effectiveWorkspace || chatWorkspace === effectiveWorkspace) ? chatId : undefined;
+		const liveChatId = effectiveChatId ?? `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		const sessionId = `optimus:${effectiveWorkspace ?? 'default'}:${effectiveChatId || liveChatId}`;
+		const existingState = effectiveChatId ? readSharedPanelState(effectiveWorkspace) : undefined;
+		const existingEntry = Array.isArray(existingState?.historyEntries)
+			? existingState.historyEntries.find(entry => isObjectRecord(entry) && entry.id === effectiveChatId)
+			: undefined;
+		const existingMessages = isObjectRecord(existingEntry) && Array.isArray(existingEntry.messages)
+			? existingEntry.messages
+				.filter(isObjectRecord)
+				.map(message => ({
+					role: typeof message.role === 'string' ? message.role : 'assistant',
+					content: typeof message.content === 'string' ? message.content : ''
+				}))
+				.filter(message => message.content)
+			: [];
+		const liveStartedAt = Date.now();
+		const liveMessages: { role: string; content: string }[] = [...existingMessages, { role: 'user', content }];
+		let fatalErrorMessage: string | undefined;
+		const appendLiveAssistantText = (text: string) => {
+			const last = liveMessages[liveMessages.length - 1];
+			if (last?.role === 'assistant') {
+				const spacer = last.content && text && /[.:!?)]$/.test(last.content) && /^[A-Z0-9"'(]/.test(text) ? ' ' : '';
+				liveMessages[liveMessages.length - 1] = { role: 'assistant', content: `${last.content}${spacer}${text}` };
+			} else {
+				liveMessages.push({ role: 'assistant', content: text });
+			}
+		};
+		const writeLiveState = (status: string, running: boolean, immediate = false) => {
+			scheduleOptimusLiveStateWrite({
+				version: 1,
+				id: liveChatId,
+				chatId: liveChatId,
+				prompt: content,
+				status,
+				running,
+				startedAt: liveStartedAt,
+				updatedAt: Date.now(),
+				currentWorkspace: effectiveWorkspace,
+				messages: liveMessages,
+				fileChanges: [],
+			}, immediate);
+		};
+		const saveHistory = async (status: string) => {
+			const now = Date.now();
+			const previousEntry = isObjectRecord(existingEntry) ? existingEntry : {};
+			const nextEntry = {
+				...previousEntry,
+				id: liveChatId,
+				title: typeof previousEntry.title === 'string' ? previousEntry.title : historyTitleFromPrompt(content),
+				prompt: typeof previousEntry.prompt === 'string' ? previousEntry.prompt : content,
+				currentWorkspace: effectiveWorkspace,
+				startedAt: typeof previousEntry.startedAt === 'number' ? previousEntry.startedAt : liveStartedAt,
+				updatedAt: now,
+				status,
+				fileChanges: Array.isArray(previousEntry.fileChanges) ? previousEntry.fileChanges : [],
+				messages: liveMessages,
+				outputText: liveMessages.filter(message => message.role === 'assistant').map(message => message.content).join('\n\n'),
+			};
+			const existingEntries = Array.isArray(existingState?.historyEntries) ? existingState.historyEntries : [];
+			const historyEntries = [
+				nextEntry,
+				...existingEntries.filter(entry => !isObjectRecord(entry) || entry.id !== liveChatId)
+			];
+			await writeSharedPanelState({
+				activeView: 'chat',
+				activeHistoryId: liveChatId,
+				currentWorkspace: effectiveWorkspace,
+				promptQueue: [],
+				historyEntries,
+				savedAt: now,
+			});
+		};
+		const sink: ResponseSink = {
+			markdown: value => {
+				const text = typeof value === 'string' ? value : value.value;
+				if (text) {
+					appendLiveAssistantText(text);
+					writeLiveState('Streaming from Backboard.', true);
+				}
+			},
+			progress: value => {
+				writeLiveState(value, true);
+			},
+			event: (type, payload) => {
+				if (type === 'toolFinished' && isObjectRecord(payload)) {
+					const name = typeof payload.name === 'string' ? payload.name : 'tool';
+					const statusText = typeof payload.status === 'string' ? payload.status : 'running';
+					writeLiveState(`${name} ${statusText}.`, true);
+				} else if (type === 'voice') {
+					liveMessages.push({ role: 'voice', content: mediaPayloadText(payload) });
+					writeLiveState('Backboard voice ready.', true);
+				} else if (type === 'media') {
+					liveMessages.push({ role: 'assistant', content: mediaPayloadText(payload) });
+					writeLiveState('Backboard media ready.', true);
+				}
+			}
+		};
+		const renderDirectBridgeEvent = (event: BridgeEvent, currentToolRequest: ToolResultRequest | undefined): ToolResultRequest | undefined => {
+			if (event.type === 'error' && !isRecoverableToolOutputSubmissionError(event.message)) {
+				const message = event.message ?? 'Backboard request failed.';
+				fatalErrorMessage = message;
+				liveMessages.push({ role: 'error', content: message });
+				writeLiveState(message, false);
+				return currentToolRequest;
+			}
+			return renderBridgeEvent(event, sink, currentToolRequest);
+		};
+
+		writeLiveState('Sending to Backboard.', true, true);
+		backboardToolOutput?.appendLine(`[optimus] direct send ${liveChatId}`);
+		try {
+			const imageGeneration = imageGenerationForPrompt(content, settings.imageGeneration);
+			const submitTools = trimBackboardToolsForRequest(
+				await this.bridge.listTools(settings.mode, token).catch(() => undefined),
+				content,
+				settings.webSearch,
+				imageGeneration
+			);
+			let currentToolRequest: ToolResultRequest | undefined;
+			const pendingToolRequests: ToolResultRequest[] = [];
+			const seenToolRequests = new Set<string>();
+			const handleEvent = (event: BridgeEvent): void => {
+				const toolRequest = renderDirectBridgeEvent(event, currentToolRequest);
+				if (toolRequest && toolRequest !== currentToolRequest) {
+					currentToolRequest = toolRequest;
+					enqueueToolResultRequest(pendingToolRequests, toolRequest, seenToolRequests);
+				}
+			};
+
+			await this.bridge.send('sendPrompt', sessionId, {
+				content,
+				workspace: effectiveWorkspace,
+				provider: settings.defaultProvider,
+				model: settings.defaultModel,
+				mode: settings.mode,
+				intensity: settings.intensity,
+				webSearch: settings.webSearch,
+				imageGeneration: imageGeneration === 'auto' ? 'auto' : undefined,
+				voiceMode: settings.voiceMode,
+				mcpCalls: mcpCallsPayload(settings),
+				tools: submitTools,
+				config: settings.config
+			}, handleEvent, token);
+
+			let nextToolRequest = pendingToolRequests.shift();
+			while (nextToolRequest && !token.isCancellationRequested) {
+				const toolOutputs = await executeToolCalls(this.bridge, nextToolRequest.toolCalls, settings.mode, sink, token);
+				if (token.isCancellationRequested) {
+					break;
+				}
+				if (toolOutputs.length !== nextToolRequest.toolCalls.length) {
+					writeLiveState('Stopped before submitting incomplete tool outputs.', false, true);
+					break;
+				}
+				let currentContinuationToolRequest: ToolResultRequest | undefined;
+				await this.bridge.send('submitToolResult', sessionId, {
+					threadId: nextToolRequest.threadId,
+					runId: nextToolRequest.runId,
+					toolOutputs,
+					tools: submitTools,
+					config: settings.config
+				}, event => {
+					const followupToolRequest = renderDirectBridgeEvent(event, currentContinuationToolRequest);
+					if (followupToolRequest && followupToolRequest !== currentContinuationToolRequest) {
+						currentContinuationToolRequest = followupToolRequest;
+						enqueueToolResultRequest(pendingToolRequests, followupToolRequest, seenToolRequests);
+					}
+				}, token);
+				nextToolRequest = pendingToolRequests.shift();
+			}
+
+			const finalStatus = token.isCancellationRequested ? 'Cancelled' : fatalErrorMessage ? 'Failed' : 'Done';
+			writeLiveState(token.isCancellationRequested ? 'Cancelled.' : fatalErrorMessage ?? 'Done.', false, true);
+			await saveHistory(finalStatus);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			liveMessages.push({ role: 'error', content: message });
+			writeLiveState(message, false, true);
+			await saveHistory('Failed').catch(saveError => {
+				backboardToolOutput?.appendLine(`[optimus] failed to save direct history: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+			});
+		}
+	}
+
 	async postPanelStateSnapshot(): Promise<void> {
 		await this.view?.webview.postMessage({ type: 'panelStateSnapshot', state: this.readPanelState() });
 	}
@@ -2327,7 +2600,8 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		const appendLiveAssistantText = (text: string) => {
 			const last = liveMessages[liveMessages.length - 1];
 			if (last?.role === 'assistant') {
-				liveMessages[liveMessages.length - 1] = { role: 'assistant', content: `${last.content}${text}` };
+				const spacer = last.content && text && /[.:!?)]$/.test(last.content) && /^[A-Z0-9"'(]/.test(text) ? ' ' : '';
+				liveMessages[liveMessages.length - 1] = { role: 'assistant', content: `${last.content}${spacer}${text}` };
 			} else {
 				liveMessages.push({ role: 'assistant', content: text });
 			}
@@ -5588,7 +5862,7 @@ class BackboardBridge implements vscode.Disposable {
 
 	async cachedModels(): Promise<BridgeModel[] | undefined> {
 		const entry = await this.readModelCache();
-		return entry?.models;
+		return entry?.models.length ? entry.models : undefined;
 	}
 
 	async cachedTools(mode: string): Promise<unknown[] | undefined> {
@@ -5600,14 +5874,14 @@ class BackboardBridge implements vscode.Disposable {
 		const [modelCache, toolCache] = await Promise.all([this.readModelCache(), this.readToolCache(mode)]);
 		const now = Date.now();
 		return Boolean(
-			modelCache && now - modelCache.fetchedAt < BackboardBridge.modelCacheTtl
+			modelCache && modelCache.models.length > 0 && now - modelCache.fetchedAt < BackboardBridge.modelCacheTtl
 			&& toolCache && now - toolCache.fetchedAt < BackboardBridge.toolCacheTtl
 		);
 	}
 
 	async listModels(token: vscode.CancellationToken, forceRefresh = false): Promise<BridgeModel[]> {
 		const cached = await this.readModelCache();
-		if (!forceRefresh && cached && Date.now() - cached.fetchedAt < BackboardBridge.modelCacheTtl) {
+		if (!forceRefresh && cached?.models.length && Date.now() - cached.fetchedAt < BackboardBridge.modelCacheTtl) {
 			return cached.models;
 		}
 		if (this.pendingModelRefresh) {
@@ -6770,11 +7044,16 @@ async function savePanelOptions(options: PanelOptions): Promise<void> {
 
 async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, forceModelRefresh = false): Promise<void> {
 	const settings = readSettings();
-	await webview.postMessage({ type: 'settings', settings: publicSettings(settings), workspace: workspacePath() });
+	const publicPanelSettings = publicSettings(settings);
+	await webview.postMessage({ type: 'settings', settings: publicPanelSettings, workspace: workspacePath() });
 	const cachedModels = forceModelRefresh ? undefined : await bridge.cachedModels();
 	const cachedTools = forceModelRefresh ? undefined : await bridge.cachedTools(settings.mode);
+	let metadataModels: readonly BridgeModel[] | undefined = cachedModels;
 	if (cachedModels) {
 		await webview.postMessage({ type: 'models', models: cachedModels });
+		void writeOptimusMetadata(publicPanelSettings, cachedModels).catch(error => {
+			backboardToolOutput?.appendLine(`[optimus] failed to write metadata: ${error instanceof Error ? error.message : String(error)}`);
+		});
 	}
 	if (cachedTools) {
 		await webview.postMessage({ type: 'tools', tools: cachedTools });
@@ -6786,12 +7065,20 @@ async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, 
 	try {
 		await webview.postMessage({ type: 'status', text: cachedModels && !forceModelRefresh ? 'Checking Backboard models.' : 'Loading Backboard models.' });
 		const models = await bridge.listModels(new vscode.CancellationTokenSource().token, forceModelRefresh);
+		metadataModels = models;
 		await webview.postMessage({ type: 'models', models });
+		void writeOptimusMetadata(publicPanelSettings, models).catch(error => {
+			backboardToolOutput?.appendLine(`[optimus] failed to write metadata: ${error instanceof Error ? error.message : String(error)}`);
+		});
 		await webview.postMessage({ type: 'status', text: 'Ready.' });
 	} catch (error) {
 		const cachedModels = await bridge.cachedModels();
 		if (cachedModels) {
+			metadataModels = cachedModels;
 			await webview.postMessage({ type: 'models', models: cachedModels });
+			void writeOptimusMetadata(publicPanelSettings, cachedModels).catch(error => {
+				backboardToolOutput?.appendLine(`[optimus] failed to write metadata: ${error instanceof Error ? error.message : String(error)}`);
+			});
 			await webview.postMessage({ type: 'status', text: 'Using cached Backboard models.' });
 		} else {
 				await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
@@ -6807,6 +7094,11 @@ async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, 
 		await webview.postMessage({ type: 'tools', tools });
 	} catch {
 		await webview.postMessage({ type: 'tools', tools: cachedTools ?? [] });
+	}
+	if (!metadataModels) {
+		void writeOptimusMetadata(publicPanelSettings, []).catch(error => {
+			backboardToolOutput?.appendLine(`[optimus] failed to write metadata: ${error instanceof Error ? error.message : String(error)}`);
+		});
 	}
 }
 

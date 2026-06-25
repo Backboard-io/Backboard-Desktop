@@ -314,22 +314,6 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	async openOptimusWindow(openConfig: IOpenConfiguration): Promise<ICodeWindow[]> {
 		this.logService.trace('windowsManager#openOptimusWindow');
 
-		const targetWindow = typeof openConfig.contextWindowId === 'number'
-			? this.getWindowById(openConfig.contextWindowId)
-			: this.getFocusedWindow() ?? this.getLastActiveWindow();
-
-		if (targetWindow && !openConfig.initialStartup) {
-			await this.openInBrowserWindow({
-				cli: openConfig.cli,
-				initialStartup: openConfig.initialStartup,
-				userEnv: openConfig.userEnv,
-				windowToUse: targetWindow,
-				forceNewWindow: false,
-				optimusWindow: true,
-			});
-			return [targetWindow];
-		}
-
 		return this.open({
 			...openConfig,
 			urisToOpen: undefined,
