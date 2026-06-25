@@ -75,7 +75,7 @@
 		const baseTheme = splash?.baseTheme
 			?? (configuration.colorScheme.highContrast
 				? configuration.colorScheme.dark ? 'hc-black' : 'hc-light'
-				: configuration.colorScheme.dark ? 'vs-dark' : 'vs');
+				: (configuration.colorScheme.dark || !splash) ? 'vs-dark' : 'vs');
 		const dark = baseTheme === 'vs-dark' || baseTheme === 'hc-black' || configuration.colorScheme.dark;
 		const highContrast = baseTheme === 'hc-black' || baseTheme === 'hc-light' || configuration.colorScheme.highContrast;
 		const fallbackBackground = dark ? 'rgb(30, 30, 30)' : 'rgb(255, 255, 255)';

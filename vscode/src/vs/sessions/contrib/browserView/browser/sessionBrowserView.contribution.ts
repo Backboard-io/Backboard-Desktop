@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../base/common/codicons.js';
-import { localize, localize2 } from '../../../../nls.js';
+import { localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { BrowserViewCommandId } from '../../../../platform/browserView/common/browserView.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
@@ -38,12 +38,6 @@ const browserViewContainer = viewContainerRegistry.registerViewContainer({
 	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [SESSIONS_BROWSER_VIEW_CONTAINER_ID, { mergeViewWithContainerWhenSingleView: true }]),
 	storageId: SESSIONS_BROWSER_VIEW_CONTAINER_ID,
 	hideIfEmpty: false,
-	openCommandActionDescriptor: {
-		id: SESSIONS_BROWSER_VIEW_CONTAINER_ID,
-		title: localize2('browser', "Browser"),
-		mnemonicTitle: localize({ key: 'miBrowser', comment: ['&& denotes a mnemonic'] }, "Bro&&wser"),
-		order: 2
-	},
 	windowEnablement: WindowEnablement.Sessions,
 }, ViewContainerLocation.AuxiliaryBar);
 

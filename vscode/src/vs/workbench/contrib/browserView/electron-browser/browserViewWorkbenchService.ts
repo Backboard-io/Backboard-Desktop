@@ -240,10 +240,10 @@ export class BrowserViewWorkbenchService extends Disposable implements IBrowserV
 				);
 				return this._createModel(id, this._getDefaultOwner(), state);
 			});
-			input.onWillDispose(() => {
+			this._register(input.onWillDispose(() => {
 				this._known.delete(id);
 				this._onDidChangeBrowserViews.fire();
-			});
+			}));
 			if (model) {
 				input.model = model;
 			}

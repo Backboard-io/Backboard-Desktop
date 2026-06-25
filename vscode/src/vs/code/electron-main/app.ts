@@ -597,6 +597,7 @@ export class CodeApplication extends Disposable {
 		validatedIpcMain.handle('vscode:optimusBackboardHistory', async () => readOptimusBackboardHistory());
 		validatedIpcMain.handle('vscode:optimusBackboardLiveState', async () => readOptimusBackboardLiveState());
 		validatedIpcMain.handle('vscode:optimusBackboardWorkspaces', async () => readOptimusBackboardWorkspaces());
+			validatedIpcMain.handle('vscode:optimusBackboardMetadata', async () => readOptimusBackboardMetadata(this.environmentMainService.userDataPath));
 		validatedIpcMain.handle('vscode:optimusBackboardCommand', async (_event, command: unknown) => writeOptimusBackboardCommand(command));
 		validatedIpcMain.handle('vscode:optimusSharedChatHistorySnapshot', async (_event, snapshot: unknown) => writeOptimusSharedChatHistorySnapshot(snapshot));
 		validatedIpcMain.handle('vscode:optimusDevHotRefreshState', async () => readOptimusDevHotRefreshState(this.environmentMainService.appRoot));
@@ -1943,6 +1944,7 @@ interface IOptimusBackboardLiveState {
 	readonly chatId?: string;
 	readonly prompt?: string;
 	readonly status?: string;
+	readonly statusKey?: string;
 	readonly running?: boolean;
 	readonly startedAt?: number;
 	readonly updatedAt?: number;
@@ -1961,6 +1963,12 @@ interface IOptimusBackboardPanelCommand {
 	readonly provider?: string;
 	readonly newChat?: boolean;
 	readonly options?: unknown;
+}
+
+interface IOptimusBackboardMetadata {
+	readonly settings?: unknown;
+	readonly models: readonly unknown[];
+	readonly updatedAt?: number;
 }
 
 interface IOptimusDevHotRefreshState {
@@ -2596,14 +2604,15 @@ function readOptimusBackboardLiveState(): IOptimusBackboardLiveState | undefined
 		const id = stringValueFromOptimusRecord(parsed.id) ?? stringValueFromOptimusRecord(parsed.chatId);
 		if (!id) {
 			return undefined;
-		}
-		return {
-			id,
-			chatId: stringValueFromOptimusRecord(parsed.chatId),
-			prompt: stringValueFromOptimusRecord(parsed.prompt),
-			status: stringValueFromOptimusRecord(parsed.status),
-			running: parsed.running === true,
-			startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : undefined,
+			}
+			return {
+				id,
+				chatId: stringValueFromOptimusRecord(parsed.chatId),
+				prompt: stringValueFromOptimusRecord(parsed.prompt),
+				status: stringValueFromOptimusRecord(parsed.status),
+				statusKey: stringValueFromOptimusRecord(parsed.statusKey),
+				running: parsed.running === true,
+				startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : undefined,
 			updatedAt,
 			currentWorkspace: stringValueFromOptimusRecord(parsed.currentWorkspace),
 			messages: normalizeOptimusHistoryMessages(parsed.messages, stringValueFromOptimusRecord(parsed.prompt), undefined, undefined),
@@ -2635,6 +2644,51 @@ function readOptimusBackboardWorkspaces(): IOptimusBackboardWorkspaceEntry[] {
 			chatCount: workspace.chatCount,
 			lastActiveAt: workspace.lastActiveAt || undefined
 		}));
+}
+
+function readOptimusBackboardMetadata(userDataPath: string): IOptimusBackboardMetadata | undefined {
+	const metadataPath = nodeJoin(homedir(), '.backboard_ide', 'optimus-metadata.json');
+	let metadata: IOptimusBackboardMetadata | undefined;
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(metadataPath, 'utf8'));
+		if (isOptimusObjectRecord(parsed) && Array.isArray(parsed.models)) {
+			const updatedAt = typeof parsed.updatedAt === 'number' ? parsed.updatedAt : undefined;
+			if (!updatedAt || Date.now() - updatedAt <= 24 * 60 * 60 * 1000) {
+				metadata = {
+					settings: isOptimusObjectRecord(parsed.settings) ? parsed.settings : undefined,
+					models: parsed.models.filter(isOptimusObjectRecord),
+					updatedAt
+				};
+			}
+		}
+	} catch {
+		metadata = undefined;
+	}
+	if (metadata?.models.length) {
+		return metadata;
+	}
+	const cachedModels = readOptimusBackboardModelCache(userDataPath);
+	if (cachedModels.length) {
+		return {
+			settings: metadata?.settings,
+			models: cachedModels,
+			updatedAt: metadata?.updatedAt
+		};
+	}
+	return metadata;
+}
+
+function readOptimusBackboardModelCache(userDataPath: string): readonly unknown[] {
+	const cachePath = nodeJoin(userDataPath, 'User', 'globalStorage', 'backboard.backboard', 'models.json');
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(cachePath, 'utf8'));
+		if (!isOptimusObjectRecord(parsed) || !Array.isArray(parsed.models)) {
+			return [];
+		}
+		return parsed.models.filter(isOptimusObjectRecord);
+	} catch {
+		return [];
+	}
 }
 
 function readOptimusPanelStateEntries(): IOptimusBackboardHistoryEntry[] {

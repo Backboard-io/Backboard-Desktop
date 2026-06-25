@@ -15,6 +15,7 @@ import { IContextMenuService } from '../../../platform/contextview/browser/conte
 import { ICommandService } from '../../../platform/commands/common/commands.js';
 
 const OPEN_BACKBOARD_AGENTS_COMMAND_ID = 'backboard.agents.open';
+const OPEN_BACKBOARD_ADVANCED_COMMAND_ID = 'workbench.action.openOptimusWindow';
 
 /**
  * Renders a stable Editor / Agents titlebar switcher in the sessions workbench.
@@ -38,7 +39,7 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 
 		container.classList.add('open-in-vscode-titlebar-widget');
 
-		const hoverText = this.keybindingService.appendKeybinding(localize('openInVSCodeHover', "Switch to Advanced"), this.keybindingCommandId);
+		const hoverText = this.keybindingService.appendKeybinding(localize('openInVSCodeHover', "Switch to Editor"), this.keybindingCommandId);
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 
@@ -55,7 +56,7 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 			const actions = [
 				toAction({
 					id: 'agents.action.mode.editor',
-					label: localize('openInVSCodeSwitcher.editor', "Advanced"),
+					label: localize('openInVSCodeSwitcher.editor', "Editor"),
 					run: () => this.action.run(),
 				}),
 				toAction({
@@ -63,6 +64,11 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 					label: localize('openInVSCodeSwitcher.agents', "Simple"),
 					checked: true,
 					run: () => this.commandService.executeCommand(OPEN_BACKBOARD_AGENTS_COMMAND_ID),
+				}),
+				toAction({
+					id: 'agents.action.mode.advanced',
+					label: localize('openInVSCodeSwitcher.advanced', "Advanced"),
+					run: () => this.commandService.executeCommand(OPEN_BACKBOARD_ADVANCED_COMMAND_ID),
 				}),
 			];
 

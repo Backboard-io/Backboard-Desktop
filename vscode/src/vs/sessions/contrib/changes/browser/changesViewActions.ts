@@ -20,6 +20,8 @@ import { ChangesViewPane } from './changesView.js';
 import { URI } from '../../../../base/common/uri.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 
 const openChangesViewActionOptions: IAction2Options = {
 	id: 'workbench.action.agentSessions.openChangesView',
@@ -37,8 +39,7 @@ class OpenChangesViewAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		const viewsService = accessor.get(IViewsService);
-		await viewsService.openView(CHANGES_VIEW_ID, true);
+		await accessor.get(ICommandService).executeCommand(RightWorkbenchCommandId.OpenReview);
 	}
 }
 
@@ -189,5 +190,4 @@ class OpenFileAction extends Action2 {
 }
 
 registerAction2(OpenFileAction);
-
 

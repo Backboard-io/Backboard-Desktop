@@ -12,15 +12,16 @@ import { autorun, derivedOpts, IObservable } from '../../../../base/common/obser
 import { localize, localize2 } from '../../../../nls.js';
 import { IActionViewItemService } from '../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuItemAction, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
-import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 import { Menus } from '../../../browser/menus.js';
 import { SessionHasChangesContext } from '../../../common/contextkeys.js';
 import { ISessionContext } from '../../../services/sessions/browser/sessionContext.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
-import { ChangesMultiDiffSourceResolver, getChangesMultiDiffSourceUri } from './changesMultiDiffSourceResolver.js';
+import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
+import { ChangesMultiDiffSourceResolver } from './changesMultiDiffSourceResolver.js';
 import { ChangesViewModel } from './changesViewModel.js';
 
 // --- View All Changes action
@@ -46,7 +47,7 @@ class ViewAllChangesAction extends Action2 {
 	}
 
 	override async run(accessor: ServicesAccessor, session?: IActiveSession): Promise<void> {
-		const editorService = accessor.get(IEditorService);
+		const commandService = accessor.get(ICommandService);
 		const sessionsService = accessor.get(ISessionsService);
 
 		// The clicked session is forwarded as the argument by the session header,
@@ -57,13 +58,7 @@ class ViewAllChangesAction extends Action2 {
 			return;
 		}
 
-		// Open the multi-file diff editor in the editor part. The resource list is
-		// resolved reactively via the `ChangesMultiDiffSourceResolver` registered as
-		// a workbench contribution.
-		await editorService.openEditor({
-			multiDiffSource: getChangesMultiDiffSourceUri(sessionResource),
-			label: localize('sessions.changes.title', 'Session Changes'),
-		});
+		await commandService.executeCommand(RightWorkbenchCommandId.OpenReview);
 	}
 }
 registerAction2(ViewAllChangesAction);

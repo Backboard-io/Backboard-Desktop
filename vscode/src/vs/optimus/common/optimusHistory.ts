@@ -7,12 +7,39 @@ export interface IOptimusHistoryProvider {
 	listBackboardHistory(): Promise<readonly IOptimusHistoryEntry[]>;
 	readBackboardLiveState?(): Promise<IOptimusLiveState | undefined>;
 	listBackboardWorkspaces?(): Promise<readonly IOptimusWorkspaceEntry[]>;
-	openBackboardPanel?(): Promise<void>;
-	openBackboardHistory?(): Promise<void>;
-	openBackboardHistoryEntry?(id: string): Promise<void>;
-	openBackboardNewChat?(workspace?: string): Promise<void>;
-	sendBackboardPrompt?(prompt: string, chatId?: string, workspace?: string): Promise<void>;
+	readBackboardMetadata?(): Promise<IOptimusBackboardMetadata | undefined>;
+	sendBackboardPrompt?(prompt: string, chatId?: string, workspace?: string, options?: IOptimusPromptOptions): Promise<void>;
 	cancelBackboardPrompt?(): Promise<void>;
+}
+
+export interface IOptimusPromptOptions {
+	readonly provider?: string;
+	readonly model?: string;
+	readonly voiceMode?: string;
+}
+
+export interface IOptimusBackboardMetadata {
+	readonly settings?: IOptimusPromptOptions & { readonly authenticated?: boolean };
+	readonly models: readonly IOptimusBackboardModel[];
+	readonly updatedAt?: number;
+}
+
+export interface IOptimusBackboardModel {
+	readonly provider: string;
+	readonly name: string;
+	readonly displayName?: string;
+	readonly modelType?: string;
+	readonly contextLimit?: number;
+	readonly supportsThinking?: boolean;
+	readonly pricing?: string;
+	readonly inputPrice?: number;
+	readonly outputPrice?: number;
+	readonly inputPricePerMillion?: number;
+	readonly outputPricePerMillion?: number;
+	readonly inputCostPer1mTokens?: number;
+	readonly outputCostPer1mTokens?: number;
+	readonly promptPrice?: number;
+	readonly completionPrice?: number;
 }
 
 export interface IOptimusNavigationProvider {
@@ -59,6 +86,7 @@ export interface IOptimusLiveState {
 	readonly chatId?: string;
 	readonly prompt?: string;
 	readonly status?: string;
+	readonly statusKey?: string;
 	readonly running?: boolean;
 	readonly startedAt?: number;
 	readonly updatedAt?: number;

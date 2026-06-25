@@ -26,7 +26,7 @@ import type { IMarker, ITheme, Terminal as RawXtermTerminal, IBufferRange, IMark
 import { ScrollPosition } from './xterm/markNavigationAddon.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { GroupIdentifier } from '../../../common/editor.js';
-import { ACTIVE_GROUP_TYPE, AUX_WINDOW_GROUP_TYPE, SIDE_GROUP_TYPE } from '../../../services/editor/common/editorService.js';
+import { ACTIVE_GROUP_TYPE, AUX_WINDOW_GROUP_TYPE, MODAL_GROUP_TYPE, SIDE_GROUP_TYPE } from '../../../services/editor/common/editorService.js';
 import type { ICurrentPartialCommand } from '../../../../platform/terminal/common/capabilities/commandDetection/terminalCommand.js';
 import type { IXtermCore, IBufferSet } from './xterm-private.js';
 import type { IMenu } from '../../../../platform/actions/common/actions.js';
@@ -735,9 +735,10 @@ export interface ICreateTerminalOptions {
 }
 
 export interface TerminalEditorLocation {
-	viewColumn: GroupIdentifier | SIDE_GROUP_TYPE | ACTIVE_GROUP_TYPE | AUX_WINDOW_GROUP_TYPE;
+	viewColumn: GroupIdentifier | SIDE_GROUP_TYPE | ACTIVE_GROUP_TYPE | AUX_WINDOW_GROUP_TYPE | MODAL_GROUP_TYPE;
 	preserveFocus?: boolean;
 	auxiliary?: IEditorOptions['auxiliary'];
+	modal?: IEditorOptions['modal'];
 }
 
 /**

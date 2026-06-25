@@ -110,23 +110,6 @@ export class OpenVSCodeWindowAction extends Action2 {
 	}
 }
 
-export class OpenOptimusWindowAction extends Action2 {
-	static readonly ID = 'agents.openOptimusWindow';
-
-	constructor() {
-		super({
-			id: OpenOptimusWindowAction.ID,
-			title: localize2('openOptimusWindow', 'Open Optimus'),
-			f1: true,
-		});
-	}
-
-	override async run(accessor: ServicesAccessor): Promise<void> {
-		const nativeHostService = accessor.get(INativeHostService);
-		await nativeHostService.openOptimusWindow();
-	}
-}
-
 export class OpenJarvisWindowAction extends Action2 {
 	static readonly ID = 'agents.openJarvisWindow';
 

@@ -87,8 +87,8 @@ export class OpenOptimusWindowAction extends Action2 {
 	constructor() {
 		super({
 			id: OpenOptimusWindowAction.ID,
-			title: localize2('openOptimusWindow', "Open Optimus"),
-			category: localize2('optimus', "Optimus"),
+			title: localize2('openOptimusWindow', "Open Advanced"),
+			category: localize2('optimus', "Advanced"),
 			f1: true,
 		});
 	}

@@ -34,6 +34,7 @@ import { IPaneCompositePartService } from '../../panecomposite/browser/panecompo
 import { ICommandActionTitle, ILocalizedString } from '../../../../platform/action/common/action.js';
 import { IEditorService } from '../../editor/common/editorService.js';
 import { IViewsService } from '../common/viewsService.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 
 export class ViewsService extends Disposable implements IViewsService {
 
@@ -425,6 +426,12 @@ export class ViewsService extends Disposable implements IViewsService {
 					});
 				}
 				public async run(serviceAccessor: ServicesAccessor): Promise<void> {
+					const redirectCommand = getSessionsRightWorkbenchRedirectCommand(viewContainer.id);
+					if (redirectCommand) {
+						await serviceAccessor.get(ICommandService).executeCommand(redirectCommand);
+						return;
+					}
+
 					const editorGroupService = serviceAccessor.get(IEditorGroupsService);
 					const viewDescriptorService = serviceAccessor.get(IViewDescriptorService);
 					const layoutService = serviceAccessor.get(IWorkbenchLayoutService);
@@ -513,6 +520,12 @@ export class ViewsService extends Disposable implements IViewsService {
 				});
 			}
 			public async run(serviceAccessor: ServicesAccessor, options?: { preserveFocus?: boolean }): Promise<void> {
+				const redirectCommand = getSessionsRightWorkbenchRedirectCommandForView(viewDescriptor.id);
+				if (redirectCommand) {
+					await serviceAccessor.get(ICommandService).executeCommand(redirectCommand);
+					return;
+				}
+
 				const editorGroupService = serviceAccessor.get(IEditorGroupsService);
 				const viewDescriptorService = serviceAccessor.get(IViewDescriptorService);
 				const layoutService = serviceAccessor.get(IWorkbenchLayoutService);
@@ -595,8 +608,14 @@ export class ViewsService extends Disposable implements IViewsService {
 					}
 				});
 			}
-			run(accessor: ServicesAccessor, options?: { preserveFocus?: boolean }): void {
-				accessor.get(IViewsService).openView(viewDescriptor.id, !options?.preserveFocus);
+			async run(accessor: ServicesAccessor, options?: { preserveFocus?: boolean }): Promise<void> {
+				const redirectCommand = getSessionsRightWorkbenchRedirectCommandForView(viewDescriptor.id);
+				if (redirectCommand) {
+					await accessor.get(ICommandService).executeCommand(redirectCommand);
+					return;
+				}
+
+				await accessor.get(IViewsService).openView(viewDescriptor.id, !options?.preserveFocus);
 			}
 		});
 	}
@@ -711,5 +730,32 @@ export class ViewsService extends Disposable implements IViewsService {
 }
 
 function getEnabledViewContainerContextKey(viewContainerId: string): string { return `viewContainer.${viewContainerId}.enabled`; }
+
+function getSessionsRightWorkbenchRedirectCommand(viewContainerId: string): string | undefined {
+	switch (viewContainerId) {
+		case 'workbench.view.agentSessions.changesContainer':
+			return 'workbench.action.sessions.rightWorkbench.openReview';
+		case 'workbench.sessions.auxiliaryBar.filesContainer':
+			return 'workbench.action.sessions.rightWorkbench.openFiles';
+		case 'workbench.sessions.auxiliaryBar.browserContainer':
+			return 'workbench.action.sessions.rightWorkbench.openBrowser';
+		default:
+			return undefined;
+	}
+}
+
+function getSessionsRightWorkbenchRedirectCommandForView(viewId: string): string | undefined {
+	switch (viewId) {
+		case 'workbench.view.agentSessions.changes':
+			return 'workbench.action.sessions.rightWorkbench.openReview';
+		case 'sessions.files.explorer':
+		case 'sessions.files.explorer.empty':
+			return 'workbench.action.sessions.rightWorkbench.openFiles';
+		case 'sessions.browser.view':
+			return 'workbench.action.sessions.rightWorkbench.openBrowser';
+		default:
+			return undefined;
+	}
+}
 
 registerSingleton(IViewsService, ViewsService, InstantiationType.Eager /* Eager because it registers viewlets and panels in the constructor which are required during workbench layout */);

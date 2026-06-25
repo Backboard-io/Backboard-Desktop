@@ -6,13 +6,17 @@
 import { localize } from '../../nls.js';
 import { Disposable, toDisposable } from '../../base/common/lifecycle.js';
 import { IOptimusRun, OptimusActivityState, OptimusProvider, OptimusRunStatus } from '../common/optimusTypes.js';
-import { IOptimusHistoryEntry, IOptimusHistoryProvider, IOptimusLiveState, IOptimusNavigationProvider, IOptimusWorkspaceEntry } from '../common/optimusHistory.js';
+import { IOptimusBackboardModel, IOptimusHistoryEntry, IOptimusHistoryProvider, IOptimusLiveState, IOptimusNavigationProvider, IOptimusPromptOptions, IOptimusWorkspaceEntry } from '../common/optimusHistory.js';
 import { OptimusRunStore } from './optimusRunStore.js';
 
 interface IOptimusStarterTask {
 	readonly id: string;
 	readonly provider: OptimusProvider;
 }
+
+type OptimusVoiceMode = 'off' | 'tts';
+type OptimusComposerPopover = 'model' | undefined;
+type OptimusSidebarStatusKey = 'sending' | 'waiting' | 'streaming' | 'history-updated' | 'done' | 'cancelled' | 'progress' | 'tool' | 'voice' | 'media' | 'error';
 
 const starterTasks: readonly IOptimusStarterTask[] = [
 	{ id: 'slot-1', provider: OptimusProvider.Backboard },
@@ -28,6 +32,7 @@ export class OptimusApp extends Disposable {
 	private content!: HTMLElement;
 	private cardGrid!: HTMLElement;
 	private sidebar!: HTMLElement;
+	private sidebarRestoreButton!: HTMLButtonElement;
 	private headerActions!: HTMLElement;
 	private selectedStarter: IOptimusStarterTask | undefined;
 	private readonly runSlots = new Map<string, number>();
@@ -40,11 +45,25 @@ export class OptimusApp extends Disposable {
 	private draftPrompt = '';
 	private pendingPrompt: string | undefined;
 	private sidebarStatus: string | undefined;
+	private sidebarStatusKey: OptimusSidebarStatusKey | undefined;
 	private sidebarError: string | undefined;
 	private isSendingPrompt = false;
+	private sidebarCollapsed = false;
+	private backboardModels: readonly IOptimusBackboardModel[] = [];
+	private backboardSettings: IOptimusPromptOptions = {};
+	private selectedComposerModelKey: string | undefined;
+	private selectedVoiceMode: OptimusVoiceMode = 'off';
+	private activeComposerPopover: OptimusComposerPopover;
+	private modelFilter = '';
+	private modelProviderFiltersOpen = false;
+	private readonly disabledModelProviders = new Set<string>();
 	private pendingLayoutUpdate: number | undefined;
 	private pendingHistoryPoll: number | undefined;
 	private historyPollsRemaining = 0;
+	private readonly selectedHistoryStorageKey = 'optimus.selectedBackboardHistoryId';
+	private readonly sidebarCollapsedStorageKey = 'optimus.backboardSidebarCollapsed';
+	private readonly composerModelStorageKey = 'optimus.backboardComposerModel';
+	private readonly composerVoiceStorageKey = 'optimus.backboardComposerVoiceMode';
 
 	constructor(
 		private readonly container: HTMLElement,
@@ -53,6 +72,9 @@ export class OptimusApp extends Disposable {
 		private readonly navigationProvider: IOptimusNavigationProvider | undefined = undefined
 	) {
 		super();
+		this.sidebarCollapsed = this.readStoredBoolean(this.sidebarCollapsedStorageKey);
+		this.selectedComposerModelKey = this.readStoredComposerModelKey();
+		this.selectedVoiceMode = this.readStoredVoiceMode();
 		this._register(this.store.onDidChange(() => this.renderRuns()));
 		this._register(toDisposable(() => this.stopHistoryPolling()));
 	}
@@ -61,6 +83,7 @@ export class OptimusApp extends Disposable {
 		this.container.classList.add('optimus-root');
 		this.container.appendChild(this.renderShell());
 		this.renderRuns();
+		this.refreshMetadata().catch(console.error);
 		this.refreshHistory().catch(error => {
 			console.error(error);
 		});
@@ -89,8 +112,18 @@ export class OptimusApp extends Disposable {
 		this.sidebar.className = 'optimus-sidebar';
 		this.sidebar.setAttribute('aria-label', localize('optimus.sidebar.label', "Backboard agent"));
 
+		this.sidebarRestoreButton = document.createElement('button');
+		this.sidebarRestoreButton.type = 'button';
+		this.sidebarRestoreButton.className = 'optimus-sidebar-restore-button';
+		this.sidebarRestoreButton.textContent = localize('optimus.sidebar.open', "Chat");
+		this.sidebarRestoreButton.title = localize('optimus.sidebar.openPanel', "Open Backboard chat");
+		this.sidebarRestoreButton.setAttribute('aria-label', this.sidebarRestoreButton.title);
+		this.sidebarRestoreButton.addEventListener('click', () => this.setSidebarCollapsed(false));
+
 		this.content.appendChild(this.cardGrid);
 		this.content.appendChild(this.sidebar);
+		this.content.appendChild(this.sidebarRestoreButton);
+		this.applySidebarCollapsedState();
 		shell.appendChild(header);
 		shell.appendChild(this.content);
 		this.installResponsiveLayout();
@@ -169,10 +202,8 @@ export class OptimusApp extends Disposable {
 		select.title = localize('optimus.mode.select', "Switch Backboard mode");
 		select.setAttribute('aria-label', select.title);
 		select.appendChild(modeOption('editor', localize('optimus.mode.editor', "Editor")));
-		select.appendChild(modeOption('agents', localize('optimus.mode.agents', "Agents")));
-		const currentModeOption = modeOption('optimus', localize('optimus.mode.optimus', "Optimus"));
-		currentModeOption.hidden = true;
-		select.appendChild(currentModeOption);
+		select.appendChild(modeOption('agents', localize('optimus.mode.agents', "Simple")));
+		select.appendChild(modeOption('optimus', localize('optimus.mode.optimus', "Advanced")));
 		select.value = 'optimus';
 		select.addEventListener('change', () => {
 			const value = select.value;
@@ -192,7 +223,7 @@ export class OptimusApp extends Disposable {
 		brand.className = 'optimus-brand';
 
 		const title = document.createElement('h1');
-		title.textContent = localize('optimus.title', "Optimus");
+		title.textContent = localize('optimus.title', "Advanced");
 
 		const subtitle = document.createElement('p');
 		subtitle.textContent = localize('optimus.subtitle', "Multi-agent control");
@@ -204,6 +235,18 @@ export class OptimusApp extends Disposable {
 
 	private renderHeaderActions(): void {
 		this.headerActions.replaceChildren();
+
+		const sidebarToggle = document.createElement('button');
+		sidebarToggle.type = 'button';
+		sidebarToggle.className = 'optimus-header-button optimus-sidebar-toggle-button';
+		sidebarToggle.textContent = this.sidebarCollapsed
+			? localize('optimus.sidebar.openShort', "Chat")
+			: localize('optimus.sidebar.closeShort', "Hide");
+		sidebarToggle.title = this.sidebarCollapsed
+			? localize('optimus.sidebar.openPanel', "Open Backboard chat")
+			: localize('optimus.sidebar.closePanel', "Close Backboard chat");
+		sidebarToggle.setAttribute('aria-label', sidebarToggle.title);
+		sidebarToggle.addEventListener('click', () => this.setSidebarCollapsed(!this.sidebarCollapsed));
 
 		const workspaceSelect = document.createElement('select');
 		workspaceSelect.className = 'optimus-workspace-select';
@@ -218,6 +261,7 @@ export class OptimusApp extends Disposable {
 			this.selectedWorkspace = workspaceSelect.value || undefined;
 			if (this.selectedHistory && !this.historyMatchesSelectedWorkspace(this.selectedHistory)) {
 				this.selectedHistory = undefined;
+				this.clearRememberedSelectedHistory();
 			}
 			this.renderRuns();
 		});
@@ -239,24 +283,16 @@ export class OptimusApp extends Disposable {
 			? localize('optimus.agentCount.one', "1 agent")
 			: localize('optimus.agentCount.many', "{0} agents", runCount);
 
-		const openPanel = document.createElement('button');
-		openPanel.type = 'button';
-		openPanel.className = 'optimus-header-button icon';
-		openPanel.textContent = '>';
-		openPanel.title = localize('optimus.openBackboardPanel', "Open Backboard panel");
-		openPanel.setAttribute('aria-label', openPanel.title);
-		openPanel.addEventListener('click', () => this.openBackboardPanel());
-
+		this.headerActions.appendChild(sidebarToggle);
 		this.headerActions.appendChild(workspaceSelect);
 		this.headerActions.appendChild(newAgent);
 		this.headerActions.appendChild(count);
-		this.headerActions.appendChild(openPanel);
 	}
 
 	private renderTaskBoard(): HTMLElement {
 		const board = document.createElement('section');
 		board.className = 'optimus-task-board';
-		board.setAttribute('aria-label', localize('optimus.taskBoard.label', "Optimus task launchers"));
+		board.setAttribute('aria-label', localize('optimus.taskBoard.label', "Advanced task launchers"));
 
 		const slottedRuns = this.slottedRuns();
 		const promptEntries = this.promptTileEntries();
@@ -303,7 +339,7 @@ export class OptimusApp extends Disposable {
 		button.className = `optimus-starter-card${historyEntry ? ` has-prompt ${historyStatusClass(historyEntry)}` : ''}${this.selectedStarter?.id === starter.id ? ' selected' : ''}`;
 		button.setAttribute('aria-label', historyEntry
 			? localize('optimus.slot.openPrompt', "Open Backboard prompt {0}", promptTileTitle(historyEntry))
-			: localize('optimus.slot.newPrompt', "Start a new Optimus prompt in slot {0}", slot + 1));
+			: localize('optimus.slot.newPrompt', "Start a new Advanced prompt in slot {0}", slot + 1));
 		button.setAttribute('aria-pressed', this.selectedStarter?.id === starter.id ? 'true' : 'false');
 		button.addEventListener('click', () => {
 			if (historyEntry) {
@@ -442,20 +478,24 @@ export class OptimusApp extends Disposable {
 		const starter = starterTasks[slot];
 		this.selectedStarter = starter;
 		this.selectedHistory = undefined;
+		this.clearRememberedSelectedHistory();
 		this.store.selectRun(undefined);
 		this.sidebarStatus = undefined;
+		this.sidebarStatusKey = undefined;
 		this.sidebarError = undefined;
 		this.renderHeaderActions();
 		this.renderRuns();
 		this.focusSidebarComposer();
 	}
 
-	private renderRuns(): void {
+	private renderRuns(options: { readonly renderSidebar?: boolean } = {}): void {
 		this.renderHeaderActions();
 		this.updateResponsiveLayout();
 		this.cardGrid.replaceChildren();
 		this.cardGrid.appendChild(this.renderTaskBoard());
-		this.renderSidebar();
+		if (options.renderSidebar !== false) {
+			this.renderSidebar();
+		}
 	}
 
 	private slottedRuns(): Map<number, IOptimusRun> {
@@ -625,10 +665,10 @@ export class OptimusApp extends Disposable {
 	private openRun(runId: string): void {
 		this.selectedStarter = undefined;
 		this.selectedHistory = undefined;
+		this.clearRememberedSelectedHistory();
 		this.renderHeaderActions();
 		this.store.selectRun(runId);
 		this.store.openWorktree(runId).catch(console.error);
-		this.openBackboardPanel();
 	}
 
 	private async refreshHistory(): Promise<void> {
@@ -638,36 +678,53 @@ export class OptimusApp extends Disposable {
 		try {
 			this.historyEntries = await this.historyProvider.listBackboardHistory();
 			await this.refreshLiveState();
+			if (!this.selectedHistory && !this.selectedStarter) {
+				this.selectedHistory = this.storedSelectedHistory();
+			}
+			const selectedPersistedHistory = this.selectedHistory ? this.historyEntries.find(entry => entry.id === this.selectedHistory?.id) : undefined;
 			const selectedHistory = this.selectedHistory
-				? this.historyEntries.find(entry => entry.id === this.selectedHistory?.id) ?? (this.liveHistoryEntry?.id === this.selectedHistory.id ? this.liveHistoryEntry : undefined)
+				? selectedPersistedHistory ?? (this.liveHistoryEntry?.id === this.selectedHistory.id ? this.liveHistoryEntry : undefined)
 				: undefined;
 			if (selectedHistory) {
 				this.selectedHistory = selectedHistory;
-				if (this.pendingPrompt && historyEntryMatchesPrompt(selectedHistory, this.pendingPrompt) && !this.liveStateRunning) {
+				this.rememberSelectedHistory(selectedHistory.id);
+				if (this.pendingPrompt && historyEntryMatchesPrompt(selectedHistory, this.pendingPrompt) && (selectedPersistedHistory || !this.liveStateRunning)) {
 					this.pendingPrompt = undefined;
 					this.isSendingPrompt = false;
+					this.liveStateRunning = false;
 					this.sidebarStatus = localize('optimus.sidebar.historyUpdated', "Backboard response updated.");
+					this.sidebarStatusKey = 'history-updated';
 				}
 			} else if (this.pendingPrompt) {
 				const pendingPrompt = this.pendingPrompt;
-				const pendingHistory = this.historyEntries.find(entry => historyEntryMatchesPrompt(entry, pendingPrompt))
+				const pendingPersistedHistory = this.historyEntries.find(entry => historyEntryMatchesPrompt(entry, pendingPrompt));
+				const pendingHistory = pendingPersistedHistory
 					?? (this.liveHistoryEntry && historyEntryMatchesPrompt(this.liveHistoryEntry, pendingPrompt) ? this.liveHistoryEntry : undefined);
 				if (pendingHistory) {
 					this.selectedStarter = undefined;
 					this.selectedHistory = pendingHistory;
-					if (!this.liveStateRunning) {
+					this.rememberSelectedHistory(pendingHistory.id);
+					if (pendingPersistedHistory || !this.liveStateRunning) {
 						this.pendingPrompt = undefined;
 						this.isSendingPrompt = false;
+						this.liveStateRunning = false;
 						this.sidebarStatus = localize('optimus.sidebar.historyUpdated', "Backboard response updated.");
+						this.sidebarStatusKey = 'history-updated';
 					}
+				}
+			} else if (!this.selectedStarter) {
+				this.selectedHistory = this.filteredHistoryEntries()[0];
+				if (this.selectedHistory) {
+					this.rememberSelectedHistory(this.selectedHistory.id);
 				}
 			} else if (this.selectedHistory) {
 				this.selectedHistory = undefined;
+				this.clearRememberedSelectedHistory();
 			}
 		} catch (error) {
 			console.error(error);
 		} finally {
-			this.renderRuns();
+			this.renderRuns({ renderSidebar: !this.activeComposerPopover });
 		}
 	}
 
@@ -686,14 +743,18 @@ export class OptimusApp extends Disposable {
 		if (this.pendingPrompt && historyEntryMatchesPrompt(liveEntry, this.pendingPrompt)) {
 			this.selectedStarter = undefined;
 			this.selectedHistory = liveEntry;
+			this.rememberSelectedHistory(liveEntry.id);
 			this.isSendingPrompt = liveState.running === true;
 			this.sidebarStatus = liveState.status ?? (liveState.running ? localize('optimus.sidebar.streaming', "Backboard is streaming.") : localize('optimus.sidebar.historyUpdated', "Backboard response updated."));
+			this.sidebarStatusKey = liveStateStatusKey(liveState) ?? (liveState.running ? 'streaming' : 'history-updated');
 			if (!liveState.running && liveEntry.messages.some(message => sidebarRoleClass(message.role) === 'assistant')) {
 				this.pendingPrompt = undefined;
 			}
 		} else if (this.selectedHistory?.id === liveEntry.id || (!this.selectedHistory && liveState.running)) {
 			this.selectedHistory = liveEntry;
+			this.rememberSelectedHistory(liveEntry.id);
 			this.sidebarStatus = liveState.status;
+			this.sidebarStatusKey = liveStateStatusKey(liveState);
 			this.isSendingPrompt = liveState.running === true;
 		}
 	}
@@ -706,18 +767,45 @@ export class OptimusApp extends Disposable {
 		this.renderHeaderActions();
 	}
 
+	private async refreshMetadata(options: { readonly renderSidebar?: boolean } = {}): Promise<void> {
+		try {
+			const metadata = await this.historyProvider?.readBackboardMetadata?.();
+			if (!metadata) {
+				return;
+			}
+			this.backboardSettings = metadata.settings ?? {};
+			this.backboardModels = metadata.models.filter(isVisibleBackboardModel);
+			if (!this.selectedComposerModelKey) {
+				const provider = this.backboardSettings.provider;
+				const model = this.backboardSettings.model;
+				if (provider && model) {
+					this.selectedComposerModelKey = composerModelKey(provider, model);
+				}
+			}
+			if (!this.readStoredVoiceModeValue() && this.backboardSettings.voiceMode === 'tts') {
+				this.selectedVoiceMode = 'tts';
+			}
+		} catch (error) {
+			this.sidebarError = error instanceof Error
+				? error.message
+				: localize('optimus.sidebar.metadataError', "Backboard model metadata could not be loaded.");
+		} finally {
+			if (options.renderSidebar !== false) {
+				this.renderSidebar();
+			}
+		}
+	}
+
 	private openHistoryEntry(entry: IOptimusHistoryEntry): void {
 		this.selectedStarter = undefined;
 		this.selectedHistory = entry;
+		this.rememberSelectedHistory(entry.id);
 		this.store.selectRun(undefined);
 		this.sidebarStatus = undefined;
+		this.sidebarStatusKey = undefined;
 		this.sidebarError = undefined;
 		this.renderHeaderActions();
 		this.renderRuns();
-	}
-
-	private openBackboardPanel(): void {
-		this.historyProvider?.openBackboardPanel?.().catch(console.error);
 	}
 
 	private filteredHistoryEntries(): readonly IOptimusHistoryEntry[] {
@@ -736,55 +824,91 @@ export class OptimusApp extends Disposable {
 			return;
 		}
 
+		const shouldStickToBottom = this.shouldStickSidebarToBottom() || this.isSendingPrompt || this.liveStateRunning;
 		this.sidebar.classList.toggle('working', this.isSendingPrompt);
 		this.sidebar.replaceChildren();
 
 		const header = document.createElement('header');
 		header.className = 'optimus-sidebar-header';
 
-		const titleBlock = document.createElement('div');
-		titleBlock.className = 'optimus-sidebar-title';
+		const titleRow = document.createElement('div');
+		titleRow.className = 'optimus-sidebar-title-row';
 
 		const title = document.createElement('h2');
-		title.textContent = localize('optimus.sidebar.title', "Backboard");
-		const subtitle = document.createElement('p');
-		subtitle.textContent = this.selectedHistory
-			? promptTileTitle(this.selectedHistory)
-			: localize('optimus.sidebar.newChat', "New Optimus agent");
+		title.className = 'optimus-sidebar-brand-title';
+		title.textContent = localize('optimus.sidebar.chatTitle', "Chat");
 
-		titleBlock.append(title, subtitle);
-		header.appendChild(titleBlock);
+		const spacer = document.createElement('div');
+		spacer.className = 'optimus-sidebar-header-spacer';
 
 		const actions = document.createElement('div');
 		actions.className = 'optimus-sidebar-actions';
-		const refresh = document.createElement('button');
-		refresh.type = 'button';
-		refresh.className = 'optimus-sidebar-icon-button';
-		refresh.textContent = '⟳';
-		refresh.title = localize('optimus.sidebar.refresh', "Refresh");
-		refresh.setAttribute('aria-label', refresh.title);
-		refresh.addEventListener('click', () => this.refreshHistory().catch(console.error));
-		actions.appendChild(refresh);
-
 		const newChat = document.createElement('button');
 		newChat.type = 'button';
 		newChat.className = 'optimus-sidebar-icon-button';
-		newChat.textContent = '+';
+		newChat.appendChild(codicon('add'));
 		newChat.title = localize('optimus.sidebar.newAgent', "New Agent");
 		newChat.setAttribute('aria-label', newChat.title);
 		newChat.addEventListener('click', () => this.startDraftTask(this.nextOpenSlot()));
 		actions.appendChild(newChat);
-		header.appendChild(actions);
+
+		const refresh = document.createElement('button');
+		refresh.type = 'button';
+		refresh.className = 'optimus-sidebar-icon-button';
+		refresh.appendChild(codicon('refresh'));
+		refresh.title = localize('optimus.sidebar.refresh', "Refresh");
+		refresh.setAttribute('aria-label', refresh.title);
+		refresh.addEventListener('click', () => {
+			this.refreshMetadata().catch(console.error);
+			this.refreshHistory().catch(console.error);
+		});
+		actions.appendChild(refresh);
+
+		const close = document.createElement('button');
+		close.type = 'button';
+		close.className = 'optimus-sidebar-icon-button';
+		close.appendChild(codicon('close'));
+		close.title = localize('optimus.sidebar.closePanel', "Close Backboard chat");
+		close.setAttribute('aria-label', close.title);
+		close.addEventListener('click', () => this.setSidebarCollapsed(true));
+		actions.appendChild(close);
+		titleRow.append(title, spacer, actions);
+
+		const tabs = document.createElement('div');
+		tabs.className = 'optimus-sidebar-tabs';
+		const backboardTab = document.createElement('button');
+		backboardTab.type = 'button';
+		backboardTab.className = 'optimus-sidebar-tab selected';
+		backboardTab.textContent = localize('optimus.sidebar.title', "Backboard");
+		backboardTab.addEventListener('click', () => {
+			const sidebarBody = this.sidebar?.querySelector('.optimus-sidebar-body');
+			if (sidebarBody instanceof HTMLElement) {
+				this.scrollSidebarToBottom(sidebarBody);
+			}
+		});
+		tabs.appendChild(backboardTab);
+
+		const contextTab = document.createElement('button');
+		contextTab.type = 'button';
+		contextTab.className = 'optimus-sidebar-tab';
+		contextTab.textContent = this.selectedHistory
+			? promptTileTitle(this.selectedHistory)
+			: localize('optimus.sidebar.newChat', "New Agent");
+		contextTab.addEventListener('click', () => this.startDraftTask(this.nextOpenSlot()));
+		tabs.appendChild(contextTab);
+		header.append(titleRow, tabs);
 
 		const body = document.createElement('div');
 		body.className = 'optimus-sidebar-body';
 		body.setAttribute('role', 'log');
 		body.setAttribute('aria-live', this.isSendingPrompt ? 'polite' : 'off');
-		const messages = this.selectedHistory?.messages ?? [];
+		const messages = coalesceSidebarMessages(this.selectedHistory?.messages ?? []);
+		const streamingAssistantIndex = this.isSendingPrompt ? lastAssistantMessageIndex(messages) : -1;
 		const selectedContainsPendingPrompt = !!this.pendingPrompt && messages.some(message => message.role === 'user' && normalizeHistoryText(message.content) === normalizeHistoryText(this.pendingPrompt));
 		if (messages.length) {
-			for (const message of messages) {
-				body.appendChild(this.renderSidebarMessage(message.role, message.content));
+			for (let index = 0; index < messages.length; index++) {
+				const message = messages[index];
+				body.appendChild(this.renderSidebarMessage(message.role, message.content, index === streamingAssistantIndex));
 			}
 			if (this.pendingPrompt && !selectedContainsPendingPrompt) {
 				body.appendChild(this.renderSidebarMessage('user', this.pendingPrompt));
@@ -796,11 +920,32 @@ export class OptimusApp extends Disposable {
 		} else {
 			const empty = document.createElement('div');
 			empty.className = 'optimus-sidebar-empty';
-			empty.textContent = localize('optimus.sidebar.empty', "Start a prompt or select a tile.");
+			const emptyTitle = document.createElement('h3');
+			emptyTitle.textContent = localize('optimus.sidebar.emptyTitle', "New Agent");
+			const emptyDescription = document.createElement('p');
+			emptyDescription.textContent = localize('optimus.sidebar.emptyDescription', "Start with a task.");
+			const suggestions = document.createElement('div');
+			suggestions.className = 'optimus-sidebar-empty-suggestions';
+			for (const suggestion of [
+				localize('optimus.sidebar.suggestion.typescript', "Fix TypeScript errors"),
+				localize('optimus.sidebar.suggestion.refactor', "Refactor this component"),
+				localize('optimus.sidebar.suggestion.darkMode', "Add dark mode support")
+			]) {
+				const suggestionButton = document.createElement('button');
+				suggestionButton.type = 'button';
+				suggestionButton.className = 'optimus-sidebar-empty-suggestion';
+				suggestionButton.textContent = suggestion;
+				suggestionButton.addEventListener('click', () => {
+					this.draftPrompt = suggestion;
+					this.renderSidebar();
+				});
+				suggestions.appendChild(suggestionButton);
+			}
+			empty.append(emptyTitle, emptyDescription, suggestions);
 			body.appendChild(empty);
 		}
 
-		if (this.sidebarStatus) {
+		if (this.sidebarStatus && shouldRenderSidebarStatus(this.sidebarStatusKey, messages)) {
 			body.appendChild(this.renderSidebarStatus(this.sidebarStatus));
 		}
 		if (this.sidebarError) {
@@ -820,7 +965,9 @@ export class OptimusApp extends Disposable {
 		let sendButton: HTMLButtonElement | undefined;
 		const updateSendButton = () => {
 			if (sendButton) {
-				sendButton.disabled = this.isSendingPrompt || !this.draftPrompt.trim() || !this.historyProvider?.sendBackboardPrompt;
+				const canSend = !this.isSendingPrompt && !!this.draftPrompt.trim() && !!this.historyProvider?.sendBackboardPrompt;
+				sendButton.disabled = !canSend;
+				sendButton.classList.toggle('ready', canSend);
 			}
 		};
 
@@ -830,7 +977,7 @@ export class OptimusApp extends Disposable {
 		textarea.value = this.draftPrompt;
 		textarea.placeholder = this.selectedHistory
 			? localize('optimus.sidebar.followupPlaceholder', "Message this Backboard agent")
-			: localize('optimus.sidebar.placeholder', "Ask Backboard to work on something");
+			: localize('optimus.sidebar.placeholder', "Chat with Backboard");
 		textarea.addEventListener('input', () => {
 			this.draftPrompt = textarea.value;
 			updateSendButton();
@@ -847,19 +994,66 @@ export class OptimusApp extends Disposable {
 		const composerBar = document.createElement('div');
 		composerBar.className = 'optimus-sidebar-composer-bar';
 
+		const composerLeft = document.createElement('div');
+		composerLeft.className = 'optimus-sidebar-composer-left';
+
+		const modelButton = document.createElement('button');
+		modelButton.type = 'button';
+		modelButton.className = `optimus-sidebar-model-button${this.activeComposerPopover === 'model' ? ' active' : ''}`;
+		modelButton.title = localize('optimus.sidebar.modelSelect', "Backboard model");
+		modelButton.setAttribute('aria-label', modelButton.title);
+		const modelIcon = document.createElement('span');
+		modelIcon.className = 'optimus-sidebar-model-icon';
+		modelIcon.appendChild(providerCodicon(this.currentComposerModel()?.provider));
+		const modelPrefix = document.createElement('span');
+		modelPrefix.className = 'optimus-sidebar-model-prefix';
+		modelPrefix.textContent = localize('optimus.sidebar.modelPrefix', "Model");
+		const modelValue = document.createElement('span');
+		modelValue.className = 'optimus-sidebar-model-value';
+		modelValue.textContent = this.currentComposerModelLabel();
+		const modelChevron = document.createElement('span');
+		modelChevron.className = 'codicon codicon-chevron-down optimus-sidebar-chevron';
+		modelButton.append(modelIcon, modelPrefix, modelValue, modelChevron);
+		modelButton.addEventListener('click', () => {
+			this.activeComposerPopover = this.activeComposerPopover === 'model' ? undefined : 'model';
+			this.modelFilter = '';
+			this.modelProviderFiltersOpen = false;
+			this.renderSidebar();
+		});
+
 		const context = document.createElement('span');
 		context.className = 'optimus-sidebar-context';
 		context.textContent = this.selectedWorkspace
 			? workspaceLabel(this.selectedWorkspace)
 			: localize('optimus.sidebar.allWorkspaces', "All workspaces");
+		composerLeft.append(modelButton, context);
 
 		const controls = document.createElement('div');
 		controls.className = 'optimus-sidebar-controls';
+		const voice = document.createElement('button');
+		voice.type = 'button';
+		voice.className = `optimus-sidebar-icon-button optimus-sidebar-voice-button${this.selectedVoiceMode === 'tts' ? ' active' : ''}`;
+		const voiceIcon = document.createElement('span');
+		voiceIcon.className = this.selectedVoiceMode === 'tts' ? 'codicon codicon-unmute' : 'codicon codicon-mute';
+		voice.appendChild(voiceIcon);
+		voice.title = this.selectedVoiceMode === 'tts'
+			? localize('optimus.sidebar.voiceEnabled', "Backboard voice on")
+			: localize('optimus.sidebar.voiceDisabled', "Backboard voice off");
+		voice.setAttribute('aria-label', voice.title);
+		voice.setAttribute('aria-pressed', this.selectedVoiceMode === 'tts' ? 'true' : 'false');
+		voice.addEventListener('click', () => {
+			this.selectedVoiceMode = this.selectedVoiceMode === 'tts' ? 'off' : 'tts';
+			this.storeVoiceMode(this.selectedVoiceMode);
+			this.renderSidebar();
+		});
+		controls.appendChild(voice);
 		if (this.isSendingPrompt) {
 			const cancel = document.createElement('button');
 			cancel.type = 'button';
-			cancel.className = 'optimus-sidebar-secondary-button';
-			cancel.textContent = localize('optimus.sidebar.cancel', "Cancel");
+			cancel.className = 'optimus-sidebar-icon-button optimus-sidebar-secondary-button';
+			cancel.appendChild(codicon('debug-stop'));
+			cancel.title = localize('optimus.sidebar.cancel', "Cancel");
+			cancel.setAttribute('aria-label', cancel.title);
 			cancel.addEventListener('click', () => this.cancelSidebarPrompt().catch(console.error));
 			controls.appendChild(cancel);
 		}
@@ -867,21 +1061,29 @@ export class OptimusApp extends Disposable {
 		const send = document.createElement('button');
 		sendButton = send;
 		send.type = 'submit';
-		send.className = 'optimus-sidebar-send-button';
-		send.textContent = localize('optimus.sidebar.send', "Send");
+		send.className = 'optimus-sidebar-icon-button optimus-sidebar-send-button';
+		send.appendChild(codicon('send'));
+		send.title = localize('optimus.sidebar.send', "Send");
+		send.setAttribute('aria-label', send.title);
 		updateSendButton();
 		controls.appendChild(send);
 
-		composerBar.append(context, controls);
+		composerBar.append(composerLeft, controls);
 		form.append(textarea, composerBar);
+		const popover = this.renderComposerPopover();
+		if (popover) {
+			form.appendChild(popover);
+		}
 
 		this.sidebar.append(header, body, form);
-		this.scrollSidebarToBottom(body);
+		if (shouldStickToBottom) {
+			this.scrollSidebarToBottom(body);
+		}
 	}
 
-	private renderSidebarMessage(role: string, content: string): HTMLElement {
+	private renderSidebarMessage(role: string, content: string, isStreaming = false): HTMLElement {
 		const message = document.createElement('article');
-		message.className = `optimus-sidebar-message ${sidebarRoleClass(role)}`;
+		message.className = `optimus-sidebar-message ${sidebarRoleClass(role)}${isStreaming ? ' streaming' : ''}`;
 
 		const header = document.createElement('header');
 		header.className = 'optimus-sidebar-message-header';
@@ -902,7 +1104,30 @@ export class OptimusApp extends Disposable {
 
 		const text = document.createElement('div');
 		text.className = 'optimus-sidebar-message-content';
-		text.textContent = content;
+		if (sidebarRoleClass(role) === 'voice') {
+			const sources = audioSourcesFromText(content);
+			if (sources.length) {
+				for (const source of sources) {
+					if (source.kind === 'audio') {
+						const audio = document.createElement('audio');
+						audio.controls = true;
+						audio.src = source.url;
+						text.appendChild(audio);
+					} else {
+						const link = document.createElement('a');
+						link.href = source.url;
+						link.target = '_blank';
+						link.rel = 'noreferrer noopener';
+						link.textContent = source.label;
+						text.appendChild(link);
+					}
+				}
+			} else {
+				text.textContent = content;
+			}
+		} else {
+			text.textContent = content;
+		}
 
 		message.append(header, text);
 		return message;
@@ -913,6 +1138,181 @@ export class OptimusApp extends Disposable {
 		status.className = 'optimus-sidebar-status';
 		status.textContent = text;
 		return status;
+	}
+
+	private renderComposerPopover(): HTMLElement | undefined {
+		if (this.activeComposerPopover !== 'model') {
+			return undefined;
+		}
+
+		const popover = document.createElement('div');
+		popover.className = 'optimus-sidebar-popover open';
+		popover.setAttribute('role', 'dialog');
+		popover.setAttribute('aria-label', localize('optimus.sidebar.modelPopover', "Select a Backboard model"));
+
+		const filterWrap = document.createElement('div');
+		filterWrap.className = 'optimus-sidebar-model-filter-wrap';
+		const filterBar = document.createElement('div');
+		filterBar.className = 'optimus-sidebar-model-filter-bar';
+		const filter = document.createElement('input');
+		filter.className = 'optimus-sidebar-model-filter';
+		filter.type = 'search';
+		filter.placeholder = localize('optimus.sidebar.modelSearch', "Select a model...");
+		filter.value = this.modelFilter;
+		filter.addEventListener('input', () => {
+			this.modelFilter = filter.value;
+			this.renderSidebar();
+			this.focusModelFilter();
+		});
+		const providerFilter = document.createElement('button');
+		providerFilter.type = 'button';
+		providerFilter.className = `optimus-sidebar-model-filter-button${this.modelProviderFiltersOpen ? ' active' : ''}`;
+		providerFilter.textContent = localize('optimus.sidebar.modelProviderFilter', "Filter");
+		providerFilter.title = localize('optimus.sidebar.modelProviderFilterTitle', "Filter by provider");
+		providerFilter.setAttribute('aria-label', providerFilter.title);
+		providerFilter.setAttribute('aria-expanded', this.modelProviderFiltersOpen ? 'true' : 'false');
+		providerFilter.addEventListener('click', () => {
+			this.modelProviderFiltersOpen = !this.modelProviderFiltersOpen;
+			this.renderSidebar();
+		});
+		filterBar.append(filter, providerFilter);
+		filterWrap.appendChild(filterBar);
+		popover.appendChild(filterWrap);
+
+		const body = document.createElement('div');
+		body.className = 'optimus-sidebar-popover-body';
+		if (this.modelProviderFiltersOpen) {
+			this.renderModelProviderFilters(body);
+			popover.appendChild(body);
+			return popover;
+		}
+
+		const models = this.filteredComposerModels();
+		if (!models.length) {
+			const empty = document.createElement('div');
+			empty.className = 'optimus-sidebar-popover-empty';
+			empty.textContent = this.backboardModels.length
+				? localize('optimus.sidebar.noMatchingModels', "No matching models")
+				: localize('optimus.sidebar.noModels', "Backboard models have not loaded yet");
+			body.appendChild(empty);
+		} else {
+			for (const provider of sortedModelProviders(models)) {
+				const section = document.createElement('section');
+				section.className = 'optimus-sidebar-popover-section';
+				const title = document.createElement('div');
+				title.className = 'optimus-sidebar-popover-section-title';
+				title.textContent = providerDisplayName(provider);
+				section.appendChild(title);
+				for (const model of models.filter(model => model.provider === provider)) {
+					section.appendChild(this.renderModelChoice(model));
+				}
+				body.appendChild(section);
+			}
+		}
+		const actions = document.createElement('div');
+		actions.className = 'optimus-sidebar-popover-actions';
+		const refreshModels = document.createElement('button');
+		refreshModels.type = 'button';
+		refreshModels.className = 'optimus-sidebar-drawer-button';
+		refreshModels.append(codicon('refresh'), document.createTextNode(localize('optimus.sidebar.refreshModels', "Refresh Models")));
+		refreshModels.addEventListener('click', () => this.refreshMetadata().catch(console.error));
+		actions.appendChild(refreshModels);
+		body.appendChild(actions);
+		popover.appendChild(body);
+		return popover;
+	}
+
+	private renderModelProviderFilters(container: HTMLElement): void {
+		const providers = sortedModelProviders(this.composerModelSource());
+		const providerList = document.createElement('div');
+		providerList.className = 'optimus-sidebar-provider-switch-list';
+
+		const allProviders = document.createElement('button');
+		allProviders.type = 'button';
+		allProviders.className = `optimus-sidebar-provider-switch${this.disabledModelProviders.size === 0 ? ' active' : ''}`;
+		allProviders.setAttribute('aria-pressed', this.disabledModelProviders.size === 0 ? 'true' : 'false');
+		const allName = document.createElement('span');
+		allName.className = 'optimus-sidebar-provider-switch-name';
+		allName.textContent = localize('optimus.sidebar.allProviders', "All providers");
+		allProviders.append(allName, providerSwitchToggle(this.disabledModelProviders.size === 0));
+		allProviders.addEventListener('click', () => {
+			this.disabledModelProviders.clear();
+			this.renderSidebar();
+		});
+		providerList.appendChild(allProviders);
+
+		for (const provider of providers) {
+			const active = !this.disabledModelProviders.has(provider);
+			const row = document.createElement('button');
+			row.type = 'button';
+			row.className = `optimus-sidebar-provider-switch${active ? ' active' : ''}`;
+			row.setAttribute('aria-pressed', active ? 'true' : 'false');
+			const icon = document.createElement('span');
+			icon.className = 'optimus-sidebar-provider-switch-icon';
+			icon.appendChild(providerCodicon(provider));
+			const name = document.createElement('span');
+			name.className = 'optimus-sidebar-provider-switch-name';
+			name.textContent = providerDisplayName(provider);
+			row.append(icon, name, providerSwitchToggle(active));
+			row.addEventListener('click', () => {
+				if (this.disabledModelProviders.has(provider)) {
+					this.disabledModelProviders.delete(provider);
+				} else {
+					this.disabledModelProviders.add(provider);
+				}
+				this.renderSidebar();
+			});
+			providerList.appendChild(row);
+		}
+
+		const done = document.createElement('button');
+		done.type = 'button';
+		done.className = 'optimus-sidebar-provider-filter-done';
+		done.textContent = localize('optimus.sidebar.providerFilterDone', "Done");
+		done.addEventListener('click', () => {
+			this.modelProviderFiltersOpen = false;
+			this.renderSidebar();
+		});
+
+		container.append(providerList, done);
+	}
+
+	private renderModelChoice(model: IOptimusBackboardModel): HTMLElement {
+		const selected = composerModelKey(model.provider, model.name) === this.currentComposerModelKey();
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = `optimus-sidebar-choice-row optimus-sidebar-model-choice${selected ? ' selected' : ''}`;
+		button.addEventListener('click', () => {
+			this.selectedComposerModelKey = composerModelKey(model.provider, model.name);
+			this.storeComposerModelKey(this.selectedComposerModelKey);
+			this.activeComposerPopover = undefined;
+			this.modelFilter = '';
+			this.renderSidebar();
+		});
+
+		const icon = document.createElement('span');
+		icon.className = 'optimus-sidebar-choice-icon';
+		icon.appendChild(providerCodicon(model.provider));
+
+		const main = document.createElement('span');
+		main.className = 'optimus-sidebar-choice-main';
+		const label = document.createElement('span');
+		label.className = 'optimus-sidebar-choice-label';
+		label.textContent = model.displayName || model.name;
+		const meta = document.createElement('span');
+		meta.className = 'optimus-sidebar-choice-meta';
+		meta.textContent = model.name;
+		main.append(label, meta);
+
+		const price = document.createElement('span');
+		price.className = 'optimus-sidebar-model-choice-meta';
+		price.textContent = modelPriceLabel(model);
+
+		const check = document.createElement('span');
+		check.className = selected ? 'codicon codicon-check optimus-sidebar-choice-check' : 'optimus-sidebar-choice-check optimus-sidebar-choice-check-spacer';
+
+		button.append(icon, main, price, check);
+		return button;
 	}
 
 	private async sendSidebarPrompt(): Promise<void> {
@@ -929,18 +1329,22 @@ export class OptimusApp extends Disposable {
 		this.liveStateRunning = true;
 		this.selectedHistory = optimisticEntry;
 		this.sidebarStatus = localize('optimus.sidebar.sending', "Sending to Backboard.");
+		this.sidebarStatusKey = 'sending';
 		this.sidebarError = undefined;
 		this.isSendingPrompt = true;
 		this.renderRuns();
 
 		try {
-			await this.historyProvider.sendBackboardPrompt(prompt, chatId, this.selectedWorkspace);
+			await this.historyProvider.sendBackboardPrompt(prompt, chatId, this.selectedWorkspace, this.composerPromptOptions());
 			this.sidebarStatus = localize('optimus.sidebar.waiting', "Waiting for Backboard response.");
+			this.sidebarStatusKey = 'waiting';
 			this.startHistoryPolling(prompt);
 			await this.refreshHistory();
 		} catch (error) {
 			this.isSendingPrompt = false;
+			this.liveStateRunning = false;
 			this.sidebarStatus = undefined;
+			this.sidebarStatusKey = undefined;
 			this.sidebarError = error instanceof Error ? error.message : String(error);
 			this.renderSidebar();
 		}
@@ -953,13 +1357,115 @@ export class OptimusApp extends Disposable {
 		try {
 			await this.historyProvider.cancelBackboardPrompt();
 			this.isSendingPrompt = false;
+			this.liveStateRunning = false;
 			this.sidebarStatus = localize('optimus.sidebar.cancelled', "Cancelled.");
+			this.sidebarStatusKey = 'cancelled';
 			this.stopHistoryPolling();
 			this.renderSidebar();
 		} catch (error) {
 			this.sidebarError = error instanceof Error ? error.message : String(error);
 			this.renderSidebar();
 		}
+	}
+
+	private setSidebarCollapsed(collapsed: boolean): void {
+		if (this.sidebarCollapsed === collapsed) {
+			return;
+		}
+		this.sidebarCollapsed = collapsed;
+		this.storeBoolean(this.sidebarCollapsedStorageKey, collapsed);
+		this.applySidebarCollapsedState();
+		this.renderHeaderActions();
+		this.updateResponsiveLayout();
+		if (!collapsed) {
+			this.focusSidebarComposer();
+		}
+	}
+
+	private applySidebarCollapsedState(): void {
+		if (!this.content || !this.sidebar || !this.sidebarRestoreButton) {
+			return;
+		}
+		this.content.classList.toggle('optimus-sidebar-collapsed', this.sidebarCollapsed);
+		this.sidebar.setAttribute('aria-hidden', this.sidebarCollapsed ? 'true' : 'false');
+		this.sidebarRestoreButton.hidden = !this.sidebarCollapsed;
+	}
+
+	private composerPromptOptions(): IOptimusPromptOptions {
+		const options: IOptimusPromptOptions = {
+			voiceMode: this.selectedVoiceMode
+		};
+		const model = this.currentComposerModel();
+		if (model) {
+			return {
+				...options,
+				provider: model.provider,
+				model: model.name
+			};
+		}
+		return {
+			...options
+		};
+	}
+
+	private currentComposerModel(): IOptimusBackboardModel | undefined {
+		const key = this.currentComposerModelKey();
+		return key ? this.composerModelSource().find(model => composerModelKey(model.provider, model.name) === key) ?? this.settingsModelFallback() : this.settingsModelFallback();
+	}
+
+	private currentComposerModelKey(): string | undefined {
+		return this.selectedComposerModelKey
+			?? (this.backboardSettings.provider && this.backboardSettings.model ? composerModelKey(this.backboardSettings.provider, this.backboardSettings.model) : undefined);
+	}
+
+	private currentComposerModelLabel(): string {
+		const model = this.currentComposerModel();
+		if (model) {
+			return model.displayName || model.name;
+		}
+		return this.backboardModels.length
+			? localize('optimus.sidebar.modelFallback', "Select model")
+			: localize('optimus.sidebar.modelLoading', "Loading models");
+	}
+
+	private composerModelSource(): readonly IOptimusBackboardModel[] {
+		if (this.backboardModels.length) {
+			return supplementalModelSource(this.backboardModels);
+		}
+		const fallback = this.settingsModelFallback();
+		return fallback ? supplementalModelSource([fallback]) : supplementalModelSource([]);
+	}
+
+	private filteredComposerModels(): readonly IOptimusBackboardModel[] {
+		const query = this.modelFilter.trim().toLowerCase();
+		const source = this.composerModelSource().filter(model => !this.disabledModelProviders.has(model.provider));
+		if (!query) {
+			return source;
+		}
+		return source.filter(model => [model.provider, model.displayName, model.name].filter(Boolean).join(' ').toLowerCase().includes(query));
+	}
+
+	private settingsModelFallback(): IOptimusBackboardModel | undefined {
+		const provider = this.backboardSettings.provider;
+		const model = this.backboardSettings.model;
+		if (!provider || !model) {
+			return undefined;
+		}
+		return {
+			provider,
+			name: model,
+			displayName: model
+		};
+	}
+
+	private focusModelFilter(): void {
+		this.container.ownerDocument.defaultView?.requestAnimationFrame(() => {
+			const filter = this.sidebar.querySelector<HTMLInputElement>('.optimus-sidebar-model-filter');
+			if (filter) {
+				filter.focus();
+				filter.setSelectionRange(filter.value.length, filter.value.length);
+			}
+		});
 	}
 
 	private startHistoryPolling(prompt: string): void {
@@ -972,7 +1478,10 @@ export class OptimusApp extends Disposable {
 		this.stopHistoryPolling();
 		if (this.historyPollsRemaining <= 0) {
 			this.isSendingPrompt = false;
-			this.sidebarStatus = localize('optimus.sidebar.refreshStopped', "Backboard is still running. Use refresh or select the tile when it appears.");
+			this.liveStateRunning = false;
+			this.sidebarStatus = undefined;
+			this.sidebarStatusKey = undefined;
+			this.sidebarError = localize('optimus.sidebar.responseTimedOut', "Backboard did not return a response. Check that the Backboard extension is running, then retry.");
 			this.renderSidebar();
 			return;
 		}
@@ -1009,6 +1518,106 @@ export class OptimusApp extends Disposable {
 			body.scrollTop = body.scrollHeight;
 		});
 	}
+
+	private shouldStickSidebarToBottom(): boolean {
+		const body = this.sidebar?.querySelector<HTMLElement>('.optimus-sidebar-body');
+		if (!body) {
+			return true;
+		}
+		return body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+	}
+
+	private readStoredBoolean(key: string): boolean {
+		try {
+			return this.container.ownerDocument.defaultView?.localStorage.getItem(key) === 'true';
+		} catch {
+			return false;
+		}
+	}
+
+	private storeBoolean(key: string, value: boolean): void {
+		try {
+			this.container.ownerDocument.defaultView?.localStorage.setItem(key, value ? 'true' : 'false');
+		} catch {
+			// localStorage can be unavailable in restricted embedder contexts.
+		}
+	}
+
+	private readStoredComposerModelKey(): string | undefined {
+		try {
+			return this.container.ownerDocument.defaultView?.localStorage.getItem(this.composerModelStorageKey) || undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private storeComposerModelKey(key: string | undefined): void {
+		try {
+			if (key) {
+				this.container.ownerDocument.defaultView?.localStorage.setItem(this.composerModelStorageKey, key);
+			} else {
+				this.container.ownerDocument.defaultView?.localStorage.removeItem(this.composerModelStorageKey);
+			}
+		} catch {
+			// localStorage can be unavailable in restricted embedder contexts.
+		}
+	}
+
+	private readStoredVoiceModeValue(): string | undefined {
+		try {
+			return this.container.ownerDocument.defaultView?.localStorage.getItem(this.composerVoiceStorageKey) || undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private readStoredVoiceMode(): OptimusVoiceMode {
+		try {
+			return this.readStoredVoiceModeValue() === 'tts' ? 'tts' : 'off';
+		} catch {
+			return 'off';
+		}
+	}
+
+	private storeVoiceMode(value: OptimusVoiceMode): void {
+		try {
+			this.container.ownerDocument.defaultView?.localStorage.setItem(this.composerVoiceStorageKey, value);
+		} catch {
+			// localStorage can be unavailable in restricted embedder contexts.
+		}
+	}
+
+	private storedSelectedHistory(): IOptimusHistoryEntry | undefined {
+		const id = this.readRememberedSelectedHistoryId();
+		return id ? this.filteredHistoryEntries().find(entry => entry.id === id) : undefined;
+	}
+
+	private readRememberedSelectedHistoryId(): string | undefined {
+		try {
+			return this.container.ownerDocument.defaultView?.localStorage.getItem(this.selectedHistoryStorageKey) || undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private rememberSelectedHistory(id: string): void {
+		if (!id || id.startsWith('optimus-pending-')) {
+			return;
+		}
+		try {
+			this.container.ownerDocument.defaultView?.localStorage.setItem(this.selectedHistoryStorageKey, id);
+		} catch {
+			// localStorage can be unavailable in restricted embedder contexts.
+		}
+	}
+
+	private clearRememberedSelectedHistory(): void {
+		try {
+			this.container.ownerDocument.defaultView?.localStorage.removeItem(this.selectedHistoryStorageKey);
+		} catch {
+			// localStorage can be unavailable in restricted embedder contexts.
+		}
+	}
 }
 
 function historyEntryMatchesPrompt(entry: IOptimusHistoryEntry, prompt: string): boolean {
@@ -1017,8 +1626,224 @@ function historyEntryMatchesPrompt(entry: IOptimusHistoryEntry, prompt: string):
 		|| entry.messages.some(message => message.role === 'user' && normalizeHistoryText(message.content) === normalizedPrompt);
 }
 
+function coalesceSidebarMessages(messages: readonly { readonly role: string; readonly content: string }[]): readonly { readonly role: string; readonly content: string }[] {
+	const result: { role: string; content: string }[] = [];
+	for (const message of messages) {
+		const role = sidebarRoleClass(message.role);
+		const content = message.content;
+		if (!content) {
+			continue;
+		}
+		const previous = result[result.length - 1];
+		if (previous && sidebarRoleClass(previous.role) === role && (role === 'assistant' || role === 'voice')) {
+			previous.content = `${previous.content}${content}`;
+		} else {
+			result.push({ role: message.role, content });
+		}
+	}
+	return result;
+}
+
+function composerModelKey(provider: string, model: string): string {
+	return `${provider}:${model}`;
+}
+
+function codicon(name: string): HTMLElement {
+	const icon = document.createElement('span');
+	icon.className = `codicon codicon-${name}`;
+	return icon;
+}
+
+function sortedModelProviders(models: readonly IOptimusBackboardModel[]): string[] {
+	return [...new Set(models.map(model => model.provider))].sort((left, right) => providerDisplayName(left).localeCompare(providerDisplayName(right)));
+}
+
+function providerKey(provider: string | undefined): string {
+	return (provider || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+function providerDisplayName(provider: string): string {
+	const names: Record<string, string> = {
+		'anthropic': 'Anthropic',
+		'aws-bedrock': 'AWS Bedrock',
+		'bedrock': 'AWS Bedrock',
+		'deepseek': 'DeepSeek',
+		'gemini': 'Google',
+		'google': 'Google',
+		'google-ai': 'Google',
+		'lm-studio': 'LM Studio',
+		'mistral': 'Mistral',
+		'ollama': 'Ollama',
+		'openai': 'OpenAI',
+		'openai-compatible': 'OpenAI Compatible',
+		'openrouter': 'OpenRouter',
+		'vercel': 'Vercel',
+		'xai': 'xAI'
+	};
+	return names[providerKey(provider)] ?? provider;
+}
+
+function providerCodicon(provider: string | undefined): HTMLElement {
+	const iconName = (() => {
+		switch (providerKey(provider)) {
+			case 'openai':
+			case 'openai-compatible':
+			case 'openrouter':
+				return 'hubot';
+			case 'anthropic':
+			case 'aws-bedrock':
+			case 'bedrock':
+				return 'server';
+			case 'google':
+			case 'google-ai':
+			case 'gemini':
+				return 'symbol-misc';
+			case 'ollama':
+			case 'lm-studio':
+				return 'desktop-download';
+			default:
+				return 'symbol-misc';
+		}
+	})();
+	return codicon(iconName);
+}
+
+function providerSwitchToggle(active: boolean): HTMLElement {
+	const toggle = document.createElement('span');
+	toggle.className = 'optimus-sidebar-provider-switch-toggle';
+	if (active) {
+		toggle.appendChild(codicon('check'));
+	}
+	return toggle;
+}
+
+function supplementalModelSource(models: readonly IOptimusBackboardModel[]): readonly IOptimusBackboardModel[] {
+	const next = [...models];
+	const supplementalModels: readonly IOptimusBackboardModel[] = [
+		{ provider: 'openrouter', name: 'openai/gpt-5-chat', displayName: 'GPT-5 Chat' }
+	];
+	for (const model of supplementalModels) {
+		if (!next.some(item => providerKey(item.provider) === providerKey(model.provider))) {
+			next.push(model);
+		}
+	}
+	return next;
+}
+
+function isVisibleBackboardModel(model: IOptimusBackboardModel): boolean {
+	const provider = providerKey(model.provider);
+	const modelType = (model.modelType ?? '').toLowerCase();
+	return !['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics'].includes(provider)
+		&& (!modelType || modelType === 'llm');
+}
+
+function numericModelValue(model: IOptimusBackboardModel, keys: readonly (keyof IOptimusBackboardModel)[]): number | undefined {
+	for (const key of keys) {
+		const value = model[key];
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			return value;
+		}
+	}
+	return undefined;
+}
+
+function modelPriceLabel(model: IOptimusBackboardModel): string {
+	if (typeof model.pricing === 'string' && model.pricing.trim()) {
+		return model.pricing;
+	}
+	const input = numericModelValue(model, ['inputPricePerMillion', 'inputCostPer1mTokens', 'inputPrice', 'promptPrice']);
+	const output = numericModelValue(model, ['outputPricePerMillion', 'outputCostPer1mTokens', 'outputPrice', 'completionPrice']);
+	if (input !== undefined && output !== undefined) {
+		return `$${input.toFixed(2)}/M in, $${output.toFixed(2)}/M out`;
+	}
+	return '';
+}
+
+interface IOptimusAudioSource {
+	readonly kind: 'audio' | 'link';
+	readonly url: string;
+	readonly label: string;
+}
+
+function audioSourcesFromText(value: string): IOptimusAudioSource[] {
+	return value
+		.split(/\s+/)
+		.map(part => part.trim())
+		.map(audioSourceFromTextPart)
+		.filter((source): source is IOptimusAudioSource => !!source);
+}
+
+function audioSourceFromTextPart(part: string): IOptimusAudioSource | undefined {
+	if (/^data:audio\//i.test(part)) {
+		return { kind: 'audio', url: part, label: localize('optimus.sidebar.audioData', "Play Backboard voice") };
+	}
+	try {
+		const url = new URL(part);
+		if (!['http:', 'https:'].includes(url.protocol) || !/\.(?:mp3|wav|ogg|m4a|webm)(?:\?|$)/i.test(url.pathname + url.search)) {
+			return undefined;
+		}
+		return {
+			kind: 'link',
+			url: url.toString(),
+			label: localize('optimus.sidebar.audioLink', "Open audio from {0}", url.hostname)
+		};
+	} catch {
+		return undefined;
+	}
+}
+
 function isBackboardOwnedHistoryEntry(entry: IOptimusHistoryEntry): boolean {
 	return entry.source === undefined || entry.source === 'backboard-panel' || entry.source === 'backboard-thread' || entry.source === 'optimus-live';
+}
+
+function lastAssistantMessageIndex(messages: readonly { readonly role: string; readonly content: string }[]): number {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (sidebarRoleClass(message.role) === 'assistant' && message.content.trim()) {
+			return index;
+		}
+	}
+	return -1;
+}
+
+function shouldRenderSidebarStatus(statusKey: OptimusSidebarStatusKey | undefined, messages: readonly { readonly role: string; readonly content: string }[]): boolean {
+	if (lastAssistantMessageIndex(messages) === -1) {
+		return true;
+	}
+	return !isAssistantOutputStatusKey(statusKey);
+}
+
+function isAssistantOutputStatusKey(statusKey: OptimusSidebarStatusKey | undefined): boolean {
+	return statusKey === 'sending'
+		|| statusKey === 'waiting'
+		|| statusKey === 'streaming'
+		|| statusKey === 'history-updated'
+		|| statusKey === 'voice'
+		|| statusKey === 'media'
+		|| statusKey === 'done';
+}
+
+function liveStateStatusKey(state: IOptimusLiveState): OptimusSidebarStatusKey | undefined {
+	return normalizeSidebarStatusKey(state.statusKey);
+}
+
+function normalizeSidebarStatusKey(value: string | undefined): OptimusSidebarStatusKey | undefined {
+	switch (value) {
+		case 'sending':
+		case 'waiting':
+		case 'streaming':
+		case 'history-updated':
+		case 'done':
+		case 'cancelled':
+		case 'progress':
+		case 'tool':
+		case 'voice':
+		case 'media':
+		case 'error':
+			return value;
+		default:
+			return undefined;
+	}
 }
 
 function createPendingHistoryEntry(prompt: string, chatId: string | undefined, workspace: string | undefined): IOptimusHistoryEntry {
@@ -1071,6 +1896,9 @@ function sidebarRoleClass(role: string): string {
 	if (normalizedRole === 'error') {
 		return 'error';
 	}
+	if (normalizedRole === 'voice') {
+		return 'voice';
+	}
 	return 'system';
 }
 
@@ -1082,6 +1910,8 @@ function sidebarRoleLabel(role: string): string {
 			return localize('optimus.sidebar.role.user', "You");
 		case 'error':
 			return localize('optimus.sidebar.role.error', "Error");
+		case 'voice':
+			return localize('optimus.sidebar.role.voice', "Backboard voice");
 		case 'system':
 		default:
 			return localize('optimus.sidebar.role.system', "System");
@@ -1096,6 +1926,8 @@ function sidebarRoleAvatar(role: string): string {
 			return 'U';
 		case 'error':
 			return '!';
+		case 'voice':
+			return 'V';
 		case 'system':
 		default:
 			return 'i';

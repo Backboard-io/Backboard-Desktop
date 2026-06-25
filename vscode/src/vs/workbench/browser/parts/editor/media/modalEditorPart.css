@@ -29,6 +29,27 @@
 	}
 }
 
+.monaco-modal-editor-block.embedded {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	background: transparent;
+
+	.modal-editor-resizable {
+		inset: 0;
+	}
+
+	.modal-editor-shadow {
+		box-shadow: none;
+		border-radius: 0;
+	}
+
+	.modal-editor-part {
+		border: 0;
+		border-radius: 0;
+	}
+}
+
 /** Modal Editor Container */
 .monaco-modal-editor-block .modal-editor-part {
 	display: grid;

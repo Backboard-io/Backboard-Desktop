@@ -659,12 +659,99 @@
 }
 
 .agent-sessions-workbench .part.editor .browser-root .browser-navbar {
-	padding-right: 16px;
+	min-height: 58px;
+	padding: 11px 14px;
+	box-sizing: border-box;
+	gap: 12px;
+	border-bottom: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 12%, transparent));
+	background: var(--vscode-editor-background);
 }
 
 .agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-item:has(.action-label.codicon-chevron-right),
 .agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-item:has(.action-label.codicon-arrow-right) {
 	display: none !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.browser-root) .title.tabs {
+	border-bottom-color: transparent !important;
+	background: var(--vscode-editor-background) !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.browser-root) .tabs-and-actions-container {
+	justify-content: flex-start;
+	padding: 4px 10px !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.browser-root) .tabs-container > .tab {
+	height: 30px !important;
+	border-radius: 8px !important;
+	padding: 0 6px 0 8px !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.browser-root) .tabs-container > .tab.active {
+	background-color: color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-nav-toolbar .action-label,
+.agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-label {
+	width: 30px !important;
+	height: 30px !important;
+	border-radius: 8px !important;
+	color: color-mix(in srgb, var(--vscode-foreground) 76%, transparent) !important;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-nav-toolbar .action-label:hover,
+.agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-label:hover {
+	background-color: color-mix(in srgb, var(--vscode-foreground) 7%, transparent) !important;
+	color: var(--vscode-foreground) !important;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-url-container {
+	min-height: 34px;
+	border: none;
+	border-radius: 8px;
+	background-color: color-mix(in srgb, var(--vscode-input-background) 72%, var(--vscode-editor-background));
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-url-container:has(.browser-url-display:focus) {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-url-bar-widgets {
+	padding: 4px 8px;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-container-wrapper {
+	background: var(--vscode-editor-background);
+}
+
+.agent-sessions-workbench .part.editor:has(.terminal-overflow-guard.terminal-editor) .title.tabs {
+	border-bottom-color: transparent !important;
+	background: var(--vscode-editor-background) !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.terminal-overflow-guard.terminal-editor) .tabs-and-actions-container {
+	justify-content: flex-start;
+	padding: 4px 10px !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.terminal-overflow-guard.terminal-editor) .tabs-container > .tab {
+	height: 30px !important;
+	border-radius: 8px !important;
+	padding: 0 6px 0 8px !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.terminal-overflow-guard.terminal-editor) .tabs-container > .tab.active {
+	background-color: color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
+}
+
+.agent-sessions-workbench .part.editor .terminal-overflow-guard.terminal-editor {
+	background: var(--vscode-editor-background);
+}
+
+.agent-sessions-workbench .part.editor .terminal-overflow-guard.terminal-editor .terminal-wrapper {
+	background-color: var(--vscode-terminal-background, var(--vscode-editor-background));
 }
 
 .agent-sessions-workbench .part.panel {
