@@ -1667,7 +1667,10 @@ export class SkillsLibraryController {
 			return Math.max(0, index);
 		};
 
-		const close = (): void => store.dispose();
+		const close = (): void => {
+			resetSkillsShDirectoryCache();
+			store.dispose();
+		};
 		store.add(toDisposable(() => overlay.remove()));
 		store.add(dom.addDisposableListener(closeButton, dom.EventType.CLICK, close));
 		store.add(dom.addDisposableListener(overlay, dom.EventType.MOUSE_DOWN, e => {

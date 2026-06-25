@@ -160,7 +160,7 @@ export abstract class AbstractCommonMcpManagementService extends Disposable impl
 		}
 
 		if (serverPackage.packageArguments?.length) {
-			const result = this.processArguments(serverPackage.packageArguments);
+			const result = this.processArguments(serverPackage.packageArguments, inputIdPrefix);
 			args.push(...result.args);
 			inputs.push(...result.variables);
 			notices.push(...result.notices);

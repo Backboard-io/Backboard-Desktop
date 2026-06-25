@@ -13,6 +13,7 @@ export function toolDataToDefinition(tool: IToolData): ToolDefinition {
 	const sourceMeta = tool.source.type === 'mcp'
 		? {
 			source: 'mcp',
+			backboardAgentHostToolSource: 'mcp',
 			mcpLabel: tool.source.label,
 			mcpServerLabel: tool.source.serverLabel,
 			mcpCollectionId: tool.source.collectionId,

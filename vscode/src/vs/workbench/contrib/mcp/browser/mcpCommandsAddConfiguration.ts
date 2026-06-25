@@ -658,7 +658,7 @@ export class McpInstallFromManifestCommand {
 		let config: IMcpServerConfiguration;
 		let inputs: IMcpServerVariable[] | undefined;
 		try {
-			const { mcpServerConfiguration, notices } = this._mcpManagementService.getMcpServerConfigurationFromManifest(galleryManifest, packageType);
+			const { mcpServerConfiguration, notices } = this._mcpManagementService.getMcpServerConfigurationFromManifest(galleryManifest, packageType, galleryManifest.name);
 			config = mcpServerConfiguration.config;
 			inputs = mcpServerConfiguration.inputs;
 

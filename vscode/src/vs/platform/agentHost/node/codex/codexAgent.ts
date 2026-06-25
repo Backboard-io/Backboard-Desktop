@@ -28,9 +28,10 @@ import { type ClientPluginCustomization, type MessageAttachment, type PendingMes
 import { IAgentPluginManager, type ISyncedCustomization } from '../../common/agentPluginManager.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { IFileService } from '../../../files/common/files.js';
-import { IMcpServerConfiguration, McpServerType } from '../../../mcp/common/mcpPlatformTypes.js';
+import { IMcpServerConfiguration } from '../../../mcp/common/mcpPlatformTypes.js';
 import { parsePlugin } from '../../../agentPlugins/common/pluginParsers.js';
 import { McpCustomizationController } from '../shared/mcpCustomizationController.js';
+import { buildCodexMcpServerConfigEdits } from './codexMcpConfigSync.js';
 import { buildCodexMcpReadResult, codexMcpListToInventory, codexMcpToolsChanged, inventoryToSdkServers, translateCodexMcpStartupState, type ICodexMcpServerEntry } from './codexMcpServers.js';
 import { buildElicitationRequest, cancelledElicitationResponse, declinedElicitationResponse, elicitationResponseFromAnswers } from './codexElicitationMapper.js';
 import type { AhpMcpUiHostCapabilities, Customization } from '../../common/state/protocol/channels-session/state.js';
@@ -70,7 +71,6 @@ import type { ToolRequestUserInputParams } from './protocol/generated/v2/ToolReq
 import type { ToolRequestUserInputQuestion } from './protocol/generated/v2/ToolRequestUserInputQuestion.js';
 import type { ToolRequestUserInputResponse } from './protocol/generated/v2/ToolRequestUserInputResponse.js';
 import type { JsonValue } from './protocol/generated/serde_json/JsonValue.js';
-import type { ConfigEdit } from './protocol/generated/v2/ConfigEdit.js';
 import type { GetAccountResponse } from './protocol/generated/v2/GetAccountResponse.js';
 import type { Thread } from './protocol/generated/v2/Thread.js';
 import type { ThreadListResponse } from './protocol/generated/v2/ThreadListResponse.js';
@@ -423,8 +423,6 @@ interface IConnectionReady {
 	readonly proxyHandle: ICodexProxyHandle;
 	readonly child: ChildProcessWithoutNullStreams;
 }
-
-type CodexMcpServerConfigValue = { [key in string]?: JsonValue };
 
 /**
  * `IAgent` implementation backed by `codex app-server`.
@@ -2274,32 +2272,23 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	private async _publishSyncedMcpServersToCodex(mcpServers: ReadonlyMap<string, IMcpServerConfiguration>): Promise<void> {
-		if (mcpServers.size === 0) {
-			return;
-		}
-		const edits: ConfigEdit[] = [];
-		for (const [name, configuration] of [...mcpServers.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-			const value = codexMcpServerConfigValue(configuration);
-			if (!value) {
-				continue;
-			}
-			edits.push({
-				keyPath: `mcp_servers.${codexConfigKeyPathSegment(name)}`,
-				value,
-				mergeStrategy: 'replace',
-			});
-		}
+		const { edits, serverCount } = buildCodexMcpServerConfigEdits(mcpServers);
 		if (edits.length === 0) {
 			return;
 		}
 		const conn = await this._ensureConnection();
 		await conn.client.request<'config/batchWrite'>('config/batchWrite', {
-			edits,
+			edits: [...edits],
 			reloadUserConfig: true,
 		});
-		await conn.client.request<'config/mcpServer/reload'>('config/mcpServer/reload', undefined as never);
-		await this._refreshMcpInventory(conn.client);
-		this._logService.info(`[Codex] Published ${edits.length} synced Backboard MCP server(s) to codex config`);
+		try {
+			await conn.client.request<'config/mcpServer/reload'>('config/mcpServer/reload', undefined as never);
+			await this._refreshMcpInventory(conn.client);
+		} catch (error) {
+			this._logService.error(`[Codex] Wrote ${serverCount} synced Backboard MCP server(s) to codex config, but reload/inventory refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+			return;
+		}
+		this._logService.info(`[Codex] Published ${serverCount} synced Backboard MCP server(s) to codex config`);
 	}
 
 	// ---- MCP servers -------------------------------------------------------
@@ -2592,48 +2581,6 @@ export class CodexAgent extends Disposable implements IAgent {
 		this._mcpInventory.clear();
 		super.dispose();
 	}
-}
-
-function codexMcpServerConfigValue(configuration: IMcpServerConfiguration): CodexMcpServerConfigValue | undefined {
-	switch (configuration.type) {
-		case McpServerType.LOCAL: {
-			if (!configuration.command) {
-				return undefined;
-			}
-			const env = normalizeCodexMcpEnv(configuration.env);
-			return {
-				command: configuration.command,
-				...(configuration.args && configuration.args.length > 0 ? { args: [...configuration.args] } : {}),
-				...(env ? { env } : {}),
-				...(configuration.envFile ? { env_file: configuration.envFile } : {}),
-				...(configuration.cwd ? { cwd: configuration.cwd } : {}),
-			};
-		}
-		case McpServerType.REMOTE:
-			return {
-				url: configuration.url,
-				...(configuration.headers ? { headers: { ...configuration.headers } } : {}),
-			};
-	}
-}
-
-function normalizeCodexMcpEnv(env: Record<string, string | number | null> | undefined): CodexMcpServerConfigValue | undefined {
-	if (!env) {
-		return undefined;
-	}
-	const result: CodexMcpServerConfigValue = {};
-	for (const [key, value] of Object.entries(env)) {
-		if (value !== null) {
-			result[key] = String(value);
-		}
-	}
-	return Object.keys(result).length > 0 ? result : undefined;
-}
-
-function codexConfigKeyPathSegment(value: string): string {
-	return /^[A-Za-z0-9_-]+$/.test(value)
-		? value
-		: JSON.stringify(value);
 }
 
 function parseBinaryArgs(json: string | undefined): string[] {

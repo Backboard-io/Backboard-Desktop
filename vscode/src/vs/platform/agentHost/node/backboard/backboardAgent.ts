@@ -2498,7 +2498,7 @@ function mergeBackboardTools(bridgeTools: unknown[] | undefined, clientTools: re
 }
 
 function isBackboardClientToolAllowed(tool: ToolDefinition): boolean {
-	return backboardAllowedClientToolNames.has(tool.name) || tool._meta?.source === 'mcp';
+	return backboardAllowedClientToolNames.has(tool.name) || tool._meta?.backboardAgentHostToolSource === 'mcp';
 }
 
 function trimBackboardToolsForRequest(tools: unknown[] | undefined, prompt: string, webSearch: string, imageGeneration: string): unknown[] | undefined {

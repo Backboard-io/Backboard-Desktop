@@ -26,30 +26,10 @@ interface CollectionState extends IDisposable {
 	serverDefinitions: ISettableObservable<readonly McpServerDefinition[]>;
 }
 
-const unsupportedGalleryOAuthMcpNames = new Set([
-	'ai.exa/exa',
-	'app.linear/linear',
-	'com.atlassian/atlassian-mcp-server',
-	'com.auth0/mcp',
-	'com.cloudflare.mcp/mcp',
-	'com.figma.mcp/mcp',
-	'com.figma/mcp',
-	'com.gitlab/mcp',
-	'com.notion/mcp',
-	'com.railway/mcp',
-	'com.thousandeyes/mcp',
-	'com.vercel/vercel-mcp',
-	'dev.lovable/mcp',
-	'figma/mcp',
-	'io.figma/mcp',
-	'io.github.firebase/firebase-mcp',
-	'io.github.getsentry/sentry-mcp',
-	'io.sentry/mcp',
-	'sentry/mcp',
-]);
-
 function isUnsupportedGalleryOAuthMcpServer(server: IWorkbenchLocalMcpServer): boolean {
-	return unsupportedGalleryOAuthMcpNames.has(server.name.toLowerCase());
+	return server.source === 'gallery'
+		&& server.config.type === 'http'
+		&& !!server.config.oauth;
 }
 
 export class InstalledMcpServersDiscovery extends Disposable implements IMcpDiscovery {

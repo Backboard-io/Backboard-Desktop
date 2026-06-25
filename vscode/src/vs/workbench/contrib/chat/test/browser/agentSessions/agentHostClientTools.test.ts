@@ -119,6 +119,7 @@ suite('AgentHostClientTools', () => {
 
 			assert.deepStrictEqual(def._meta, {
 				source: 'mcp',
+				backboardAgentHostToolSource: 'mcp',
 				mcpLabel: 'Supabase',
 				mcpServerLabel: 'Supabase',
 				mcpCollectionId: 'mcp.config.usrlocal.com.supabase/mcp',
