@@ -18,7 +18,7 @@ registerAction2(class OpenBackboardWorkspaceAction extends Action2 {
 	constructor() {
 		super({
 			id: OPEN_BACKBOARD_WORKSPACE_COMMAND_ID,
-			title: localize2('openBackboardWorkspace', "Open Workspace"),
+			title: localize2('openBackboardWorkspace', "Open Advanced"),
 			category: CHAT_CATEGORY,
 			f1: true,
 		});

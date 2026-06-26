@@ -63,14 +63,14 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 			if (workspaceCommandId) {
 				actions.push(toAction({
 					id: 'agents.action.mode.workspace',
-					label: localize('openInVSCodeSwitcher.workspace', "Workspace"),
+					label: localize('openInVSCodeSwitcher.workspace', "Advanced"),
 					run: () => this.commandService.executeCommand(workspaceCommandId),
 				}));
 			}
 
 			actions.push(toAction({
 					id: 'agents.action.mode.agents',
-					label: localize('openInVSCodeSwitcher.agents', "Agents"),
+					label: localize('openInVSCodeSwitcher.agents', "Simple"),
 					checked: true,
 					run: () => undefined,
 				}));
@@ -84,7 +84,7 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		};
 
 		currentIcon.className = 'open-in-vscode-titlebar-widget-icon codicon codicon-window';
-		currentLabel.textContent = localize('openInVSCodeSwitcher.agents', "Agents");
+		currentLabel.textContent = localize('openInVSCodeSwitcher.agents', "Simple");
 
 		this._register(addDisposableListener(triggerButton, EventType.CLICK, event => {
 			EventHelper.stop(event, true);
