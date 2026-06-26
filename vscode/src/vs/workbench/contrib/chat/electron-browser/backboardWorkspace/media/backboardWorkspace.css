@@ -32,15 +32,16 @@
 	outline: none;
 }
 
+/* === Page layout: tiles on left, chat panel on right === */
+
 .monaco-workbench .backboard-workspace-page {
 	box-sizing: border-box;
 	display: grid;
-	grid-template-columns: minmax(420px, 1fr) minmax(360px, 430px);
+	grid-template-columns: 1fr minmax(420px, 560px);
 	min-height: 0;
 	width: 100%;
 	height: 100%;
 	overflow: hidden;
-	background: var(--vscode-editor-background);
 }
 
 .monaco-workbench .backboard-workspace-page.no-detail {
@@ -52,615 +53,233 @@
 	display: flex;
 	min-width: 0;
 	min-height: 0;
-	height: 100%;
 	flex-direction: column;
-	padding: 36px 24px 26px;
 	overflow: hidden;
-	border-right: 1px solid var(--vscode-panel-border);
 }
 
+/* === Toolbar === */
+
 .monaco-workbench .backboard-workspace-toolbar {
+	box-sizing: border-box;
+	flex: none;
 	display: flex;
-	align-items: flex-start;
+	align-items: center;
 	justify-content: space-between;
-	gap: 18px;
-	padding-bottom: 18px;
-	border-bottom: 1px solid var(--vscode-panel-border);
+	gap: 12px;
+	padding: 14px 24px 10px;
 }
 
 .monaco-workbench .backboard-workspace-heading {
+	display: flex;
+	align-items: center;
+	gap: 12px;
 	min-width: 0;
 }
 
 .monaco-workbench .backboard-workspace-title-row {
 	display: flex;
-	align-items: baseline;
-	gap: 10px;
+	align-items: center;
+	gap: 8px;
 }
 
 .monaco-workbench .backboard-workspace-title-row h1 {
 	margin: 0;
-	color: var(--vscode-editor-foreground);
-	font-size: 18px;
-	font-weight: 700;
-	letter-spacing: 0;
-	line-height: 1.25;
+	font-size: 15px;
+	font-weight: 600;
+	white-space: nowrap;
 }
 
 .monaco-workbench .backboard-workspace-count {
 	color: var(--vscode-descriptionForeground);
-	font-size: 12px;
-	font-weight: 500;
-	line-height: 1.3;
+	font-size: 11px;
+	flex-shrink: 0;
 }
 
-.monaco-workbench .backboard-workspace-description {
-	margin-top: 5px;
-	color: var(--vscode-descriptionForeground);
+/* === Workspace switcher === */
+
+.monaco-workbench .backboard-workspace-switcher {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+	border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
+	border-radius: 6px;
+	background: var(--vscode-input-background, transparent);
+	color: var(--vscode-input-foreground, var(--vscode-foreground));
 	font-size: 12px;
-	line-height: 1.35;
+	cursor: pointer;
+	white-space: nowrap;
 }
+
+.monaco-workbench .backboard-workspace-switcher:hover {
+	border-color: var(--vscode-focusBorder);
+	background: var(--vscode-list-hoverBackground);
+}
+
+.monaco-workbench .backboard-workspace-switcher .codicon {
+	font-size: 14px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workspace-switcher-menu {
+	position: fixed;
+	z-index: 100;
+	min-width: 220px;
+	max-height: 340px;
+	overflow-y: auto;
+	border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+	border-radius: 8px;
+	background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+	box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+	padding: 4px;
+}
+
+.monaco-workspace-switcher-menu-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	border-radius: 6px;
+	font-size: 12px;
+	cursor: pointer;
+	color: var(--vscode-foreground);
+}
+
+.monaco-workspace-switcher-menu-item:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.monaco-workspace-switcher-menu-item.active {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+}
+
+.monaco-workspace-switcher-menu-item .codicon {
+	font-size: 14px;
+	flex-shrink: 0;
+}
+
+.monaco-workspace-switcher-menu-item .switcher-item-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workspace-switcher-menu-item .switcher-item-count {
+	margin-left: auto;
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+	flex-shrink: 0;
+}
+
+.monaco-workspace-switcher-menu-separator {
+	height: 1px;
+	margin: 4px 0;
+	background: var(--vscode-panel-border);
+}
+
+/* === Actions === */
 
 .monaco-workbench .backboard-workspace-actions {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 6px;
+	flex-shrink: 0;
 }
 
-.monaco-workbench .backboard-workspace-icon-button {
+.monaco-workbench .backboard-workspace-actions button {
 	display: inline-flex;
 	width: 30px;
 	height: 30px;
-	align-items: center;
-	justify-content: center;
-	border: 1px solid transparent;
+	border: 1px solid var(--vscode-button-border, transparent);
 	border-radius: 6px;
-	background: transparent;
-	color: var(--vscode-icon-foreground);
+	background: var(--vscode-button-secondaryBackground, transparent);
+	color: var(--vscode-button-secondaryForeground, var(--vscode-icon-foreground));
 	cursor: pointer;
-}
-
-.monaco-workbench .backboard-workspace-icon-button:hover {
-	background: var(--vscode-toolbar-hoverBackground);
-}
-
-.monaco-workbench .backboard-workspace-icon-button:focus-visible,
-.monaco-workbench .backboard-workspace-primary-button:focus-visible,
-.monaco-workbench .backboard-workspace-card:focus-visible {
-	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: 2px;
-}
-
-.monaco-workbench .backboard-workspace-cards {
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-	gap: 18px;
-	align-content: start;
-	min-height: 0;
-	padding: 22px 2px 4px;
-	overflow: auto;
-}
-
-.monaco-workbench .backboard-workspace-card {
-	box-sizing: border-box;
-	display: flex;
-	position: relative;
-	min-height: 330px;
-	max-height: min(560px, calc(100vh - 180px));
-	flex-direction: column;
-	padding: 0;
-	overflow: hidden;
-	text-align: left;
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 9px;
-	background: var(--vscode-editor-background);
-	color: var(--vscode-editor-foreground);
-	cursor: pointer;
-	transition: border-color 80ms ease, box-shadow 80ms ease, transform 80ms ease;
-}
-
-.monaco-workbench .backboard-workspace-card:hover {
-	border-color: var(--vscode-focusBorder);
-	box-shadow: 0 8px 20px color-mix(in srgb, var(--vscode-widget-shadow, transparent) 45%, transparent);
-	transform: translateY(-1px);
-}
-
-.monaco-workbench .backboard-workspace-card.selected {
-	min-height: 430px;
-	max-height: min(640px, calc(100vh - 150px));
-	border-color: var(--vscode-focusBorder);
-	box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
-}
-
-.monaco-workbench .backboard-workspace-card.running {
-	border-color: color-mix(in srgb, var(--vscode-progressBar-background) 45%, var(--vscode-panel-border));
-	box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-progressBar-background) 10%, transparent);
-}
-
-.monaco-workbench .backboard-workspace-card.awaiting-workspace {
-	border-color: color-mix(in srgb, var(--vscode-charts-yellow) 40%, var(--vscode-panel-border));
-}
-
-.monaco-workbench .backboard-workspace-card.running::before {
-	content: '';
-	position: absolute;
-	z-index: 1;
-	inset: -1px;
-	padding: 1px;
-	border-radius: 9px;
-	opacity: 0.75;
-	animation: backboard-workspace-running-border 2s linear infinite;
-	background: linear-gradient(
-		120deg,
-		transparent 0%,
-		transparent 24%,
-		var(--vscode-progressBar-background) 46%,
-		color-mix(in srgb, var(--vscode-progressBar-background) 30%, transparent) 58%,
-		transparent 76%,
-		transparent 100%
-	);
-	background-size: 260% 260%;
-	pointer-events: none;
-	-webkit-mask:
-		linear-gradient(currentColor 0 0) content-box,
-		linear-gradient(currentColor 0 0);
-	-webkit-mask-composite: xor;
-	mask-composite: exclude;
-}
-
-@keyframes backboard-workspace-running-border {
-	from {
-		background-position: 180% 0;
-	}
-
-	to {
-		background-position: -180% 0;
-	}
-}
-
-.monaco-workbench .backboard-workspace-card-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
-	min-height: 52px;
-	padding: 0 15px;
-	border-bottom: 1px solid var(--vscode-panel-border);
-}
-
-.monaco-workbench .backboard-workspace-card-title {
-	display: flex;
-	min-width: 0;
-	align-items: center;
-	gap: 8px;
-	font-size: 13px;
-	font-weight: 700;
-	line-height: 1.3;
-}
-
-.monaco-workbench .backboard-workspace-card-name {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.monaco-workbench .backboard-workspace-status-dot {
-	flex: none;
-	width: 7px;
-	height: 7px;
-	border-radius: 999px;
-	background: var(--vscode-charts-blue);
-}
-
-.monaco-workbench .backboard-workspace-status-dot.done {
-	background: var(--vscode-charts-green);
-}
-
-.monaco-workbench .backboard-workspace-status-dot.failed {
-	background: var(--vscode-charts-red);
-}
-
-.monaco-workbench .backboard-workspace-status-dot.needs-input {
-	background: var(--vscode-charts-yellow);
-}
-
-.monaco-workbench .backboard-workspace-card-actions {
-	display: flex;
-	flex: none;
-	align-items: center;
-	gap: 8px;
-	color: var(--vscode-descriptionForeground);
-}
-
-.monaco-workbench .backboard-workspace-card-menu {
-	display: inline-flex;
-	width: 24px;
-	height: 24px;
 	align-items: center;
 	justify-content: center;
-	padding: 0;
-	border: 0;
-	border-radius: 5px;
-	background: transparent;
-	color: var(--vscode-descriptionForeground);
-	font: inherit;
-	cursor: pointer;
+	transition: background 0.15s, border-color 0.15s;
 }
 
-.monaco-workbench .backboard-workspace-card-menu:hover {
-	background: var(--vscode-toolbar-hoverBackground);
-	color: var(--vscode-foreground);
+.monaco-workbench .backboard-workspace-actions button:hover {
+	background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
 }
 
-.monaco-workbench .backboard-workspace-status-pill {
-	padding: 2px 8px;
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 4px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 10px;
-	font-weight: 700;
-	line-height: 1.4;
-	text-transform: uppercase;
-}
-
-.monaco-workbench .backboard-workspace-status-pill.done {
-	color: var(--vscode-charts-green);
-}
-
-.monaco-workbench .backboard-workspace-status-pill.failed {
-	color: var(--vscode-charts-red);
-}
-
-.monaco-workbench .backboard-workspace-status-pill.needs-input {
-	color: var(--vscode-charts-yellow);
-}
-
-.monaco-workbench .backboard-workspace-card-body {
-	display: flex;
-	min-height: 0;
-	flex: 1;
-	flex-direction: column;
-	overflow: hidden;
-}
-
-.monaco-workbench .backboard-workspace-card-content {
-	display: flex;
-	min-height: 0;
-	flex: 1;
-	flex-direction: column;
-	padding: 15px;
-	overflow: auto;
-}
-
-.monaco-workbench .backboard-workspace-card-provider {
-	margin-bottom: 5px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 11px;
-	line-height: 1.3;
-}
-
-.monaco-workbench .backboard-workspace-card-description {
-	display: -webkit-box;
-	min-height: 40px;
-	overflow: hidden;
-	color: var(--vscode-editor-foreground);
-	font-size: 13px;
-	line-height: 1.4;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 2;
-}
-
-.monaco-workbench .backboard-workspace-card-output {
-	display: -webkit-box;
-	margin-top: 12px;
-	padding: 10px 11px;
-	overflow: hidden;
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 7px;
-	background: var(--vscode-sideBar-background);
-	color: var(--vscode-editor-foreground);
-	font-size: 12px;
-	line-height: 1.45;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 3;
-}
-
-.monaco-workbench .backboard-workspace-card-chat {
-	display: flex;
-	min-height: 0;
-	flex: none;
-	flex-direction: column;
-	gap: 10px;
-	margin-top: 12px;
-	padding: 10px;
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 8px;
-	background: var(--vscode-sideBar-background);
-}
-
-.monaco-workbench .backboard-workspace-card-transcript {
-	display: flex;
-	min-height: 72px;
-	max-height: 150px;
-	flex-direction: column;
-	gap: 8px;
-	overflow: auto;
-}
-
-.monaco-workbench .backboard-workspace-card-message {
-	padding: 9px 10px;
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 7px;
-	background: var(--vscode-editor-background);
-	color: var(--vscode-editor-foreground);
-}
-
-.monaco-workbench .backboard-workspace-card-message.user {
-	background: var(--vscode-input-background);
-}
-
-.monaco-workbench .backboard-workspace-card-message-label {
-	margin-bottom: 3px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 10px;
-	font-weight: 700;
-	line-height: 1.2;
-	text-transform: uppercase;
-}
-
-.monaco-workbench .backboard-workspace-card-message-text {
-	display: -webkit-box;
-	overflow: hidden;
-	font-size: 12px;
-	line-height: 1.45;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 4;
-}
-
-.monaco-workbench .backboard-workspace-card-chat-empty {
-	padding: 10px;
-	border: 1px dashed var(--vscode-panel-border);
-	border-radius: 7px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 12px;
-	line-height: 1.35;
-}
-
-.monaco-workbench .backboard-workspace-card-composer {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	flex: none;
-}
-
-.monaco-workbench .backboard-workspace-card-input {
-	box-sizing: border-box;
-	min-width: 0;
-	min-height: 54px;
-	flex: 1;
-	resize: none;
-	padding: 8px 10px;
-	border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-	border-radius: 7px;
-	background: var(--vscode-input-background);
-	color: var(--vscode-input-foreground);
-	font: inherit;
-	font-size: 12px;
-	line-height: 1.35;
-}
-
-.monaco-workbench .backboard-workspace-card-input:focus {
-	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: -1px;
-}
-
-.monaco-workbench .backboard-workspace-card-send {
-	display: inline-flex;
-	width: 36px;
-	height: 36px;
-	flex: none;
-	align-items: center;
-	justify-content: center;
-	padding: 0;
-	border: 1px solid var(--vscode-button-background);
-	border-radius: 9px;
-	background: var(--vscode-button-background);
-	color: var(--vscode-button-foreground);
-	cursor: pointer;
-	transition: background 80ms ease, border-color 80ms ease, color 80ms ease, transform 80ms ease;
-}
-
-.monaco-workbench .backboard-workspace-card-send .codicon {
-	font-size: 15px;
-}
-
-.monaco-workbench .backboard-workspace-card-send:not(:disabled):hover {
-	background: var(--vscode-button-hoverBackground);
-	border-color: var(--vscode-button-hoverBackground);
-	transform: translateY(-1px);
-}
-
-.monaco-workbench .backboard-workspace-card-send:disabled {
-	border-color: var(--vscode-panel-border);
-	background: var(--vscode-input-background);
-	color: var(--vscode-disabledForeground);
-	cursor: default;
-	opacity: 1;
-}
-
-.monaco-workbench .backboard-workspace-card-approval {
-	display: flex;
-	align-items: flex-start;
-	gap: 9px;
-	margin-top: 12px;
-	padding: 10px 11px;
-	border: 1px solid color-mix(in srgb, var(--vscode-charts-yellow) 42%, var(--vscode-panel-border));
-	border-radius: 7px;
-	background: color-mix(in srgb, var(--vscode-charts-yellow) 8%, var(--vscode-editor-background));
-	color: var(--vscode-editor-foreground);
-}
-
-.monaco-workbench .backboard-workspace-card-approval .codicon {
-	flex: none;
-	margin-top: 1px;
-	color: var(--vscode-charts-yellow);
+.monaco-workbench .backboard-workspace-actions button .codicon {
 	font-size: 14px;
 }
 
-.monaco-workbench .backboard-workspace-card-approval-copy {
-	display: flex;
-	min-width: 0;
-	flex-direction: column;
-	gap: 3px;
-}
+/* === Card grid: 3 columns === */
 
-.monaco-workbench .backboard-workspace-card-approval-copy strong {
-	font-size: 12px;
-	line-height: 1.3;
-}
-
-.monaco-workbench .backboard-workspace-card-approval-copy span {
-	color: var(--vscode-descriptionForeground);
-	font-size: 11px;
-	line-height: 1.35;
-}
-
-.monaco-workbench .backboard-workspace-card-activity {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-	margin-top: 16px;
-}
-
-.monaco-workbench .backboard-workspace-activity-row {
-	display: flex;
-	align-items: center;
-	gap: 7px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 12px;
-	line-height: 1.35;
-}
-
-.monaco-workbench .backboard-workspace-activity-row .codicon-check,
-.monaco-workbench .backboard-workspace-activity-row .codicon-diff,
-.monaco-workbench .backboard-workspace-activity-row .codicon-edit {
-	color: var(--vscode-charts-green);
-}
-
-.monaco-workbench .backboard-workspace-activity-row .codicon-sync {
-	color: var(--vscode-charts-blue);
-}
-
-.monaco-workbench .backboard-workspace-activity-row .codicon-error {
-	color: var(--vscode-charts-red);
-}
-
-.monaco-workbench .backboard-workspace-activity-time {
-	color: var(--vscode-descriptionForeground);
-	opacity: 0.8;
-}
-
-.monaco-workbench .backboard-workspace-activity-label {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.monaco-workbench .backboard-workspace-card-files {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 6px;
-	margin-top: auto;
-	padding-top: 16px;
-}
-
-.monaco-workbench .backboard-workspace-card-files span {
-	max-width: 120px;
-	padding: 3px 8px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 5px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 11px;
-	line-height: 1.2;
-	white-space: nowrap;
-}
-
-.monaco-workbench .backboard-workspace-card-footer {
-	display: flex;
-	align-items: center;
-	justify-content: flex-start;
-	gap: 12px;
-	min-height: 44px;
-	padding: 0 15px;
-	border-top: 1px solid var(--vscode-panel-border);
-	color: var(--vscode-descriptionForeground);
-	font-size: 12px;
-}
-
-.monaco-workbench .backboard-workspace-card-model {
-	display: inline-flex;
-	min-width: 0;
-	align-items: center;
-	gap: 7px;
-}
-
-.monaco-workbench .backboard-workspace-card-model span {
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.monaco-workbench .backboard-workspace-card-model {
+.monaco-workbench .backboard-workspace-cards {
 	flex: 1;
-	max-width: 100%;
-	color: var(--vscode-descriptionForeground);
+	min-height: 0;
+	overflow-y: auto;
+	padding: 4px 24px 24px;
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	grid-auto-rows: min-content;
+	gap: 10px;
+	align-content: start;
 }
+
+.monaco-workbench .backboard-workspace-cards::-webkit-scrollbar {
+	width: 10px;
+}
+
+.monaco-workbench .backboard-workspace-cards::-webkit-scrollbar-thumb {
+	background: var(--vscode-scrollbarSlider-background);
+	border-radius: 5px;
+}
+
+.monaco-workbench .backboard-workspace-cards::-webkit-scrollbar-thumb:hover {
+	background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+/* === Empty state === */
 
 .monaco-workbench .backboard-workspace-empty {
+	grid-column: 1 / -1;
 	display: flex;
-	min-height: 300px;
+	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	flex-direction: column;
-	grid-column: 1 / -1;
-	gap: 10px;
-	color: var(--vscode-descriptionForeground);
+	gap: 12px;
+	padding: 60px 20px;
 	text-align: center;
 }
 
 .monaco-workbench .backboard-workspace-empty .codicon {
-	color: var(--vscode-editor-foreground);
 	font-size: 48px;
+	opacity: 0.5;
 }
 
 .monaco-workbench .backboard-workspace-empty h2 {
 	margin: 0;
-	color: var(--vscode-editor-foreground);
-	font-size: 18px;
-	line-height: 1.3;
+	font-size: 16px;
+	font-weight: 600;
 }
 
 .monaco-workbench .backboard-workspace-empty p {
-	max-width: 280px;
 	margin: 0;
-	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	max-width: 320px;
 	line-height: 1.4;
 }
 
 .monaco-workbench .backboard-workspace-primary-button {
-	height: 32px;
-	margin-top: 8px;
-	padding: 0 14px;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 16px;
 	border: 1px solid var(--vscode-button-border, transparent);
 	border-radius: 6px;
 	background: var(--vscode-button-background);
 	color: var(--vscode-button-foreground);
-	font: inherit;
 	font-size: 12px;
-	font-weight: 700;
+	font-weight: 600;
 	cursor: pointer;
 }
 
@@ -668,12 +287,325 @@
 	background: var(--vscode-button-hoverBackground);
 }
 
+/* === Session card (tile) === */
+
+.monaco-workbench .backboard-workspace-card {
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 8px;
+	background: var(--vscode-sideBar-background);
+	overflow: hidden;
+	cursor: pointer;
+	transition: border-color 0.12s, background 0.12s;
+	min-height: 0;
+}
+
+.monaco-workbench .backboard-workspace-card:hover {
+	border-color: var(--vscode-focusBorder);
+	background: var(--vscode-list-hoverBackground);
+}
+
+.monaco-workbench .backboard-workspace-card.selected {
+	border-color: var(--vscode-focusBorder);
+	box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
+}
+
+.monaco-workbench .backboard-workspace-card.running {
+	border-color: var(--vscode-list-activeSelectionBackground);
+}
+
+.monaco-workbench .backboard-workspace-card-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	padding: 10px 12px 4px;
+}
+
+.monaco-workbench .backboard-workspace-card-title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	flex: 1;
+}
+
+.monaco-workbench .backboard-workspace-status-dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .backboard-workspace-status-dot.live {
+	background: var(--vscode-testing-iconPassed);
+	animation: workspace-pulse 1.5s ease-in-out infinite;
+}
+
+.monaco-workbench .backboard-workspace-status-dot.done {
+	background: var(--vscode-testing-iconPassed);
+}
+
+.monaco-workbench .backboard-workspace-status-dot.failed {
+	background: var(--vscode-testing-iconFailed);
+}
+
+.monaco-workbench .backboard-workspace-status-dot.needs-input {
+	background: var(--vscode-testing-iconQueued);
+}
+
+.monaco-workbench .backboard-workspace-card-name {
+	font-size: 13px;
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.monaco-workbench .backboard-workspace-card-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+.monaco-workbench .backboard-workspace-status-pill {
+	display: inline-flex;
+	align-items: center;
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+}
+
+.monaco-workbench .backboard-workspace-status-pill.live {
+	background: var(--vscode-testing-runAction);
+	color: var(--vscode-editor-background);
+}
+
+.monaco-workbench .backboard-workspace-status-pill.done {
+	background: var(--vscode-testing-iconPassed);
+	color: var(--vscode-editor-background);
+}
+
+.monaco-workbench .backboard-workspace-status-pill.failed {
+	background: var(--vscode-testing-iconFailed);
+	color: var(--vscode-editor-background);
+}
+
+.monaco-workbench .backboard-workspace-status-pill.needs-input {
+	background: var(--vscode-testing-iconQueued);
+	color: var(--vscode-editor-background);
+}
+
+.monaco-workbench .backboard-workspace-card-menu {
+	display: inline-flex;
+	width: 22px;
+	height: 22px;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	align-items: center;
+	justify-content: center;
+}
+
+.monaco-workbench .backboard-workspace-card-menu:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .backboard-workspace-card-content {
+	flex: 1;
+	padding: 0 12px 8px;
+	min-height: 0;
+}
+
+.monaco-workbench .backboard-workspace-card-description {
+	font-size: 12px;
+	color: var(--vscode-foreground);
+	line-height: 1.4;
+	margin-bottom: 4px;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.monaco-workbench .backboard-workspace-card-activity {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.monaco-workbench .backboard-workspace-card-activity-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	line-height: 1.4;
+}
+
+.monaco-workbench .backboard-workspace-card-activity-row .codicon {
+	flex: none;
+	font-size: 11px;
+	opacity: 0.7;
+}
+
+.monaco-workbench .backboard-workspace-card-activity-row .activity-time {
+	flex: none;
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.7;
+	font-size: 10px;
+}
+
+.monaco-workbench .backboard-workspace-card-activity-row .activity-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-workspace-card-output {
+	padding: 4px 8px;
+	margin: 4px 0;
+	border-radius: 6px;
+	background: var(--vscode-textCodeBlock-background);
+	font-size: 11px;
+	line-height: 1.4;
+	color: var(--vscode-descriptionForeground);
+	max-height: 44px;
+	overflow: hidden;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+}
+
+.monaco-workbench .backboard-workspace-card-files {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 3px;
+	padding: 3px 0;
+}
+
+.monaco-workbench .backboard-workspace-card-files span {
+	display: inline-flex;
+	padding: 1px 5px;
+	border-radius: 3px;
+	background: var(--vscode-textCodeBlock-background);
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* === Selected card inline chat === */
+
+.monaco-workbench .backboard-workspace-card-chat {
+	padding: 6px 0;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.monaco-workbench .backboard-workspace-card-transcript {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	max-height: 120px;
+	overflow-y: auto;
+}
+
+.monaco-workbench .backboard-workspace-card-message {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 4px 8px;
+	border-radius: 6px;
+	background: var(--vscode-textCodeBlock-background);
+}
+
+.monaco-workbench .backboard-workspace-card-message-label {
+	font-size: 10px;
+	font-weight: 600;
+	color: var(--vscode-descriptionForeground);
+	text-transform: uppercase;
+}
+
+.monaco-workbench .backboard-workspace-card-message-text {
+	font-size: 11px;
+	color: var(--vscode-foreground);
+	line-height: 1.4;
+}
+
+.monaco-workbench .backboard-workspace-card-chat-empty {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	padding: 8px;
+	text-align: center;
+}
+
+.monaco-workbench .backboard-workspace-card-composer {
+	display: flex;
+	gap: 6px;
+	align-items: flex-end;
+}
+
+.monaco-workbench .backboard-workspace-card-input {
+	flex: 1;
+	resize: none;
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 6px;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	font-family: inherit;
+	font-size: 12px;
+	line-height: 1.4;
+	padding: 6px 8px;
+	outline: none;
+	min-height: 32px;
+	max-height: 80px;
+}
+
+.monaco-workbench .backboard-workspace-card-input:focus {
+	border-color: var(--vscode-focusBorder);
+}
+
+.monaco-workbench .backboard-workspace-card-send {
+	display: inline-flex;
+	width: 28px;
+	height: 28px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 6px;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	cursor: pointer;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+}
+
+.monaco-workbench .backboard-workspace-card-send:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+/* === Detail / chat panel === */
+
 .monaco-workbench .backboard-workspace-detail {
 	display: flex;
 	min-width: 0;
 	height: 100%;
 	flex-direction: column;
 	background: var(--vscode-sideBar-background);
+	border-left: 1px solid var(--vscode-panel-border);
 }
 
 .monaco-workbench .backboard-workspace-detail.hidden {
@@ -683,38 +615,60 @@
 .monaco-workbench .backboard-workspace-detail-header {
 	box-sizing: border-box;
 	flex: none;
-	padding: 18px 20px 16px;
+	padding: 12px 18px;
 	border-bottom: 1px solid var(--vscode-panel-border);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
 }
 
 .monaco-workbench .backboard-workspace-detail-title-row {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
+	min-width: 0;
 }
 
 .monaco-workbench .backboard-workspace-detail-icon {
 	color: var(--vscode-editor-foreground);
-	font-size: 22px;
+	font-size: 18px;
 }
 
 .monaco-workbench .backboard-workspace-detail-title-row h2 {
-	min-width: 0;
 	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	color: var(--vscode-editor-foreground);
-	font-size: 15px;
-	font-weight: 700;
-	line-height: 1.35;
-	white-space: nowrap;
 }
 
 .monaco-workbench .backboard-workspace-detail-subtitle {
-	margin-top: 6px;
+	margin-top: 4px;
 	color: var(--vscode-descriptionForeground);
-	font-size: 12px;
+	font-size: 11px;
 	line-height: 1.35;
+}
+
+.monaco-workbench .backboard-workspace-detail-new-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 12px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 6px;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	font-size: 11px;
+	font-weight: 600;
+	cursor: pointer;
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
+.monaco-workbench .backboard-workspace-detail-new-button:hover {
+	background: var(--vscode-button-hoverBackground);
 }
 
 .monaco-workbench .backboard-workspace-detail-chat {
@@ -731,16 +685,27 @@
 	height: 100%;
 }
 
-@media (max-width: 1020px) {
+@keyframes workspace-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.4; }
+}
+
+@media (max-width: 1200px) {
+	.monaco-workbench .backboard-workspace-cards {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+
+@media (max-width: 800px) {
 	.monaco-workbench .backboard-workspace-page {
 		grid-template-columns: 1fr;
 	}
 
-	.monaco-workbench .backboard-workspace-main {
-		border-right: none;
-	}
-
 	.monaco-workbench .backboard-workspace-detail {
 		display: none;
+	}
+
+	.monaco-workbench .backboard-workspace-cards {
+		grid-template-columns: 1fr;
 	}
 }

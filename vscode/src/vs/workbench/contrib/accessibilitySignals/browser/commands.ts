@@ -15,6 +15,36 @@ import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickin
 import { IPreferencesService } from '../../../services/preferences/common/preferences.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 
+const backboardSoundSignals = [
+	AccessibilitySignal.chatRequestSent,
+	AccessibilitySignal.chatResponseReceived,
+	AccessibilitySignal.notificationReceived
+];
+
+export class EnableBackboardSounds extends Action2 {
+	static readonly ID = 'backboard.sounds.enable';
+
+	constructor() {
+		super({
+			id: EnableBackboardSounds.ID,
+			title: localize2('backboard.sounds.enable', "Backboard: Enable Chat and Notification Sounds"),
+			f1: true,
+			metadata: {
+				description: localize('backboard.sounds.enable.description', "Enable only Backboard's chat sent, chat done, and notification sounds.")
+			}
+		});
+	}
+
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		const configurationService = accessor.get(IConfigurationService);
+
+		for (const signal of backboardSoundSignals) {
+			const value = configurationService.getValue<{ sound?: string; announcement?: string }>(signal.settingsKey) ?? {};
+			await configurationService.updateValue(signal.settingsKey, { ...value, sound: 'on' });
+		}
+	}
+}
+
 export class ShowSignalSoundHelp extends Action2 {
 	static readonly ID = 'signals.sounds.help';
 

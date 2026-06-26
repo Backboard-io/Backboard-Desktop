@@ -103,6 +103,24 @@
         }
       ]
     },
+    "viewsContainers": {
+      "auxiliarybar": [
+        {
+          "id": "backboard",
+          "title": "\u200b",
+          "icon": "media/blank.svg"
+        }
+      ]
+    },
+    "views": {
+      "backboard": [
+        {
+          "id": "backboard.panel",
+          "type": "webview",
+          "name": "\u200b"
+        }
+      ]
+    },
     "configuration": [
       {
         "title": "Backboard",

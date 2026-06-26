@@ -10,7 +10,7 @@ import { Disposable, MutableDisposable, toDisposable } from '../../../../../base
 import { InstantiationType, registerSingleton } from '../../../../../platform/instantiation/common/extensions.js';
 import { createDecorator, IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope } from '../../../../../platform/storage/common/storage.js';
-import { IWorkbenchLayoutService, Parts } from '../../../../services/layout/browser/layoutService.js';
+import { IWorkbenchLayoutService } from '../../../../services/layout/browser/layoutService.js';
 import { BACKBOARD_WORKSPACE_OPEN_ON_STARTUP_STORAGE_KEY } from './backboardWorkspaceConstants.js';
 import { BackboardWorkspacePage } from './backboardWorkspacePage.js';
 
@@ -63,7 +63,6 @@ export class BackboardWorkspaceService extends Disposable implements IBackboardW
 		if (!this._visible) {
 			this._visible = true;
 			this.layoutService.mainContainer.classList.add(BACKBOARD_WORKSPACE_VISIBLE_CLASS);
-			this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
 			this.container?.classList.remove('hidden');
 			this.layout(Dimension.lift(this.layoutService.mainContainerDimension));
 			this.page.value?.revealTop();

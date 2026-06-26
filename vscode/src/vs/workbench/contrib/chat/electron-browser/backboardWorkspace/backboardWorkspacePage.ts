@@ -47,8 +47,12 @@ export class BackboardWorkspacePage extends Disposable {
 	private detailElement: HTMLElement | undefined;
 	private detailTitleElement: HTMLElement | undefined;
 	private detailSubtitleElement: HTMLElement | undefined;
+	private detailNewButton: HTMLButtonElement | undefined;
 	private chatContainer: HTMLElement | undefined;
 	private chatWidget: ChatWidget | undefined;
+	private workspaceSwitcherButton: HTMLButtonElement | undefined;
+	private workspaceSwitcherLabel: HTMLElement | undefined;
+	private selectedWorkspaceFilter: string | undefined;
 	private dimension = new Dimension(0, 0);
 	private selectedSessionResource: URI | undefined;
 	private targetWorkspaceUri: URI | undefined;
@@ -106,10 +110,24 @@ export class BackboardWorkspacePage extends Disposable {
 
 		const toolbar = append(main, $('.backboard-workspace-toolbar'));
 		const heading = append(toolbar, $('.backboard-workspace-heading'));
+
+		// Workspace switcher button
+		this.workspaceSwitcherButton = append(heading, $('button.backboard-workspace-switcher'));
+		this.workspaceSwitcherButton.type = 'button';
+		const switcherIcon = append(this.workspaceSwitcherButton, $('span.codicon.codicon-folder'));
+		switcherIcon.setAttribute('aria-hidden', 'true');
+		this.workspaceSwitcherLabel = append(this.workspaceSwitcherButton, $('span'));
+		this.workspaceSwitcherLabel.textContent = localize('backboardWorkspaceAllWorkspaces', "All Workspaces");
+		this.workspaceSwitcherButton.title = localize('backboardWorkspaceSwitcherTitle', "Switch workspace");
+		this.workspaceSwitcherButton.setAttribute('aria-label', this.workspaceSwitcherButton.title);
+		this.cardDisposables.add(addDisposableListener(this.workspaceSwitcherButton, EventType.CLICK, (e) => {
+			EventHelper.stop(e);
+			this.showWorkspaceSwitcherMenu(this.workspaceSwitcherButton!);
+		}));
+
 		const titleRow = append(heading, $('.backboard-workspace-title-row'));
 		append(titleRow, $('h1')).textContent = localize('backboardWorkspaceTitle', "Agent Workspace");
 		this.countElement = append(titleRow, $('.backboard-workspace-count'));
-		append(heading, $('.backboard-workspace-description')).textContent = localize('backboardWorkspaceDescription', "Review active and completed Backboard agent sessions.");
 
 		const actions = append(toolbar, $('.backboard-workspace-actions'));
 		this.createToolbarButton(actions, 'codicon-refresh', localize('backboardWorkspaceRefresh', "Refresh"), () => {
@@ -129,10 +147,31 @@ export class BackboardWorkspacePage extends Disposable {
 		detailIcon.setAttribute('aria-hidden', 'true');
 		this.detailTitleElement = append(detailTitleRow, $('h2'));
 		this.detailSubtitleElement = append(detailHeader, $('.backboard-workspace-detail-subtitle'));
+
+		// "New" button in detail header — always spawns a fresh chat
+		this.detailNewButton = append(detailHeader, $('button.backboard-workspace-detail-new-button')) as HTMLButtonElement;
+		this.detailNewButton.type = 'button';
+		const newIcon = append(this.detailNewButton, $('span.codicon.codicon-add'));
+		newIcon.setAttribute('aria-hidden', 'true');
+		append(this.detailNewButton, $('span')).textContent = localize('backboardWorkspaceDetailNew', "New");
+		this.detailNewButton.title = localize('backboardWorkspaceDetailNewTitle', "Start a new agent chat");
+		this.detailNewButton.setAttribute('aria-label', this.detailNewButton.title);
+		this.cardDisposables.add(addDisposableListener(this.detailNewButton, EventType.CLICK, () => {
+			void this.openNewAgentSession();
+		}));
+
 		this.chatContainer = append(detail, $('.backboard-workspace-detail-chat'));
 
 		this.createChatWidget(detail);
-		void this.ensureWorkspaceUri().then(() => this.renderSessions(), error => {
+		void this.ensureWorkspaceUri().then(() => {
+			this.renderSessions();
+			// Auto-open a new agent session so the detail/chat panel is
+			// immediately visible and functional instead of hidden behind
+			// the "no-detail" state.
+			if (!this.modelRef.value) {
+				void this.openNewAgentSession();
+			}
+		}, error => {
 			this.logService.error('[BackboardWorkspacePage] Failed to initialize default workspace folder', error);
 		});
 		this.renderSessions();
@@ -277,6 +316,7 @@ export class BackboardWorkspacePage extends Disposable {
 		card.setAttribute('aria-pressed', String(selected));
 		this.queueSessionOutputPreview(session);
 
+		// Header: status dot + name + status pill
 		const header = append(card, $('.backboard-workspace-card-header'));
 		const title = append(header, $('.backboard-workspace-card-title'));
 		append(title, $(`span.backboard-workspace-status-dot.${this.getStatusClass(session.status)}`));
@@ -294,11 +334,14 @@ export class BackboardWorkspacePage extends Disposable {
 			void this.deleteSession(session);
 		}));
 
-		const body = append(card, $('.backboard-workspace-card-body'));
-		const content = append(body, $('.backboard-workspace-card-content'));
-		append(content, $('.backboard-workspace-card-provider')).textContent = session.providerLabel;
+		// Body: description + output preview + activity
+		const content = append(card, $('.backboard-workspace-card-content'));
 		const outputPreview = this.getCachedOutputPreview(session);
-		append(content, $('.backboard-workspace-card-description')).textContent = this.getCardDescription(session);
+		const description = this.getCardDescription(session);
+		if (description) {
+			append(content, $('.backboard-workspace-card-description')).textContent = description;
+		}
+
 		if (selected) {
 			this.renderSelectedCardChat(content, session, outputPreview);
 		} else if (outputPreview) {
@@ -319,11 +362,6 @@ export class BackboardWorkspacePage extends Disposable {
 				append(fileRow, $('span')).textContent = localize('backboardWorkspaceMoreFiles', "+{0}", files.length - 3);
 			}
 		}
-
-		const footer = append(card, $('.backboard-workspace-card-footer'));
-		const model = append(footer, $('.backboard-workspace-card-model'));
-		append(model, $('.codicon.codicon-symbol-misc')).setAttribute('aria-hidden', 'true');
-		append(model, $('span')).textContent = this.getSessionModelLabel(session);
 
 		this.cardDisposables.add(addDisposableListener(card, EventType.CLICK, () => {
 			void this.openExistingSession(session);
@@ -684,7 +722,91 @@ export class BackboardWorkspacePage extends Disposable {
 	private getBackboardSessions(): IAgentSession[] {
 		return this.agentSessionsService.model.sessions
 			.filter(session => !session.isArchived() && !this.deletedSessionResources.has(session.resource.toString()) && this.isBackboardSession(session))
+			.filter(session => !this.selectedWorkspaceFilter || this.getSessionWorkspaceUri(session)?.toString() === this.selectedWorkspaceFilter)
 			.sort((a, b) => this.getSessionActivityTime(b) - this.getSessionActivityTime(a));
+	}
+
+	private getAvailableWorkspaces(): { uri: URI; label: string; count: number }[] {
+		const map = new Map<string, { uri: URI; label: string; count: number }>();
+		for (const session of this.agentSessionsService.model.sessions) {
+			if (session.isArchived() || !this.isBackboardSession(session)) {
+				continue;
+			}
+			const uri = this.getSessionWorkspaceUri(session);
+			if (!uri) {
+				continue;
+			}
+			const key = uri.toString();
+			const existing = map.get(key);
+			if (existing) {
+				existing.count++;
+			} else {
+				map.set(key, { uri, label: basename(uri) ?? uri.fsPath, count: 1 });
+			}
+		}
+		return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+	}
+
+	private showWorkspaceSwitcherMenu(anchor: HTMLElement): void {
+		// Remove any existing menu
+		const existing = this.container?.ownerDocument.querySelector('.monaco-workspace-switcher-menu');
+		existing?.remove();
+
+		const doc = this.container?.ownerDocument;
+		if (!doc) {
+			return;
+		}
+
+		const menu = append(doc.body, $('.monaco-workspace-switcher-menu'));
+		const disposables = new DisposableStore();
+
+		// "All Workspaces" option
+		const allItem = append(menu, $('.monaco-workspace-switcher-menu-item'));
+		allItem.classList.toggle('active', !this.selectedWorkspaceFilter);
+		append(allItem, $('span.codicon.codicon-layout')).setAttribute('aria-hidden', 'true');
+		append(allItem, $('span.switcher-item-label')).textContent = localize('backboardWorkspaceAllWorkspaces', "All Workspaces");
+		const allCount = append(allItem, $('span.switcher-item-count'));
+		const totalSessions = this.agentSessionsService.model.sessions.filter(s => !s.isArchived() && this.isBackboardSession(s)).length;
+		allCount.textContent = String(totalSessions);
+		disposables.add(addDisposableListener(allItem, EventType.CLICK, () => {
+			this.selectedWorkspaceFilter = undefined;
+			this.workspaceSwitcherLabel!.textContent = localize('backboardWorkspaceAllWorkspaces', "All Workspaces");
+			this.renderSessions();
+			menu.remove();
+			disposables.dispose();
+		}));
+
+		const workspaces = this.getAvailableWorkspaces();
+		if (workspaces.length > 0) {
+			append(menu, $('.monaco-workspace-switcher-menu-separator'));
+			for (const ws of workspaces) {
+				const item = append(menu, $('.monaco-workspace-switcher-menu-item'));
+				item.classList.toggle('active', this.selectedWorkspaceFilter === ws.uri.toString());
+				append(item, $('span.codicon.codicon-folder')).setAttribute('aria-hidden', 'true');
+				append(item, $('span.switcher-item-label')).textContent = ws.label;
+				append(item, $('span.switcher-item-count')).textContent = String(ws.count);
+				disposables.add(addDisposableListener(item, EventType.CLICK, () => {
+					this.selectedWorkspaceFilter = ws.uri.toString();
+					this.workspaceSwitcherLabel!.textContent = ws.label;
+					this.renderSessions();
+					menu.remove();
+					disposables.dispose();
+				}));
+			}
+		}
+
+		// Position the menu below the anchor
+		const rect = anchor.getBoundingClientRect();
+		menu.style.top = `${rect.bottom + 4}px`;
+		menu.style.left = `${rect.left}px`;
+
+		// Dismiss on outside click
+		disposables.add(addDisposableListener(doc, EventType.CLICK, (e: MouseEvent) => {
+			if (!menu.contains(e.target as Node) && e.target !== anchor) {
+				menu.remove();
+				disposables.dispose();
+			}
+		}, true));
 	}
 
 	private getSessionActivityTime(session: IAgentSession): number {
@@ -722,15 +844,6 @@ export class BackboardWorkspacePage extends Disposable {
 		return typeof value === 'string' ? value : value.value;
 	}
 
-	private getSessionModelLabel(session: IAgentSession): string {
-		const modelId = this.getMetadataString(session, 'modelId') ?? this.modelIdByResource.get(session.resource.toString());
-		if (modelId) {
-			return this.formatModelLabel(modelId);
-		}
-
-		return localize('backboardWorkspaceUnknownModel', "Model not recorded");
-	}
-
 	private getMetadataString(session: IAgentSession, key: string): string | undefined {
 		const value = session.metadata?.[key];
 		if (typeof value === 'string' && value.trim()) {
@@ -738,12 +851,6 @@ export class BackboardWorkspacePage extends Disposable {
 		}
 
 		return undefined;
-	}
-
-	private formatModelLabel(modelId: string): string {
-		const trimmedModelId = modelId.trim();
-		const schemeSeparator = trimmedModelId.indexOf(':');
-		return schemeSeparator >= 0 ? trimmedModelId.substring(schemeSeparator + 1) : trimmedModelId;
 	}
 
 	private getCachedOutputPreview(session: IAgentSession): string | undefined {

@@ -5,6 +5,7 @@
 
 import { registerAction2 } from '../../platform/actions/common/actions.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../workbench/common/contributions.js';
+import { EnvironmentTitleBarContribution } from '../browser/actions/environmentTitleBarWidget.js';
 import { OpenSessionInVSCodeAction, OpenInVSCodeWidgetContribution, OpenJarvisWindowAction, OpenOptimusWindowAction, OpenVSCodeWindowAction, OpenWorkspaceInVSCodeAction } from './actions/vscodeActions.js';
 
 // Actions
@@ -18,4 +19,5 @@ import { OpenSessionInVSCodeAction, OpenInVSCodeWidgetContribution, OpenJarvisWi
 
 (function registerWorkbenchContributions(): void {
 	registerWorkbenchContribution2(OpenInVSCodeWidgetContribution.ID, OpenInVSCodeWidgetContribution, WorkbenchPhase.BlockRestore);
+	registerWorkbenchContribution2(EnvironmentTitleBarContribution.ID, EnvironmentTitleBarContribution, WorkbenchPhase.BlockRestore);
 })();

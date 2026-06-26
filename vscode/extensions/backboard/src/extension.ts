@@ -737,7 +737,7 @@ function canInstallBackboardUpdate(): boolean {
 		return false;
 	}
 	const appPath = currentMacAppPath();
-	return Boolean(appPath && path.basename(appPath) === 'Backboard Studio.app');
+	return Boolean(appPath && isSupportedMacBackboardAppName(path.basename(appPath)));
 }
 
 async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
@@ -746,7 +746,7 @@ async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
 		return;
 	}
 	const appPath = currentMacAppPath();
-	if (!appPath || path.basename(appPath) !== 'Backboard Studio.app') {
+	if (!appPath || !isSupportedMacBackboardAppName(path.basename(appPath))) {
 		await vscode.window.showWarningMessage('Automatic update install is only available from the packaged Backboard Studio app.');
 		return;
 	}
@@ -777,6 +777,10 @@ async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
 function currentMacAppPath(): string | undefined {
 	const match = /^(.+?\.app)(?:\/|$)/.exec(process.execPath);
 	return match?.[1];
+}
+
+function isSupportedMacBackboardAppName(appName: string): boolean {
+	return appName === 'Backboard Studio.app' || appName === 'Backboard Studio Sandbox.app';
 }
 
 function downloadBackboardUpdate(rawUrl: string, destination: string, progress: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
@@ -873,8 +877,10 @@ function sha256File(filePath: string): Promise<string> {
 async function stageMacBackboardInstaller(dmgPath: string, appPath: string, version: string): Promise<void> {
 	const installerPath = path.join(path.dirname(dmgPath), 'install-backboard-update.sh');
 	const logPath = path.join(os.tmpdir(), 'backboard-studio-update.log');
+	const appName = path.basename(appPath);
+	const bundleIdentifier = appName === 'Backboard Studio Sandbox.app' ? 'io.backboard.studio.sandbox' : 'io.backboard.studio';
 	await fs.promises.writeFile(installerPath, macUpdateInstallerScript(), { mode: 0o700 });
-	const child = cp.spawn('/bin/zsh', [installerPath, dmgPath, appPath, String(process.pid), version, logPath], {
+	const child = cp.spawn('/bin/zsh', [installerPath, dmgPath, appPath, String(process.pid), version, logPath, appName, bundleIdentifier], {
 		detached: true,
 		stdio: 'ignore'
 	});
@@ -890,7 +896,8 @@ APP_PATH="$2"
 CURRENT_PID="$3"
 VERSION="$4"
 LOG_PATH="$5"
-APP_NAME="Backboard Studio.app"
+APP_NAME="\${6:-Backboard Studio.app}"
+BUNDLE_IDENTIFIER="\${7:-io.backboard.studio}"
 MOUNT_POINT="$(/usr/bin/mktemp -d /tmp/backboard-studio-update-mount.XXXXXX)"
 
 exec >>"$LOG_PATH" 2>&1
@@ -908,7 +915,7 @@ if [[ ! -d "$SOURCE_APP" ]]; then
   exit 1
 fi
 
-/usr/bin/osascript -e 'tell application id "io.backboard.studio" to quit' >/dev/null 2>&1 || true
+/usr/bin/osascript -e "tell application id \\"$BUNDLE_IDENTIFIER\\" to quit" >/dev/null 2>&1 || true
 for _ in {1..120}; do
   if ! /bin/ps -p "$CURRENT_PID" >/dev/null 2>&1; then
     break
@@ -1396,6 +1403,14 @@ async function handleOptimusPanelCommand(panelProvider: BackboardPanelProvider):
 			break;
 		case 'cancel':
 			panelProvider.cancelActiveRun();
+			break;
+		case 'refreshModels':
+			await openBackboardViewForOptimus(panelProvider);
+			await panelProvider.refreshModelsForOptimus();
+			break;
+		case 'signIn':
+			await openBackboardViewForOptimus(panelProvider);
+			await panelProvider.signInForOptimus();
 			break;
 		case 'reviewChanges':
 			await panelProvider.reviewChanges();
@@ -2174,6 +2189,13 @@ function toolResultRequestKey(request: ToolResultRequest): string {
 	return `${request.threadId ?? ''}:${request.runId ?? ''}:${toolCallIds}`;
 }
 
+function withFallbackThreadId(request: ToolResultRequest, threadId: string | undefined): ToolResultRequest {
+	if (request.threadId || !threadId) {
+		return request;
+	}
+	return { ...request, threadId };
+}
+
 function isRecoverableToolOutputSubmissionError(message: string | undefined): boolean {
 	return typeof message === 'string'
 		&& (
@@ -2263,6 +2285,28 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 
 	async reviewChanges(): Promise<void> {
 		await vscode.commands.executeCommand('workbench.view.scm');
+	}
+
+	async refreshModelsForOptimus(): Promise<void> {
+		const view = this.view;
+		if (!view) {
+			this.bridge.refreshModels();
+			return;
+		}
+		await postPanelState(this.bridge, view.webview, true);
+		await this.postPanelStateSnapshot();
+	}
+
+	async signInForOptimus(): Promise<void> {
+		const changed = await promptBackboardSso(this.bridge);
+		if (!changed) {
+			return;
+		}
+		const view = this.view;
+		if (view) {
+			await postPanelState(this.bridge, view.webview, true);
+			await this.postPanelStateSnapshot();
+		}
 	}
 
 	refreshState(): void {
@@ -2468,13 +2512,17 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				imageGeneration
 			);
 			let currentToolRequest: ToolResultRequest | undefined;
+			let boundThreadId: string | undefined;
 			const pendingToolRequests: ToolResultRequest[] = [];
 			const seenToolRequests = new Set<string>();
 			const handleEvent = (event: BridgeEvent): void => {
+				if (event.type === 'sessionBinding' && event.threadId) {
+					boundThreadId = event.threadId;
+				}
 				const toolRequest = renderDirectBridgeEvent(event, currentToolRequest);
 				if (toolRequest && toolRequest !== currentToolRequest) {
-					currentToolRequest = toolRequest;
-					enqueueToolResultRequest(pendingToolRequests, toolRequest, seenToolRequests);
+					currentToolRequest = withFallbackThreadId(toolRequest, boundThreadId);
+					enqueueToolResultRequest(pendingToolRequests, currentToolRequest, seenToolRequests);
 				}
 			};
 
@@ -2495,6 +2543,13 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 
 			let nextToolRequest = pendingToolRequests.shift();
 			while (nextToolRequest && !token.isCancellationRequested) {
+				if (!nextToolRequest.threadId || !nextToolRequest.runId) {
+					const message = 'Backboard requested local tools without a thread/run binding.';
+					fatalErrorMessage = message;
+					liveMessages.push({ role: 'error', content: message });
+					writeLiveState(message, 'error', false, true);
+					break;
+				}
 				const toolOutputs = await executeToolCalls(this.bridge, nextToolRequest.toolCalls, settings.mode, sink, token);
 				if (token.isCancellationRequested) {
 					break;
@@ -2511,10 +2566,13 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 					tools: submitTools,
 					config: settings.config
 				}, event => {
+					if (event.type === 'sessionBinding' && event.threadId) {
+						boundThreadId = event.threadId;
+					}
 					const followupToolRequest = renderDirectBridgeEvent(event, currentContinuationToolRequest);
 					if (followupToolRequest && followupToolRequest !== currentContinuationToolRequest) {
-						currentContinuationToolRequest = followupToolRequest;
-						enqueueToolResultRequest(pendingToolRequests, followupToolRequest, seenToolRequests);
+						currentContinuationToolRequest = withFallbackThreadId(followupToolRequest, boundThreadId);
+						enqueueToolResultRequest(pendingToolRequests, currentContinuationToolRequest, seenToolRequests);
 					}
 				}, token);
 				nextToolRequest = pendingToolRequests.shift();

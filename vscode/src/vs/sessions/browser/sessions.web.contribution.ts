@@ -5,6 +5,7 @@
 
 import { registerAction2 } from '../../platform/actions/common/actions.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../workbench/common/contributions.js';
+import { EnvironmentTitleBarContribution } from './actions/environmentTitleBarWidget.js';
 import { OpenInVSCodeAction, OpenInVSCodeWidgetContribution } from './actions/vscodeActions.js';
 
 // Actions
@@ -14,4 +15,5 @@ import { OpenInVSCodeAction, OpenInVSCodeWidgetContribution } from './actions/vs
 
 (function registerWorkbenchContributions(): void {
 	registerWorkbenchContribution2(OpenInVSCodeWidgetContribution.ID, OpenInVSCodeWidgetContribution, WorkbenchPhase.BlockRestore);
+	registerWorkbenchContribution2(EnvironmentTitleBarContribution.ID, EnvironmentTitleBarContribution, WorkbenchPhase.BlockRestore);
 })();

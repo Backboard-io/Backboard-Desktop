@@ -16,7 +16,7 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 APP_BUNDLE=""
-for candidate in "$ROOT/.build/electron/Backboard Studio Dev.app" "$ROOT/.build/electron/Backboard IDE.app" "$ROOT/.build/electron/Code - OSS.app"; do
+for candidate in "$ROOT/.build/electron/Backboard Studio Dev.app" "$ROOT/.build/electron/Backboard IDE.app" "$ROOT/.build/electron/Backboard Studio.app" "$ROOT/.build/electron/Code - OSS.app"; do
 	if [[ -d "$candidate" ]]; then
 		APP_BUNDLE="$candidate"
 		break

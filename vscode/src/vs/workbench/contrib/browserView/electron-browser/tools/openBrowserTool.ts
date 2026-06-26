@@ -12,6 +12,7 @@ import { hasKey } from '../../../../../base/common/types.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { IPlaywrightService } from '../../../../../platform/browserView/common/playwrightService.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IAgentNetworkFilterService } from '../../../../../platform/networkFilter/common/networkFilterService.js';
@@ -63,6 +64,7 @@ export interface IOpenBrowserToolParams {
 }
 
 const DECLINE_OPTION_ID = '__decline__';
+const sessionsRightWorkbenchBrowserCommand = 'workbench.action.sessions.rightWorkbench.openBrowser';
 
 export class OpenBrowserTool implements IToolImpl {
 	constructor(
@@ -74,6 +76,7 @@ export class OpenBrowserTool implements IToolImpl {
 		@IChatService private readonly chatService: IChatService,
 		@IConfigurationService private readonly configService: IConfigurationService,
 		@ILogService private readonly logService: ILogService,
+		@ICommandService private readonly commandService: ICommandService,
 	) { }
 
 	async prepareToolInvocation(context: IToolInvocationPreparationContext, _token: CancellationToken): Promise<IPreparedToolInvocation | undefined> {
@@ -97,6 +100,13 @@ export class OpenBrowserTool implements IToolImpl {
 		if (!this.agentNetworkFilterService.isUriAllowed(uri)) {
 			throw new Error(this.agentNetworkFilterService.formatError(uri));
 		}
+
+		// Surface the browser tool call in the sessions right workbench (the
+		// auxiliary bar) at the same time the acceptance card is shown, so the
+		// call appears in the right panel that remains visible in Simple mode.
+		this._openInSessionsRightWorkbench(params.url).catch(error => {
+			this.logService.debug('[OpenBrowserTool] Sessions Right Workbench browser command unavailable during prepare.', error);
+		});
 
 		return {
 			invocationMessage: localize('browser.open.invocation', "Opening browser page at {0}", parsed.href),
@@ -284,8 +294,14 @@ export class OpenBrowserTool implements IToolImpl {
 	}
 
 	private async _openNewPage(sessionId: string, url: string): Promise<IToolResult> {
-		const { pageId, summary } = await this.playwrightService.openPage(sessionId, url);
-		return this._pageResult(pageId, summary, localize('browser.open.result', "Opened {0}", createBrowserPageLink(pageId)));
+		try {
+			const { pageId, summary } = await this.playwrightService.openPage(sessionId, url);
+			await this._openInSessionsRightWorkbench(url, pageId);
+			return this._pageResult(pageId, summary, localize('browser.open.result', "Opened {0}", createBrowserPageLink(pageId)));
+		} catch (error) {
+			await this._openInSessionsRightWorkbench(url);
+			throw error;
+		}
 	}
 
 	private async _shareExistingPage(sessionId: string, editor: BrowserEditorInput): Promise<IToolResult> {
@@ -297,7 +313,16 @@ export class OpenBrowserTool implements IToolImpl {
 		}
 
 		const summary = await this.playwrightService.getSummary(sessionId, editor.id);
+		await this._openInSessionsRightWorkbench(editor.url, editor.id);
 		return this._pageResult(editor.id, summary, localize('browser.open.sharedResult', "User shared {0}", createBrowserPageLink(editor.id)));
+	}
+
+	private async _openInSessionsRightWorkbench(url: string | undefined, browserViewId?: string): Promise<void> {
+		try {
+			await this.commandService.executeCommand(sessionsRightWorkbenchBrowserCommand, { url, browserViewId });
+		} catch (error) {
+			this.logService.debug('[OpenBrowserTool] Sessions Right Workbench browser command unavailable.', error);
+		}
 	}
 
 	private _pageResult(pageId: string, summary: string, resultMessage: string): IToolResult {

@@ -35,6 +35,7 @@ import { ActiveSessionWorkspaceIsVirtualContext } from '../../../common/contextk
 import { ISession } from '../../../services/sessions/common/session.js';
 import { IChatWidgetService } from '../../../../workbench/contrib/chat/browser/chat.js';
 import { Menus } from '../../../browser/menus.js';
+import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 import { INonSessionTaskEntry, ISessionsTasksService, ISessionTaskWithTarget, ITaskEntry, TaskStorageTarget } from './sessionsTasksService.js';
 import { IsAuxiliaryWindowContext } from '../../../../workbench/common/contextkeys.js';
 import { IRunScriptCustomTaskWidgetResult, RunScriptCustomTaskWidget } from './runScriptCustomTaskWidget.js';
@@ -92,6 +93,10 @@ function formatBrowserUrlDescription(url: string | undefined, maxLength: number)
 		return stripped;
 	}
 	return `${stripped.substring(0, maxLength - 3)}...`;
+}
+
+async function openRightWorkbenchBrowser(commandService: ICommandService, browserUrl: string | undefined): Promise<void> {
+	await commandService.executeCommand(RightWorkbenchCommandId.OpenBrowser, browserUrl);
 }
 
 function getPrimaryTask(tasks: readonly ISessionTaskWithTarget[], pinnedTaskLabel: string | undefined): ISessionTaskWithTarget | undefined {
@@ -223,7 +228,7 @@ export class RunScriptContribution extends Disposable implements IWorkbenchContr
 
 				const { tasks, session, pinnedBrowser, browserUrl } = activeState;
 				if (pinnedBrowser) {
-					await that._commandService.executeCommand('simpleBrowser.show', browserUrl);
+					await openRightWorkbenchBrowser(that._commandService, browserUrl);
 					return;
 				}
 
@@ -821,7 +826,7 @@ class RunScriptActionViewItem extends BaseActionViewItem {
 				}
 			],
 			run: async () => {
-				await this._commandService.executeCommand('simpleBrowser.show', browserUrl);
+				await openRightWorkbenchBrowser(this._commandService, browserUrl);
 			},
 		});
 
