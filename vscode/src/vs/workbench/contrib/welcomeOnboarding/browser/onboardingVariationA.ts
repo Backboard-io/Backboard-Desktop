@@ -819,11 +819,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				card.classList.add('selected');
 			}
 
-			const top = append(card, $('.onboarding-backboard-mode-card-top'));
-			const icon = append(top, $('.onboarding-backboard-mode-icon'));
-			icon.appendChild(renderIcon(this._getModeIcon(option.id)));
-			append(top, $('.onboarding-backboard-mode-card-line'));
-
 			const cardTitle = append(card, $('div.onboarding-backboard-mode-title'));
 			cardTitle.textContent = option.label;
 
@@ -842,17 +837,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		const selectedExperienceIndex = ONBOARDING_EXPERIENCE_OPTIONS.findIndex(option => option.id === this.selectedExperience);
 		this._setupRadioGroupNavigation(cards, Math.max(0, selectedExperienceIndex));
-	}
-
-	private _getModeIcon(experience: OnboardingExperience) {
-		switch (experience) {
-			case OnboardingExperience.Simple:
-				return Codicon.comment;
-			case OnboardingExperience.Developer:
-				return Codicon.code;
-			case OnboardingExperience.Advanced:
-				return Codicon.gitBranch;
-		}
 	}
 
 	private _createModePreview(parent: HTMLElement, experience: OnboardingExperience): void {

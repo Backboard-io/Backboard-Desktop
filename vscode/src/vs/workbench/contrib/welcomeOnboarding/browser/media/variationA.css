@@ -916,8 +916,8 @@
 	flex-direction: column;
 	align-items: flex-start;
 	width: 260px;
-	height: 268px;
-	padding: 22px 18px 18px;
+	height: 220px;
+	padding: 20px 18px 18px;
 	box-sizing: border-box;
 	color: var(--vscode-editor-foreground);
 	font-family: inherit;
@@ -939,38 +939,10 @@
 	border-color: var(--vscode-focusBorder);
 }
 
-.onboarding-backboard-mode-card-top {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	width: 224px;
-	height: 36px;
-}
-
-.onboarding-backboard-mode-icon {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 36px;
-	height: 36px;
-	color: var(--vscode-descriptionForeground);
-	background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent);
-	border-radius: 8px;
-}
-
-.onboarding-backboard-mode-icon .codicon {
-	font-size: 16px;
-}
-
-.onboarding-backboard-mode-card-line {
-	flex: 1;
-	height: 1px;
-}
-
 .onboarding-backboard-mode-title {
 	width: 224px;
 	height: 18px;
-	margin-top: 10px;
+	margin-top: 0;
 	color: var(--vscode-descriptionForeground);
 	font-size: 13px;
 	font-weight: 400;
