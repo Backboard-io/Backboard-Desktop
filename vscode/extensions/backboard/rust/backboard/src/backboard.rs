@@ -616,6 +616,20 @@ pub struct AudioAttachment {
     pub mime_type: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct ImageAttachment {
+    pub data: Vec<u8>,
+    pub file_name: String,
+    pub mime_type: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ImageAttachment {
+    pub data: Vec<u8>,
+    pub file_name: String,
+    pub mime_type: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SendMessageRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -653,6 +667,8 @@ pub struct SendMessageRequest {
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing)]
     pub audio_file: Option<AudioAttachment>,
+    #[serde(skip_serializing)]
+    pub image_file: Option<ImageAttachment>,
 }
 
 fn default_web_search() -> String {
@@ -680,6 +696,7 @@ impl Default for SendMessageRequest {
             mcp_calls: None,
             max_tokens: None,
             audio_file: None,
+            image_file: None,
         }
     }
 }
@@ -1622,6 +1639,12 @@ fn message_multipart_form(request: SendMessageRequest, stream: bool) -> Result<F
             .mime_str(&audio.mime_type)?;
         form = form.part("audio_file", part);
     }
+    if let Some(image) = request.image_file {
+        let part = Part::bytes(image.data)
+            .file_name(image.file_name)
+            .mime_str(&image.mime_type)?;
+        form = form.part("image_file", part);
+    }
     Ok(form)
 }
 
@@ -1633,7 +1656,7 @@ fn message_request_builder(
     stream: bool,
 ) -> RequestBuilder {
     let builder = auth.apply(client.post(url));
-    if request.audio_file.is_some() {
+    if request.audio_file.is_some() || request.image_file.is_some() {
         builder.multipart(message_multipart_form(request, stream).unwrap_or_else(|_| Form::new()))
     } else {
         builder
@@ -1643,7 +1666,7 @@ fn message_request_builder(
 }
 
 fn validate_message_request(request: &SendMessageRequest, stream: bool) -> Result<()> {
-    if request.audio_file.is_some() {
+    if request.audio_file.is_some() || request.image_file.is_some() {
         message_multipart_form(request.clone(), stream).map(|_| ())
     } else {
         message_json(request, stream);

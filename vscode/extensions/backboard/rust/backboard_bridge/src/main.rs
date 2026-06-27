@@ -12,8 +12,9 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use backboard::{
-    AudioAttachment, BackboardClient, BackboardConfig, BackboardModel, RecentUsageQuery,
-    SendMessageRequest, SubmitToolOutputsRequest, UsageSummaryQuery, message_request_log_json,
+    AudioAttachment, BackboardClient, BackboardConfig, BackboardModel, ImageAttachment,
+    RecentUsageQuery, SendMessageRequest, SubmitToolOutputsRequest, UsageSummaryQuery,
+    message_request_log_json,
 };
 use futures::{StreamExt as _, stream};
 use serde::{Deserialize, Serialize};
@@ -180,6 +181,10 @@ struct SendPromptParams {
     #[serde(default)]
     audio_file: Option<AudioFileParams>,
     #[serde(default)]
+    image_file: Option<ImageFileParams>,
+    #[serde(default)]
+    image_file: Option<ImageFileParams>,
+    #[serde(default)]
     tools: Option<Vec<Value>>,
     #[serde(default)]
     thread_id: Option<String>,
@@ -194,6 +199,22 @@ struct SendPromptParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AudioFileParams {
+    data: Vec<u8>,
+    file_name: String,
+    mime_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImageFileParams {
+    data: Vec<u8>,
+    file_name: String,
+    mime_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImageFileParams {
     data: Vec<u8>,
     file_name: String,
     mime_type: String,
@@ -828,6 +849,16 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         file_name: audio.file_name,
         mime_type: audio.mime_type,
     });
+    let image_file = params.image_file.map(|img| ImageAttachment {
+        data: img.data,
+        file_name: img.file_name,
+        mime_type: img.mime_type,
+    });
+    let image_file = params.image_file.map(|img| ImageAttachment {
+        data: img.data,
+        file_name: img.file_name,
+        mime_type: img.mime_type,
+    });
     let cancel_flag = session_cancel_flag(&state, &session_id);
     cancel_flag.store(false, Ordering::SeqCst);
 
@@ -897,6 +928,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         mcp_calls: None,
         max_tokens: params.max_tokens,
         audio_file,
+        image_file,
     };
     for attempt in 0..=MAX_UPSTREAM_IDLE_RECOVERY_ATTEMPTS {
         log_backboard_request(&send_request, params.workspace.as_ref(), &mode)?;
@@ -947,6 +979,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
                 );
                 send_request.voice = None;
                 send_request.audio_file = None;
+                send_request.image_file = None;
                 send_request.send_to_llm = Some(true);
             }
             StreamOutcome::UpstreamIdleTimeout { message } => {
@@ -1097,6 +1130,7 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
                 mcp_calls: None,
                 max_tokens: params.max_tokens,
                 audio_file: None,
+                image_file: None,
             };
             emit_trace(
                 &state,

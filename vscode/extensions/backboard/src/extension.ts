@@ -102,6 +102,12 @@ interface VoiceAttachment {
 	readonly mimeType: string;
 }
 
+interface ImageAttachment {
+	readonly data: readonly number[];
+	readonly fileName: string;
+	readonly mimeType: string;
+}
+
 interface PanelOptions {
 	readonly provider?: string;
 	readonly model?: string;
@@ -1904,6 +1910,16 @@ function isVoiceAttachment(value: unknown): value is VoiceAttachment {
 		&& value.mimeType.trim().length > 0;
 }
 
+function isImageAttachment(value: unknown): value is ImageAttachment {
+	return isObjectRecord(value)
+		&& Array.isArray(value.data)
+		&& value.data.every(item => Number.isInteger(item) && item >= 0 && item <= 255)
+		&& typeof value.fileName === 'string'
+		&& value.fileName.trim().length > 0
+		&& typeof value.mimeType === 'string'
+		&& value.mimeType.trim().length > 0;
+}
+
 function isBridgeModel(value: unknown): value is BridgeModel {
 	if (!isObjectRecord(value)) {
 		return false;
@@ -2323,7 +2339,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.html = panelHtml(webviewView.webview, codiconsStylesheetUri(this.context, webviewView.webview), iconBaseUri(this.context, webviewView.webview), fontBaseUri(this.context, webviewView.webview), { showHeader: false, initialState: this.readPanelState() });
 		webviewView.webview.onDidReceiveMessage(message => {
 			if (message?.type === 'send' && typeof message.prompt === 'string') {
-				this.runPrompt(message.prompt, asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, undefined, typeof message.workspace === 'string' ? message.workspace : undefined);
+				this.runPrompt(message.prompt, asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, undefined, typeof message.workspace === 'string' ? message.workspace : undefined, isImageAttachment(message.imageFile) ? message.imageFile : undefined);
 			} else if (message?.type === 'sendVoice' && isVoiceAttachment(message.audio)) {
 				this.runPrompt(typeof message.prompt === 'string' ? message.prompt : '', asPanelOptions(message.options), typeof message.chatId === 'string' ? message.chatId : undefined, message.audio, typeof message.workspace === 'string' ? message.workspace : undefined);
 			} else if (message?.type === 'cancel') {
@@ -2595,7 +2611,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		await this.view?.webview.postMessage({ type: 'panelStateSnapshot', state: this.readPanelState() });
 	}
 
-	private runPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment, workspaceOverride?: string): void {
+	private runPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment, workspaceOverride?: string, image?: ImageAttachment): void {
 		const serial = ++this.promptRunSerial;
 		const previousRun = this.activePromptRun;
 		if (previousRun) {
@@ -2613,7 +2629,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			if (serial !== this.promptRunSerial) {
 				return;
 			}
-			await this.sendPrompt(prompt, options, chatId, audio, workspaceOverride);
+			await this.sendPrompt(prompt, options, chatId, audio, workspaceOverride, image);
 		})();
 		this.activePromptRun = run;
 		void run.finally(() => {
@@ -2623,7 +2639,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
-	private async sendPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment, workspaceOverride?: string): Promise<void> {
+	private async sendPrompt(prompt: string, options: PanelOptions, chatId: string | undefined, audio?: VoiceAttachment, workspaceOverride?: string, image?: ImageAttachment): Promise<void> {
 		const view = this.view;
 		if (!view || (!prompt.trim() && !audio)) {
 			return;
@@ -2708,6 +2724,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				imageGeneration: imageGeneration === 'auto' ? 'auto' : undefined,
 				voiceMode,
 				audioFile: audio,
+				imageFile: image,
 				mcpCalls: mcpCallsPayload(settings),
 				tools: submitTools,
 				config: settings.config
@@ -3381,6 +3398,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		let accountUsage = undefined;
 		let runStartedAt = undefined;
 		let runTimer = undefined;
+		let pendingImageFile = undefined;
+		let pendingImageFile = undefined;
 		let currentPromptClock = undefined;
 		let currentWorkspace = typeof persistedState.currentWorkspace === 'string' ? persistedState.currentWorkspace : '';
 		let restoringHistory = false;
@@ -4519,6 +4538,68 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				document.getElementById('form').requestSubmit();
 			}
 		});
+		prompt.addEventListener('paste', event => {
+			const clipboardItems = event.clipboardData?.items;
+		if (!clipboardItems) {
+			return;
+		}
+		for (let idx = 0; idx < clipboardItems.length; idx++) {
+			const item = clipboardItems[idx];
+			if (item.type.startsWith('image/')) {
+				event.preventDefault();
+				const blob = item.getAsFile();
+				if (!blob) {
+					continue;
+				}
+				const reader = new FileReader();
+				reader.onload = () => {
+					const arrayBuffer = reader.result;
+					if (!(arrayBuffer instanceof ArrayBuffer)) {
+						return;
+				}
+					pendingImageFile = {
+						data: Array.from(new Uint8Array(arrayBuffer)),
+						fileName: blob.name || 'pasted-image.' + (item.type.split('/')[1] || 'png'),
+						mimeType: item.type,
+					};
+					updateStatus('Image attached. Submit to send.');
+				};
+				reader.readAsArrayBuffer(blob);
+				break;
+			}
+		}
+		});
+		prompt.addEventListener('paste', event => {
+			const clipboardItems = event.clipboardData?.items;
+		if (!clipboardItems) {
+			return;
+		}
+		for (let idx = 0; idx < clipboardItems.length; idx++) {
+			const item = clipboardItems[idx];
+			if (item.type.startsWith('image/')) {
+				event.preventDefault();
+				const blob = item.getAsFile();
+				if (!blob) {
+					continue;
+				}
+				const reader = new FileReader();
+				reader.onload = () => {
+					const arrayBuffer = reader.result;
+					if (!(arrayBuffer instanceof ArrayBuffer)) {
+						return;
+				}
+					pendingImageFile = {
+						data: Array.from(new Uint8Array(arrayBuffer)),
+						fileName: blob.name || 'pasted-image.' + (item.type.split('/')[1] || 'png'),
+						mimeType: item.type,
+					};
+					updateStatus('Image attached. Submit to send.');
+				};
+				reader.readAsArrayBuffer(blob);
+				break;
+			}
+		}
+		});
 		buttons.mode.addEventListener('click', event => openPopover('reasoning', event.currentTarget));
 		buttons.model.addEventListener('click', event => openPopover('model', event.currentTarget));
 		buttons.web.addEventListener('click', event => openPopover('web', event.currentTarget));
@@ -4968,9 +5049,11 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				detachActiveHistoryIfWorkspaceChanged();
 				const chatId = beginHistoryRun(text);
 				runInProgress = true;
+				const imageFile = pendingImageFile;
+				pendingImageFile = undefined;
 			startRunTimer(Date.now());
 			renderQueue();
-				vscode.postMessage({ type: 'send', chatId, prompt: text, workspace: currentWorkspace, options: queuedOptions || options() });
+				vscode.postMessage({ type: 'send', chatId, prompt: text, workspace: currentWorkspace, options: queuedOptions || options(), imageFile });
 			}
 		function drainPromptQueue() {
 			if (runInProgress || !promptQueue.length) {

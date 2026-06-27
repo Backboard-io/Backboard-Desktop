@@ -107,9 +107,6 @@ export class BackboardWorkspacePage extends Disposable {
 		this.container = append(parent, $('.backboard-workspace-editor'));
 		this.container.tabIndex = 0;
 
-		const page = append(this.container, $('.backboard-workspace-page'));
-		this.pageElement = page;
-
 		// Single unified header spanning full width
 		const header = append(this.container, $('.backboard-workspace-header'));
 		const headerLeft = append(header, $('.backboard-workspace-header-left'));
@@ -181,6 +178,8 @@ export class BackboardWorkspacePage extends Disposable {
 		}));
 
 		// Page body below the header
+		const page = append(this.container, $('.backboard-workspace-page'));
+		this.pageElement = page;
 		const main = append(page, $('.backboard-workspace-main'));
 		this.cardsContainer = append(main, $('.backboard-workspace-cards'));
 

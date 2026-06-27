@@ -25,7 +25,8 @@
 .monaco-workbench .backboard-workspace-surface.hidden { display: none; }
 
 .monaco-workbench.backboard-workspace-visible > .part.titlebar > .titlebar-container > .titlebar-right > .window-controls-container,
-.monaco-workbench.backboard-workspace-visible > .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container {
+.monaco-workbench.backboard-workspace-visible > .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container,
+.monaco-workbench.backboard-workspace-visible > .part.titlebar > .titlebar-container > .titlebar-center > .center-adjacent-toolbar-container {
 	display: none !important;
 }
 
@@ -80,15 +81,16 @@
 
 .monaco-workbench .backboard-workspace-header {
 	box-sizing: border-box; flex: none;
-	display: flex; align-items: center; justify-content: space-between;
-	min-height: 48px; gap: 12px; padding: 0 16px 0 20px;
+	display: grid; align-items: center;
+	grid-template-columns: minmax(150px, 1fr) auto minmax(220px, 1fr);
+	min-height: 44px; gap: 14px; padding: 0 14px 0 18px;
 	border-bottom: 1px solid var(--backboard-workspace-border);
 	overflow: hidden;
 	-webkit-app-region: drag;
 }
 
 .monaco-workbench.mac:not(.fullscreen) .backboard-workspace-header {
-	padding-left: 240px;
+	padding-left: 218px;
 }
 
 .monaco-workbench.mac.fullscreen .backboard-workspace-header {
@@ -96,22 +98,21 @@
 }
 
 .monaco-workbench .backboard-workspace-header-left {
-	display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 auto;
+	display: contents;
+}
+
+.monaco-workbench .backboard-workspace-header-right {
+	display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+	min-width: 0;
 	overflow: hidden;
 	-webkit-app-region: no-drag;
 }
 
-.monaco-workbench .backboard-workspace-header-right {
-	display: flex; align-items: center; gap: 6px; flex: 0 0 auto;
-	margin-left: auto;
-	-webkit-app-region: no-drag;
-}
-
 .monaco-workbench .backboard-workspace-detail-title {
-	margin: 0; font-size: 13px; font-weight: 600;
+	margin: 0; font-size: 12px; font-weight: 600;
 	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-	max-width: 300px; flex: 0 1 auto;
-	color: var(--vscode-foreground);
+	max-width: 180px; flex: 0 1 auto;
+	color: var(--backboard-workspace-muted);
 }
 
 .monaco-workbench .backboard-workspace-heading {
@@ -122,7 +123,10 @@
 
 .monaco-workbench .backboard-workspace-title-row {
 	display: flex; align-items: baseline; gap: 10px; min-width: 0;
+	justify-self: center;
+	max-width: 100%;
 	overflow: hidden;
+	-webkit-app-region: no-drag;
 }
 
 .monaco-workbench .backboard-workspace-title-row h1 {
@@ -152,6 +156,8 @@
 	color: var(--backboard-workspace-muted);
 	font-size: 12px; cursor: pointer; white-space: nowrap;
 	overflow: hidden;
+	justify-self: start;
+	-webkit-app-region: no-drag;
 }
 
 .monaco-workbench .backboard-workspace-switcher:hover {
@@ -233,8 +239,8 @@
 	flex: 1; min-height: 0; overflow-y: auto;
 	padding: 16px;
 	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	grid-auto-rows: minmax(392px, calc((100% - 16px) / 2));
+	grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+	grid-auto-rows: minmax(320px, calc((100% - 16px) / 2));
 	gap: 16px;
 	align-content: start;
 }
@@ -284,7 +290,7 @@
 
 .monaco-workbench .backboard-workspace-card.selected {
 	border-color: var(--backboard-workspace-active);
-	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--backboard-workspace-active) 60%, transparent);
+	box-shadow: none;
 }
 
 .monaco-workbench .backboard-workspace-card.running {
@@ -295,8 +301,8 @@
 
 .monaco-workbench .backboard-workspace-card-header {
 	display: flex; align-items: center; justify-content: space-between;
-	gap: 12px; padding: 16px 16px 8px;
-	min-height: 52px;
+	gap: 12px; padding: 14px 14px 7px;
+	min-height: 48px;
 	box-sizing: border-box;
 }
 
@@ -368,8 +374,8 @@
 /* Band 2: Activity body */
 
 .monaco-workbench .backboard-workspace-card-body {
-	flex: 1; min-height: 0; padding: 4px 16px 8px;
-	display: flex; flex-direction: column; gap: 12px;
+	flex: 1; min-height: 0; padding: 4px 14px 8px;
+	display: flex; flex-direction: column; gap: 10px;
 }
 
 .monaco-workbench .backboard-workspace-card-output {
@@ -410,8 +416,8 @@
 
 .monaco-workbench .backboard-workspace-card-files {
 	display: flex; flex-wrap: wrap; gap: 6px;
-	min-height: 34px;
-	padding: 6px 16px 12px;
+	min-height: 30px;
+	padding: 5px 14px 10px;
 	box-sizing: border-box;
 }
 
@@ -435,8 +441,8 @@
 
 .monaco-workbench .backboard-workspace-card-footer {
 	display: flex; align-items: center; gap: 6px;
-	min-height: 42px;
-	padding: 0 16px; border-top: 1px solid var(--backboard-workspace-border);
+	min-height: 38px;
+	padding: 0 14px; border-top: 1px solid var(--backboard-workspace-border);
 	box-sizing: border-box;
 }
 
@@ -456,7 +462,7 @@
 	border: 1px dashed var(--backboard-workspace-border);
 	border-radius: 8px;
 	background: transparent;
-	cursor: pointer; min-height: 392px;
+	cursor: pointer; min-height: 320px;
 	transition: border-color 0.12s, background 0.12s;
 }
 
@@ -496,7 +502,9 @@
 	border-color: var(--backboard-workspace-active);
 }
 
-.monaco-workbench .backboard-workspace-detail-toggle {
+.monaco-workbench .backboard-workspace-icon-button,
+.monaco-workbench .backboard-workspace-detail-toggle,
+.monaco-workbench .backboard-workspace-detail-expand {
 	display: inline-flex; width: 30px; height: 30px;
 	border: 1px solid transparent;
 	border-radius: 6px;
@@ -506,10 +514,18 @@
 	-webkit-app-region: no-drag;
 }
 
-.monaco-workbench .backboard-workspace-detail-toggle:hover {
+.monaco-workbench .backboard-workspace-icon-button:hover,
+.monaco-workbench .backboard-workspace-detail-toggle:hover,
+.monaco-workbench .backboard-workspace-detail-expand:hover {
 	border-color: var(--backboard-workspace-border);
 	background: var(--vscode-toolbar-hoverBackground);
 	color: var(--vscode-icon-foreground);
+}
+
+.monaco-workbench .backboard-workspace-icon-button .codicon,
+.monaco-workbench .backboard-workspace-detail-toggle .codicon,
+.monaco-workbench .backboard-workspace-detail-expand .codicon {
+	font-size: 14px;
 }
 
 .monaco-workbench .backboard-workspace-detail-chat {
@@ -518,21 +534,45 @@
 }
 
 .monaco-workbench .backboard-workspace-detail-chat.hidden { display: none; }
-.monaco-workbench .backboard-workspace-detail-chat .interactive-session { height: 100%; }
+.monaco-workbench .backboard-workspace-detail-chat .interactive-session {
+	height: 100%;
+	background: var(--backboard-workspace-bg);
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .interactive-list {
+	padding: 0 18px;
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .interactive-input-part {
+	box-sizing: border-box;
+	padding: 0 16px 16px;
+	background: transparent;
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .chat-input-container {
+	border-radius: 8px;
+	border-color: var(--backboard-workspace-border);
+	background-color: var(--backboard-workspace-card-bg);
+	box-shadow: none;
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .chat-input-container.focused {
+	border-color: var(--backboard-workspace-active);
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .chat-input-toolbars {
+	min-height: 30px;
+}
 
 @keyframes workspace-pulse {
 	0%, 100% { opacity: 1; }
 	50% { opacity: 0.4; }
 }
 
-@media (max-width: 1200px) {
-	.monaco-workbench .backboard-workspace-cards { grid-template-columns: repeat(2, 1fr); }
-}
-
 @media (max-width: 900px) {
 	.monaco-workbench .backboard-workspace-switcher > span:not(.codicon) { display: none; }
 	.monaco-workbench .backboard-workspace-switcher .codicon { margin: 0; }
-	.monaco-workbench .backboard-workspace-title-row h1 { display: none; }
+	.monaco-workbench .backboard-workspace-header { grid-template-columns: auto minmax(0, 1fr) auto; }
 	.monaco-workbench .backboard-workspace-detail-title { display: none; }
 }
 
@@ -540,6 +580,6 @@
 	.monaco-workbench .backboard-workspace-page { grid-template-columns: 1fr; }
 	.monaco-workbench .backboard-workspace-detail { display: none; }
 	.monaco-workbench .backboard-workspace-sash { display: none; }
-	.monaco-workbench .backboard-workspace-cards { grid-template-columns: 1fr; }
+	.monaco-workbench .backboard-workspace-cards { grid-template-columns: minmax(0, 1fr); }
 	.monaco-workbench.mac:not(.fullscreen) .backboard-workspace-header { padding-left: 90px; }
 }
