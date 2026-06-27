@@ -154,6 +154,8 @@ export interface ICommonNativeHostService {
 	minimizeWindow(options?: INativeHostOptions): Promise<void>;
 	moveWindowTop(options?: INativeHostOptions): Promise<void>;
 	positionWindow(position: IRectangle, options?: INativeHostOptions): Promise<void>;
+	isWindowResizable(options?: INativeHostOptions): Promise<boolean>;
+	setWindowResizable(resizable: boolean, options?: INativeHostOptions): Promise<void>;
 
 	isWindowAlwaysOnTop(options?: INativeHostOptions): Promise<boolean>;
 	toggleWindowAlwaysOnTop(options?: INativeHostOptions): Promise<void>;

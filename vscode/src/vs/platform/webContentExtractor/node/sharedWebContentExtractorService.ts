@@ -28,7 +28,12 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 	_serviceBrand: undefined;
 
 	async readText(uri: URI, token: CancellationToken): Promise<string | undefined> {
-		if (token.isCancellationRequested) {
+		// The CancellationToken may have been marshalled across IPC, in which case
+		// `onCancellationRequested` is no longer a function (ProxyChannel does not
+		// support CancellationToken — see ipc.ts). Guard against this so we don't
+		// throw "token.onCancellationRequested is not a function" and fail the fetch.
+		const isCancellationRequested = token?.isCancellationRequested === true;
+		if (isCancellationRequested) {
 			return undefined;
 		}
 		if (!this.isSafeRemoteTextUri(uri)) {
@@ -37,7 +42,9 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), TEXT_FETCH_TIMEOUT_MS);
-		const cancellation = token.onCancellationRequested(() => controller.abort());
+		const cancellation = typeof token?.onCancellationRequested === 'function'
+			? token.onCancellationRequested(() => controller.abort())
+			: { dispose(): void { /* no-op — token was marshalled across IPC */ } };
 		try {
 			const headers: Record<string, string> = {
 				'Accept': 'text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8',

@@ -964,7 +964,7 @@ export function buildMcpMarketplaceItems(
 	state: IMcpMarketplaceState,
 	options: IMcpMarketplaceBuildOptions = {},
 ): McpMarketplaceModalItem[] {
-	const category = options.category ?? 'communication-design-pm';
+	const category = options.category ?? 'all';
 	const query = (options.query ?? '').trim().toLowerCase();
 	const recentlyRemovedSet = new Set(options.recentlyRemovedIds ?? []);
 	const installed = state.installed.filter(server => !recentlyRemovedSet.has(getMcpServerKey(server)));
@@ -1478,7 +1478,7 @@ export class SkillsLibraryController {
 		const store = new DisposableStore();
 		let activeMarketplacePage: SkillsMarketplacePage = 'skills';
 		let activeCategory: SkillsLibraryCategory = 'official';
-		let activeMcpCategory: McpMarketplaceCategory = 'communication-design-pm';
+		let activeMcpCategory: McpMarketplaceCategory = 'all';
 		let installedFilter: InstalledSkillFilter = 'all';
 		let recentlyRemovedInstalled: IRecentlyRemovedSkill[] = [];
 		let recentlyRemovedMcps: IRecentlyRemovedMcp[] = [];
@@ -2462,7 +2462,7 @@ export class SkillsLibraryController {
 				allPage = 0;
 				state = { ...state, allRemote, allLoading: false };
 			} catch (err) {
-				state = { ...state, allRemote: [], allLoading: false, allError: err?.message ?? String(err) };
+				state = { ...state, allRemote: state.allRemote ?? [], allLoading: false, allError: err?.message ?? String(err) };
 			}
 			render();
 		};
@@ -2515,7 +2515,7 @@ export class SkillsLibraryController {
 				};
 			}
 			if (activeMcpCategory === 'pinned' && !buildMcpMarketplaceItems(mcpState, { category: 'pinned' }).length) {
-				activeMcpCategory = 'communication-design-pm';
+				activeMcpCategory = 'all';
 			}
 			render();
 		};
@@ -2537,7 +2537,12 @@ export class SkillsLibraryController {
 			} catch (err) {
 				const installed = await this.getInstalledSkills(CancellationToken.None).catch(() => []);
 				state = {
-					remote: [],
+					// Keep previously-fetched remote skills instead of wiping them,
+					// so the marketplace remains usable when a re-fetch fails.
+					remote: state.remote,
+					remoteByCategory: state.remoteByCategory,
+					remoteTotal: state.remoteTotal,
+					officialOwners: state.officialOwners,
 					installed: filterLocallyRemovedInstalled(installed),
 					favoriteIds: this.getFavoriteIds(),
 					error: err?.message ?? String(err),

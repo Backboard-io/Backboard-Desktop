@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, append, clearNode, EventType, getActiveWindow } from '../../../../base/browser/dom.js';
-import { asCSSUrl } from '../../../../base/browser/cssValue.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
@@ -27,10 +26,12 @@ import { ExtensionType } from '../../../../platform/extensions/common/extensions
 import { IFileService, FileOperationResult, toFileOperationResult } from '../../../../platform/files/common/files.js';
 import product from '../../../../platform/product/common/product.js';
 import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
+import { INativeHostService } from '../../../../platform/native/common/native.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { IRectangle, WindowMinimumSize } from '../../../../platform/window/common/window.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
 import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
@@ -114,6 +115,9 @@ const BACKBOARD_SIGN_IN_URL = 'https://app.backboard.io/signup';
 const BACKBOARD_API_KEYS_URL = 'https://app.backboard.io/dashboard/api-keys';
 const BACKBOARD_API_KEY_PATTERN = /^espr_[A-Za-z0-9_-]{43}$/;
 const LOCAL_AGENT_HOST_PROVIDER_ID = 'local-agent-host';
+const ONBOARDING_WINDOW_WIDTH = 920;
+const ONBOARDING_WINDOW_HEIGHT = 600;
+const OPEN_BACKBOARD_WORKSPACE_COMMAND_ID = 'workbench.action.openBackboardWorkspace';
 const SOURCE_SETTINGS_RESOURCE_NAMES = ['settings.json', 'keybindings.json'] as const;
 const DEFAULT_SETTINGS_IMPORT_SELECTION: ISettingsImportSelection = {
 	settings: true,
@@ -123,26 +127,6 @@ const DEFAULT_SETTINGS_IMPORT_SELECTION: ISettingsImportSelection = {
 const SETTINGS_IMPORT_EXTENSION_ID_REPLACEMENTS = new Map<string, string>([
 	['anysphere.remote-ssh', 'ms-vscode-remote.remote-ssh'],
 ]);
-const BACKBOARD_WELCOME_SPLASH_ICONS = [
-	'ai_open_ai.svg',
-	'ai_open_ai_compat.svg',
-	'ai_open_code.svg',
-	'ai_anthropic.svg',
-	'ai_claude.svg',
-	'ai_gemini.svg',
-	'ai_google.svg',
-	'ai_bedrock.svg',
-	'ai_deep_seek.svg',
-	'ai_edit.svg',
-	'ai_mistral.svg',
-	'ai_open_router.svg',
-	'ai_ollama.svg',
-	'ai_lm_studio.svg',
-	'ai_x_ai.svg',
-	'ai_vercel.svg',
-	'ai_backboard.svg',
-] as const;
-
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -211,10 +195,11 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private _isShowing = false;
 	private postOnboardingSignInPromptShown = false;
 	private selectedThemeId = 'dark-2026';
-	private selectedExperience = OnboardingExperience.Developer;
+	private selectedExperience = OnboardingExperience.Simple;
 	private hasConfirmedBackboardSignIn = false;
 	private hasImportedApiKey = false;
-	private hasPlayedWelcomeSplash = false;
+	private previousWindowResizable: boolean | undefined;
+	private previousWindowPosition: IRectangle | undefined;
 
 	constructor(
 		@ILayoutService private readonly layoutService: ILayoutService,
@@ -225,6 +210,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@ICommandService private readonly commandService: ICommandService,
+		@INativeHostService private readonly nativeHostService: INativeHostService,
 		@IStorageService private readonly storageService: IStorageService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
@@ -257,8 +243,11 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		this._isShowing = true;
 		this.currentStepIndex = 0;
-		this.hasPlayedWelcomeSplash = false;
 		this.previouslyFocusedElement = getActiveWindow().document.activeElement as HTMLElement | undefined;
+		void this._lockOnboardingWindowMinimumSize();
+		this.disposables.add(toDisposable(() => {
+			void this._restoreWindowMinimumSize();
+		}));
 
 		const container = this.layoutService.activeContainer;
 
@@ -354,7 +343,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 
 		this.currentStepIndex = 0;
-		this.selectedExperience = OnboardingExperience.Developer;
+		this.selectedExperience = OnboardingExperience.Simple;
 		this.hasConfirmedBackboardSignIn = false;
 		this.hasImportedApiKey = false;
 		this._syncSelectedThemeWithCurrentTheme();
@@ -380,10 +369,13 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			handled = true;
 			this._removeFromDOM();
 			this._onDidDismiss.fire();
-			this._promptBackboardSsoAfterOnboarding().catch(error => {
+			const postDismissWork = reason === 'complete'
+				? this._openSelectedExperienceAfterOnboarding().then(() => this._promptBackboardSsoAfterOnboarding())
+				: this._promptBackboardSsoAfterOnboarding();
+			postDismissWork.catch(error => {
 				this.notificationService.notify({
 					severity: Severity.Error,
-					message: localize('onboarding.backboard.ssoPromptFailed', "Could not check Backboard sign-in state."),
+					message: localize('onboarding.backboard.postDismissFailed', "Could not finish Backboard onboarding setup."),
 					source: error instanceof Error ? error.message : undefined,
 				});
 			});
@@ -404,6 +396,62 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		};
 
 		this.storageService.store(ONBOARDING_STORAGE_KEY, JSON.stringify(state), StorageScope.APPLICATION, StorageTarget.USER);
+	}
+
+	private async _lockOnboardingWindowMinimumSize(): Promise<void> {
+		try {
+			this.previousWindowResizable = await this.nativeHostService.isWindowResizable();
+			this.previousWindowPosition = await this.nativeHostService.getActiveWindowPosition();
+			await this.nativeHostService.setMinimumSize(ONBOARDING_WINDOW_WIDTH, ONBOARDING_WINDOW_HEIGHT);
+			if (this.previousWindowPosition) {
+				await this.nativeHostService.positionWindow(this._centeredOnboardingWindowPosition(this.previousWindowPosition));
+			}
+			await this.nativeHostService.setWindowResizable(false);
+		} catch {
+			// Keep onboarding available if native window constraints cannot be applied.
+		}
+	}
+
+	private async _restoreWindowMinimumSize(): Promise<void> {
+		try {
+			await this.nativeHostService.setWindowResizable(this.previousWindowResizable ?? true);
+			await this.nativeHostService.setMinimumSize(WindowMinimumSize.WIDTH, WindowMinimumSize.HEIGHT);
+			if (this.previousWindowPosition) {
+				await this.nativeHostService.positionWindow(this.previousWindowPosition);
+			}
+			this.previousWindowResizable = undefined;
+			this.previousWindowPosition = undefined;
+		} catch {
+			// The window may be gone during shutdown.
+		}
+	}
+
+	private _centeredOnboardingWindowPosition(position: IRectangle): IRectangle {
+		return {
+			x: Math.round(position.x + ((position.width - ONBOARDING_WINDOW_WIDTH) / 2)),
+			y: Math.round(position.y + ((position.height - ONBOARDING_WINDOW_HEIGHT) / 2)),
+			width: ONBOARDING_WINDOW_WIDTH,
+			height: ONBOARDING_WINDOW_HEIGHT,
+		};
+	}
+
+	private async _openSelectedExperienceAfterOnboarding(): Promise<void> {
+		switch (this.selectedExperience) {
+			case OnboardingExperience.Simple:
+				await this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID, {
+					preferredSessionType: {
+						providerId: LOCAL_AGENT_HOST_PROVIDER_ID,
+						sessionTypeId: SessionType.CopilotCLI,
+					}
+				});
+				break;
+			case OnboardingExperience.Developer:
+				await this.commandService.executeCommand('backboard.openPanel');
+				break;
+			case OnboardingExperience.Advanced:
+				await this.commandService.executeCommand(OPEN_BACKBOARD_WORKSPACE_COMMAND_ID);
+				break;
+		}
 	}
 
 	private async _promptBackboardSsoAfterOnboarding(): Promise<void> {
@@ -591,12 +639,14 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		const stepId = this.steps[this.currentStepIndex];
 		const isWelcome = stepId === OnboardingStepId.Welcome;
+		const isExperience = stepId === OnboardingStepId.Experience;
 		const isImportSettings = stepId === OnboardingStepId.ImportSettings;
 
 		this.card.classList.toggle('onboarding-a-card-welcome', isWelcome);
+		this.card.classList.toggle('onboarding-a-card-mode', isExperience);
 		this.card.classList.toggle('onboarding-a-card-import', isImportSettings);
-		this.titleEl.style.display = isWelcome || isImportSettings ? 'none' : '';
-		this.subtitleEl.style.display = isWelcome || isImportSettings ? 'none' : '';
+		this.titleEl.style.display = isWelcome || isExperience || isImportSettings ? 'none' : '';
+		this.subtitleEl.style.display = isWelcome || isExperience || isImportSettings ? 'none' : '';
 		this.titleEl.textContent = getOnboardingStepTitle(stepId);
 		this.subtitleEl.textContent = getOnboardingStepSubtitle(stepId);
 
@@ -658,150 +708,78 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 	private _renderWelcomeStep(container: HTMLElement): void {
 		const wrapper = append(container, $('.onboarding-backboard-welcome'));
+		const body = append(wrapper, $('.onboarding-backboard-welcome-layout'));
 
-		const splash = append(wrapper, $('.onboarding-backboard-splash'));
-		this._createBackboardWelcomeSplash(splash);
-
-		const welcomeContent = append(wrapper, $('.onboarding-backboard-welcome-content'));
-
-		const brand = append(welcomeContent, $('.onboarding-backboard-brand'));
-		this._createBackboardMark(brand, 'onboarding-backboard-mark');
-
-		const title = append(welcomeContent, $('h1.onboarding-backboard-title'));
+		const welcomeContent = append(body, $('.onboarding-backboard-welcome-content'));
+		const intro = append(welcomeContent, $('.onboarding-backboard-welcome-intro'));
+		const title = append(intro, $('h1.onboarding-backboard-title'));
 		title.textContent = getOnboardingStepTitle(OnboardingStepId.Welcome);
 
-		const subtitle = append(welcomeContent, $('p.onboarding-backboard-subtitle'));
+		const subtitle = append(intro, $('p.onboarding-backboard-subtitle'));
 		subtitle.textContent = getOnboardingStepSubtitle(OnboardingStepId.Welcome);
 
-		const continueButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-welcome-continue')));
-		continueButton.type = 'button';
-		continueButton.disabled = true;
-		continueButton.textContent = localize('onboarding.backboard.continue', "Continue");
-		let isAdvancing = false;
-		this.stepDisposables.add(addDisposableListener(continueButton, EventType.CLICK, () => {
-			if (isAdvancing || continueButton.disabled) {
-				return;
-			}
-
-			isAdvancing = true;
-			continueButton.disabled = true;
-			this._logAction('next');
-			welcomeContent.classList.add('exiting');
-			this._playWelcomeAdvanceTransition();
+		const accountPrompt = append(welcomeContent, $('.onboarding-backboard-account-prompt'));
+		const accountPromptText = append(accountPrompt, $('span.onboarding-backboard-account-copy'));
+		accountPromptText.textContent = localize('onboarding.backboard.accountPrompt', "New to Backboard?");
+		const accountLink = this._registerStepFocusable(append(accountPrompt, $<HTMLAnchorElement>('a.onboarding-backboard-account-link')));
+		accountLink.href = BACKBOARD_SIGN_IN_URL;
+		accountLink.textContent = localize('onboarding.backboard.createAccount', "Create your free account.");
+		this.stepDisposables.add(addDisposableListener(accountLink, EventType.CLICK, (event: MouseEvent) => {
+			event.preventDefault();
+			this._logAction('openBackboardSignIn');
+			void this.openerService.open(URI.parse(BACKBOARD_SIGN_IN_URL), { openExternal: true });
 		}));
 
-		if (this.hasPlayedWelcomeSplash) {
-			splash.remove();
-			welcomeContent.classList.add('visible');
-			continueButton.disabled = false;
-			return;
-		}
+		append(welcomeContent, $('.onboarding-backboard-welcome-divider'));
 
-		this.hasPlayedWelcomeSplash = true;
-		const activeWindow = getActiveWindow();
-		const splashTimer = activeWindow.setTimeout(() => {
-			splash.classList.add('fade-out');
-			welcomeContent.classList.add('visible');
-			continueButton.disabled = false;
-			this._focusCurrentStepElement();
-		}, 7400);
-		const removeTimer = activeWindow.setTimeout(() => {
-			splash.remove();
-		}, 8500);
-
-		this.stepDisposables.add(toDisposable(() => {
-			activeWindow.clearTimeout(splashTimer);
-			activeWindow.clearTimeout(removeTimer);
+		const signInButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
+		signInButton.type = 'button';
+		signInButton.textContent = localize('onboarding.backboard.signInButton', "Sign in to Backboard.io");
+		this.stepDisposables.add(addDisposableListener(signInButton, EventType.CLICK, () => {
+			this._logAction('openBackboardSso');
+			void this.commandService.executeCommand('backboard.signIn').catch(error => {
+				this.notificationService.notify({
+					severity: Severity.Error,
+					message: localize('onboarding.backboard.signInFailed', "Could not start Backboard sign in."),
+					source: error instanceof Error ? error.message : undefined,
+				});
+			});
+			this._nextStep();
 		}));
+
+		const skipArea = append(welcomeContent, $('.onboarding-backboard-skip-area'));
+		const skipButton = this._registerStepFocusable(append(skipArea, $<HTMLButtonElement>('button.onboarding-backboard-skip-link')));
+		skipButton.type = 'button';
+		skipButton.textContent = localize('onboarding.backboard.skipStep', "Skip this step");
+		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
+			this._logAction('skipWelcomeSignIn');
+			this._nextStep();
+		}));
+
+		const visual = append(body, $('.onboarding-backboard-welcome-visual'));
+		this._createBackboardLiquidVisual(visual);
 	}
 
-	private _createBackboardWelcomeSplash(parent: HTMLElement): void {
+	private _createBackboardLiquidVisual(parent: HTMLElement): void {
 		parent.setAttribute('aria-hidden', 'true');
-
-		const stream = append(parent, $('.onboarding-backboard-logo-stream'));
-		const rows = [
-			BACKBOARD_WELCOME_SPLASH_ICONS.slice(0, 5),
-			BACKBOARD_WELCOME_SPLASH_ICONS.slice(5, 9),
-			BACKBOARD_WELCOME_SPLASH_ICONS.slice(9, 13),
-			BACKBOARD_WELCOME_SPLASH_ICONS.slice(13),
-		];
-
-		for (const [rowIndex, rowIcons] of rows.entries()) {
-			const row = append(stream, $('.onboarding-backboard-logo-row'));
-			row.style.setProperty('--row-index', String(rowIndex));
-			for (const [iconIndex, iconName] of rowIcons.entries()) {
-				const cell = append(row, $('.onboarding-backboard-logo-cell'));
-				cell.style.setProperty('--icon-index', String(iconIndex));
-				cell.style.setProperty('--icon-total', String(rowIcons.length));
-				cell.style.setProperty('--icon-left', `${8 + (iconIndex * (84 / Math.max(rowIcons.length - 1, 1)))}%`);
-				cell.style.setProperty('--icon-mask', this._backboardMediaIconCss(iconName));
-				append(cell, $('.onboarding-backboard-logo-symbol'));
-			}
-		}
-
-		const finalLogo = append(parent, $('.onboarding-backboard-splash-final'));
-		finalLogo.style.setProperty('--icon-mask', this._backboardMediaIconCss('ai_backboard.svg'));
-		append(finalLogo, $('.onboarding-backboard-splash-final-symbol'));
-	}
-
-	private _playWelcomeAdvanceTransition(): void {
-		if (!this.card) {
-			this._nextStep();
-			return;
-		}
-
-		const activeWindow = getActiveWindow();
-		const transitionSplash = append(this.card, $('.onboarding-backboard-step-transition'));
-		transitionSplash.setAttribute('aria-hidden', 'true');
-		this._createBackboardContinueTransition(transitionSplash);
-
-		activeWindow.requestAnimationFrame(() => {
-			transitionSplash.classList.add('visible');
-		});
-
-		const nextStepTimer = activeWindow.setTimeout(() => {
-			this._nextStep();
-		}, 1150);
-
-		const fadeTimer = activeWindow.setTimeout(() => {
-			transitionSplash.classList.add('fade-out');
-		}, 1900);
-
-		const removeTimer = activeWindow.setTimeout(() => {
-			transitionSplash.remove();
-			this._focusCurrentStepElement();
-		}, 2600);
-
-		this.disposables.add(toDisposable(() => {
-			activeWindow.clearTimeout(nextStepTimer);
-			activeWindow.clearTimeout(fadeTimer);
-			activeWindow.clearTimeout(removeTimer);
-			transitionSplash.remove();
+		const video = append(parent, $<HTMLVideoElement>('video.onboarding-backboard-welcome-video'));
+		video.autoplay = true;
+		video.loop = true;
+		video.muted = true;
+		video.playsInline = true;
+		video.preload = 'auto';
+		video.src = this._mediaUri('onboarding-welcome-animation.mp4');
+		this.stepDisposables.add(addDisposableListener(video, 'canplay', () => {
+			video.classList.add('loaded');
 		}));
-	}
 
-	private _createBackboardContinueTransition(parent: HTMLElement): void {
-		const burst = append(parent, $('.onboarding-backboard-transition-burst'));
-		const radius = 168;
-		for (const [iconIndex, iconName] of BACKBOARD_WELCOME_SPLASH_ICONS.entries()) {
-			const angle = (-Math.PI / 2) + ((Math.PI * 2 * iconIndex) / BACKBOARD_WELCOME_SPLASH_ICONS.length);
-			const x = Math.cos(angle) * radius;
-			const y = Math.sin(angle) * radius;
-			const cell = append(burst, $('.onboarding-backboard-transition-icon'));
-			cell.style.setProperty('--burst-index', String(iconIndex));
-			cell.style.setProperty('--burst-delay', `${iconIndex * 22}ms`);
-			cell.style.setProperty('--burst-x', `${x}px`);
-			cell.style.setProperty('--burst-y', `${y}px`);
-			cell.style.setProperty('--burst-x-start', `${x * 1.28}px`);
-			cell.style.setProperty('--burst-y-start', `${y * 1.28}px`);
-			cell.style.setProperty('--burst-x-mid', `${x * 0.18}px`);
-			cell.style.setProperty('--burst-y-mid', `${y * 0.18}px`);
-
-			cell.style.setProperty('--icon-mask', this._backboardMediaIconCss(iconName));
-			append(cell, $('.onboarding-backboard-transition-symbol'));
+		const canvas = append(parent, $('.onboarding-backboard-liquid'));
+		for (let index = 0; index < 5; index++) {
+			const layer = append(canvas, $('.onboarding-backboard-liquid-layer'));
+			layer.style.setProperty('--liquid-index', String(index));
 		}
-
-		this._createBackboardMark(parent, 'onboarding-backboard-splash-mark');
+		append(canvas, $('.onboarding-backboard-liquid-shine'));
+		append(canvas, $('.onboarding-backboard-liquid-noise'));
 	}
 
 	private _createBackboardMark(parent: HTMLElement, className: string): HTMLElement {
@@ -813,13 +791,17 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		return mark;
 	}
 
-	private _backboardMediaIconCss(fileName: string): string {
-		return asCSSUrl(FileAccess.asBrowserUri(`vs/workbench/contrib/welcomeOnboarding/browser/media/model-provider-icons/${fileName}`));
-	}
-
 	private _renderExperienceStep(container: HTMLElement): void {
-		const wrapper = append(container, $('.onboarding-backboard-experience'));
-		const grid = append(wrapper, $('.onboarding-backboard-mode-grid'));
+		const wrapper = append(container, $('.onboarding-backboard-mode'));
+		const body = append(wrapper, $('.onboarding-backboard-mode-layout'));
+
+		const intro = append(body, $('.onboarding-backboard-mode-intro'));
+		const title = append(intro, $('h1.onboarding-backboard-mode-heading'));
+		title.textContent = getOnboardingStepTitle(OnboardingStepId.Experience);
+		const description = append(intro, $('p.onboarding-backboard-mode-subtitle'));
+		description.textContent = getOnboardingStepSubtitle(OnboardingStepId.Experience);
+
+		const grid = append(body, $('.onboarding-backboard-mode-grid'));
 		grid.setAttribute('role', 'radiogroup');
 		grid.setAttribute('aria-label', localize('onboarding.backboard.experience.label', "Choose your workspace mode"));
 
@@ -837,35 +819,87 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				card.classList.add('selected');
 			}
 
+			const top = append(card, $('.onboarding-backboard-mode-card-top'));
+			const icon = append(top, $('.onboarding-backboard-mode-icon'));
+			icon.appendChild(renderIcon(this._getModeIcon(option.id)));
+			append(top, $('.onboarding-backboard-mode-card-line'));
+
+			const cardTitle = append(card, $('div.onboarding-backboard-mode-title'));
+			cardTitle.textContent = option.label;
+
+			const cardDescription = append(card, $('p.onboarding-backboard-mode-description'));
+			cardDescription.textContent = localize('onboarding.backboard.experience.quote', "\u201c{0}\u201d", option.description);
+
 			const preview = append(card, $('.onboarding-backboard-mode-preview'));
-			const lightPreview = append(preview, $<HTMLImageElement>('img.onboarding-backboard-mode-image.onboarding-backboard-mode-image-light'));
-			lightPreview.alt = '';
-			lightPreview.decoding = 'async';
-			lightPreview.src = this._mediaUri(option.lightPreview);
-
-			const darkPreview = append(preview, $<HTMLImageElement>('img.onboarding-backboard-mode-image.onboarding-backboard-mode-image-dark'));
-			darkPreview.alt = '';
-			darkPreview.decoding = 'async';
-			darkPreview.src = this._mediaUri(option.darkPreview);
-
-			const copy = append(card, $('.onboarding-backboard-mode-copy'));
-			const eyebrow = append(copy, $('div.onboarding-backboard-mode-eyebrow'));
-			eyebrow.textContent = option.eyebrow;
-
-			const title = append(copy, $('div.onboarding-backboard-mode-title'));
-			title.textContent = option.label;
-
-			const description = append(copy, $('p.onboarding-backboard-mode-description'));
-			description.textContent = option.description;
+			this._createModePreview(preview, option.id);
 
 			this.stepDisposables.add(addDisposableListener(card, EventType.CLICK, () => {
 				this._selectExperience(option.id, cards);
 				this.accessibilityService.alert(localize('onboarding.backboard.experience.selected.alert', "{0} selected", option.label));
+				this._dismiss('complete');
 			}));
 		}
 
 		const selectedExperienceIndex = ONBOARDING_EXPERIENCE_OPTIONS.findIndex(option => option.id === this.selectedExperience);
 		this._setupRadioGroupNavigation(cards, Math.max(0, selectedExperienceIndex));
+	}
+
+	private _getModeIcon(experience: OnboardingExperience) {
+		switch (experience) {
+			case OnboardingExperience.Simple:
+				return Codicon.comment;
+			case OnboardingExperience.Developer:
+				return Codicon.code;
+			case OnboardingExperience.Advanced:
+				return Codicon.gitBranch;
+		}
+	}
+
+	private _createModePreview(parent: HTMLElement, experience: OnboardingExperience): void {
+		switch (experience) {
+			case OnboardingExperience.Simple:
+				parent.classList.add('onboarding-backboard-mode-preview-clean');
+				this._appendModePreviewPill(parent, 'assistant');
+				this._appendModePreviewPill(parent, 'user');
+				this._appendModePreviewPill(parent, 'composer');
+				break;
+			case OnboardingExperience.Developer: {
+				parent.classList.add('onboarding-backboard-mode-preview-editor');
+				const files = append(parent, $('.onboarding-backboard-mode-preview-files'));
+				for (const width of ['32px', '40px', '26px']) {
+					this._appendModePreviewLine(files, width);
+				}
+				const code = append(parent, $('.onboarding-backboard-mode-preview-code'));
+				for (const width of ['92px', '120px', '68px', '104px', '76px']) {
+					this._appendModePreviewLine(code, width);
+				}
+				break;
+			}
+			case OnboardingExperience.Advanced:
+				parent.classList.add('onboarding-backboard-mode-preview-advanced');
+				for (const column of ['running', 'review', 'done']) {
+					const lane = append(parent, $(`.onboarding-backboard-mode-preview-lane.onboarding-backboard-mode-preview-lane-${column}`));
+					this._appendModePreviewLine(lane, '36px');
+					this._appendModePreviewBlock(lane, '51px');
+					this._appendModePreviewBlock(lane, column === 'review' ? '41px' : '48px');
+				}
+				break;
+		}
+	}
+
+	private _appendModePreviewPill(parent: HTMLElement, kind: string): void {
+		const pill = append(parent, $(`.onboarding-backboard-mode-preview-pill.onboarding-backboard-mode-preview-pill-${kind}`));
+		append(pill, $('.onboarding-backboard-mode-preview-line'));
+	}
+
+	private _appendModePreviewLine(parent: HTMLElement, width: string): void {
+		const line = append(parent, $('.onboarding-backboard-mode-preview-line'));
+		line.style.width = width;
+	}
+
+	private _appendModePreviewBlock(parent: HTMLElement, width: string): void {
+		const block = append(parent, $('.onboarding-backboard-mode-preview-block'));
+		block.style.width = width;
 	}
 
 	private _selectExperience(experience: OnboardingExperience, cards: readonly HTMLElement[]): void {
@@ -1575,24 +1609,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				this._updateButtonStates();
 				closeDialog();
 				this._dismiss('complete');
-				const command = this.selectedExperience === OnboardingExperience.Simple
-					? this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID, {
-						preferredSessionType: {
-							providerId: LOCAL_AGENT_HOST_PROVIDER_ID,
-							sessionTypeId: SessionType.CopilotCLI,
-						}
-					})
-					: this.commandService.executeCommand('backboard.openPanel');
-				const failureMessage = this.selectedExperience === OnboardingExperience.Simple
-					? localize('onboarding.backboard.apiKey.openSandboxFailed', "Could not open Backboard Sandbox.")
-					: localize('onboarding.backboard.apiKey.openPanelFailed', "Could not open Backboard chat.");
-				void command.catch(err => {
-					this.notificationService.notify({
-						severity: Severity.Error,
-						message: failureMessage,
-						source: err instanceof Error ? err.message : undefined,
-					});
-				});
 			} catch (err) {
 				importButton.disabled = false;
 				cancelButton.disabled = false;
