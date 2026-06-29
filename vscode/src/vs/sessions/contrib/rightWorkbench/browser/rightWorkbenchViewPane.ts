@@ -43,7 +43,7 @@ import { IEditorService } from '../../../../workbench/services/editor/common/edi
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { ISCMResource, ISCMService } from '../../../../workbench/contrib/scm/common/scm.js';
 import { GitChange, GitDiffChange, IGitRepository, IGitService } from '../../../../workbench/contrib/git/common/gitService.js';
-import { ITerminalInstance, ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
+import { ITerminalGroupService, ITerminalInstance, ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { TerminalTabbedView } from '../../../../workbench/contrib/terminal/browser/terminalTabbedView.js';
 import { TerminalLocation } from '../../../../platform/terminal/common/terminal.js';
 import { CHANGES_VIEW_ID } from '../../changes/common/changes.js';
@@ -123,6 +123,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		@ISCMService private readonly scmService: ISCMService,
 		@IGitService private readonly gitService: IGitService,
 		@ITerminalService private readonly terminalService: ITerminalService,
+		@ITerminalGroupService private readonly terminalGroupService: ITerminalGroupService,
 		@IBrowserViewWorkbenchService private readonly browserViewWorkbenchService: IBrowserViewWorkbenchService,
 		@ISessionsService private readonly sessionsService: ISessionsService,
 		@IConfigurationService configurationService: IConfigurationService,
@@ -587,6 +588,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 				this.requestGitReviewRefresh(activeSession);
 			}
 			if (changes.length === 0 && reviewResources.length === 0) {
+				review.classList.add('sessions-right-workbench-review-empty-state');
 				scmFallback.style.display = 'none';
 				scmRailFallback.style.display = 'none';
 				rail.classList.remove('sessions-right-workbench-review-rail-scm');
@@ -595,6 +597,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 				this.showReviewEmptyState(reviewBody);
 				return;
 			}
+			review.classList.remove('sessions-right-workbench-review-empty-state');
 			this.reviewEmptyElement?.remove();
 			this.reviewEmptyElement = undefined;
 			if (reviewResources.length > 0) {
@@ -1346,7 +1349,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 		await this.terminalService.whenConnected;
 		if (!this.terminalInstance || this.terminalInstance.isDisposed) {
-			const activeInstance = this.terminalService.activeInstance;
+			const activeInstance = this.terminalGroupService.activeInstance;
 			this.terminalInstance = activeInstance && !activeInstance.isDisposed
 				? activeInstance
 				: await this.terminalService.createTerminal({ location: TerminalLocation.Panel });
@@ -1354,6 +1357,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 				this.terminalInstance = undefined;
 			}));
 		}
+		const terminalGroup = this.terminalGroupService.getGroupForInstance(this.terminalInstance);
+		terminalGroup?.setVisible(true);
 		this.layoutTerminalView();
 		await this.terminalInstance.focusWhenReady(true);
 		this.terminalTabbedView?.focus();

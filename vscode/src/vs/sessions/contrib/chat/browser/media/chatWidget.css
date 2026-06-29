@@ -88,6 +88,7 @@
 	flex: 1 1 auto;
 	background: var(--vscode-editor-background);
 	border-right: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-contrastBorder)) 48%, transparent);
+	position: relative;
 }
 
 .new-chat-simple-header {
@@ -319,6 +320,31 @@
 	margin-top: 10px;
 	min-width: 0;
 	max-width: 100%;
+}
+
+.new-chat-middle-toolbar {
+	position: absolute;
+	top: 12px;
+	right: 16px;
+	display: flex;
+	align-items: center;
+	z-index: 40;
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
+}
+
+.new-chat-middle-toolbar .monaco-toolbar .actions-container {
+	gap: 8px;
+}
+
+.new-chat-middle-toolbar .monaco-toolbar,
+.new-chat-middle-toolbar .monaco-action-bar,
+.new-chat-middle-toolbar .actions-container,
+.new-chat-middle-toolbar .action-item,
+.new-chat-middle-toolbar .action-label,
+.new-chat-middle-toolbar button {
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
 }
 
 .new-chat-composer-stack > .new-chat-middle-suggestions {

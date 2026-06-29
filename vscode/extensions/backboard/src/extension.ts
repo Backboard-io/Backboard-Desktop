@@ -115,6 +115,12 @@ interface FileAttachment {
 	readonly mimeType: string;
 }
 
+interface BackboardAttachment {
+	readonly data: readonly number[];
+	readonly fileName: string;
+	readonly mimeType: string;
+}
+
 interface PanelOptions {
 	readonly provider?: string;
 	readonly model?: string;
@@ -167,6 +173,9 @@ interface OptimusLiveState {
 }
 
 type OptimusLiveStatusKey = 'sending' | 'streaming' | 'progress' | 'tool' | 'voice' | 'media' | 'done' | 'cancelled' | 'error';
+
+const BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS = 90_000;
+const BACKBOARD_DOCUMENT_POLL_INTERVAL_MS = 1_000;
 
 interface OptimusPanelCommand {
 	readonly id: string;
@@ -1536,6 +1545,13 @@ async function writeSharedPanelState(state: PanelPersistedState): Promise<void> 
 		latest: hasPanelStateContent(persistedState) ? persistedState : existing.latest,
 	};
 	const statePath = backboardPanelStatePath();
+	logBackboardDocumentDiagnostic('panel_state_write', {
+		statePath,
+		storageKey: key,
+		currentWorkspace: persistedState.currentWorkspace,
+		activeHistoryId: persistedState.activeHistoryId,
+		historyEntryCount: persistedState.historyEntries?.length,
+	});
 	await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
 	await writeJsonFileAtomic(statePath, next);
 	if (process.platform !== 'win32') {
@@ -1694,6 +1710,18 @@ function readSharedPanelThreadWorkspace(id: string | undefined): string | undefi
 			}
 		} catch {
 			// Ignore unreadable snapshots.
+		}
+	}
+	return undefined;
+}
+
+function readBackboardThreadId(value: unknown): string | undefined {
+	if (!isObjectRecord(value)) {
+		return undefined;
+	}
+	for (const candidate of [value.backboardThreadId, value.threadId]) {
+		if (typeof candidate === 'string' && candidate.trim()) {
+			return candidate;
 		}
 	}
 	return undefined;
@@ -2435,6 +2463,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		const existingEntry = Array.isArray(existingState?.historyEntries)
 			? existingState.historyEntries.find(entry => isObjectRecord(entry) && entry.id === effectiveChatId)
 			: undefined;
+		let boundThreadId = readBackboardThreadId(existingEntry);
 		const existingMessages = isObjectRecord(existingEntry) && Array.isArray(existingEntry.messages)
 			? existingEntry.messages
 				.filter(isObjectRecord)
@@ -2478,6 +2507,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			const nextEntry = {
 				...previousEntry,
 				id: liveChatId,
+				backboardThreadId: boundThreadId,
 				title: typeof previousEntry.title === 'string' ? previousEntry.title : historyTitleFromPrompt(content),
 				prompt: typeof previousEntry.prompt === 'string' ? previousEntry.prompt : content,
 				currentWorkspace: effectiveWorkspace,
@@ -2549,7 +2579,6 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				imageGeneration
 			);
 			let currentToolRequest: ToolResultRequest | undefined;
-			let boundThreadId: string | undefined;
 			const pendingToolRequests: ToolResultRequest[] = [];
 			const seenToolRequests = new Set<string>();
 			const handleEvent = (event: BridgeEvent): void => {
@@ -2691,9 +2720,16 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		}
 		const liveChatId = effectiveChatId ?? `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const sessionId = `panel:${effectiveWorkspace ?? 'default'}:${effectiveChatId || 'default'}`;
+		const existingState = effectiveChatId ? readSharedPanelState(effectiveWorkspace) : undefined;
+		const existingEntry = Array.isArray(existingState?.historyEntries)
+			? existingState.historyEntries.find(entry => isObjectRecord(entry) && entry.id === effectiveChatId)
+			: undefined;
 		const sink = this.panelSink(view);
 		const content = prompt.trim() || 'Please transcribe this audio and respond.';
-		const imageGeneration = imageGenerationForPrompt(content, settings.imageGeneration);
+		const attachments = backboardAttachments(image, files);
+		let boundThreadId = readBackboardThreadId(existingEntry);
+		const modelContent = promptWithBackboardDocuments(content, attachments);
+		const imageGeneration = imageGenerationForPrompt(modelContent, settings.imageGeneration);
 		const liveStartedAt = Date.now();
 		const liveMessages: { role: string; content: string }[] = [{ role: 'user', content }];
 		const appendLiveAssistantText = (text: string) => {
@@ -2724,18 +2760,51 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		writeLiveState('Sending to Backboard.', 'sending', true, true);
 		await view.webview.postMessage({ type: 'runStarted', prompt: content, chatId: liveChatId });
 		await view.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
+		const saveHistory = async (status: string) => {
+			const now = Date.now();
+			const previousEntry = isObjectRecord(existingEntry) ? existingEntry : {};
+			const nextEntry = {
+				...previousEntry,
+				id: liveChatId,
+				backboardThreadId: boundThreadId,
+				title: typeof previousEntry.title === 'string' ? previousEntry.title : historyTitleFromPrompt(content),
+				prompt: typeof previousEntry.prompt === 'string' ? previousEntry.prompt : content,
+				currentWorkspace: effectiveWorkspace,
+				startedAt: typeof previousEntry.startedAt === 'number' ? previousEntry.startedAt : liveStartedAt,
+				updatedAt: now,
+				status,
+				fileChanges: Array.isArray(previousEntry.fileChanges) ? previousEntry.fileChanges : [],
+				messages: liveMessages,
+				outputText: liveMessages.filter(message => message.role === 'assistant').map(message => message.content).join('\n\n'),
+			};
+			const existingEntries = Array.isArray(existingState?.historyEntries) ? existingState.historyEntries : [];
+			const historyEntries = [
+				nextEntry,
+				...existingEntries.filter(entry => !isObjectRecord(entry) || entry.id !== liveChatId)
+			];
+			await writeSharedPanelState({
+				activeView: 'chat',
+				activeHistoryId: liveChatId,
+				currentWorkspace: effectiveWorkspace,
+				promptQueue: [],
+				historyEntries,
+				savedAt: now,
+			});
+		};
 		const pendingToolRequests: ToolResultRequest[] = [];
 		const seenToolRequests = new Set<string>();
 		try {
+			boundThreadId = await uploadBackboardDocuments(this.bridge, sessionId, boundThreadId, attachments, settings, token);
 			let currentToolRequest: ToolResultRequest | undefined;
 			const submitTools = trimBackboardToolsForRequest(
 				await this.bridge.listTools(settings.mode, token).catch(() => undefined),
-				content,
+				modelContent,
 				settings.webSearch,
 				imageGeneration
 			);
 			await this.bridge.send('sendPrompt', sessionId, {
-				content,
+				content: modelContent,
+				threadId: boundThreadId,
 				workspace: effectiveWorkspace,
 				provider: settings.defaultProvider,
 				model: settings.defaultModel,
@@ -2745,12 +2814,13 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				imageGeneration: imageGeneration === 'auto' ? 'auto' : undefined,
 				voiceMode,
 				audioFile: audio,
-				imageFile: image,
-				files,
 				mcpCalls: mcpCallsPayload(settings),
 				tools: submitTools,
 				config: settings.config
 			}, event => {
+				if (event.type === 'sessionBinding' && event.threadId) {
+					boundThreadId = event.threadId;
+				}
 				if (event.type === 'assistantTextDelta') {
 					const text = typeof event.text === 'string' ? event.text : '';
 					if (text) {
@@ -2789,6 +2859,9 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 					tools: submitTools,
 					config: settings.config
 				}, event => {
+					if (event.type === 'sessionBinding' && event.threadId) {
+						boundThreadId = event.threadId;
+					}
 					if (event.type === 'assistantTextDelta') {
 						const text = typeof event.text === 'string' ? event.text : '';
 						if (text) {
@@ -2813,12 +2886,16 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			await view.webview.postMessage({ type: 'runFinished', chatId: liveChatId });
 			await view.webview.postMessage({ type: 'status', text: token.isCancellationRequested ? 'Cancelled.' : 'Done.' });
 			writeLiveState(token.isCancellationRequested ? 'Cancelled.' : 'Done.', token.isCancellationRequested ? 'cancelled' : 'done', false, true);
+			await saveHistory(token.isCancellationRequested ? 'Cancelled' : 'Done');
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			liveMessages.push({ role: 'error', content: message });
 			writeLiveState(message, 'error', false, true);
 			await view.webview.postMessage({ type: 'append', role: 'error', text: message });
 			await view.webview.postMessage({ type: 'runFinished', chatId: liveChatId });
+			await saveHistory('Failed').catch(saveError => {
+				backboardToolOutput?.appendLine(`[panel] failed to save history: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+			});
 			await handleBackboardError(view.webview, error, this.bridge);
 		}
 	}
@@ -6139,8 +6216,12 @@ class BackboardBridge implements vscode.Disposable {
 	}
 
 	async callApi(command: string, params: Record<string, unknown>, token: vscode.CancellationToken): Promise<unknown> {
-		const events = await this.send(command, undefined, { ...params, config: readSettings().config }, undefined, token);
-		return events.find(event => event.type === 'apiResponse')?.data;
+		const request = { ...params, config: readSettings().config };
+		logBackboardDocumentDiagnostic('bridge_call_api_start', { command, params: request });
+		const events = await this.send(command, undefined, request, undefined, token);
+		const response = events.find(event => event.type === 'apiResponse')?.data;
+		logBackboardDocumentDiagnostic('bridge_call_api_response', { command, response, eventTypes: events.map(event => event.type) });
+		return response;
 	}
 
 	async send(command: string, sessionId: string | undefined, params: unknown, onEvent: ((event: BridgeEvent) => void | Promise<void>) | undefined, token: vscode.CancellationToken): Promise<BridgeEvent[]> {
@@ -6218,7 +6299,7 @@ class BackboardBridge implements vscode.Disposable {
 		}
 		const bridgePath = this.resolveBridgePath();
 		if (!fs.existsSync(bridgePath)) {
-			throw new Error(`Backboard bridge binary not found at ${bridgePath}. Build it with: npm --prefix extensions/backboard run build-bridge`);
+			throw new Error(`Backboard bridge binary not found at ${bridgePath}. This Backboard build needs a packaged Rust bridge. If cargo is installed, run: npm --prefix extensions/backboard run build-bridge. Otherwise set backboard.bridgePath to a prebuilt backboard-bridge binary.`);
 		}
 		const cwd = workspacePath() ?? os.homedir();
 		this.output.appendLine(`[${new Date().toISOString()}] Starting Backboard bridge`);
@@ -6348,13 +6429,13 @@ function bridgeInactivityTimeoutMs(command: string): number {
 	}
 }
 
-async function executeToolCalls(bridge: BackboardBridge, toolCalls: unknown[], mode: string, response: ResponseSink, token: vscode.CancellationToken): Promise<unknown[]> {
+async function executeToolCalls(bridge: BackboardBridge, toolCalls: unknown[], mode: string, response: ResponseSink, token: vscode.CancellationToken, attachments: readonly BackboardAttachment[] = []): Promise<unknown[]> {
 	if (toolCalls.length > 1 && toolCalls.every(rawCall => {
 		const call = parseToolCall(rawCall);
 		return (mode === 'free' || isReadOnlyTool(call.name)) && isParallelSafeTool(call.name);
 	})) {
 		const calls = toolCalls.map(parseToolCall);
-		return Promise.all(calls.map(call => executeOneToolCall(bridge, call, mode, response, token)));
+		return Promise.all(calls.map(call => executeOneToolCall(bridge, call, mode, response, token, attachments)));
 	}
 	const outputs: unknown[] = [];
 	for (const rawCall of toolCalls) {
@@ -6362,12 +6443,27 @@ async function executeToolCalls(bridge: BackboardBridge, toolCalls: unknown[], m
 			break;
 		}
 		const call = parseToolCall(rawCall);
-		outputs.push(await executeOneToolCall(bridge, call, mode, response, token));
+		outputs.push(await executeOneToolCall(bridge, call, mode, response, token, attachments));
 	}
 	return outputs;
 }
 
-async function executeOneToolCall(bridge: BackboardBridge, call: { id: string; name: string; args: Record<string, unknown> }, mode: string, response: ResponseSink, token: vscode.CancellationToken): Promise<unknown> {
+async function executeOneToolCall(bridge: BackboardBridge, call: { id: string; name: string; args: Record<string, unknown> }, mode: string, response: ResponseSink, token: vscode.CancellationToken, attachments: readonly BackboardAttachment[]): Promise<unknown> {
+	if (isBackboardAttachmentTool(call.name)) {
+		try {
+			logToolDiagnostic('started', call);
+			response.event?.('toolFinished', { status: 'started', key: call.id, name: call.name, args: call.args });
+			const result = backboardAttachmentToolResult(attachments, call.args);
+			logToolDiagnostic('finished', call, result);
+			response.event?.('toolFinished', { status: 'finished', key: call.id, name: call.name, args: call.args, output: result });
+			return successfulToolOutput(call.id, result);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			logToolDiagnostic('failed', call, undefined, error);
+			response.event?.('toolFinished', { status: 'failed', key: call.id, name: call.name, args: call.args, error: message });
+			return toolOutput(call.id, { success: false, content: message });
+		}
+	}
 	const allowed = await approveTool(call.name, call.args, mode);
 	if (!allowed) {
 		logToolDiagnostic('denied', call);
@@ -6390,7 +6486,7 @@ async function executeOneToolCall(bridge: BackboardBridge, call: { id: string; n
 }
 
 function isParallelSafeTool(name: string): boolean {
-	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search'].includes(name);
+	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search', backboardAttachmentToolName].includes(name);
 }
 
 function logToolDiagnostic(status: string, call: { id: string; name: string; args: Record<string, unknown> }, output?: unknown, error?: unknown): void {
@@ -6412,10 +6508,38 @@ function logToolDiagnostic(status: string, call: { id: string; name: string; arg
 
 function safeDiagnosticJson(value: unknown): string {
 	try {
-		return JSON.stringify(value, undefined, 2);
+		return JSON.stringify(redactDiagnosticValue(value), undefined, 2);
 	} catch {
 		return String(value);
 	}
+}
+
+function logBackboardDocumentDiagnostic(stage: string, details?: Record<string, unknown>): void {
+	const channel = backboardToolOutput;
+	if (!channel) {
+		return;
+	}
+	channel.appendLine(`[${new Date().toISOString()}] [document-flow] ${stage}`);
+	if (details) {
+		channel.appendLine(safeDiagnosticJson(details));
+	}
+	channel.appendLine('');
+}
+
+function redactDiagnosticValue(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return value.map(redactDiagnosticValue);
+	}
+	if (!isObjectRecord(value)) {
+		return value;
+	}
+	const redacted: Record<string, unknown> = {};
+	for (const [key, item] of Object.entries(value)) {
+		redacted[key] = key === '__image_base64'
+			? `<redacted image base64, ${typeof item === 'string' ? item.length : 0} chars>`
+			: redactDiagnosticValue(item);
+	}
+	return redacted;
 }
 
 function backboardVerboseBridgeLogging(): boolean {
@@ -7024,7 +7148,320 @@ function successfulToolOutput(toolCallId: string, content: unknown): unknown {
 	return toolOutput(toolCallId, multimodalToolOutputContent(content) ?? { success: true, content });
 }
 
+const backboardAttachmentToolName = 'backboard_read_attachment';
 const maxBackboardToolImageBytes = 5 * 1024 * 1024;
+
+function backboardAttachments(image: ImageAttachment | undefined, files: readonly FileAttachment[]): BackboardAttachment[] {
+	return [
+		...(image ? [{ data: image.data, fileName: image.fileName, mimeType: image.mimeType }] : []),
+		...files.map(file => ({ data: file.data, fileName: file.fileName, mimeType: file.mimeType })),
+	];
+}
+
+function promptWithBackboardDocuments(prompt: string, attachments: readonly BackboardAttachment[]): string {
+	if (!attachments.length) {
+		return prompt;
+	}
+	const list = attachments.map((attachment, index) => `${index + 1}. ${attachment.fileName}`).join('\n');
+	return `${prompt}\n\nThe user attached the following file(s) to this Backboard thread as indexed documents:\n${list}\n\nThese files were uploaded to Backboard thread documents and must be handled through Backboard document retrieval, not as inline attachments. Do not claim to directly view, OCR, or visually inspect the raw files. Use the indexed Backboard thread documents when answering. If a file's indexed content is unavailable, say that Backboard document retrieval did not return usable content for that file.`;
+}
+
+function stringAtBackboardPath(value: unknown, path: readonly string[]): string | undefined {
+	let current: unknown = value;
+	for (const segment of path) {
+		if (!isObjectRecord(current)) {
+			return undefined;
+		}
+		current = current[segment];
+	}
+	return typeof current === 'string' && current.trim() ? current : undefined;
+}
+
+function backboardThreadIdFromValue(value: unknown): string | undefined {
+	for (const candidate of [
+		['thread_id'],
+		['threadId'],
+		['thread', 'id'],
+		['thread', 'thread_id'],
+		['data', 'thread_id'],
+		['data', 'threadId'],
+		['data', 'thread', 'id'],
+		['message', 'thread_id'],
+		['message', 'threadId'],
+		['run', 'thread_id'],
+		['run', 'threadId'],
+	] as const) {
+		const resolved = stringAtBackboardPath(value, candidate);
+		if (resolved) {
+			return resolved;
+		}
+	}
+	return undefined;
+}
+
+function backboardDocumentIdFromValue(value: unknown): string | undefined {
+	for (const candidate of [
+		['id'],
+		['document_id'],
+		['documentId'],
+		['document', 'id'],
+		['data', 'id'],
+		['data', 'document_id'],
+		['data', 'documentId'],
+		['data', 'document', 'id'],
+	] as const) {
+		const resolved = stringAtBackboardPath(value, candidate);
+		if (resolved) {
+			return resolved;
+		}
+	}
+	return undefined;
+}
+
+function backboardDocumentStatusFromValue(value: unknown): string | undefined {
+	for (const candidate of [
+		['status'],
+		['document_status'],
+		['documentStatus'],
+		['document', 'status'],
+		['data', 'status'],
+		['data', 'document_status'],
+		['data', 'documentStatus'],
+		['data', 'document', 'status'],
+	] as const) {
+		const resolved = stringAtBackboardPath(value, candidate);
+		if (resolved) {
+			return resolved.toLowerCase();
+		}
+	}
+	return undefined;
+}
+
+async function waitForBackboardDelay(ms: number, token: vscode.CancellationToken): Promise<void> {
+	await new Promise<void>(resolve => {
+		const handle = setTimeout(resolve, ms);
+		token.onCancellationRequested(() => {
+			clearTimeout(handle);
+			resolve();
+		});
+	});
+}
+
+async function withBackboardTempAttachmentFile<T>(attachment: BackboardAttachment, callback: (filePath: string) => Promise<T>): Promise<T> {
+	const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'backboard-document-'));
+	const filePath = path.join(tempDir, backboardTempAttachmentFileName(attachment));
+	try {
+		logBackboardDocumentDiagnostic('temp_file_created', {
+			tempDir,
+			filePath,
+			fileName: attachment.fileName,
+			mimeType: attachment.mimeType,
+			bytes: attachment.data.length,
+		});
+		await fs.promises.writeFile(filePath, Buffer.from(attachment.data));
+		return await callback(filePath);
+	} finally {
+		logBackboardDocumentDiagnostic('temp_file_cleanup', { tempDir, filePath, fileName: attachment.fileName });
+		await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+	}
+}
+
+function backboardTempAttachmentFileName(attachment: BackboardAttachment): string {
+	const baseName = path.basename(attachment.fileName).replace(/[\\/:*?"<>|]/g, '_');
+	return baseName || 'attachment.bin';
+}
+
+async function ensureBackboardDocumentThreadId(
+	bridge: BackboardBridge,
+	_sessionId: string,
+	threadId: string | undefined,
+	settings: BackboardSettings,
+	token: vscode.CancellationToken
+): Promise<string> {
+	if (threadId) {
+		logBackboardDocumentDiagnostic('thread_reuse', { sessionId: _sessionId, threadId });
+		return threadId;
+	}
+	logBackboardDocumentDiagnostic('thread_bootstrap_start', {
+		sessionId: _sessionId,
+		panelStatePath: backboardPanelStatePath(),
+		threadsDir: backboardThreadsDir(),
+		env: currentBackboardEnv(),
+		provider: settings.defaultProvider,
+		model: settings.defaultModel,
+		webSearch: settings.webSearch,
+	});
+	const response = await bridge.callApi('sendMessage', {
+		body: {
+			content: 'Attachment upload bootstrap.',
+			llm_provider: settings.defaultProvider,
+			model_name: settings.defaultModel,
+			memory: 'off',
+			web_search: settings.webSearch,
+			send_to_llm: false,
+		}
+	}, token);
+	const createdThreadId = backboardThreadIdFromValue(response);
+	logBackboardDocumentDiagnostic('thread_bootstrap_response', {
+		sessionId: _sessionId,
+		response,
+		createdThreadId,
+	});
+	if (!createdThreadId) {
+		throw new Error('Backboard did not return a thread ID while preparing document upload.');
+	}
+	return createdThreadId;
+}
+
+async function waitForBackboardDocumentIndexed(
+	bridge: BackboardBridge,
+	documentId: string,
+	fileName: string,
+	token: vscode.CancellationToken
+): Promise<void> {
+	const deadline = Date.now() + BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS;
+	let attempt = 0;
+	while (!token.isCancellationRequested && Date.now() < deadline) {
+		attempt++;
+		const statusResponse = await bridge.callApi('getDocumentStatus', { documentId }, token);
+		const status = backboardDocumentStatusFromValue(statusResponse);
+		logBackboardDocumentDiagnostic('document_status_poll', {
+			documentId,
+			fileName,
+			attempt,
+			status,
+			response: statusResponse,
+			remainingMs: Math.max(0, deadline - Date.now()),
+		});
+		if (status === 'indexed' || status === 'ready' || status === 'completed' || status === 'complete') {
+			return;
+		}
+		if (status === 'failed' || status === 'error' || status === 'cancelled') {
+			throw new Error(`Backboard could not index ${fileName} (status: ${status}).`);
+		}
+		await waitForBackboardDelay(BACKBOARD_DOCUMENT_POLL_INTERVAL_MS, token);
+	}
+	if (token.isCancellationRequested) {
+		throw new Error('Backboard document upload was cancelled.');
+	}
+	throw new Error(`Backboard did not finish indexing ${fileName} within ${Math.round(BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS / 1000)} seconds.`);
+}
+
+async function uploadBackboardDocuments(
+	bridge: BackboardBridge,
+	sessionId: string,
+	threadId: string | undefined,
+	attachments: readonly BackboardAttachment[],
+	settings: BackboardSettings,
+	token: vscode.CancellationToken
+): Promise<string | undefined> {
+	if (!attachments.length) {
+		logBackboardDocumentDiagnostic('upload_skipped_no_attachments', { sessionId, threadId });
+		return threadId;
+	}
+	logBackboardDocumentDiagnostic('upload_start', {
+		sessionId,
+		incomingThreadId: threadId,
+		attachmentCount: attachments.length,
+		attachments: attachments.map(attachment => ({
+			fileName: attachment.fileName,
+			mimeType: attachment.mimeType,
+			bytes: attachment.data.length,
+		})),
+	});
+	const ensuredThreadId = await ensureBackboardDocumentThreadId(bridge, sessionId, threadId, settings, token);
+	logBackboardDocumentDiagnostic('upload_thread_ready', { sessionId, threadId: ensuredThreadId });
+	for (const attachment of attachments) {
+		await withBackboardTempAttachmentFile(attachment, async filePath => {
+			logBackboardDocumentDiagnostic('document_upload_request', {
+				threadId: ensuredThreadId,
+				filePath,
+				fileName: attachment.fileName,
+				mimeType: attachment.mimeType,
+				bytes: attachment.data.length,
+			});
+			const uploadResponse = await bridge.callApi('uploadThreadDocument', {
+				threadId: ensuredThreadId,
+				filePath,
+			}, token);
+			const documentId = backboardDocumentIdFromValue(uploadResponse);
+			logBackboardDocumentDiagnostic('document_upload_response', {
+				threadId: ensuredThreadId,
+				fileName: attachment.fileName,
+				documentId,
+				response: uploadResponse,
+			});
+			if (!documentId) {
+				throw new Error(`Backboard did not return a document ID for ${attachment.fileName}.`);
+			}
+			await waitForBackboardDocumentIndexed(bridge, documentId, attachment.fileName, token);
+		});
+	}
+	logBackboardDocumentDiagnostic('upload_complete', { sessionId, threadId: ensuredThreadId });
+	return ensuredThreadId;
+}
+
+function isBackboardAttachmentTool(name: string): boolean {
+	return name === backboardAttachmentToolName;
+}
+
+function backboardAttachmentToolResult(attachments: readonly BackboardAttachment[], args: Record<string, unknown>): unknown {
+	if (!attachments.length) {
+		throw new Error('No user attachments are available for this turn.');
+	}
+	const attachment = selectBackboardAttachment(attachments, args);
+	const buffer = Buffer.from(attachment.data);
+	if (attachment.mimeType.toLowerCase().startsWith('image/')) {
+		return {
+			success: true,
+			content: `Attached image: ${attachment.fileName}. The continuation turn receives this image as visual input. Inspect the image directly and answer the user. Do not mention base64 or attempt to decode it with tools.`,
+			file_name: attachment.fileName,
+			mime_type: attachment.mimeType,
+			__image_base64: buffer.toString('base64'),
+			__image_media_type: attachment.mimeType,
+		};
+	}
+	const text = decodeAttachmentText(buffer, attachment);
+	return {
+		success: true,
+		content: text ?? `Attached file ${attachment.fileName} is ${attachment.data.length} bytes of ${attachment.mimeType} data and is not a supported text or image attachment.`,
+		file_name: attachment.fileName,
+		mime_type: attachment.mimeType,
+		bytes: attachment.data.length,
+	};
+}
+
+function selectBackboardAttachment(attachments: readonly BackboardAttachment[], args: Record<string, unknown>): BackboardAttachment {
+	const byIndex = numberArg(args, 'index', 'attachment_index', 'attachmentIndex');
+	if (typeof byIndex === 'number' && Number.isFinite(byIndex)) {
+		const attachment = attachments[Math.max(1, Math.trunc(byIndex)) - 1];
+		if (attachment) {
+			return attachment;
+		}
+	}
+	const requestedName = stringArg(args, 'file_name', 'fileName', 'name');
+	if (requestedName) {
+		const attachment = attachments.find(item => item.fileName === requestedName);
+		if (attachment) {
+			return attachment;
+		}
+	}
+	if (attachments.length === 1) {
+		return attachments[0];
+	}
+	throw new Error(`Attachment not found. Available attachments: ${attachments.map((item, index) => `${index + 1}: ${item.fileName}`).join(', ')}`);
+}
+
+function decodeAttachmentText(buffer: Buffer, attachment: BackboardAttachment): string | undefined {
+	const lowerName = attachment.fileName.toLowerCase();
+	const lowerMime = attachment.mimeType.toLowerCase();
+	if (!lowerMime.startsWith('text/')
+		&& !/\/(json|xml|javascript|typescript|x-yaml|yaml|csv|markdown)$/.test(lowerMime)
+		&& !/\.(txt|md|markdown|json|jsonl|csv|tsv|js|jsx|ts|tsx|css|html|xml|yaml|yml|toml|ini|log|py|rs|go|java|c|cc|cpp|h|hpp|cs|rb|php|swift|kt|sql|sh|zsh|bash)$/i.test(lowerName)) {
+		return undefined;
+	}
+	return buffer.toString('utf8');
+}
 
 function multimodalToolOutputContent(content: unknown): unknown | undefined {
 	const parsed = typeof content === 'string' ? parseJsonObject(content) : content;

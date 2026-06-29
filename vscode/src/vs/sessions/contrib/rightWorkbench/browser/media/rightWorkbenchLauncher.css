@@ -438,11 +438,19 @@
 	background: var(--rwb-bg);
 }
 
+.sessions-right-workbench-review.sessions-right-workbench-review-empty-state {
+	grid-template-columns: minmax(0, 1fr);
+}
+
 .sessions-right-workbench-review-main {
 	min-width: 0;
 	min-height: 0;
 	border-right: 1px solid var(--rwb-border);
 	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-main {
+	border-right: 0;
 }
 
 .sessions-right-workbench-review-rail {
@@ -451,6 +459,10 @@
 	min-height: 0;
 	overflow: hidden;
 	background: #0d0d0e;
+}
+
+.sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-rail {
+	display: none;
 }
 
 .sessions-right-workbench-review-rail-scm > .pane {

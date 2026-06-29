@@ -147,11 +147,6 @@ class CloseMainEditorPartAction extends Action2 {
 
 registerAction2(CloseMainEditorPartAction);
 
-const editorLeftRightWhen = ContextKeyExpr.and(
-	IsSessionsWindowContext,
-	IsAuxiliaryWindowContext.toNegated(),
-	IsTopRightEditorGroupContext);
-
 class PushEditorRightAction extends Action2 {
 	static readonly ID = 'workbench.action.agentSessions.pushEditorRight';
 
@@ -182,12 +177,6 @@ class PullEditorLeftAction extends Action2 {
 			icon: Codicon.chevronLeft,
 			f1: false,
 			toggled: AuxiliaryBarVisibleContext.toNegated(),
-			menu: {
-				id: MenuId.EditorTitleLayout,
-				group: 'navigation',
-				order: 99.5,
-				when: ContextKeyExpr.and(editorLeftRightWhen, AuxiliaryBarVisibleContext.toNegated())
-			}
 		});
 	}
 

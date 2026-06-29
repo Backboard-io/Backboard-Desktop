@@ -96,6 +96,7 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 
 	override render(container: HTMLElement): void {
 		super.render(container);
+		clearNode(container);
 
 		container.classList.add('sessions-environment-titlebar-widget');
 		const triggerButton = append(container, $('button.sessions-environment-titlebar-widget-trigger')) as HTMLButtonElement;
@@ -456,17 +457,30 @@ export class EnvironmentTitleBarContribution extends Disposable implements IWork
 		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
-		this._register(MenuRegistry.appendMenuItem(Menus.TitleBarLeftLayout, {
+		this._register(MenuRegistry.appendMenuItem(Menus.NewSessionToolbar, {
 			command: {
 				id: ShowEnvironmentPopupAction.ID,
 				title: localize2('showEnvironmentPopupMenu', "Environment"),
 				icon: Codicon.settings,
 			},
 			group: 'navigation',
-			order: -9,
+			order: 9,
+			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsPhoneLayoutContext.negate()),
+		}));
+		this._register(MenuRegistry.appendMenuItem(Menus.SessionBarToolbar, {
+			command: {
+				id: ShowEnvironmentPopupAction.ID,
+				title: localize2('showEnvironmentPopupMenu', "Environment"),
+				icon: Codicon.settings,
+			},
+			group: 'navigation',
+			order: 9,
 			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
 		}));
-		this._register(actionViewItemService.register(Menus.TitleBarLeftLayout, ShowEnvironmentPopupAction.ID, (action, options) => {
+		this._register(actionViewItemService.register(Menus.NewSessionToolbar, ShowEnvironmentPopupAction.ID, (action, options) => {
+			return instantiationService.createInstance(EnvironmentTitleBarWidget, action, options);
+		}, undefined));
+		this._register(actionViewItemService.register(Menus.SessionBarToolbar, ShowEnvironmentPopupAction.ID, (action, options) => {
 			return instantiationService.createInstance(EnvironmentTitleBarWidget, action, options);
 		}, undefined));
 	}

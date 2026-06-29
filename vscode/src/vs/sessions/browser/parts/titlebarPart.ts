@@ -31,6 +31,7 @@ import { safeIntl } from '../../../base/common/date.js';
 import { ITitlebarPart, ITitleProperties, ITitleVariable, IAuxiliaryTitlebarPart } from '../../../workbench/browser/parts/titlebar/titlebarPart.js';
 import { WindowTitle } from '../../../workbench/browser/parts/titlebar/windowTitle.js';
 import { Menus } from '../menus.js';
+import { SessionsWelcomeVisibleContext } from '../../common/contextkeys.js';
 
 /**
  * Simplified agent sessions titlebar part.
@@ -81,6 +82,8 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 	private leftToolbarContainer!: HTMLElement;
 	private centerContent!: HTMLElement;
 	private rightContent!: HTMLElement;
+	private rightToolbarContainer!: HTMLElement;
+	private sessionActionsContainer!: HTMLElement;
 
 	get leftContainer(): HTMLElement { return this.leftContent; }
 	get rightContainer(): HTMLElement { return this.rightContent; }
@@ -92,6 +95,7 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 	private isInactive: boolean = false;
 	private panelDividersUpdateHandle: { dispose(): void } | undefined;
 	private panelDividersRetryCount = 0;
+	private readonly panelDividersResizeObserverStore = this._register(new DisposableStore());
 
 	constructor(
 		id: string,
@@ -119,6 +123,12 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 	private registerListeners(targetWindowId: number): void {
 		this._register(this.hostService.onDidChangeFocus(focused => focused ? this.onFocus() : this.onBlur()));
 		this._register(this.hostService.onDidChangeActiveWindow(windowId => windowId === targetWindowId ? this.onFocus() : this.onBlur()));
+		const welcomeVisibleKeySet = new Set([SessionsWelcomeVisibleContext.key]);
+		this._register(this.contextKeyService.onDidChangeContext(e => {
+			if (e.affectsSome(welcomeVisibleKeySet)) {
+				this.updateWelcomeToolbarVisibility();
+			}
+		}));
 	}
 
 	private onBlur(): void {
@@ -219,8 +229,8 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		}));
 
 		// Right toolbar (driven by Menus.TitleBarRightLayout - includes layout actions)
-		const rightToolbarContainer = prepend(this.rightContent, $('div.titlebar-actions-container.titlebar-right-layout-container'));
-		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, rightToolbarContainer, Menus.TitleBarRightLayout, {
+		this.rightToolbarContainer = prepend(this.rightContent, $('div.titlebar-actions-container.titlebar-right-layout-container'));
+		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, this.rightToolbarContainer, Menus.TitleBarRightLayout, {
 			contextMenu: Menus.TitleBarContext,
 			hiddenItemStrategy: HiddenItemStrategy.NoHide,
 			telemetrySource: 'titlePart.right',
@@ -228,8 +238,8 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		}));
 
 		// Session title actions toolbar (before right toolbar)
-		const sessionActionsContainer = prepend(this.rightContent, $('div.titlebar-actions-container.titlebar-session-actions-container'));
-		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, sessionActionsContainer, Menus.TitleBarSessionMenu, {
+		this.sessionActionsContainer = prepend(this.rightContent, $('div.titlebar-actions-container.titlebar-session-actions-container'));
+		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, this.sessionActionsContainer, Menus.TitleBarSessionMenu, {
 			contextMenu: Menus.TitleBarContext,
 			hiddenItemStrategy: HiddenItemStrategy.NoHide,
 			telemetrySource: 'titlePart.sessionActions',
@@ -243,6 +253,8 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		}));
 
 		this.updateStyles();
+		this.updateWelcomeToolbarVisibility();
+		this.updatePanelDividerResizeObservers();
 		this.schedulePanelDividersUpdate(true);
 
 		return this.element;
@@ -259,6 +271,12 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 			const titleForeground = this.getColor(agentsPanelForeground);
 			this.element.style.color = titleForeground || '';
 		}
+	}
+
+	private updateWelcomeToolbarVisibility(): void {
+		const hideRightTitlebarActions = !!SessionsWelcomeVisibleContext.getValue(this.contextKeyService);
+		this.rightToolbarContainer.classList.toggle('hidden-for-welcome', hideRightTitlebarActions);
+		this.sessionActionsContainer.classList.toggle('hidden-for-welcome', hideRightTitlebarActions);
 	}
 
 	protected onContextMenu(e: MouseEvent): void {
@@ -320,6 +338,7 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		}
 
 		clearNode(this.panelChromeContainer);
+		this.updatePanelDividerResizeObservers();
 
 		const targetWindow = getWindow(this.element);
 		const titlebarBounds = this.element.getBoundingClientRect();
@@ -349,6 +368,30 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 			divider.style.left = `${left}px`;
 		}
 		return sectionCount > 0;
+	}
+
+	private updatePanelDividerResizeObservers(): void {
+		if (!this.element) {
+			return;
+		}
+
+		const targetWindow = getWindow(this.element);
+		const ResizeObserverCtor = targetWindow.ResizeObserver;
+		if (!ResizeObserverCtor) {
+			return;
+		}
+
+		this.panelDividersResizeObserverStore.clear();
+
+		const resizeObserver = new ResizeObserverCtor(() => this.schedulePanelDividersUpdate(true));
+		this.panelDividersResizeObserverStore.add({ dispose: () => resizeObserver.disconnect() });
+
+		resizeObserver.observe(this.element);
+
+		const selector = '.part.sidebar, .part.sessionspart, .part.editor:not(.modal-editor-part), .part.auxiliarybar';
+		for (const part of Array.from(targetWindow.document.querySelectorAll<HTMLElement>(selector))) {
+			resizeObserver.observe(part);
+		}
 	}
 
 	private getPartBackground(part: HTMLElement): string {

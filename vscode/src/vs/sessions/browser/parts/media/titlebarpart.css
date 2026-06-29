@@ -20,16 +20,7 @@
 }
 
 .agent-sessions-workbench.monaco-workbench > .part.titlebar {
-	position: absolute !important;
-	top: 0;
-	left: 0;
-	right: 0;
 	height: 38px !important;
-	z-index: 100;
-	pointer-events: none;
-}
-
-.agent-sessions-workbench.monaco-workbench > .part.titlebar > .sessions-titlebar-container {
 	pointer-events: auto;
 }
 
@@ -138,6 +129,10 @@
 .monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-right > .titlebar-actions-container:not(.has-no-actions) {
 	display: flex;
 	align-items: center;
+}
+
+.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-right > .titlebar-actions-container.hidden-for-welcome {
+	display: none !important;
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container.sessions-titlebar-container .monaco-toolbar .actions-container {

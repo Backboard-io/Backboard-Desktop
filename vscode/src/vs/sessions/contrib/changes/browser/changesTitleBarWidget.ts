@@ -24,7 +24,7 @@ import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkb
 
 const TOGGLE_CHANGES_VIEW_ID = 'workbench.action.agentSessions.toggleChangesView';
 const OPEN_CHANGES_VIEW_ID = 'workbench.action.agentSessions.openChangesInRightPanel';
-const TOGGLE_SECONDARY_SIDEBAR_TOOLTIP = localize('toggleSecondarySidebarTooltip', "Toggle Secondary Side Bar Visibility");
+const TOGGLE_SECONDARY_SIDEBAR_TOOLTIP = localize('toggleSecondarySidebarTooltip', "Toggle Right Panel Visibility");
 
 const changesButtonIcon = registerIcon('agent-right-panel-changes', Codicon.gitCompare, localize('agentRightPanelChangesIcon', "Icon for opening the session changes view."));
 const secondarySidebarToggleClosedIcon = registerIcon('agent-secondary-sidebar-toggle-closed', Codicon.layoutSidebarRightOff, localize('agentSecondarySidebarToggleClosedIcon', "Icon for the sessions secondary sidebar when closed."));
@@ -40,22 +40,38 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 	constructor() {
 		super();
 
-		// Register the toggle action in the session toolbar
-		this._register(MenuRegistry.appendMenuItem(Menus.TitleBarSessionMenu, {
+		this._register(MenuRegistry.appendMenuItem(Menus.NewSessionToolbar, {
 			command: {
 				id: TOGGLE_CHANGES_VIEW_ID,
-				title: localize2('showChanges', "Show Changes"),
+				title: localize2('showRightPanel', "Show Right Panel"),
 				tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
 				icon: secondarySidebarToggleClosedIcon,
 				toggled: {
 					condition: AuxiliaryBarVisibleContext,
 					icon: secondarySidebarToggleOpenIcon,
-					title: localize('hideChanges', "Hide Changes"),
+					title: localize('hideRightPanel', "Hide Right Panel"),
 					tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
 				},
 			},
 			group: 'navigation',
-			order: 11, // After Open in VS Code (7), Run Script (8), and Open Terminal (10)
+			order: 11, // After Environment (9) and Open Terminal (10)
+			when: IsAuxiliaryWindowContext.toNegated(),
+		}));
+		this._register(MenuRegistry.appendMenuItem(Menus.SessionBarToolbar, {
+			command: {
+				id: TOGGLE_CHANGES_VIEW_ID,
+				title: localize2('showRightPanel', "Show Right Panel"),
+				tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
+				icon: secondarySidebarToggleClosedIcon,
+				toggled: {
+					condition: AuxiliaryBarVisibleContext,
+					icon: secondarySidebarToggleOpenIcon,
+					title: localize('hideRightPanel', "Hide Right Panel"),
+					tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
+				},
+			},
+			group: 'navigation',
+			order: 11, // After Environment (9) and Open Terminal (10)
 			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
 		}));
 
@@ -78,16 +94,16 @@ registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: TOGGLE_CHANGES_VIEW_ID,
-			title: localize2('showChanges', "Show Changes"),
+			title: localize2('showRightPanel', "Show Right Panel"),
 			tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
 			icon: secondarySidebarToggleClosedIcon,
 			toggled: {
 				condition: AuxiliaryBarVisibleContext,
 				icon: secondarySidebarToggleOpenIcon,
-				title: localize('hideChanges', "Hide Changes"),
+				title: localize('hideRightPanel', "Hide Right Panel"),
 				tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
 			},
-			precondition: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
+			precondition: IsAuxiliaryWindowContext.toNegated(),
 		});
 	}
 
